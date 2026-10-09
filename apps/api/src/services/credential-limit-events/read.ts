@@ -27,7 +27,12 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { composableCredentialReference } from '../default-capacity-pool-helpers';
-import { credentialLimitReferenceKey, isCredentialLimitReferenceDigest } from './values';
+import {
+  CREDENTIAL_REFERENCE_DIGEST_KEY_BYTES,
+  credentialLimitReferenceKey,
+  encoder,
+  isCredentialLimitReferenceDigest,
+} from './values';
 
 type WindowReadRow = {
   project_id: string;
@@ -211,6 +216,8 @@ function summarize(
 /**
  * Windows visible to `userId` inside `projectId`: the caller's own rows plus
  * project- and platform-sourced rows. Optionally narrowed to one credential.
+ * Digest-keyed rows get their real reference back only for the caller's own
+ * credentials, with or without the narrowing.
  */
 export async function listProjectCredentialLimits(
   env: Env,
@@ -236,11 +243,10 @@ export async function listProjectCredentialLimits(
     .all<WindowReadRow>();
 
   const credentials = summarize(result.results ?? [], false);
-  if (reference && referenceKey) {
-    restoreCredentialReferences(credentials, new Map([[referenceKey, reference]]));
-  } else {
-    await restoreOwnCredentialReferences(env, credentials, input.userId);
-  }
+  // The filtered read restores only the caller's own credentials too: the
+  // session filter resolves any project member's session, and a backfilled id
+  // embeds the legacy ciphertext, so another member's credential stays a digest.
+  await restoreOwnCredentialReferences(env, credentials, input.userId);
   return { credentials, generatedAt: Date.now() };
 }
 
@@ -283,10 +289,19 @@ function restoreCredentialReferences(
 }
 
 /**
- * Restore digest-keyed summaries for the caller's own composable credentials,
- * the only ids long enough to need a digest. Costs one D1 read (bounded like the
- * window read), and only when a digest key is present. Another member's
- * credential stays a digest with no id.
+ * Longest credential id whose `cc_credentials:` reference is still its own key.
+ * Only longer ids are stored by digest, so only they can need restoring.
+ */
+const LONGEST_SELF_KEYED_CREDENTIAL_ID_BYTES =
+  CREDENTIAL_REFERENCE_DIGEST_KEY_BYTES -
+  encoder.encode(composableCredentialReference('')).byteLength;
+
+/**
+ * Restore digest-keyed summaries for the caller's own composable credentials.
+ * Costs one indexed D1 read, only when a digest key is present. It reads only
+ * ids long enough to be stored by digest, so the row cap is not spent on short
+ * ids (which sort first) and a user with many credentials still gets theirs
+ * back. Another member's credential stays a digest with no id.
  */
 async function restoreOwnCredentialReferences(
   env: Env,
@@ -301,9 +316,11 @@ async function restoreOwnCredentialReferences(
     return;
   }
   const rows = await env.DATABASE.prepare(
-    'SELECT id FROM cc_credentials WHERE owner_id = ? ORDER BY id LIMIT ?'
+    `SELECT id FROM cc_credentials
+      WHERE owner_id = ? AND length(CAST(id AS BLOB)) > ?
+      ORDER BY id LIMIT ?`
   )
-    .bind(userId, readMaxRows(env))
+    .bind(userId, LONGEST_SELF_KEYED_CREDENTIAL_ID_BYTES, readMaxRows(env))
     .all<{ id: unknown }>();
   const referencesByKey = new Map<string, string>();
   for (const row of rows.results ?? []) {

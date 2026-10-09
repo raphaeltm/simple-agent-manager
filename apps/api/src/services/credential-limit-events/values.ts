@@ -125,7 +125,7 @@ export async function fingerprint(value: ProjectEventJsonValue): Promise<string>
 }
 
 /** Length of a digest key: `sha256:` plus 64 hex characters. */
-const CREDENTIAL_REFERENCE_DIGEST_KEY_BYTES = SHA256_PREFIX.length + 64;
+export const CREDENTIAL_REFERENCE_DIGEST_KEY_BYTES = SHA256_PREFIX.length + 64;
 
 /**
  * Key that stands for a credential reference everywhere in the credential-limit

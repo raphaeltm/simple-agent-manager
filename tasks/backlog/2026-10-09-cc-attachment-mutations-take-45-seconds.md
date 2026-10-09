@@ -4,15 +4,16 @@
 
 Every `POST /api/cc/attachments` and `DELETE /api/cc/attachments/:id` on staging took 41–48 s of
 wall time with under 1 s of CPU, so the time is spent waiting on I/O. A browser client with a 30 s
-request timeout gives up before the server answers, and the row is created anyway, so a retry can
-create a duplicate attachment.
+request timeout gives up before the server answers, and the row is created anyway. A retry can then
+create a duplicate attachment: `POST` mints a new `cc-att-<ULID>` per request, and `cc_attachments`
+has no uniqueness constraint on configuration, consumer, user and project.
 
 Each handler awaits `reconcileCapacityPoolsForCredentialMutation`
-(`apps/api/src/services/capacity-pool-credential-lifecycle.ts`), which runs
-`ensureDefaultCapacityPoolsForExistingCredentials` for the user and every project with a compute
-attachment. That reconcile runs even when the attachment is for an agent credential
-(`consumer_kind = 'agent'`), which cannot change any capacity pool. This is a hypothesis to confirm
-before fixing.
+(`apps/api/src/services/capacity-pool-credential-lifecycle.ts`). A `POST` with `projectId` reconciles
+only that project. A `POST` without one, `PATCH` and `DELETE` use user scope, which reconciles the
+user and every project with a compute attachment. Reconciliation runs even for agent-credential
+attachments (`consumer_kind = 'agent'`), which cannot change any capacity pool. That this is where
+the time goes is a hypothesis to confirm before fixing.
 
 ## Context
 

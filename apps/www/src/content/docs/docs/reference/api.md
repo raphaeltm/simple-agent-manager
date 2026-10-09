@@ -303,7 +303,8 @@ Optional `agentSessionId` narrows the result to the credential that agent sessio
 resolved server-side from `agent_sessions`. The MCP tool `get_credential_limits` exposes the same
 view to agents (`scope: "session" | "project"`). `credentialId` is filled in for the caller's own
 credentials; a shared credential owned by another member whose reference is longer than 71 bytes
-comes back with a `sha256:` digest as `credentialReference` and `credentialId: null`.
+comes back with a `sha256:` digest as `credentialReference` and `credentialId: null`, with or
+without `agentSessionId`.
 
 ### `GET /api/providers/catalog`
 

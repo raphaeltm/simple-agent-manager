@@ -459,6 +459,9 @@ describe('credential references longer than the identifier budget', () => {
   it('finds the session credential stored under its digest and returns the real reference', async () => {
     expect(new TextEncoder().encode(ownerReference).byteLength).toBeGreaterThan(160);
     const { sqlite, env } = setup();
+    sqlite
+      .prepare('INSERT INTO cc_credentials (id, owner_id) VALUES (?, ?)')
+      .run(ownerCredentialId, 'owner-1');
     await recordWindow(env, {
       credentialReference: ownerReference,
       userId: 'owner-1',
@@ -542,6 +545,103 @@ describe('credential references longer than the identifier budget', () => {
       ])
     );
     expect(response.credentials).toHaveLength(2);
+  });
+
+  it("keeps another member's credential a digest when the chip resolves their session", async () => {
+    const { sqlite, env } = setup();
+    sqlite
+      .prepare('INSERT INTO cc_credentials (id, owner_id) VALUES (?, ?)')
+      .run(memberCredentialId, 'member-2');
+    // member-2's session runs on member-2's project-shared credential.
+    sqlite
+      .prepare(`INSERT INTO workspaces (id, project_id, user_id, status) VALUES (?, ?, ?, ?)`)
+      .run('ws-member', 'project-1', 'member-2', 'running');
+    sqlite
+      .prepare(
+        `INSERT INTO agent_sessions (id, workspace_id, user_id, status, agent_type, created_at, updated_at, agent_credential_reference)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        'agent-session-member',
+        'ws-member',
+        'member-2',
+        'running',
+        'claude-code',
+        '2026-10-05T00:00:00Z',
+        '2026-10-05T00:00:00Z',
+        memberReference
+      );
+    await recordWindow(env, {
+      credentialReference: memberReference,
+      userId: 'member-2',
+      credentialSource: 'project',
+      windowType: 'claude.five_hour',
+      utilizationPercent: 20,
+    });
+
+    // The route's composition: resolve the session within the project, then read.
+    const chipRead = async (userId: string) => {
+      const credentialReference = await resolveAgentSessionCredentialReference(env, {
+        projectId: 'project-1',
+        agentSessionId: 'agent-session-member',
+      });
+      expect(credentialReference).toBe(memberReference);
+      return listProjectCredentialLimits(env, {
+        projectId: 'project-1',
+        userId,
+        credentialReference,
+      });
+    };
+
+    // Another member still sees the shared usage, but not member-2's credential id.
+    const asOwner = await chipRead('owner-1');
+    expect(asOwner.credentials).toHaveLength(1);
+    expect(asOwner.credentials[0]!.windows.map((window) => window.utilizationPercent)).toEqual([
+      20,
+    ]);
+    expect(asOwner.credentials[0]!.credentialId).toBeNull();
+    expect(asOwner.credentials[0]!.credentialReference).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    // Owner control: member-2 gets the real reference and id on the same read.
+    const asMember = await chipRead('member-2');
+    expect(asMember.credentials).toHaveLength(1);
+    expect(asMember.credentials[0]).toMatchObject({
+      credentialReference: memberReference,
+      credentialId: memberCredentialId,
+    });
+  });
+
+  it('restores a long credential id for an owner with more credentials than the read cap', async () => {
+    const { sqlite, env } = setup();
+    env.CREDENTIAL_LIMIT_READ_MAX_ROWS = '2';
+    // Modern short ids sort before backfilled `cred-…` ids, so an unfiltered
+    // owner lookup capped at two rows would return only short ids.
+    sqlite
+      .prepare('INSERT INTO cc_credentials (id, owner_id) VALUES (?, ?), (?, ?), (?, ?), (?, ?)')
+      .run(
+        'cc-cred-01A',
+        'owner-1',
+        'cc-cred-01B',
+        'owner-1',
+        'cc-cred-01C',
+        'owner-1',
+        ownerCredentialId,
+        'owner-1'
+      );
+    await recordWindow(env, {
+      credentialReference: ownerReference,
+      userId: 'owner-1',
+      credentialSource: 'user',
+      windowType: 'claude.five_hour',
+      utilizationPercent: 13,
+    });
+
+    const response = await listUserCredentialLimits(env, { userId: 'owner-1' });
+    expect(response.credentials).toHaveLength(1);
+    expect(response.credentials[0]).toMatchObject({
+      credentialReference: ownerReference,
+      credentialId: ownerCredentialId,
+    });
   });
 
   it("never restores another member's credential id, while the owner still gets theirs", async () => {
