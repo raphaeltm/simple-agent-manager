@@ -4,7 +4,7 @@
  * Creates a new task with the same description and project, then starts
  * the task runner. The original task is left unchanged for history.
  */
-import { isValidAgentType, type TaskMode, type VMSize } from '@simple-agent-manager/shared';
+import { type TaskMode, type VMSize } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -142,22 +142,18 @@ export async function retrySubtask(
     return { error: 'Task has no description and no newDescription was provided.' };
   }
 
-  // Persisted legacy hints can identify an agent type, not a profile. Keep
-  // that distinction local to retries; explicit profile selection stays strict.
-  const originalAgentType =
-    original.agentProfileHint && isValidAgentType(original.agentProfileHint)
-      ? original.agentProfileHint
-      : null;
-  const profileHint = originalAgentType ? null : original.agentProfileHint;
+  // Resolve matching profiles before interpreting a persisted legacy agent-type
+  // hint. Skill defaults/overrides retain their original layering semantics.
   const resolvedProfile =
-    profileHint || original.skillId
+    original.agentProfileHint || original.skillId
       ? await resolveSkillProfile(
           db,
           original.projectId,
-          profileHint,
+          original.agentProfileHint,
           original.skillId,
           ctx.userId,
-          env
+          env,
+          { allowLegacyAgentTypeHint: Boolean(original.agentProfileHint) }
         )
       : null;
   const newTaskId = ulid();
@@ -191,7 +187,6 @@ export async function retrySubtask(
       },
       profile: resolvedProfile,
       explicit: {
-        agentType: originalAgentType,
         taskMode: (original.taskMode as TaskMode | null) ?? null,
       },
       inheritedCredentialAttribution: {

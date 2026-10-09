@@ -253,6 +253,97 @@ describe('SAM session dispatch_task current project authority', () => {
     }
   );
 
+  it.each(['project', 'global'])(
+    'retry_subtask resolves a %s profile named like an agent type before legacy fallback',
+    async (scope) => {
+      const sqlite = new Database(':memory:');
+      try {
+        const env = await seedRunnableProject(sqlite);
+        sqlite
+          .prepare(
+            `INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, model, effort)
+          VALUES ('matching-profile', ?, 'owner-1', 'claude-code', 'openai-codex', 'profile-model', 'auto')`
+          )
+          .run(scope === 'project' ? 'project-1' : null);
+        const now = new Date().toISOString();
+        sqlite
+          .prepare(
+            `INSERT INTO tasks
+          (id, project_id, user_id, title, description, status, agent_profile_hint, created_at, updated_at)
+          VALUES ('original-task', 'project-1', 'owner-1', 'Original', 'Retry me', 'failed', 'claude-code', ?, ?)`
+          )
+          .run(now, now);
+
+        await retrySubtask({ taskId: 'original-task' }, makeContext(env, 'owner-1'));
+
+        expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+          env,
+          expect.objectContaining({
+            agentType: 'openai-codex',
+            model: 'profile-model',
+            agentProfileHint: 'matching-profile',
+          })
+        );
+        expect(
+          sqlite.prepare("SELECT agent_profile_hint FROM tasks WHERE id != 'original-task'").get()
+        ).toEqual({ agent_profile_hint: 'matching-profile' });
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it.each([
+    [null, 'claude-code'],
+    ['openai-codex', 'openai-codex'],
+  ] as const)(
+    'retry_subtask preserves legacy type and skill layering with skill agent type %s',
+    async (skillAgentType, expectedAgentType) => {
+      const sqlite = new Database(':memory:');
+      try {
+        const env = await seedRunnableProject(sqlite);
+        sqlite
+          .prepare(
+            `INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, model, effort)
+          VALUES ('skill-default', 'project-1', 'owner-1', 'Skill default', 'opencode', 'unused-default-model', 'auto')`
+          )
+          .run();
+        sqlite
+          .prepare(
+            `INSERT INTO skills (id, project_id, user_id, name, agent_type, default_profile_id)
+          VALUES ('skill-1', 'project-1', 'owner-1', 'Skill', ?, 'skill-default')`
+          )
+          .run(skillAgentType);
+        const now = new Date().toISOString();
+        sqlite
+          .prepare(
+            `INSERT INTO tasks
+          (id, project_id, user_id, title, description, status, agent_profile_hint, skill_id, created_at, updated_at)
+          VALUES ('original-task', 'project-1', 'owner-1', 'Original', 'Retry me', 'failed', 'claude-code', 'skill-1', ?, ?)`
+          )
+          .run(now, now);
+
+        await retrySubtask({ taskId: 'original-task' }, makeContext(env, 'owner-1'));
+
+        expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+          env,
+          expect.objectContaining({
+            agentType: expectedAgentType,
+            model: null,
+            agentProfileHint: 'claude-code',
+          })
+        );
+        expect(
+          sqlite
+            .prepare("SELECT agent_profile_hint, skill_id FROM tasks WHERE id != 'original-task'")
+            .get()
+        ).toEqual({ agent_profile_hint: 'claude-code', skill_id: 'skill-1' });
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
   it('retry_subtask rejects an unavailable explicit profile before creating replacement work', async () => {
     const sqlite = new Database(':memory:');
     try {

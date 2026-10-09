@@ -306,7 +306,8 @@ export async function resolveAgentProfile(
   projectId: string,
   profileNameOrId: string | null | undefined,
   userId: string,
-  env: ProfileEnv
+  env: ProfileEnv,
+  options: { allowLegacyAgentTypeHint?: boolean } = {}
 ): Promise<ResolvedAgentProfile> {
   // Helper to convert a DB row into a ResolvedAgentProfile
   function rowToResolved(p: schema.AgentProfileRow): ResolvedAgentProfile {
@@ -408,5 +409,13 @@ export async function resolveAgentProfile(
     return rowToResolved(byNameGlobal[0]);
   }
 
+  // Only background retries may interpret an unmatched persisted type hint.
+  // Matching profiles retain priority, and public explicit selections are strict.
+  if (options.allowLegacyAgentTypeHint && isValidAgentType(profileNameOrId)) {
+    return resolveAgentProfile(db, projectId, null, userId, {
+      ...env,
+      DEFAULT_TASK_AGENT_TYPE: profileNameOrId,
+    });
+  }
   throw errors.notFound('Agent profile');
 }

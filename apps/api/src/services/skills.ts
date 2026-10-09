@@ -265,7 +265,8 @@ export async function resolveSkillProfile(
   profileNameOrId: string | null | undefined,
   skillNameOrId: string | null | undefined,
   userId: string,
-  env: SkillEnv
+  env: SkillEnv,
+  options: { allowLegacyAgentTypeHint?: boolean } = {}
 ): Promise<ResolvedSkillProfile> {
   let skill: schema.SkillRow | null = null;
   if (skillNameOrId) {
@@ -300,7 +301,8 @@ export async function resolveSkillProfile(
     projectId,
     profileNameOrId ?? skill?.defaultProfileId ?? null,
     userId,
-    env
+    env,
+    options
   );
   const promptAppend =
     [profile.systemPromptAppend, skill?.systemPromptAppend]
