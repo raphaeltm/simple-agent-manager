@@ -111,8 +111,11 @@ seven_day:{utilization:0.31,resetsAt:<s>}}}`. Top-level `utilization` appears on
       those is the limiting window.
 - [x] D2 SAM Idea `01M4EST1XWX60JGC7D59PX2BEG` for the separate hygiene issue: backfilled `cc_credentials` ids embed ciphertext + IV
       (`backfill-service.ts:31`); re-keying is a data migration, out of scope here.
+- [x] D1b Same section: Claude Code sends its first reading only after a few model calls, so a chat
+      that ends after one short reply may not show a chip yet (found on staging, see below).
 - [ ] D3 After merge + deploy: verify a production Claude session produces `anthropic` rows and the chip
-      renders; update idea `01M1RMTYR8FB95H3V031CRYN68`.
+      renders; update idea `01M1RMTYR8FB95H3V031CRYN68`. Evidence goes on the PR and the idea, since
+      this file is archived before merge.
 
 ## Acceptance criteria
 
@@ -159,3 +162,38 @@ seven_day:{utilization:0.31,resetsAt:<s>}}}`. Top-level `utilization` appears on
   well under 8 (rule 60).
 - Turbo 2.11.7 writes an agent-guidance block into `AGENTS.md` on every agent-run turbo command; it
   is reverted before each commit (unrelated to this task).
+
+## Staging verification (2026-10-08/09)
+
+Deploy `37860636181` (8894f29a3, main 2bbe9336f merged) succeeded at 23:54Z. VM agent release
+`350d71732` was uploaded to R2 at 23:45:40Z; both test nodes were provisioned after that from an
+empty node list (rule 27). Throwaway Artifacts project `01M4EY6CCH30PD0BKKWK8A4CKA` with a
+`claude-code` VM profile.
+
+- **Long backfilled reference (the production failure).** The smoke user's migrated config
+  `cfg-01KJPYVEXT39RHF2PXMV4Q23B4` (credential id 223 chars, reference 238 chars) was attached at
+  project scope. Agent session `01M4F1S03QGZF41ZE3DDMW76N6` was attributed `project` / 238 chars.
+  `POST …/acp-sessions/01M4F1S03QGZF41ZE3DDMW76N6/usage` returned **204** at 00:43:20Z (production
+  returns 400 for this shape). D1 stored `claude.five_hour` 38% (allowed, 300 min) and
+  `claude.seven_day` 91% (allowed_warning, 10080 min) under `sha256:a310660…` (71 bytes).
+- **Chat chip, long reference.** It reads "Claude · 5h 38% · Week 91%". The details read "Project
+  credential · claude-code", with 5h resetting in 2h 15m and Week in 1d 5h. Mobile (375px) chip and
+  details render with 0 px horizontal overflow and no console errors. Screenshots are in
+  `.codex/tmp/playwright-screenshots/usage-limits/longref-*`.
+- **Restore.** The unfiltered `GET /api/projects/:id/credential-limits` returned the long credential
+  with its real 238-char reference and 223-char `credentialId`.
+- **Default (short) credential, Settings.** Session `01M4F1AAC04WQ6P71AC43G18AY` (user scope, 49
+  chars) reported both windows (204 at 00:40:19Z). Settings → Advanced shows
+  "Claude · 5h 38% · Week 91%, sampled 4m ago" on the Claude Code credential.
+- **Before this change.** Staging's newest Claude rows (old VM agent) carried `claude.five_hour`
+  with no utilization, or only the weekly window when it was in a warning state.
+- **Emission timing found on staging.** Each chat's first one-reply session produced no usage
+  callback at all. The same account produced readings as soon as a prompt made several model
+  calls. In Claude Code 2.1.281, `extractQuotaStatusFromHeaders` ignores rate-limit headers until the
+  subscription type is known, and the event is emitted from the `statusChanged` listener. The
+  agents guide now says so; nothing in SAM can change it.
+- **Cleanup.** Both chats stopped (`workspaceDeleted: true`). Nodes `01M4EZ7GZHJ8F1SFWF74QYDZPT` and
+  `01M4F0YZN9T8V5065Z4WEA33JW` were deleted (`GET /api/nodes` = []), then the project and both
+  project attachments. The user-level Claude attachment was never changed.
+- **Found while testing.** Credential attachment create/delete takes 41–48 s on staging. Filed as
+  `tasks/backlog/2026-10-09-cc-attachment-mutations-take-45-seconds.md`.
