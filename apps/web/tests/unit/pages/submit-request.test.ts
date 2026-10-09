@@ -70,4 +70,34 @@ describe('buildBaseSubmitRequest', () => {
     expect(result.agentProfileId).toBe('profile-123');
     expect(result.skillId).toBe('skill-456');
   });
+
+  it('carries fork/retry lineage as parentTaskId and never a context summary', () => {
+    const pendingDerived = {
+      type: 'fork' as const,
+      parentSessionId: 'session-1',
+      parentSessionLabel: 'Fix the login bug',
+      parentTaskId: 'task-1',
+      promptLoading: false,
+    };
+    for (const agentProfileId of [null, 'profile-123']) {
+      const result = buildBaseSubmitRequest({ ...BASE_ARGS, agentProfileId, pendingDerived });
+      expect(result.parentTaskId).toBe('task-1');
+      expect('contextSummary' in result).toBe(false);
+    }
+  });
+
+  it('omits parentTaskId when the derived session has no task', () => {
+    const result = buildBaseSubmitRequest({
+      ...BASE_ARGS,
+      pendingDerived: {
+        type: 'fork',
+        parentSessionId: 'session-1',
+        parentSessionLabel: 'Fix the login bug',
+        parentTaskId: '',
+        promptLoading: false,
+      },
+    });
+    expect('parentTaskId' in result).toBe(false);
+    expect(result.message).toBe('Fix the bug');
+  });
 });

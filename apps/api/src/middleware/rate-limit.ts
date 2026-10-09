@@ -48,9 +48,6 @@ export const DEFAULT_RATE_LIMITS = {
   TRIAL_CREATE: 10,
   // SSE events endpoint — short window to prevent connection storms.
   TRIAL_SSE: 30,
-  // Fork (`fork-prepare`) and Retry (`summarize`) each send up to 1,000 session messages to
-  // Workers AI. They spend the same budget, so they share one per-user bucket.
-  SESSION_SUMMARIZE: 30,
   // Voice transcription runs Workers AI Whisper on every request. Per MINUTE, not per hour
   // (`DEFAULT_TRANSCRIBE_WINDOW_SECONDS`): dictation is bursty, and the budget is for abuse.
   TRANSCRIBE: 30,
@@ -181,7 +178,9 @@ export class RateLimitError extends AppError {
 
 type RateLimitResult = { allowed: boolean; remaining: number; resetAt: number };
 
-export type AiSpendRateLimitBucket = 'session-summarize' | 'transcribe';
+// The table's CHECK (migration 0174) also admits the retired 'session-summarize' bucket;
+// adding a bucket needs a migration that widens it.
+export type AiSpendRateLimitBucket = 'transcribe';
 
 interface AiSpendRateLimitRow {
   count: number;
@@ -421,24 +420,6 @@ export function rateLimitReportIssuePost(env: Env): MiddlewareHandler<{ Bindings
   return rateLimit({
     limit: getRateLimit(env, 'REPORT_ISSUE_POST'),
     keyPrefix: 'report-issue-post',
-  });
-}
-
-/** Session summarization's window: per hour. Override via RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS. */
-export const DEFAULT_SESSION_SUMMARIZE_WINDOW_SECONDS = 3600;
-
-/**
- * Rate limit shared by the two session-summarization routes, `POST …/sessions/:id/fork-prepare`
- * and `POST …/sessions/:id/summarize`. Default: 30 per hour per user, across both.
- */
-export function rateLimitSessionSummarize(env: Env): MiddlewareHandler<{ Bindings: Env }> {
-  return aiSpendRateLimit({
-    limit: getRateLimit(env, 'SESSION_SUMMARIZE'),
-    windowSeconds: parsePositiveInt(
-      env.RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS,
-      DEFAULT_SESSION_SUMMARIZE_WINDOW_SECONDS
-    ),
-    bucket: 'session-summarize',
   });
 }
 

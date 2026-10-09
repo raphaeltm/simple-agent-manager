@@ -145,7 +145,7 @@ export function expireDuePromptDeliveries(
 } {
   const expiredWakeFailures = listExpiringWakeDeliveries(sql, now);
   const expired = sql.exec(
-    `UPDATE session_inbox
+    `UPDATE session_inbox INDEXED BY idx_inbox_active_expiry
      SET delivery_state = 'expired',
          terminal_reason = 'ttl_expired',
          last_error = COALESCE(last_error, 'Prompt delivery TTL expired')
@@ -155,7 +155,7 @@ export function expireDuePromptDeliveries(
     now
   ).rowsWritten;
   const failed = sql.exec(
-    `UPDATE session_inbox
+    `UPDATE session_inbox INDEXED BY idx_inbox_pending_attempts
      SET delivery_state = 'failed',
          terminal_reason = 'max_attempts_exceeded',
          last_error = COALESCE(last_error, 'Prompt delivery maximum attempts exceeded')
@@ -163,6 +163,12 @@ export function expireDuePromptDeliveries(
        AND delivery_attempts >= ?`,
     config.maxAttempts
   ).rowsWritten;
+  if (expired + failed > 0) {
+    sql.exec(`DELETE FROM prompt_delivery_target_backoff
+      WHERE NOT EXISTS (SELECT 1 FROM session_inbox INDEXED BY idx_inbox_active_target_head
+        WHERE target_session_id = prompt_delivery_target_backoff.target_session_id
+          AND delivery_state IN ('queued', 'retry_wait', 'delivering'))`);
+  }
   return { expired, failed, expiredWakeFailures };
 }
 
@@ -182,7 +188,7 @@ function listExpiringWakeDeliveries(sql: SqlStorage, now: number): ExpiredWakeDe
               inbox.source_task_id,
               inbox.last_error,
               'ttl_expired' AS terminal_reason
-         FROM session_inbox inbox
+         FROM session_inbox inbox INDEXED BY idx_inbox_active_expiry
          JOIN chat_sessions session ON session.id = inbox.target_session_id
         WHERE inbox.delivery_state IN ('queued', 'retry_wait', 'delivering')
           AND inbox.expires_at IS NOT NULL
@@ -224,68 +230,58 @@ export function failParentWakeDeliveries(
 
 /** Message-class precedence is protocol semantics, shared by claims and alarm eligibility. */
 function deliveryPrioritySql(alias: string): string {
-  return `CASE ${alias}.message_class
+  const prefix = alias ? `${alias}.` : '';
+  return `CASE ${prefix}message_class
     WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4
     WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END`;
 }
 
 function noEarlierDeliverySql(): string {
-  const activePriority = deliveryPrioritySql('active');
-  const inboxPriority = deliveryPrioritySql('inbox');
-  return `NOT EXISTS (SELECT 1 FROM session_inbox active
-    WHERE active.target_session_id = inbox.target_session_id AND active.id != inbox.id
-      AND (active.delivery_state = 'delivering' OR (
-        active.delivery_state IN ('queued', 'retry_wait') AND (
-          ${activePriority} > ${inboxPriority} OR (
-            ${activePriority} = ${inboxPriority} AND (
-              active.created_at < inbox.created_at OR
-              (active.created_at = inbox.created_at AND active.rowid < inbox.rowid)
-            )
-          )
-        )
-      )))`;
+  return `inbox.id = (SELECT active.id FROM session_inbox active
+    INDEXED BY idx_inbox_active_target_head
+    WHERE active.target_session_id = inbox.target_session_id
+      AND active.delivery_state IN ('queued', 'retry_wait', 'delivering')
+    ORDER BY (active.delivery_state = 'delivering') DESC,
+      ${deliveryPrioritySql('active')} DESC, active.created_at, active.rowid
+    LIMIT 1)`;
 }
 
-// Built once from module-owned SQL fragments; caller values remain bound parameters.
-const CLAIM_DUE_PROMPT_DELIVERIES_SQL = `SELECT * FROM session_inbox inbox
-     WHERE (
-       delivery_state IN ('queued', 'retry_wait')
-       AND COALESCE(next_attempt_at, created_at) <= ?
-       AND delivery_attempts < ?
-       AND ${noEarlierDeliverySql()}
-     ) OR (
-       delivery_state = 'delivering'
-       AND attempt_started_at IS NOT NULL
-       AND attempt_started_at <= ?
-     )
-     ORDER BY
-       CASE message_class
-         WHEN 'shutdown_with_final_prompt' THEN 5
-         WHEN 'preempt_and_replan' THEN 4
-         WHEN 'interrupt' THEN 3
-         WHEN 'deliver' THEN 2
-         WHEN 'notify' THEN 1
-         ELSE 0
-       END DESC,
-       created_at ASC,
-       rowid ASC
-     LIMIT ?`;
-// Built once from module-owned SQL fragments; caller values remain bound parameters.
+// Urgent controls can still preempt a target whose informational messages are
+// backed off. Equal/lower priority messages share the target's single retry wake.
+const TARGET_BACKOFF_SQL = `COALESCE((SELECT next_attempt_at
+  FROM prompt_delivery_target_backoff target
+  WHERE target.target_session_id = inbox.target_session_id
+    AND (${deliveryPrioritySql('inbox')} <= 2
+      OR target.message_priority >= ${deliveryPrioritySql('inbox')})), 0)`;
+
+// Split the states so each arm can range-seek its due-time index. Only active
+// rows participate in the head lookup; retained mailbox history is never scanned.
+const CLAIM_DUE_PROMPT_DELIVERIES_SQL = `SELECT * FROM (
+  SELECT inbox.*, inbox.rowid AS queue_order FROM session_inbox inbox
+    INDEXED BY idx_inbox_pending_due
+    WHERE delivery_state IN ('queued', 'retry_wait')
+      AND COALESCE(next_attempt_at, created_at) <= ?
+      AND delivery_attempts < ?
+      AND ${TARGET_BACKOFF_SQL} <= ?
+      AND ${noEarlierDeliverySql()}
+  UNION ALL
+  SELECT inbox.*, inbox.rowid AS queue_order FROM session_inbox inbox
+    WHERE delivery_state = 'delivering'
+      AND attempt_started_at IS NOT NULL AND attempt_started_at <= ?
+) ORDER BY ${deliveryPrioritySql('')} DESC, created_at, queue_order LIMIT ?`;
+
 const PROMPT_DELIVERY_ALARM_SQL = `SELECT MIN(due_at) AS due_at FROM (
-       SELECT MIN(COALESCE(next_attempt_at, created_at)) AS due_at
-       FROM session_inbox inbox
-       WHERE delivery_state IN ('queued', 'retry_wait')
-         AND ${noEarlierDeliverySql()}
-       UNION ALL
-       SELECT MIN(attempt_started_at + ?) AS due_at
-       FROM session_inbox
-       WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL
-       UNION ALL
-       SELECT MIN(expires_at) AS due_at
-       FROM session_inbox
-       WHERE delivery_state IN ('queued', 'retry_wait', 'delivering')
-         AND expires_at IS NOT NULL
-     )`;
+  SELECT MIN(MAX(COALESCE(next_attempt_at, created_at), ${TARGET_BACKOFF_SQL})) AS due_at
+    FROM session_inbox inbox INDEXED BY idx_inbox_pending_due
+    WHERE delivery_state IN ('queued', 'retry_wait') AND ${noEarlierDeliverySql()}
+  UNION ALL
+  SELECT MIN(attempt_started_at) + ? AS due_at FROM session_inbox
+    WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL
+  UNION ALL
+  SELECT MIN(expires_at) AS due_at FROM session_inbox INDEXED BY idx_inbox_active_expiry
+    WHERE delivery_state IN ('queued', 'retry_wait', 'delivering')
+      AND expires_at IS NOT NULL
+)`;
 
 export function claimDuePromptDeliveries(
   sql: SqlStorage,
@@ -299,6 +295,7 @@ export function claimDuePromptDeliveries(
       CLAIM_DUE_PROMPT_DELIVERIES_SQL,
       now,
       config.maxAttempts,
+      now,
       staleBefore,
       config.maxCandidatesPerAlarm
     )
@@ -443,8 +440,26 @@ export function applyPromptDeliveryResult(
   config: DurableExecutionConfig,
   now = Date.now()
 ): boolean {
+  // Results may race a reclaimed/expired attempt. Fence before touching the
+  // shared target backoff, not only before updating the individual message.
+  const current = sql
+    .exec(
+      `SELECT wake_ready_attempt_id, prompt_delivery_phase FROM session_inbox
+      WHERE id = ? AND delivery_state = 'delivering' AND attempt_id = ?`,
+      claim.message.id,
+      claim.attemptId
+    )
+    .toArray()[0];
+  if (!current) return false;
+  const nudgedWhilePreparing =
+    current.wake_ready_attempt_id === claim.attemptId &&
+    current.prompt_delivery_phase === 'preparing';
   const capability = capabilitiesColumns(result.capabilities);
   if (result.kind === 'accepted') {
+    sql.exec(
+      'DELETE FROM prompt_delivery_target_backoff WHERE target_session_id = ?',
+      claim.message.targetSessionId
+    );
     return (
       sql.exec(
         `UPDATE session_inbox
@@ -478,8 +493,33 @@ export function applyPromptDeliveryResult(
   }
 
   if (result.kind === 'retry') {
-    const nextAttemptAt =
+    let nextAttemptAt =
       now + promptDeliveryBackoffMs(Math.max(1, claim.message.deliveryAttempts), config);
+    if (result.reason === 'busy' && !nudgedWhilePreparing) {
+      const previous = sql
+        .exec(
+          'SELECT busy_attempts FROM prompt_delivery_target_backoff WHERE target_session_id = ?',
+          claim.message.targetSessionId
+        )
+        .toArray()[0];
+      const busyAttempts = Number(previous?.busy_attempts ?? 0) + 1;
+      nextAttemptAt = now + promptDeliveryBackoffMs(busyAttempts, config);
+      sql.exec(
+        `INSERT INTO prompt_delivery_target_backoff
+          (target_session_id, busy_attempts, next_attempt_at, message_priority)
+          SELECT target_session_id, ?, ?, CASE message_class
+            WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4
+            WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END
+          FROM session_inbox WHERE id = ?
+          ON CONFLICT(target_session_id) DO UPDATE SET
+            busy_attempts = excluded.busy_attempts,
+            next_attempt_at = excluded.next_attempt_at,
+            message_priority = excluded.message_priority`,
+        busyAttempts,
+        nextAttemptAt,
+        claim.message.id
+      );
+    }
     // A retry result means the target is alive but temporarily unavailable
     // (for example, a replacement VM is still installing/loading its agent).
     // Do not let that readiness wait become a permanent max-attempts failure:
@@ -493,7 +533,7 @@ export function applyPromptDeliveryResult(
        SET delivery_state = 'retry_wait',
            delivery_attempts = MIN(delivery_attempts, ?),
            next_attempt_at = CASE WHEN wake_ready_attempt_id = attempt_id
-             AND prompt_delivery_phase = 'preparing' AND ? = 'not_ready' THEN ? ELSE ? END,
+             AND prompt_delivery_phase = 'preparing' AND ? IN ('not_ready', 'busy') THEN ? ELSE ? END,
            wake_ready_attempt_id = NULL,
            last_error = ?,
            runtime_identity = COALESCE(?, runtime_identity),
@@ -549,7 +589,20 @@ export function nudgePromptDeliveriesForTarget(
   targetSessionId: string,
   now = Date.now()
 ): number {
-  return sql.exec(
+  const released = sql.exec(
+    'DELETE FROM prompt_delivery_target_backoff WHERE target_session_id = ?',
+    targetSessionId
+  ).rowsWritten;
+  // An idle callback can land while the adapter is still returning "busy".
+  // Latch it on that exact pre-submit attempt so the late result cannot park it.
+  const preparing = sql.exec(
+    `UPDATE session_inbox SET wake_ready_attempt_id = attempt_id
+      WHERE target_session_id = ? AND delivery_state = 'delivering'
+        AND prompt_delivery_phase = 'preparing'
+        AND wake_ready_attempt_id IS NOT attempt_id`,
+    targetSessionId
+  ).rowsWritten;
+  const queued = sql.exec(
     `UPDATE session_inbox
      SET next_attempt_at = ?
      WHERE target_session_id = ?
@@ -559,6 +612,7 @@ export function nudgePromptDeliveriesForTarget(
     targetSessionId,
     now
   ).rowsWritten;
+  return Math.max(released, preparing + queued);
 }
 
 export function computePromptDeliveryAlarmTime(

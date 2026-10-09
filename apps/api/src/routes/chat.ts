@@ -41,7 +41,6 @@ import { resolveChatAgentState } from './chat-agent-state';
 import { registerChatCancelRoute } from './chat-cancel';
 import { registerChatCommentDirectiveRoute } from './chat-comment-directives';
 import { chatCommentRoutes } from './chat-comments';
-import { chatForkRoutes } from './chat-fork';
 import { chatIdeaRoutes } from './chat-ideas';
 import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
 import {
@@ -142,7 +141,6 @@ chatRoutes.get('/ws', async (c) => {
  * Read the lightweight ACP activity snapshot for a chat session.
  */
 chatRoutes.route('/', chatStateRoutes);
-chatRoutes.route('/', chatForkRoutes);
 
 /**
  * GET /api/projects/:projectId/sessions/:sessionId

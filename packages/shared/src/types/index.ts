@@ -297,7 +297,6 @@ export type {
   RequestAttachmentUploadResponse,
   RunTaskRequest,
   RunTaskResponse,
-  SessionSummaryResponse,
   SubmitTaskRequest,
   SubmitTaskResponse,
   Task,

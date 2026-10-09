@@ -331,8 +331,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   RATE_LIMIT_ANONYMOUS?: string;
   RATE_LIMIT_TRIAL_CREATE?: string;
   RATE_LIMIT_REPORT_ISSUE_POST?: string;
-  RATE_LIMIT_SESSION_SUMMARIZE?: string;
-  RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS?: string;
   RATE_LIMIT_IDENTITY_TOKEN?: string;
   RATE_LIMIT_IDENTITY_TOKEN_WINDOW_SECONDS?: string;
   RATE_LIMIT_CALLBACK_TOKEN_RENEWAL?: string; // Authenticated workspace callback-token renewal attempts per workspace per window (default: 12)
@@ -941,15 +939,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TASK_TITLE_RETRY_DELAY_MS?: string;
   TASK_TITLE_RETRY_MAX_DELAY_MS?: string;
   TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH?: string;
-  // Context summarization (conversation forking)
-  CONTEXT_SUMMARY_MODEL?: string;
-  CONTEXT_SUMMARY_MAX_LENGTH?: string;
-  CONTEXT_SUMMARY_TIMEOUT_MS?: string;
-  CONTEXT_SUMMARY_MAX_MESSAGES?: string;
-  CONTEXT_SUMMARY_RECENT_MESSAGES?: string;
-  CONTEXT_SUMMARY_SHORT_THRESHOLD?: string;
-  CONTEXT_SUMMARY_HEAD_MESSAGES?: string;
-  CONTEXT_SUMMARY_HEURISTIC_RECENT_MESSAGES?: string;
   // Idle cleanup configuration
   IDLE_CLEANUP_RETRY_DELAY_MS?: string;
   IDLE_CLEANUP_MAX_RETRIES?: string;

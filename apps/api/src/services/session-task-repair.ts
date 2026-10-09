@@ -1,5 +1,5 @@
 import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -38,6 +38,32 @@ async function findTaskBySession(db: Db, sessionId: string): Promise<schema.Task
 }
 
 /**
+ * Link a task to its chat session unless another task already owns that session in
+ * `idx_tasks_chat_session_id_unique`. A pre-#2230 recovery task can be a session's current
+ * task while an earlier task in its family still holds the link; linking it anyway violated
+ * the unique index and failed the caller with a 500 (production, 2026-09-22 and 2026-10-04).
+ */
+async function linkTaskToSessionIfUnowned(
+  db: Db,
+  taskId: string,
+  sessionId: string
+): Promise<boolean> {
+  const result = await db
+    .update(schema.tasks)
+    .set({ chatSessionId: sessionId, updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(schema.tasks.id, taskId),
+        isNull(schema.tasks.chatSessionId),
+        // Alias the inner table: an unqualified tasks column here would bind to the UPDATE row.
+        sql`NOT EXISTS (SELECT 1 FROM ${schema.tasks} AS link_owner
+          WHERE link_owner.chat_session_id = ${sessionId})`
+      )
+    );
+  return (result.meta.changes ?? 0) > 0;
+}
+
+/**
  * Lazily materialize a conversation Task for a legacy taskless ProjectData chat.
  * The D1 partial unique index is the concurrency guard; a losing writer reuses
  * the winner and links that identity into ProjectData.
@@ -59,13 +85,15 @@ export async function ensureSessionTaskBacked(
       .limit(1);
     if (rows[0]) {
       if (!rows[0].chatSessionId) {
-        await db
-          .update(schema.tasks)
-          .set({
-            chatSessionId: input.sessionId,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(schema.tasks.id, existingTaskId));
+        const linked = await linkTaskToSessionIfUnowned(db, existingTaskId, input.sessionId);
+        if (!linked) {
+          log.info('session_task_repair.link_owned_elsewhere', {
+            projectId: input.projectId,
+            sessionId: input.sessionId,
+            taskId: existingTaskId,
+          });
+          return rows[0];
+        }
       }
       return { ...rows[0], chatSessionId: input.sessionId };
     }
