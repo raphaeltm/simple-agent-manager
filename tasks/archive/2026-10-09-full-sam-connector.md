@@ -2,7 +2,7 @@
 
 Authoritative design: SAM idea `01M4GJ0W0DS5BTKBM1YW0X5YC8`, project `01KHRJGANBBWGDY1NZ0KVF0D4J`. Implementation child `01M4H0TFBRMW2S5XATMPNZYDXN`. Preserve the idea.
 
-> Current state: corrective code review passes H1–H4/M1–M8; final validation/CI and live rollout gates remain pending. Earlier no-deploy and intermediate check statements below are historical; latest user authorization governs. No OAuth grants without explicit approval OAUTH-STAGING-2294-v1.
+> Current state: implementation and independent corrective reviews pass; runtime commit589ebe2c1 has green CI/Sonar and successful full staging deployment37999448002. Latest user clarification withdraws OAUTH-STAGING-2294-v1: meaningful local OAuth tests plus live existing-PAT MCP verification suffice. No live OAuth was tested; no real OAuth grants are to be created. Earlier pending-approval and no-deploy statements below are historical. Final live VM verification and cleanup passed; production rollout remains.
 
 ## Constraints and research
 
@@ -23,8 +23,8 @@ Existing operations are in `apps/api/src/operations`. PAT HMAC authentication is
 - [x] SQLite attack/control tests and guard mutation checks; real MCP client tests; OAuth conformance and full capability flow.
 - [x] Lint/typecheck/tests/build, mobile/desktop Playwright screenshots reviewed.
 - [x] Independent specialist reviews, all findings addressed.
-- [x] PR required checks green on121f486a8, CodeRabbit requested and observation window complete; no review findings received.
-- [ ] Live staging verification per specification round2, including real-client PAT and OAuth paths.
+- [x] Runtime candidate589ebe2c1 required CI and SonarCloud checks green; CodeRabbit requested, observed over15min after final runtime push, no findings.
+- [x] Final staging verification under user-corrected scope: local OAuth security tests and live existing-PAT MCP; no live OAuth grants.
 - [ ] Production deployment and post-deploy verification.
 
 Scope follows the fully specified and approved P0–P2 Connector. The specification author confirmed P3 toolsets and P4 /sam belong to later roadmaps. Do not claim them implemented without specification and implementation evidence. Staging and production rollout are now authorized; live acceptance verification remains a blocking gate.
@@ -74,3 +74,12 @@ Independent routing/cancel95 tests, protocol/CORS20, OAuth Workers23, real Inter
 M1 final correction covers task-start pure admission (VM and Instant), shared idea/chat validation, and attention-answer definitive prepare rejection/successful preparation release. A private in-process marker proves safe retry; no status-code-based blanket release. Uncertain insert/dispatch/completion outcomes keep receipts reserved. Independent completion review passes H1–H4/M1–M8,180tests+1skip; security independently validates40+56unit/5realstore cases. Attention correction70tests passes. Source-inventory now names refactored task writers exactly, preserving canonical allocation evidence;83boundary tests pass. Full validation final rerun pending.
 
 Final corrective candidate: full `pnpm test`21/21 workspace tasks pass; `pnpm lint`, `pnpm typecheck`, and `pnpm build` pass. OAuth/InteractionStore Workers28/28, quality669/669 and source-boundary83/83 pass separately. Fresh commit CI and live staging acceptance remain required.
+
+
+## Final candidate verification
+
+589ebe2c1 passes all applicable Actions checks and SonarCloud. Full staging37999448002 succeeded, including container build and smoke tests. Staging Worker9a53cdf9-7286-4a39-b04b-000cd6c04ce4 deployed22:38:18UTC. Live official SDK catalog18 and eight reads pass; idea create/update and same-ID replay pass, fixture deleted200. Eight desktop/mobile page checks have no JS errors/overflow. Persisted observability noise check passes; Workers telemetry unavailable403 is disclosed. OAuth evidence is local/mock/Workers only; live OAuth and hosted provider API calls were not tested. Fresh VM verification remains in progress.
+
+Fresh VM task01M4HDHNQBNDK4YJ3KXY7S7ETH returned CONNECTOR_FINAL_VM_READY and CONNECTOR_FINAL_FOLLOWUP_READY through live PAT MCP. Authenticated workspace01M4HDT9KTP5068NMVQ28E62ZE loaded the conversation/terminal interface. HTTPS system-info200. Earliest observed heartbeat22:49:25.001UTC is158seconds after node creation22:46:46.691; system-info uptime42.46seconds captured22:48:38.923 implies about89seconds after inferred OS boot. This is not a claim of under-two-minute node-creation-to-heartbeat. Unchanged VM agent contentversionc3b0f730e85437435e2382837ec80b650cc0035b. Independent completion audit passes implementation and revised user scope; final cleanup and production evidence follow in PR/task session.
+
+Cleanup: temporary idea, task and node deleted200; direct D1 confirms zero nondeleted staging nodes. Staging lease180 released. Implementation archived after independent completion audit; merge/deployment status continues in the PR and SAM session.
