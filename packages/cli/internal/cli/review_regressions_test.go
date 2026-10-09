@@ -75,6 +75,7 @@ func TestLegacyTaskStatusPreservesCompleteJSON(t *testing.T) {
 
 func TestWaitCallerCancellationDoesNotClaimTimeoutOrCancelTask(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	h := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		cancel()
 		<-req.Context().Done()

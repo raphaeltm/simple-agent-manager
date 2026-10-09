@@ -78,7 +78,7 @@ func TestWorkflowNamedResourceAmbiguity(t *testing.T) {
 func TestWorkflowReadMethodsAndPaths(t *testing.T) {
 	for _, c := range workflowContracts() {
 		t.Run(c.command, func(t *testing.T) {
-			if strings.HasPrefix(c.command, "profiles get") || strings.HasPrefix(c.command, "skills get") || c.command == "profiles resolve" || c.command == "skills resolve" {
+			if requiresNamedWorkflowFixture(c.command) {
 				return
 			}
 			args := append(strings.Fields(c.command), "--project", workflowProject, "--json")
@@ -90,7 +90,7 @@ func TestWorkflowReadMethodsAndPaths(t *testing.T) {
 			if Run(context.Background(), r) != 0 {
 				t.Fatal(err.String())
 			}
-			if req.Method != c.method || !(strings.Contains(req.URL, "/api/projects/"+workflowProject) || c.command == "notifications list" && strings.Contains(req.URL, "projectId="+workflowProject)) {
+			if req.Method != c.method || !requestUsesWorkflowProject(c.command, req.URL) {
 				t.Fatalf("unsafe read %s %s", req.Method, req.URL)
 			}
 		})
@@ -112,4 +112,15 @@ func TestSettingsAllowlistedAndPreviewNeverMutates(t *testing.T) {
 	if !strings.Contains(out.String(), `"preview": true`) {
 		t.Fatal(out.String())
 	}
+}
+
+func requiresNamedWorkflowFixture(command string) bool {
+	return strings.HasPrefix(command, "profiles get") || strings.HasPrefix(command, "skills get") || command == "profiles resolve" || command == "skills resolve"
+}
+
+func requestUsesWorkflowProject(command, requestURL string) bool {
+	if command == "notifications list" {
+		return strings.Contains(requestURL, "projectId="+workflowProject)
+	}
+	return strings.Contains(requestURL, "/api/projects/"+workflowProject)
 }
