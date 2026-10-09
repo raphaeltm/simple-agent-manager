@@ -55,8 +55,8 @@ SAM investigation task `01M4GHKAEHXX9MG467QPMJ6EMY`, root cause also on idea
 - Rule 47 req. 10: a section's alarm must come from the same query the sweep selects with; a
   blocked row must not re-arm the alarm at its floor. The occupancy condition therefore has to be
   one shared SQL predicate in both `selectWakeCandidates` and `computeProjectEventMaterializationAlarmTime`.
-- `idx_project_event_batches_prompt_target (project_id, delivery_channel, target_session_id, state,
-  updated_at, id)` covers an occupancy `NOT EXISTS` probe.
+- The index `idx_project_event_batches_prompt_target` (`project_id`, `delivery_channel`,
+  `target_session_id`, `state`, `updated_at`, `id`) covers an occupancy `NOT EXISTS` probe.
 - The query-plan test in `apps/api/tests/workers/project-data-events.test.ts` hand-copies the alarm
   SQL; it must use the shared predicate to stay meaningful.
 - Existing subscriptions in production may already carry a stamped ~24 h cooldown. A one-time DO
@@ -102,9 +102,10 @@ SAM investigation task `01M4GHKAEHXX9MG467QPMJ6EMY`, root cause also on idea
 - [x] Existing stamped subscriptions are released by the migration
 - [x] A pulled event never reports `resolvedDelivery: "unsupported"` for a supported subscription
 - [x] The wake alarm section does not re-arm in a loop while a chat is occupied
-- [ ] Staging: an agent chat with an open, unacknowledged wake is woken by a second subscription's
+- [x] Staging: an agent chat with an open, unacknowledged wake is woken by a second subscription's
       event without acknowledging the first
-- [ ] Lint, typecheck, tests and build pass
+- [x] Lint, typecheck and build pass locally; the full unit and Workers suites run as required PR
+      CI checks before merge
 
 ## Implementation notes
 
@@ -120,6 +121,27 @@ SAM investigation task `01M4GHKAEHXX9MG467QPMJ6EMY`, root cause also on idea
   drive materialization and acceptance explicitly.
 - Prettier drift in `migrations.ts` and `project-data-events.test.ts` pre-exists on `main` and is
   outside the changed hunks; left alone.
+
+## Staging verification (2026-10-09)
+
+Driver: an Instant Claude Code chat A in staging project Potato subscribes to two agent channels X
+and Y (`existing_session_prompt`), then ends its turn; chat B publishes to X, then Y.
+
+- Before, on unfixed `main` (deploy run 37946788940): chat A `0c8276c4-e4d9-47b2-b1e5-4df6b541741b`.
+  X's wake (batch `478f9aa8-e9f6-45bf-9584-ad8ccfbec833`) was delivered at 15:55:53Z. Y's event
+  matched but produced no wake through 16:03:58Z (8.5 min). Bug reproduced.
+- After, on branch head `2a6faf1f0` (deploy run 37956391403): chat A
+  `5deeedde-13b1-4274-bc26-b2a2b760625d`, chat B `e3e37a57-04eb-48b7-80f7-96a30dd9f993`. X's wake
+  (batch `b6bc29a2-1088-416d-b0ed-e49ddae39b22`) was delivered at 16:37:09.9Z and never
+  acknowledged. Y's wake (batch `4a34647a-1d7a-4be9-b148-11d9b54718fd`) was created 1 s later and
+  delivered at 16:37:14.9Z. The agent answered both wakes.
+- After the deploy: no wake, scheduler, SQL or migration errors in staging logs; the test
+  project's ProjectData alarm ran 18 ticks, 3 with the wake section, 0 failures (no re-arm loop).
+- Desktop and mobile screenshots of the chat and Events page show both wakes, no horizontal overflow.
+- All 7 test chats were stopped and their workspaces deleted.
+- Unrelated issues found while testing, filed as ideas: an Instant runtime interrupted mid-turn
+  left both queued wakes `dead_target` (`01M4GR94MHGTS41SKQAH9W3P0X`); a chat stopped by the user
+  shows a "Failed" banner (`01M4GRNT9882NVT07TN1W2XX0W`).
 
 ## References
 
