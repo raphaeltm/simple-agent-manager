@@ -4,7 +4,7 @@ Authoritative design: SAM idea `01M4GJ0W0DS5BTKBM1YW0X5YC8`, project `01KHRJGANB
 
 ## Constraints and research
 
-User explicitly prohibits merge and deployment. Keep all work on `sam/run-repository-skill-implement-nzydxn`; do not push task bookkeeping to main because it triggers deployment. P0 is owned by task `01M4GVCTT82B9BMJM46GMXH0YX`, PR #2293, and its branch is reused, not reimplemented. Profile/runtime metadata confirms MF'in Astra / gpt-6-astra.
+Updated user authorization permits staging deployment, end-to-end verification, and production rollout after green checks. Creating or expanding persistent credentials or security-sensitive access requires action-time user approval. Keep all work on `sam/run-repository-skill-implement-nzydxn`; do not push task bookkeeping to main because it triggers deployment. P0 is owned by task `01M4GVCTT82B9BMJM46GMXH0YX`, PR #2293, and its branch is reused, not reimplemented. Profile/runtime metadata confirms MF'in Astra / gpt-6-astra.
 
 Existing operations are in `apps/api/src/operations`. PAT HMAC authentication is in `routes/api-tokens.ts`; user denial gates in `services/signup-approval.ts`. Existing `cli_operation_receipts` provide permanent intent reservations. Task submission, chat prompting, permissions, stop and project reads must be extracted rather than accessed by loopback HTTP. OAuth must use the approved maintained provider; no handwritten authorization server.
 
@@ -21,9 +21,11 @@ Existing operations are in `apps/api/src/operations`. PAT HMAC authentication is
 - [x] SQLite attack/control tests and guard mutation checks; real MCP client tests; OAuth conformance and full capability flow.
 - [x] Lint/typecheck/tests/build, mobile/desktop Playwright screenshots reviewed.
 - [x] Independent specialist reviews, all findings addressed.
-- [ ] PR required checks green, CodeRabbit requested and any feedback resolved, ready for review.
+- [x] PR required checks green on121f486a8, CodeRabbit requested and observation window complete; no review findings received.
+- [ ] Live staging verification per specification round2, including real-client PAT and OAuth paths.
+- [ ] Production deployment and post-deploy verification.
 
-Scope follows the fully specified and approved P0–P2 Connector. The specification author confirmed P3 toolsets and P4 /sam belong to later roadmaps. Do not claim them implemented without specification and implementation evidence. Staging deployment is prohibited by the current request; document exactly which verification remains unperformed.
+Scope follows the fully specified and approved P0–P2 Connector. The specification author confirmed P3 toolsets and P4 /sam belong to later roadmaps. Do not claim them implemented without specification and implementation evidence. Staging and production rollout are now authorized; live acceptance verification remains a blocking gate.
 
 ## Review and PR evidence
 
@@ -44,3 +46,9 @@ Actions CI37982405687 passed all applicable jobs (visual228 pass/28 skips). Late
 ## Late coordinator review: workspace routing
 
 A delayed coordinator message identified positional bindings in `workspace-adapter.ts`. Current catalog ordering was correct, but future insertion/reordering could silently dispatch the wrong operation. Replaced all13 workspace tool bindings with existing named exports; added a reversed-catalog regression suite asserting each intended operation and alias flags. All13 cases failed before the fix; all287 affected adapter/platform/MCP tests pass after it. Independent reviewer reran42 tests and returned PASS. API typecheck, scoped lint and formatting pass. Final CI/Sonar rerun follows on the same PR; no merge or deployment.
+
+## Authorized rollout
+
+The latest user instruction supersedes the historical no-deploy constraint above. Staging deployment [37991228557](https://github.com/raphaeltm/simple-agent-manager/actions/runs/37991228557) is in progress on121f486a8. Existing PATs and deployment secrets reused. Temporary staging OAuth grants require pending action-time approval. All live results remain pending; local OAuth tests do not replace the specification’s live-client acceptance gates.
+
+Staging run37991228557 failed after API upload: Docker Hub anonymous429 fetching the unchanged pinned Node base for the Instant container. Fix: configure Google’s supported public registry mirror on the deployment runner before every Wrangler deployment, retaining canonical digest-pinned FROM references and Docker Hub fallback. No registry credentials added. Exact mirror manifest SHA256 verified. Deployment/governance tests47/47 and Instant runtime contract10/10 pass; focused security/Cloudflare review passed, robustness suggestions applied. Live partial-deployment evidence: SDK/Inspector catalog18 tools, eight read operations, idea create/update/get and idempotent replay; desktop/mobile dashboard/project/Access/Admin pages have no page errors or horizontal overflow. This partial evidence does not satisfy the deployment gate. No compute test started.

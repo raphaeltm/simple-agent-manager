@@ -1129,6 +1129,16 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
+      # Wrangler uses the local Docker daemon for Instant container builds.
+      # A public cache avoids shared-runner anonymous Docker Hub pull limits,
+      # retaining canonical digest pins and Docker Hub fallback on cache misses.
+      - name: Configure Docker Hub cache
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          sudo node scripts/deploy/configure-docker-mirror.mjs /etc/docker/daemon.json https://mirror.gcr.io
+          sudo systemctl restart docker
+          docker info --format '{{json .RegistryConfig.Mirrors}}'
+
       # A first installation needs an API service for the tail Worker's service binding.
       # Established installations defer API code publication until after secrets so an
       # active Instant container sees at most the secret revision plus the final revision.
