@@ -136,6 +136,19 @@ until the budget refreshes and must not silently drop the candidate.
     see and leave by acting. Automatic retries must skip that terminal state
     (`apps/api/src/services/session-sleep-episode.ts`).
 
+12. **A deferral must not copy another record's deadline into the deferred row.**
+    Requirement 10 is only satisfied if the per-row "next check" belongs to that row. When
+    a row is blocked by some other record's state, read that record in both the selection
+    query and the schedule (one shared predicate), or clear every copy on every exit of
+    the blocking state. A copied deadline is a second, unsynchronized representation that
+    nothing invalidates. Incident (2026-10-09): one open event wake on a chat made the
+    ProjectData wake materializer write that wake's 24 h expiry into the cooldown of every
+    other wake subscription on the chat (`deferWakeTarget`). Acknowledging or delivering
+    the wake did not release the copies, so a production CI subscription never woke its
+    chat. Fix: `WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL` in
+    `project-data/project-events-wake-config.ts`, used by both `selectWakeCandidates` and
+    `computeProjectEventMaterializationAlarmTime`.
+
 ## Required Tests
 
 For every new or changed sweep/reconcile candidate class, include a zombie
@@ -172,6 +185,9 @@ prevention regression test:
   a loop, firing the sweep at each time the scheduler returns, and assert the exact
   sequence of fire times. A row the sweep skips while the scheduler keeps re-arming
   it then fails the test instead of passing every single-tick assertion.
+- For a row blocked by another record (requirement 12), end the blocking state through
+  its real transition without touching the blocked row, and assert the blocked row
+  becomes due and runs (`tests/workers/project-event-wake-target-occupancy.test.ts`).
 
 ## Reviewer Checklist
 
