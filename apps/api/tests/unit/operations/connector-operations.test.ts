@@ -354,10 +354,10 @@ describe('connector operations current membership and creator authority', () => 
       env,
       'project',
       'chat',
-      50,
+      51,
       { createdAt: 10, sequence: 2, id: 'message' },
       null,
-      ['user', 'assistant', 'system', 'tool', 'thinking', 'plan']
+      undefined
     );
   });
   it('replays a successful start by key without calling provisioning twice and denies after membership removal', async () => {

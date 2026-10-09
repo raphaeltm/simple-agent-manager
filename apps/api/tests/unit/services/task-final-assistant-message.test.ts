@@ -63,7 +63,7 @@ describe('getLatestAssistantMessageForTask', () => {
     });
   });
 
-  it('requests messages with limit=1 and order=desc to get the newest', async () => {
+  it('requests a bounded all-role tail to preserve message boundaries', async () => {
     mockGetMessages.mockResolvedValue({
       messages: [{ id: 'msg-newest', role: 'assistant', content: 'Latest output', createdAt: 1710000005000 }],
       hasMore: false,
@@ -74,10 +74,10 @@ describe('getLatestAssistantMessageForTask', () => {
       mockEnv,
       'proj-1',
       'session-1',
-      1,
+      200,
       null,
       null,
-      ['assistant'],
+      undefined,
       false,
       'desc',
     );

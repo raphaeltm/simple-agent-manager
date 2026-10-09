@@ -19,6 +19,8 @@ SAM asks you to sign in and approve access. Check the app name, redirect host, a
 
 Try “What needs my attention?” or “Start a chat in my project to investigate the failing tests.” Results include links back to SAM. Starting work can provision compute and is subject to installation limits.
 
+Chat results show the newest message groups first. Pagination counts stored streaming rows; follow `nextCursor` for older content. A group split across pages includes `partialBefore` or `mayContinueInNewerPage`, and shortened summaries include `truncated`. Task final-message summaries combine adjacent assistant fragments from a bounded recent window. During a long tool run, that window can contain no assistant text and the summary is `null`; read the chat for older progress.
+
 ## Command-line clients
 
 Replace the example URL with the URL from Settings → Access:

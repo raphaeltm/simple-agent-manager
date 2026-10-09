@@ -4380,10 +4380,10 @@ describe('MCP Routes', () => {
       });
       expect(mockDoStub.getMessages).toHaveBeenCalledWith(
         task.chat_session_id,
-        1,
+        200,
         null,
         null,
-        ['assistant'],
+        undefined,
         false,
         'desc'
       );
