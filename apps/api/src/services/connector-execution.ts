@@ -234,7 +234,7 @@ export async function auditConnectorWrite<T>(
       JSON.stringify(
         Object.keys(input)
           .filter((name) => AUDIT_INPUT_FIELDS.has(name))
-          .sort()
+          .sort((left, right) => left.localeCompare(right))
       )
     )
     .run();

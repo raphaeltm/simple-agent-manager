@@ -149,9 +149,11 @@ connectorConsentRoutes.get('/', async (c) => {
   const settings = await getConnectorSettings(c.env);
   if (!settings.enabled) throw errors.forbidden('Connector disabled by the administrator');
   const oauth = (await createConnectorAuthorizationServer(c.env, settings)).getOAuthApi(c.env);
-  const request = await oauth.parseAuthRequest(
-    new Request(`https://api.${c.env.BASE_DOMAIN}/oauth/authorize${new URL(c.req.url).search}`)
-  );
+  const authorizationUrl = new URL(`https://api.${c.env.BASE_DOMAIN}/oauth/authorize`);
+  for (const [name, value] of new URL(c.req.url).searchParams) {
+    authorizationUrl.searchParams.append(name, value);
+  }
+  const request = await oauth.parseAuthRequest(new Request(authorizationUrl));
   if (request.codeChallengeMethod !== 'S256' || !request.codeChallenge)
     throw errors.badRequest('S256 PKCE is required');
   if (await isConnectorClientBlocked(c.env, request.clientId))
