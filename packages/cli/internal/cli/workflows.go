@@ -34,12 +34,12 @@ func workflowContracts() []workflowContract {
 		readContract("tasks get", []string{"tasks", "$0"}, 1, ""),
 		readContract("tasks events", []string{"tasks", "$0", "events"}, 1, ""),
 		readContract("tasks sessions", []string{"tasks", "$0", "sessions"}, 1, ""),
-		readContract("ideas list", []string{"tasks"}, 0, "limit cursor"),
+		readContract("ideas list", []string{"tasks"}, 0, cursorQueryFields),
 		readContract("ideas get", []string{"tasks", "$0"}, 1, ""),
-		workflowContract{command: "profiles resolve", method: http.MethodPost, path: []string{"agent-profiles", "resolve"}, args: 1, effect: "read-only"},
+		workflowContract{command: "profiles resolve", method: http.MethodPost, path: []string{agentProfilesAPI, "resolve"}, args: 1, effect: "read-only"},
 		readContract("skills resolve", []string{"skills", "$0", "resolve"}, 1, "profileId"),
-		readContract("profiles list", []string{"agent-profiles"}, 0, ""),
-		readContract("profiles get", []string{"agent-profiles", "$0"}, 1, ""),
+		readContract("profiles list", []string{agentProfilesAPI}, 0, ""),
+		readContract("profiles get", []string{agentProfilesAPI, "$0"}, 1, ""),
 		readContract("skills list", []string{"skills"}, 0, ""),
 		readContract("skills get", []string{"skills", "$0"}, 1, ""),
 		readContract("chat list", []string{"sessions"}, 0, "limit offset scope status"),
@@ -67,11 +67,11 @@ func workflowContracts() []workflowContract {
 		readContract("triggers list", []string{"triggers"}, 0, ""),
 		readContract("triggers get", []string{"triggers", "$0"}, 1, ""),
 		readContract("triggers executions", []string{"triggers", "$0", "executions"}, 1, "limit offset status"),
-		readContract("events subscriptions", []string{"event-subscriptions"}, 0, "limit state sessionId"),
-		readContract("events subscription", []string{"event-subscriptions", "$0"}, 1, ""),
-		readContract("events deliveries", []string{"event-subscriptions", "$0", "deliveries"}, 1, "limit"),
-		readContract("events channels", []string{"event-channels"}, 0, "limit cursor"),
-		readContract("events history", []string{"event-channels", "$0", "history"}, 1, "limit cursor"),
+		readContract("events subscriptions", []string{eventSubscriptionsAPI}, 0, "limit state sessionId"),
+		readContract("events subscription", []string{eventSubscriptionsAPI, "$0"}, 1, ""),
+		readContract("events deliveries", []string{eventSubscriptionsAPI, "$0", "deliveries"}, 1, "limit"),
+		readContract("events channels", []string{"event-channels"}, 0, cursorQueryFields),
+		readContract("events history", []string{"event-channels", "$0", "history"}, 1, cursorQueryFields),
 		readContract("schedules list", []string{"schedules"}, 0, "limit cursor sessionId"),
 		readContract("schedules get", []string{"schedules", "$0"}, 1, ""),
 		readContract("watches list", []string{"standing-watches"}, 0, "limit cursor sessionId"),
@@ -133,44 +133,15 @@ func runWorkflow(ctx context.Context, runtime Runtime, parsed parsedArgs, c work
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	segments := append([]string(nil), c.path...)
-	for i, s := range segments {
-		if strings.HasPrefix(s, "$") {
-			segments[i] = args[int(s[1]-'0')]
-		}
-	}
-	if strings.HasPrefix(c.command, "profiles get") || strings.HasPrefix(c.command, "skills get") || c.command == "skills resolve" {
-		id, e := resolveNamedResource(ctx, client, project, c.path[0], args[0])
-		if e != nil {
-			return fail(runtime.Stderr, e)
-		}
-		segments[1] = id
-	}
-	query := url.Values{}
-	for _, key := range c.query {
-		if v := parsed.Flags[key]; v != "" {
-			query.Set(key, v)
-		}
-	}
-	if c.command == "ideas list" {
-		query.Set("status", "draft")
-	}
-	if parsed.Bools["recursive"] || parsed.Bools["all"] {
-		query.Set("recursive", "true")
-	}
-	if c.command == "tasks list" && (query.Get("cursor") != "" || parsed.Bools["all-pages"]) && query.Get("sort") != "" && query.Get("sort") != "createdAtDesc" {
-		return fail(runtime.Stderr, fmt.Errorf("cursor paging with non-created sort is unsupported by the API"))
-	}
-	path := projectAPIPath(project, segments...)
-	if c.command == "notifications list" {
-		path = "/api/notifications"
-		query.Set("projectId", project)
+	path, query, err := workflowRequestPath(ctx, client, project, parsed, c, args)
+	if err != nil {
+		return fail(runtime.Stderr, err)
 	}
 	basePath := path
 	if len(query) > 0 {
 		path += "?" + query.Encode()
 	}
-	if parsed.Bools["all-pages"] {
+	if parsed.Bools[allPagesFlag] {
 		paging, ok := pagingFor(c.command)
 		if !ok {
 			return fail(runtime.Stderr, fmt.Errorf("--all-pages is unsupported for %s; use its explicit cursor controls", c.command))
@@ -183,7 +154,7 @@ func runWorkflow(ctx context.Context, runtime Runtime, parsed parsedArgs, c work
 	}
 	var body map[string]any
 	if c.command == "profiles resolve" {
-		id, e := resolveNamedResource(ctx, client, project, "agent-profiles", args[0])
+		id, e := resolveNamedResource(ctx, client, project, agentProfilesAPI, args[0])
 		if e != nil {
 			return fail(runtime.Stderr, e)
 		}
@@ -239,7 +210,7 @@ func resolveNamedResource(ctx context.Context, client APIClient, project, family
 }
 
 func legacyTextInspection(p parsedArgs) bool {
-	if p.Globals.JSON || len(p.Flags) > 0 || p.Bools["all-pages"] {
+	if p.Globals.JSON || len(p.Flags) > 0 || p.Bools[allPagesFlag] {
 		return false
 	}
 	if len(p.Positionals) == 2 && p.Positionals[0] == "chat" && !knownChatAction(p.Positionals[1]) {
@@ -253,4 +224,59 @@ func legacyTextInspection(p parsedArgs) bool {
 		return true
 	}
 	return false
+}
+
+const agentProfilesAPI = "agent-profiles"
+const cursorQueryFields = "limit cursor"
+const eventSubscriptionsAPI = "event-subscriptions"
+
+func workflowRequestPath(ctx context.Context, client APIClient, project string, parsed parsedArgs, c workflowContract, args []string) (string, url.Values, error) {
+	segments := append([]string(nil), c.path...)
+	for i, s := range segments {
+		if strings.HasPrefix(s, "$") {
+			segments[i] = args[int(s[1]-'0')]
+		}
+	}
+	if err := resolveWorkflowResource(ctx, client, project, c, args, segments); err != nil {
+		return "", nil, err
+	}
+	query := url.Values{}
+	for _, key := range c.query {
+		if v := parsed.Flags[key]; v != "" {
+			query.Set(key, v)
+		}
+	}
+	if c.command == "ideas list" {
+		query.Set("status", "draft")
+	}
+	if parsed.Bools["recursive"] || parsed.Bools["all"] {
+		query.Set("recursive", "true")
+	}
+	if err := validateWorkflowSort(c, parsed, query); err != nil {
+		return "", nil, err
+	}
+	path := projectAPIPath(project, segments...)
+	if c.command == "notifications list" {
+		path = "/api/notifications"
+		query.Set("projectId", project)
+	}
+	return path, query, nil
+}
+
+func resolveWorkflowResource(ctx context.Context, client APIClient, project string, c workflowContract, args, segments []string) error {
+	if strings.HasPrefix(c.command, "profiles get") || strings.HasPrefix(c.command, "skills get") || c.command == "skills resolve" {
+		id, e := resolveNamedResource(ctx, client, project, c.path[0], args[0])
+		if e != nil {
+			return e
+		}
+		segments[1] = id
+	}
+	return nil
+}
+
+func validateWorkflowSort(c workflowContract, parsed parsedArgs, query url.Values) error {
+	if c.command == "tasks list" && (query.Get("cursor") != "" || parsed.Bools[allPagesFlag]) && query.Get("sort") != "" && query.Get("sort") != "createdAtDesc" {
+		return fmt.Errorf("cursor paging with non-created sort is unsupported by the API")
+	}
+	return nil
 }

@@ -112,19 +112,8 @@ func pollDeviceToken(ctx context.Context, runtime Runtime, apiURL string, code D
 		if !errors.As(err, &apiErr) {
 			return TokenLoginResponse{}, err
 		}
-		switch {
-		case apiErr.Status == http.StatusPreconditionRequired || apiErr.Code == "authorization_pending":
-			if !containsJSONFlag(runtime.Args) {
-				fmt.Fprint(runtime.Stdout, ".")
-			}
-		case apiErr.Status == http.StatusTooManyRequests || apiErr.Code == "slow_down":
-			interval += 5 * time.Second
-			if !containsJSONFlag(runtime.Args) {
-				fmt.Fprint(runtime.Stdout, ".")
-			}
-		case apiErr.Status == http.StatusGone || apiErr.Code == "expired_token":
-			return TokenLoginResponse{}, errors.New("code expired. Run `sam auth login` again")
-		default:
+		interval, err = handleDevicePollError(runtime, apiErr, interval)
+		if err != nil {
 			return TokenLoginResponse{}, err
 		}
 		if time.Now().Add(interval).After(deadline) {
@@ -174,7 +163,7 @@ func browserCommands(goos string, target string) []browserCommand {
 	}
 }
 
-func saveAuthConfig(runtime Runtime, parsed parsedArgs, apiURL string, sessionCookie string, user AuthUser) int {
+func saveAuthConfig(runtime Runtime, parsed parsedArgs, apiURL, sessionCookie string, user AuthUser) int {
 	config := CLIConfig{APIURL: normalizeAPIURL(apiURL), SessionCookie: sessionCookie}
 	paths, err := SaveConfig(runtime.Env, config)
 	if err != nil {
@@ -254,4 +243,23 @@ func runAuthStatus(ctx context.Context, runtime Runtime, parsed parsedArgs) int 
 		"source":        source,
 	}
 	return writeOrFail(runtime, parsed.Globals.JSON, text, value)
+}
+
+func handleDevicePollError(runtime Runtime, apiErr APIError, interval time.Duration) (time.Duration, error) {
+	switch {
+	case apiErr.Status == http.StatusPreconditionRequired || apiErr.Code == "authorization_pending":
+		if !containsJSONFlag(runtime.Args) {
+			fmt.Fprint(runtime.Stdout, ".")
+		}
+	case apiErr.Status == http.StatusTooManyRequests || apiErr.Code == "slow_down":
+		interval += 5 * time.Second
+		if !containsJSONFlag(runtime.Args) {
+			fmt.Fprint(runtime.Stdout, ".")
+		}
+	case apiErr.Status == http.StatusGone || apiErr.Code == "expired_token":
+		return interval, errors.New("code expired. Run `sam auth login` again")
+	default:
+		return interval, apiErr
+	}
+	return interval, nil
 }

@@ -15,7 +15,7 @@ func commandFlags(p parsedArgs) []string {
 	if ok {
 		flags := append([]string(nil), c.query...)
 		if _, pageable := pagingFor(c.command); pageable {
-			flags = append(flags, "all-pages")
+			flags = append(flags, allPagesFlag)
 		}
 		if c.command == "library list" {
 			flags = append(flags, "recursive", "all")
@@ -25,91 +25,30 @@ func commandFlags(p parsedArgs) []string {
 	if len(p.Positionals) == 0 {
 		return nil
 	}
+	return mutationCommandFlags(p)
+}
+
+func mutationCommandFlags(p parsedArgs) []string {
 	family := p.Positionals[0]
-	action := ""
-	if len(p.Positionals) > 1 {
-		action = p.Positionals[1]
-	}
-	switch family {
-	case "comments":
-		if action == "add" || action == "reply" {
-			return strings.Fields("body body-file body-stdin idempotency-key")
-		}
-		if action == "resolve" || action == "reopen" {
-			return strings.Fields("idempotency-key")
-		}
-	case "files":
-		if action == "download" {
-			return strings.Fields("ref path output")
-		}
-	case "library":
-		if action == "download" {
-			return strings.Fields("output")
-		}
-		if action == "upload" {
-			return strings.Fields("directory description filename mimeType")
-		}
-	case "auth":
-		if action == "login" {
-			return strings.Fields("api-url token session-cookie session-cookie-stdin")
-		}
-	case "chat":
-		switch action {
-		case "new":
-			return strings.Fields(submitFlagNames)
-		case "export":
-			return strings.Fields("limit output ndjson hydrate-tools")
-		case "answer":
-			return strings.Fields("answer")
-		case "send":
-			return strings.Fields("content content-file content-stdin idempotency-key")
-		case "fork", "retry":
-			return derivedSubmitFlagNames("parent-task", "parent-task-id")
-		}
-	case "task", "tasks":
-		switch action {
-		case "submit", "dispatch":
-			return strings.Fields(submitFlagNames)
-		case "create", "update":
-			return strings.Fields("title description priority preview")
-		case "wait":
-			return strings.Fields("timeout interval")
-		}
-	case "ideas":
-		if action == "create" || action == "update" {
-			return strings.Fields("title description priority preview")
-		}
-		if action == "execute" {
-			return derivedSubmitFlagNames("mode")
-		}
-	case "profiles", "skills":
-		switch action {
-		case "create", "clone":
-			return strings.Fields("name description preview idempotency-key")
-		case "update":
-			return strings.Fields("name description preview expected-updated-at")
-		}
-	case "settings":
-		if action == "update" {
-			return strings.Fields("name description preview")
-		}
-	case "workspace":
-		if len(p.Positionals) > 2 && p.Positionals[2] == "forward" {
-			return strings.Fields("port local-port local-host")
-		}
-	case "projects":
+	action := commandAction(p)
+	if family == "projects" {
 		return strings.Fields("limit cursor all-pages")
 	}
-	return nil
+	if family == "workspace" && len(p.Positionals) > 2 && p.Positionals[2] == "forward" {
+		return strings.Fields("port local-port local-host")
+	}
+	if family == "chat" && (action == "fork" || action == "retry") {
+		return derivedSubmitFlagNames("parent-task", "parent-task-id")
+	}
+	if family == "ideas" && action == "execute" {
+		return derivedSubmitFlagNames("mode")
+	}
+	return strings.Fields(mutationFlagContracts()[family+" "+action])
 }
 
 func validateCommandFlags(p parsedArgs) error {
-	for _, aliases := range [][]string{{"agent-profile", "agent-profile-id"}, {"node", "node-id"}, {"parent-task", "parent-task-id"}, {"workspace", "workspace-profile"}, {"devcontainer-config", "devcontainer-config-name"}} {
-		if _, first := p.Flags[aliases[0]]; first {
-			if _, second := p.Flags[aliases[1]]; second {
-				return fmt.Errorf("--%s and --%s cannot be combined", aliases[0], aliases[1])
-			}
-		}
+	if err := validateFlagAliases(p); err != nil {
+		return err
 	}
 	allowed := map[string]bool{}
 	for _, s := range commandFlags(p) {
@@ -132,7 +71,7 @@ func validateCommandFlags(p parsedArgs) error {
 }
 func booleanCommandFlag(n string) bool {
 	switch n {
-	case "body-stdin", "recursive", "all", "all-pages", "prompt-stdin", "content-stdin", "session-cookie-stdin", "exclusive-node", "preview", "ndjson", "hydrate-tools", "launch":
+	case "body-stdin", "recursive", "all", allPagesFlag, "prompt-stdin", "content-stdin", "session-cookie-stdin", "exclusive-node", "preview", "ndjson", "hydrate-tools", "launch":
 		return true
 	}
 	return false
@@ -155,7 +94,7 @@ func workflowHelp(family string) string {
 		}
 		flags := append([]string(nil), c.query...)
 		if _, pageable := pagingFor(c.command); pageable {
-			flags = append(flags, "all-pages")
+			flags = append(flags, allPagesFlag)
 		}
 		if len(flags) > 0 {
 			fmt.Fprintf(&b, " [--%s]", strings.Join(flags, " | --"))
@@ -279,3 +218,43 @@ func containsFlag(flags []string, name string) bool {
 	}
 	return false
 }
+
+func commandAction(p parsedArgs) string {
+	if len(p.Positionals) > 1 {
+		return p.Positionals[1]
+	}
+	return ""
+}
+func validateFlagAliases(p parsedArgs) error {
+	for _, aliases := range [][]string{{"agent-profile", "agent-profile-id"}, {"node", "node-id"}, {"parent-task", "parent-task-id"}, {"workspace", "workspace-profile"}, {"devcontainer-config", "devcontainer-config-name"}} {
+		if _, first := p.Flags[aliases[0]]; first {
+			if _, second := p.Flags[aliases[1]]; second {
+				return fmt.Errorf("--%s and --%s cannot be combined", aliases[0], aliases[1])
+			}
+		}
+	}
+	return nil
+}
+func mutationFlagContracts() map[string]string {
+	return map[string]string{
+		"comments add": "body body-file body-stdin idempotency-key", "comments reply": "body body-file body-stdin idempotency-key",
+		"comments resolve": "idempotency-key", "comments reopen": "idempotency-key",
+		"files download": "ref path output", "library download": "output", "library upload": "directory description filename mimeType",
+		"auth login": "api-url token session-cookie session-cookie-stdin", "chat new": submitFlagNames,
+		"chat export": "limit output ndjson hydrate-tools", "chat answer": "answer", "chat send": "content content-file content-stdin idempotency-key",
+		"task submit": submitFlagNames, "task dispatch": submitFlagNames, "tasks submit": submitFlagNames, "tasks dispatch": submitFlagNames,
+		"task create": taskMetadataFlags, "task update": taskMetadataFlags, "task wait": waitFlagNames,
+		"tasks create": taskMetadataFlags, "tasks update": taskMetadataFlags, "tasks wait": waitFlagNames,
+		"ideas create": taskMetadataFlags, "ideas update": taskMetadataFlags,
+		"profiles create": createMetadataFlags, "profiles clone": createMetadataFlags, "profiles update": updateMetadataFlags,
+		"skills create": createMetadataFlags, "skills clone": createMetadataFlags, "skills update": updateMetadataFlags,
+		"settings update": "name description preview",
+	}
+}
+
+const taskMetadataFlags = "title description priority preview"
+const createMetadataFlags = "name description preview idempotency-key"
+const updateMetadataFlags = "name description preview expected-updated-at"
+const allPagesFlag = "all-pages"
+
+const waitFlagNames = "timeout interval"

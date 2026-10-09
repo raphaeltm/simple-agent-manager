@@ -10,11 +10,8 @@ import (
 )
 
 func Run(ctx context.Context, runtime Runtime) int {
-	for _, arg := range runtime.Args {
-		if arg == "--json" {
-			runtime.Stderr = structuredErrorWriter{runtime.Stderr}
-			break
-		}
+	if containsJSONFlag(runtime.Args) {
+		runtime.Stderr = structuredErrorWriter{runtime.Stderr}
 	}
 	secured, secureErr := secureRuntime(runtime)
 	if secureErr != nil {
@@ -39,7 +36,7 @@ func Run(ctx context.Context, runtime Runtime) int {
 	if c, args, ok := findWorkflow(parsed); ok && !legacyTextInspection(parsed) {
 		return runWorkflow(ctx, runtime, parsed, c, args)
 	}
-	if len(parsed.Positionals) > 1 && (parsed.Positionals[0] == "tasks" || parsed.Positionals[0] == "ideas" || parsed.Positionals[0] == "profiles" || parsed.Positionals[0] == "skills" || parsed.Positionals[0] == "settings") && (parsed.Positionals[1] == "create" || parsed.Positionals[1] == "update" || parsed.Positionals[1] == "clone") {
+	if isMetadataCommand(parsed) {
 		return runMetadataMutation(ctx, runtime, parsed, parsed.Positionals[2:])
 	}
 	if parsed.Positionals[0] == "settings" {
@@ -48,6 +45,9 @@ func Run(ctx context.Context, runtime Runtime) int {
 	if len(parsed.Positionals) > 1 && (parsed.Positionals[0] == "library" || parsed.Positionals[0] == "files") && parsed.Positionals[1] == "download" {
 		return runArtifactDownload(ctx, runtime, parsed, parsed.Positionals[2:])
 	}
+	return dispatchCommand(ctx, runtime, parsed)
+}
+func dispatchCommand(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 	namespace := parsed.Positionals[0]
 	args := parsed.Positionals[1:]
 	switch namespace {
@@ -435,6 +435,20 @@ Task resource flags:
 func containsJSONFlag(args []string) bool {
 	for _, a := range args {
 		if a == "--json" {
+			return true
+		}
+	}
+	return false
+}
+
+func isMetadataCommand(p parsedArgs) bool {
+	if len(p.Positionals) < 2 {
+		return false
+	}
+	switch p.Positionals[0] {
+	case "tasks", "ideas", "profiles", "skills", "settings":
+		switch p.Positionals[1] {
+		case "create", "update", "clone":
 			return true
 		}
 	}

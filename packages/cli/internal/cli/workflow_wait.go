@@ -13,14 +13,8 @@ func runTaskWait(ctx context.Context, runtime Runtime, p parsedArgs, args []stri
 	}
 	timeout := 30 * time.Minute
 	interval := 2 * time.Second
-	for name, target := range map[string]*time.Duration{"timeout": &timeout, "interval": &interval} {
-		if raw := p.Flags[name]; raw != "" {
-			d, err := time.ParseDuration(raw)
-			if err != nil || d <= 0 {
-				return fail(runtime.Stderr, fmt.Errorf("--%s must be a positive duration", name))
-			}
-			*target = d
-		}
+	if err := parseWaitDurations(p, &timeout, &interval); err != nil {
+		return fail(runtime.Stderr, err)
 	}
 	client, config, err := authenticatedClientWithConfig(ctx, runtime)
 	if err != nil {
@@ -64,4 +58,17 @@ func writeWaitInterruption(runtime Runtime, p parsedArgs, task map[string]any, r
 		return result
 	}
 	return code
+}
+
+func parseWaitDurations(p parsedArgs, timeout, interval *time.Duration) error {
+	for name, target := range map[string]*time.Duration{"timeout": timeout, "interval": interval} {
+		if raw := p.Flags[name]; raw != "" {
+			d, err := time.ParseDuration(raw)
+			if err != nil || d <= 0 {
+				return fmt.Errorf("--%s must be a positive duration", name)
+			}
+			*target = d
+		}
+	}
+	return nil
 }

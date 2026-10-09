@@ -12,7 +12,12 @@ func validateCommandSyntax(p parsedArgs) error {
 		}
 		return validatePageNumbers(p)
 	}
-	args := p.Positionals
+	if err := validateFamilySyntax(p.Positionals); err != nil {
+		return err
+	}
+	return validatePageNumbers(p)
+}
+func validateFamilySyntax(args []string) error {
 	if len(args) == 0 {
 		return nil
 	}
@@ -27,35 +32,64 @@ func validateCommandSyntax(p parsedArgs) error {
 			return fmt.Errorf("sam %s takes no positional arguments", family)
 		}
 	case "settings":
-		if len(args) > 1 && (action != "get" && action != "update" || len(args) != 2) {
-			return fmt.Errorf("settings accepts get or update without extra arguments")
-		}
+		return validateSettingsSyntax(args, action)
 	case "profiles", "skills":
-		if action == "create" && len(args) != 2 || (action == "update" || action == "clone") && len(args) != 3 {
-			return fmt.Errorf("%s %s has invalid resource arguments", family, action)
-		}
+		return validateMetadataSyntax(args, action, true)
 	case "auth", "runner":
 		if len(args) != 2 {
 			return fmt.Errorf("%s requires one action and no extra arguments", family)
 		}
 	case "chat":
-		switch action {
-		case "export", "cancel", "sleep", "fork", "retry":
-			if len(args) != 3 {
-				return fmt.Errorf("chat %s requires exactly one session ID", action)
-			}
-		case "send":
-			if len(args) < 3 {
-				return fmt.Errorf("chat send requires a session ID")
-			}
-		}
+		return validateChatSyntax(args, action)
 	case "tasks", "ideas":
-		if action == "create" && len(args) != 2 || action == "update" && len(args) != 3 || action == "wait" && len(args) != 3 {
-			return fmt.Errorf("%s %s has invalid resource arguments", family, action)
+		return validateMetadataSyntax(args, action, false)
+	}
+	return nil
+}
+func validateSettingsSyntax(args []string, action string) error {
+	if len(args) <= 1 {
+		return nil
+	}
+	if len(args) != 2 || action != "get" && action != "update" {
+		return fmt.Errorf("settings accepts get or update without extra arguments")
+	}
+	return nil
+}
+func validateMetadataSyntax(args []string, action string, named bool) error {
+	required := 0
+	switch action {
+	case "create":
+		required = 2
+	case "update":
+		required = 3
+	case "clone":
+		if named {
+			required = 3
+		}
+	case "wait":
+		if !named {
+			required = 3
 		}
 	}
-	return validatePageNumbers(p)
+	if required != 0 && len(args) != required {
+		return fmt.Errorf("%s %s has invalid resource arguments", args[0], action)
+	}
+	return nil
 }
+func validateChatSyntax(args []string, action string) error {
+	switch action {
+	case "export", "cancel", "sleep", "fork", "retry":
+		if len(args) != 3 {
+			return fmt.Errorf("chat %s requires exactly one session ID", action)
+		}
+	case "send":
+		if len(args) < 3 {
+			return fmt.Errorf("chat send requires a session ID")
+		}
+	}
+	return nil
+}
+
 func validatePageNumbers(p parsedArgs) error {
 	for _, key := range []string{"limit", "offset"} {
 		if raw, ok := p.Flags[key]; ok {

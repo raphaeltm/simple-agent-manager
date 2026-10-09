@@ -17,8 +17,8 @@ type timeoutHTTPDoer struct {
 
 func (d timeoutHTTPDoer) Do(req *http.Request) (*http.Response, error) {
 	ctx, cancel := context.WithTimeout(req.Context(), d.timeout)
-	copy := req.Clone(ctx)
-	res, err := d.next.Do(copy)
+	request := req.Clone(ctx)
+	res, err := d.next.Do(request)
 	if err != nil {
 		cancel()
 		return nil, err

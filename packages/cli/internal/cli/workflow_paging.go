@@ -44,14 +44,11 @@ func drainPages(ctx context.Context, client APIClient, path string, q url.Values
 		}
 		combined = append(combined, rows...)
 		next, _ := page[paging.continuation].(string)
+		var err error
 		if paging.offset {
-			total, ok := page[paging.continuation].(float64)
-			if !ok {
-				return nil, fmt.Errorf("missing pagination total; use explicit page controls")
-			}
-			offset += len(rows)
-			if offset < int(total) {
-				next = strconv.Itoa(offset)
+			offset, next, err = offsetContinuation(page, paging.continuation, offset, len(rows))
+			if err != nil {
+				return nil, err
 			}
 		}
 		if next == "" {
@@ -65,4 +62,16 @@ func drainPages(ctx context.Context, client APIClient, path string, q url.Values
 		seen[next] = true
 		q.Set(paging.parameter, next)
 	}
+}
+
+func offsetContinuation(page map[string]any, field string, offset, count int) (int, string, error) {
+	total, ok := page[field].(float64)
+	if !ok {
+		return offset, "", fmt.Errorf("missing pagination total; use explicit page controls")
+	}
+	offset += count
+	if offset < int(total) {
+		return offset, strconv.Itoa(offset), nil
+	}
+	return offset, "", nil
 }
