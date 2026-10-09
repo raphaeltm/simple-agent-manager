@@ -2426,6 +2426,32 @@ export const MIGRATIONS: Migration[] = [
         WHERE delivery_state IN ('queued', 'retry_wait')`);
     },
   },
+  {
+    // The wake materializer used to copy an open wake's ~24 h expiry into the cooldown of every
+    // other wake subscription on the same chat, and nothing released it (idea
+    // 01M4E7F6JN191Q4B7H3KRB3N7H). Current writers only set short cooldowns, so clearing every
+    // active wake cooldown once releases those holds; a live 30 s cooldown is merely shortened.
+    // The same hold also pushed wake_due_at out, so it is recomputed from unbatched matches.
+    name: '063-release-event-wake-target-holds',
+    run(sql) {
+      sql.exec(`
+        UPDATE project_event_subscriptions
+           SET delivery_cooldown_until = NULL,
+               wake_due_at = (
+                 SELECT MIN(m.matched_at)
+                   FROM project_event_matches m
+                  WHERE m.project_id = project_event_subscriptions.project_id
+                    AND m.subscription_id = project_event_subscriptions.id
+                    AND m.state = 'matched'
+                    AND m.batch_id IS NULL
+               )
+         WHERE lifecycle_state = 'active'
+           AND delivery_cooldown_until IS NOT NULL
+           AND requested_delivery IN ('existing_session_prompt', 'runtime_interrupt')
+           AND resolved_delivery = 'queued_for_prompt_delivery'
+      `);
+    },
+  },
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
   // that ran it keep an unused `message_upload_parts` table, since DO migrations
   // never drop tables, so neither that migration name nor that table name may be reused.

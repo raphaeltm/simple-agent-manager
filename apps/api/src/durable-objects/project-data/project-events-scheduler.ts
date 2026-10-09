@@ -3,6 +3,7 @@ import type { ProjectEventOrphanScanCursor } from './project-events-orphan-reten
 import {
   isProjectEventWakeEnabled,
   PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL,
+  WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL,
 } from './project-events-wake-config';
 import type { Env } from './types';
 
@@ -72,6 +73,7 @@ export function computeProjectEventMaterializationAlarmTime(
          AND (s.expires_at IS NULL OR s.expires_at > ?)
          AND (s.delivery_lifetime_expires_at IS NULL OR s.delivery_lifetime_expires_at > ?)
          AND s.prompt_delivery_count < ?
+         AND NOT ${WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL}
          AND ${PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL}
          AND s.resolved_delivery = 'queued_for_prompt_delivery'
          AND s.target_session_id IS NOT NULL
@@ -81,7 +83,8 @@ export function computeProjectEventMaterializationAlarmTime(
       projectId,
       now,
       now,
-      limits.wakeMaxPerSubscription
+      limits.wakeMaxPerSubscription,
+      now
     )
     .toArray()[0];
   const dueAt = typeof row?.due_at === 'number' ? row.due_at : null;

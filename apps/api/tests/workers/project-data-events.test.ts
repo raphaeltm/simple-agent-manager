@@ -15,6 +15,7 @@ import {
   readMatchesByIds,
   updateMatchesForBatch,
 } from '../../src/durable-objects/project-data/project-events-storage-helpers';
+import { WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL } from '../../src/durable-objects/project-data/project-events-wake-config';
 import {
   advanceProjectEventPromptAttemptCheckpoint,
   hasProjectEventWakeLease,
@@ -832,7 +833,7 @@ describe('ProjectData event subscription core', () => {
     expect(snapshot.batch).toEqual({ target_task_id: recoveryTaskId });
   });
 
-  it('defers a blocked oldest wake target and materializes a ready later target with large history', async () => {
+  it('skips a target with an undelivered wake, without holding its subscriptions, and materializes a ready later target with large history', async () => {
     const projectId = 'project-events-wake-fair-blocked-target';
     const stub = getStub(projectId);
     await stub.ensureProjectId(projectId);
@@ -935,11 +936,13 @@ describe('ProjectData event subscription core', () => {
     }));
     expect(snapshot.blockedMatches).toEqual([{ state: 'matched', cnt: 120 }]);
     expect(snapshot.readyMatches).toEqual([{ state: 'batch_created', cnt: 1 }]);
+    // The undelivered wake's 60 s expiry must not be copied into the blocked subscription: it
+    // becomes eligible again as soon as that wake leaves `pending`.
     expect(snapshot.subscriptions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: blocked.subscription.id,
-          delivery_cooldown_until: 60000,
+          delivery_cooldown_until: null,
           prompt_delivery_count: 0,
         }),
         expect.objectContaining({
@@ -950,7 +953,7 @@ describe('ProjectData event subscription core', () => {
     );
   });
 
-  it('continues the alarm candidate walk after a blocked target defers globally', async () => {
+  it('continues the alarm candidate walk past a target with an undelivered wake', async () => {
     const projectId = 'project-events-wake-alarm-fair-blocked-target';
     const userId = 'user-event-wake-alarm-fair';
     const installationId = 'installation-event-wake-alarm-fair';
@@ -1091,7 +1094,7 @@ describe('ProjectData event subscription core', () => {
       },
     ]);
     expect(snapshot.blockedSubscription).toEqual({
-      delivery_cooldown_until: liveLeaseUntil,
+      delivery_cooldown_until: null,
       prompt_delivery_count: 0,
     });
     expect(snapshot.scheduler).toMatchObject({ next_attempt_at: null });
@@ -1249,6 +1252,7 @@ describe('ProjectData event subscription core', () => {
              AND (s.expires_at IS NULL OR s.expires_at > ?)
              AND (s.delivery_lifetime_expires_at IS NULL OR s.delivery_lifetime_expires_at > ?)
              AND s.prompt_delivery_count < ?
+             AND NOT ${WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL}
              AND s.wake_due_at IS NOT NULL
              AND s.requested_delivery = 'existing_session_prompt'
              AND s.resolved_delivery = 'queued_for_prompt_delivery'
@@ -1259,7 +1263,8 @@ describe('ProjectData event subscription core', () => {
           projectId,
           20_000,
           20_000,
-          10
+          10,
+          20_000
         )
         .toArray()
         .map((row) => String((row as { detail?: unknown }).detail ?? ''));
@@ -1409,6 +1414,11 @@ describe('ProjectData event subscription core', () => {
       plans.wake.some((detail) => detail.includes('idx_project_event_subscriptions_wake_due'))
     ).toBe(true);
     expect(plans.wake.some((detail) => detail.includes('project_event_matches'))).toBe(false);
+    // The target-occupancy probe is an index seek per candidate, never a batch-table scan.
+    expect(
+      plans.wake.some((detail) => detail.includes('idx_project_event_batches_prompt_target'))
+    ).toBe(true);
+    expect(plans.wake.some((detail) => /^SCAN occupying\b/.test(detail))).toBe(false);
     expect(
       plans.expiry.some((detail) => detail.includes('idx_project_event_subscriptions_wake_expiry'))
     ).toBe(true);

@@ -330,6 +330,44 @@ describe('ProjectData event delivery resolver', () => {
     });
   });
 
+  it('records a pull read as not injected instead of unsupported for injecting modes', () => {
+    for (const requested of ['existing_session_prompt', 'runtime_steer', 'spawn_task'] as const) {
+      const pulled = resolveProjectEventDelivery({
+        subscription: subscription(requested),
+        now: NOW,
+        maxSummaryEvents: 10,
+        pull: true,
+      });
+      expect(pulled).toMatchObject({
+        requestedDelivery: requested,
+        resolvedDelivery: 'recorded_not_injected',
+        batchState: 'recorded_not_injected',
+        adapterDecision: {
+          action: 'recorded_not_injected',
+          reason: 'recorded_not_injected_baseline',
+          supported: true,
+          authorized: true,
+        },
+      });
+      // Control: the same read without the pull flag still reports the missing adapter.
+      expect(
+        resolveProjectEventDelivery({
+          subscription: subscription(requested),
+          now: NOW,
+          maxSummaryEvents: 10,
+        }).resolvedDelivery
+      ).toBe('unsupported');
+    }
+    expect(
+      resolveProjectEventDelivery({
+        subscription: subscription('record_only'),
+        now: NOW,
+        maxSummaryEvents: 10,
+        pull: true,
+      }).resolvedDelivery
+    ).toBe('record_only');
+  });
+
   it('falls back from unsupported live steering to the durable prompt queue when authorized', () => {
     const result = resolveProjectEventDelivery({
       subscription: subscription('runtime_steer'),

@@ -26,13 +26,15 @@ import {
   claimProjectEventMatchesForBatch,
 } from './project-events-storage-helpers';
 import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
-import { PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL } from './project-events-wake-config';
+import {
+  PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL,
+  WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL,
+} from './project-events-wake-config';
 import { EVENT_WAKE_ADAPTER_ID } from './project-events-wake-delivery';
 import { buildWakePromptInput } from './project-events-wake-prompt';
 import {
   deferWakeTarget,
   isTargetAtWakeCapacity,
-  readLivePromptBatchLeaseUntilForTarget,
   resolveMailboxMaxMessages,
 } from './project-events-wake-targets';
 import {
@@ -121,22 +123,12 @@ export function runProjectEventWakeMaterializationBatch(
   }
 
   let deferredUntil: number | null = null;
+  // Candidates already exclude targets with an undelivered wake; only capacity can block here.
   for (const candidate of candidates) {
     if (isTargetAtWakeCapacity(sql, env, candidate.targetSessionId)) {
       const nextAt = now + limits.wakeTargetCooldownMs;
       deferWakeTarget(sql, projectId, candidate.targetSessionId, nextAt, now);
       deferredUntil = earliestNonNull(deferredUntil, nextAt);
-      continue;
-    }
-    const liveBatchLeaseUntil = readLivePromptBatchLeaseUntilForTarget(
-      sql,
-      projectId,
-      candidate.targetSessionId,
-      now
-    );
-    if (liveBatchLeaseUntil !== null) {
-      deferWakeTarget(sql, projectId, candidate.targetSessionId, liveBatchLeaseUntil, now);
-      deferredUntil = earliestNonNull(deferredUntil, liveBatchLeaseUntil);
       continue;
     }
     return materializeCandidate(sql, env, projectId, now, limits, candidate);
@@ -385,7 +377,7 @@ function selectWakeCandidates(
   requiredSubscriptionId: string | null
 ): ProjectEventWakeMaterializationCandidate[] {
   const whereClause = requiredSubscriptionId ? 'AND s.id = ?' : '';
-  const params: unknown[] = [projectId, projectId, now, now, maxPerSubscription, now];
+  const params: unknown[] = [projectId, projectId, now, now, maxPerSubscription, now, now];
   if (requiredSubscriptionId) params.push(requiredSubscriptionId);
   params.push(Math.max(1, limit));
   const rows = sql
@@ -411,6 +403,7 @@ function selectWakeCandidates(
          AND s.prompt_delivery_count < ?
          AND s.wake_due_at IS NOT NULL
          AND (s.delivery_cooldown_until IS NULL OR s.delivery_cooldown_until <= ?)
+         AND NOT ${WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL}
          AND ${PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL}
          AND s.resolved_delivery = 'queued_for_prompt_delivery'
          AND s.target_session_id IS NOT NULL

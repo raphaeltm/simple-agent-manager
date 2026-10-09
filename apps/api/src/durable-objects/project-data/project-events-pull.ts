@@ -459,6 +459,7 @@ function createPullDeliveryBatch(
     events: [event],
     now,
     maxSummaryEvents: limits.maxDeliveryBatchEvents,
+    pull: true,
   });
   const batchId = generateId();
   const idempotencyKey = `pull:${match.id}`;

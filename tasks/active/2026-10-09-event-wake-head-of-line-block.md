@@ -69,29 +69,29 @@ SAM investigation task `01M4GHKAEHXX9MG467QPMJ6EMY`, root cause also on idea
 
 ## Implementation checklist
 
-- [ ] Define target occupancy as "a prompt-queue wake for this chat is still pending delivery" in one
+- [x] Define target occupancy as "a prompt-queue wake for this chat is still pending delivery" in one
       exported SQL predicate (pending batch with a live `delivery_expires_at`); accepted (delivered)
       wakes no longer hold the chat, whether or not they are acknowledged
-- [ ] Use that predicate in `selectWakeCandidates` and `computeProjectEventMaterializationAlarmTime`
-- [ ] Remove the lease-based deferral (`readLivePromptBatchLeaseUntilForTarget` and its
+- [x] Use that predicate in `selectWakeCandidates` and `computeProjectEventMaterializationAlarmTime`
+- [x] Remove the lease-based deferral (`readLivePromptBatchLeaseUntilForTarget` and its
       `deferWakeTarget` call); keep the short capacity deferral
-- [ ] Recalculate the ProjectData alarm after pull, ack and cancel RPCs, which can end a queued wake
+- [x] Recalculate the ProjectData alarm after pull, ack and cancel RPCs, which can end a queued wake
       outside the alarm
-- [ ] DO migration `063` releasing stamped cooldowns on active prompt-queue wake subscriptions and
+- [x] DO migration `063` releasing stamped cooldowns on active prompt-queue wake subscriptions and
       recomputing their `wake_due_at`
-- [ ] Pull-created batches record `recorded_not_injected` (or `record_only`) instead of `unsupported`
-- [ ] Regression test through the real MCP/admission path reproducing the incident: open DM wake on a
+- [x] Pull-created batches record `recorded_not_injected` (or `record_only`) instead of `unsupported`
+- [x] Regression test through the real MCP/admission path reproducing the incident: open DM wake on a
       chat, CI event matched for another subscription on the same chat, CI wake materializes once the
       DM wake is accepted, with no acknowledgement; control: no second wake while the first is still
       pending; subscription cooldown is never stamped with the lease
-- [ ] Scheduler/sweep loop test: while the chat is occupied the wake section does not re-arm; after
+- [x] Scheduler/sweep loop test: while the chat is occupied the wake section does not re-arm; after
       acceptance it fires once and materializes
-- [ ] Migration test: stamped cooldown released, `wake_due_at` recomputed, legit rows untouched
-- [ ] Pull label test (worker or resolver unit test)
-- [ ] Update tests that encoded the old stamping and the query-plan test
-- [ ] Update docs: `apps/www/src/content/docs/docs/guides/agents.md` (unacknowledged notification
+- [x] Migration test: stamped cooldown released, `wake_due_at` recomputed, legit rows untouched
+- [x] Pull label test (worker or resolver unit test)
+- [x] Update tests that encoded the old stamping and the query-plan test
+- [x] Update docs: `apps/www/src/content/docs/docs/guides/agents.md` (unacknowledged notification
       sentence), architecture overview if needed, MCP tool text if it describes ack gating
-- [ ] Prove discrimination: revert the fix and confirm the regression test goes red
+- [x] Prove discrimination: revert the fix and confirm the regression test goes red
 
 ## Acceptance criteria
 
@@ -105,6 +105,21 @@ SAM investigation task `01M4GHKAEHXX9MG467QPMJ6EMY`, root cause also on idea
 - [ ] Staging: an agent chat with an open, unacknowledged wake is woken by a second subscription's
       event without acknowledging the first
 - [ ] Lint, typecheck, tests and build pass
+
+## Implementation notes
+
+- Discrimination (rule 62): with the `apps/api/src` changes stashed, all five tests in
+  `tests/workers/project-event-wake-target-occupancy.test.ts` went red (blocked CI subscription
+  still scheduled, `unsupported` pull label, migration absent); restored, all five pass.
+- Three existing tests encoded the stamping and were updated to the new contract:
+  `project-data-events.test.ts` (two blocked-target fairness tests now assert
+  `delivery_cooldown_until: null`) and `agent-message-wake-starvation.test.ts` (`no_due_work`
+  instead of `capacity_deferred`).
+- Miniflare shares one env object between the test worker and the ProjectData DO, so the new
+  tests do MCP setup with wakes/durable delivery on, then switch both off (`withQuietAlarms`) and
+  drive materialization and acceptance explicitly.
+- Prettier drift in `migrations.ts` and `project-data-events.test.ts` pre-exists on `main` and is
+  outside the changed hunks; left alone.
 
 ## References
 

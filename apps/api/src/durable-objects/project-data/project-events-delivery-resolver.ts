@@ -27,6 +27,8 @@ export type ResolveProjectEventDeliveryInput = {
   events?: readonly ProjectEventRecord[] | null;
   now: number;
   maxSummaryEvents: number;
+  /** The events are being read on demand, so nothing was injected whatever was requested. */
+  pull?: boolean;
 };
 
 const DEFAULT_AUTHORIZATION: ProjectEventDeliveryAuthorization = {
@@ -163,6 +165,17 @@ function resolveActiveSubscriptionDelivery(
       'recorded_not_injected',
       'target_terminal',
       input.targetTerminalReason ?? 'delivery target is terminal'
+    );
+  }
+
+  // A pull read advertises no injection adapter, so the adapter path below would call every
+  // injecting mode `unsupported`, which reads as "this delivery mode does not work".
+  if (input.pull) {
+    return terminalResolution(
+      input,
+      'recorded_not_injected',
+      'recorded_not_injected_baseline',
+      'read through pull before any automatic injection'
     );
   }
 

@@ -20,39 +20,7 @@ export function isTargetAtWakeCapacity(sql: SqlStorage, env: Env, sessionId: str
   return isMailboxAtCapacity(sql, resolveMailboxMaxMessages(env));
 }
 
-export function readLivePromptBatchLeaseUntilForTarget(
-  sql: SqlStorage,
-  projectId: string,
-  sessionId: string,
-  now: number
-): number | null {
-  const row = sql
-    .exec(
-      `SELECT MIN(
-                CASE
-                  WHEN state = 'delivered' THEN readable_until
-                  WHEN delivery_expires_at IS NOT NULL THEN delivery_expires_at
-                  ELSE readable_until
-                END
-              ) AS lease_until
-       FROM project_event_delivery_batches
-       WHERE project_id = ?
-         AND delivery_channel = 'prompt_queue'
-         AND target_session_id = ?
-         AND state IN ('pending', 'delivered')
-         AND (
-           (state = 'pending' AND (delivery_expires_at IS NULL OR delivery_expires_at > ?))
-           OR (state = 'delivered' AND readable_until IS NOT NULL AND readable_until > ?)
-         )`,
-      projectId,
-      sessionId,
-      now,
-      now
-    )
-    .toArray()[0];
-  return typeof row?.lease_until === 'number' && row.lease_until > now ? row.lease_until : null;
-}
-
+/** Short capacity deferral for every wake subscription on one chat; never a delivery lease. */
 export function deferWakeTarget(
   sql: SqlStorage,
   projectId: string,

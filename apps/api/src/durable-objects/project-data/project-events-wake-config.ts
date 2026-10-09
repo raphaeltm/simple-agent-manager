@@ -39,3 +39,23 @@ export const PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL = `s.requested_delivery IN
 
 /** SQL predicate for prompt-queue wake subscriptions on un-aliased rows. */
 export const PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_UNALIASED_SQL = `requested_delivery IN (${promptQueueWakeModeList})`;
+
+/**
+ * True while subscription `s`'s target chat still has a wake waiting to reach its runtime: a
+ * pending prompt-queue batch whose delivery has not expired. A chat holds at most one such wake.
+ * Once the runtime accepts it the chat is free for the next wake, acknowledged or not; holding
+ * the chat until acknowledgement silenced every other subscription for the 24-hour read grace
+ * (idea 01M4E7F6JN191Q4B7H3KRB3N7H).
+ *
+ * Wake candidate selection and the wake alarm schedule must both exclude occupied targets with
+ * this same predicate, so a waiting subscription never re-arms the alarm while it cannot run
+ * (`.claude/rules/47` requirement 10). Binds one parameter: the current time.
+ */
+export const WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL = `EXISTS (
+  SELECT 1 FROM project_event_delivery_batches occupying
+  WHERE occupying.project_id = s.project_id
+    AND occupying.delivery_channel = 'prompt_queue'
+    AND occupying.target_session_id = s.target_session_id
+    AND occupying.state = 'pending'
+    AND occupying.delivery_expires_at > ?
+)`;

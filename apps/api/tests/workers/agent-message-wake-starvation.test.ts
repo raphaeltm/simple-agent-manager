@@ -35,17 +35,17 @@ const send = (from: Fixture['a'], to: Fixture['a'], message: string) =>
   from.tool('send_durable_message', { targetTaskId: to.taskId, message, messageClass: 'notify' });
 
 describe('agent message wake scheduler isolation', () => {
-  it('notifies a newly eligible chat while another chat still holds an unacknowledged wake', async () => {
+  it('notifies a newly eligible chat while another chat still has an undelivered wake', async () => {
     const f = await twoAgentProject();
     await withAgentMessageChannels(async () => {
-      okBody(await send(f.a, f.b, 'first notification remains unacknowledged'));
+      okBody(await send(f.a, f.b, 'first notification is still waiting to be delivered'));
       const firstAt = Date.now();
       expect(await materialize(f, firstAt)).toMatchObject({ status: 'materialized' });
       okBody(await send(f.a, f.b, 'second notification must wait for the same recipient'));
-      // The real default subscription cooldown is 30 seconds. The first wake
-      // still has its 24-hour lease: only this target should be deferred.
+      // The real default subscription cooldown is 30 seconds. B's first wake has not
+      // reached its runtime yet, so B is not a candidate: only this target waits.
       const afterCooldown = firstAt + 31_000;
-      expect(await materialize(f, afterCooldown)).toMatchObject({ status: 'capacity_deferred' });
+      expect(await materialize(f, afterCooldown)).toMatchObject({ status: 'no_due_work' });
       const reply = okBody<ChannelReceipt>(await send(f.b, f.a, 'new work for an eligible chat'));
       expect(await due(f, afterCooldown)).toBe(afterCooldown + 1_000);
       const candidates = await runInDurableObject(f.stub, (_instance, state) =>

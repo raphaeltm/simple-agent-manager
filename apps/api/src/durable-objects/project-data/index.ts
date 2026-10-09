@@ -1355,13 +1355,21 @@ export class ProjectData extends DurableObject<Env> {
     const result = this.ctx.storage.transactionSync(() =>
       projectEvents.admitProjectEvent(this.sql, this.env, this.getProjectId(), input)
     );
+    this.rescheduleProjectEventAlarm(input.projectId);
+    return result;
+  }
+
+  /**
+   * Re-arm after an event write outside the alarm. Admission makes wakes due; pull, ack and
+   * cancel can end a chat's undelivered wake, which frees the next waiting subscription.
+   */
+  private rescheduleProjectEventAlarm(projectId: string): void {
     this.recalculateAlarm().catch((err) =>
       log.warn('schedule_project_event_alarm_failed', {
-        projectId: input.projectId,
+        projectId,
         error: err instanceof Error ? err.message : String(err),
       })
     );
-    return result;
   }
 
   async createProjectSchedule(input: {
@@ -1713,9 +1721,11 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.CancelProjectEventSubscriptionInput
   ): projectEvents.ProjectEventSubscriptionMutationResult {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    const result = this.ctx.storage.transactionSync(() =>
       projectEvents.cancelProjectEventSubscription(this.sql, this.env, this.getProjectId(), input)
     );
+    this.rescheduleProjectEventAlarm(input.projectId);
+    return result;
   }
 
   expireProjectEventSubscriptions(
@@ -1740,7 +1750,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.ListProjectEventSubscriptionEventsInput
   ): projectEvents.ProjectEventSubscriptionEventListResult | null {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    const result = this.ctx.storage.transactionSync(() =>
       projectEvents.listProjectEventSubscriptionEvents(
         this.sql,
         this.env,
@@ -1748,24 +1758,30 @@ export class ProjectData extends DurableObject<Env> {
         input
       )
     );
+    this.rescheduleProjectEventAlarm(input.projectId);
+    return result;
   }
 
   getProjectEvent(
     input: projectEvents.GetProjectEventInput
   ): projectEvents.ProjectEventSubscriptionEvent | null {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    const result = this.ctx.storage.transactionSync(() =>
       projectEvents.getProjectEvent(this.sql, this.env, this.getProjectId(), input)
     );
+    this.rescheduleProjectEventAlarm(input.projectId);
+    return result;
   }
 
   ackProjectEventDelivery(
     input: projectEvents.AckProjectEventDeliveryInput
   ): projectEvents.ProjectEventDeliveryAckResult | null {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    const result = this.ctx.storage.transactionSync(() =>
       projectEvents.ackProjectEventDelivery(this.sql, this.env, this.getProjectId(), input)
     );
+    this.rescheduleProjectEventAlarm(input.projectId);
+    return result;
   }
 
   listProjectEventDeliveryBatches(
