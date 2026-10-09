@@ -32,9 +32,11 @@ export const cliOperationReceipt: MiddlewareHandler<{ Bindings: Env }> = async (
   const userId = getUserId(c);
   const path = new URL(c.req.url).pathname;
   const receiptId = await operationReceiptId(projectId, userId, c.req.method, path, key);
-  const body = await (await cloneRawRequest(c.req)).text();
-  if (new TextEncoder().encode(body).byteLength > 256 * 1024)
-    throw errors.badRequest('Keyed intent exceeds receipt boundary');
+  const body = await boundedReceiptText(
+    await cloneRawRequest(c.req),
+    receiptLimit(c.env.CLI_RECEIPT_REQUEST_MAX_BYTES, 256 * 1024)
+  );
+  if (body === null) throw errors.badRequest('Keyed intent exceeds receipt boundary');
   const intentHash = await digest(body);
   const reservation = await c.env.DATABASE.prepare(
     `INSERT OR IGNORE INTO cli_operation_receipts
@@ -79,8 +81,11 @@ export const cliOperationReceipt: MiddlewareHandler<{ Bindings: Env }> = async (
   }
   await next();
   if (c.res.status >= 200 && c.res.status < 300) {
-    const response = await c.res.clone().text();
-    if (new TextEncoder().encode(response).byteLength > 64 * 1024) return;
+    const response = await boundedReceiptText(
+      c.res.clone(),
+      receiptLimit(c.env.CLI_RECEIPT_RESPONSE_MAX_BYTES, 64 * 1024)
+    );
+    if (response === null) return;
     await c.env.DATABASE.prepare(
       "UPDATE cli_operation_receipts SET state = 'completed', response_json = ?, response_status = ? WHERE receipt_id = ? AND state = 'pending'"
     )
@@ -88,3 +93,42 @@ export const cliOperationReceipt: MiddlewareHandler<{ Bindings: Env }> = async (
       .run();
   }
 };
+
+function receiptLimit(raw: string | undefined, fallback: number): number {
+  if (raw === undefined) return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0)
+    throw errors.badRequest('Invalid receipt size configuration');
+  return value;
+}
+
+async function boundedReceiptText(
+  source: Request | Response,
+  maxBytes: number
+): Promise<string | null> {
+  if (!source.body) return '';
+  const reader = source.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        void reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}

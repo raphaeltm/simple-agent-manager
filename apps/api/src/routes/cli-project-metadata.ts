@@ -68,6 +68,8 @@ for (const family of ['profiles', 'skills'] as const) {
           : await getSkill(db, projectId, id, userId);
       if (before.projectId !== projectId)
         throw errors.badRequest('Global resources require their own scope');
+      if (family === 'skills' && 'isBuiltin' in before && before.isBuiltin)
+        throw errors.badRequest('Builtin skills cannot be modified');
       const body = c.req.valid('json');
       if (body.name === undefined && body.description === undefined)
         throw errors.badRequest('No metadata fields specified');

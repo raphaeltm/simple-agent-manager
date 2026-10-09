@@ -18,6 +18,10 @@ func runArtifactDownload(ctx context.Context, runtime Runtime, p parsedArgs, arg
 	if output == "" {
 		return fail(runtime.Stderr, fmt.Errorf("download requires --output; private bytes are not printed to diagnostics"))
 	}
+	maxBytes, err := workflowByteLimit(runtime, "SAM_CLI_MAX_DOWNLOAD_BYTES", 64<<20)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
 	client, config, err := authenticatedClientWithConfig(ctx, runtime)
 	if err != nil {
 		return fail(runtime.Stderr, err)
@@ -52,12 +56,11 @@ func runArtifactDownload(ctx context.Context, runtime Runtime, p parsedArgs, arg
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	maxBytes := int64(64 << 20)
 	written, err := io.Copy(f, io.LimitReader(response.Body, maxBytes+1))
 	closeErr := f.Close()
 	if err != nil || closeErr != nil || written > maxBytes {
 		_ = os.Remove(output)
-		return fail(runtime.Stderr, fmt.Errorf("artifact download incomplete or exceeds 64 MiB"))
+		return fail(runtime.Stderr, fmt.Errorf("artifact download incomplete or exceeds configured download byte limit"))
 	}
 	return writeWorkflow(runtime, p, map[string]any{"output": output, "bytes": written, "complete": true})
 }

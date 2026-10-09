@@ -48,9 +48,10 @@ func parseArgs(args []string) (parsedArgs, error) {
 }
 
 type argParser struct {
-	args   []string
-	index  int
-	result parsedArgs
+	projectSeen bool
+	args        []string
+	index       int
+	result      parsedArgs
 }
 
 func (p *argParser) parseNext() error {
@@ -71,8 +72,7 @@ func (p *argParser) parseNext() error {
 		return nil
 	}
 	if value, ok := strings.CutPrefix(arg, "--project="); ok {
-		p.result.Globals.Project = value
-		return nil
+		return p.setProject(value)
 	}
 	if arg == "--project" {
 		return p.readProjectValue()
@@ -88,9 +88,9 @@ func (p *argParser) readProjectValue() error {
 	if p.index >= len(p.args) || strings.HasPrefix(p.args[p.index], "-") {
 		return fmt.Errorf("--project requires a value")
 	}
-	p.result.Globals.Project = p.args[p.index]
+	value := p.args[p.index]
 	p.index++
-	return nil
+	return p.setProject(value)
 }
 
 func (p *argParser) parseFlag(arg string) error {
@@ -174,4 +174,16 @@ func flagValue(flags map[string]string, names ...string) string {
 
 func flagValues(multiFlags map[string][]string, name string) []string {
 	return multiFlags[name]
+}
+
+func (p *argParser) setProject(value string) error {
+	if p.projectSeen {
+		return fmt.Errorf("--project may only be specified once")
+	}
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("--project requires a value")
+	}
+	p.projectSeen = true
+	p.result.Globals.Project = value
+	return nil
 }

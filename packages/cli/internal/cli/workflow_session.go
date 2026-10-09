@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 func runSessionAction(ctx context.Context, runtime Runtime, p parsedArgs, action string, args []string) int {
@@ -48,7 +49,7 @@ func runSessionAction(ctx context.Context, runtime Runtime, p parsedArgs, action
 		if workspace == "" {
 			return fail(runtime.Stderr, fmt.Errorf("session has no resumable workspace"))
 		}
-		path = apiWorkspacesPath + workspace + "/sleep"
+		path = apiWorkspacesPath + url.PathEscape(workspace) + "/sleep"
 	}
 	client.idempotencyKey = p.Flags["idempotency-key"]
 	var value any

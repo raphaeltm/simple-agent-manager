@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -67,4 +68,16 @@ func secureRuntime(runtime Runtime) (Runtime, error) {
 	}
 	runtime.Stderr = redactingWriter{runtime.Stderr, secrets}
 	return runtime, nil
+}
+
+func workflowByteLimit(runtime Runtime, name string, fallback int64) (int64, error) {
+	raw := runtime.Env.Getenv(name)
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 || value >= 1<<62 {
+		return 0, fmt.Errorf("%s must be a positive byte count", name)
+	}
+	return value, nil
 }

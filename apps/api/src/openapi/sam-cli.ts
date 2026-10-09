@@ -1,4 +1,4 @@
-import { cliWorkflowPaths } from './cli-workflows';
+import { cliWorkflowMutations, cliWorkflowPaths } from './cli-workflows';
 
 // FILE SIZE EXCEPTION: Hand-maintained OpenAPI document literal with a byte-exact
 // generated-artifact contract (openapi:check regenerates apps/api/openapi/sam-cli.openapi.json
@@ -260,6 +260,7 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       [
         projectId,
         queryParam('status', stringSchema(), 'Optional session status filter.'),
+        queryParam('scope', stringSchema(), 'my or all session scope.'),
         queryParam('limit', integerSchema(), 'Maximum number of sessions to return.'),
         queryParam('offset', integerSchema(), 'Offset for session pagination.'),
       ]
@@ -288,7 +289,16 @@ export const samCliOpenApiDocument: OpenApiDocument = {
         summary: 'Submit a task for agent execution.',
         tags: ['Tasks'],
         security: bearerSecurity,
-        parameters: [projectId],
+        parameters: [
+          projectId,
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            schema: stringSchema(),
+            description:
+              'Stable actor/project/route-scoped intent key; reconcile unknown outcomes before retrying.',
+          },
+        ],
         requestBody: jsonBody(ref('SubmitTaskRequest')),
         responses: { '202': ok(ref('SubmitTaskResponse'), 'Accepted') },
       },
@@ -301,6 +311,12 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       [
         projectId,
         queryParam('status', stringSchema('Task status filter.'), 'Task status filter.'),
+        queryParam('minPriority', integerSchema(), 'Minimum task priority.'),
+        queryParam(
+          'sort',
+          stringSchema(),
+          'Task sort order; cursor paging requires createdAtDesc.'
+        ),
         queryParam('limit', integerSchema(), 'Maximum number of tasks to return.'),
         queryParam('cursor', stringSchema(), 'Pagination cursor.'),
       ]
@@ -319,7 +335,10 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       { '200': ok(ref('ListFilesResponse')) },
       [
         projectId,
-        queryParam('tag', stringSchema(), 'Tag filter.'),
+        queryParam('tags', stringSchema(), 'Comma-separated tag filter.'),
+        ...['directory', 'recursive', 'search', 'mimeType', 'status', 'sortBy', 'sortOrder'].map(
+          (name) => queryParam(name, stringSchema(), 'Library filter or ordering control.')
+        ),
         queryParam('uploadSource', stringSchema(), 'Upload source filter.'),
         queryParam('limit', integerSchema(), 'Maximum number of files to return.'),
         queryParam('cursor', stringSchema(), 'Pagination cursor.'),
@@ -330,7 +349,12 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       'List project knowledge graph entities.',
       ['Knowledge'],
       { '200': ok(ref('ListKnowledgeEntitiesResponse')) },
-      [projectId, queryParam('limit', integerSchema(), 'Maximum number of entities to return.')]
+      [
+        projectId,
+        queryParam('limit', integerSchema(), 'Maximum number of entities to return.'),
+        queryParam('offset', integerSchema(), 'Entity offset.'),
+        queryParam('entityType', stringSchema(), 'Entity type filter.'),
+      ]
     ),
     '/api/notifications': getOp(
       'listNotifications',
@@ -340,6 +364,9 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       [
         queryParam('limit', integerSchema(), 'Maximum number of notifications to return.'),
         queryParam('cursor', stringSchema(), 'Pagination cursor.'),
+        ...['projectId', 'sessionId', 'filter', 'type'].map((name) =>
+          queryParam(name, stringSchema(), 'Notification scope or filter.')
+        ),
       ]
     ),
     '/api/projects/{projectId}/triggers': getOp(
@@ -361,7 +388,13 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       'List project activity events.',
       ['Activity'],
       { '200': ok(ref('ListActivityEventsResponse')) },
-      [projectId, queryParam('limit', integerSchema(), 'Maximum number of events to return.')]
+      [
+        projectId,
+        queryParam('limit', integerSchema(), 'Maximum number of events to return.'),
+        ...['before', 'eventType', 'sessionId'].map((name) =>
+          queryParam(name, stringSchema(), 'Activity cursor or filter.')
+        ),
+      ]
     ),
     '/api/nodes': getOp(
       'listNodes',
@@ -891,3 +924,8 @@ export const samCliOpenApiDocument: OpenApiDocument = {
     },
   },
 };
+
+// Merge new methods without replacing the existing typed inspection schemas.
+for (const [path, methods] of Object.entries(cliWorkflowMutations)) {
+  samCliOpenApiDocument.paths[path] = { ...samCliOpenApiDocument.paths[path], ...methods };
+}

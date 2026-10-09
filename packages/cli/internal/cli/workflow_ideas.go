@@ -56,6 +56,11 @@ func runIdeaExecute(ctx context.Context, runtime Runtime, p parsedArgs, args []s
 		}
 		options.Skill = id
 	}
+	refs, err := attachmentReferences(ctx, runtime, client, project, p)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	options.Attachments = refs
 	options.Mode = "conversation"
 	client.idempotencyKey = p.Flags["idempotency-key"]
 	response, err := client.SubmitTask(ctx, project, message, options)

@@ -484,6 +484,9 @@ by the read-only cron-liveness check.
 
 ### Resource Limits
 
+- `CLI_RECEIPT_REQUEST_MAX_BYTES` — Bounded keyed-intent buffer (default: `262144` bytes)
+- `CLI_RECEIPT_RESPONSE_MAX_BYTES` — Bounded completed receipt cache (default: `65536` bytes); oversized replies leave reconciliation pending
+
 - `MAX_NODES_PER_USER` — Runtime node cap
 - `MAX_AGENT_SESSIONS_PER_WORKSPACE` — Runtime session cap
 - `VM_ADMISSION_CONTROL_MODE` — VM task/session admission mode for node-packing backpressure (`off`, `shadow`, `enforce`; default: `enforce`)

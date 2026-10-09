@@ -66,7 +66,7 @@ func workflowContracts() []workflowContract {
 		readContract("activity list", []string{"activity"}, 0, "limit before eventType sessionId"),
 		readContract("triggers list", []string{"triggers"}, 0, ""),
 		readContract("triggers get", []string{"triggers", "$0"}, 1, ""),
-		readContract("triggers executions", []string{"triggers", "$0", "executions"}, 1, "limit cursor"),
+		readContract("triggers executions", []string{"triggers", "$0", "executions"}, 1, "limit offset status"),
 		readContract("events subscriptions", []string{"event-subscriptions"}, 0, "limit state sessionId"),
 		readContract("events subscription", []string{"event-subscriptions", "$0"}, 1, ""),
 		readContract("events deliveries", []string{"event-subscriptions", "$0", "deliveries"}, 1, "limit"),

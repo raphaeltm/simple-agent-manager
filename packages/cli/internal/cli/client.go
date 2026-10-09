@@ -281,12 +281,15 @@ func doJSONWithLimit(ctx context.Context, httpClient HTTPDoer, method string, en
 
 	content, truncated, err := readBoundedAPIResponseBody(response.Body, maxResponseBytes)
 	if err != nil {
-		return err
+		return unreadableResponse(method, response.StatusCode, "RESPONSE_READ_FAILED")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return parseAPIError(response.StatusCode, content)
 	}
 	if truncated {
+		if method != http.MethodGet {
+			return unreadableResponse(method, response.StatusCode, "RESPONSE_TOO_LARGE")
+		}
 		return APIError{
 			Status:  response.StatusCode,
 			Code:    "RESPONSE_TOO_LARGE",
@@ -294,9 +297,15 @@ func doJSONWithLimit(ctx context.Context, httpClient HTTPDoer, method string, en
 		}
 	}
 	if len(content) == 0 {
+		if method != http.MethodGet && response.StatusCode != http.StatusNoContent {
+			return unreadableResponse(method, response.StatusCode, "EMPTY_RESPONSE")
+		}
 		return nil
 	}
 	if err := json.Unmarshal(content, out); err != nil {
+		if method != http.MethodGet {
+			return unreadableResponse(method, response.StatusCode, "INVALID_JSON")
+		}
 		return APIError{
 			Status: response.StatusCode,
 			Code:   "INVALID_JSON",
@@ -434,4 +443,11 @@ func safeAPIErrorCode(code string) bool {
 		}
 	}
 	return true
+}
+
+func unreadableResponse(method string, status int, code string) error {
+	if method != http.MethodGet {
+		return APIError{Status: status, Code: "OUTCOME_UNKNOWN", Message: "Response could not be read; a mutating request may have been accepted. Reconcile before retrying."}
+	}
+	return APIError{Status: status, Code: code, Message: "SAM API response could not be read"}
 }

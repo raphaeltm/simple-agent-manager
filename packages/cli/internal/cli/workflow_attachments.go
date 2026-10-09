@@ -14,6 +14,14 @@ import (
 )
 
 func attachmentReferences(ctx context.Context, runtime Runtime, client APIClient, project string, p parsedArgs) ([]map[string]any, error) {
+	maxUpload, err := workflowByteLimit(runtime, "SAM_CLI_MAX_UPLOAD_BYTES", 50<<20)
+	if err != nil {
+		return nil, err
+	}
+	maxRefs, err := workflowByteLimit(runtime, "SAM_CLI_MAX_ATTACHMENT_REFERENCE_BYTES", 1<<20)
+	if err != nil {
+		return nil, err
+	}
 	var refs []map[string]any
 	if path := p.Flags["attachment-ref-file"]; path != "" {
 		f, e := os.Open(path)
@@ -21,9 +29,12 @@ func attachmentReferences(ctx context.Context, runtime Runtime, client APIClient
 			return nil, e
 		}
 		defer f.Close()
-		b, e := io.ReadAll(io.LimitReader(f, 1<<20))
+		b, e := io.ReadAll(io.LimitReader(f, maxRefs+1))
 		if e != nil {
 			return nil, e
+		}
+		if int64(len(b)) > maxRefs {
+			return nil, fmt.Errorf("attachment references exceed configured byte limit")
 		}
 		if e = json.Unmarshal(b, &refs); e != nil {
 			return nil, fmt.Errorf("invalid attachment reference file")
@@ -36,8 +47,8 @@ func attachmentReferences(ctx context.Context, runtime Runtime, client APIClient
 		if e != nil {
 			return nil, e
 		}
-		if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 50<<20 {
-			return nil, fmt.Errorf("attachment must be a regular nonempty file up to 50 MiB")
+		if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxUpload {
+			return nil, fmt.Errorf("attachment must be a regular nonempty file within configured upload byte limit")
 		}
 	}
 	for _, path := range paths {

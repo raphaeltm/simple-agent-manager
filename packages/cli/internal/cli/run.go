@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 )
 
@@ -150,6 +151,13 @@ func runTaskSubmit(ctx context.Context, runtime Runtime, parsed parsedArgs, clie
 func runTaskStatus(ctx context.Context, runtime Runtime, parsed parsedArgs, client APIClient, projectID string, args []string) int {
 	if len(args) != 1 {
 		return fail(runtime.Stderr, errors.New("task status requires <taskId>"))
+	}
+	if parsed.Globals.JSON {
+		var value map[string]any
+		if err := client.request(ctx, http.MethodGet, projectAPIPath(projectID, "tasks", args[0]), nil, &value); err != nil {
+			return fail(runtime.Stderr, err)
+		}
+		return writeWorkflow(runtime, parsed, value)
 	}
 	response, err := client.GetTaskStatus(ctx, projectID, args[0])
 	if err != nil {

@@ -35,6 +35,10 @@ func runTaskWait(ctx context.Context, runtime Runtime, p parsedArgs, args []stri
 	for {
 		var value map[string]any
 		if err = client.request(ctx, http.MethodGet, projectAPIPath(project, "tasks", args[0]), nil, &value); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				_ = writeWorkflow(runtime, p, map[string]any{"outcome": "wait_timeout", "completed": false})
+				return 3
+			}
 			return fail(runtime.Stderr, err)
 		}
 		switch value["status"] {

@@ -1,3 +1,11 @@
+import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
+
+import { serve } from '@hono/node-server';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -6,7 +14,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
+import { agentProfileRoutes } from '../../../src/routes/agent-profiles';
+import { cliProjectMetadataRoutes } from '../../../src/routes/cli-project-metadata';
+import { skillRoutes } from '../../../src/routes/skills';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
+import { resolveSkillProfile } from '../../../src/services/skills';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedCloudCredential, seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';
 
@@ -38,6 +50,7 @@ vi.mock('../../../src/services/instant-session', () => ({
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => async (_c: unknown, next: () => Promise<void>) => next(),
   requireApproved: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  getUserId: () => authState.userId,
   getAuth: () => ({
     user: {
       id: authState.userId,
@@ -87,6 +100,9 @@ function createApp() {
       : c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500)
   );
   app.route('/api/projects/:projectId/tasks', submitRoutes);
+  app.route('/api/projects/:projectId/cli', cliProjectMetadataRoutes);
+  app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
+  app.route('/api/projects/:projectId/skills', skillRoutes);
   return app;
 }
 
@@ -211,6 +227,268 @@ describe('task submit capacity-pool placement', () => {
     });
   });
 
+  it.skipIf(!process.env.SAM_CLI_CONTRACT_BINARY)(
+    'compiled CLI performs metadata lifecycle and submits through real Worker orchestration',
+    async () => {
+      const { sqlite, env } = createEnv();
+      sqlite.exec(readFileSync('src/db/migrations/0189_cli_operation_receipts.sql', 'utf8'));
+      const projectId = '01K00000000000000000000000';
+      const folder = await mkdtemp(join(tmpdir(), 'sam-cli-real-submit-'));
+      seedUser(sqlite, 'user-1');
+      seedProjectWithMember(sqlite, { projectId, userId: 'user-1', role: 'owner' });
+      seedCloudCredential(sqlite, { id: 'fixture-cloud', userId: 'user-1', projectId });
+      await seedStaticDefaultPool(env, { userId: 'user-1', projectId });
+      env.DEFAULT_TASK_AGENT_TYPE = 'openai-codex';
+      const app = createApp();
+      // Only project display is a fixture endpoint; all workflow routes/services below are real.
+      app.get('/api/projects/:projectId', (c) =>
+        c.json({ id: projectId, name: 'Disposable fixture' })
+      );
+      const server = serve({ fetch: (req) => app.fetch(req, env, executionCtx), port: 0 });
+      try {
+        await new Promise<void>((resolve) => server.on('listening', resolve));
+        const address = server.address();
+        if (!address || typeof address === 'string') throw new Error('Missing fixture address');
+        const cli = async (args: string[]) => {
+          const { stdout, stderr } = await promisify(execFile)(
+            process.env.SAM_CLI_CONTRACT_BINARY!,
+            [...args, '--project', projectId, '--json'],
+            {
+              env: {
+                ...process.env,
+                SAM_API_URL: `http://127.0.0.1:${address.port}`,
+                SAM_SESSION_COOKIE: 'fixture=synthetic',
+                SAM_CONFIG_DIR: folder,
+              },
+            }
+          );
+          expect(stderr).toBe('');
+          return JSON.parse(stdout) as Record<string, unknown>;
+        };
+        const profile = await cli(['profiles', 'create', '--name', 'Sol']);
+        const skill = await cli(['skills', 'create', '--name', 'Review']);
+        expect(
+          await cli(['profiles', 'update', 'Sol', '--description', 'Synthetic metadata'])
+        ).toMatchObject({ id: profile.id, description: 'Synthetic metadata' });
+        expect(
+          await cli(['skills', 'update', 'Review', '--description', 'Synthetic skill'])
+        ).toMatchObject({ id: skill.id, description: 'Synthetic skill' });
+        expect(
+          await cli(['skills', 'resolve', 'Review', '--profileId', String(profile.id)])
+        ).toMatchObject({ profileId: profile.id, skillId: skill.id, agentType: 'openai-codex' });
+        const args = [
+          'tasks',
+          'submit',
+          'Synthetic only; draft PR; do not merge',
+          '--agent-profile',
+          'Sol',
+          '--skill',
+          'Review',
+          '--idempotency-key',
+          'real-worker-fixture',
+        ];
+        const first = await cli(args);
+        expect(await cli(args)).toEqual(first);
+        expect(mocks.startTaskRunnerDO).toHaveBeenCalledTimes(1);
+        expect(
+          sqlite
+            .prepare('SELECT agent_profile_hint, skill_id FROM tasks WHERE id = ?')
+            .get(first.taskId)
+        ).toEqual({ agent_profile_hint: profile.id, skill_id: skill.id });
+        await Promise.all(vi.mocked(executionCtx.waitUntil).mock.calls.map(([promise]) => promise));
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve()))
+        );
+        sqlite.close();
+        await rm(folder, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([
+    ['vm', 'task'],
+    ['vm', 'conversation'],
+    ['cf-container', 'task'],
+    ['cf-container', 'conversation'],
+  ] as const)(
+    'persists Sol and skill selection through real submit orchestration (%s / %s)',
+    async (runtime, taskMode) => {
+      const { sqlite, env } = createEnv();
+      try {
+        seedTaskSubmitRows(sqlite);
+        await seedProjectDefaultPool(env);
+        env.CF_CONTAINER_ENABLED = 'true';
+        mocks.enrichMessageWithMentions.mockImplementation(async (content: string) => ({
+          enrichedMessage: content,
+        }));
+        sqlite
+          .prepare(
+            `INSERT INTO agent_profiles
+        (id, project_id, user_id, name, agent_type, model, effort, runtime, task_mode)
+        VALUES ('sol', 'project-1', 'user-1', 'Sol', 'openai-codex', 'gpt-6.1-sol', 'high', ?, ?)`
+          )
+          .run(runtime, taskMode);
+        sqlite.exec(`INSERT INTO skills
+        (id, project_id, user_id, name, agent_type, default_profile_id, task_mode, system_prompt_append)
+        VALUES ('review', 'project-1', 'user-1', 'Review', 'openai-codex', 'sol', 'task', 'Synthetic review guidance')`);
+        mocks.acceptInstantSession.mockResolvedValue({ chatSessionId: 'instant-chat' });
+        mocks.continueInstantSessionLaunch.mockResolvedValue({});
+        const res = await createApp().request(
+          '/api/projects/project-1/tasks/submit',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: 'Synthetic review; draft PR; do not merge',
+              agentProfileId: 'sol',
+              skillId: 'review',
+              taskMode,
+            }),
+          },
+          env,
+          executionCtx
+        );
+        expect(res.status).toBe(202);
+        const result = (await res.json()) as { taskId: string; sessionId: string };
+        expect(
+          sqlite
+            .prepare(
+              `SELECT agent_profile_hint, skill_id, skill_hint, task_mode, description
+        FROM tasks WHERE id = ?`
+            )
+            .get(result.taskId)
+        ).toMatchObject({
+          agent_profile_hint: 'sol',
+          skill_id: 'review',
+          skill_hint: 'review',
+          task_mode: taskMode,
+          description: 'Synthetic review; draft PR; do not merge',
+        });
+        if (runtime === 'cf-container') {
+          expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+          expect(mocks.acceptInstantSession).toHaveBeenCalledWith(
+            expect.anything(),
+            env,
+            expect.objectContaining({
+              agentProfileId: 'sol',
+              skillId: 'review',
+              taskMode,
+              overrides: expect.objectContaining({ model: 'gpt-6.1-sol', effort: 'high' }),
+              initialPrompt: expect.stringContaining('Synthetic review guidance'),
+            })
+          );
+        } else {
+          expect(mocks.acceptInstantSession).not.toHaveBeenCalled();
+          expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+            env,
+            expect.objectContaining({
+              taskId: result.taskId,
+              taskMode,
+              agentProfileHint: 'sol',
+              model: 'gpt-6.1-sol',
+              effort: 'high',
+              systemPromptAppend: 'Synthetic review guidance',
+            })
+          );
+          expect(mocks.persistMessage).toHaveBeenCalledWith(
+            env,
+            'project-1',
+            result.sessionId,
+            'user',
+            'Synthetic review; draft PR; do not merge',
+            null
+          );
+        }
+        await Promise.all(vi.mocked(executionCtx.waitUntil).mock.calls.map(([promise]) => promise));
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it('creates and updates metadata through real services, resolves it, and submits persisted identities', async () => {
+    const { sqlite, env } = createEnv();
+    try {
+      seedTaskSubmitRows(sqlite);
+      await seedProjectDefaultPool(env);
+      env.DEFAULT_TASK_AGENT_TYPE = 'openai-codex';
+      const app = createApp();
+      const request = (path: string, method: string, body: unknown) =>
+        app.request(
+          `/api/projects/project-1/cli/${path}`,
+          { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+          env,
+          executionCtx
+        );
+      const profileResponse = await request('profiles', 'POST', { name: 'Sol fixture' });
+      expect(profileResponse.status).toBe(201);
+      const profile = (await profileResponse.json()) as { id: string; updatedAt: string };
+      const skillResponse = await request('skills', 'POST', { name: 'Review fixture' });
+      expect(skillResponse.status).toBe(201);
+      const skill = (await skillResponse.json()) as { id: string; updatedAt: string };
+      for (const [family, resource] of [
+        ['profiles', profile],
+        ['skills', skill],
+      ] as const) {
+        const updated = await request(`${family}/${resource.id}`, 'PATCH', {
+          description: 'Updated synthetic metadata',
+          expectedUpdatedAt: resource.updatedAt,
+        });
+        expect(updated.status).toBe(200);
+        expect(await updated.json()).toMatchObject({
+          id: resource.id,
+          description: 'Updated synthetic metadata',
+        });
+        expect(
+          (
+            await request(`${family}/${resource.id}`, 'PATCH', {
+              name: 'Stale overwrite',
+              expectedUpdatedAt: resource.updatedAt,
+            })
+          ).status
+        ).toBe(409);
+      }
+      const resolved = await resolveSkillProfile(
+        drizzle(env.DATABASE, { schema }),
+        'project-1',
+        profile.id,
+        skill.id,
+        'user-1',
+        env
+      );
+      expect(resolved).toMatchObject({
+        profileId: profile.id,
+        skillId: skill.id,
+        agentType: 'openai-codex',
+      });
+      const res = await app.request(
+        '/api/projects/project-1/tasks/submit',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: 'Use persisted fixture',
+            agentProfileId: profile.id,
+            skillId: skill.id,
+          }),
+        },
+        env,
+        executionCtx
+      );
+      expect(res.status).toBe(202);
+      const result = (await res.json()) as { taskId: string };
+      expect(
+        sqlite
+          .prepare('SELECT agent_profile_hint, skill_id FROM tasks WHERE id = ?')
+          .get(result.taskId)
+      ).toEqual({ agent_profile_hint: profile.id, skill_id: skill.id });
+      await Promise.all(vi.mocked(executionCtx.waitUntil).mock.calls.map(([promise]) => promise));
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it.each([false, true])(
     'honors an Instant profile through task-submit without cloud credentials or a VM pool (attachment=%s)',
     async (withAttachment) => {
@@ -264,9 +542,26 @@ describe('task submit capacity-pool placement', () => {
       );
       expect(mocks.continueInstantSessionLaunch).toHaveBeenCalled();
       await Promise.all(vi.mocked(executionCtx.waitUntil).mock.calls.map(([promise]) => promise));
-      expect(mocks.updateSessionTopic).toHaveBeenCalledWith(env, 'project-1', 'instant-chat', 'Generated task title');
-      expect(sqlite.prepare("SELECT title FROM tasks WHERE parent_task_id = 'parent-instant'").get()).toEqual({ title: 'Generated task title' });
-      expect(mocks.recordActivityEvent).toHaveBeenCalledWith(env, 'project-1', 'task.submitted', 'user', 'user-1', null, 'instant-chat', expect.any(String), expect.objectContaining({ branchName: expect.any(String) }));
+      expect(mocks.updateSessionTopic).toHaveBeenCalledWith(
+        env,
+        'project-1',
+        'instant-chat',
+        'Generated task title'
+      );
+      expect(
+        sqlite.prepare("SELECT title FROM tasks WHERE parent_task_id = 'parent-instant'").get()
+      ).toEqual({ title: 'Generated task title' });
+      expect(mocks.recordActivityEvent).toHaveBeenCalledWith(
+        env,
+        'project-1',
+        'task.submitted',
+        'user',
+        'user-1',
+        null,
+        'instant-chat',
+        expect.any(String),
+        expect.objectContaining({ branchName: expect.any(String) })
+      );
     }
   );
 
@@ -278,16 +573,31 @@ describe('task submit capacity-pool placement', () => {
       VALUES ('instant', 'project-1', 'user-1', 'Instant', 'openai-codex', 'cf-container')`);
     env.CF_CONTAINER_ENABLED = 'true';
     mocks.acceptInstantSession.mockRejectedValueOnce(new Error('Instant acceptance rejected'));
-    const res = await createApp().request('/api/projects/project-1/tasks/submit', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: 'Use Instant', agentProfileId: 'instant' }),
-    }, env, executionCtx);
+    const res = await createApp().request(
+      '/api/projects/project-1/tasks/submit',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'Use Instant', agentProfileId: 'instant' }),
+      },
+      env,
+      executionCtx
+    );
     expect(res.status).toBe(500);
-    expect(sqlite.prepare('SELECT status, execution_step, error_message FROM tasks').get()).toEqual({
-      status: 'failed', execution_step: 'launch_failed', error_message: 'Instant acceptance rejected',
-    });
-    expect(sqlite.prepare('SELECT from_status, to_status FROM task_status_events ORDER BY created_at, rowid').all()).toEqual([
-      { from_status: null, to_status: 'queued' }, { from_status: 'queued', to_status: 'failed' },
+    expect(sqlite.prepare('SELECT status, execution_step, error_message FROM tasks').get()).toEqual(
+      {
+        status: 'failed',
+        execution_step: 'launch_failed',
+        error_message: 'Instant acceptance rejected',
+      }
+    );
+    expect(
+      sqlite
+        .prepare('SELECT from_status, to_status FROM task_status_events ORDER BY created_at, rowid')
+        .all()
+    ).toEqual([
+      { from_status: null, to_status: 'queued' },
+      { from_status: 'queued', to_status: 'failed' },
     ]);
     expect(mocks.recordActivityEvent).not.toHaveBeenCalled();
   });

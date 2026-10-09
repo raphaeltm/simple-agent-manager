@@ -82,7 +82,7 @@ func runDeviceFlow(ctx context.Context, runtime Runtime, parsed parsedArgs, apiU
 
 	if parsed.Globals.JSON {
 		data, _ := json.Marshal(map[string]any{"authorizationRequired": true, "verificationUrl": code.VerificationURIComplete, "userCode": code.UserCode})
-		fmt.Fprintln(runtime.Stderr, string(data))
+		writeDiagnostic(runtime.Stderr, data)
 	} else {
 		fmt.Fprintf(runtime.Stdout, "Open this URL to authorize SAM CLI:\n%s\n\nUser code: %s\n", code.VerificationURIComplete, code.UserCode)
 	}

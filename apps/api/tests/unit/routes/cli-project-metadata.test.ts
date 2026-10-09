@@ -8,7 +8,7 @@ import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { cliProjectMetadataRoutes } from '../../../src/routes/cli-project-metadata';
 
-const auth = vi.hoisted(() => ({ capability: vi.fn() }));
+const auth = vi.hoisted(() => ({ capability: vi.fn(), builtin: false }));
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => async (_c: unknown, next: () => Promise<void>) => next(),
   requireApproved: () => async (_c: unknown, next: () => Promise<void>) => next(),
@@ -24,12 +24,18 @@ vi.mock('../../../src/services/agent-profiles', () => ({
 }));
 vi.mock('../../../src/services/skills', () => ({
   createSkill: vi.fn(),
-  getSkill: async () => ({ id: 'skill', projectId: 'project', updatedAt: 'old' }),
+  getSkill: async () => ({
+    id: 'skill',
+    projectId: 'project',
+    updatedAt: 'old',
+    isBuiltin: auth.builtin,
+  }),
 }));
 let db: Database.Database;
 let app: Hono<{ Bindings: Env }>;
 let env: Env;
 beforeEach(() => {
+  auth.builtin = false;
   auth.capability.mockReset().mockResolvedValue({});
   db = new Database(':memory:');
   db.exec(
@@ -104,4 +110,10 @@ describe('server scoped CLI metadata boundary', () => {
     );
     expect(db.prepare('SELECT name FROM projects').get()).toEqual({ name: 'original' });
   });
+});
+
+it('does not edit builtin skill metadata', async () => {
+  auth.builtin = true;
+  const response = await patch('skills/skill', { name: 'changed', expectedUpdatedAt: 'old' });
+  expect(response.status).toBe(400);
 });

@@ -271,6 +271,14 @@
             "description": "Optional session status filter."
           },
           {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "my or all session scope."
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -410,6 +418,14 @@
               "type": "string"
             },
             "description": "Project ID."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stable actor/project/route-scoped intent key; reconcile unknown outcomes before retrying."
           }
         ],
         "requestBody": {
@@ -468,6 +484,22 @@
             "description": "Task status filter."
           },
           {
+            "name": "minPriority",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Minimum task priority."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Task sort order; cursor paging requires createdAtDesc."
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -494,6 +526,102 @@
                 }
               }
             }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_projects__projectId__tasks",
+        "summary": "Create draft task metadata; does not submit execution.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "title"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
           }
         }
       }
@@ -552,6 +680,85 @@
             }
           }
         }
+      },
+      "patch": {
+        "operationId": "patch_api_projects__projectId__tasks__taskId_",
+        "summary": "Update task metadata, subject to the task route capability checks.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
       }
     },
     "/api/projects/{projectId}/library": {
@@ -577,12 +784,68 @@
             "description": "Project ID."
           },
           {
-            "name": "tag",
+            "name": "tags",
             "in": "query",
             "schema": {
               "type": "string"
             },
-            "description": "Tag filter."
+            "description": "Comma-separated tag filter."
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Library filter or ordering control."
+          },
+          {
+            "name": "recursive",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Library filter or ordering control."
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Library filter or ordering control."
+          },
+          {
+            "name": "mimeType",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Library filter or ordering control."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Library filter or ordering control."
+          },
+          {
+            "name": "sortBy",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Library filter or ordering control."
+          },
+          {
+            "name": "sortOrder",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Library filter or ordering control."
           },
           {
             "name": "uploadSource",
@@ -652,6 +915,22 @@
               "type": "integer"
             },
             "description": "Maximum number of entities to return."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Entity offset."
+          },
+          {
+            "name": "entityType",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Entity type filter."
           }
         ],
         "responses": {
@@ -696,6 +975,38 @@
               "type": "string"
             },
             "description": "Pagination cursor."
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Notification scope or filter."
+          },
+          {
+            "name": "sessionId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Notification scope or filter."
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Notification scope or filter."
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Notification scope or filter."
           }
         ],
         "responses": {
@@ -815,6 +1126,30 @@
               "type": "integer"
             },
             "description": "Maximum number of events to return."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Activity cursor or filter."
+          },
+          {
+            "name": "eventType",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Activity cursor or filter."
+          },
+          {
+            "name": "sessionId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Activity cursor or filter."
           }
         ],
         "responses": {
@@ -1931,6 +2266,111 @@
             "description": "Conflict or unknown keyed outcome; reconcile before retrying"
           }
         }
+      },
+      "post": {
+        "operationId": "post_api_projects__projectId__sessions__sessionId__comments",
+        "summary": "Add a message-anchored note without sending work.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  },
+                  "clientMutationId": {
+                    "type": "string"
+                  },
+                  "messageId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "messageId",
+                  "body"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
       }
     },
     "/api/projects/{projectId}/repo/branches": {
@@ -2652,6 +3092,20 @@
           },
           {
             "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
             "in": "query",
             "schema": {
               "type": "string"
@@ -4367,6 +4821,1026 @@
           },
           {
             "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/library/{fileId}/download": {
+      "get": {
+        "operationId": "get_api_projects__projectId__library__fileId__download",
+        "summary": "Download private artifact bytes; does not modify remote resources.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fileId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifact bytes.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/repo/raw": {
+      "get": {
+        "operationId": "get_api_projects__projectId__repo_raw",
+        "summary": "Download private artifact bytes; does not modify remote resources.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifact bytes.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/agent-profiles/resolve": {
+      "post": {
+        "operationId": "post_api_projects__projectId__agent_profiles_resolve",
+        "summary": "Read-only effective profile resolution; never launches work.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "profileNameOrId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "profileNameOrId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/tasks/request-upload": {
+      "post": {
+        "operationId": "post_api_projects__projectId__tasks_request_upload",
+        "summary": "Create an attachment upload URL; does not submit work.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filename": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "integer"
+                  },
+                  "contentType": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "filename",
+                  "size",
+                  "contentType"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions/{sessionId}/ideas": {
+      "post": {
+        "operationId": "post_api_projects__projectId__sessions__sessionId__ideas",
+        "summary": "Link an accepted conversation to an existing Idea.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "taskId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions/{sessionId}/attention/{markerId}/resolve": {
+      "post": {
+        "operationId": "post_api_projects__projectId__sessions__sessionId__attention__markerId__resolve",
+        "summary": "Answer current needs_input marker; permission/auth interaction markers are rejected.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "markerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "answer": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "answer"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions/{sessionId}/comments/{threadId}/replies": {
+      "post": {
+        "operationId": "post_api_projects__projectId__sessions__sessionId__comments__threadId__replies",
+        "summary": "Reply to a note without sending work.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  },
+                  "clientMutationId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "body"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions/{sessionId}/comments/{threadId}/resolve": {
+      "post": {
+        "operationId": "post_api_projects__projectId__sessions__sessionId__comments__threadId__resolve",
+        "summary": "Resolve a note thread without sending work.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "clientMutationId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions/{sessionId}/comments/{threadId}/reopen": {
+      "post": {
+        "operationId": "post_api_projects__projectId__sessions__sessionId__comments__threadId__reopen",
+        "summary": "Reopen a note thread without sending work.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "clientMutationId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/library/upload": {
+      "post": {
+        "operationId": "post_api_projects__projectId__library_upload",
+        "summary": "Upload a new project artifact; no automatic replay or destructive replace.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "directory": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{id}/sleep": {
+      "post": {
+        "operationId": "post_api_workspaces__id__sleep",
+        "summary": "Suspend the session workspace resumably; owner authorization applies.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
             "in": "path",
             "required": true,
             "schema": {

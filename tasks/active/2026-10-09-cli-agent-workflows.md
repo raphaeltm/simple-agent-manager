@@ -12,19 +12,19 @@ Raphael approved the audit plan in PR #2291 and requested full implementation, g
 - Settings scope: safe inspection and rename/description; consequential access/credentials/permission/billing/runtime/deployment/destructive writes deferred. Do not expose an unbounded raw patch escape hatch.
 
 ## Implementation checklist
-- [ ] Common strict command/flag/arity contracts and contextual discoverable help; unknown flags fail before HTTP.
-- [ ] Shared complete project resolution, scoped profile/skill exact ID/name resolution and fail-closed explicit hints.
-- [ ] Full supported JSON, project summary counts, project notifications, redacted structured errors and bounded HTTP cancellation.
-- [ ] Pageable task/session/project/Idea/library/context/notification/activity inspection, complete bounded transcript export, tool-content and metadata.
-- [ ] Task/Idea create/get/update/linked execute/wait; stdin/file prompt input, skill selection, attachments.
-- [ ] Safe submit/prompt receipt/idempotency and unknown-outcome reconciliation; no blind retry.
-- [ ] Session send/cancel/sleep/fork/retry and non-permission attention answer; permission/auth requests inspected and left human controlled.
-- [ ] Profiles/skills scoped inspect/create/clone/update using approved ordinary fields; security/resource fields rejected, global writes rejected unless backend supports them.
-- [ ] Settings safe inspect and rename/description only; no mutation of user settings during verification.
-- [ ] Remaining sidebar reads: comments, repository files/ref/compare, library/download, memory/policies, events, triggers, deployments.
-- [ ] Scoped routine resource writes: draft metadata, notes/replies, library artifacts, trigger pause and schedules where explicitly invoked; no implicit sends/launch/permissions/secret outputs.
-- [ ] Exact contract/regression/integration fixtures and CI API/shared→CLI coverage coupling.
-- [ ] User documentation and audit status updated to actual implemented commands.
+- [x] Common strict command/flag/arity contracts and contextual discoverable help; unknown flags fail before HTTP.
+- [x] Shared complete project resolution, scoped profile/skill exact ID/name resolution and fail-closed explicit hints.
+- [x] Full supported JSON, project summary counts, project notifications, redacted structured errors and bounded HTTP cancellation.
+- [x] Pageable task/session/project/Idea/library/context/notification/activity inspection, complete bounded transcript export, tool-content and metadata.
+- [x] Task/Idea create/get/update/linked execute/wait; stdin/file prompt input, skill selection, attachments.
+- [x] Safe submit/prompt receipt/idempotency and unknown-outcome reconciliation; no blind retry.
+- [x] Session send/cancel/sleep/fork/retry and non-permission attention answer; permission/auth requests inspected and left human controlled.
+- [x] Profiles/skills scoped inspect/create/clone/update using approved ordinary fields; security/resource fields rejected, global writes rejected unless backend supports them.
+- [x] Settings safe inspect and rename/description only; no mutation of user settings during verification.
+- [x] Remaining sidebar reads: comments, repository files/ref/compare, library/download, memory/policies, events, triggers, deployments.
+- [x] Scoped draft metadata, notes/replies and library artifact writes implemented. Trigger pause and schedule/watch automation writes explicitly deferred under original conditional decision boundary; no implicit sends/launch/permissions/secret outputs.
+- [x] Exact contract/regression/integration fixtures and CI API/shared→CLI coverage coupling.
+- [x] User documentation and audit status updated to actual implemented commands.
 - [ ] Full validation, task-completion validator, local specialist reviews, staging smoke with cleanup.
 - [ ] PR green, CodeRabbit requested/waited/addressed, merge and production deployment verified.
 
@@ -33,3 +33,6 @@ All approved audit phase acceptance criteria apply. In particular: unknown dry-r
 
 ## References
 `packages/cli/.claude/rules/36-cli-quality.md`, API scoped rules, `/do`, staging rule 13, review rule 25, constitution simplicity/configuration principles. Maintain local `.do-state.md` and durable PR state.
+
+## Specialist review and validation
+Go/security/Cloudflare/constitution/doc/completion specialists completed and identified actionable fixes. Implemented prompt-safe errors, unknown accepted-write response outcomes, ambiguous selector rejection, exact effect flags, deadline exit semantics, builtin immutability, bounded configurable receipt buffers and corrected help/OpenAPI. Task completion re-review finds substantive gaps fixed; legacy full-JSON regression added. Test-engineer added real SQLite + actual submit route fixtures: metadata lifecycle and explicit Sol/skill propagation for VM/Instant × task/conversation; compiled CLI fixture proves replay admits one runner. Full pnpm test passed serially; final post-review validation, staging and shipping gates remain pending.

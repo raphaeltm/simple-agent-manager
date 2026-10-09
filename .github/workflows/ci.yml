@@ -829,7 +829,7 @@ jobs:
       - name: Verify Go CLI against Worker route contracts
         run: |
           (cd packages/cli && go build -o "$RUNNER_TEMP/sam-cli-contract" ./cmd/sam)
-          SAM_CLI_CONTRACT_BINARY="$RUNNER_TEMP/sam-cli-contract" pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/routes/cli-worker-contract.test.ts
+          SAM_CLI_CONTRACT_BINARY="$RUNNER_TEMP/sam-cli-contract" pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/routes/cli-worker-contract.test.ts tests/unit/routes/task-submit-capacity-pools.test.ts
 
       - name: Cross-build CLI
         working-directory: packages/cli

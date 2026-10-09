@@ -196,14 +196,14 @@ func assertAttentionCommandJSON(t *testing.T, command string, value map[string]a
 	t.Helper()
 	switch command {
 	case "list":
-		assertSessionJSON(t, value["sessions"].([]any)[0], session)
+		assertRawSessionJSON(t, value["sessions"].([]any)[0], session)
 	case "project":
-		assertSessionJSON(t, value["recentSessions"].([]any)[0], session)
+		assertRawSessionJSON(t, value["recentSessions"].([]any)[0], session)
 	case "status":
-		assertSessionJSON(t, value["project"].(map[string]any)["recentSessions"].([]any)[0], session)
-		assertSessionJSON(t, value["sessions"].(map[string]any)["sessions"].([]any)[0], session)
+		assertRawSessionJSON(t, value["project"].(map[string]any)["recentSessions"].([]any)[0], session)
+		assertRawSessionJSON(t, value["sessions"].(map[string]any)["sessions"].([]any)[0], session)
 	case "detail":
-		assertSessionJSON(t, value["session"], session)
+		assertRawSessionJSON(t, value["session"], session)
 		assertAttentionMessages(t, value, session)
 	}
 }
@@ -230,5 +230,14 @@ func assertAttentionTextContains(t *testing.T, output string, texts []string) {
 		if !strings.Contains(output, text) {
 			t.Fatalf("missing %q in text output", text)
 		}
+	}
+}
+
+// Commands preserve the complete API object, including explicit null fields.
+func assertRawSessionJSON(t *testing.T, got any, expected string) {
+	t.Helper()
+	want := decodeAttentionJSON(t, []byte(expected))
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("session JSON = %#v, want %#v", got, want)
 	}
 }

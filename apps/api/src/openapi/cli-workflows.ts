@@ -87,7 +87,7 @@ const reads: Array<[string, string]> = [
   ['/policies', ''],
   ['/policies/{policyId}', ''],
   ['/triggers/{triggerId}', ''],
-  ['/triggers/{triggerId}/executions', 'limit'],
+  ['/triggers/{triggerId}/executions', 'limit offset status'],
   ['/event-subscriptions', 'state sessionId limit'],
   ['/event-subscriptions/{subscriptionId}', ''],
   ['/event-subscriptions/{subscriptionId}/deliveries', 'limit'],
@@ -182,5 +182,146 @@ cliWorkflowPaths[cancel] = {
     cancel,
     'post',
     'Cancel only the current agent turn, not archive or delete the session.'
+  ),
+};
+
+// These are the mutation boundaries consumed by the CLI, not permission to
+// execute them. Existing route schemas remain the request-validation authority.
+export const cliWorkflowMutations: Record<
+  string,
+  Partial<Record<'post' | 'patch', OperationObject>>
+> = {};
+const string: SchemaObject = { type: 'string' };
+const metadata: SchemaObject = {
+  type: 'object',
+  properties: { title: string, description: string, priority: { type: 'integer' } },
+};
+const note: SchemaObject = {
+  type: 'object',
+  properties: { body: string, clientMutationId: string },
+};
+const mutations: Array<[string, 'post' | 'patch', string, SchemaObject | undefined]> = [
+  [
+    '/tasks',
+    'post',
+    'Create draft task metadata; does not submit execution.',
+    { ...metadata, required: ['title'] },
+  ],
+  [
+    '/tasks/{taskId}',
+    'patch',
+    'Update task metadata, subject to the task route capability checks.',
+    metadata,
+  ],
+  [
+    '/agent-profiles/resolve',
+    'post',
+    'Read-only effective profile resolution; never launches work.',
+    { type: 'object', properties: { profileNameOrId: string }, required: ['profileNameOrId'] },
+  ],
+  [
+    '/tasks/request-upload',
+    'post',
+    'Create an attachment upload URL; does not submit work.',
+    {
+      type: 'object',
+      properties: { filename: string, size: { type: 'integer' }, contentType: string },
+      required: ['filename', 'size', 'contentType'],
+    },
+  ],
+  [
+    '/sessions/{sessionId}/ideas',
+    'post',
+    'Link an accepted conversation to an existing Idea.',
+    { type: 'object', properties: { taskId: string }, required: ['taskId'] },
+  ],
+  [
+    '/sessions/{sessionId}/attention/{markerId}/resolve',
+    'post',
+    'Answer current needs_input marker; permission/auth interaction markers are rejected.',
+    { type: 'object', properties: { answer: string }, required: ['answer'] },
+  ],
+  [
+    '/sessions/{sessionId}/comments',
+    'post',
+    'Add a message-anchored note without sending work.',
+    {
+      ...note,
+      properties: { ...note.properties, messageId: string },
+      required: ['messageId', 'body'],
+    },
+  ],
+  [
+    '/sessions/{sessionId}/comments/{threadId}/replies',
+    'post',
+    'Reply to a note without sending work.',
+    { ...note, required: ['body'] },
+  ],
+  [
+    '/sessions/{sessionId}/comments/{threadId}/resolve',
+    'post',
+    'Resolve a note thread without sending work.',
+    { type: 'object', properties: { clientMutationId: string } },
+  ],
+  [
+    '/sessions/{sessionId}/comments/{threadId}/reopen',
+    'post',
+    'Reopen a note thread without sending work.',
+    { type: 'object', properties: { clientMutationId: string } },
+  ],
+];
+for (const [suffix, method, summary, body] of mutations) {
+  const path = project + suffix;
+  cliWorkflowMutations[path] = { [method]: operation(path, method, summary, '', body) };
+}
+const upload = project + '/library/upload';
+cliWorkflowMutations[upload] = {
+  post: {
+    ...operation(
+      upload,
+      'post',
+      'Upload a new project artifact; no automatic replay or destructive replace.'
+    ),
+    requestBody: {
+      required: true,
+      content: {
+        'multipart/form-data': {
+          schema: {
+            type: 'object',
+            properties: {
+              file: { type: 'string', format: 'binary' },
+              directory: string,
+              description: string,
+            },
+            required: ['file'],
+          },
+        },
+      },
+    },
+  },
+};
+for (const [suffix, query] of [
+  ['/library/{fileId}/download', ''],
+  ['/repo/raw', 'ref path'],
+]) {
+  const path = project + suffix;
+  const read = operation(
+    path,
+    'get',
+    'Download private artifact bytes; does not modify remote resources.',
+    query
+  );
+  read.responses['200'] = {
+    description: 'Artifact bytes.',
+    content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } },
+  };
+  cliWorkflowPaths[path] = { get: read };
+}
+const sleep = '/api/workspaces/{id}/sleep';
+cliWorkflowMutations[sleep] = {
+  post: operation(
+    sleep,
+    'post',
+    'Suspend the session workspace resumably; owner authorization applies.'
   ),
 };

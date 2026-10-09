@@ -16,6 +16,10 @@ func runLibraryUpload(ctx context.Context, runtime Runtime, p parsedArgs, args [
 	if len(args) != 1 {
 		return fail(runtime.Stderr, fmt.Errorf("library upload requires one local file"))
 	}
+	maxUpload, err := workflowByteLimit(runtime, "SAM_CLI_MAX_UPLOAD_BYTES", 50<<20)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
 	file, err := os.Open(args[0])
 	if err != nil {
 		return fail(runtime.Stderr, err)
@@ -25,8 +29,8 @@ func runLibraryUpload(ctx context.Context, runtime Runtime, p parsedArgs, args [
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	if !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > 50<<20 {
-		return fail(runtime.Stderr, fmt.Errorf("library upload requires a regular nonempty file up to 50 MiB"))
+	if !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > maxUpload {
+		return fail(runtime.Stderr, fmt.Errorf("library upload requires a regular nonempty file within configured upload byte limit"))
 	}
 	client, config, err := authenticatedClientWithConfig(ctx, runtime)
 	if err != nil {
@@ -42,7 +46,7 @@ func runLibraryUpload(ctx context.Context, runtime Runtime, p parsedArgs, args [
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	if _, err = io.Copy(part, io.LimitReader(file, (50<<20)+1)); err != nil {
+	if _, err = io.Copy(part, io.LimitReader(file, maxUpload+1)); err != nil {
 		return fail(runtime.Stderr, err)
 	}
 	for _, name := range []string{"directory", "description", "filename", "mimeType"} {

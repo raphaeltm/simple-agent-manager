@@ -29,25 +29,15 @@ func readCommandInput(runtime Runtime, p parsedArgs, args []string, kind string)
 			return "", err
 		}
 		defer f.Close()
-		return boundedPrompt(f)
+		return boundedPromptForRuntime(runtime, f)
 	}
 	if stdin {
-		return boundedPrompt(runtime.Stdin)
+		return boundedPromptForRuntime(runtime, runtime.Stdin)
 	}
 	if len(args) > 0 {
 		return strings.Join(args, " "), nil
 	}
 	return direct, nil
-}
-func boundedPrompt(r io.Reader) (string, error) {
-	b, err := io.ReadAll(io.LimitReader(r, 16001))
-	if err != nil {
-		return "", err
-	}
-	if len(b) > 16000 {
-		return "", fmt.Errorf("prompt input exceeds 16000 bytes")
-	}
-	return string(b), nil
 }
 
 func runMetadataMutation(ctx context.Context, runtime Runtime, p parsedArgs, args []string) int {
@@ -239,3 +229,21 @@ func runSettingsInspect(ctx context.Context, runtime Runtime, p parsedArgs) int 
 }
 
 func anyRows(v any) []any { rows, _ := v.([]any); return rows }
+
+func boundedPromptForRuntime(runtime Runtime, reader io.Reader) (string, error) {
+	limit, err := workflowByteLimit(runtime, "SAM_CLI_MAX_PROMPT_BYTES", 16000)
+	if err != nil {
+		return "", err
+	}
+	if limit > 16000 {
+		return "", fmt.Errorf("SAM_CLI_MAX_PROMPT_BYTES cannot exceed API contract maximum 16000")
+	}
+	bytes, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return "", fmt.Errorf("prompt input could not be read")
+	}
+	if int64(len(bytes)) > limit {
+		return "", fmt.Errorf("prompt input exceeds configured byte limit")
+	}
+	return string(bytes), nil
+}
