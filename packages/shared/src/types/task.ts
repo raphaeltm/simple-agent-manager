@@ -602,11 +602,12 @@ export interface SubmitTaskRequest {
   devcontainerConfigName?: string | null;
   /** Cloud provider to use for auto-provisioned nodes. Falls back to project default, then any available credential. */
   provider?: CredentialProvider;
-  /** ID of a parent task to continue from (conversation forking). When set, the new workspace
-   * checks out the parent task's output branch if available. */
+  /** ID of the parent task this one forks or retries (same project). The new task records the
+   * lineage, inherits the parent's credential attribution, and counts toward the fork-depth
+   * limit; it still starts on its own output branch. */
   parentTaskId?: string;
-  /** Context summary from the parent session. Persisted as the first system message in the new
-   * chat session to give the agent context about prior work. Max 64KB. */
+  /** Caller-supplied note persisted as the first system message in the new chat session. It is
+   * shown in the chat only; the agent's prompt is `message`. Max 64KB. */
   contextSummary?: string;
   /** Task execution mode. 'task' (default): agent pushes, creates PR, calls complete_task.
    * 'conversation': agent responds conversationally, human controls lifecycle. */
@@ -618,18 +619,6 @@ export interface SubmitTaskRequest {
   attachments?: TaskAttachment[];
   /** Explicit resource requirements for this task. Overrides profile/project/platform defaults. */
   resourceRequirements?: ResourceRequirements;
-}
-
-/** Response from the session summarize endpoint. */
-export interface SessionSummaryResponse {
-  /** The generated context summary text. */
-  summary: string;
-  /** Total number of messages in the session. */
-  messageCount: number;
-  /** Number of messages after filtering (user + assistant only). */
-  filteredCount: number;
-  /** Method used to generate the summary. */
-  method: 'ai' | 'heuristic' | 'verbatim';
 }
 
 export interface SubmitTaskResponse {

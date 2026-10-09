@@ -250,7 +250,8 @@ and disk alone — see [Compute Pools](/docs/guides/compute-pools/).
   `AI_PROXY_ALLOWED_MODELS`. → [Admin AI Allowances](/docs/reference/api/#admin-ai-allowances)
 - **Spending on summaries and voice is capped.** Fork/Retry summaries (30 per hour) and voice
   transcription (30 per minute) are rate-limited per user: `RATE_LIMIT_SESSION_SUMMARIZE`,
-  `RATE_LIMIT_TRANSCRIBE`.
+  `RATE_LIMIT_TRANSCRIBE`. (Since 8 October, Fork and Retry no longer generate summaries, so
+  `RATE_LIMIT_SESSION_SUMMARIZE` is gone.)
 - **Setup stops echoing secrets.** Saving the `/setup` wizard no longer returns the platform secrets
   in its response.
 - **Fewer duplicate error drafts.** Automated triage groups recurring errors that differ only in

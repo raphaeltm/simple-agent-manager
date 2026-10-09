@@ -17,8 +17,8 @@ SAM root ProjectData storage_safety has repeatedly failed with SQLITE_NOMEM sinc
 - [x] Real SQLite alarm-path tests, bounded-query evidence, discriminating negative controls.
 - [x] Relevant docs and full quality validation; local specialist review.
 - [x] Coordinated staging lease and runtime validation.
-- [ ] PR, CI, CodeRabbit request/wait, merge and production deploy.
-- [ ] Verify root storage_safety completion, no new NOMEM, normal hourly alert dedupe; append evidence and complete idea.
+- [x] PR, CI, CodeRabbit request/wait, merge and production deploy.
+- [x] Verify root storage_safety completion, no new NOMEM, sustained alert dedupe; append evidence and complete idea.
 
 ## Acceptance
 No whole-table aggregate over grouped content. Failure of one substep does not suppress later steps or erase unrelated markers. Mutation operations cannot retry ambiguous NOMEM effects. Production symptom is verified gone before completion.
@@ -37,9 +37,19 @@ Idea 01M1XKK208SJV9VJA4BXP2KBHT; task 01M4DV2PE0ARS834TY69DG3KSF. Rules 53, 62, 
 - No flag override in either GitHub Environment; deployed production cleanup binding=true before changes. Production baseline 13:43Z shows root NOMEM ~once/minute and hourly threshold alerts.
 
 - Full root test run passed21/21 tasks (36m02s): API827files/11615tests; web336files/4023tests. Used one package/worker at a time after unrelated host-load timeouts.
-- Local Cloudflare, constitution, test-engineer, documentation/environment and task-completion reviews PASS/ADDRESSED; deployment acceptance remains pending.
+- Local Cloudflare, constitution, test-engineer, documentation/environment and task-completion reviews PASS/ADDRESSED; production acceptance verified below.
 
 - Staging run37801950185 succeeded including smoke, SHAd78a2cf73. Worker4b4f7a21-08f5-4ef0-8c5a-a501eb793f73 flag=true; actual storage alarms complete allfive substeps. Authenticated dashboard/projects/settings200/no pageerrors, screenshots reviewed; adminmeasure/groupedcleanup200 belowthreshold. NoVMs/resources created; lease released.
 
 - Full CI Workers run:1395 passed, one cursor test raced a real scheduled alarm between manual calls. Test-only fix pauses timer scheduling around explicit real cleanup calls, preserving four one-session pages and final cleanup assertion; reviewer approved,24/24storage tests rerunPASS, ESLintPASS.
-- After~3h rollout delay, authorized stopgap: set production Environment grouped-cleanup override=false (previously absent), deploy37809363295 exactCI-green main974b3fd2e. Deployed binding verification pending; remove override before fixed-code production verification.
+- After~3h rollout delay, authorized stopgap: set production Environment grouped-cleanup override=false (previously absent), deploy37809363295 exactCI-green main974b3fd2e. Stopgap deployed false and verified; override subsequently removed before the fixed deployment, restoring the prior absent override.
+
+## Production acceptance — 2026-10-08
+- PR #2269 merged as ef0e38a538fbcabbb89d56c9299c39f8f7577375; production deployment 37818961138 succeeded.
+- Worker 037dc629-5f73-4f3d-825b-e5a8736006f7 uploaded 17:54:58 UTC; deployed cleanup=true and alert interval=21600000ms verified through Cloudflare settings.
+- Root DO at 18:00:43 UTC completed a bounded pass: two sessions examined, 25 grouped and 25 FTS rows deleted, 139264 bytes reclaimed. Alarms continue completing through 20:57 UTC.
+- Fresh production queries using CF_PRODUCTION_DEBUGGING_TOKEN: zero SQLITE_NOMEM in Workers Observability and platform_errors since upload; cleanup_health=running, last_error=NULL.
+- Last alert remains 1791481370838 (17:42:50.838 UTC), with zero storage alert rows after upload across more than three hours. Existing cleanup-health passes refresh the measurement timestamp, so a separate hourly measured:true alarm was not observed; sustained sampling, stable marker and no duplicate alerts are the runtime evidence.
+- Final CI passed all 1396 Workers tests; CodeRabbit requested through trusted workflow at 17:02, rate limited with no findings after a 16-minute wait.
+- Final task-completion review PASS for checks A/B/C/F; D/E not applicable. No outstanding implementation or runtime acceptance items.
+- Idea 01M1XKK208SJV9VJA4BXP2KBHT completed only after this production evidence. No temporary override, staging lease or VM remains.

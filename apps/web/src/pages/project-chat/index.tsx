@@ -466,7 +466,7 @@ export function ProjectChat() {
               value={state.message}
               onChange={state.setMessage}
               onSubmit={state.handleSubmit}
-              submitting={state.submitting || (state.pendingDerived?.summaryLoading ?? false)}
+              submitting={state.submitting || (state.pendingDerived?.promptLoading ?? false)}
               error={state.submitError}
               placeholder="Describe what you want the agent to do..."
               transcribeApiUrl={state.transcribeApiUrl}

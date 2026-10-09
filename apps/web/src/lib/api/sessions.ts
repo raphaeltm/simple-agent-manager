@@ -322,7 +322,6 @@ export interface StartInstantChatSessionRequest {
   agentProfileId?: string;
   skillId?: string;
   parentTaskId?: string;
-  contextSummary?: string;
 }
 
 export interface StartInstantChatSessionResponse {
@@ -372,44 +371,6 @@ export async function stopChatSession(
     {
       method: 'POST',
     }
-  );
-}
-
-// Context summarization (conversation forking)
-export interface ForkPreparationResponse {
-  parentTaskId: string;
-  parentSessionId: string;
-  parentBranch: string | null;
-  sessionLabel: string;
-  summary: string;
-  messageCount: number;
-  repaired: boolean;
-}
-
-export async function prepareForkSession(
-  projectId: string,
-  sessionId: string
-): Promise<ForkPreparationResponse> {
-  return request<ForkPreparationResponse>(
-    `/api/projects/${projectId}/sessions/${sessionId}/fork-prepare`,
-    { method: 'POST' }
-  );
-}
-
-export interface SessionSummaryResponse {
-  summary: string;
-  messageCount: number;
-  filteredCount: number;
-  method: 'ai' | 'heuristic' | 'verbatim';
-}
-
-export async function summarizeSession(
-  projectId: string,
-  sessionId: string
-): Promise<SessionSummaryResponse> {
-  return request<SessionSummaryResponse>(
-    `/api/projects/${projectId}/sessions/${sessionId}/summarize`,
-    { method: 'POST' }
   );
 }
 

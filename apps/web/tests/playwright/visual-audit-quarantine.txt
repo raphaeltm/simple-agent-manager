@@ -44,7 +44,6 @@ deployment-volumes-audit.spec.ts
 deployments-empty-state-audit.spec.ts
 file-preview-modal-audit.spec.ts
 focus-mode-audit.spec.ts
-fork-retry-new-chat-audit.spec.ts
 frontend-cache-audit.spec.ts
 gcp-credential-audit.spec.ts
 github-reauth-prompt-audit.spec.ts

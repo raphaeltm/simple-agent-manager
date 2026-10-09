@@ -200,7 +200,7 @@ the conversation you are in rather than opening something beside it.)
 | **Resources** | CPU, memory, I/O, and OOM history — [Session Resource History](/docs/guides/session-resources/)                                                                    | Always                                                   |
 | **Events**    | This session's subscriptions, schedules, and watches — [Scheduled actions](/docs/guides/scheduled-actions/)                                                        | Always                                                   |
 | **Comments**  | Comment threads on this session. Unresolved threads show as a dot in icons mode and a count in labels mode; the marker turns amber when a thread is waiting on you | Always                                                   |
-| **Retry**     | Re-run the task behind the session                                                                                                                                 | When the session has a task                              |
+| **Retry**     | Start a new chat with the original task prompt — [Retrying a Session](#retrying-a-session)                                                                         | When the session has a task                              |
 | **Fork**      | Start a new task from this session — [Conversation Forking](#conversation-forking)                                                                                 | When the session has a task                              |
 | **Report**    | File a problem report — [Reporting Issues](/docs/guides/reporting-issues/)                                                                                         | When the deployment has reporting configured             |
 | **Complete**  | Mark the task complete                                                                                                                                             | When the session has a task that is not already finished |
@@ -399,43 +399,27 @@ Agent responses can be played back as audio. SAM uses Deepgram Aura 2 (via Worke
 
 ## Conversation Forking
 
-You can branch off from a conversation to explore an alternative approach without losing the original thread. A fork copies the session's context into a new session — it is session-scoped, not anchored to a particular message.
+You can branch off from a conversation to explore an alternative approach without losing the original thread. A fork starts a new session that is linked to the original one — it is session-scoped, not anchored to a particular message.
 
-Forking now applies to task-backed chat sessions broadly, including instant-container and conversation-style sessions. You do not need to know whether the original session started from an idea, a task, or a lightweight chat; if the session is forkable, SAM preserves the lineage and starts the new branch with the right context.
+Forking applies to task-backed chat sessions broadly, including instant-container and conversation-style sessions. You do not need to know whether the original session started from an idea, a task, or a lightweight chat; SAM records the new session's parent so the lineage is preserved.
 
 ### How to Fork
 
 1. Open the session you want to branch from
 2. Click **Fork** in the [session tool rail](#the-session-tool-rail)
-3. SAM generates an AI-powered context summary of the conversation so far
-4. A new session starts with awareness of the previous conversation
+3. The new-chat screen opens straight away with the message box filled in: a short instruction for the agent plus the previous session's title and its project, session, and task IDs
+4. Edit the message to say what to do next, then send it
 
-### Context Summarization
+The new agent does not get a copy of the old conversation. It reads what it needs with the SAM MCP tools (`get_session_messages`, `search_messages`), using the IDs in the message.
 
-When forking, SAM uses Workers AI to generate a concise summary of the conversation so far. This summary is injected as a system message in the new session.
+### Retrying a Session
 
-For short conversations (5 or fewer messages), the messages are passed directly without AI summarization. For longer conversations, a model generates a focused summary.
-
-| Variable                          | Default                         | Description                          |
-| --------------------------------- | ------------------------------- | ------------------------------------ |
-| `CONTEXT_SUMMARY_MODEL`           | `@cf/google/gemma-4-26b-a4b-it` | Model for context summarization      |
-| `CONTEXT_SUMMARY_MAX_LENGTH`      | `4000`                          | Max summary length (characters)      |
-| `CONTEXT_SUMMARY_TIMEOUT_MS`      | `10000`                         | Summarization timeout                |
-| `CONTEXT_SUMMARY_MAX_MESSAGES`    | `50`                            | Max messages to include              |
-| `CONTEXT_SUMMARY_SHORT_THRESHOLD` | `5`                             | Skip AI for conversations this short |
+**Retry** opens the new-chat screen with the original task prompt filled in, and the banner shows the previous error if there was one. The new session is linked to the original as its parent. If SAM cannot load the original prompt, the message box says so and you can type the prompt yourself.
 
 ### Fork Limits
 
 - Maximum fork depth: 10 levels (configurable via `ACP_SESSION_MAX_FORK_DEPTH`)
 - Each fork starts a new chat; on a VM it gets its own branch and workspace
-- **Fork** and **Retry** both ask SAM for a summary of the conversation, and together they allow 30
-  summaries per hour per user (`RATE_LIMIT_SESSION_SUMMARIZE`), however short the conversation.
-  - Past the limit, **Fork** shows _"Too many requests. Please try again later."_, and its
-    "Forking from" banner stays on _Loading context..._ and the send button stays on a disabled
-    **Sending...**, although nothing is being sent. Close the banner with its **✕** and fork again
-    later.
-  - **Retry** still opens the new chat, but without a summary of the previous one. Wait, or paste the
-    context you need into your message yourself.
 
 ## Finding Past Conversations
 

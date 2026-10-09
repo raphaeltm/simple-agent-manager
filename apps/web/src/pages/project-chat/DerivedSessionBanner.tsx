@@ -41,10 +41,10 @@ export function DerivedSessionBanner({
             Error: {derived.errorMessage}
           </div>
         )}
-        {derived.summaryLoading && (
+        {derived.promptLoading && (
           <div className="flex items-center gap-1.5 mt-1 text-xs text-fg-muted">
             <Spinner size="sm" />
-            Loading context...
+            Loading original prompt...
           </div>
         )}
       </div>

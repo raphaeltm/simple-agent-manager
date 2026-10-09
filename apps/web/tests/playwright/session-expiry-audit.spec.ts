@@ -238,10 +238,6 @@ async function setupApiMocks(
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
       const subPath = projectMatch[2] || '';
-      if (subPath.endsWith('/fork-prepare')) return respond(200, {
-        parentTaskId: 'task-1', parentSessionId: 'chat-session-1', parentBranch: 'main',
-        sessionLabel: session.topic, summary: 'Continue from the preserved transcript.', messageCount: 1, repaired: false,
-      });
       if (subPath === '/skills') return respond(200, { items: [] });
       if (subPath === '/sessions') {
         return respond(200, { sessions, total: sessions.length });
@@ -345,7 +341,8 @@ test('expired transcript, neutral label, and Fork remain usable', async ({ page 
   });
   await page.getByRole('button', { name: 'Fork conversation', exact: true }).click();
   await expect(page.getByText(/Forking from:/)).toBeVisible();
-  await expect(page.getByText('Loading context...')).toHaveCount(0);
+  // No agent is configured in this fixture, so the composer shows its add-an-agent placeholder.
+  await expect(page.getByRole('combobox')).toHaveValue(/Parent session ID: chat-session-1/);
   await page.goto('/projects/proj-agent-1/chat/chat-session-1');
   const openList = page.getByRole('button', { name: 'Open chat list' });
   if (suffix === 'mobile') {
