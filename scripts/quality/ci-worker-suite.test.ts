@@ -28,10 +28,8 @@ function stepBlock(job: string, stepName: string): string {
 }
 
 function withoutWorkerSuiteStep(workflow: string): string {
-  return workflow.replace(
-    /\n {6}- name: Run Worker and Durable Object suites\n {8}run: pnpm --filter @simple-agent-manager\/api test:workers[^\n]*\n/,
-    '\n'
-  );
+  const job = jobBlock(workflow, 'durable-object-worker-shards');
+  return workflow.replace(stepBlock(job, 'Run Worker and Durable Object suites'), '\n');
 }
 
 function expectRequiredWorkerSuiteWiring(workflow: string): void {
@@ -56,7 +54,8 @@ function expectRequiredWorkerSuiteWiring(workflow: string): void {
   expect(step).not.toContain('continue-on-error');
   expect(job).toContain('fail-fast: false');
   expect(job).toContain('shard: [1, 2, 3]');
-  expect(step).toContain('--shard=${{ matrix.shard }}/3');
+  expect(step).toContain('WORKERS_SHARD: ${{ matrix.shard }}');
+  expect(step).toContain('--shard="${WORKERS_SHARD}/3"');
   expect(step).toContain('--reporter=./tests/workers/timing-reporter.ts');
   const gate = jobBlock(workflow, 'durable-object-workers');
   expect(gate).toContain('name: Durable Object Workers');
@@ -102,7 +101,8 @@ describe('Workers shard gate discrimination', () => {
   it('rejects an omitted shard and a disabled shard selector', () => {
     for (const weakened of [
       readCiWorkflow().replace('shard: [1, 2, 3]', 'shard: [1, 2]'),
-      readCiWorkflow().replace('--shard=${{ matrix.shard }}/3', ''),
+      readCiWorkflow().replace('--shard="${WORKERS_SHARD}/3"', ''),
+      readCiWorkflow().replace('WORKERS_SHARD: ${{ matrix.shard }}', ''),
     ])
       expect(() => expectRequiredWorkerSuiteWiring(weakened)).toThrow();
   });
