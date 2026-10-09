@@ -182,16 +182,26 @@ type ProjectDetail struct {
 	RecentSessions       []Session `json:"recentSessions,omitempty"`
 }
 
+// AttentionSummary is the API's structured session attention marker.
+type AttentionSummary struct {
+	MarkerID  string   `json:"markerId"`
+	Kind      string   `json:"kind"`
+	CreatedAt int64    `json:"createdAt"`
+	ExpiresAt *int64   `json:"expiresAt"`
+	Reason    *string  `json:"reason"`
+	Options   []string `json:"options"`
+}
+
 // Session represents a chat session.
 type Session struct {
-	ID            string  `json:"id"`
-	Topic         string  `json:"topic,omitempty"`
-	Status        string  `json:"status,omitempty"`
-	MessageCount  int     `json:"messageCount,omitempty"`
-	StartedAt     any     `json:"startedAt,omitempty"`
-	LastMessageAt any     `json:"lastMessageAt,omitempty"`
-	Attention     *string `json:"attention,omitempty"`
-	TaskID        string  `json:"taskId,omitempty"`
+	ID            string            `json:"id"`
+	Topic         string            `json:"topic,omitempty"`
+	Status        string            `json:"status,omitempty"`
+	MessageCount  int               `json:"messageCount,omitempty"`
+	StartedAt     any               `json:"startedAt,omitempty"`
+	LastMessageAt any               `json:"lastMessageAt,omitempty"`
+	Attention     *AttentionSummary `json:"attention,omitempty"`
+	TaskID        string            `json:"taskId,omitempty"`
 }
 
 // SessionListResponse wraps a list of sessions.
