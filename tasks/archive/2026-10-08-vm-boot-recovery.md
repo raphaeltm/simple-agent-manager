@@ -19,7 +19,7 @@ Production task 01M467MSH3527SSD28TKTFHC8W failed after node 01M467ND1CM7J766YCN
 - [x] One durable fresh-VM replacement budget; confirmed teardown before replacement; no workspace/agent replay, reused/BYO nodes untouched; crash-boundary tests.
 - [x] Environment/API/operator documentation and unit/integration tests.
 - [x] Lint, typecheck, tests, build and local specialist reviews; address all findings.
-- [ ] Exclusive staging lease; real new VM, heartbeat/access/TLS checks; <=2 VMs, prompt deletion and release.
+- [x] Exclusive staging lease; real new VM, heartbeat/access/TLS checks; <=2 VMs, prompt deletion and release.
 - [ ] PR/CI/CodeRabbit gate, merge, production deploy; idea evidence and completion; channel MERGED/DONE and unsubscribe.
 
 ## Acceptance
@@ -58,3 +58,8 @@ Feature comparison deploy37816522004 completed successfully including smoke. Fin
 
 ## Bounded binary-download follow-up
 Independent sibling deploy7fe65052c (cloud-init template/generator identical to baseline974b) also had a no-heartbeat replacement; our earlier A/B does not establish a branch-specific regression. A later running sibling VM reported API/R2 DNS lookup timeouts. Root cause remains unproven, but initial binary curl had a concrete unbounded DNS/connect/transfer gap. Added CLOUD_INIT_AGENT_DOWNLOAD_TIMEOUT_SECONDS (default60) so failures reach the existing fixed-reason boot callback and bounded replacement. All181 cloud-init tests, lint/typecheck/build,47 deployment-forwarding tests, API build/typecheck and context-budget check pass. Independent review approved; shell exit28 test proves configured deadline argument, reporting, and no continuation, not real DNS timing. Real feature-VM gate still required.
+
+## Final healthy branch infrastructure gate — passed and cleaned
+Staging deployment37871217816 succeeded on6e5b463992b616c4eb3ffd87671ddd38b81b2f46 including smoke. Lease154 used one VM only:01M4F6FQDNWDB6DJGVR0ARXH7W created2026-10-09T02:04:45.877Z, heartbeat02:07:20.741Z (155s), ready02:09:06.433Z with expected096afcd8f1211df3fdb414bc101763c75c9ef754 agent. Task01M4F6FF7G2AX8EE3JGPQCNANJ reached running, workspace01M4F6QQ05CB1ZV6B050R4VN7Q. Playwright dashboard/projects/settings200, zero page errors, HTTPS health200; authenticated terminal printed BOOT_RECOVERY_OK at02:09:40.552Z. Agent assistant/tool activity observed; no final assistant canary response claimed. Cold boot155s exceeds the generic two-minute benchmark but is faster than the earlier main control184s and within the empirically justified six-minute readiness budget.
+
+Task cancelled and workspace/node/project deleted successfully by02:14Z; D1 query found no non-deleted/non-stopped nodes. STAGING_RELEASE PASS/cleaned channel156 and direct coordinator handoff sent. Earlier live controlled stop proves termination-before-replacement and bounded exhaustion; final normal VM proves heartbeat/TLS/access. Earlier intermittent boot root cause remains unproven. Latest completion review found no code gaps; release/production bookkeeping remains.
