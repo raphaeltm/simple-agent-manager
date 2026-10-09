@@ -49,7 +49,9 @@ export const PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_UNALIASED_SQL = `requested_del
  *
  * Wake candidate selection and the wake alarm schedule must both exclude occupied targets with
  * this same predicate, so a waiting subscription never re-arms the alarm while it cannot run
- * (`.claude/rules/47` requirement 10). Binds one parameter: the current time.
+ * (`.claude/rules/47` requirement 10). Binds one parameter: the current time. Relies on every
+ * prompt-queue batch having `delivery_expires_at` (`insertPromptQueueBatch` sets it, nothing
+ * extends it); a NULL would not hold the chat.
  */
 export const WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL = `EXISTS (
   SELECT 1 FROM project_event_delivery_batches occupying

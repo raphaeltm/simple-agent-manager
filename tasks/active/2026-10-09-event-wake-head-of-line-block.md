@@ -95,13 +95,13 @@ SAM investigation task `01M4GHKAEHXX9MG467QPMJ6EMY`, root cause also on idea
 
 ## Acceptance criteria
 
-- [ ] A chat with a delivered but unacknowledged wake receives the next matching event's wake as soon
+- [x] A chat with a delivered but unacknowledged wake receives the next matching event's wake as soon
       as the prompt queue can deliver it (no 24 h hold)
-- [ ] At most one undelivered (pending) wake batch exists per chat at any time
-- [ ] No code path copies a wake batch's expiry into another subscription's cooldown
-- [ ] Existing stamped subscriptions are released by the migration
-- [ ] A pulled event never reports `resolvedDelivery: "unsupported"` for a supported subscription
-- [ ] The wake alarm section does not re-arm in a loop while a chat is occupied
+- [x] At most one undelivered (pending) wake batch exists per chat at any time
+- [x] No code path copies a wake batch's expiry into another subscription's cooldown
+- [x] Existing stamped subscriptions are released by the migration
+- [x] A pulled event never reports `resolvedDelivery: "unsupported"` for a supported subscription
+- [x] The wake alarm section does not re-arm in a loop while a chat is occupied
 - [ ] Staging: an agent chat with an open, unacknowledged wake is woken by a second subscription's
       event without acknowledging the first
 - [ ] Lint, typecheck, tests and build pass

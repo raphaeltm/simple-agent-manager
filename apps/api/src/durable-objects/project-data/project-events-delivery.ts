@@ -69,6 +69,11 @@ const TERMINAL_BATCH_STATES = new Set([
   'cancelled',
 ]);
 
+/**
+ * Records a batch on the default `pull` channel. Prompt-queue wake batches come only from
+ * `insertPromptQueueBatch`, whose delivery expiry chat occupancy reads
+ * (`WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL`); do not create wakes here.
+ */
 export function createProjectEventDeliveryBatch(
   sql: SqlStorage,
   env: Env,
@@ -229,6 +234,11 @@ export function listProjectEventDeliveryBatches(
   };
 }
 
+/**
+ * Can move any batch out of `pending`. If a caller ever records attempts on prompt-queue wake
+ * batches, its RPC must re-arm the alarm like `ackProjectEventDelivery`: a wake leaving `pending`
+ * frees its chat for the next one.
+ */
 export function recordProjectEventDeliveryAttempt(
   sql: SqlStorage,
   env: Env,
