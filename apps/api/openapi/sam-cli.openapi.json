@@ -5810,6 +5810,12 @@
                     "type": "string",
                     "format": "binary"
                   },
+                  "filename": {
+                    "type": "string"
+                  },
+                  "mimeType": {
+                    "type": "string"
+                  },
                   "directory": {
                     "type": "string"
                   },

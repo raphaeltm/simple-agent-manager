@@ -1020,3 +1020,19 @@ describe('ensureTomlMap', () => {
     );
   });
 });
+
+it('forwards optional CLI receipt limits without adding default bindings', () => {
+  vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+  const checkedIn = TOML.parse(
+    readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf8')
+  ) as WranglerToml;
+  const baseline = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null);
+  expect(baseline.vars?.CLI_RECEIPT_REQUEST_MAX_BYTES).toBeUndefined();
+  vi.stubEnv('CLI_RECEIPT_REQUEST_MAX_BYTES', '131072');
+  vi.stubEnv('CLI_RECEIPT_RESPONSE_MAX_BYTES', '32768');
+  const configured = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null);
+  expect(configured.vars).toMatchObject({
+    CLI_RECEIPT_REQUEST_MAX_BYTES: '131072',
+    CLI_RECEIPT_RESPONSE_MAX_BYTES: '32768',
+  });
+});

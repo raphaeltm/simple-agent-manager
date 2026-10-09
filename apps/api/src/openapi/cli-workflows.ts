@@ -290,6 +290,8 @@ cliWorkflowMutations[upload] = {
             type: 'object',
             properties: {
               file: { type: 'string', format: 'binary' },
+              filename: string,
+              mimeType: string,
               directory: string,
               description: string,
             },
