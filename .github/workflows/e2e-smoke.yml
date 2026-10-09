@@ -9,6 +9,8 @@ on:
       - 'packages/shared/**'
       - 'packages/task-runner/**'
       - 'scripts/e2e/**'
+      - 'scripts/deploy/configure-docker-mirror.mjs'
+      - '.github/workflows/e2e-smoke.yml'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
@@ -52,6 +54,12 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Configure Docker Hub cache
+        run: |
+          sudo node scripts/deploy/configure-docker-mirror.mjs /etc/docker/daemon.json https://mirror.gcr.io
+          sudo systemctl restart docker
+          docker info --format '{{json .RegistryConfig.Mirrors}}'
 
       - name: Run smoke test
         run: bash -lc "$SMOKE_COMMAND"
