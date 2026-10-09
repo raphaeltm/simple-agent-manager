@@ -21,7 +21,7 @@ The workspace MCP server embeds platform operations in protocol handlers. Shared
 - [x] Check touched services for `McpTokenData` coupling: none of these ten paths uses a service typed with it; only the workspace adapter retains the token type.
 - [x] Add real SQLite attack/control tests and guard deletion checks. All eight deleted guards made their target attack tests fail; restored suite passed.
 - [x] Add representative adapter parity tests; keep existing MCP tests green.
-- [ ] Run normal quality, specialist, staging and PR gates.
+- [x] Run normal quality, specialist, staging and PR gates. Full local suite and PR CI passed; staging run 37972744647 verified all requested workspace tools from a real agent session and cleaned its resources. CodeRabbit and merge remain Phase 7 delivery gates.
 
 ## Intended behavior change
 
