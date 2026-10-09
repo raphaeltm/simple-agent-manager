@@ -111,11 +111,14 @@ async function protocol(c: Context<{ Bindings: Env }>) {
     c.executionCtx as unknown as ExecutionContext
   );
   if (c.req.path === '/oauth/register' && response.ok) {
-    const client = (await response.clone().json()) as {
-      client_id: string;
-      client_name?: string;
-      redirect_uris: string[];
-    };
+    const client = v.parse(
+      v.object({
+        client_id: v.string(),
+        client_name: v.optional(v.string()),
+        redirect_uris: v.array(v.pipe(v.string(), v.url())),
+      }),
+      await response.clone().json()
+    );
     await c.env.DATABASE.prepare(
       'INSERT OR IGNORE INTO connector_oauth_clients (id,client_name,redirect_hosts,created_at,expires_at) VALUES (?,?,?,?,?)'
     )
@@ -129,7 +132,7 @@ async function protocol(c: Context<{ Bindings: Env }>) {
       .run();
   }
   if (c.req.path === '/.well-known/oauth-authorization-server' && response.ok) {
-    const metadata = (await response.json()) as Record<string, unknown>;
+    const metadata = v.parse(v.record(v.string(), v.unknown()), await response.json());
     metadata.revocation_endpoint = `https://api.${c.env.BASE_DOMAIN}/oauth/revoke`;
     return c.json(metadata, 200, { 'Cache-Control': 'no-store' });
   }

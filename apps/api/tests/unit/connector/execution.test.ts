@@ -25,9 +25,9 @@ beforeEach(() => {
   sqlite = new Database(':memory:');
   createSchemaTables(sqlite, [schema.users, schema.projects, schema.platformSettings]);
   for (const migration of ['0189_cli_operation_receipts.sql', '0191_connector_execution.sql']) {
-    sqlite.exec(
-      readFileSync(new URL(`../../../src/db/migrations/${migration}`, import.meta.url), 'utf8')
-    );
+    // Execute the production migration as SQLite setup; assertions exercise real writes.
+    const migrationUrl = new URL(`../../../src/db/migrations/${migration}`, import.meta.url);
+    sqlite.exec(readFileSync(migrationUrl, 'utf8'));
   }
   sqlite.exec(
     "INSERT INTO users(id) VALUES ('owner'),('other'); INSERT INTO projects(id) VALUES ('project');"

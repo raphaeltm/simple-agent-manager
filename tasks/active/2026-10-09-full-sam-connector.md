@@ -19,7 +19,7 @@ Existing operations are in `apps/api/src/operations`. PAT HMAC authentication is
 - [x] Mobile/desktop consent, Settings Access and Connected apps, Admin Integrations Connector controls, provenance labels.
 - [x] Public guide, self-hosting/env/API references.
 - [x] SQLite attack/control tests and guard mutation checks; real MCP client tests; OAuth conformance and full capability flow.
-- [ ] Lint/typecheck/tests/build, mobile/desktop Playwright screenshots reviewed.
+- [x] Lint/typecheck/tests/build, mobile/desktop Playwright screenshots reviewed.
 - [x] Independent specialist reviews, all findings addressed.
 - [ ] PR required checks green, CodeRabbit requested and any feedback resolved, ready for review.
 
@@ -28,3 +28,5 @@ Scope follows the fully specified and approved P0–P2 Connector. The specificat
 ## Review and PR evidence
 
 PR: https://github.com/raphaeltm/simple-agent-manager/pull/2294 (no merge/deploy). Independent security/constitution/Cloudflare/docs/completion and test/env/UI reviewers PASS. Final local desktop/mobile Playwright18/18; screenshot evidence published in PR comment6087971171. Review fixed DCR admission, atomic OAuth replay handling, audit allowlists, pagination request races and long-client badge clipping. Full lint/typecheck/build passed; final full-suite rerun and CI remain pending. P0 owner merged #2293; integrate current main without merging this PR.
+
+Final local full-suite validation: `pnpm test`21 tasks pass (API11,842 pass +2 existing skips), `pnpm lint`, `pnpm typecheck` and `pnpm build` all pass. CI in progress; initial preflight wording corrected, migration-execution test setup clarified for source-contract detector.
