@@ -32,3 +32,11 @@ PR: https://github.com/raphaeltm/simple-agent-manager/pull/2294 (no merge/deploy
 Final local full-suite validation: `pnpm test`21 tasks pass (API11,842 pass +2 existing skips), `pnpm lint`, `pnpm typecheck` and `pnpm build` all pass. CI in progress; initial preflight wording corrected, migration-execution test setup clarified for source-contract detector.
 
 Actions CI37982405687 passed all applicable jobs (visual228 pass/28 skips). Late Sonar findings addressed with safe URLSearchParams construction and explicit audit sort; independent security re-review PASS, OAuth21 and execution6 tests PASS. CodeRabbit requested20:00 UTC via trusted workflow37984009394; declined115 selected files over100-file limit, no findings. Final fix CI/Sonar and observation window pending.
+
+## Final validation record
+
+- Final Actions run [37984236981](https://github.com/raphaeltm/simple-agent-manager/actions/runs/37984236981) passed every applicable job on `1c3cb3ea7`: lint, typecheck, coverage, build, all three Workers shards, browser tests, CLI, infrastructure, deployment-script validation, quality and evidence gates.
+- Local workspace validation passed 18,528 tests (two existing API skips). Targeted final OAuth Workers21/21 and execution6/6 passed after the two Sonar fixes. Independent security re-review passed both changes.
+- CodeRabbit requested once through trusted workflow37984009394 at20:00 UTC. After more than15 minutes, no review arrived: the service declined115 selected files against its100-file limit and reported rate limiting. This is the repository's documented best-effort no-review outcome; no unresolved CodeRabbit findings exist.
+- No merge or deployment performed. Live external-client/compute validation remains explicitly unperformed under the requester's constraint.
+- SonarCloud has not published analysis for the latest fix commit: the PR view still points to95e143822, while `/api/ce/component` shows an older report rejected as stale and `/api/ce/analysis_status` reports no active analysis. This documentation checkpoint provides a fresh push event; do not claim a green Sonar gate until it reports on the latest head.
