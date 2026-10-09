@@ -152,7 +152,7 @@ type browserCommand struct {
 	args []string
 }
 
-func browserCommands(goos string, target string) []browserCommand {
+func browserCommands(goos, target string) []browserCommand {
 	switch goos {
 	case "darwin":
 		return []browserCommand{{name: "open", args: []string{target}}}
