@@ -45,3 +45,7 @@ PR #2290. User initially requested draft/no merge; 2026-10-09 follow-up explicit
 Deploy Staging 37910686532 passed on 44a5a82d2. Authenticated Playwright browser and downloaded public Linux amd64 CLI; embedded revision matched exactly. Smoke account had three populated attention objects. All eight chat list/detail/project/status text and JSON commands passed. Nine messages matched API content, roles and numeric/ISO timestamps; hasMore=false matched the live API. Populated attention decoded and round-tripped. No VMs or test resources provisioned. Private response values stayed in memory; logs contain only counts/revision/booleans.
 
 Implementation acceptance is complete. The final CI/CodeRabbit/merge/automatic-deployment outcomes remain tracked in PR #2290 and local .do-state.md; do not infer merge from this implementation validation record.
+
+## CodeRabbit review follow-up
+
+CodeRabbit/Sonar identified excessive cognitive complexity in the two regression test orchestrators (39 and 99). Split scenario orchestration, HTTP setup, client checks and text/JSON assertions into focused helpers. All 40 scenarios remain; client-detail checks now compare the complete message array. Independent Go/test-completion reviewers passed again; full race suite remains 83.1% CLI coverage and vet passes. Production types/commands are unchanged after live staging verification. Final CI/Sonar/incremental-review outcomes are recorded in PR #2290.
