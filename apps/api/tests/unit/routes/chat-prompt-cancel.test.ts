@@ -361,7 +361,7 @@ describe('POST /sessions/:sessionId/prompt', () => {
       })
     );
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
-    expect(mocks.drizzle).toHaveBeenCalledTimes(1);
+    expect(mocks.drizzle).toHaveBeenCalledTimes(2);
   });
 
   it('uses the extended wake budget for a sleeping session', async () => {

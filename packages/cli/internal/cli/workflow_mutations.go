@@ -77,6 +77,7 @@ func runMetadataMutation(ctx context.Context, runtime Runtime, p parsedArgs, arg
 	}
 	path := projectAPIPath(project)
 	method := http.MethodPatch
+	var cloneSource string
 	switch family {
 	case "settings":
 		path = projectAPIPath(project, "cli", "settings")
@@ -103,7 +104,7 @@ func runMetadataMutation(ctx context.Context, runtime Runtime, p parsedArgs, arg
 			method = http.MethodPost
 		} else {
 			if len(args) != 1 {
-				return fail(runtime.Stderr, fmt.Errorf("update requires one name or ID"))
+				return fail(runtime.Stderr, fmt.Errorf("update/clone requires one name or ID"))
 			}
 			id, e := resolveNamedResource(ctx, client, project, apiFamily, args[0])
 			if e != nil {
@@ -112,6 +113,19 @@ func runMetadataMutation(ctx context.Context, runtime Runtime, p parsedArgs, arg
 			var current map[string]any
 			if e = client.request(ctx, http.MethodGet, projectAPIPath(project, apiFamily, id), nil, &current); e != nil {
 				return fail(runtime.Stderr, e)
+			}
+			if action == "clone" {
+				if p.Flags["name"] == "" {
+					return fail(runtime.Stderr, fmt.Errorf("clone requires --name for a new project resource"))
+				}
+				if _, ok := fields["description"]; !ok {
+					if v, exists := current["description"]; exists {
+						fields["description"] = v
+					}
+				}
+				method = http.MethodPost
+				cloneSource = id
+				break
 			}
 			if current["projectId"] != project {
 				return fail(runtime.Stderr, fmt.Errorf("shared/global resources cannot be updated through project commands"))
@@ -156,6 +170,9 @@ func runMetadataMutation(ctx context.Context, runtime Runtime, p parsedArgs, arg
 	if err = client.request(ctx, method, path, fields, &value); err != nil {
 		return fail(runtime.Stderr, err)
 	}
+	if cloneSource != "" {
+		return writeWorkflow(runtime, p, map[string]any{"created": value, "sourceId": cloneSource, "configurationCopied": false, "copiedFields": []string{"description"}})
+	}
 	return writeWorkflow(runtime, p, value)
 }
 func runSettingsInspect(ctx context.Context, runtime Runtime, p parsedArgs) int {
@@ -178,5 +195,35 @@ func runSettingsInspect(ctx context.Context, runtime Runtime, p parsedArgs) int 
 		}
 	}
 	safe["runtimeValues"] = "redacted"
+	var assets map[string]any
+	if readErr := client.request(ctx, http.MethodGet, projectAPIPath(project, "runtime-config"), nil, &assets); readErr != nil {
+		safe["runtimeConfig"] = map[string]any{"available": false}
+	} else {
+		masked := map[string]any{}
+		for _, kind := range []string{"envVars", "files"} {
+			var rows []any
+			for _, row := range anyRows(assets[kind]) {
+				source, ok := row.(map[string]any)
+				if !ok {
+					continue
+				}
+				metadata := map[string]any{"value": "REDACTED"}
+				for _, key := range []string{"key", "path", "isSecret", "hasValue", "createdAt", "updatedAt"} {
+					if v, exists := source[key]; exists {
+						metadata[key] = v
+					}
+				}
+				rows = append(rows, metadata)
+			}
+			masked[kind] = rows
+		}
+		safe["runtimeConfig"] = masked
+	}
+	safe["resolutionOrder"] = []string{"explicit task", "skill/profile", "project agent defaults", "user agent settings", "platform defaults"}
+	if defaults, ok := value["agentDefaults"].(map[string]any); ok {
+		safe["agentDefaults"] = defaults
+	}
 	return writeWorkflow(runtime, p, safe)
 }
+
+func anyRows(v any) []any { rows, _ := v.([]any); return rows }

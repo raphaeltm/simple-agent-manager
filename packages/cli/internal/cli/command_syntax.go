@@ -31,7 +31,7 @@ func validateCommandSyntax(p parsedArgs) error {
 			return fmt.Errorf("settings accepts get or update without extra arguments")
 		}
 	case "profiles", "skills":
-		if action == "create" && len(args) != 2 || action == "update" && len(args) != 3 {
+		if action == "create" && len(args) != 2 || (action == "update" || action == "clone") && len(args) != 3 {
 			return fmt.Errorf("%s %s has invalid resource arguments", family, action)
 		}
 	case "auth", "runner":

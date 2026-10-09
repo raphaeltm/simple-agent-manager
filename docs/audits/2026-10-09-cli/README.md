@@ -1,5 +1,7 @@
 # SAM CLI audit: assistant and voice workflows
 
+Implementation follow-up: Raphael subsequently authorized implementation. [Current command documentation](../../../apps/www/src/content/docs/docs/reference/cli-project-workflows.md) records implemented scope and deferred consequential writes. The findings below retain the original baseline.
+
 Date: 2026-10-09. Source snapshot: `5199e5771eb6519e78a8a4d451dcaa2726ae7fcd`, verified against remote `main` during the audit. Audit branch: `sam/audit-sam-cli-coverage-hvw14r`.
 
 ## Executive summary

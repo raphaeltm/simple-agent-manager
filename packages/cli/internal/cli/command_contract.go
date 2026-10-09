@@ -31,6 +31,13 @@ func commandFlags(p parsedArgs) []string {
 		action = p.Positionals[1]
 	}
 	switch family {
+	case "comments":
+		if action == "add" || action == "reply" {
+			return strings.Fields("body body-file body-stdin idempotency-key")
+		}
+		if action == "resolve" || action == "reopen" {
+			return strings.Fields("idempotency-key")
+		}
 	case "files":
 		if action == "download" {
 			return strings.Fields("ref path output")
@@ -38,6 +45,9 @@ func commandFlags(p parsedArgs) []string {
 	case "library":
 		if action == "download" {
 			return strings.Fields("output")
+		}
+		if action == "upload" {
+			return strings.Fields("directory description filename mimeType")
 		}
 	case "auth":
 		if action == "login" {
@@ -73,8 +83,11 @@ func commandFlags(p parsedArgs) []string {
 			return strings.Fields(submitFlagNames + " launch")
 		}
 	case "profiles", "skills":
-		if action == "create" || action == "update" || action == "clone" {
-			return strings.Fields("name description preview expected-updated-at idempotency-key")
+		switch action {
+		case "create", "clone":
+			return strings.Fields("name description preview idempotency-key")
+		case "update":
+			return strings.Fields("name description preview expected-updated-at")
 		}
 	case "settings":
 		if action == "update" {
@@ -112,7 +125,7 @@ func validateCommandFlags(p parsedArgs) error {
 }
 func booleanCommandFlag(n string) bool {
 	switch n {
-	case "recursive", "all", "all-pages", "prompt-stdin", "content-stdin", "session-cookie-stdin", "exclusive-node", "preview", "ndjson", "hydrate-tools", "launch":
+	case "body-stdin", "recursive", "all", "all-pages", "prompt-stdin", "content-stdin", "session-cookie-stdin", "exclusive-node", "preview", "ndjson", "hydrate-tools", "launch":
 		return true
 	}
 	return false
@@ -133,7 +146,7 @@ func workflowHelp(family string) string {
 		for i := 0; i < c.args; i++ {
 			fmt.Fprintf(&b, " <id%d>", i+1)
 		}
-		fmt.Fprintf(&b, " [%s] (%s)\n", strings.Join(c.query, " | "), c.effect)
+		fmt.Fprintf(&b, " [%s] (%s)\n", "--"+strings.Join(c.query, " | --"), c.effect)
 	}
 	if family == "" || family == "tasks" {
 		b.WriteString("  sam tasks submit <prompt> [--agent-profile <name-or-id>] [--skill <name-or-id>] [--prompt-file <path>|--prompt-stdin] (launches work)\n")
@@ -177,12 +190,12 @@ func mutationHelp(family string) string {
 	lines := map[string]string{
 		"tasks":    "  sam tasks create --title <text> [--description <text>] [--priority <n>] (draft metadata)\n  sam tasks update <id> [--title <text>] [--description <text>] [--priority <n>]\n  sam tasks wait <id> [--timeout 30m] [--interval 2s] (read-only; exits 3 timeout, 4 failed/cancelled)\n  sam task submit <project-id> <prompt> (legacy alias)\n  sam task status <project-id> <task-id> (legacy alias)\n",
 		"ideas":    "  sam ideas create --title <text> [--description <text>] [--priority <n>]\n  sam ideas update <id> [--title <text>] [--description <text>] [--priority <n>]\n  sam ideas execute <id> [--launch] (prepare by default; launch creates work and links Idea)\n",
-		"profiles": "  sam profiles create --name <text> [--description <text>] [--idempotency-key <key>]\n  sam profiles update <name-or-id> [--name <text>] [--description <text>] [--expected-updated-at <version>] [--preview] (project metadata only)\n",
+		"profiles": "  sam profiles clone <source-name-or-id> --name <new-name> [--preview] (metadata only; configuration not copied)\n  sam profiles create --name <text> [--description <text>] [--idempotency-key <key>]\n  sam profiles update <name-or-id> [--name <text>] [--description <text>] [--expected-updated-at <version>] [--preview] (project metadata only)\n",
 		"skills":   "  sam skills create --name <text> [--description <text>] [--idempotency-key <key>]\n  sam skills update <name-or-id> [--name <text>] [--description <text>] [--expected-updated-at <version>] [--preview] (project metadata only)\n",
 		"settings": "  sam settings [get] (safe metadata; runtime values masked)\n  sam settings update [--name <text>] [--description <text>] [--preview] (routine project metadata only)\n",
 		"chat":     "  sam chat fork <id> [--launch] (prepare lineage; explicit launch creates work)\n  sam chat retry <id> [--launch] (prepare original prompt; explicit launch creates work)\n",
 		"files":    "  sam files download --ref <ref> --path <path> --output <new-file> (read-only)\n",
-		"library":  "  sam library download <id> --output <new-file> (read-only)\n",
+		"library":  "  sam library upload <local-file> [--directory <path>] [--description <text>] (creates artifact; no automatic retry)\n  sam library download <id> --output <new-file> (read-only)\n",
 	}
 	var b strings.Builder
 	for _, key := range []string{"tasks", "ideas", "profiles", "skills", "settings", "chat", "files", "library"} {
@@ -191,7 +204,7 @@ func mutationHelp(family string) string {
 		}
 	}
 	if family == "" || family == "tasks" || family == "chat" {
-		b.WriteString("  Submit flags: " + strings.Join(strings.Fields(submitFlagNames), ", ") + "\n  Resource flags set explicit placement requirements. --model is reserved and fails.\n  --attachment uploads private bytes; keyed retries should reuse --attachment-ref-file or reconcile receipts.\n")
+		b.WriteString("  Submit flags: " + strings.ReplaceAll(strings.Join(strings.Fields(submitFlagNames), ", "), "max-co-tenants, ", "") + "\n  Resource flags set explicit placement requirements. --model is reserved and fails.\n  --attachment uploads private bytes; keyed retries should reuse --attachment-ref-file or reconcile receipts.\n")
 	}
 	return b.String()
 }

@@ -30,10 +30,10 @@ import { getAuth, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { jsonValidator, SubmitTaskSchema } from '../../schemas';
-import { cliOperationReceipt } from '../../services/cli-operation-receipts';
 import { validateAttachments } from '../../services/attachment-upload';
 import { generateBranchName } from '../../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
+import { cliOperationReceipt } from '../../services/cli-operation-receipts';
 import { enrichMessageWithMentions } from '../../services/mention-enrichment';
 import {
   PlacementResolutionError,

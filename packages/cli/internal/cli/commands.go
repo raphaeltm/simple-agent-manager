@@ -126,6 +126,18 @@ func runStatus(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 		}
 		return fail(runtime.Stderr, resolveErr)
 	}
+	if parsed.Globals.JSON {
+		var projectData any
+		var sessionData any
+		if err := client.request(ctx, http.MethodGet, projectAPIPath(projectID), nil, &projectData); err != nil {
+			return fail(runtime.Stderr, err)
+		}
+		if err := client.request(ctx, http.MethodGet, projectAPIPath(projectID, "sessions"), nil, &sessionData); err != nil {
+			return fail(runtime.Stderr, err)
+		}
+		return writeWorkflow(runtime, parsed, map[string]any{"project": projectData, "sessions": sessionData})
+	}
+
 	detail, err := client.GetProjectDetail(ctx, projectID)
 	if err != nil {
 		return fail(runtime.Stderr, err)
@@ -216,13 +228,19 @@ func runChatNew(ctx context.Context, runtime Runtime, parsed parsedArgs, args []
 	if resolveErr != nil {
 		return fail(runtime.Stderr, resolveErr)
 	}
-	message := commandMessage(parsed, args)
+	message, inputErr := readCommandInput(runtime, parsed, args, "prompt")
+	if inputErr != nil {
+		return fail(runtime.Stderr, inputErr)
+	}
 	if strings.TrimSpace(message) == "" {
 		return fail(runtime.Stderr, fmt.Errorf("chat new requires a message. Usage: sam chat new <message>"))
 	}
 	options, err := parseSubmitOptions(parsed)
 	if err != nil {
 		return fail(runtime.Stderr, err)
+	}
+	if options.Mode != "" && options.Mode != "conversation" {
+		return fail(runtime.Stderr, fmt.Errorf("chat new requires conversation mode; use tasks submit for task mode"))
 	}
 	options.Mode = "conversation"
 	return submitTaskWithClient(ctx, runtime, parsed, client, projectID, message, options)
@@ -258,6 +276,9 @@ func runChatView(ctx context.Context, runtime Runtime, parsed parsedArgs, sessio
 			ts = " (" + formatted + ")"
 		}
 		fmt.Fprintf(&sb, "[%s]%s\n%s", role, ts, m.Content)
+	}
+	if response.HasMore {
+		sb.WriteString("\n\nEarlier messages exist. Use sam chat messages --before <exact-cursor> or sam chat export <session-id>.")
 	}
 	return writeOrFail(runtime, parsed.Globals.JSON, sb.String(), response)
 }

@@ -32,7 +32,7 @@ func workflowContracts() []workflowContract {
 		readContract("tasks receipt", []string{"operation-receipts"}, 0, "key operation sessionId"),
 		readContract("tasks list", []string{"tasks"}, 0, "status minPriority sort limit cursor"),
 		readContract("tasks get", []string{"tasks", "$0"}, 1, ""),
-		readContract("tasks events", []string{"tasks", "$0", "events"}, 1, "limit cursor"),
+		readContract("tasks events", []string{"tasks", "$0", "events"}, 1, ""),
 		readContract("tasks sessions", []string{"tasks", "$0", "sessions"}, 1, ""),
 		readContract("ideas list", []string{"tasks"}, 0, "limit cursor"),
 		readContract("ideas get", []string{"tasks", "$0"}, 1, ""),
@@ -50,17 +50,17 @@ func workflowContracts() []workflowContract {
 		readContract("chat interactions", []string{"sessions", "$0", "interactions"}, 1, ""),
 		readContract("chat interaction", []string{"sessions", "$0", "interactions", "$1"}, 2, ""),
 		readContract("comments list", []string{"comments"}, 0, "limit status"),
-		readContract("comments session", []string{"sessions", "$0", "comments"}, 1, "limit cursor"),
+		readContract("comments session", []string{"sessions", "$0", "comments"}, 1, "limit afterSequence messageId status"),
 		readContract("files branches", []string{"repo", "branches"}, 0, ""),
-		readContract("files tree", []string{"repo", "tree"}, 0, "ref path"),
+		readContract("files tree", []string{"repo", "tree"}, 0, "ref"),
 		readContract("files get", []string{"repo", "file"}, 0, "ref path"),
 		readContract("files compare", []string{"repo", "compare"}, 0, "base head"),
 		readContract("library list", []string{"library"}, 0, "limit cursor directory recursive search tags mimeType status uploadSource sortBy sortOrder"),
 		readContract("library get", []string{"library", "$0"}, 1, ""),
-		readContract("library directories", []string{"library", "directories"}, 0, ""),
+		readContract("library directories", []string{"library", "directories"}, 0, "parentDirectory search"),
 		readContract("context list", []string{"knowledge"}, 0, "limit offset entityType"),
-		readContract("context get", []string{"knowledge", "$0"}, 1, ""),
-		readContract("context search", []string{"knowledge", "search"}, 0, "q limit"),
+		readContract("context get", []string{"knowledge", "$0"}, 1, "includeInactive"),
+		readContract("context search", []string{"knowledge", "search"}, 0, "q entityType minConfidence limit"),
 		readContract("policies list", []string{"policies"}, 0, ""),
 		readContract("policies get", []string{"policies", "$0"}, 1, ""),
 		readContract("activity list", []string{"activity"}, 0, "limit before eventType sessionId"),
@@ -72,10 +72,15 @@ func workflowContracts() []workflowContract {
 		readContract("events deliveries", []string{"event-subscriptions", "$0", "deliveries"}, 1, "limit"),
 		readContract("events channels", []string{"event-channels"}, 0, "limit cursor"),
 		readContract("events history", []string{"event-channels", "$0", "history"}, 1, "limit cursor"),
-		readContract("schedules list", []string{"schedules"}, 0, "limit cursor"),
+		readContract("schedules list", []string{"schedules"}, 0, "limit cursor sessionId"),
 		readContract("schedules get", []string{"schedules", "$0"}, 1, ""),
-		readContract("watches list", []string{"standing-watches"}, 0, "limit cursor"),
+		readContract("watches list", []string{"standing-watches"}, 0, "limit cursor sessionId"),
 		readContract("watches get", []string{"standing-watches", "$0"}, 1, ""),
+		readContract("deployments releases", []string{"environments", "$0", "releases"}, 1, ""),
+		readContract("deployments release", []string{"environments", "$0", "releases", "$1"}, 2, ""),
+		readContract("deployments routes", []string{"environments", "$0", "public-routes"}, 1, ""),
+		readContract("deployments containers", []string{"environments", "$0", "containers"}, 1, ""),
+		readContract("deployments metrics", []string{"environments", "$0", "metrics"}, 1, ""),
 		readContract("deployments list", []string{"environments"}, 0, ""),
 		readContract("deployments get", []string{"environments", "$0"}, 1, ""),
 	}
@@ -231,4 +236,21 @@ func resolveNamedResource(ctx context.Context, client APIClient, project, family
 		return "", fmt.Errorf("ambiguous %s name %q; use a full ID", family, ref)
 	}
 	return "", fmt.Errorf("no accessible %s matches %q", family, ref)
+}
+
+func legacyTextInspection(p parsedArgs) bool {
+	if p.Globals.JSON || len(p.Flags) > 0 || p.Bools["all-pages"] {
+		return false
+	}
+	if len(p.Positionals) == 2 && p.Positionals[0] == "chat" && !knownChatAction(p.Positionals[1]) {
+		return true
+	}
+	if len(p.Positionals) != 1 {
+		return false
+	}
+	switch p.Positionals[0] {
+	case "project", "chat", "ideas", "library", "context", "notifications", "triggers", "profiles", "activity":
+		return true
+	}
+	return false
 }

@@ -103,7 +103,7 @@ func TestAuthStatusReturnsOneWhenNoConfigExists(t *testing.T) {
 func TestTasksDispatchUsesGlobalProjectAndPrompt(t *testing.T) {
 	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted)
 	runtime, _, stderr := testRuntime(t, []string{
-		"--project=project_1",
+		"--project=01K00000000000000000000000",
 		"tasks",
 		"dispatch",
 		"--agent=sam",
@@ -116,7 +116,7 @@ func TestTasksDispatchUsesGlobalProjectAndPrompt(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if captured.URL != "https://api.example.com/api/projects/project_1/tasks/submit" {
+	if captured.URL != "https://api.example.com/api/projects/01K00000000000000000000000/tasks/submit" {
 		t.Fatalf("path = %s", captured.URL)
 	}
 	if captured.JSON["message"] != "manage idea 123" || captured.JSON["agentType"] != "sam" {
@@ -130,7 +130,7 @@ func TestTasksDispatchUsesGlobalProjectAndPrompt(t *testing.T) {
 func TestTasksDispatchSendsModernResourceFlags(t *testing.T) {
 	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted)
 	runtime, _, stderr := testRuntime(t, []string{
-		"--project=project_1",
+		"--project=01K00000000000000000000000",
 		"tasks",
 		"dispatch",
 		"--prompt=compile",
@@ -161,7 +161,7 @@ func TestTasksDispatchResourceFlagsWithHTTPCanary(t *testing.T) {
 	var captured map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
-		if r.Method != http.MethodPost || r.URL.Path != "/api/projects/project_1/tasks/submit" {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/projects/01K00000000000000000000000/tasks/submit" {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -173,7 +173,7 @@ func TestTasksDispatchResourceFlagsWithHTTPCanary(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	runtime, _, stderr := testRuntime(t, []string{
-		"--project=project_1",
+		"--project=01K00000000000000000000000",
 		"tasks",
 		"dispatch",
 		"--prompt=compile",
@@ -213,12 +213,12 @@ func TestTasksDispatchRejectsMissingResourceFlagValuesBeforeHTTP(t *testing.T) {
 	}{
 		{
 			name: "trailing numeric flag",
-			args: []string{"--project=project_1", "tasks", "dispatch", "--prompt=review", "--min-vcpu"},
+			args: []string{"--project=01K00000000000000000000000", "tasks", "dispatch", "--prompt=review", "--min-vcpu"},
 			want: "--min-vcpu requires a numeric value",
 		},
 		{
 			name: "numeric flag before another flag",
-			args: []string{"--project=project_1", "tasks", "dispatch", "--prompt=review", "--min-memory-gb", "--min-disk-gb=80"},
+			args: []string{"--project=01K00000000000000000000000", "tasks", "dispatch", "--prompt=review", "--min-memory-gb", "--min-disk-gb=80"},
 			want: "--min-memory-gb requires a numeric value",
 		},
 	}
@@ -260,25 +260,25 @@ func TestTasksDispatchHandlesExclusiveNodeForms(t *testing.T) {
 	}{
 		{
 			name:        "bare flag after prompt",
-			args:        []string{"--project=project_1", "tasks", "dispatch", "--prompt=compile", "--exclusive-node"},
+			args:        []string{"--project=01K00000000000000000000000", "tasks", "dispatch", "--prompt=compile", "--exclusive-node"},
 			wantMessage: "compile",
 			wantValue:   true,
 		},
 		{
 			name:        "bare flag before positional prompt",
-			args:        []string{"--project=project_1", "tasks", "dispatch", "--exclusive-node", "compile", "now"},
+			args:        []string{"--project=01K00000000000000000000000", "tasks", "dispatch", "--exclusive-node", "compile", "now"},
 			wantMessage: "compile now",
 			wantValue:   true,
 		},
 		{
 			name:        "explicit false",
-			args:        []string{"--project=project_1", "tasks", "dispatch", "--prompt=compile", "--exclusive-node=false"},
+			args:        []string{"--project=01K00000000000000000000000", "tasks", "dispatch", "--prompt=compile", "--exclusive-node=false"},
 			wantMessage: "compile",
 			wantValue:   false,
 		},
 		{
 			name:        "space separated explicit false",
-			args:        []string{"--project=project_1", "tasks", "dispatch", "--exclusive-node", "false", "compile"},
+			args:        []string{"--project=01K00000000000000000000000", "tasks", "dispatch", "--exclusive-node", "false", "compile"},
 			wantMessage: "compile",
 			wantValue:   false,
 		},
@@ -319,7 +319,7 @@ func TestTasksDispatchRejectsDuplicateExclusiveNodeBeforeHTTP(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			args := []string{"--project=project_1", "tasks", "dispatch", "--prompt=compile"}
+			args := []string{"--project=01K00000000000000000000000", "tasks", "dispatch", "--prompt=compile"}
 			args = append(args, tt.args...)
 			runtime, _, stderr := testRuntime(t, args, noRequestDoer(t), nil)
 
@@ -337,7 +337,7 @@ func TestTasksDispatchRejectsDuplicateExclusiveNodeBeforeHTTP(t *testing.T) {
 func TestTasksDispatchKeepsDeprecatedVMSizeWithModernFlags(t *testing.T) {
 	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted)
 	runtime, _, stderr := testRuntime(t, []string{
-		"--project=project_1",
+		"--project=01K00000000000000000000000",
 		"tasks",
 		"dispatch",
 		"--prompt=compile",
@@ -375,7 +375,7 @@ func TestTasksDispatchRejectsMalformedResourceFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			args := []string{"--project=project_1", "tasks", "dispatch", "--prompt=compile"}
+			args := []string{"--project=01K00000000000000000000000", "tasks", "dispatch", "--prompt=compile"}
 			args = append(args, tt.args...)
 			runtime, _, stderr := testRuntime(t, args, nil, nil)
 
@@ -435,7 +435,7 @@ func TestChatNewDeprecatedVMSizeWarningUsesStderrWithJSONStdout(t *testing.T) {
 func TestTaskSubmitUsesPromptFlag(t *testing.T) {
 	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted)
 	runtime, _, stderr := testRuntime(t, []string{
-		"--project=project_1",
+		"--project=01K00000000000000000000000",
 		"task",
 		"submit",
 		"--prompt=manage idea 123",
@@ -465,7 +465,7 @@ func TestTaskStatusPrintsStructuredStatus(t *testing.T) {
 	}`
 	doer, captured := captureJSONRequest(t, response, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{
-		"--project=project_1",
+		"--project=01K00000000000000000000000",
 		"task",
 		"status",
 		"task_1",
@@ -475,7 +475,7 @@ func TestTaskStatusPrintsStructuredStatus(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if captured.Method != http.MethodGet || captured.URL != "https://api.example.com/api/projects/project_1/tasks/task_1" {
+	if captured.Method != http.MethodGet || captured.URL != "https://api.example.com/api/projects/01K00000000000000000000000/tasks/task_1" {
 		t.Fatalf("unexpected request: %s %s", captured.Method, captured.URL)
 	}
 	for _, expected := range []string{
@@ -493,7 +493,7 @@ func TestTaskStatusPrintsStructuredStatus(t *testing.T) {
 
 func TestModelFlagFailsUntilAPIContractExists(t *testing.T) {
 	runtime, _, stderr := testRuntime(t, []string{
-		"--project=project_1",
+		"--project=01K00000000000000000000000",
 		"tasks",
 		"dispatch",
 		"--model=gemma-4",
@@ -511,7 +511,7 @@ func TestModelFlagFailsUntilAPIContractExists(t *testing.T) {
 
 func TestChatNewSubmitsConversationTask(t *testing.T) {
 	env := tempConfigEnv(t)
-	setActiveProjectConfig(t, env, "project_1", "My Project")
+	setActiveProjectConfig(t, env, "01K00000000000000000000000", "My Project")
 	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted)
 	runtime, stdout, stderr := testRuntime(t, []string{
 		"chat",
@@ -525,7 +525,7 @@ func TestChatNewSubmitsConversationTask(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if captured.URL != "https://api.example.com/api/projects/project_1/tasks/submit" {
+	if captured.URL != "https://api.example.com/api/projects/01K00000000000000000000000/tasks/submit" {
 		t.Fatalf("path = %s", captured.URL)
 	}
 	if captured.JSON["message"] != "Plan the release" || captured.JSON["taskMode"] != "conversation" {
@@ -538,7 +538,7 @@ func TestChatNewSubmitsConversationTask(t *testing.T) {
 
 func TestChatViewShowsMessages(t *testing.T) {
 	env := tempConfigEnv(t)
-	setActiveProjectConfig(t, env, "project_1", "My Project")
+	setActiveProjectConfig(t, env, "01K00000000000000000000000", "My Project")
 	doer, captured := captureJSONRequest(t, `{"session":{"id":"session_1","topic":"Demo","status":"active","messageCount":2},"messages":[{"id":"msg_1","role":"user","content":"Hello","createdAt":1780099200000},{"id":"msg_2","role":"assistant","content":"Hi there","createdAt":1780099200000}],"hasMore":false,"state":null}`, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{"chat", "session_1"}, doer, env.values)
 
@@ -546,7 +546,7 @@ func TestChatViewShowsMessages(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if captured.URL != "https://api.example.com/api/projects/project_1/sessions/session_1" {
+	if captured.URL != "https://api.example.com/api/projects/01K00000000000000000000000/sessions/session_1" {
 		t.Fatalf("path = %s", captured.URL)
 	}
 	if !strings.Contains(stdout.String(), "[user]") || !strings.Contains(stdout.String(), "Hello") {
@@ -633,7 +633,7 @@ func TestAuthenticatedClientFromEnvToken(t *testing.T) {
 		}
 		return jsonResponse(`{"id":"task_1","status":"queued","updatedAt":"now"}`, http.StatusOK), nil
 	})
-	runtime, _, stderr := testRuntime(t, []string{"--project", "project_1", "task", "status", "task_1"}, doer, map[string]string{
+	runtime, _, stderr := testRuntime(t, []string{"--project", "01K00000000000000000000000", "task", "status", "task_1"}, doer, map[string]string{
 		"SAM_API_URL":   "https://api.example.com",
 		"SAM_API_TOKEN": "sam_pat_env",
 	})

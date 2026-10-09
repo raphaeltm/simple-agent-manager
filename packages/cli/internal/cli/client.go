@@ -272,6 +272,9 @@ func doJSONWithLimit(ctx context.Context, httpClient HTTPDoer, method string, en
 
 	response, err := httpClient.Do(req)
 	if err != nil {
+		if method == http.MethodGet {
+			return APIError{Code: "REQUEST_FAILED", Message: "Read request transport failed or was cancelled"}
+		}
 		return APIError{Code: "OUTCOME_UNKNOWN", Message: "Request transport failed; a mutating request may have been accepted. Reconcile before retrying."}
 	}
 	defer response.Body.Close()
@@ -365,11 +368,17 @@ func parseAPIError(status int, content []byte) error {
 			body.Message = fmt.Sprintf("SAM API returned a non-JSON error (status %d)", status)
 		}
 	}
-	if body.Error == "" {
+	if !safeAPIErrorCode(body.Error) {
 		body.Error = "HTTP_ERROR"
 	}
-	if body.Message == "" {
-		body.Message = fmt.Sprintf("SAM API request failed with %d", status)
+	if body.Error == "AUTHENTICATION_REQUIRED" {
+		body.Message = "Authentication required"
+	} else if body.Message == "" || strings.HasPrefix(body.Message, "SAM API returned a non-JSON error") {
+		if body.Message == "" {
+			body.Message = fmt.Sprintf("SAM API request failed with %d", status)
+		}
+	} else {
+		body.Message = fmt.Sprintf("SAM API request failed with %d; use the error code to reconcile or correct the request", status)
 	}
 	return APIError{Status: status, Code: body.Error, Message: body.Message}
 }
@@ -413,4 +422,16 @@ func (c APIClient) ListAllProjects(ctx context.Context) (ProjectListResponse, er
 		}
 		seen[cursor] = true
 	}
+}
+
+func safeAPIErrorCode(code string) bool {
+	if len(code) == 0 || len(code) > 64 {
+		return false
+	}
+	for _, c := range code {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
 }

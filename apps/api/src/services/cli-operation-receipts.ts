@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from 'hono';
+import { cloneRawRequest } from 'hono/request';
 
 import type { Env } from '../env';
 import { getUserId } from '../middleware/auth';
@@ -31,7 +32,10 @@ export const cliOperationReceipt: MiddlewareHandler<{ Bindings: Env }> = async (
   const userId = getUserId(c);
   const path = new URL(c.req.url).pathname;
   const receiptId = await operationReceiptId(projectId, userId, c.req.method, path, key);
-  const intentHash = await digest(await c.req.raw.clone().text());
+  const body = await (await cloneRawRequest(c.req)).text();
+  if (new TextEncoder().encode(body).byteLength > 256 * 1024)
+    throw errors.badRequest('Keyed intent exceeds receipt boundary');
+  const intentHash = await digest(body);
   const reservation = await c.env.DATABASE.prepare(
     `INSERT OR IGNORE INTO cli_operation_receipts
      (receipt_id, project_id, user_id, intent_hash, state) VALUES (?, ?, ?, ?, 'pending')`
@@ -39,6 +43,7 @@ export const cliOperationReceipt: MiddlewareHandler<{ Bindings: Env }> = async (
     .bind(receiptId, projectId, userId, intentHash)
     .run();
   c.header('SAM-Receipt-ID', receiptId);
+  c.header('Cache-Control', 'private, no-store');
   if (!reservation.meta.changes) {
     const receipt = await c.env.DATABASE.prepare(
       'SELECT intent_hash, state, response_json, response_status FROM cli_operation_receipts WHERE receipt_id = ? AND project_id = ? AND user_id = ?'
@@ -66,6 +71,7 @@ export const cliOperationReceipt: MiddlewareHandler<{ Bindings: Env }> = async (
       status: receipt.response_status ?? 200,
       headers: {
         'Content-Type': 'application/json',
+        'Cache-Control': 'private, no-store',
         'SAM-Receipt-ID': receiptId,
         'SAM-Receipt-Replayed': 'true',
       },
@@ -74,6 +80,7 @@ export const cliOperationReceipt: MiddlewareHandler<{ Bindings: Env }> = async (
   await next();
   if (c.res.status >= 200 && c.res.status < 300) {
     const response = await c.res.clone().text();
+    if (new TextEncoder().encode(response).byteLength > 64 * 1024) return;
     await c.env.DATABASE.prepare(
       "UPDATE cli_operation_receipts SET state = 'completed', response_json = ?, response_status = ? WHERE receipt_id = ? AND state = 'pending'"
     )

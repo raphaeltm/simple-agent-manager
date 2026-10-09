@@ -5,8 +5,8 @@ import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AppError } from '../../../src/middleware/error';
 import type { Env } from '../../../src/env';
+import { AppError } from '../../../src/middleware/error';
 import { cliOperationReceipt } from '../../../src/services/cli-operation-receipts';
 
 vi.mock('../../../src/middleware/auth', () => ({ getUserId: () => 'user' }));

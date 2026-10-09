@@ -344,9 +344,25 @@
             "name": "before",
             "in": "query",
             "schema": {
-              "type": "integer"
+              "type": "string"
             },
-            "description": "Message pagination cursor."
+            "description": "Exact JSON [createdAt, sequence, id] cursor or legacy timestamp."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Forward exact message cursor."
+          },
+          {
+            "name": "compact",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "true/false; use false for full text."
           }
         ],
         "responses": {
@@ -969,6 +985,3443 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/operation-receipts": {
+      "get": {
+        "operationId": "get_api_projects__projectId__operation_receipts",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "operation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/skills": {
+      "get": {
+        "operationId": "get_api_projects__projectId__skills",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/skills/{skillId}": {
+      "get": {
+        "operationId": "get_api_projects__projectId__skills__skillId_",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "skillId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/skills/{skillId}/resolve": {
+      "get": {
+        "operationId": "get_api_projects__projectId__skills__skillId__resolve",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "skillId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "profileId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/agent-profiles/{profileId}": {
+      "get": {
+        "operationId": "get_api_projects__projectId__agent_profiles__profileId_",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "profileId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/tasks/{taskId}/events": {
+      "get": {
+        "operationId": "get_api_projects__projectId__tasks__taskId__events",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/tasks/{taskId}/sessions": {
+      "get": {
+        "operationId": "get_api_projects__projectId__tasks__taskId__sessions",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions/{sessionId}/messages": {
+      "get": {
+        "operationId": "get_api_projects__projectId__sessions__sessionId__messages",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "compact",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "roles",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions/{sessionId}/messages/{messageId}/tool-content": {
+      "get": {
+        "operationId": "get_api_projects__projectId__sessions__sessionId__messages__messageId__tool_content",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions/{sessionId}/state": {
+      "get": {
+        "operationId": "get_api_projects__projectId__sessions__sessionId__state",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions/{sessionId}/interactions": {
+      "get": {
+        "operationId": "get_api_projects__projectId__sessions__sessionId__interactions",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions/{sessionId}/interactions/{interactionId}": {
+      "get": {
+        "operationId": "get_api_projects__projectId__sessions__sessionId__interactions__interactionId_",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "interactionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/comments": {
+      "get": {
+        "operationId": "get_api_projects__projectId__comments",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions/{sessionId}/comments": {
+      "get": {
+        "operationId": "get_api_projects__projectId__sessions__sessionId__comments",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "afterSequence",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/repo/branches": {
+      "get": {
+        "operationId": "get_api_projects__projectId__repo_branches",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/repo/tree": {
+      "get": {
+        "operationId": "get_api_projects__projectId__repo_tree",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/repo/file": {
+      "get": {
+        "operationId": "get_api_projects__projectId__repo_file",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/repo/compare": {
+      "get": {
+        "operationId": "get_api_projects__projectId__repo_compare",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "base",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "head",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/library/{fileId}": {
+      "get": {
+        "operationId": "get_api_projects__projectId__library__fileId_",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fileId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/library/directories": {
+      "get": {
+        "operationId": "get_api_projects__projectId__library_directories",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "parentDirectory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/knowledge/{entityId}": {
+      "get": {
+        "operationId": "get_api_projects__projectId__knowledge__entityId_",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "includeInactive",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/knowledge/search": {
+      "get": {
+        "operationId": "get_api_projects__projectId__knowledge_search",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entityType",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "minConfidence",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/policies": {
+      "get": {
+        "operationId": "get_api_projects__projectId__policies",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/policies/{policyId}": {
+      "get": {
+        "operationId": "get_api_projects__projectId__policies__policyId_",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "policyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/triggers/{triggerId}": {
+      "get": {
+        "operationId": "get_api_projects__projectId__triggers__triggerId_",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "triggerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/triggers/{triggerId}/executions": {
+      "get": {
+        "operationId": "get_api_projects__projectId__triggers__triggerId__executions",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "triggerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/event-subscriptions": {
+      "get": {
+        "operationId": "get_api_projects__projectId__event_subscriptions",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/event-subscriptions/{subscriptionId}": {
+      "get": {
+        "operationId": "get_api_projects__projectId__event_subscriptions__subscriptionId_",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subscriptionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/event-subscriptions/{subscriptionId}/deliveries": {
+      "get": {
+        "operationId": "get_api_projects__projectId__event_subscriptions__subscriptionId__deliveries",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subscriptionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/event-channels": {
+      "get": {
+        "operationId": "get_api_projects__projectId__event_channels",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/event-channels/{channel}/history": {
+      "get": {
+        "operationId": "get_api_projects__projectId__event_channels__channel__history",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "channel",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/schedules": {
+      "get": {
+        "operationId": "get_api_projects__projectId__schedules",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/schedules/{id}": {
+      "get": {
+        "operationId": "get_api_projects__projectId__schedules__id_",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/standing-watches": {
+      "get": {
+        "operationId": "get_api_projects__projectId__standing_watches",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/standing-watches/{id}": {
+      "get": {
+        "operationId": "get_api_projects__projectId__standing_watches__id_",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/environments": {
+      "get": {
+        "operationId": "get_api_projects__projectId__environments",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/environments/{envId}": {
+      "get": {
+        "operationId": "get_api_projects__projectId__environments__envId_",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "envId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/environments/{envId}/releases": {
+      "get": {
+        "operationId": "get_api_projects__projectId__environments__envId__releases",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "envId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/environments/{envId}/releases/{releaseId}": {
+      "get": {
+        "operationId": "get_api_projects__projectId__environments__envId__releases__releaseId_",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "envId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "releaseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/environments/{envId}/public-routes": {
+      "get": {
+        "operationId": "get_api_projects__projectId__environments__envId__public_routes",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "envId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/environments/{envId}/containers": {
+      "get": {
+        "operationId": "get_api_projects__projectId__environments__envId__containers",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "envId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/environments/{envId}/metrics": {
+      "get": {
+        "operationId": "get_api_projects__projectId__environments__envId__metrics",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "envId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/runtime-config": {
+      "get": {
+        "operationId": "get_api_projects__projectId__runtime_config",
+        "summary": "Read project-scoped resource; does not launch or wake agents.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/cli/profiles": {
+      "post": {
+        "operationId": "post_api_projects__projectId__cli_profiles",
+        "summary": "Create project metadata with platform configuration defaults; security/spend/runtime fields rejected.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stable key, 1–128 letters/digits/dot/underscore/colon/hyphen. Identical intent replays its receipt. Unknown reservations never execute again."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/cli/profiles/{id}": {
+      "patch": {
+        "operationId": "patch_api_projects__projectId__cli_profiles__id_",
+        "summary": "Update project metadata only with compare-and-set; global resources rejected.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "expectedUpdatedAt": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "expectedUpdatedAt"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/cli/skills": {
+      "post": {
+        "operationId": "post_api_projects__projectId__cli_skills",
+        "summary": "Create project metadata with platform configuration defaults; security/spend/runtime fields rejected.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stable key, 1–128 letters/digits/dot/underscore/colon/hyphen. Identical intent replays its receipt. Unknown reservations never execute again."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/cli/skills/{id}": {
+      "patch": {
+        "operationId": "patch_api_projects__projectId__cli_skills__id_",
+        "summary": "Update project metadata only with compare-and-set; global resources rejected.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "expectedUpdatedAt": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "expectedUpdatedAt"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/cli/settings": {
+      "patch": {
+        "operationId": "patch_api_projects__projectId__cli_settings",
+        "summary": "Rename/update project description only; no settings authority expansion.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "expectedUpdatedAt": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "expectedUpdatedAt"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions/{sessionId}/prompt": {
+      "post": {
+        "operationId": "post_api_projects__projectId__sessions__sessionId__prompt",
+        "summary": "Send a follow-up, requiring task:write and session creator authority.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stable key, 1–128 letters/digits/dot/underscore/colon/hyphen. Identical intent replays its receipt. Unknown reservations never execute again."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/sessions/{sessionId}/cancel": {
+      "post": {
+        "operationId": "post_api_projects__projectId__sessions__sessionId__cancel",
+        "summary": "Cancel only the current agent turn, not archive or delete the session.",
+        "tags": [
+          "Project workflows"
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Complete JSON resource response, preserving continuation metadata and additional fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Capability or creator denied"
+          },
+          "404": {
+            "description": "Scoped resource not found"
+          },
+          "409": {
+            "description": "Conflict or unknown keyed outcome; reconcile before retrying"
           }
         }
       }

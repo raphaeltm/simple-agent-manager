@@ -666,3 +666,7 @@ Missing/revoked authentication returns 401; missing project capability returns 4
 ### Lifecycle timing callback
 
 - `POST /api/workspaces/:id/lifecycle-timings` — Workspace callback JWT; fixed bounded numeric lifecycle phase summary emitted to structured logs only. See `docs/notes/session-lifecycle-timings.md`.
+
+## Scoped CLI project workflows
+
+CLI public contracts are in `apps/api/src/openapi/sam-cli.ts` and `cli-workflows.ts`, generated as `apps/api/openapi/sam-cli.openapi.json`. `GET /api/projects/:projectId/operation-receipts` inspects the authenticated actor's keyed submit/prompt receipt. `POST /api/projects/:projectId/cli/profiles|skills` creates name/description metadata; `PATCH /api/projects/:projectId/cli/profiles|skills/:id` and `/cli/settings` accept only name/description plus `expectedUpdatedAt`. Unknown/mixed sensitive fields fail at the runtime schema boundary; updates use an atomic compare-and-set. Scoped profile/skill writes reject global targets. Keyed task submit and prompt delivery replay accepted responses and retain unknown reservations rather than resubmitting after a crash. See `docs/reference/cli-project-workflows` on the documentation website for operation effects, error and pagination contracts.

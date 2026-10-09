@@ -1,9 +1,11 @@
+import { cliWorkflowPaths } from './cli-workflows';
+
 // FILE SIZE EXCEPTION: Hand-maintained OpenAPI document literal with a byte-exact
 // generated-artifact contract (openapi:check regenerates apps/api/openapi/sam-cli.openapi.json
 // from this file and diffs it byte-for-byte; apps/api/tests/unit/openapi/sam-cli-openapi.test.ts
 // asserts the same equality). Splitting the spec literal across modules adds import complexity
 // and artifact-drift risk without a reviewability benefit. See .claude/rules/18-file-size-limits.md
-type SchemaObject = {
+export type SchemaObject = {
   type?: string | string[];
   format?: string;
   description?: string;
@@ -29,14 +31,14 @@ type MediaTypeObject = {
   schema: SchemaObject | ReferenceObject;
 };
 
-type OperationObject = {
+export type OperationObject = {
   operationId: string;
   summary: string;
   tags: string[];
   security?: Array<Record<string, string[]>>;
   parameters?: Array<{
     name: string;
-    in: 'path' | 'query';
+    in: 'path' | 'query' | 'header';
     required?: boolean;
     schema: SchemaObject;
     description?: string;
@@ -62,7 +64,7 @@ export type OpenApiDocument = {
     description: string;
   };
   servers?: Array<{ url: string; description: string }>;
-  paths: Record<string, Partial<Record<'get' | 'post', OperationObject>>>;
+  paths: Record<string, Partial<Record<'get' | 'post' | 'patch', OperationObject>>>;
   components: {
     securitySchemes: Record<string, { type: string; in: string; name: string }>;
     schemas: Record<string, SchemaObject>;
@@ -139,7 +141,7 @@ const getOp = (
   tags: string[],
   responses: OperationObject['responses'],
   parameters?: OperationObject['parameters']
-): Partial<Record<'get' | 'post', OperationObject>> => ({
+): Partial<Record<'get' | 'post' | 'patch', OperationObject>> => ({
   get: {
     operationId,
     summary,
@@ -271,7 +273,13 @@ export const samCliOpenApiDocument: OpenApiDocument = {
         projectId,
         sessionId,
         queryParam('limit', integerSchema(), 'Maximum number of messages to return.'),
-        queryParam('before', integerSchema(), 'Message pagination cursor.'),
+        queryParam(
+          'before',
+          stringSchema(),
+          'Exact JSON [createdAt, sequence, id] cursor or legacy timestamp.'
+        ),
+        queryParam('after', stringSchema(), 'Forward exact message cursor.'),
+        queryParam('compact', stringSchema(), 'true/false; use false for full text.'),
       ]
     ),
     '/api/projects/{projectId}/tasks/submit': {
@@ -382,6 +390,7 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       { '200': ok(ref('PortAccessResponse')) },
       [workspaceId, queryParam('port', integerSchema(), 'Workspace port number.')]
     ),
+    ...cliWorkflowPaths,
   },
   components: {
     securitySchemes: {

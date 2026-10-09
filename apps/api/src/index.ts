@@ -1,5 +1,5 @@
-import { cliProjectMetadataRoutes } from './routes/cli-project-metadata';
 import { cliOperationReceiptRoutes } from './routes/cli-operation-receipts';
+import { cliProjectMetadataRoutes } from './routes/cli-project-metadata';
 import { projectScheduleRoutes } from './routes/project-schedules';
 import { projectStandingWatchRoutes } from './routes/project-standing-watches';
 // Re-export Durable Object classes for Cloudflare Workers runtime

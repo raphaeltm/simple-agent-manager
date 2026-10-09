@@ -19,17 +19,21 @@ cliOperationReceiptRoutes.get('/', requireAuth(), requireApproved(), async (c) =
     userId,
     'task:read'
   );
+  c.header('Cache-Control', 'private, no-store');
   const key = c.req.query('key');
   const operation = c.req.query('operation');
   if (!key || !/^[A-Za-z0-9._:-]{1,128}$/.test(key)) throw errors.badRequest('Invalid receipt key');
   let path: string;
-  if (operation === 'submit') path = `/api/projects/${projectId}/tasks/submit`;
+  if (operation === 'profile-create' || operation === 'skill-create') {
+    path = `/api/projects/${projectId}/cli/${operation === 'profile-create' ? 'profiles' : 'skills'}`;
+  } else if (operation === 'submit') path = `/api/projects/${projectId}/tasks/submit`;
   else if (operation === 'prompt') {
     const sessionId = c.req.query('sessionId');
     if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId))
       throw errors.badRequest('sessionId is required');
     path = `/api/projects/${projectId}/sessions/${sessionId}/prompt`;
-  } else throw errors.badRequest('operation must be submit or prompt');
+  } else
+    throw errors.badRequest('operation must be submit, prompt, profile-create or skill-create');
   const receiptId = await operationReceiptId(projectId, userId, 'POST', path, key);
   const receipt = await c.env.DATABASE.prepare(
     'SELECT state, response_json, response_status, created_at FROM cli_operation_receipts WHERE receipt_id = ? AND project_id = ? AND user_id = ?'

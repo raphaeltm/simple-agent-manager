@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/workspace/sam-cli/internal/cli"
 )
@@ -15,7 +14,7 @@ func main() {
 	runtime := cli.Runtime{
 		Args:       os.Args[1:],
 		Env:        cli.OSConfigEnv{},
-		HTTPClient: &http.Client{Timeout: 60 * time.Second},
+		HTTPClient: &http.Client{},
 		Stdin:      os.Stdin,
 		Stdout:     os.Stdout,
 		Stderr:     os.Stderr,

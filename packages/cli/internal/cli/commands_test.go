@@ -599,7 +599,7 @@ func TestProjectFlagOverridesConfig(t *testing.T) {
 func TestLegacyTaskCommandStillWorks(t *testing.T) {
 	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted)
 	runtime, _, stderr := testRuntime(t, []string{
-		"--project=project_1",
+		"--project=01K00000000000000000000000",
 		"task",
 		"submit",
 		"Fix the bug",
@@ -609,7 +609,7 @@ func TestLegacyTaskCommandStillWorks(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if captured.URL != "https://api.example.com/api/projects/project_1/tasks/submit" {
+	if captured.URL != "https://api.example.com/api/projects/01K00000000000000000000000/tasks/submit" {
 		t.Fatalf("path = %s", captured.URL)
 	}
 }
@@ -617,7 +617,7 @@ func TestLegacyTaskCommandStillWorks(t *testing.T) {
 func TestLegacyTasksDispatchStillWorks(t *testing.T) {
 	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted)
 	runtime, _, stderr := testRuntime(t, []string{
-		"--project=project_1",
+		"--project=01K00000000000000000000000",
 		"tasks",
 		"dispatch",
 		"--prompt=do the thing",

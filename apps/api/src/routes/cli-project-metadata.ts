@@ -82,7 +82,7 @@ for (const family of ['profiles', 'skills'] as const) {
         if (duplicate) throw errors.conflict('Name already exists in project');
       }
       const fields: string[] = ['updated_at = ?'];
-      const values: (string | null)[] = [new Date().toISOString()];
+      const values: (string | null)[] = [nextMetadataTimestamp(body.expectedUpdatedAt)];
       if (body.name !== undefined) {
         fields.push('name = ?');
         values.push(body.name);
@@ -119,7 +119,7 @@ cliProjectMetadataRoutes.patch(
     if (body.name === undefined && body.description === undefined)
       throw errors.badRequest('No metadata fields specified');
     const fields: string[] = ['updated_at = ?'];
-    const values: (string | null)[] = [new Date().toISOString()];
+    const values: (string | null)[] = [nextMetadataTimestamp(body.expectedUpdatedAt)];
     if (body.name !== undefined) {
       fields.push('name = ?');
       values.push(body.name);
@@ -142,3 +142,10 @@ cliProjectMetadataRoutes.patch(
     });
   }
 );
+
+function nextMetadataTimestamp(expected: string): string {
+  const previous = Date.parse(expected);
+  return new Date(
+    Number.isFinite(previous) ? Math.max(Date.now(), previous + 1) : Date.now()
+  ).toISOString();
+}

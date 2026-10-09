@@ -41,10 +41,10 @@ func Run(ctx context.Context, runtime Runtime) int {
 	if err := validateCommandSyntax(parsed); err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	if c, args, ok := findWorkflow(parsed); ok && (parsed.Globals.JSON || len(parsed.Flags) > 0 || parsed.Bools["all-pages"] || len(parsed.Positionals) > 1 && parsed.Positionals[0] != "chat") {
+	if c, args, ok := findWorkflow(parsed); ok && !legacyTextInspection(parsed) {
 		return runWorkflow(ctx, runtime, parsed, c, args)
 	}
-	if len(parsed.Positionals) > 1 && (parsed.Positionals[0] == "tasks" || parsed.Positionals[0] == "ideas" || parsed.Positionals[0] == "profiles" || parsed.Positionals[0] == "skills" || parsed.Positionals[0] == "settings") && (parsed.Positionals[1] == "create" || parsed.Positionals[1] == "update") {
+	if len(parsed.Positionals) > 1 && (parsed.Positionals[0] == "tasks" || parsed.Positionals[0] == "ideas" || parsed.Positionals[0] == "profiles" || parsed.Positionals[0] == "skills" || parsed.Positionals[0] == "settings") && (parsed.Positionals[1] == "create" || parsed.Positionals[1] == "update" || parsed.Positionals[1] == "clone") {
 		return runMetadataMutation(ctx, runtime, parsed, parsed.Positionals[2:])
 	}
 	if parsed.Positionals[0] == "settings" {
@@ -66,12 +66,20 @@ func Run(ctx context.Context, runtime Runtime) int {
 		return runStatus(ctx, runtime, parsed)
 	case "chat":
 		return runChatCommand(ctx, runtime, parsed, args)
+	case "comments":
+		if len(args) > 0 && (args[0] == "add" || args[0] == "reply" || args[0] == "resolve" || args[0] == "reopen") {
+			return runCommentMutation(ctx, runtime, parsed, args[0], args[1:])
+		}
+		return fail(runtime.Stderr, errors.New("unknown comments action"))
 	case "ideas":
 		if len(args) > 0 && args[0] == "execute" {
 			return runIdeaExecute(ctx, runtime, parsed, args[1:])
 		}
 		return runIdeas(ctx, runtime, parsed)
 	case "library":
+		if len(args) > 0 && args[0] == "upload" {
+			return runLibraryUpload(ctx, runtime, parsed, args[1:])
+		}
 		return runLibrary(ctx, runtime, parsed)
 	case "context":
 		return runContext(ctx, runtime, parsed)
@@ -354,18 +362,31 @@ func runTask(ctx context.Context, runtime Runtime, parsed parsedArgs, args []str
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
+	client, config, resolveErr := authenticatedClientWithConfig(ctx, runtime)
+	if resolveErr != nil {
+		return fail(runtime.Stderr, resolveErr)
+	}
+	resolvedID, _, resolveErr := ResolveProject(ctx, client, projectID, config)
+	if resolveErr != nil {
+		return fail(runtime.Stderr, resolveErr)
+	}
+	projectID = resolvedID
+
 	switch action {
 	case "submit":
-		return runTaskSubmit(ctx, runtime, parsed, projectID, rest)
+		return runTaskSubmit(ctx, runtime, parsed, client, projectID, rest)
 	case "status":
-		return runTaskStatus(ctx, runtime, parsed, projectID, rest)
+		return runTaskStatus(ctx, runtime, parsed, client, projectID, rest)
 	default:
 		return fail(runtime.Stderr, fmt.Errorf("unknown task action: %s", action))
 	}
 }
 
-func runTaskSubmit(ctx context.Context, runtime Runtime, parsed parsedArgs, projectID string, args []string) int {
-	message := commandMessage(parsed, args)
+func runTaskSubmit(ctx context.Context, runtime Runtime, parsed parsedArgs, client APIClient, projectID string, args []string) int {
+	message, inputErr := readCommandInput(runtime, parsed, args, "prompt")
+	if inputErr != nil {
+		return fail(runtime.Stderr, inputErr)
+	}
 	if strings.TrimSpace(message) == "" {
 		return fail(runtime.Stderr, errors.New("task submit requires <message> or --prompt"))
 	}
@@ -373,16 +394,12 @@ func runTaskSubmit(ctx context.Context, runtime Runtime, parsed parsedArgs, proj
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	return submitTask(ctx, runtime, parsed, projectID, message, options)
+	return submitTaskWithClient(ctx, runtime, parsed, client, projectID, message, options)
 }
 
-func runTaskStatus(ctx context.Context, runtime Runtime, parsed parsedArgs, projectID string, args []string) int {
+func runTaskStatus(ctx context.Context, runtime Runtime, parsed parsedArgs, client APIClient, projectID string, args []string) int {
 	if len(args) != 1 {
 		return fail(runtime.Stderr, errors.New("task status requires <taskId>"))
-	}
-	client, err := authenticatedClient(ctx, runtime)
-	if err != nil {
-		return fail(runtime.Stderr, err)
 	}
 	response, err := client.GetTaskStatus(ctx, projectID, args[0])
 	if err != nil {
@@ -424,7 +441,19 @@ func runTasks(ctx context.Context, runtime Runtime, parsed parsedArgs, args []st
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	message := commandMessage(parsed, rest)
+	client, config, resolveErr := authenticatedClientWithConfig(ctx, runtime)
+	if resolveErr != nil {
+		return fail(runtime.Stderr, resolveErr)
+	}
+	resolvedID, _, resolveErr := ResolveProject(ctx, client, projectID, config)
+	if resolveErr != nil {
+		return fail(runtime.Stderr, resolveErr)
+	}
+	projectID = resolvedID
+	message, inputErr := readCommandInput(runtime, parsed, rest, "prompt")
+	if inputErr != nil {
+		return fail(runtime.Stderr, inputErr)
+	}
 	if strings.TrimSpace(message) == "" {
 		return fail(runtime.Stderr, errors.New("tasks dispatch requires --prompt or <prompt>"))
 	}
@@ -432,7 +461,7 @@ func runTasks(ctx context.Context, runtime Runtime, parsed parsedArgs, args []st
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	return submitTask(ctx, runtime, parsed, projectID, message, options)
+	return submitTaskWithClient(ctx, runtime, parsed, client, projectID, message, options)
 }
 
 func runProjectCommand(ctx context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
@@ -509,6 +538,9 @@ func submitTask(ctx context.Context, runtime Runtime, parsed parsedArgs, project
 }
 
 func submitTaskWithClient(ctx context.Context, runtime Runtime, parsed parsedArgs, client APIClient, projectID string, message string, options TaskSubmitOptions) int {
+	if strings.TrimSpace(message) == "" {
+		return fail(runtime.Stderr, errors.New("submission requires a nonempty prompt"))
+	}
 	client.idempotencyKey = parsed.Flags["idempotency-key"]
 	if options.AgentProfile != "" {
 		id, err := resolveNamedResource(ctx, client, projectID, "agent-profiles", options.AgentProfile)
