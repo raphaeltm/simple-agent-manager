@@ -6422,10 +6422,19 @@ describe('MCP Routes', () => {
         {
           id: 'task-peer',
           title: 'Auth refactor',
-          status: 'completed',
           description: 'Refactored the auth module',
-          output_summary: 'PR merged, tests passing',
-          output_branch: 'sam/auth-refactor',
+          status: 'completed',
+          priority: 0,
+          outputBranch: 'sam/auth-refactor',
+          outputPrUrl: null,
+          outputSummary: 'PR merged, tests passing',
+          completionEvidence: null,
+          errorMessage: null,
+          chatSessionId: null,
+          createdAt: '2026-10-09',
+          updatedAt: '2026-10-09',
+          startedAt: null,
+          completedAt: '2026-10-09',
         },
       ]);
 

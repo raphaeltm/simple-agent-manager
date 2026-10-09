@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { OperationError, operationErrorHttpStatus } from '../../../src/operations/errors';
+import { getPlatformOperationLimits } from '../../../src/operations/limits';
 import {
   samChatRead,
   samChatsSearch,
@@ -19,6 +20,7 @@ import {
 import { operationInputJsonSchema, operations } from '../../../src/operations/registry';
 import type { Actor, OperationContext } from '../../../src/operations/types';
 import { runWorkspaceOperation } from '../../../src/operations/workspace-adapter';
+import { getMcpLimits } from '../../../src/routes/mcp/_helpers';
 import { handleGetPeerAgentOutput } from '../../../src/routes/mcp/workspace-tools-direct';
 import type { McpTokenData } from '../../../src/services/mcp-token';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -281,15 +283,38 @@ describe('shared platform operation authorization on real SQLite', () => {
   });
 
   it('peer output keeps its workspace response shape while using task get', async () => {
-    const token = { userId: ownerId, projectId, workspaceId: 'workspace-1', taskId: 'current-task' } as McpTokenData;
+    const token = {
+      userId: ownerId,
+      projectId,
+      workspaceId: 'workspace-1',
+      taskId: 'current-task',
+    } as McpTokenData;
     const response = await handleGetPeerAgentOutput(60, { taskId: 'idea-owner' }, token, env);
-    expect(JSON.stringify(response)).toBe(JSON.stringify({
-      jsonrpc: '2.0', id: 60,
-      result: { content: [{ type: 'text', text: JSON.stringify({
-        id: 'idea-owner', title: 'Owner idea', status: 'draft',
-        description: 'Content', summary: null, branch: null,
-      }, null, 2) }] },
-    }));
+    expect(JSON.stringify(response)).toBe(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 60,
+        result: {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  id: 'idea-owner',
+                  title: 'Owner idea',
+                  status: 'draft',
+                  description: 'Content',
+                  summary: null,
+                  branch: null,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        },
+      })
+    );
   });
 
   it('scope checks pair each rejected path with an owner control', async () => {
@@ -390,10 +415,89 @@ describe('shared platform operation authorization on real SQLite', () => {
         },
       })
     );
+
+    // Frozen workspace fixtures cover the remaining response families. The JSON-RPC
+    // envelope and pretty-printed text are part of the agent-facing contract.
+    const expectWorkspaceText = async (
+      name: string,
+      id: number,
+      params: Record<string, unknown>,
+      payload: unknown
+    ) => {
+      const response = await runWorkspaceOperation(name, id, params, token, env);
+      expect(JSON.stringify(response)).toBe(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id,
+          result: { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] },
+        })
+      );
+    };
+    await expectWorkspaceText(
+      'get_session_messages',
+      43,
+      { sessionId: 'chat-1' },
+      {
+        sessionId: 'chat-1',
+        topic: 'Test chat',
+        taskId: null,
+        messages: [],
+        messageCount: 0,
+        hasMore: false,
+      }
+    );
+    await expectWorkspaceText(
+      'list_ideas',
+      44,
+      {},
+      {
+        ideas: [
+          {
+            ideaId: 'idea-owner',
+            title: 'Owner idea',
+            contentSnippet: 'Content',
+            priority: 0,
+            createdAt: '2026-10-09',
+            updatedAt: '2026-10-09',
+          },
+        ],
+        count: 1,
+      }
+    );
+    await expectWorkspaceText(
+      'update_idea',
+      45,
+      { ideaId: 'idea-owner', title: 'Renamed' },
+      {
+        updated: true,
+        ideaId: 'idea-owner',
+        updatedFields: ['title'],
+      }
+    );
+    await expectWorkspaceText(
+      'search_knowledge',
+      46,
+      { query: 'needle' },
+      {
+        results: [],
+        count: 0,
+        query: 'needle',
+        queryTruncated: false,
+        queryLimits: { maxLength: 4096, maxTerms: 40, maxTermLength: 48 },
+      }
+    );
   });
 });
 
 describe('operation registry contract', () => {
+  it('uses the same configurable limits as the workspace tool catalog', () => {
+    const env = { MCP_IDEA_LIST_MAX: '27', MCP_MESSAGE_LIST_LIMIT: '31' } as Env;
+    const platform = getPlatformOperationLimits(env);
+    const workspace = getMcpLimits(env);
+    for (const [name, value] of Object.entries(platform)) {
+      expect(workspace[name as keyof typeof workspace]).toBe(value);
+    }
+  });
   it('exports ten stable operations and JSON Schema inputs', () => {
     expect(operations.map((operation) => operation.name)).toEqual([
       'sam_task_get',

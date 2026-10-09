@@ -3,10 +3,10 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { normalizeSearchQuery } from '../lib/search-query-limits';
-import { getMcpLimits } from '../routes/mcp/_helpers';
 import * as agentProfileService from '../services/agent-profiles';
 import * as projectDataService from '../services/project-data';
 import { OperationError } from './errors';
+import { getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 
 export async function searchKnowledge(
@@ -19,7 +19,7 @@ export async function searchKnowledge(
     limit?: number;
   }
 ) {
-  const limits = getMcpLimits(ctx.env);
+  const limits = getPlatformOperationLimits(ctx.env);
   const inputQuery = typeof input.query === 'string' ? input.query.trim() : '';
   if (!inputQuery) throw new OperationError('invalid_input', 'query is required');
   const normalizedQuery = normalizeSearchQuery(inputQuery, ctx.env);

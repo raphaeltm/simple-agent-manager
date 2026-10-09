@@ -1,7 +1,8 @@
-import { getMcpLimits, VALID_MESSAGE_ROLES, validateRoles } from '../routes/mcp/_helpers';
+import { VALID_MESSAGE_ROLES, validateRoles } from '../lib/message-roles';
 import * as projectDataService from '../services/project-data';
 import { describeRootSearchCoverage } from '../services/project-data-search-coverage';
 import { OperationError } from './errors';
+import { getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 
 export interface TokenRow {
@@ -42,7 +43,7 @@ export async function readChat(
 ) {
   const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : '';
   if (!sessionId) throw new OperationError('invalid_input', 'sessionId is required');
-  const limits = getMcpLimits(ctx.env);
+  const limits = getPlatformOperationLimits(ctx.env);
   const requestedLimit = typeof input.limit === 'number' ? input.limit : limits.messageListLimit;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.messageListMax);
   const roles = rolesOrThrow(input.roles);
@@ -90,7 +91,7 @@ export async function searchChats(
     throw new OperationError('invalid_input', 'query is required and must be a non-empty string');
   if (query.length < 2)
     throw new OperationError('invalid_input', 'query must be at least 2 characters');
-  const limits = getMcpLimits(ctx.env);
+  const limits = getPlatformOperationLimits(ctx.env);
   const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : null;
   const roles = rolesOrThrow(input.roles);
   const requestedLimit = typeof input.limit === 'number' ? input.limit : 10;

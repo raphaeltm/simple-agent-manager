@@ -26,9 +26,14 @@ export async function authorizeProjectOperation(
       await requireProjectAccess(db, projectId, ctx.actor.userId);
     }
   } catch (error) {
-    if (error instanceof AppError && error.statusCode === 403) {
-      throw new OperationError('forbidden', 'Project capability is required');
+    if (error instanceof AppError) {
+      if (error.statusCode === 403) {
+        throw new OperationError('forbidden', 'Project capability is required');
+      }
+      if (error.statusCode === 404) {
+        throw new OperationError('not_found', 'Project not found');
+      }
     }
-    throw new OperationError('not_found', 'Project not found');
+    throw new OperationError('unavailable', 'Project authorization is unavailable');
   }
 }

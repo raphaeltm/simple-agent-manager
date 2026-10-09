@@ -1,8 +1,9 @@
 import { log } from '../lib/logger';
+import { sanitizeUserInput } from '../lib/sanitize-user-input';
 import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../lib/search-query-limits';
 import { ulid } from '../lib/ulid';
-import { getMcpLimits, sanitizeUserInput } from '../routes/mcp/_helpers';
 import { OperationError } from './errors';
+import { getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 
 export type IdeasSearchInput = {
@@ -38,7 +39,7 @@ function normalizedIdeaQuery(query: unknown, ctx: OperationContext) {
 }
 
 export async function searchIdeas(ctx: OperationContext, input: IdeasSearchInput) {
-  const limits = getMcpLimits(ctx.env);
+  const limits = getPlatformOperationLimits(ctx.env);
   const related = input.related === true;
   const search = related || input.search === true || input.query !== undefined;
   const normalizedQuery = search ? normalizedIdeaQuery(input.query, ctx) : null;
@@ -174,7 +175,7 @@ export async function getIdea(ctx: OperationContext, projectId: string, ideaId: 
 }
 
 export async function createIdea(ctx: OperationContext, input: IdeaCreateInput) {
-  const limits = getMcpLimits(ctx.env);
+  const limits = getPlatformOperationLimits(ctx.env);
   const title =
     typeof input.title === 'string'
       ? sanitizeUserInput(input.title.trim()).slice(0, limits.ideaTitleMaxLength)
@@ -246,7 +247,7 @@ export function validateIdeaStatusTransition(
 }
 
 export async function updateIdea(ctx: OperationContext, input: IdeaUpdateInput) {
-  const limits = getMcpLimits(ctx.env);
+  const limits = getPlatformOperationLimits(ctx.env);
   const ideaId = typeof input.ideaId === 'string' ? input.ideaId.trim() : '';
   if (!ideaId) throw new OperationError('invalid_input', 'ideaId is required');
   const existing = await ctx.env.DATABASE.prepare(

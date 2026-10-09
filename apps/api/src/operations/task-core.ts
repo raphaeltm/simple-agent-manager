@@ -5,10 +5,10 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
 import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../lib/search-query-limits';
-import { getMcpLimits } from '../routes/mcp/_helpers';
 import * as projectDataService from '../services/project-data';
 import { getLatestAssistantMessageForTask } from '../services/task-final-assistant-message';
 import { OperationError } from './errors';
+import { getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 
 type TaskSearchRow = {
@@ -152,7 +152,7 @@ type ListTasksInput = {
 };
 
 export async function listTasks(ctx: OperationContext, input: ListTasksInput) {
-  const limits = getMcpLimits(ctx.env);
+  const limits = getPlatformOperationLimits(ctx.env);
   const search = input.search || input.query !== undefined;
   const inputQuery = typeof input.query === 'string' ? input.query.trim() : '';
   if (search && !inputQuery)

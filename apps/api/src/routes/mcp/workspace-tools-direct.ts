@@ -8,6 +8,7 @@
  */
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
@@ -86,17 +87,30 @@ export async function handleGetPeerAgentOutput(
   }
 
   try {
-    const response = await runWorkspaceOperation('get_task_details', requestId, { taskId }, tokenData, env);
+    const response = await runWorkspaceOperation(
+      'get_task_details',
+      requestId,
+      { taskId },
+      tokenData,
+      env
+    );
     if (response.error) {
       return response.error.message === 'Task not found in this project'
         ? jsonRpcError(requestId, INVALID_PARAMS, `Task ${taskId} not found in this project`)
         : response;
     }
     const result = response.result as { content: Array<{ text: string }> };
-    const task = JSON.parse(result.content[0]?.text ?? '{}') as {
-      id: string; title: string; status: string; description: string | null;
-      outputSummary: string | null; outputBranch: string | null;
-    };
+    const task = v.parse(
+      v.object({
+        id: v.string(),
+        title: v.string(),
+        status: v.string(),
+        description: v.nullable(v.string()),
+        outputSummary: v.nullable(v.string()),
+        outputBranch: v.nullable(v.string()),
+      }),
+      JSON.parse(result.content[0]?.text ?? '{}')
+    );
     const limits = getMcpLimits(env);
     return jsonRpcSuccess(requestId, {
       content: [
