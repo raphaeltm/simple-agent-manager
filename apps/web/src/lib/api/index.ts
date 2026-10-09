@@ -480,11 +480,9 @@ export type {
   ChatSessionResponse,
   ChatSessionStateResponse,
   ChatSessionTaskEmbed,
-  ForkPreparationResponse,
   RecentChatsApiResponse,
   SessionStateSnapshot,
   SessionSummaryItem,
-  SessionSummaryResponse,
   StartInstantChatSessionRequest,
   StartInstantChatSessionResponse,
 } from './sessions';
@@ -498,13 +496,11 @@ export {
   listActivityEvents,
   listChatMessages,
   listChatSessions,
-  prepareForkSession,
   resetIdleTimer,
   resolveAttentionAnswer,
   sendFollowUpPrompt,
   startInstantChatSession,
   stopChatSession,
-  summarizeSession,
 } from './sessions';
 export type { SetupCompleteResponse, SetupStatusResponse, SetupVerifyResponse } from './setup';
 export { completeSetup, fetchSetupStatus, saveSetupConfig, verifySetupToken } from './setup';

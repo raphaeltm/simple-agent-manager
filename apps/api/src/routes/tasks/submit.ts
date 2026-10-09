@@ -516,8 +516,8 @@ submitRoutes.post(
     const projectAgentDefaults = resolveProjectAgentDefault(project.agentDefaults, agentType);
 
     // Start new task work on its generated output branch so VM-agent completion
-    // pushes cannot land on the repository default branch. Forked tasks get parent
-    // context via contextSummary instead of checking out the parent's branch.
+    // pushes cannot land on the repository default branch. A fork does not check out
+    // its parent's branch; its prompt carries the parent IDs for the agent to look up.
     const branch = branchName;
 
     // Use a deterministic title immediately. AI title refinement runs after the
@@ -594,8 +594,9 @@ submitRoutes.post(
         userId
       );
 
-      // If this is a forked task, persist the context summary as a system message first.
-      // This gives the agent background context from the parent session.
+      // A caller-supplied context note (e.g. the CLI's --context-summary) is persisted as a
+      // system message ahead of the prompt. It is shown in the chat only; the agent's prompt
+      // is the task description.
       if (body.contextSummary) {
         await projectDataService.persistMessage(
           c.env,

@@ -7,8 +7,8 @@ import type { PendingDerived } from './useProjectChatState';
 type SubmitTaskPayload = Parameters<typeof submitTask>[1];
 
 function getDerivedSubmitFields(pendingDerived: PendingDerived | null) {
-  if (!pendingDerived) return {};
-  return { parentTaskId: pendingDerived.parentTaskId, contextSummary: pendingDerived.contextSummary };
+  if (!pendingDerived?.parentTaskId) return {};
+  return { parentTaskId: pendingDerived.parentTaskId };
 }
 
 export function buildBaseSubmitRequest({

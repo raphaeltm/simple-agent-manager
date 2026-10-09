@@ -95,7 +95,7 @@ The API Worker (`apps/api/`) is a Hono application handling:
 - **Resource management** — CRUD for nodes, workspaces, projects, ideas
 - **Reverse proxy** — workspace subdomain, port traffic, and file proxy to VMs
 - **Durable Objects** — per-project data, node lifecycle, idea orchestration, notifications
-- **Workers AI** — idea title generation, voice transcription, text-to-speech, context summarization
+- **Workers AI** — idea title generation, voice transcription, text-to-speech
 - **MCP server** — project-aware tools for running agents
 - **Cron triggers** — provisioning timeout checks, warm node cleanup, orphan detection
 
@@ -193,7 +193,7 @@ Summary data flows back from DOs to D1 via debounced sync (e.g., `last_activity_
 | -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **KV**         | `KV`    | Auth sessions, bootstrap tokens, boot logs, MCP tokens                                                                                           |
 | **R2**         | `R2`    | VM Agent binaries, private diagnostic artifacts, session snapshots, compose image artifacts, TTS audio cache, ProjectData archived tool payloads |
-| **Workers AI** | `AI`    | Idea title generation, transcription, TTS, context summarization                                                                                 |
+| **Workers AI** | `AI`    | Idea title generation, transcription, TTS                                                                                                        |
 
 ### API error diagnostics
 

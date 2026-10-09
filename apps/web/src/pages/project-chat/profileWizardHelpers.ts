@@ -26,7 +26,23 @@ export function selectProfileId(current: string | null, profiles: AgentProfile[]
   return profiles[0]?.id ?? null;
 }
 
-export const FORK_MESSAGE_TEMPLATE = `Use the SAM MCP tools (get_session_messages, search_messages) to review the previous session for full context about what was done and what needs to happen next.
+const FORK_MESSAGE_TEMPLATE = `Use the SAM MCP tools (get_session_messages, search_messages) to review the previous session for full context about what was done and what needs to happen next.
 Use get_session_messages with the parent project ID and parent session ID below before relying on title or phrase search.
 
 `;
+
+/** Composer text for a fork: the IDs the new agent needs to read the previous session. */
+export function buildForkMessage({
+  sessionLabel,
+  projectId,
+  sessionId,
+  taskId,
+}: Readonly<{ sessionLabel: string; projectId: string; sessionId: string; taskId: string }>) {
+  const ids = [
+    `Previous session: "${sessionLabel}"`,
+    `Parent project ID: ${projectId}`,
+    `Parent session ID: ${sessionId}`,
+    ...(taskId ? [`Parent task ID: ${taskId}`] : []),
+  ];
+  return `${FORK_MESSAGE_TEMPLATE}${ids.join('\n')}\n\n`;
+}
