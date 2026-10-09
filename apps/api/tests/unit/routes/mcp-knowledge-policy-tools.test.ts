@@ -11,6 +11,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as projectDataService from '../../../src/services/project-data';
 
+vi.mock('../../../src/middleware/project-auth', () => ({
+  requireProjectAccess: vi.fn().mockResolvedValue({ id: 'proj-456' }),
+  requireProjectCapability: vi.fn().mockResolvedValue({ id: 'proj-456' }),
+}));
+
 vi.mock('../../../src/services/project-data', () => ({
   addKnowledgeObservation: vi.fn(),
   createKnowledgeEntity: vi.fn(),

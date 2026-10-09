@@ -239,7 +239,7 @@ importers:
         version: 0.6.1(hono@4.13.4)(valibot@1.5.0(typescript@5.9.3))
       '@mastra/core':
         specifier: 1.9.0
-        version: 1.9.0(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-community/standard-openapi@0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4))(@types/json-schema@7.0.15)(openapi-types@12.1.3)(zod@4.5.4)
+        version: 1.9.0(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-community/standard-openapi@0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4))(@types/json-schema@7.0.15)(openapi-types@12.1.3)(zod@4.5.4)
       '@simple-agent-manager/cloud-init':
         specifier: workspace:*
         version: link:../../packages/cloud-init
@@ -249,6 +249,9 @@ importers:
       '@simple-agent-manager/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@valibot/to-json-schema':
+        specifier: 1.3.0
+        version: 1.3.0(valibot@1.5.0(typescript@5.9.3))
       ai:
         specifier: 7.0.9
         version: 7.0.9(zod@4.5.4)
@@ -1422,6 +1425,7 @@ packages:
 
   '@cloudflare/vitest-pool-workers@0.17.0':
     resolution: {integrity: sha512-fNNXG11SLN+wjjYq9HWxBVtkZwAjbGJeAEz2vU55bsAizJihUXd8FYa7RS2G5PRy4u7JQpK11Qgm9Ubfp2oQ1Q==}
+    deprecated: '@cloudflare/vitest-pool-workers has been renamed to @cloudflare/vitest-plugin. This package will not receive future updates.'
     peerDependencies:
       '@vitest/runner': ^4.1.0
       '@vitest/snapshot': ^4.1.0
@@ -4727,6 +4731,11 @@ packages:
 
   '@upsetjs/venn.js@2.0.0':
     resolution: {integrity: sha512-WbBhLrooyePuQ1VZxrJjtLvTc4NVfpOyKx0sKqioq9bX1C1m7Jgykkn8gLrtwumBioXIqam8DLxp88Adbue6Hw==}
+
+  '@valibot/to-json-schema@1.3.0':
+    resolution: {integrity: sha512-82Vv6x7sOYhv5YmTRgSppSqj1nn2pMCk5BqCMGWYp0V/fq+qirrbGncqZAtZ09/lrO40ne/7z8ejwE728aVreg==}
+    peerDependencies:
+      valibot: ^1.1.0
 
   '@vercel/oidc@3.2.0':
     resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
@@ -12071,7 +12080,7 @@ snapshots:
     dependencies:
       '@lukeed/csprng': 1.1.0
 
-  '@mastra/core@1.9.0(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-community/standard-openapi@0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4))(@types/json-schema@7.0.15)(openapi-types@12.1.3)(zod@4.5.4)':
+  '@mastra/core@1.9.0(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-community/standard-openapi@0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4))(@types/json-schema@7.0.15)(openapi-types@12.1.3)(zod@4.5.4)':
     dependencies:
       '@a2a-js/sdk': 0.2.5
       '@ai-sdk/provider-utils-v5': '@ai-sdk/provider-utils@3.0.20(zod@4.5.4)'
@@ -12088,7 +12097,7 @@ snapshots:
       execa: 9.6.1
       gray-matter: 4.0.3
       hono: 4.13.4
-      hono-openapi: 1.3.0(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-community/standard-openapi@0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4))(@types/json-schema@7.0.15)(hono@4.13.4)(openapi-types@12.1.3)
+      hono-openapi: 1.3.0(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-community/standard-openapi@0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4))(@types/json-schema@7.0.15)(hono@4.13.4)(openapi-types@12.1.3)
       ignore: 7.0.5
       js-tiktoken: 1.0.21
       json-schema: 0.4.0
@@ -13082,19 +13091,20 @@ snapshots:
 
   '@speed-highlight/core@1.2.15': {}
 
-  '@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)':
+  '@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)':
     dependencies:
       '@standard-schema/spec': 1.1.0
       '@types/json-schema': 7.0.15
       quansync: 0.2.11
     optionalDependencies:
+      '@valibot/to-json-schema': 1.3.0(valibot@1.5.0(typescript@5.9.3))
       valibot: 1.5.0(typescript@5.9.3)
       zod: 4.5.4
       zod-to-json-schema: 3.25.2(zod@4.5.4)
 
-  '@standard-community/standard-openapi@0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4)':
+  '@standard-community/standard-openapi@0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4)':
     dependencies:
-      '@standard-community/standard-json': 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)
+      '@standard-community/standard-json': 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)
       '@standard-schema/spec': 1.1.0
       openapi-types: 12.1.3
     optionalDependencies:
@@ -13894,6 +13904,10 @@ snapshots:
     optionalDependencies:
       d3-selection: 3.0.0
       d3-transition: 3.0.1(d3-selection@3.0.0)
+
+  '@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3))':
+    dependencies:
+      valibot: 1.5.0(typescript@5.9.3)
 
   '@vercel/oidc@3.2.0': {}
 
@@ -16538,10 +16552,10 @@ snapshots:
 
   hex-rgb@4.3.0: {}
 
-  hono-openapi@1.3.0(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-community/standard-openapi@0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4))(@types/json-schema@7.0.15)(hono@4.13.4)(openapi-types@12.1.3):
+  hono-openapi@1.3.0(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-community/standard-openapi@0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4))(@types/json-schema@7.0.15)(hono@4.13.4)(openapi-types@12.1.3):
     dependencies:
-      '@standard-community/standard-json': 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)
-      '@standard-community/standard-openapi': 0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4)
+      '@standard-community/standard-json': 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)
+      '@standard-community/standard-openapi': 0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(quansync@0.2.11)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.5.0(typescript@5.9.3))(zod@4.5.4)
       '@types/json-schema': 7.0.15
       openapi-types: 12.1.3
     optionalDependencies:
@@ -19349,8 +19363,7 @@ snapshots:
 
   source-map-js@1.2.1: {}
 
-  source-map-js@1.2.2:
-    optional: true
+  source-map-js@1.2.2: {}
 
   source-map-support@0.5.21:
     dependencies:

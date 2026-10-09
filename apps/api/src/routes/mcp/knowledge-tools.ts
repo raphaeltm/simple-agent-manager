@@ -11,7 +11,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
-import { normalizeSearchQuery } from '../../lib/search-query-limits';
+import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import * as projectDataService from '../../services/project-data';
 import {
   getMcpLimits,
@@ -281,36 +281,7 @@ export async function handleSearchKnowledge(
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
-  const limits = getMcpLimits(env);
-  const inputQuery = typeof params.query === 'string' ? params.query.trim() : '';
-  if (!inputQuery) return jsonRpcError(requestId, INVALID_PARAMS, 'query is required');
-  const normalizedQuery = normalizeSearchQuery(inputQuery, env);
-
-  let entityType: KnowledgeEntityType | null = null;
-  if (params.entityType !== undefined) {
-    if (typeof params.entityType !== 'string' || !isKnowledgeEntityType(params.entityType)) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `Invalid entityType. Valid: ${KNOWLEDGE_ENTITY_TYPES.join(', ')}`);
-    }
-    entityType = params.entityType;
-  }
-  const minConfidenceResult = validateConfidence(requestId, params.minConfidence, 'minConfidence');
-  if (!minConfidenceResult.ok) return minConfidenceResult.response;
-  const minConfidence = minConfidenceResult.value;
-  const limitResult = validateLimit(requestId, params.limit, limits.knowledgeSearchLimit, limits.knowledgeSearchLimit);
-  if (!limitResult.ok) return limitResult.response;
-  const limit = limitResult.value;
-
-  try {
-    const results = await projectDataService.searchKnowledgeObservations(
-      env, tokenData.projectId, normalizedQuery.query, entityType, minConfidence, limit,
-    );
-
-    return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: JSON.stringify({ results, count: results.length, ...normalizedQuery }, null, 2) }],
-    });
-  } catch (err) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to search knowledge: ${(err as Error).message}`);
-  }
+  return runWorkspaceOperation('search_knowledge', requestId, params, tokenData, env);
 }
 
 // ─── get_project_knowledge ──────────────────────────────────────────────────

@@ -1550,29 +1550,37 @@ Applied via cloud-init on each node:
 
 ## MCP Tool Limits
 
-| Variable                               | Default | Description                                                                                                                                              |
-| -------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MCP_IDEA_CONTEXT_MAX_LENGTH`          | `500`   | Max characters of idea context shown to agents                                                                                                           |
-| `MCP_IDEA_LIST_LIMIT`                  | `20`    | Default page size for `list_ideas`                                                                                                                       |
-| `MCP_IDEA_LIST_MAX`                    | `100`   | Max page size for `list_ideas`                                                                                                                           |
-| `MCP_IDEA_SEARCH_MAX`                  | `20`    | Max results from `search_ideas`                                                                                                                          |
-| `MCP_MESSAGE_SEARCH_MAX`               | `20`    | Max results from `search_messages`                                                                                                                       |
-| `SEARCH_QUERY_MAX_LENGTH`              | `4096`  | Max total UTF-8 bytes retained by idea, task, knowledge, and message search as a DoS guard; responses disclose truncation                                |
-| `SEARCH_QUERY_MAX_TERM_LENGTH`         | `48`    | Max LIKE-safe UTF-8 bytes retained per search term; higher values clamp to SQLite's safe pattern ceiling                                                 |
-| `SEARCH_QUERY_MAX_TERMS`               | `40`    | Max whitespace-delimited terms retained by those search surfaces; higher values clamp to the safe D1 parameter ceiling and responses disclose truncation |
-| `MCP_MESSAGE_LIST_LIMIT`               | `50`    | Default page size for `get_session_messages`                                                                                                             |
-| `MCP_MESSAGE_LIST_MAX`                 | `200`   | Max messages per `get_session_messages` request                                                                                                          |
-| `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT` | `10`    | Default page size for `get_archived_tool_payloads`                                                                                                       |
-| `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX`   | `50`    | Max archived payloads per `get_archived_tool_payloads`                                                                                                   |
-| `MCP_COMMENT_LIST_LIMIT`               | `10`    | Default page size for `list_message_comment_threads`                                                                                                     |
-| `MCP_COMMENT_LIST_MAX`                 | `25`    | Max threads per `list_message_comment_threads` request                                                                                                   |
-| `MCP_COMMENT_BODY_MAX_LENGTH`          | `4000`  | Max comment/reply body characters accepted through MCP                                                                                                   |
-| `MCP_COMMENT_QUOTE_MAX_LENGTH`         | `1000`  | Max quoted source-message characters returned to agents                                                                                                  |
-| `COMMENT_DIRECTIVE_CONTEXT_MAX_LENGTH` | `6000`  | Max send-to-agent comment directive prompt length                                                                                                        |
-| `MCP_TRIGGER_LIST_LIMIT`               | `20`    | Default page size for `list_triggers`                                                                                                                    |
-| `MCP_TRIGGER_LIST_MAX`                 | `100`   | Max triggers per `list_triggers` request                                                                                                                 |
-| `MCP_INCIDENT_LIST_LIMIT`              | `10`    | Default page size for private `list_incident_queue`                                                                                                      |
-| `MCP_INCIDENT_LIST_MAX`                | `50`    | Max private incidents per `list_incident_queue` request                                                                                                  |
+| Variable                                 | Default | Description                                                                                                                                              |
+| ---------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MCP_IDEA_CONTEXT_MAX_LENGTH`            | `500`   | Max characters of idea context shown to agents                                                                                                           |
+| `MCP_IDEA_LIST_LIMIT`                    | `20`    | Default page size for `list_ideas`                                                                                                                       |
+| `MCP_IDEA_LIST_MAX`                      | `100`   | Max page size for `list_ideas`                                                                                                                           |
+| `MCP_IDEA_SEARCH_MAX`                    | `20`    | Max results from `search_ideas`                                                                                                                          |
+| `MCP_RELATED_IDEA_SEARCH_LIMIT`          | `10`    | Default results from `find_related_ideas`                                                                                                                |
+| `MCP_TASK_LIST_LIMIT`                    | `10`    | Default page size for `list_tasks`                                                                                                                       |
+| `MCP_TASK_LIST_MAX`                      | `50`    | Max page size for `list_tasks`                                                                                                                           |
+| `MCP_TASK_SEARCH_LIMIT`                  | `10`    | Default page size for `search_tasks`                                                                                                                     |
+| `MCP_TASK_SEARCH_MAX`                    | `20`    | Max results from `search_tasks`                                                                                                                          |
+| `MCP_TASK_DETAIL_RECENT_MESSAGE_LIMIT`   | `5`     | Recent assistant messages returned by `get_task_details`                                                                                                 |
+| `MCP_TASK_DETAIL_MESSAGE_SNIPPET_LENGTH` | `2000`  | Max characters per assistant message snippet in `get_task_details`                                                                                       |
+| `MCP_MESSAGE_SEARCH_LIMIT`               | `10`    | Default page size for `search_messages`                                                                                                                  |
+| `MCP_MESSAGE_SEARCH_MAX`                 | `20`    | Max results from `search_messages`                                                                                                                       |
+| `SEARCH_QUERY_MAX_LENGTH`                | `4096`  | Max total UTF-8 bytes retained by idea, task, knowledge, and message search as a DoS guard; responses disclose truncation                                |
+| `SEARCH_QUERY_MAX_TERM_LENGTH`           | `48`    | Max LIKE-safe UTF-8 bytes retained per search term; higher values clamp to SQLite's safe pattern ceiling                                                 |
+| `SEARCH_QUERY_MAX_TERMS`                 | `40`    | Max whitespace-delimited terms retained by those search surfaces; higher values clamp to the safe D1 parameter ceiling and responses disclose truncation |
+| `MCP_MESSAGE_LIST_LIMIT`                 | `50`    | Default page size for `get_session_messages`                                                                                                             |
+| `MCP_MESSAGE_LIST_MAX`                   | `200`   | Max messages per `get_session_messages` request                                                                                                          |
+| `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT`   | `10`    | Default page size for `get_archived_tool_payloads`                                                                                                       |
+| `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX`     | `50`    | Max archived payloads per `get_archived_tool_payloads`                                                                                                   |
+| `MCP_COMMENT_LIST_LIMIT`                 | `10`    | Default page size for `list_message_comment_threads`                                                                                                     |
+| `MCP_COMMENT_LIST_MAX`                   | `25`    | Max threads per `list_message_comment_threads` request                                                                                                   |
+| `MCP_COMMENT_BODY_MAX_LENGTH`            | `4000`  | Max comment/reply body characters accepted through MCP                                                                                                   |
+| `MCP_COMMENT_QUOTE_MAX_LENGTH`           | `1000`  | Max quoted source-message characters returned to agents                                                                                                  |
+| `COMMENT_DIRECTIVE_CONTEXT_MAX_LENGTH`   | `6000`  | Max send-to-agent comment directive prompt length                                                                                                        |
+| `MCP_TRIGGER_LIST_LIMIT`                 | `20`    | Default page size for `list_triggers`                                                                                                                    |
+| `MCP_TRIGGER_LIST_MAX`                   | `100`   | Max triggers per `list_triggers` request                                                                                                                 |
+| `MCP_INCIDENT_LIST_LIMIT`                | `10`    | Default page size for private `list_incident_queue`                                                                                                      |
+| `MCP_INCIDENT_LIST_MAX`                  | `50`    | Max private incidents per `list_incident_queue` request                                                                                                  |
 
 Project event MCP tools use the ProjectData event limits above: `PROJECT_EVENT_LIST_LIMIT`, `PROJECT_EVENT_LIST_MAX`, and `PROJECT_EVENT_SUBSCRIPTION_EVENT_CURSOR_MAX_LENGTH`.
 

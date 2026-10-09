@@ -15,6 +15,7 @@ import type { Env } from '../../index';
 import { log } from '../../lib/logger';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { requireProjectAccess, requireProjectCapability } from '../../middleware/project-auth';
+import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import * as agentProfileService from '../../services/agent-profiles';
 import { getRuntimeLimits } from '../../services/limits';
 import {
@@ -109,46 +110,7 @@ export async function handleListAgentProfiles(
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  try {
-    const db = drizzle(env.DATABASE, { schema });
-    await requireProjectAccess(db, tokenData.projectId, tokenData.userId);
-    const profiles = await agentProfileService.listProfiles(
-      db,
-      tokenData.projectId,
-      tokenData.userId,
-      env
-    );
-
-    return jsonRpcSuccess(requestId, {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              profiles: profiles.map((p) => ({
-                id: p.id,
-                name: p.name,
-                description: p.description,
-                agentType: p.agentType,
-                model: p.model,
-                effort: p.effort,
-                isBuiltin: p.isBuiltin,
-              })),
-              count: profiles.length,
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    });
-  } catch (err) {
-    return mapServiceError(requestId, err, {
-      fallbackPrefix: 'Failed to list profiles',
-      logTag: 'mcp.list_agent_profiles_failed',
-      logCtx: { projectId: tokenData.projectId },
-    });
-  }
+  return runWorkspaceOperation('list_agent_profiles', requestId, _params, tokenData, env);
 }
 
 export async function handleGetAgentProfile(

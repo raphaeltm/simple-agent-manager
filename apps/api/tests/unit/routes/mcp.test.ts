@@ -111,7 +111,7 @@ function isCapacityPoolSql(sql: string): boolean {
 // Keep those rows independent of the task/count result queues below, and map
 // full Drizzle rows in schema order rather than object insertion order.
 function mockDispatchProjectAccess(
-  options: { projectExists?: boolean; memberRole?: string | null } = {}
+  options: { projectExists?: boolean; memberRole?: string | null; consumeConfigured?: boolean } = {}
 ) {
   const prepare = mockD1.prepare.getMockImplementation()!;
   mockD1.prepare.mockImplementation((sql: string) => {
@@ -122,9 +122,12 @@ function mockDispatchProjectAccess(
     const read = async () => {
       if (projectQuery && options.projectExists === false) return [];
       if (memberQuery && options.memberRole === null) return [];
-      const configured = (await mockD1._stmt.all()).results.find(
-        (row: Record<string, unknown>) => row.id === 'proj-456'
-      );
+      const configured =
+        options.consumeConfigured === false
+          ? undefined
+          : (await mockD1._stmt.all()).results.find(
+              (row: Record<string, unknown>) => row.id === 'proj-456'
+            );
       const row: Record<string, unknown> = memberQuery
         ? {
             projectId: 'proj-456',
@@ -245,6 +248,21 @@ function createStatefulTaskD1(task: StatefulTaskRow) {
         }),
         all: vi.fn(async () => ({ results: [] })),
         raw: vi.fn(async () => {
+          if (sql.includes('from "projects"')) {
+            const row: Record<string, unknown> = { id: task.project_id };
+            return [Object.keys(getTableColumns(schema.projects)).map((key) => row[key] ?? null)];
+          }
+          if (sql.includes('from "project_members"')) {
+            const row: Record<string, unknown> = {
+              projectId: task.project_id,
+              userId: task.user_id,
+              role: 'owner',
+              status: 'active',
+            };
+            return [
+              Object.keys(getTableColumns(schema.projectMembers)).map((key) => row[key] ?? null),
+            ];
+          }
           if (sql.includes('from "tasks"') && sql.includes('"completion_evidence"')) {
             return [
               [
@@ -480,6 +498,7 @@ describe('MCP Routes', () => {
     vi.clearAllMocks();
     mockD1 = createMockD1();
     mockEnv.DATABASE = mockD1;
+    mockDispatchProjectAccess({ consumeConfigured: false });
     mockEnv.CF_CONTAINER_ENABLED = 'false';
     delete (mockEnv as Record<string, unknown>).ENCRYPTION_KEY;
     delete (mockEnv as Record<string, unknown>).PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS;
@@ -5233,7 +5252,10 @@ describe('MCP Routes', () => {
       expect(data.contentLength).toBe(0);
 
       // Verify INSERT was called with status='draft'
-      const sql = mockD1.prepare.mock.calls[0][0];
+      const sql =
+        mockD1.prepare.mock.calls.find(([statement]) =>
+          statement.includes('INSERT INTO tasks')
+        )?.[0] ?? '';
       expect(sql).toContain("'draft'");
       expect(sql).toContain('INSERT INTO tasks');
     });
@@ -5887,7 +5909,9 @@ describe('MCP Routes', () => {
       );
 
       // Verify SQL includes status = 'draft'
-      const sql = mockD1.prepare.mock.calls[0][0];
+      const sql =
+        mockD1.prepare.mock.calls.find(([statement]) => statement.includes('status = ?'))?.[0] ??
+        '';
       expect(sql).toContain('status = ?');
       const bindCalls = mockD1._stmt.bind.mock.calls;
       const lastBind = bindCalls[bindCalls.length - 1];
@@ -5961,10 +5985,12 @@ describe('MCP Routes', () => {
       expect(data.query).toBe('SSO');
 
       // Verify status='draft' filter was applied
-      const sql = mockD1.prepare.mock.calls[0][0];
+      const sql =
+        mockD1.prepare.mock.calls.find(([statement]) => statement.includes('status = ?'))?.[0] ??
+        '';
       expect(sql).toContain('status = ?');
       const bindCalls = mockD1._stmt.bind.mock.calls;
-      expect(bindCalls[0]).toContain('draft');
+      expect(bindCalls.some((values) => values.includes('draft'))).toBe(true);
     });
   });
 
@@ -6396,10 +6422,19 @@ describe('MCP Routes', () => {
         {
           id: 'task-peer',
           title: 'Auth refactor',
-          status: 'completed',
           description: 'Refactored the auth module',
-          output_summary: 'PR merged, tests passing',
-          output_branch: 'sam/auth-refactor',
+          status: 'completed',
+          priority: 0,
+          outputBranch: 'sam/auth-refactor',
+          outputPrUrl: null,
+          outputSummary: 'PR merged, tests passing',
+          completionEvidence: null,
+          errorMessage: null,
+          chatSessionId: null,
+          createdAt: '2026-10-09',
+          updatedAt: '2026-10-09',
+          startedAt: null,
+          completedAt: '2026-10-09',
         },
       ]);
 

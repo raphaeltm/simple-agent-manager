@@ -53,6 +53,10 @@
       "registryUrl": "https://www.npmjs.com/package/@typescript-eslint/parser",
       "necessity": "Parses TypeScript for ESLint rules and fixtures."
     },
+    "@valibot/to-json-schema": {
+      "registryUrl": "https://www.npmjs.com/package/@valibot/to-json-schema",
+      "necessity": "Exports operation input schemas as JSON Schema for shared MCP and HTTP adapters."
+    },
     "@vitest/coverage-v8": {
       "registryUrl": "https://www.npmjs.com/package/@vitest/coverage-v8",
       "necessity": "Generates V8 coverage for workspace gates."

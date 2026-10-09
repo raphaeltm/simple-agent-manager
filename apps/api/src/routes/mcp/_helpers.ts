@@ -8,6 +8,7 @@ import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { getPlatformOperationLimits } from '../../operations/limits';
 import { type McpTokenData, type McpTokenEnv, validateMcpToken } from '../../services/mcp-token';
 
 // Re-export McpTokenData for use by tool handler files
@@ -56,16 +57,7 @@ const DEFAULT_LOG_MESSAGE_MAX_LENGTH = 1000;
 /** Default max length for task output summary stored in D1. Override via MAX_OUTPUT_SUMMARY_LENGTH env var. */
 const DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH = 10000;
 
-/** Valid message roles for filtering in get_session_messages and search_messages. */
-export const VALID_MESSAGE_ROLES = [
-  'user',
-  'assistant',
-  'system',
-  'tool',
-  'thinking',
-  'plan',
-] as const;
-export type MessageRole = (typeof VALID_MESSAGE_ROLES)[number];
+export { type MessageRole, VALID_MESSAGE_ROLES, validateRoles } from '../../lib/message-roles';
 
 /** Default HTTP-level rate limit for the /mcp endpoint (per token, per minute). Override via MCP_RATE_LIMIT env var. */
 const DEFAULT_MCP_RATE_LIMIT = 120;
@@ -83,9 +75,6 @@ const DEFAULT_MCP_DISPATCH_MAX_REFERENCE_LENGTH = 500;
 const DEFAULT_MCP_DISPATCH_MAX_PRIORITY = 100;
 
 /** Default page sizes for project awareness tools. Override via MCP_* env vars. */
-const DEFAULT_MCP_TASK_LIST_LIMIT = 10;
-const DEFAULT_MCP_TASK_LIST_MAX = 50;
-const DEFAULT_MCP_TASK_SEARCH_MAX = 20;
 const DEFAULT_MCP_SESSION_LIST_LIMIT = 10;
 const DEFAULT_MCP_SESSION_LIST_MAX = 50;
 const DEFAULT_MCP_MESSAGE_LIST_LIMIT = 50;
@@ -142,6 +131,7 @@ const DEFAULT_KNOWLEDGE_ENTITY_NAME_MAX_LENGTH = 200;
 const DEFAULT_KNOWLEDGE_DESCRIPTION_MAX_LENGTH = 2000;
 
 export function getMcpLimits(env: Env) {
+  const operationLimits = getPlatformOperationLimits(env);
   return {
     activityMessageMaxLength: parsePositiveInt(
       env.MAX_ACTIVITY_MESSAGE_LENGTH,
@@ -155,9 +145,9 @@ export function getMcpLimits(env: Env) {
       env.MAX_OUTPUT_SUMMARY_LENGTH,
       DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH
     ),
-    taskListLimit: DEFAULT_MCP_TASK_LIST_LIMIT,
-    taskListMax: DEFAULT_MCP_TASK_LIST_MAX,
-    taskSearchMax: DEFAULT_MCP_TASK_SEARCH_MAX,
+    taskListLimit: operationLimits.taskListLimit,
+    taskListMax: operationLimits.taskListMax,
+    taskSearchMax: operationLimits.taskSearchMax,
     sessionListLimit: DEFAULT_MCP_SESSION_LIST_LIMIT,
     sessionListMax: DEFAULT_MCP_SESSION_LIST_MAX,
     messageListLimit: parsePositiveInt(env.MCP_MESSAGE_LIST_LIMIT, DEFAULT_MCP_MESSAGE_LIST_LIMIT),
@@ -324,30 +314,6 @@ export const ACTIVE_STATUSES = ['queued', 'in_progress', 'delegated', 'awaiting_
 // Sleeping agents retain their task/chat identity and can receive durable wakes
 // or parent cancellation. They cannot act as live callers or consume dispatch slots.
 export const AGENT_TARGET_STATUSES = [...ACTIVE_STATUSES, 'sleeping'];
-
-/**
- * Validate and filter a roles array against the allowlist.
- * Returns null if any role is invalid (caller should return 400).
- * Returns filtered valid roles, or the default if input is not an array.
- */
-export function validateRoles(
-  input: unknown,
-  defaultRoles: MessageRole[] = ['user', 'assistant']
-): { valid: true; roles: MessageRole[] } | { valid: false; invalid: string[] } {
-  if (!Array.isArray(input)) {
-    return { valid: true, roles: defaultRoles };
-  }
-  const strings = input.filter((r): r is string => typeof r === 'string');
-  const invalid = strings.filter((r) => !(VALID_MESSAGE_ROLES as readonly string[]).includes(r));
-  if (invalid.length > 0) {
-    return { valid: false, invalid };
-  }
-  // Repeated roles do not change the filter semantics, but every retained value becomes a
-  // SQLite bind parameter. De-duplicate here so a valid duplicate-heavy request cannot exhaust
-  // the 100-parameter ceiling when search also expands one bind per retained query term.
-  const roles = strings.length > 0 ? ([...new Set(strings)] as MessageRole[]) : defaultRoles;
-  return { valid: true, roles };
-}
 
 // ─── Rate limiting ──────────────────────────────────────────────────────────
 

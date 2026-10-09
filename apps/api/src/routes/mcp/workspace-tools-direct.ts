@@ -8,11 +8,13 @@
  */
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import { listAgentActivityTasks } from '../../services/agent-activity';
 import {
   getMcpLimits,
@@ -85,24 +87,30 @@ export async function handleGetPeerAgentOutput(
   }
 
   try {
-    const db = drizzle(env.DATABASE, { schema });
-    const [task] = await db
-      .select({
-        id: schema.tasks.id,
-        title: schema.tasks.title,
-        status: schema.tasks.status,
-        description: schema.tasks.description,
-        outputSummary: schema.tasks.outputSummary,
-        outputBranch: schema.tasks.outputBranch,
-      })
-      .from(schema.tasks)
-      .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, tokenData.projectId)))
-      .limit(1);
-
-    if (!task) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `Task ${taskId} not found in this project`);
+    const response = await runWorkspaceOperation(
+      'get_task_details',
+      requestId,
+      { taskId },
+      tokenData,
+      env
+    );
+    if (response.error) {
+      return response.error.message === 'Task not found in this project'
+        ? jsonRpcError(requestId, INVALID_PARAMS, `Task ${taskId} not found in this project`)
+        : response;
     }
-
+    const result = response.result as { content: Array<{ text: string }> };
+    const task = v.parse(
+      v.object({
+        id: v.string(),
+        title: v.string(),
+        status: v.string(),
+        description: v.nullable(v.string()),
+        outputSummary: v.nullable(v.string()),
+        outputBranch: v.nullable(v.string()),
+      }),
+      JSON.parse(result.content[0]?.text ?? '{}')
+    );
     const limits = getMcpLimits(env);
     return jsonRpcSuccess(requestId, {
       content: [

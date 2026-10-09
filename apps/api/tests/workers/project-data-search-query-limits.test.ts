@@ -96,7 +96,7 @@ describe('ProjectData search query limits with real Durable Object SQLite', () =
   });
 
   it('runs a long query through the MCP knowledge handler into real DO SQLite', async () => {
-    const projectId = `mcp-knowledge-search-limits-${crypto.randomUUID()}`;
+    const { projectId, userId } = await createMcpProject('mcp-knowledge-search-limits');
     const stub = env.PROJECT_DATA.get(
       env.PROJECT_DATA.idFromName(projectId)
     ) as DurableObjectStub<ProjectDataTestDouble>;
@@ -107,7 +107,7 @@ describe('ProjectData search query limits with real Durable Object SQLite', () =
     const response = await handleSearchKnowledge(
       1,
       { query: LONG_QUERY },
-      tokenData(projectId),
+      { ...tokenData(projectId), userId },
       env as unknown as Env
     );
     expect(response.error).toBeUndefined();
