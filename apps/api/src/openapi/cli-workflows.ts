@@ -31,7 +31,12 @@ function operation(
 ): OperationObject {
   const parameters: NonNullable<OperationObject['parameters']> = [
     ...path.matchAll(/\{([^}]+)\}/g),
-  ].map((match) => ({ name: match[1]!, in: 'path', required: true, schema: { type: 'string' } }));
+  ].map((match) => ({
+    name: match[1] ?? '',
+    in: 'path',
+    required: true,
+    schema: { type: 'string' },
+  }));
   parameters.push(
     ...query
       .split(' ')

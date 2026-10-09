@@ -139,7 +139,7 @@ func TestWorkspacePortsAPIError(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("expected exit code 1, got %d", code)
 	}
-	if !strings.Contains(stderr.String(), "Workspace not found") {
+	if !strings.Contains(stderr.String(), "NOT_FOUND") {
 		t.Fatalf("expected error message, got: %s", stderr.String())
 	}
 }
@@ -513,7 +513,7 @@ func TestTokenCacheReturnsErrorOnAPIFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from getToken when API returns error")
 	}
-	if !strings.Contains(err.Error(), "Invalid session") {
+	if !strings.Contains(err.Error(), "UNAUTHORIZED") {
 		t.Fatalf("expected API error message, got: %v", err)
 	}
 }

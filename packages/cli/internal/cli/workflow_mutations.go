@@ -221,7 +221,19 @@ func runSettingsInspect(ctx context.Context, runtime Runtime, p parsedArgs) int 
 	}
 	safe["resolutionOrder"] = []string{"explicit task", "skill/profile", "project agent defaults", "user agent settings", "platform defaults"}
 	if defaults, ok := value["agentDefaults"].(map[string]any); ok {
-		safe["agentDefaults"] = defaults
+		filtered := map[string]any{}
+		for agent, raw := range defaults {
+			if config, ok := raw.(map[string]any); ok {
+				entry := map[string]any{}
+				for _, key := range []string{"model", "permissionMode"} {
+					if v, exists := config[key]; exists {
+						entry[key] = v
+					}
+				}
+				filtered[agent] = entry
+			}
+		}
+		safe["agentDefaults"] = filtered
 	}
 	return writeWorkflow(runtime, p, safe)
 }
