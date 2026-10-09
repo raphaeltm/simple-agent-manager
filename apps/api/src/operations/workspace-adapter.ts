@@ -1,23 +1,35 @@
 import type { Env } from '../env';
 import { type JsonRpcResponse, jsonRpcSuccess, type McpTokenData } from '../routes/mcp/_helpers';
 import { OperationError, operationErrorToWorkspaceJsonRpc } from './errors';
-import { platformOperations } from './platform-operations';
+import {
+  type platformOperations,
+  samChatRead,
+  samChatsSearch,
+  samIdeaCreate,
+  samIdeaGet,
+  samIdeasSearch,
+  samIdeaUpdate,
+  samKnowledgeSearch,
+  samProfilesList,
+  samTaskGet,
+  samTasksList,
+} from './platform-operations';
 import type { OperationContext } from './types';
 
 const workspaceOperations: Record<string, (typeof platformOperations)[number]> = {
-  get_task_details: platformOperations[0],
-  list_tasks: platformOperations[1],
-  search_tasks: platformOperations[1],
-  get_session_messages: platformOperations[2],
-  search_messages: platformOperations[3],
-  list_ideas: platformOperations[4],
-  search_ideas: platformOperations[4],
-  find_related_ideas: platformOperations[4],
-  get_idea: platformOperations[5],
-  create_idea: platformOperations[6],
-  update_idea: platformOperations[7],
-  search_knowledge: platformOperations[8],
-  list_agent_profiles: platformOperations[9],
+  get_task_details: samTaskGet,
+  list_tasks: samTasksList,
+  search_tasks: samTasksList,
+  get_session_messages: samChatRead,
+  search_messages: samChatsSearch,
+  list_ideas: samIdeasSearch,
+  search_ideas: samIdeasSearch,
+  find_related_ideas: samIdeasSearch,
+  get_idea: samIdeaGet,
+  create_idea: samIdeaCreate,
+  update_idea: samIdeaUpdate,
+  search_knowledge: samKnowledgeSearch,
+  list_agent_profiles: samProfilesList,
 };
 
 export async function runWorkspaceOperation(
