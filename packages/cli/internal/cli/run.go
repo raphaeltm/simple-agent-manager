@@ -174,23 +174,7 @@ func runTasks(ctx context.Context, runtime Runtime, parsed parsedArgs, args []st
 		return runTaskWait(ctx, runtime, parsed, args[1:])
 	}
 	if args[0] == "submit" {
-		client, config, err := authenticatedClientWithConfig(ctx, runtime)
-		if err != nil {
-			return fail(runtime.Stderr, err)
-		}
-		id, _, err := resolveProjectRef(ctx, client, parsed, config)
-		if err != nil {
-			return fail(runtime.Stderr, err)
-		}
-		message, err := readCommandInput(runtime, parsed, args[1:], "prompt")
-		if err != nil {
-			return fail(runtime.Stderr, err)
-		}
-		options, err := parseSubmitOptions(parsed)
-		if err != nil {
-			return fail(runtime.Stderr, err)
-		}
-		return submitTaskWithClient(ctx, runtime, parsed, client, id, message, options)
+		return runScopedTaskSubmit(ctx, runtime, parsed, args[1:])
 	}
 	if args[0] != "dispatch" {
 		return fail(runtime.Stderr, fmt.Errorf("unknown tasks action: %s", args[0]))
@@ -453,4 +437,24 @@ func isMetadataCommand(p parsedArgs) bool {
 		}
 	}
 	return false
+}
+
+func runScopedTaskSubmit(ctx context.Context, runtime Runtime, parsed parsedArgs, args []string) int {
+	client, config, err := authenticatedClientWithConfig(ctx, runtime)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	id, _, err := resolveProjectRef(ctx, client, parsed, config)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	message, err := readCommandInput(runtime, parsed, args, "prompt")
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	options, err := parseSubmitOptions(parsed)
+	if err != nil {
+		return fail(runtime.Stderr, err)
+	}
+	return submitTaskWithClient(ctx, runtime, parsed, client, id, message, options)
 }

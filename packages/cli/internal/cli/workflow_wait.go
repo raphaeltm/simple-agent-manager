@@ -29,10 +29,7 @@ func runTaskWait(ctx context.Context, runtime Runtime, p parsedArgs, args []stri
 	for {
 		var value map[string]any
 		if err = client.request(ctx, http.MethodGet, projectAPIPath(project, "tasks", args[0]), nil, &value); err != nil {
-			if ctx.Err() != nil {
-				return writeWaitInterruption(runtime, p, value, ctx.Err())
-			}
-			return fail(runtime.Stderr, err)
+			return writeWaitRequestError(ctx, runtime, p, value, err)
 		}
 		switch value["status"] {
 		case "completed":
@@ -71,4 +68,11 @@ func parseWaitDurations(p parsedArgs, timeout, interval *time.Duration) error {
 		}
 	}
 	return nil
+}
+
+func writeWaitRequestError(ctx context.Context, runtime Runtime, p parsedArgs, task map[string]any, err error) int {
+	if ctx.Err() != nil {
+		return writeWaitInterruption(runtime, p, task, ctx.Err())
+	}
+	return fail(runtime.Stderr, err)
 }
