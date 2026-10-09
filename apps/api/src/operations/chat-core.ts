@@ -94,7 +94,7 @@ export async function searchChats(
   const limits = getPlatformOperationLimits(ctx.env);
   const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : null;
   const roles = rolesOrThrow(input.roles);
-  const requestedLimit = typeof input.limit === 'number' ? input.limit : 10;
+  const requestedLimit = typeof input.limit === 'number' ? input.limit : limits.messageSearchLimit;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.messageSearchMax);
   const continuation =
     typeof input.continuation === 'string' && input.continuation.length > 0

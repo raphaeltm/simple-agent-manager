@@ -23,8 +23,6 @@ type TaskSearchRow = {
   updatedAt: string;
 };
 
-const TASK_DETAIL_RECENT_ASSISTANT_MESSAGE_LIMIT = 5;
-const TASK_DETAIL_MESSAGE_SNIPPET_LENGTH = 2000;
 function truncateSnippet(value: string | null, maxLength: number): string | null {
   if (!value) return null;
   return value.slice(0, maxLength) + (value.length > maxLength ? '...' : '');
@@ -55,7 +53,7 @@ async function loadRecentAssistantMessages(
       ctx.env,
       projectId,
       sessionId,
-      TASK_DETAIL_RECENT_ASSISTANT_MESSAGE_LIMIT,
+      getPlatformOperationLimits(ctx.env).taskDetailRecentMessageLimit,
       null,
       null,
       ['assistant'],
@@ -68,7 +66,10 @@ async function loadRecentAssistantMessages(
         id: String(message.id),
         role: 'assistant' as const,
         content:
-          truncateSnippet(message.content as string, TASK_DETAIL_MESSAGE_SNIPPET_LENGTH) ?? '',
+          truncateSnippet(
+            message.content as string,
+            getPlatformOperationLimits(ctx.env).taskDetailMessageSnippetLength
+          ) ?? '',
         createdAt:
           typeof message.createdAt === 'number' || typeof message.createdAt === 'string'
             ? message.createdAt
@@ -161,7 +162,11 @@ export async function listTasks(ctx: OperationContext, input: ListTasksInput) {
     throw new OperationError('invalid_input', 'query must be at least 2 characters');
   const normalizedQuery = search ? normalizeSearchQuery(inputQuery, ctx.env) : null;
   const requestedLimit =
-    typeof input.limit === 'number' ? input.limit : search ? 10 : limits.taskListLimit;
+    typeof input.limit === 'number'
+      ? input.limit
+      : search
+        ? limits.taskSearchLimit
+        : limits.taskListLimit;
   const limit = Math.min(
     Math.max(1, Math.round(requestedLimit)),
     search ? limits.taskSearchMax : limits.taskListMax

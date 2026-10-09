@@ -1039,9 +1039,16 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ACP_LONG_TURN_SUPERVISOR_ENABLED?: string;
   ACP_LONG_TURN_CHECKPOINT_MS?: string;
   ACP_CHECKPOINT_PREEMPT_GRACE_MS?: string;
-  // MCP get_session_messages limits
+  // Shared platform operation and MCP list/read limits
+  MCP_TASK_LIST_LIMIT?: string; // Default task list page size (default: 10)
+  MCP_TASK_LIST_MAX?: string; // Max task list page size (default: 50)
+  MCP_TASK_SEARCH_LIMIT?: string; // Default task search page size (default: 10)
+  MCP_TASK_SEARCH_MAX?: string; // Max task search page size (default: 20)
+  MCP_TASK_DETAIL_RECENT_MESSAGE_LIMIT?: string; // Recent assistant messages in task detail (default: 5)
+  MCP_TASK_DETAIL_MESSAGE_SNIPPET_LENGTH?: string; // Task detail assistant message snippet (default: 2000)
   MCP_MESSAGE_LIST_LIMIT?: string; // Default raw tokens per request (default: 50)
   MCP_MESSAGE_LIST_MAX?: string; // Max raw tokens per request (default: 200)
+  MCP_MESSAGE_SEARCH_LIMIT?: string; // Default search_messages page size (default: 10)
   MCP_MESSAGE_SEARCH_MAX?: string; // Max search results for search_messages (default: 20)
   MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT?: string; // Default archived payloads per get_archived_tool_payloads (default: 10)
   MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX?: string; // Max archived payloads per get_archived_tool_payloads (default: 50)
@@ -1077,6 +1084,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MCP_IDEA_LIST_LIMIT?: string; // Default page size for list_ideas (default: 20)
   MCP_IDEA_LIST_MAX?: string; // Max page size for list_ideas (default: 100)
   MCP_IDEA_SEARCH_MAX?: string; // Max results for search_ideas (default: 20)
+  MCP_RELATED_IDEA_SEARCH_LIMIT?: string; // Default results for find_related_ideas (default: 10)
   MCP_IDEA_TITLE_MAX_LENGTH?: string; // Max length for idea title (default: 200)
   MCP_SESSION_TOPIC_MAX_LENGTH?: string; // Max length for session topic (default: 200)
   // Knowledge graph limits

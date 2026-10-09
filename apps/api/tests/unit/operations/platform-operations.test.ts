@@ -491,12 +491,20 @@ describe('shared platform operation authorization on real SQLite', () => {
 
 describe('operation registry contract', () => {
   it('uses the same configurable limits as the workspace tool catalog', () => {
-    const env = { MCP_IDEA_LIST_MAX: '27', MCP_MESSAGE_LIST_LIMIT: '31' } as Env;
+    const env = {
+      MCP_IDEA_LIST_MAX: '27',
+      MCP_MESSAGE_LIST_LIMIT: '31',
+      MCP_TASK_LIST_LIMIT: '12',
+      MCP_TASK_DETAIL_RECENT_MESSAGE_LIMIT: '7',
+      MCP_MESSAGE_SEARCH_LIMIT: '11',
+    } as Env;
     const platform = getPlatformOperationLimits(env);
     const workspace = getMcpLimits(env);
     for (const [name, value] of Object.entries(platform)) {
-      expect(workspace[name as keyof typeof workspace]).toBe(value);
+      if (name in workspace) expect(workspace[name as keyof typeof workspace]).toBe(value);
     }
+    expect(platform.taskDetailRecentMessageLimit).toBe(7);
+    expect(platform.messageSearchLimit).toBe(11);
   });
   it('exports ten stable operations and JSON Schema inputs', () => {
     expect(operations.map((operation) => operation.name)).toEqual([

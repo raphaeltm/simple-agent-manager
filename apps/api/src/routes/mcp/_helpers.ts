@@ -8,6 +8,7 @@ import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { getPlatformOperationLimits } from '../../operations/limits';
 import { type McpTokenData, type McpTokenEnv, validateMcpToken } from '../../services/mcp-token';
 
 // Re-export McpTokenData for use by tool handler files
@@ -74,9 +75,6 @@ const DEFAULT_MCP_DISPATCH_MAX_REFERENCE_LENGTH = 500;
 const DEFAULT_MCP_DISPATCH_MAX_PRIORITY = 100;
 
 /** Default page sizes for project awareness tools. Override via MCP_* env vars. */
-const DEFAULT_MCP_TASK_LIST_LIMIT = 10;
-const DEFAULT_MCP_TASK_LIST_MAX = 50;
-const DEFAULT_MCP_TASK_SEARCH_MAX = 20;
 const DEFAULT_MCP_SESSION_LIST_LIMIT = 10;
 const DEFAULT_MCP_SESSION_LIST_MAX = 50;
 const DEFAULT_MCP_MESSAGE_LIST_LIMIT = 50;
@@ -133,6 +131,7 @@ const DEFAULT_KNOWLEDGE_ENTITY_NAME_MAX_LENGTH = 200;
 const DEFAULT_KNOWLEDGE_DESCRIPTION_MAX_LENGTH = 2000;
 
 export function getMcpLimits(env: Env) {
+  const operationLimits = getPlatformOperationLimits(env);
   return {
     activityMessageMaxLength: parsePositiveInt(
       env.MAX_ACTIVITY_MESSAGE_LENGTH,
@@ -146,9 +145,9 @@ export function getMcpLimits(env: Env) {
       env.MAX_OUTPUT_SUMMARY_LENGTH,
       DEFAULT_OUTPUT_SUMMARY_MAX_LENGTH
     ),
-    taskListLimit: DEFAULT_MCP_TASK_LIST_LIMIT,
-    taskListMax: DEFAULT_MCP_TASK_LIST_MAX,
-    taskSearchMax: DEFAULT_MCP_TASK_SEARCH_MAX,
+    taskListLimit: operationLimits.taskListLimit,
+    taskListMax: operationLimits.taskListMax,
+    taskSearchMax: operationLimits.taskSearchMax,
     sessionListLimit: DEFAULT_MCP_SESSION_LIST_LIMIT,
     sessionListMax: DEFAULT_MCP_SESSION_LIST_MAX,
     messageListLimit: parsePositiveInt(env.MCP_MESSAGE_LIST_LIMIT, DEFAULT_MCP_MESSAGE_LIST_LIMIT),

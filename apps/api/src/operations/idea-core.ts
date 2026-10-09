@@ -47,7 +47,7 @@ export async function searchIdeas(ctx: OperationContext, input: IdeasSearchInput
     typeof input.limit === 'number'
       ? input.limit
       : related
-        ? 10
+        ? limits.relatedIdeaSearchLimit
         : search
           ? limits.ideaSearchMax
           : limits.ideaListLimit;
