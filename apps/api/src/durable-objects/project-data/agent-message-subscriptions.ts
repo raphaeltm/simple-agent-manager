@@ -231,6 +231,8 @@ function retireManagedSubscriptions(
 /**
  * A matched event not yet batched, or a prompt-queue wake not yet delivered. The
  * batch branch is scoped by target session to use the prompt-target index.
+ * Asks about ONE subscription (may it be retired?); whether a chat can take a new
+ * wake at all is `WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL` in project-events-wake-config.ts.
  */
 function hasPendingWake(
   sql: SqlStorage,
