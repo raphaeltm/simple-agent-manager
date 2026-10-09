@@ -231,7 +231,12 @@ describe('task submit capacity-pool placement', () => {
     'compiled CLI performs metadata lifecycle and submits through real Worker orchestration',
     async () => {
       const { sqlite, env } = createEnv();
-      sqlite.exec(readFileSync('src/db/migrations/0189_cli_operation_receipts.sql', 'utf8'));
+      sqlite.exec(
+        readFileSync(
+          join(process.cwd(), 'src', 'db', 'migrations', '0189_cli_operation_receipts.sql'),
+          'utf8'
+        )
+      );
       const projectId = '01K00000000000000000000000';
       const folder = await mkdtemp(join(tmpdir(), 'sam-cli-real-submit-'));
       seedUser(sqlite, 'user-1');

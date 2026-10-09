@@ -826,6 +826,9 @@ jobs:
       - name: Install Worker contract fixture dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build Worker contract fixture dependencies
+        run: pnpm --filter '@simple-agent-manager/api^...' build
+
       - name: Verify Go CLI against Worker route contracts
         run: |
           (cd packages/cli && go build -o "$RUNNER_TEMP/sam-cli-contract" ./cmd/sam)

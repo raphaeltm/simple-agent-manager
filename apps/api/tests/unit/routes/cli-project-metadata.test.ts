@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
@@ -41,7 +42,12 @@ beforeEach(() => {
   db.exec(
     "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, description TEXT, updated_at TEXT); CREATE TABLE users(id TEXT PRIMARY KEY); CREATE TABLE agent_profiles(id TEXT PRIMARY KEY, project_id TEXT, name TEXT, description TEXT, updated_at TEXT); CREATE TABLE skills(id TEXT PRIMARY KEY, project_id TEXT, name TEXT, description TEXT, updated_at TEXT); INSERT INTO projects VALUES('project','original',NULL,'old'); INSERT INTO users VALUES('user'); INSERT INTO agent_profiles VALUES('profile','project','Sol',NULL,'old');"
   );
-  db.exec(readFileSync('src/db/migrations/0189_cli_operation_receipts.sql', 'utf8'));
+  db.exec(
+    readFileSync(
+      join(process.cwd(), 'src', 'db', 'migrations', '0189_cli_operation_receipts.sql'),
+      'utf8'
+    )
+  );
   const database = {
     prepare: (sql: string) => ({
       bind: (...values: unknown[]) => ({
