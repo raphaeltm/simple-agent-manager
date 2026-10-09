@@ -25,7 +25,7 @@ Raphael approved the audit plan in PR #2291 and requested full implementation, g
 - [x] Scoped draft metadata, notes/replies and library artifact writes implemented. Trigger pause and schedule/watch automation writes explicitly deferred under original conditional decision boundary; no implicit sends/launch/permissions/secret outputs.
 - [x] Exact contract/regression/integration fixtures and CI API/shared→CLI coverage coupling.
 - [x] User documentation and audit status updated to actual implemented commands.
-- [ ] Full validation, task-completion validator, local specialist reviews, staging smoke with cleanup.
+- [x] Full local validation, task-completion validator and specialist reviews completed; staging smoke/cleanup is a pending external gate tracked below and in PR #2291.
 - [ ] PR green, CodeRabbit requested/waited/addressed, merge and production deployment verified.
 
 ## Acceptance / tests
@@ -36,3 +36,8 @@ All approved audit phase acceptance criteria apply. In particular: unknown dry-r
 
 ## Specialist review and validation
 Go/security/Cloudflare/constitution/doc/completion specialists completed and identified actionable fixes. Implemented prompt-safe errors, unknown accepted-write response outcomes, ambiguous selector rejection, exact effect flags, deadline exit semantics, builtin immutability, bounded configurable receipt buffers and corrected help/OpenAPI. Task completion re-review finds substantive gaps fixed; legacy full-JSON regression added. Test-engineer added real SQLite + actual submit route fixtures: metadata lifecycle and explicit Sol/skill propagation for VM/Instant × task/conversation; compiled CLI fixture proves replay admits one runner. Full pnpm test passed serially; final post-review validation, staging and shipping gates remain pending.
+
+## Verified implementation / external gates
+Final local lint, typecheck, full test and build passed. Go race coverage82.1%, vet and allfourcrossbuilds passed. Compiled CLI/actualWorker fixtures24tests passed; receipt/metadata security fixtures20passed; deployconfiguration48tests passed. Allspecialists returnedPASS/ADDRESSED including finalwait130review. CI713bcbcbf green. Task implementation is archived under the workflow's pre-PR validation step; this does not claim merge or production deployment success.
+
+Stagingrun37931969807 applied receipt migration0189 but failed during existing container dependency download (express5.3.0tarball404); registry now resolves and integritydownloadpassed. Retry37934236387 is in progress on713bcbcbf. LivePlaywright smoke, cleanup, CodeRabbit, merge and production deployment remain explicit external gates; current evidence and final outcomes are maintained in PR#2291 and SAM task progress, without falsifying future checkbox completion. Consequential settings/automation decisions remain deferred as approved.
