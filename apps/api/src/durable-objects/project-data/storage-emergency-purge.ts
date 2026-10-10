@@ -9,9 +9,8 @@ import type {
   StorageSafetyConfig,
 } from './storage-safety';
 import {
-  META_LAST_ERROR,
-  META_LAST_MEASURED_AT,
   META_LAST_STATUS,
+  recordStorageSafetyError,
   truncateStorageSafetyMetaValue as truncate,
   writeStorageSafetyMeta as writeMeta,
 } from './storage-safety-meta';
@@ -177,9 +176,10 @@ export async function runProjectDataStorageEmergencyPurgeCore(
     exhaustedCandidates,
   };
 
+  // An operator purge records a history row but evaluates no alerts, so it must not postpone the
+  // hourly measurement that does (META_LAST_MEASURED_AT).
   const measuredAt = Date.now();
   const telemetry = await callbacks.buildTelemetry(sql, env, projectId, measuredAt);
-  writeMeta(sql, META_LAST_MEASURED_AT, String(measuredAt));
   writeMeta(sql, META_LAST_STATUS, statusAfter);
 
   try {
@@ -191,8 +191,7 @@ export async function runProjectDataStorageEmergencyPurgeCore(
       lastError: null,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    writeMeta(sql, META_LAST_ERROR, truncate(message, 500));
+    recordStorageSafetyError(sql, error instanceof Error ? error.message : String(error));
     log.warn('purge_telemetry_upsert_failed', {
       projectId,
       ...serializeError(error),

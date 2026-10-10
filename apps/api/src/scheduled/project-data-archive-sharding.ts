@@ -68,6 +68,10 @@ import {
   isProjectDataArchiveExactRoutingEnabled,
   rootProjectDataOwner,
 } from '../services/project-data-archive-routing';
+import {
+  alertProjectDataArchiveBreakerOpened,
+  breakerWasClosedBeforeOpening,
+} from './project-data-archive-breaker-alerts';
 
 const log = createModuleLogger('scheduled.project_data_archive_sharding');
 const PROJECT_DATA_ARCHIVE_DEFAULT_POISON_AFTER_ATTEMPTS = 3;
@@ -3250,7 +3254,7 @@ export async function poisonProjectDataArchiveMigration(
     .bind(input.reason, input.message ?? input.reason, now, now, input.migrationId, input.projectId)
     .run();
   const changed = (result.meta.changes ?? 0) > 0;
-  await env.DATABASE.batch([
+  const [, breakerBefore] = await env.DATABASE.batch([
     env.DATABASE.prepare(
       `UPDATE project_data_session_locations
        SET location_state = 'frozen',
@@ -3259,6 +3263,11 @@ export async function poisonProjectDataArchiveMigration(
          AND project_id = ?
          AND location_state = 'migrating'`
     ).bind(now, input.migrationId, input.projectId),
+    // Read inside the same transaction as the upsert, so of any number of concurrent poisonings
+    // exactly one sees the breaker closed and announces the opening.
+    env.DATABASE.prepare(
+      'SELECT state FROM project_data_archive_circuit_breakers WHERE project_id = ?'
+    ).bind(input.projectId),
     env.DATABASE.prepare(
       `INSERT INTO project_data_archive_circuit_breakers (project_id, state, reason, opened_at, updated_at)
        VALUES (?, 'open', ?, ?, ?)
@@ -3269,6 +3278,15 @@ export async function poisonProjectDataArchiveMigration(
          updated_at = excluded.updated_at`
     ).bind(input.projectId, input.reason, now, now),
   ]);
+  if (breakerWasClosedBeforeOpening(breakerBefore)) {
+    await alertProjectDataArchiveBreakerOpened(env, {
+      projectId: input.projectId,
+      migrationId: input.migrationId,
+      reason: input.reason,
+      message: input.message ?? null,
+      openedAt: now,
+    });
+  }
   return changed;
 }
 

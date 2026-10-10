@@ -9,10 +9,9 @@ import type {
 } from './storage-safety';
 import {
   deleteStorageSafetyMeta as deleteMeta,
-  META_LAST_ERROR,
-  META_LAST_MEASURED_AT,
   META_LAST_STATUS,
   readStorageSafetyMetaNumber as readMetaNumber,
+  recordStorageSafetyError,
   truncateStorageSafetyMetaValue as truncate,
   writeStorageSafetyMeta as writeMeta,
 } from './storage-safety-meta';
@@ -331,8 +330,9 @@ async function recordEventLogCleanupTelemetry(
 ): Promise<void> {
   if (rowsDeleted <= 0 && !lastError) return;
 
+  // Publishes the size after cleanup without touching the measurement clock: a pass on every
+  // alarm tick would otherwise postpone the hourly measurement forever (META_LAST_MEASURED_AT).
   const measuredAt = Date.now();
-  writeMeta(sql, META_LAST_MEASURED_AT, String(measuredAt));
   const statusAfter = options.classifyStatus(afterBytes);
   writeMeta(sql, META_LAST_STATUS, statusAfter);
   const telemetry: ProjectDataStorageTelemetry = {
@@ -358,8 +358,7 @@ async function recordEventLogCleanupTelemetry(
       lastError,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    writeMeta(sql, META_LAST_ERROR, truncate(message, 500));
+    recordStorageSafetyError(sql, error instanceof Error ? error.message : String(error));
     log.warn('telemetry_upsert_failed', {
       projectId,
       ...serializeError(error),
@@ -422,7 +421,7 @@ async function handleEventLogCleanupFailure(
   writeEventLogCleanupRecheckAt(sql, recheckAt);
 
   const message = truncate(error instanceof Error ? error.message : String(error), 500);
-  writeMeta(sql, META_LAST_ERROR, message);
+  recordStorageSafetyError(sql, message);
   log.warn('failed_retry_scheduled', {
     projectId: plan.projectId,
     recheckAt,

@@ -1259,9 +1259,10 @@ describe('ProjectData storage safety firebreak', () => {
         now - 8 * 24 * 60 * 60 * 1000,
         id
       );
+      // The back-off ages the error from when it was recorded, not from any activity clock.
       state.storage.sql.exec(
         `INSERT INTO do_meta (key, value)
-         VALUES ('storageSafetyLastMeasuredAt', ?), ('storageSafetyLastError', ?)
+         VALUES ('storageSafetyLastErrorAt', ?), ('storageSafetyLastError', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
         String(now - 60_001),
         'storage operation exceeded timeout'

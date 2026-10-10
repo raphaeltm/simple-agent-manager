@@ -125,6 +125,18 @@ indistinguishable from an OOM kill.
    selector or has a separate bounded reconciler. Do not require a prerequisite that the attempted
    operation itself is responsible for producing.
 
+7. **A step's schedule clock has one writer: the step it schedules.** Rule 5 in another shape:
+   a timestamp that decides when step B is due must not be written by step A, however related
+   A's work looks. ProjectData storage safety measured hourly from `storageSafetyLastMeasuredAt`,
+   and the cleanup steps stamped that key too because they also publish the latest size. Grouped
+   FTS cleanup re-checks every 5 minutes, so from 2026-10-08 (once #2269 stopped it failing) every
+   pass postponed the measurement by an hour, forever: no history rows, `measured:false` on every
+   completion, no alert, on an object at 90% of its hard cap. The #2269 acceptance notes even saw
+   "no separate hourly measured:true" and read it as healthy — an absence is not evidence of
+   health. Before writing a timestamp, list every reader; if one uses it to schedule or gate
+   other work, only that work may write it. A related check that needs "how old is X?" gets X's
+   own timestamp (here, `storageSafetyLastErrorAt`), not a neighbouring activity clock.
+
 ## Required Tests
 
 - **Isolation regression:** a throwing step must not prevent later steps from running.
@@ -139,6 +151,10 @@ indistinguishable from an OOM kill.
   state; run two sweeps; assert the first persists a due intent without spending an attempt and the
   next eligible sweep claims it. A terminal or precondition-failed row must not disappear from all
   candidate selectors.
+- **Schedule-clock starvation:** drive the real handler across a full interval of the scheduled
+  step while the other steps do work on every tick, and assert the step runs on time
+  (`tests/workers/project-data-storage-measurement-cadence.test.ts`). A test that seeds or deletes
+  the clock to force the step cannot observe another writer moving it.
 - Both tests must be proven discriminating: confirm they go red when the isolation or
   the corrected signal is removed.
 
@@ -157,6 +173,7 @@ Before merging a change to a scheduled handler or an idleness predicate:
 - [ ] Every leased/capped set has a named answer to "what evicts an entry that never
       reports a terminal state?", and it is not process death
 - [ ] Precondition deferrals preserve the destructive retry budget and remain durably selectable
+- [ ] Every clock that schedules or gates a step is written only by that step
 - [ ] Discriminating regression tests exist for both the isolation and the signal
 
 ## References
