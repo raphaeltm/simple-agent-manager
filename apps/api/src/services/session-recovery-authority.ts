@@ -1,4 +1,8 @@
 import type { Env } from '../env';
+import {
+  sessionRecoveryAuthorityRevoked,
+  type SessionRecoveryAuthorityRevokedError,
+} from './session-recovery-authority-revocation';
 
 const TERMINAL_TASK_STATUSES_SQL = "'completed', 'failed', 'cancelled'";
 const LIVE_TASK_STATUSES_SQL = "'queued', 'delegated', 'in_progress', 'awaiting_followup'";
@@ -268,12 +272,27 @@ export async function findSessionRecoverySourceTaskGuardFailureForEnv(
     : 'source_task_guard';
 }
 
-/** Check both durable authorities inside the container before starting or submitting. */
-export async function isSessionRecoverySourceTaskGuardFullyValidForEnv(
+/**
+ * Check both durable authorities inside the container before starting or submitting. A refusal
+ * is logged with its check and the snapshot claim, then returned for the caller to throw or answer.
+ */
+export async function findSessionRecoverySourceTaskGuardRefusal(
   env: Env,
-  guard: SessionRecoverySourceTaskGuard
-): Promise<boolean> {
-  return (await findSessionRecoverySourceTaskGuardFailureForEnv(env, guard)) === null;
+  guard: SessionRecoverySourceTaskGuard,
+  site: string
+): Promise<SessionRecoveryAuthorityRevokedError | null> {
+  const check = await findSessionRecoverySourceTaskGuardFailureForEnv(env, guard);
+  if (!check) return null;
+  return sessionRecoveryAuthorityRevoked(env.DATABASE, {
+    check,
+    site,
+    taskId: guard.taskId,
+    projectId: guard.projectId,
+    chatSessionId: guard.chatSessionId,
+    recoveryAttemptId: null,
+    sourceTaskId: guard.taskId,
+    projectEventWake: guard.projectEventWake ?? null,
+  });
 }
 
 export {

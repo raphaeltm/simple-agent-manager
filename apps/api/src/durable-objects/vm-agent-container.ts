@@ -11,12 +11,10 @@ import { commitContainerWakeFromSleep } from '../services/container-wake-commit'
 import { loadInstantRestoreWorkspace } from '../services/instant-restore-workspace';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 import {
-  findSessionRecoverySourceTaskGuardFailureForEnv,
-  isSessionRecoverySourceTaskGuardFullyValidForEnv,
+  findSessionRecoverySourceTaskGuardRefusal,
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../services/session-recovery-authority';
-import { sessionRecoveryAuthorityRevoked } from '../services/session-recovery-authority-revocation';
 import { prepareSessionRestoreMcp } from '../services/session-restore-mcp';
 import { assertSessionRuntimeContractCapability } from '../services/session-runtime-contract';
 import { signalSessionWakeReadyBestEffort } from '../services/session-wake-ready';
@@ -277,7 +275,8 @@ export class VmAgentContainer extends Container<Env> {
     // before proxyHttp() reaches prepareForRequest()/ensureAwake(). A caller-
     // side check alone leaves a network-RPC window where a terminal parent can
     // still cold-start compute.
-    if (!(await isSessionRecoverySourceTaskGuardFullyValidForEnv(this.env, sourceTaskGuard))) {
+    const site = 'vm_agent_container.proxy_http_guarded';
+    if (await findSessionRecoverySourceTaskGuardRefusal(this.env, sourceTaskGuard, site)) {
       await this.abortRevokedSourceTaskWake(sourceTaskGuard);
       return revokedSourceTaskResponse();
     }
@@ -615,21 +614,13 @@ export class VmAgentContainer extends Container<Env> {
     sourceTaskGuard?: VmAgentContainerRequestGuard
   ): Promise<void> {
     if (!sourceTaskGuard) return;
-    const failure = await findSessionRecoverySourceTaskGuardFailureForEnv(
+    const site = 'vm_agent_container.source_task_guard';
+    const refusal = await findSessionRecoverySourceTaskGuardRefusal(
       this.env,
-      sourceTaskGuard
+      sourceTaskGuard,
+      site
     );
-    if (!failure) return;
-    throw await sessionRecoveryAuthorityRevoked(this.env.DATABASE, {
-      check: failure,
-      site: 'vm_agent_container.source_task_guard',
-      taskId: sourceTaskGuard.taskId,
-      projectId: sourceTaskGuard.projectId,
-      chatSessionId: sourceTaskGuard.chatSessionId,
-      recoveryAttemptId: null,
-      sourceTaskId: sourceTaskGuard.taskId,
-      projectEventWake: sourceTaskGuard.projectEventWake ?? null,
-    });
+    if (refusal) throw refusal;
   }
 
   private async clearSourceTaskWakeGuard(

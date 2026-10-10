@@ -18,7 +18,6 @@ import type { Env } from '../../../src/env';
 import {
   findSessionRecoverySourceTaskGuardFailureForEnv,
   findSessionRecoveryTaskAndEventAuthorityFailure,
-  isSessionRecoverySourceTaskGuardFullyValidForEnv,
   isSessionRecoverySourceTaskGuardValid,
   isSessionRecoveryTaskAuthorized,
   type SessionRecoverySourceTaskGuard,
@@ -29,6 +28,7 @@ const databases: Database.Database[] = [];
 // Start-time inputs carry no runner state, so the guard never reads DO storage.
 const startTimeCtx = {} as DurableObjectState;
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const sqlite of databases.splice(0)) sqlite.close();
 });
 
@@ -38,6 +38,20 @@ const guard: SessionRecoverySourceTaskGuard = {
   chatSessionId: 'chat',
   projectEventWake: { batchId: 'batch', subscriptionId: 'subscription' },
 };
+
+function authorityRevocations(warn: ReturnType<typeof vi.spyOn>): Record<string, unknown>[] {
+  return warn.mock.calls
+    .map(([line]: unknown[]) => {
+      try {
+        return JSON.parse(String(line)) as Record<string, unknown>;
+      } catch {
+        return {};
+      }
+    })
+    .filter(
+      (entry: Record<string, unknown>) => entry.event === 'session_recovery.authority_revoked'
+    );
+}
 const recoveryInput = {
   recoveryTaskId: 'T2',
   sourceTaskId: 'root',
@@ -92,9 +106,7 @@ describe('recovery event authority at final asynchronous boundaries', () => {
     await expect(
       findSessionRecoveryTaskAndEventAuthorityFailure(f.database, recoveryInput, f.validateEvent)
     ).resolves.toBeNull();
-    await expect(isSessionRecoverySourceTaskGuardFullyValidForEnv(f.env, guard)).resolves.toBe(
-      true
-    );
+    await expect(findSessionRecoverySourceTaskGuardFailureForEnv(f.env, guard)).resolves.toBeNull();
   });
 
   it.each([
@@ -162,8 +174,8 @@ describe('recovery event authority at final asynchronous boundaries', () => {
       await expect(isSessionRecoverySourceTaskGuardValid(f.database, preBatch)).resolves.toBe(
         false
       );
-      await expect(isSessionRecoverySourceTaskGuardFullyValidForEnv(f.env, guard)).resolves.toBe(
-        false
+      await expect(findSessionRecoverySourceTaskGuardFailureForEnv(f.env, guard)).resolves.toBe(
+        'source_task_guard'
       );
       await expect(
         findSessionRecoveryTaskAndEventAuthorityFailure(f.database, recoveryInput, f.validateEvent)
@@ -273,6 +285,7 @@ describe('recovery event authority at final asynchronous boundaries', () => {
         },
         containerFetch,
       }) as VmAgentContainer;
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       const response = await container.proxyHttpGuarded(
         new Request('http://container/prompt', { method: 'POST' }),
         undefined,
@@ -281,6 +294,18 @@ describe('recovery event authority at final asynchronous boundaries', () => {
       expect(response.status).toBe(409);
       expect(f.validateEvent).toHaveBeenCalledTimes(2);
       expect(containerFetch).not.toHaveBeenCalled();
+      // The entry check passed, so the refusal is the final check before transport.
+      expect(authorityRevocations(warn)).toEqual([
+        expect.objectContaining({
+          check:
+            revocation === 'event cancellation'
+              ? 'project_event_wake_authority'
+              : 'source_task_guard',
+          site: 'vm_agent_container.source_task_guard',
+          taskId: 'root',
+          chatSessionId: 'chat',
+        }),
+      ]);
     }
   );
 
@@ -293,11 +318,22 @@ describe('recovery event authority at final asynchronous boundaries', () => {
       lifecycleChain: Promise.resolve(),
       ctx: { storage: { get } },
     }) as VmAgentContainer;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const response = await container.proxyHttpGuarded(
       new Request('http://container/prompt', { method: 'POST' }),
       undefined,
       guard
     );
+    // The entry check names its refusal like every other authority check.
+    expect(authorityRevocations(warn)).toEqual([
+      expect.objectContaining({
+        check: 'project_event_wake_authority',
+        site: 'vm_agent_container.proxy_http_guarded',
+        taskId: 'root',
+        projectEventBatchId: 'batch',
+        projectEventSubscriptionId: 'subscription',
+      }),
+    ]);
     expect(response.status).toBe(409);
     expect(get).not.toHaveBeenCalledWith('lifecycleStatus');
   });

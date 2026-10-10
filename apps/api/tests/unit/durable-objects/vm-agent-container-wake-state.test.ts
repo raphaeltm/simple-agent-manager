@@ -208,7 +208,11 @@ describe('VmAgentContainer proxy recovery boundaries', () => {
 
     expect(response.status).toBe(409);
     expect(proxyHttp).not.toHaveBeenCalled();
-    expect(first).toHaveBeenCalledTimes(1);
+    // The authority read, then the refusal's diagnostic read of the snapshot claim.
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(String(fake.env.DATABASE.prepare.mock.calls[1]?.[0])).toContain(
+      'FROM session_snapshots'
+    );
     expect(fake.abortRevokedSourceTaskWake).toHaveBeenCalledOnce();
   });
 
