@@ -114,7 +114,7 @@ function isSleepingContainer(runtime: string | null, sleepStatus: string | null)
 }
 
 /** Statuses a VM wake's task holds until `transitionToInProgress` commits its handoff. */
-const UNCOMMITTED_WAKE_TASK_STATUSES = ['queued', 'delegated'];
+const UNCOMMITTED_WAKE_TASK_STATUSES: ReadonlySet<string> = new Set(['queued', 'delegated']);
 
 /**
  * Whether this VM workspace belongs to a TaskRunner wake that has not committed its
@@ -142,7 +142,7 @@ const UNCOMMITTED_WAKE_TASK_STATUSES = ['queued', 'delegated'];
  */
 function isVmWakeHandoffPending(row: DeliveryTargetRow): boolean {
   if (row.node_runtime !== 'vm') return false;
-  if (!UNCOMMITTED_WAKE_TASK_STATUSES.includes(row.wake_task_status ?? '')) return false;
+  if (!UNCOMMITTED_WAKE_TASK_STATUSES.has(row.wake_task_status ?? '')) return false;
   return (
     row.snapshot_recovery_status === 'waking' ||
     (row.snapshot_recovery_status === 'restored' &&
