@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { prepareSessionSnapshot } from '../../../src/services/session-snapshot-prepare';
-import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const vm = vi.hoisted(() => ({
   create: vi.fn<(...args: unknown[]) => Promise<undefined>>(async () => undefined),
@@ -53,14 +53,19 @@ function env(): Env {
   } as unknown as Env;
 }
 
+/** The task's first run; the wake restores this chat onto `ws-2` as `agent-2`. */
+const FIRST_RUN = {
+  nodeId: 'node-1',
+  workspaceId: 'ws-1',
+  projectId: 'proj-1',
+  userId: 'user-1',
+  chatSessionId: 'chat-1',
+  agentSessionId: 'agent-1',
+};
+
 function input(extra: Record<string, unknown> = {}) {
   return {
-    nodeId: 'node-1',
-    workspaceId: 'ws-1',
-    projectId: 'proj-1',
-    userId: 'user-1',
-    chatSessionId: 'chat-1',
-    agentSessionId: 'agent-1',
+    ...FIRST_RUN,
     label: 'Task: work',
     agentType: 'claude-code',
     visibleInitialPrompt: WAKE_PROMPT,
@@ -74,15 +79,7 @@ function input(extra: Record<string, unknown> = {}) {
 /** A task that ran and slept, leaving the snapshot record a wake restores from. */
 async function sleptTask(): Promise<void> {
   await startSamAwareAgentSession(db, env(), input());
-  await prepareSessionSnapshot(db, env(), {
-    workspaceId: 'ws-1',
-    nodeId: 'node-1',
-    projectId: 'proj-1',
-    userId: 'user-1',
-    chatSessionId: 'chat-1',
-    agentSessionId: 'agent-1',
-    runtime: 'vm',
-  });
+  await prepareSessionSnapshot(db, env(), { ...FIRST_RUN, runtime: 'vm' });
   vi.clearAllMocks();
 }
 
@@ -100,18 +97,7 @@ const wake = () =>
 beforeEach(() => {
   vi.clearAllMocks();
   sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [
-    schema.mcpConnections,
-    schema.agentSessions,
-    schema.projects,
-    schema.agentSettings,
-    schema.sessionSnapshots,
-    schema.nodes,
-    schema.workspaces,
-    schema.users,
-    schema.tasks,
-    schema.agentProfiles,
-  ]);
+  createAllSchemaTables(sqlite, schema);
   sqlite.exec(
     'CREATE UNIQUE INDEX session_snapshots_chat_unique ON session_snapshots(chat_session_id)'
   );
