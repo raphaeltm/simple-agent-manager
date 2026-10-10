@@ -92,39 +92,58 @@ Idea `01M4JMZVVMGRKMNC0GBV3CQN8E`. Coordinator task `01M4JK3X7BART9SDKJ3KGCDE0Q`
 ## Implementation Checklist
 
 ### A. Measurement clock belongs to the measurement
-- [ ] Document in `storage-safety-meta.ts` that `storageSafetyLastMeasuredAt` is written only by the full measurement and schedules it
-- [ ] Remove the measurement-clock write from `persistCleanupHealthTelemetryAndAlerts` (`storage-alarm.ts`)
-- [ ] Remove it from `recordEventLogCleanupTelemetry` (`event-log-cleanup.ts`)
-- [ ] Remove it from `recordToolPayloadCleanupTelemetry` (`tool-payload-cleanup.ts`)
-- [ ] Remove it from `runProjectDataStorageEmergencyPurgeCore` (`storage-emergency-purge.ts`)
+- [x] Document in `storage-safety-meta.ts` that `storageSafetyLastMeasuredAt` is written only by the full measurement and schedules it
+- [x] Remove the measurement-clock write from `persistCleanupHealthTelemetryAndAlerts` (`storage-alarm.ts`)
+- [x] Remove it from `recordEventLogCleanupTelemetry` (`event-log-cleanup.ts`)
+- [x] Remove it from `recordToolPayloadCleanupTelemetry` (`tool-payload-cleanup.ts`)
+- [x] Remove it from `runProjectDataStorageEmergencyPurgeCore` (`storage-emergency-purge.ts`)
 
 ### B. Errors carry their own timestamp
-- [ ] Add `recordStorageSafetyError` / `clearStorageSafetyError` / error-time reader to `storage-safety-meta.ts`
-- [ ] Route every `storageSafetyLastError` write and the one clear through the helpers
-- [ ] `hasRecentOverloadSignal` reads the error's own timestamp; a pre-upgrade error with no timestamp backs off once (bounded), never forever
-- [ ] Drop the duplicated local `storageSafetyLastError` constant in `grouped-fts-cleanup.ts`
+- [x] Add `recordStorageSafetyError` / `clearStorageSafetyError` / error-time reader to `storage-safety-meta.ts`
+- [x] Route every `storageSafetyLastError` write and the one clear through the helpers
+- [x] `hasRecentOverloadSignal` reads the error's own timestamp; a pre-upgrade error with no timestamp backs off once (bounded), never forever
+- [x] Drop the duplicated local `storageSafetyLastError` constant in `grouped-fts-cleanup.ts`
 
 ### C. Alert dedupe stays sane
-- [ ] Workers test: hourly measurements with cleanup every tick produce alerts at the alert interval, not hourly
-- [ ] Workers test: threshold and target-unreachable alerts do not reset each other's throttle (red first)
-- [ ] Per-reason dedupe slots with the legacy single slot honoured for its own reason
+- [x] Workers test: hourly measurements with cleanup every tick produce alerts at the alert interval, not hourly
+- [x] Workers test: threshold and target-unreachable alerts do not reset each other's throttle (red first)
+- [x] Per-reason dedupe slots with the legacy single slot honoured for its own reason
 
 ### D. Archive breaker alert
-- [ ] Extract the superadmin fan-out from `notifyFailedSweeps` into a shared helper (no behaviour change for failed sweeps)
-- [ ] New module `scheduled/project-data-archive-breaker-alerts.ts`: one `persistError` row + one `cron_failure` notification per superadmin, linking `/admin/storage`; never throws
-- [ ] `poisonProjectDataArchiveMigration` reads the pre-upsert breaker state in its D1 batch and alerts only on closed/absent → open
+- [x] Extract the superadmin fan-out from `notifyFailedSweeps` into a shared helper (no behaviour change for failed sweeps)
+- [x] New module `scheduled/project-data-archive-breaker-alerts.ts`: one `persistError` row + one `cron_failure` notification per superadmin, linking `/admin/storage`; never throws
+- [x] `poisonProjectDataArchiveMigration` reads the pre-upsert breaker state in its D1 batch and alerts only on closed/absent → open
 
 ### E. Tests
-- [ ] Workers alarm test, production signature: grouped FTS cursor advancing every tick; real `alarm()`; fake clock; asserts the hourly measurement runs, appends a history row and evaluates alerts
-- [ ] Workers alarm test, task signature: event-log cleanup deleting rows every tick
-- [ ] Discrimination: restore the cleanup-health re-stamp once (and the event-log re-stamp once) and record which tests go red
-- [ ] Workers tests for the overload breaker: fresh error trips, stale error does not, legacy error backs off exactly once
-- [ ] Unit test on a real SQL engine (better-sqlite3 D1): a migration poisoned through the real sweep opens the breaker and sends exactly one alert; further poisonings/sweeps while open send none; control: a below-threshold failure (breaker stays closed) sends none; a re-opening after an operator close alerts again
-- [ ] Unit test: `notifyFailedSweeps` behaviour unchanged after the extraction (existing suite stays green)
+- [x] Workers alarm test, production signature: grouped FTS cursor advancing every tick; real `alarm()`; fake clock; asserts the hourly measurement runs, appends a history row and evaluates alerts
+- [x] Workers alarm test, task signature: event-log cleanup deleting rows every tick
+- [x] Discrimination: restore the cleanup-health re-stamp once (and the event-log re-stamp once) and record which tests go red
+- [x] Workers tests for the overload breaker: fresh error trips, stale error does not, legacy error backs off exactly once
+- [x] Unit test on a real SQL engine (better-sqlite3 D1): a migration poisoned through the real sweep opens the breaker and sends exactly one alert; further poisonings/sweeps while open send none; control: a below-threshold failure (breaker stays closed) sends none; a re-opening after an operator close alerts again
+- [x] Unit test: `notifyFailedSweeps` behaviour unchanged after the extraction (existing suite stays green)
 
 ### F. Docs
-- [ ] `configuration.md`: measure interval and alert interval semantics; poison row mentions the alert
-- [ ] `self-hosting.mdx` storage/breaker section: superadmins are notified once per opening
+- [x] `configuration.md`: measure interval and alert interval semantics; poison row mentions the alert
+- [x] `self-hosting.mdx` storage/breaker section: superadmins are notified once per opening
+
+## Implementation Notes
+
+- Commit `8ec8116bb`: measurement clock, error timestamps, per-reason alert throttle (written
+  before the D1 bookkeeping), tests. Commit `d7d28c74b`: breaker alert + shared operator fan-out.
+- The cadence tests reproduce the incident on pre-fix code with liveness intact (storage safety
+  ran on all 14 ticks and grouped cleanup returned `row_budget` on every one) while the T0+60m
+  measurement never ran; the reason test saw 8 alerts in 4 hours.
+- Discrimination (each restored afterwards): cleanup-health re-stamp back → grouped-cursor,
+  event-log and alert-interval tests red, reason test green. Event-log re-stamp alone → only the
+  event-log test red. Shared throttle slot → only the reason test red. Overload reader back on the
+  measurement clock → fresh/stale/legacy tests red, alarm end-to-end test green. Breaker alert
+  disabled → 5 positive unit tests red, 2 controls green; alert on every poisoning →
+  repeat-while-open, concurrent and frozen tests red, and the Workers runtime test red.
+- Extra Workers test (`project-data-archive-breaker-alert.test.ts`) proves the batched `SELECT`
+  and the real NotificationService DO claim on Miniflare, since the unit suite runs on
+  better-sqlite3 (rule 69 harness substitution).
+- Docs also updated: `guides/notifications.md`, env-reference skill, `.env.example`.
+- `turbo` injects an agent-guidance block into `AGENTS.md`; it is reverted, not committed.
 
 ## Acceptance Criteria
 

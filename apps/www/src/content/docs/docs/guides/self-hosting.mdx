@@ -454,7 +454,7 @@ The sentinel user id defaults to `system_anonymous_trials`. If your deployment u
 
 ### Storage and archive circuit breakers
 
-**Admin → Storage** (`/admin/storage`) shows per-project ProjectData storage telemetry and the archive-sharding circuit breakers. When a project's archive drain fails repeatedly, its breaker opens and the scheduled sweep stops archiving that project until a superadmin closes the breaker. Use the **Close breaker** button on that page (it works from a phone) once the underlying failure is fixed; it calls `POST /api/admin/project-data/storage/:projectId/archive-sharding/circuit-breaker` with `state: "closed"` and the reason you enter. Closing a breaker does not thaw migrations that were already frozen.
+**Admin → Storage** (`/admin/storage`) shows per-project ProjectData storage telemetry and the archive-sharding circuit breakers. When a project's archive drain fails repeatedly, its breaker opens and the scheduled sweep stops archiving that project until a superadmin closes the breaker. Each opening sends every active superadmin one high-urgency **Operational Failure** notification that links to this page, and records one entry in **Admin → Errors**. Use the **Close breaker** button on that page (it works from a phone) once the underlying failure is fixed; it calls `POST /api/admin/project-data/storage/:projectId/archive-sharding/circuit-breaker` with `state: "closed"` and the reason you enter. Closing a breaker does not thaw migrations that were already frozen.
 
 Below the breakers, **Problem migrations** lists the individual session migrations that need attention, each with its error code, attempt count, and timestamps:
 

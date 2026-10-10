@@ -7,15 +7,15 @@ SAM combines an in-app notification center with optional Web Push delivery for a
 
 ## Notification Types
 
-| Type              | Urgency | When It Fires                                                            |
-| ----------------- | ------- | ------------------------------------------------------------------------ |
-| **task_complete** | Medium  | A task finishes executing successfully (includes PR URL or branch name)  |
-| **needs_input**   | High    | An agent calls `request_human_input` because it needs your decision      |
-| **error**         | High    | Execution fails with an error                                            |
-| **progress**      | Low     | An agent reports incremental progress via `update_task_status`           |
-| **session_ended** | Medium  | A conversation-mode session turn completes                               |
-| **pr_created**    | Medium  | An agent creates a pull request                                          |
-| **cron_failure**  | High    | A five-minute operational recovery sweep fails (active superadmins only) |
+| Type              | Urgency | When It Fires                                                                                                                              |
+| ----------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **task_complete** | Medium  | A task finishes executing successfully (includes PR URL or branch name)                                                                    |
+| **needs_input**   | High    | An agent calls `request_human_input` because it needs your decision                                                                        |
+| **error**         | High    | Execution fails with an error                                                                                                              |
+| **progress**      | Low     | An agent reports incremental progress via `update_task_status`                                                                             |
+| **session_ended** | Medium  | A conversation-mode session turn completes                                                                                                 |
+| **pr_created**    | Medium  | An agent creates a pull request                                                                                                            |
+| **cron_failure**  | High    | A five-minute operational recovery sweep fails, or a sweep opens a project's ProjectData archive circuit breaker (active superadmins only) |
 
 A permission request, question, or link card that an agent puts in the chat while it waits does
 **not** send a notification. Those show up as **Needs input** beside the chat in the project's
@@ -103,6 +103,13 @@ and anonymous-trial sentinel users are excluded. The notification links to the
 admin log viewer for investigation and respects the recipient's in-app
 `cron_failure` preference.
 
+When a sweep poisons a ProjectData archive migration and that opens the project's
+archive circuit breaker, the same superadmins get one `cron_failure` notification
+for that opening, titled "Archiving stopped for" the project and linking to
+**Admin → Storage**, where the breaker is closed. Further poisonings while the
+breaker stays open send nothing; a breaker that opens again after being closed
+notifies again.
+
 ### Retention
 
 - Maximum notifications per user: 500 (configurable via `MAX_NOTIFICATIONS_PER_USER`)
@@ -111,28 +118,28 @@ admin log viewer for investigation and respects the recipient's in-app
 
 ## Configuration
 
-| Variable                                | Default                     | Description                                                               |
-| --------------------------------------- | --------------------------- | ------------------------------------------------------------------------- |
-| `NOTIFICATION_PROGRESS_BATCH_WINDOW_MS` | `300000` (5 min)            | Minimum interval between progress notifications per task                  |
-| `NOTIFICATION_DEDUP_WINDOW_MS`          | `60000` (60s)               | Dedup window for task_complete notifications                              |
-| `NOTIFICATION_AUTO_DELETE_AGE_MS`       | `7776000000` (90 days)      | Auto-delete threshold                                                     |
-| `MAX_NOTIFICATIONS_PER_USER`            | `500`                       | Max stored notifications before oldest are removed                        |
-| `NOTIFICATION_PAGE_SIZE`                | `50`                        | Default page size for notification list                                   |
-| `CRON_FAILURE_NOTIFICATION_THROTTLE_MS` | `3600000` (1 hr)            | Per-sweep superadmin alert throttle                                       |
-| `CRON_FAILURE_NOTIFICATION_KV_PREFIX`   | `cron-failure-notification` | KV prefix used for coarse throttle markers and atomic deduplication keys  |
-| `HUMAN_INPUT_TIMEOUT_MS`                | `7200000` (2 hr)            | Initial needs-input response window                                       |
-| `HUMAN_INPUT_ESCALATION_FRACTIONS`      | `0.25,0.75`                 | Fractions of the initial window at which reminders fire                   |
-| `HUMAN_INPUT_UNDELIVERED_GRACE_MS`      | `7200000` (2 hr)            | Extension when no push delivery was confirmed                             |
-| `HUMAN_INPUT_MAX_WAIT_MS`               | `86400000` (24 hr)          | Hard maximum needs-input marker lifetime                                  |
-| `WEB_PUSH_TTL_SECONDS`                  | `86400`                     | Push-service message TTL                                                  |
-| `WEB_PUSH_VAPID_TTL_SECONDS`            | `43200`                     | VAPID authorization-token lifetime                                        |
-| `WEB_PUSH_DELIVERY_TIMEOUT_MS`          | `10000`                     | Per-attempt push-service timeout                                          |
-| `WEB_PUSH_DELIVERY_BUDGET_MS`           | `25000`                     | Total fan-out budget, hard-capped at 25s below Worker background lifetime |
-| `WEB_PUSH_FANOUT_CONCURRENCY`           | `8`                         | Maximum concurrent endpoint deliveries                                    |
-| `WEB_PUSH_MAX_ATTEMPTS`                 | `3`                         | Bounded attempts for transient failures                                   |
-| `WEB_PUSH_MAX_RETRY_AFTER_SECONDS`      | `30`                        | Maximum honored `Retry-After` delay                                       |
-| `WEB_PUSH_MAX_PAYLOAD_BYTES`            | `3500`                      | Maximum unencrypted payload size                                          |
-| `WEB_PUSH_FAILURE_THRESHOLD`            | `5`                         | Consecutive failures before disabling a subscription                      |
-| `WEB_PUSH_MAX_SUBSCRIPTIONS_PER_USER`   | `8`                         | Maximum retained browser endpoints per user                               |
-| `WEB_PUSH_USER_AGENT_MAX_LENGTH`        | `512`                       | Maximum stored browser description length                                 |
-| `RATE_LIMIT_PUSH_SUBSCRIPTION`          | `30`                        | Subscription mutations per user per hour                                  |
+| Variable                                | Default                     | Description                                                                               |
+| --------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------- |
+| `NOTIFICATION_PROGRESS_BATCH_WINDOW_MS` | `300000` (5 min)            | Minimum interval between progress notifications per task                                  |
+| `NOTIFICATION_DEDUP_WINDOW_MS`          | `60000` (60s)               | Dedup window for task_complete notifications                                              |
+| `NOTIFICATION_AUTO_DELETE_AGE_MS`       | `7776000000` (90 days)      | Auto-delete threshold                                                                     |
+| `MAX_NOTIFICATIONS_PER_USER`            | `500`                       | Max stored notifications before oldest are removed                                        |
+| `NOTIFICATION_PAGE_SIZE`                | `50`                        | Default page size for notification list                                                   |
+| `CRON_FAILURE_NOTIFICATION_THROTTLE_MS` | `3600000` (1 hr)            | Per-sweep superadmin alert throttle; also how long an archive-breaker alert claim is held |
+| `CRON_FAILURE_NOTIFICATION_KV_PREFIX`   | `cron-failure-notification` | KV prefix used for coarse throttle markers and atomic deduplication keys                  |
+| `HUMAN_INPUT_TIMEOUT_MS`                | `7200000` (2 hr)            | Initial needs-input response window                                                       |
+| `HUMAN_INPUT_ESCALATION_FRACTIONS`      | `0.25,0.75`                 | Fractions of the initial window at which reminders fire                                   |
+| `HUMAN_INPUT_UNDELIVERED_GRACE_MS`      | `7200000` (2 hr)            | Extension when no push delivery was confirmed                                             |
+| `HUMAN_INPUT_MAX_WAIT_MS`               | `86400000` (24 hr)          | Hard maximum needs-input marker lifetime                                                  |
+| `WEB_PUSH_TTL_SECONDS`                  | `86400`                     | Push-service message TTL                                                                  |
+| `WEB_PUSH_VAPID_TTL_SECONDS`            | `43200`                     | VAPID authorization-token lifetime                                                        |
+| `WEB_PUSH_DELIVERY_TIMEOUT_MS`          | `10000`                     | Per-attempt push-service timeout                                                          |
+| `WEB_PUSH_DELIVERY_BUDGET_MS`           | `25000`                     | Total fan-out budget, hard-capped at 25s below Worker background lifetime                 |
+| `WEB_PUSH_FANOUT_CONCURRENCY`           | `8`                         | Maximum concurrent endpoint deliveries                                                    |
+| `WEB_PUSH_MAX_ATTEMPTS`                 | `3`                         | Bounded attempts for transient failures                                                   |
+| `WEB_PUSH_MAX_RETRY_AFTER_SECONDS`      | `30`                        | Maximum honored `Retry-After` delay                                                       |
+| `WEB_PUSH_MAX_PAYLOAD_BYTES`            | `3500`                      | Maximum unencrypted payload size                                                          |
+| `WEB_PUSH_FAILURE_THRESHOLD`            | `5`                         | Consecutive failures before disabling a subscription                                      |
+| `WEB_PUSH_MAX_SUBSCRIPTIONS_PER_USER`   | `8`                         | Maximum retained browser endpoints per user                                               |
+| `WEB_PUSH_USER_AGENT_MAX_LENGTH`        | `512`                       | Maximum stored browser description length                                                 |
+| `RATE_LIMIT_PUSH_SUBSCRIPTION`          | `30`                        | Subscription mutations per user per hour                                                  |
