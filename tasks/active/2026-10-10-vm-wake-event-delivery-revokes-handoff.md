@@ -61,6 +61,14 @@ the traces. Saturated `not_ready` retries run about every 80 s, which matches th
 observed rate. Unguarded wakes (human follow-ups) have no event check, so they never
 failed this way, but their prompt could still enter a runtime whose handoff later fails.
 
+**Second consumer, found in review.** The woken agent can consume the batch itself. A
+degraded snapshot restore starts a fresh session with the recovery prompt before the commit
+(`agent-session-bootstrap.ts`), and the woken agent may read its subscription in that turn
+(`list_subscription_events` / `get_event` → `markBatchObservedForPull`, which flips a
+`pending` batch to `delivered` while its wake row is `retry_wait`) or ack it
+(`ackProjectEventDelivery`). No production failure traces to this path, but it produces the
+same self-revocation and no delivery hold can cover it.
+
 Writers the evidence idea suspected but which are **ruled out**:
 `session-snapshot-prepare.ts` clears `recovery_task_id`, and `markSessionSnapshotSleeping`
 clears `recovery_attempt_id` and `recovery_status`. Either would have broken the
@@ -82,7 +90,14 @@ and suppressed `step_error`, and `returnFailedWakeToSleep` would have refused.
      `markSessionSnapshotAwakeInPlace` writes `restored` on every delivery attempt.
    - TaskRunner authority checks are unchanged, so stale-attempt and terminal-source
      protection keep their exact semantics.
-2. **Make every `SessionRecoveryAuthorityRevokedError` diagnosable.** The error carries
+2. **Accept the woken chat consuming its own batch.** The TaskRunner's event re-check
+   passes `acceptConsumedByTarget`, so `validateProjectEventWakeRecoveryAuthority` accepts
+   `delivered` and `acked` as well as `pending`. Only the woken chat can consume the batch
+   (pull and ack visibility is bound to the subscription's target), so that is the wake
+   succeeding. Cancellation, expiry, subscription and audience changes still revoke. The
+   Instant container's per-request guard stays strict: it rides the delivery request
+   itself, whose inbox row is `delivering`, so a pull cannot consume the batch first.
+3. **Make every `SessionRecoveryAuthorityRevokedError` diagnosable.** The error carries
    a `check` discriminator, and every throw site logs `session_recovery.authority_revoked`
    with:
    - the check, the site, and the task, project, chat, and attempt IDs;
@@ -94,10 +109,14 @@ and suppressed `step_error`, and `returnFailedWakeToSleep` would have refused.
 
 ## Every path that submits a prompt to a VM runtime (rule 61)
 
-Durable delivery is the only path that delivers event batches
-(`advanceProjectEventPromptAttemptCheckpoint` → `updatePromptQueueBatchForAttempt`), so it
-is the only path that can produce the self-revocation. The direct senders below call
-`sendPromptToAgentOnNode` themselves and skip `resolveVmPromptDeliveryTarget`.
+Three things consume an event batch: durable delivery of the wake prompt
+(`advanceProjectEventPromptAttemptCheckpoint` → `updatePromptQueueBatchForAttempt`), the
+woken agent reading its subscription (`markBatchObservedForPull`), and its ack
+(`ackProjectEventDelivery`). Durable delivery is held until the commit; the runner's
+re-check accepts the other two (fix item 2). Read and ack are bound to the subscription's
+target chat (`visibleSubscriptionPredicate`), so no other caller can consume the batch. The
+direct senders below call `sendPromptToAgentOnNode` themselves and skip
+`resolveVmPromptDeliveryTarget`; none of them consumes an event batch.
 
 | Path                                                                                                                                                                                                                                   | Held? | Why                                                                                                                                                                                                                                                                                                                                                                                                |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -120,6 +139,8 @@ is the only path that can produce the self-revocation. The direct senders below 
 - [x] `SessionRecoveryAuthorityCheck` + `check` on the error; logging helper with
       snapshot-row diagnostics in `services/session-recovery-authority-revocation.ts`
       (new module, re-exported, so the 508-line module did not grow)
+- [x] The TaskRunner's event re-check accepts its own chat consuming the batch
+      (`acceptConsumedByTarget`); the Instant guard stays strict (review finding)
 - [x] Every throw site names its check and logs: TaskRunner `assertRecoveryAuthority`,
       `advanceToStep`, `updateD1ExecutionStep` (×2), `putTaskRunnerState`,
       attempt-storage `setAlarm`, warm-node claim (`node-selection.ts`), Instant
@@ -169,12 +190,21 @@ is the only path that can produce the self-revocation. The direct senders below 
 
   This matches production exactly.
 
-- `tests/workers/vm-prompt-delivery-wake-handoff-gate.test.ts`, 9 cases against real D1.
+- The same file covers the second consumer: the woken agent calls `list_subscription_events`
+  through the real MCP route with the runtime's own token while the restore is held. The
+  batch becomes `delivered` and its wake row is withdrawn, then the handoff commits with no
+  stop and no revocation. **Revert proof:** with `acceptConsumedByTarget: false`, only this
+  test went red: the task went `sleeping` instead of `in_progress`. A table on the real
+  ProjectData validator covers `pending`, `delivered`, `acked`, `cancelled` and `expired` in
+  strict and live-wake modes, plus a cancelled subscription. Making the validator ignore the
+  opt-in reddened exactly the strict `delivered` and `acked` cases.
+- `tests/workers/vm-prompt-delivery-wake-handoff-gate.test.ts`, 10 cases against real D1.
   Each conjunct mutation reddened exactly its cases:
   - dropping the runtime check: Instant;
   - dropping the task-status check: committed and returned-to-sleep;
   - dropping the restored-workspace match: older-wake restore;
   - dropping the `waking` disjunct: both claimed-wake cases.
+    The tenth case is a claim naming another project's task (the join's project scope).
 - `tests/unit/services/session-recovery-authority-revocation.test.ts` (4) and the updated
   `task-runner-attempt-storage.test.ts` (3) cover the diagnostics.
 

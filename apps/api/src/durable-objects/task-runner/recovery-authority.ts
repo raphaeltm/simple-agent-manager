@@ -109,6 +109,8 @@ export async function findRecoveryAuthorityFailure(
             sourceTaskId: eventInput.sourceTaskId,
             batchId: eventInput.batchId,
             subscriptionId: eventInput.subscriptionId,
+            // The woken agent reading or acking its own event must not revoke its wake.
+            acceptConsumedByTarget: true,
           })
       : undefined
   );

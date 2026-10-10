@@ -256,6 +256,9 @@ export async function findSessionRecoverySourceTaskGuardFailureForEnv(
   }
   if (!guard.projectEventWake) return null;
   const projectData = await import('./project-data');
+  // Strict, unlike the TaskRunner's re-check: this guard rides the delivery request that
+  // carries the wake prompt, and that inbox row is `delivering`, so a pull cannot consume the
+  // batch first (`cancelQueuedWakeInboxBeforePull` only cancels queued or retrying rows).
   const eventAuthorized = await projectData.validateProjectEventWakeRecoveryAuthority(
     env,
     guard.projectId,

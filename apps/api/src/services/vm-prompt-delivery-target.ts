@@ -126,9 +126,10 @@ const UNCOMMITTED_WAKE_TASK_STATUSES = ['queued', 'delegated'];
  * prompt flips its batch to `delivered`, `validateProjectEventWakeRecoveryAuthority` reads
  * that as revocation, and the runner kills the runtime mid-prompt (production,
  * 2026-10-09). The hold covers every durable delivery, so no queued prompt enters a
- * runtime whose handoff can still be refused. Durable delivery is the only path that
- * delivers event batches; the direct senders that bypass it are enumerated in
- * `tasks/archive/2026-10-10-vm-wake-event-delivery-revokes-handoff.md`.
+ * runtime whose handoff can still be refused. The woken agent can also consume its batch
+ * by reading or acking it, which nothing can hold; the runner's re-check accepts that
+ * (`acceptConsumedByTarget`). The direct senders that bypass durable delivery are
+ * enumerated in `tasks/archive/2026-10-10-vm-wake-event-delivery-revokes-handoff.md`.
  *
  * This mirrors the claim the runner holds: `waking` from `claimSessionSnapshotRecovery`,
  * then `restored` for this workspace once `completeSessionSnapshotRecovery` runs, while

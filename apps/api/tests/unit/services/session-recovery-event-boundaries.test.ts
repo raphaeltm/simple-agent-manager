@@ -250,6 +250,8 @@ describe('recovery event authority at final asynchronous boundaries', () => {
       chatSessionId: 'chat',
       batchId: 'batch',
       subscriptionId: 'subscription',
+      // A live VM wake treats its own chat consuming the batch as success.
+      acceptConsumedByTarget: true,
     });
   });
 

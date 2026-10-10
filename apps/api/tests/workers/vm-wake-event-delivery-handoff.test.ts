@@ -15,10 +15,11 @@
  *    owns the midpoint (rule 62: an ordering defect needs controlled ordering).
  * 4. The delivery runner runs again at that midpoint, then the restore is released.
  * Provisioning (node selection to workspace ready) is fast-forwarded with the rows those
- * steps write; it plays no part in the race.
+ * steps write; it plays no part in the race. One case replaces step 4 with the woken agent
+ * reading its own subscription through MCP, the consumer that no delivery hold covers.
  */
 import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
-import { env, runInDurableObject } from 'cloudflare:test';
+import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -33,6 +34,7 @@ import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task
 import type { Env } from '../../src/env';
 import { encrypt } from '../../src/services/encryption';
 import { getNodeBackendBaseUrl } from '../../src/services/node-agent-readiness';
+import { validateProjectEventWakeRecoveryAuthority } from '../../src/services/project-data';
 import { resolveSessionRuntimeContract } from '../../src/services/session-runtime-contract';
 import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
 import {
@@ -338,6 +340,22 @@ async function runnerState(taskId: string): Promise<TaskRunnerState | null> {
   return taskRunner(taskId).getStatus();
 }
 
+/** Call an MCP tool the way the replacement runtime's agent does, with its own token. */
+async function callMcpTool(token: string, name: string, args: Record<string, unknown>) {
+  const response = await SELF.fetch('https://api.test.example.com/mcp', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: name,
+      method: 'tools/call',
+      params: { name, arguments: args },
+    }),
+  });
+  expect(response.status).toBe(200);
+  return response.json<{ result?: { content?: Array<{ text?: string }> }; error?: unknown }>();
+}
+
 function authorityRevocations(warn: ReturnType<typeof vi.spyOn>): Record<string, unknown>[] {
   return warn.mock.calls
     .map(([line]: unknown[]) => {
@@ -463,6 +481,42 @@ describe('VM wake handoff with its own queued event delivery', () => {
     });
   });
 
+  it('lets the woken agent read its own event mid-handoff without revoking the wake', async () => {
+    await withEventWakes(async (f) => {
+      const warn = vi.spyOn(console, 'warn');
+      const { alarm, vm } = await wakeToHeldRestore(f);
+      // A degraded restore starts a fresh agent turn before the handoff commits
+      // (`startSamAwareAgentSession`), and that agent may read its own subscription. The
+      // read consumes the batch (`markBatchObservedForPull`), which no delivery hold covers.
+      // The runtime's own MCP token; getStatus() redacts it, so read the runner's storage.
+      const token = await runInDurableObject(
+        taskRunner(f.b.taskId),
+        async (instance) =>
+          (await instance.ctx.storage.get<TaskRunnerState>('state'))?.stepResults.mcpToken
+      );
+      expect(token).toEqual(expect.any(String));
+      const read = await callMcpTool(token!, 'list_subscription_events', {
+        subscriptionId: f.subscriptionId,
+      });
+      expect(read.error).toBeUndefined();
+      expect(read.result?.content?.[0]?.text).toContain(f.deliveryId);
+      expect(await batchState(f)).toBe('delivered');
+      expect(await inboxRow(f)).toMatchObject({ delivery_state: 'failed' });
+
+      vm.releaseRestore();
+      await alarm;
+      expect(await taskRow(f.b.taskId)).toEqual({
+        status: 'in_progress',
+        execution_step: 'running',
+      });
+      expect(await snapshotClaim(f.b.sessionId)).toMatchObject({ recovery_status: 'restored' });
+      expect(authorityRevocations(warn)).toEqual([]);
+      expect(vm.stops()).toEqual([]);
+      // The agent already read the event, so its wake prompt was withdrawn.
+      expect(vm.prompts()).toEqual([]);
+    });
+  });
+
   it('still aborts the handoff when a newer wake attempt supersedes the runner', async () => {
     await withEventWakes(async (f) => {
       const warn = vi.spyOn(console, 'warn');
@@ -562,6 +616,66 @@ describe('VM wake handoff with its own queued event delivery', () => {
       );
       expect(vm.stops()).toHaveLength(1);
       expect(vm.prompts()).toEqual([]);
+    });
+  });
+});
+
+describe('event wake authority while a VM wake is live', () => {
+  // Real ProjectData SQL (rule 28). The TaskRunner sets acceptConsumedByTarget; the Instant
+  // container's per-request guard does not.
+  it.each([
+    { state: 'pending', strict: true, liveWake: true },
+    { state: 'delivered', strict: false, liveWake: true },
+    { state: 'acked', strict: false, liveWake: true },
+    { state: 'cancelled', strict: false, liveWake: false },
+    { state: 'expired', strict: false, liveWake: false },
+  ])('$state batch: strict=$strict, live wake=$liveWake', async ({ state, strict, liveWake }) => {
+    await withEventWakes(async (f) => {
+      await sqlRows(
+        f.stub,
+        'UPDATE project_event_delivery_batches SET state = ? WHERE id = ?',
+        state,
+        f.deliveryId
+      );
+      const input = {
+        chatSessionId: f.b.sessionId,
+        sourceTaskId: f.b.taskId,
+        batchId: f.deliveryId,
+        subscriptionId: f.subscriptionId,
+      };
+      await expect(
+        validateProjectEventWakeRecoveryAuthority(wakeEnv(), f.projectId, input)
+      ).resolves.toBe(strict);
+      await expect(
+        validateProjectEventWakeRecoveryAuthority(wakeEnv(), f.projectId, {
+          ...input,
+          acceptConsumedByTarget: true,
+        })
+      ).resolves.toBe(liveWake);
+    });
+  });
+
+  it('still refuses a consumed batch once its subscription is cancelled', async () => {
+    await withEventWakes(async (f) => {
+      await sqlRows(
+        f.stub,
+        "UPDATE project_event_delivery_batches SET state = 'delivered' WHERE id = ?",
+        f.deliveryId
+      );
+      await sqlRows(
+        f.stub,
+        "UPDATE project_event_subscriptions SET lifecycle_state = 'cancelled' WHERE id = ?",
+        f.subscriptionId
+      );
+      await expect(
+        validateProjectEventWakeRecoveryAuthority(wakeEnv(), f.projectId, {
+          chatSessionId: f.b.sessionId,
+          sourceTaskId: f.b.taskId,
+          batchId: f.deliveryId,
+          subscriptionId: f.subscriptionId,
+          acceptConsumedByTarget: true,
+        })
+      ).resolves.toBe(false);
     });
   });
 });

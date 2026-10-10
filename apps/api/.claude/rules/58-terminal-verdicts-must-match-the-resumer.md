@@ -198,8 +198,14 @@ reading `running`, a mirror that turns true before the commit.
 
 - **List every writer of the state a terminating re-check reads, including the work it guards.**
   If the guarded work's success changes that state, either the re-check must accept the success
-  state, or the work must be held until after the final re-check. Here the work is now held:
-  `isVmWakeHandoffPending` keeps durable delivery at `not_ready` until the commit.
+  state, or the work must be held until after the final re-check. Hold what you can, and accept
+  what you cannot hold. Here durable delivery is held (`isVmWakeHandoffPending` answers
+  `not_ready` until the commit). The woken agent can also consume the batch itself: a degraded
+  restore starts a fresh turn before the commit, and its reading of the subscription
+  (`markBatchObservedForPull`) or its ack is not a delivery anyone can hold. So the runner's
+  re-check accepts its own chat having consumed the batch (`acceptConsumedByTarget`), and still
+  refuses cancellation, expiry and subscription changes. Review found the pull path only after
+  the hold was written; enumerate consumers, not just senders.
 - **A commit that publishes readiness must also gate admission.** A post-commit release signal
   schedules the happy path; it does not stop a retry that arrives first. Every consumer's own
   readiness check must consult the committed state, not a mirror written earlier in the flow.
