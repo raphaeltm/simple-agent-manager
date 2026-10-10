@@ -16,12 +16,12 @@ operator deletion quarantine.
 
 **Production evidence (read-only, `CF_PRODUCTION_DEBUGGING_TOKEN`, 2026-10-10):**
 
-| Task | Failure | Delivery | Accepted | `step_error` |
-| --- | --- | --- | --- | --- |
+| Task                         | Failure     | Delivery                           | Accepted     | `step_error` |
+| ---------------------------- | ----------- | ---------------------------------- | ------------ | ------------ |
 | `01M4GED49YASA7D7QFG7AW3XA0` | 10-09 15:45 | `1bbc0690…` (CI-subscription chat) | 15:45:04.689 | 15:45:05.823 |
-| `01M4FXMYCFTNMT3JTV41HVW14R` | 10-09 18:19 | `141b67f6…` agent-DM batch | ~18:19:01.36 | 18:19:02.030 |
-| `01M4ABRWV97F54MQ1FFJFGHMBA` | 10-09 00:24 | `904f6fd9…` agent-DM batch | ~00:24:32.35 | 00:24:33.111 |
-| `01M4GED49YASA7D7QFG7AW3XA0` | 10-10 00:49 | `782204e8…` (same CI chat) | ~00:49:49.65 | 00:49:50.710 |
+| `01M4FXMYCFTNMT3JTV41HVW14R` | 10-09 18:19 | `141b67f6…` agent-DM batch         | ~18:19:01.36 | 18:19:02.030 |
+| `01M4ABRWV97F54MQ1FFJFGHMBA` | 10-09 00:24 | `904f6fd9…` agent-DM batch         | ~00:24:32.35 | 00:24:33.111 |
+| `01M4GED49YASA7D7QFG7AW3XA0` | 10-10 00:49 | `782204e8…` (same CI chat)         | ~00:49:49.65 | 00:49:50.710 |
 
 - All four were **project-event wakes** (`source_kind = 'project_event_wake'`). Two
   wake prompts read "SAM notice … agent message batch <deliveryId> … call
@@ -49,8 +49,8 @@ operator deletion quarantine.
    `delivered`.
 4. The TaskRunner re-checks authority before committing (`agent-session-step.ts`
    `rc.assertRecoveryAuthority` at the three handoff points). For an event wake this
-   calls `validateProjectEventWakeRecoveryAuthority`, which requires `b.state =
-   'pending'`. The wake's own successful delivery therefore reads as revocation →
+   calls `validateProjectEventWakeRecoveryAuthority`, which requires a `pending` batch.
+   The wake's own successful delivery therefore reads as revocation →
    `SessionRecoveryAuthorityRevokedError` → `failTask` → `returnFailedWakeToSleep` →
    workspace stopped ("SessionHost stopped") and the accepted prompt's turn is killed.
    The batch stays `delivered`, so the event is not redelivered.
@@ -94,41 +94,73 @@ Writers the evidence idea suspected but which are **ruled out**:
 ## Checklist
 
 - [x] Root cause proven from production logs plus code; candidate writers ruled out
-- [ ] Split TaskRunner recovery-authority methods out of `task-runner/index.ts`
-      (789 lines; rule 18) in its own commit before behavior changes
-- [ ] Gate in `services/vm-prompt-delivery-target.ts` with a comment naming the
+- [x] Split TaskRunner recovery-authority methods out of `task-runner/index.ts`
+      (789 lines; rule 18) in its own commit before behavior changes (b5f6da898); also
+      moved the handoff-restore functions out of `session-recovery-authority.ts` (508
+      lines) into `session-recovery-handoff.ts` (d9e8cea27)
+- [x] Gate in `services/vm-prompt-delivery-target.ts` with a comment naming the
       resumer predicate it mirrors (`isSessionWakeReadyCurrent`, `transitionToInProgress`)
-- [ ] `SessionRecoveryAuthorityCheck` + `check` on the error; logging helper with
-      snapshot-row diagnostics in `services/session-recovery-authority.ts`
-- [ ] Every throw site names its check and logs: TaskRunner `assertRecoveryAuthority`,
+- [x] `SessionRecoveryAuthorityCheck` + `check` on the error; logging helper with
+      snapshot-row diagnostics in `services/session-recovery-authority-revocation.ts`
+      (new module, re-exported, so the 508-line module did not grow)
+- [x] Every throw site names its check and logs: TaskRunner `assertRecoveryAuthority`,
       `advanceToStep`, `updateD1ExecutionStep` (×2), `putTaskRunnerState`,
       attempt-storage `setAlarm`, warm-node claim (`node-selection.ts`), Instant
       container source guard (`vm-agent-container.ts`)
-- [ ] `task_runner_do.step_error` includes the authority check
-- [ ] Workers vertical slice (new file): real agent-DM event wake → real snapshot claim
+- [x] `task_runner_do.step_error` includes the authority check
+- [x] Workers vertical slice (new file): real agent-DM event wake → real snapshot claim
       and TaskRunner reactivation → real `agent_session` alarm with the VM restore
       call held → real delivery claim mid-handoff → release. Assert the handoff
       commits, the runtime is not stopped, and the prompt is accepted exactly once after
       the wake-ready signal
-- [ ] Controls: superseded attempt still aborts; terminal (cancelled) task still
+- [x] Controls: superseded attempt still aborts; terminal (cancelled) task still
       aborts; genuinely revoked event authority (subscription cancelled) still aborts
       with check `project_event_wake_authority` logged
-- [ ] Gate predicate table against real D1: waking+delegated holds; restored+delegated
+- [x] Gate predicate table against real D1: waking+delegated holds; restored+delegated
       on this workspace holds; restored+in_progress ready; stale restored on another
       workspace ready; Instant (`cf-container`) restored+queued not held; terminal or
       sleeping task not held
-- [ ] Diagnostics unit tests: each check logged with snapshot fields; diagnostic read
+- [x] Diagnostics unit tests: each check logged with snapshot fields; diagnostic read
       failure does not mask the error; no secret-bearing fields
-- [ ] Revert the gate once and record which test goes red (PR body)
+- [x] Revert the gate once and record which test goes red (PR body)
 - [ ] Rule 61 enumeration in PR: durable delivery (gated), reconciliation check-in
       (`agent_mailbox`, active chat plus long idle; not an event batch), Instant (not a
       TaskRunner wake)
-- [ ] Docs: update public docs that describe when queued prompts start after a wake
+- [x] Docs: architecture overview (prompt-delivery paragraph) and chat features
+      ("Sleeping") describe the handoff hold
 - [ ] Lint, typecheck, focused and full API tests (sequential), build
 - [ ] Local specialist reviews + task-completion-validator
 - [ ] Staging: one real VM wake via a queued event or DM (STAGING_CLAIM/RELEASE, clean up)
 - [ ] PR, CI, CodeRabbit request and wait, SonarCloud, merge, production deploy and
       release check
+
+## Test evidence
+
+- `tests/workers/vm-wake-event-delivery-handoff.test.ts`, 4 tests. Real agent-DM wake,
+  real `ensureSessionRecovery` claim and TaskRunner config, real `agent_session` alarm
+  with the VM restore held, and the real delivery runner mid-handoff.
+- **Revert proof.** Gate disabled with `false &&`. Only "holds the wake prompt until the
+  handoff commits, then delivers it into the live runtime" went red: the midpoint
+  delivery returned `accepted` instead of `retry`. The three controls stayed green.
+- **Pre-fix full reproduction** (temporary test, gate disabled):
+  - the midpoint delivery was `accepted`, 1 prompt was submitted, and the batch became
+    `delivered`;
+  - the handoff then aborted, logging `check=project_event_wake_authority` at
+    `task_runner.assert_recovery_authority` with the snapshot claim still `waking`;
+  - the task went `sleeping` with "Wake attempt failed; saved conversation retained:
+    Session recovery authority was revoked";
+  - one VM stop was issued.
+
+  This matches production exactly.
+
+- `tests/workers/vm-prompt-delivery-wake-handoff-gate.test.ts`, 9 cases against real D1.
+  Each conjunct mutation reddened exactly its cases:
+  - dropping the runtime check: Instant;
+  - dropping the task-status check: committed and returned-to-sleep;
+  - dropping the restored-workspace match: older-wake restore;
+  - dropping the `waking` disjunct: both claimed-wake cases.
+- `tests/unit/services/session-recovery-authority-revocation.test.ts` (4) and the updated
+  `task-runner-attempt-storage.test.ts` (3) cover the diagnostics.
 
 ## Acceptance criteria
 
