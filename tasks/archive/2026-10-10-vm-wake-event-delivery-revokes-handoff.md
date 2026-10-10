@@ -131,9 +131,11 @@ direct senders below call `sendPromptToAgentOnNode` themselves and skip
 
 - [x] Root cause proven from production logs plus code; candidate writers ruled out
 - [x] Split TaskRunner recovery-authority methods out of `task-runner/index.ts`
-      (789 lines; rule 18) in its own commit before behavior changes (b5f6da898); also
-      moved the handoff-restore functions out of `session-recovery-authority.ts` (508
-      lines) into `session-recovery-handoff.ts` (d9e8cea27)
+      (789 lines; rule 18) in its own commit before behavior changes ("refactor(api):
+      extract TaskRunner recovery authority checks"); also moved the handoff-restore
+      functions out of `session-recovery-authority.ts` (508 lines) into
+      `session-recovery-handoff.ts` ("refactor(api): move session recovery handoff restore
+      into its own module")
 - [x] Gate in `services/vm-prompt-delivery-target.ts` with a comment naming the
       resumer predicate it mirrors (`isSessionWakeReadyCurrent`, `transitionToInProgress`)
 - [x] `SessionRecoveryAuthorityCheck` + `check` on the error; logging helper with
