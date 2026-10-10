@@ -8,24 +8,32 @@ import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { notificationClaims, sentNotifications, sendNotificationOnceMock } = vi.hoisted(() => {
-  const notificationClaims = new Set<string>();
+  /** Per-user claim key → expiry, like `notification_dedup_claims` in each user's DO. */
+  const notificationClaims = new Map<string, number>();
   const sentNotifications: Array<{
     userId: string;
     dedupKey: string;
     notification: Record<string, unknown>;
   }> = [];
-  // Mirrors the NotificationService DO contract: a per-user claim on the dedup key, then create.
+  // Mirrors NotificationService.claimNotificationDeduplication: drop expired claims, then claim
+  // the key once per user, then create the notification.
   const sendNotificationOnceMock = vi.fn(
     async (
       _env: unknown,
       userId: string,
       dedupKey: string,
-      _expiresAt: number,
-      notification: Record<string, unknown>
+      expiresAt: number,
+      notification: Record<string, unknown>,
+      now: number = Date.now()
     ) => {
+      for (const [claim, claimExpiresAt] of notificationClaims) {
+        if (claim.startsWith(`${userId}\u0000`) && claimExpiresAt <= now) {
+          notificationClaims.delete(claim);
+        }
+      }
       const claim = `${userId}\u0000${dedupKey}`;
       if (notificationClaims.has(claim)) return false;
-      notificationClaims.add(claim);
+      notificationClaims.set(claim, expiresAt);
       sentNotifications.push({ userId, dedupKey, notification });
       return true;
     }
@@ -313,6 +321,40 @@ describe('ProjectData archive breaker alerts', () => {
       'migration-2',
     ]);
     expect(sentNotifications).toHaveLength(4);
+  });
+
+  it('alerts again when the breaker re-opens inside the notification claim window', async () => {
+    // Sweeps one minute apart, so the re-opening lands well inside the one-hour claim the first
+    // opening's notifications hold. Each opening is its own migration, hence its own claim.
+    const { main, observability, env } = createHarness({
+      PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS: '60000',
+    } as Partial<Env>);
+    seedFailedMigration(main, 'migration-1', POISON_AFTER_ATTEMPTS - 1);
+    await runProjectDataArchiveSharding(env, new Date(NOW));
+    await setProjectDataArchiveCircuitBreaker(env, {
+      projectId: PROJECT_ID,
+      state: 'closed',
+      reason: 'Closed from admin UI',
+      now: NOW + 5 * 60_000,
+    });
+    seedFailedMigration(main, 'migration-2', POISON_AFTER_ATTEMPTS - 1);
+
+    const stats = await runProjectDataArchiveSharding(env, new Date(NOW + 10 * 60_000));
+
+    expect(stats.poisoned).toBe(1);
+    expect(readBreaker(main)?.state).toBe('open');
+    expect(readBreakerAlertRows(observability).map((row) => row.context.migrationId)).toEqual([
+      'migration-1',
+      'migration-2',
+    ]);
+    const claimKey = (migrationId: string) =>
+      `${PROJECT_DATA_ARCHIVE_BREAKER_OPENED_ALERT}:${PROJECT_ID}:${migrationId}`;
+    expect(sentNotifications.map((sent) => `${sent.userId} ${sent.dedupKey}`).sort()).toEqual([
+      `admin-1 ${claimKey('migration-1')}`,
+      `admin-1 ${claimKey('migration-2')}`,
+      `admin-2 ${claimKey('migration-1')}`,
+      `admin-2 ${claimKey('migration-2')}`,
+    ]);
   });
 
   it('does not announce a poisoning in a project an operator already froze', async () => {

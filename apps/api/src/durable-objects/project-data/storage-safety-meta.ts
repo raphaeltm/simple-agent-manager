@@ -12,7 +12,7 @@ import { isJsonRecord } from '@simple-agent-manager/shared';
  * Cleanup passes publish the latest size too, but they must not stamp this key. A cleanup that
  * runs more often than the measure interval would then postpone the measurement forever. That is
  * how the SAM root object went silent on 2026-10-08: grouped FTS cleanup returned a result every
- * five minutes and every pass re-stamped this clock (`.claude/rules/74`).
+ * five minutes and every pass re-stamped this clock (`.claude/rules/53`, requirement 7).
  */
 export const META_LAST_MEASURED_AT = 'storageSafetyLastMeasuredAt';
 export const META_LAST_STATUS = 'storageSafetyLastStatus';
