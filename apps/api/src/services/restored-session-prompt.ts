@@ -10,6 +10,7 @@
  * readiness signal (`signalSessionWakeReady`) makes it due.
  */
 import { resolveDurableExecutionConfig } from '../durable-objects/project-data/durable-execution-config';
+import type { AcceptPromptDeliveryInput } from '../durable-objects/project-data/prompt-delivery';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
@@ -43,6 +44,26 @@ export interface QueueRestoredSessionPromptInput {
   prompt: string;
 }
 
+/** The durable delivery carrying a restored session's first prompt. */
+export function restoredSessionPromptDelivery(
+  input: QueueRestoredSessionPromptInput,
+  ttlMs: number
+): AcceptPromptDeliveryInput {
+  return {
+    deliveryId: restoredSessionPromptDeliveryId(input.agentSessionId),
+    targetSessionId: input.chatSessionId,
+    displayContent: input.prompt,
+    deliveryContent: input.prompt,
+    sourceTaskId: input.taskId,
+    senderType: 'system',
+    senderId: RESTORED_SESSION_PROMPT_SENDER_ID,
+    messageClass: 'deliver',
+    sourceKind: 'checkpoint_continuation',
+    ttlMs,
+    metadata: { restoredAgentSessionId: input.agentSessionId },
+  };
+}
+
 export async function queueRestoredSessionPrompt(
   env: Env,
   input: QueueRestoredSessionPromptInput
@@ -69,18 +90,10 @@ export async function queueRestoredSessionPrompt(
     log.warn('restored_session_prompt.delivery_disabled', logContext);
     return;
   }
-  await projectDataService.acceptPromptDelivery(env, input.projectId, {
-    deliveryId,
-    targetSessionId: input.chatSessionId,
-    displayContent: input.prompt,
-    deliveryContent: input.prompt,
-    sourceTaskId: input.taskId,
-    senderType: 'system',
-    senderId: RESTORED_SESSION_PROMPT_SENDER_ID,
-    messageClass: 'deliver',
-    sourceKind: 'checkpoint_continuation',
-    ttlMs: config.ttlMs,
-    metadata: { restoredAgentSessionId: input.agentSessionId },
-  });
+  await projectDataService.acceptPromptDelivery(
+    env,
+    input.projectId,
+    restoredSessionPromptDelivery(input, config.ttlMs)
+  );
   log.info('restored_session_prompt.queued', logContext);
 }

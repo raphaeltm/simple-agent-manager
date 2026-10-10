@@ -89,6 +89,7 @@ export const PROMPT_DELIVERY_SOURCES = [
   'comment_directive',
   'agent_mailbox',
   'orchestration_handoff',
+  // SAM's first prompt to a restored session that has nothing queued (`restored-session-prompt.ts`).
   'checkpoint_continuation',
   'parent_wakeup',
   'project_event_wake',
