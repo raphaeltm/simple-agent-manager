@@ -104,40 +104,70 @@ what `sleeping` means, so three user-visible features break for slept VM tasks:
 
 ## Implementation checklist
 
-- [ ] `services/task-status.ts`: add shared `LIVE_TASK_STATUSES` and `WAKEABLE_TASK_STATUSES`
+- [x] `services/task-status.ts`: add shared `LIVE_TASK_STATUSES` and `WAKEABLE_TASK_STATUSES`
       (+ SQL placeholder helper if useful); `_helpers.ts` derives `ACTIVE_STATUSES` /
       `AGENT_TARGET_STATUSES` from them
-- [ ] Schedule authority accepts wakeable (incl. sleeping) target tasks via bound params
-- [ ] Schedule reconcile `started` includes sleeping
-- [ ] Trigger admission: one shared slot predicate for reserve + classify; sleeping linked
+- [x] Schedule authority accepts wakeable (incl. sleeping) target tasks via bound params
+- [x] Schedule reconcile `started` includes sleeping
+- [x] Trigger admission: one shared slot predicate for reserve + classify; sleeping linked
       task does not hold the slot; update cleanup doc comment
-- [ ] `SessionRecoveryOptions.resumeReason` (or equivalent explicit field); eviction caller
+- [x] `SessionRecoveryOptions.wakeCause` (explicit field); eviction caller
       sets runtime-lost; `startRecoveryTask` selects the prompt
-- [ ] `session-sleep-fallback-messages.ts`: continue-assigned-task wording (normal + fallback)
-- [ ] Test a: schedule created awake → real sleep teardown → schedule alarm admits, writes
+- [x] `session-sleep-fallback-messages.ts`: continue-assigned-task wording (normal + fallback)
+- [x] Test a: schedule created awake → real sleep teardown → schedule alarm admits, writes
       `scheduled_action` inbox row → delivery alarm through real adapter requests recovery;
       controls: completed task, suspended member refused; creation-time acceptance of a
       sleeping target
-- [ ] Test b: real `runCronTriggerSweep` fires while previous task sleeps (incl. hard-max
+- [x] Test b: real `runCronTriggerSweep` fires while previous task sleeps (incl. hard-max
       failed execution); controls queued/delegated/in_progress still skip
-- [ ] Test c: eviction callback HTTP → task-mode prompt says continue + no external repeats;
+- [x] Test c: eviction callback HTTP → task-mode prompt says continue + no external repeats;
       controls: conversation mode unchanged, user follow-up wake unchanged
-- [ ] Test d: event subscription → sleep → event → materialization → delivery alarm → real
+- [x] Test d: event subscription → sleep → event → materialization → delivery alarm → real
       adapter requests recovery with the event-wake guard
-- [ ] Revert each fix once; record which test went red (d: revert sleeping in materialization)
-- [ ] Docs: grep public docs for affected behavior; update if they describe it
+- [x] Revert each fix once; record which test went red (d: revert sleeping in materialization)
+- [x] Docs: grep public docs for affected behavior; update if they describe it
 - [ ] Rule 79 audit table in PR
+
+## Implementation notes
+
+- Shared sets in `services/task-status.ts`: `LIVE_TASK_STATUSES`, `SLEEPING_TASK_STATUSES`,
+  `WAKEABLE_TASK_STATUSES` (= live + sleeping), plus `taskStatusSqlList`. MCP `ACTIVE_STATUSES` /
+  `AGENT_TARGET_STATUSES` now derive from them (same members; order normalized).
+- Trigger admission: `EXECUTION_HOLDS_RUN_SLOT_SQL` is shared by the reservation INSERT and
+  `classifyReservationFailure`. Only a linked `sleeping` task changes outcome; every other case
+  (terminal task with an unsynced `running` execution, missing task row, draft/ready) behaves as
+  before.
+- Eviction prompt: `SessionRecoveryOptions.wakeCause = 'runtime_lost'` is set only by
+  `recoverWorkspaceAfterEviction`; `startRecoveryTask` picks `continue_assigned_task` only for
+  task mode (the same effective task mode the TaskRunner config uses, contract first).
+  `session-recovery.ts` (Agent A) is untouched; SHARED_FILE published for
+  `session-recovery-eviction.ts`.
+- The recovery prompt reaches the agent only when it starts a fresh ACP session (degraded or no
+  restore). A `restored` session gets no prompt at all; out of scope here.
+
+### Discrimination evidence (each fix reverted once)
+
+| Revert                                                            | Red                                                                                                                                                          | Green controls                                                  |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| Trigger sleeping exclusion removed                                | 2 × "admits the next cron fire while the previous run sleeps", "admits the next fire after the real hard-residence backstop"                                 | queued/delegated/in_progress skips, max_concurrent live control |
+| Schedule authority back to the pre-fix list                       | "admits the schedule, queues the scheduled message and asks to wake the slept chat", "accepts a new self-wake schedule created after the task already slept" | completed-task and suspended-member controls                    |
+| Schedule authority status predicate deleted                       | "still refuses the self-wake when the task completed while it slept"                                                                                         | others                                                          |
+| Reconcile `started` without sleeping                              | "observes sleeping without replaying task admission"                                                                                                         | 18 others                                                       |
+| Eviction `wakeCause` removed                                      | 2 task-mode eviction cases                                                                                                                                   | conversation-mode eviction, user follow-up wake                 |
+| `startRecoveryTask` task-mode gate removed                        | "keeps the conversation-mode wording after an eviction"                                                                                                      | 3 others                                                        |
+| Wake materialization `c.status = 'active'` only (pre-#2266/#2292) | "delivers a pull request event to the slept chat and asks to wake it"                                                                                        | others                                                          |
+| Delivery target drops the `sleeping` workspace recovery branch    | schedule self-wake + event wake delivery cases                                                                                                               | controls                                                        |
 
 ## Acceptance criteria
 
-- [ ] A `message_session` schedule targeting a slept VM task is admitted and requests a wake
-- [ ] A skip_if_running/max_concurrent trigger fires when the previous run's task sleeps;
+- [x] A `message_session` schedule targeting a slept VM task is admitted and requests a wake
+- [x] A skip_if_running/max_concurrent trigger fires when the previous run's task sleeps;
       live previous runs still block
-- [ ] Eviction recovery of a task-mode agent tells it to continue its assigned task without
+- [x] Eviction recovery of a task-mode agent tells it to continue its assigned task without
       repeating external effects; conversation mode and follow-up wakes unchanged
-- [ ] Event wake delivery to a slept VM chat requests recovery through the real adapter
-- [ ] One shared live/wakeable status set used by the fixed checks
-- [ ] Every new guard proven discriminating by reverting it
+- [x] Event wake delivery to a slept VM chat requests recovery through the real adapter
+- [x] One shared live/wakeable status set used by the fixed checks
+- [x] Every new guard proven discriminating by reverting it
 - [ ] Production: next "Daily blog post" fire admitted (trigger_executions), or note when checkable
 
 ## References

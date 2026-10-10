@@ -55,7 +55,9 @@ In the **Schedules** section, choose **Schedule once**, enter a due time, and pi
 
 - **Message an existing session** sends your prompt to the selected conversation.
   A busy agent receives it through the durable queue. A sleeping session resumes
-  its existing conversation when recovery is available.
+  its existing conversation when recovery is available, including a task whose
+  agent went to sleep while waiting, so an agent can schedule a message to itself
+  and be woken by it.
 - **Start a new session** creates a task-backed conversation using the selected
   profile and skill, with current project access, credentials and placement rules.
   It can run after you leave or archive the conversation that created the schedule.
