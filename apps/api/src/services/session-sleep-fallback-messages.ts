@@ -147,6 +147,16 @@ export const SESSION_RECOVERY_CONTINUE_TASK_PROMPT = [
 export type SessionRecoveryNextStep = 'answer_queued_message' | 'continue_assigned_task';
 
 /**
+ * The prompt for a wake whose snapshot restore resumed the saved agent session (LoadSession).
+ * That session never receives the fresh-start prompt below. A queued message is already its
+ * prompt and a conversation waits for its user, so only a task whose runtime was lost needs one,
+ * queued through durable prompt delivery (`services/restored-session-prompt.ts`).
+ */
+export function sessionRecoveryRestoredPrompt(nextStep: SessionRecoveryNextStep): string | null {
+  return nextStep === 'continue_assigned_task' ? SESSION_RECOVERY_CONTINUE_TASK_PROMPT : null;
+}
+
+/**
  * The first prompt of a wake. After a fallback sleep it tells the agent which files to
  * expect, how to check them, and not to replay effects outside the workspace. Such a
  * wake always starts a new agent session (`session-snapshot-restore-response.ts`), so

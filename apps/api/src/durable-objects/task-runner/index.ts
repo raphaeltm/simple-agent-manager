@@ -597,6 +597,7 @@ export class TaskRunner extends DurableObject<Env> {
     raw.workspaceDispatchLastError ??= null;
     raw.workspaceDispatchAckedAt ??= null;
     raw.config.resumeSnapshotChatSessionId ??= null;
+    raw.config.restoredSessionPrompt ??= null;
     raw.config.evictionFence ??= null;
     raw.config.recoverySourceTaskId ??= null;
     raw.config.retrySourceTaskId ??= null;

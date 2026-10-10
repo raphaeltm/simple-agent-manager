@@ -192,6 +192,8 @@ export async function startTaskRunnerDO(
     vmSizeSource?: ResourceRequirementsSource | 'explicit' | null;
     /** Existing sleeping chat whose snapshot is restored before queued prompt delivery. */
     resumeSnapshotChatSessionId?: string | null;
+    /** First prompt for a restored session when nothing is queued for it. */
+    restoredSessionPrompt?: string | null;
     /** Resource-eviction identity that must remain current through replacement allocation. */
     evictionFence?: {
       workspaceId: string;
@@ -277,6 +279,7 @@ export async function startTaskRunnerDO(
       capacityPoolSelection,
       vmSizeSource: input.vmSizeSource ?? null,
       resumeSnapshotChatSessionId: input.resumeSnapshotChatSessionId ?? null,
+      restoredSessionPrompt: input.restoredSessionPrompt ?? null,
       evictionFence: input.evictionFence ?? null,
       recoverySourceTaskId: input.recoverySourceTaskId ?? null,
       recoveryAttemptId: input.recoveryAttemptId ?? null,

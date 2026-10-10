@@ -188,7 +188,12 @@ describe('recovery prompt chosen by the wake cause', () => {
     expect(mocks.startTaskRunnerDO).toHaveBeenCalledOnce();
     const [, config] = mocks.startTaskRunnerDO.mock.calls[0] as unknown as [
       Env,
-      { taskId: string; taskMode: TaskMode; taskDescription: string },
+      {
+        taskId: string;
+        taskMode: TaskMode;
+        taskDescription: string;
+        restoredSessionPrompt: string | null;
+      },
     ];
     return config;
   }
@@ -206,6 +211,8 @@ describe('recovery prompt chosen by the wake cause', () => {
       'Do not repeat actions with effects outside this workspace'
     );
     expect(config.taskDescription).not.toMatch(/wait for and answer/i);
+    // A restored session never receives taskDescription; the TaskRunner queues this instead.
+    expect(config.restoredSessionPrompt).toBe(SESSION_RECOVERY_CONTINUE_TASK_PROMPT);
   });
 
   it('follows the task mode the runtime contract recorded', async () => {
@@ -215,6 +222,7 @@ describe('recovery prompt chosen by the wake cause', () => {
     expect(recoveryStart()).toMatchObject({
       taskMode: 'task',
       taskDescription: SESSION_RECOVERY_CONTINUE_TASK_PROMPT,
+      restoredSessionPrompt: SESSION_RECOVERY_CONTINUE_TASK_PROMPT,
     });
   });
 
@@ -225,6 +233,7 @@ describe('recovery prompt chosen by the wake cause', () => {
     expect(recoveryStart()).toMatchObject({
       taskMode: 'conversation',
       taskDescription: SESSION_RECOVERY_INITIAL_PROMPT,
+      restoredSessionPrompt: null,
     });
   });
 
@@ -236,6 +245,7 @@ describe('recovery prompt chosen by the wake cause', () => {
       taskId: 'source-task',
       taskMode: 'task',
       taskDescription: SESSION_RECOVERY_INITIAL_PROMPT,
+      restoredSessionPrompt: null,
     });
   });
 });
