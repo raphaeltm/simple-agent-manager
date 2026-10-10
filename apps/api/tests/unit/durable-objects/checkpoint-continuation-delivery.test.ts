@@ -152,6 +152,20 @@ describe('invalidCheckpointContinuationTarget', () => {
     await expect(validate(claimFor(later))).resolves.toBeNull();
   });
 
+  it('keeps only the later of two continuations queued in the same millisecond', async () => {
+    // Claims break created_at ties on rowid (`noEarlierDeliverySql`); so must "newer".
+    seedTask('in_progress');
+    const earlier = queueContinuation('agent-2', 1_000);
+    const later = queueContinuation('agent-3', 1_000);
+
+    await expect(validate(claimFor(earlier))).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Checkpoint continuation was superseded by a later wake',
+    });
+    await expect(validate(claimFor(later))).resolves.toBeNull();
+  });
+
   it('is not superseded by an earlier continuation that already went out', async () => {
     seedTask('in_progress');
     const earlier = queueContinuation('agent-2', 1_000);

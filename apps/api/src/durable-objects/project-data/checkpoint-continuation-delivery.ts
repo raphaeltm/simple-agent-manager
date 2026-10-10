@@ -5,23 +5,24 @@ import type { Env } from './types';
 /**
  * Whether a later wake queued its own continuation for this chat. Each runtime loss queues one,
  * so an older one still waiting would make the agent hear "continue your task" twice. Same-class
- * deliveries to one target are claimed oldest first (`noEarlierDeliverySql`), so the older one is
- * always the one checked while the newer one is still active.
+ * deliveries to one target are claimed in `(created_at, rowid)` order (`noEarlierDeliverySql`),
+ * so the older one is always the one checked while the newer one is still active. "Newer" uses
+ * the same order, so two continuations queued in the same millisecond still keep only one.
  */
 function hasNewerContinuation(sql: SqlStorage, claim: PromptDeliveryClaim): boolean {
   return (
     sql
       .exec(
-        `SELECT 1 FROM session_inbox INDEXED BY idx_inbox_active_target_head
-          WHERE target_session_id = ?
-            AND delivery_state IN ('queued', 'retry_wait', 'delivering')
-            AND source_kind = 'checkpoint_continuation'
-            AND id != ?
-            AND created_at > ?
+        `SELECT 1 FROM session_inbox newer INDEXED BY idx_inbox_active_target_head
+          WHERE newer.target_session_id = ?
+            AND newer.delivery_state IN ('queued', 'retry_wait', 'delivering')
+            AND newer.source_kind = 'checkpoint_continuation'
+            AND (newer.created_at, newer.rowid) >
+              (SELECT claimed.created_at, claimed.rowid FROM session_inbox claimed
+                WHERE claimed.id = ?)
           LIMIT 1`,
         claim.message.targetSessionId,
-        claim.message.id,
-        claim.message.createdAt
+        claim.message.id
       )
       .toArray().length > 0
   );
