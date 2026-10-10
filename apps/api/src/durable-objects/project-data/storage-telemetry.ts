@@ -21,6 +21,8 @@ import type { Env } from './types';
 
 const log = createModuleLogger('project_data.storage_telemetry');
 
+// The most recent alert of any reason. Throttling reads the per-reason slots below; this slot is
+// kept for diagnostics and is the throttle record for alerts raised before those slots existed.
 const META_LAST_ALERT_AT = 'storageSafetyLastAlertAt';
 const META_LAST_ALERT_STATUS = 'storageSafetyLastAlertStatus';
 const META_LAST_ALERT_REASON = 'storageSafetyLastAlertReason';
@@ -316,6 +318,27 @@ function formatGrowthForecast(telemetry: ProjectDataStorageTelemetry): string {
   return `${growth}, ${telemetry.estimatedDaysToLimit.toFixed(1)} days to limit`;
 }
 
+/**
+ * The last alert raised for one reason. Each reason has its own throttle slot: threshold alerts
+ * (hourly measurement) and cleanup-target-unreachable alerts (cleanup health) can hold at the same
+ * time, and with one shared slot each reset the other's throttle, so every measurement hour
+ * raised both again.
+ */
+function readLastAlertForReason(
+  sql: SqlStorage,
+  reason: ProjectDataStorageAlertReason
+): { at: number | null; status: string | null } {
+  const at = readMetaNumber(sql, `${META_LAST_ALERT_AT}:${reason}`);
+  if (at !== null) return { at, status: readMeta(sql, `${META_LAST_ALERT_STATUS}:${reason}`) };
+  // Alerts raised before per-reason slots existed are recorded only in the shared slot, which
+  // still throttles the reason it names.
+  if (readMeta(sql, META_LAST_ALERT_REASON) !== reason) return { at: null, status: null };
+  return {
+    at: readMetaNumber(sql, META_LAST_ALERT_AT),
+    status: readMeta(sql, META_LAST_ALERT_STATUS),
+  };
+}
+
 export async function maybePersistProjectDataStorageAlert(
   sql: SqlStorage,
   env: Env,
@@ -328,14 +351,11 @@ export async function maybePersistProjectDataStorageAlert(
   if (!isThresholdAlert && !isCleanupTargetUnreachable) return;
 
   const now = Date.now();
-  const lastAlertAt = readMetaNumber(sql, META_LAST_ALERT_AT);
-  const lastAlertStatus = readMeta(sql, META_LAST_ALERT_STATUS);
-  const lastAlertReason = readMeta(sql, META_LAST_ALERT_REASON);
+  const lastAlert = readLastAlertForReason(sql, reason);
   if (
-    lastAlertAt !== null &&
-    now - lastAlertAt < config.alertIntervalMs &&
-    lastAlertStatus === telemetry.status &&
-    lastAlertReason === reason
+    lastAlert.at !== null &&
+    now - lastAlert.at < config.alertIntervalMs &&
+    lastAlert.status === telemetry.status
   ) {
     return;
   }
@@ -393,6 +413,14 @@ export async function maybePersistProjectDataStorageAlert(
     undefined
   );
 
+  // Record the throttle as soon as the alert row exists. The D1 bookkeeping below can fail, and
+  // a throttle written after it would then be skipped, re-raising the alert on every measurement.
+  writeMeta(sql, `${META_LAST_ALERT_AT}:${reason}`, String(now));
+  writeMeta(sql, `${META_LAST_ALERT_STATUS}:${reason}`, telemetry.status);
+  writeMeta(sql, META_LAST_ALERT_AT, String(now));
+  writeMeta(sql, META_LAST_ALERT_STATUS, telemetry.status);
+  writeMeta(sql, META_LAST_ALERT_REASON, reason);
+
   await upsertProjectDataStorageTelemetry(
     env,
     telemetry,
@@ -403,8 +431,4 @@ export async function maybePersistProjectDataStorageAlert(
     },
     { appendHistory: false }
   );
-
-  writeMeta(sql, META_LAST_ALERT_AT, String(now));
-  writeMeta(sql, META_LAST_ALERT_STATUS, telemetry.status);
-  writeMeta(sql, META_LAST_ALERT_REASON, reason);
 }

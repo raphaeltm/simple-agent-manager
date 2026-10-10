@@ -18,12 +18,11 @@ import {
 } from './storage-category-telemetry';
 import { runProjectDataStorageEmergencyPurgeCore } from './storage-emergency-purge';
 import {
-  META_LAST_ERROR,
   META_LAST_MEASURED_AT,
   META_LAST_STATUS,
   readStorageSafetyMeta as readMeta,
   readStorageSafetyMetaNumber as readMetaNumber,
-  truncateStorageSafetyMetaValue as truncate,
+  recordStorageSafetyError,
   writeStorageSafetyMeta as writeMeta,
 } from './storage-safety-meta';
 import {
@@ -630,7 +629,6 @@ async function buildTelemetry(
   return enrichProjectDataStorageTelemetry(sql, env, baseTelemetry, config, options);
 }
 
-
 export function shouldMeasureProjectDataStorage(
   sql: SqlStorage,
   env: Env,
@@ -668,8 +666,7 @@ export async function measureAndPersistProjectDataStorage(
       lastError: null,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    writeMeta(sql, META_LAST_ERROR, truncate(message, 500));
+    recordStorageSafetyError(sql, error instanceof Error ? error.message : String(error));
     log.warn('telemetry_upsert_failed', {
       projectId,
       ...serializeError(error),
@@ -679,8 +676,7 @@ export async function measureAndPersistProjectDataStorage(
   try {
     await maybePersistProjectDataStorageAlert(sql, env, telemetry, config);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    writeMeta(sql, META_LAST_ERROR, truncate(message, 500));
+    recordStorageSafetyError(sql, error instanceof Error ? error.message : String(error));
     log.warn('alert_failed', {
       projectId,
       ...serializeError(error),

@@ -2,9 +2,8 @@
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import type { ProjectDataStorageTelemetry, StorageSafetyConfig } from './storage-safety';
 import {
-  META_LAST_ERROR,
-  META_LAST_MEASURED_AT,
   META_LAST_STATUS,
+  recordStorageSafetyError,
   truncateStorageSafetyMetaValue as truncate,
   writeStorageSafetyMeta as writeMeta,
 } from './storage-safety-meta';
@@ -741,7 +740,7 @@ function recordToolPayloadCleanupFailureMeta(
 ): string | null {
   const message = summarizeToolPayloadCleanupFailures(batch);
   if (!message) return null;
-  writeMeta(sql, META_LAST_ERROR, message);
+  recordStorageSafetyError(sql, message);
   log.warn('candidate_failed_closed', {
     projectId,
     rowsFailed: batch.rowsFailed,
@@ -762,8 +761,9 @@ async function recordToolPayloadCleanupTelemetry(
 ): Promise<void> {
   if (rowsUpdated <= 0 && !lastError) return;
 
+  // Publishes the size after cleanup without touching the measurement clock, which only the
+  // full measurement may advance (META_LAST_MEASURED_AT).
   const measuredAt = Date.now();
-  writeMeta(sql, META_LAST_MEASURED_AT, String(measuredAt));
   const statusAfter = options.classifyStatus(afterBytes);
   writeMeta(sql, META_LAST_STATUS, statusAfter);
   const telemetry: ProjectDataStorageTelemetry = {
@@ -790,8 +790,7 @@ async function recordToolPayloadCleanupTelemetry(
       lastError,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    writeMeta(sql, META_LAST_ERROR, truncate(message, 500));
+    recordStorageSafetyError(sql, error instanceof Error ? error.message : String(error));
     log.warn('telemetry_upsert_failed', {
       projectId,
       ...serializeError(error),
@@ -861,7 +860,7 @@ async function handleToolPayloadCleanupFailure(
   }
 
   const message = truncate(error instanceof Error ? error.message : String(error), 500);
-  writeMeta(sql, META_LAST_ERROR, message);
+  recordStorageSafetyError(sql, message);
   log.warn('failed_retry_scheduled', {
     projectId: plan.projectId,
     recheckAt,

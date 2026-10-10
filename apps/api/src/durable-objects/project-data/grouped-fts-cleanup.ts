@@ -6,9 +6,11 @@ import {
 } from './materialization';
 import type { ProjectDataStorageStatus, StorageSafetyConfig } from './storage-safety';
 import {
-  META_LAST_MEASURED_AT,
+  META_LAST_ERROR,
+  META_LAST_ERROR_AT,
   readStorageSafetyMeta,
   readStorageSafetyMetaNumber,
+  recordStorageSafetyError,
   truncateStorageSafetyMetaValue,
   writeStorageSafetyMeta,
 } from './storage-safety-meta';
@@ -19,7 +21,6 @@ const log = createModuleLogger('project_data.grouped_fts_cleanup');
 const META_GROUPED_FTS_CLEANUP_CURSOR_SESSION_ID = 'storageSafetyGroupedFtsCleanupCursorSessionId';
 const META_GROUPED_FTS_CLEANUP_RECHECK_AT = 'storageSafetyGroupedFtsCleanupRecheckAt';
 const META_GROUPED_FTS_CLEANUP_DISABLED_REASON = 'storageSafetyGroupedFtsCleanupDisabledReason';
-const META_LAST_ERROR = 'storageSafetyLastError';
 const OVERLOAD_ERROR_PATTERN =
   /reset|overload|queued for too long|storage operation exceeded timeout/i;
 
@@ -257,6 +258,12 @@ function deleteGroupedFtsForSession(
   return { groupedRowsDeleted, ftsRowsDeleted, contentBytes };
 }
 
+/**
+ * Back off for one recheck interval after an overload/reset error. Its age is measured from when
+ * the error was recorded, not from a measurement or cleanup clock: those advance on their own
+ * schedule, so reading one made the back-off fire or lapse for reasons unrelated to the error
+ * (`.claude/rules/74`).
+ */
 function hasRecentOverloadSignal(
   sql: SqlStorage,
   now: number,
@@ -264,13 +271,18 @@ function hasRecentOverloadSignal(
 ): string | null {
   const lastError = readStorageSafetyMeta(sql, META_LAST_ERROR);
   if (!lastError || !OVERLOAD_ERROR_PATTERN.test(lastError)) return null;
-  const lastMeasuredAt = readStorageSafetyMetaNumber(sql, META_LAST_MEASURED_AT);
-  if (lastMeasuredAt === null) return null;
-  const lastErrorAgeMs = now - lastMeasuredAt;
-  if (lastErrorAgeMs >= 0 && lastErrorAgeMs <= config.groupedFtsCleanupRecheckMs) {
+  const lastErrorAt = readStorageSafetyMetaNumber(sql, META_LAST_ERROR_AT);
+  if (lastErrorAt === null) {
+    // Recorded before errors carried a timestamp, so its age is unknown. Treat it as recorded
+    // now: that backs off exactly one interval. Leaving it unstamped would back off forever,
+    // because a breaker pass counts as a cleanup failure and never clears the error.
+    recordStorageSafetyError(sql, lastError, now);
     return lastError;
   }
-  return null;
+  const lastErrorAgeMs = now - lastErrorAt;
+  return lastErrorAgeMs >= 0 && lastErrorAgeMs < config.groupedFtsCleanupRecheckMs
+    ? lastError
+    : null;
 }
 
 export async function runProjectDataGroupedFtsCleanup(
@@ -412,13 +424,9 @@ export async function runProjectDataGroupedFtsCleanup(
   if (groupedRowsDeleted > 0 && reclaimedBytes < config.groupedFtsCleanupWeakReclaimBytes) {
     terminationReason = 'weak_reclaim';
     shouldContinue = false;
-    writeStorageSafetyMeta(
+    recordStorageSafetyError(
       sql,
-      META_LAST_ERROR,
-      truncateStorageSafetyMetaValue(
-        `grouped FTS cleanup weak reclaim: rows=${groupedRowsDeleted}, reclaimedBytes=${reclaimedBytes}`,
-        500
-      )
+      `grouped FTS cleanup weak reclaim: rows=${groupedRowsDeleted}, reclaimedBytes=${reclaimedBytes}`
     );
   }
 

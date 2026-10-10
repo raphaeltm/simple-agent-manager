@@ -17,11 +17,9 @@ import type {
   StorageSafetyConfig,
 } from './storage-safety';
 import {
-  deleteStorageSafetyMeta as deleteMeta,
-  META_LAST_ERROR,
-  META_LAST_MEASURED_AT,
+  clearStorageSafetyError,
   META_LAST_STATUS,
-  STORAGE_SAFETY_ERROR_MAX_LENGTH,
+  recordStorageSafetyError,
   truncateStorageSafetyMetaValue as truncate,
   writeStorageSafetyMeta as writeMeta,
 } from './storage-safety-meta';
@@ -201,11 +199,12 @@ async function persistCleanupHealthTelemetryAndAlerts(
         )
       : null;
 
-  writeMeta(sql, META_LAST_MEASURED_AT, String(measuredAt));
+  // Deliberately NOT the measurement clock: this runs after every pass that did cleanup work,
+  // and stamping the clock here starved the hourly measurement (see META_LAST_MEASURED_AT).
   writeMeta(sql, META_LAST_STATUS, telemetry.status);
-  if (lastError) writeMeta(sql, META_LAST_ERROR, truncate(lastError, STORAGE_SAFETY_ERROR_MAX_LENGTH));
+  if (lastError) recordStorageSafetyError(sql, lastError);
   else if (!cleanupHadFailure(cleanup, groupedFtsCleanup, eventLogCleanup)) {
-    deleteMeta(sql, META_LAST_ERROR);
+    clearStorageSafetyError(sql);
   }
 
   try {
@@ -219,8 +218,7 @@ async function persistCleanupHealthTelemetryAndAlerts(
       { appendHistory: cleanupHealth === 'target_unreachable' }
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    writeMeta(sql, META_LAST_ERROR, truncate(message, STORAGE_SAFETY_ERROR_MAX_LENGTH));
+    recordStorageSafetyError(sql, error instanceof Error ? error.message : String(error));
     log.warn('cleanup_health_telemetry_upsert_failed', {
       projectId,
       ...serializeError(error),
@@ -237,8 +235,7 @@ async function persistCleanupHealthTelemetryAndAlerts(
         STORAGE_ALERT_REASON_CLEANUP_TARGET_UNREACHABLE
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      writeMeta(sql, META_LAST_ERROR, truncate(message, STORAGE_SAFETY_ERROR_MAX_LENGTH));
+      recordStorageSafetyError(sql, error instanceof Error ? error.message : String(error));
       log.warn('cleanup_target_unreachable_alert_failed', {
         projectId,
         ...serializeError(error),
@@ -275,7 +272,7 @@ export async function runProjectDataStorageSafetyAlarmCore(
       log.error('step_failed', { projectId, step: name, ...serializeError(error) });
       // Even recording the failure may fail on an unhealthy SQLite connection.
       try {
-        writeMeta(sql, META_LAST_ERROR, truncate(`${name}: ${String(error)}`, STORAGE_SAFETY_ERROR_MAX_LENGTH));
+        recordStorageSafetyError(sql, `${name}: ${String(error)}`);
       } catch (recordError) {
         log.warn('step_failure_record_failed', { projectId, step: name, ...serializeError(recordError) });
       }
