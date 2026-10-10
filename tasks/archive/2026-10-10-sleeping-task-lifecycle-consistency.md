@@ -126,7 +126,7 @@ what `sleeping` means, so three user-visible features break for slept VM tasks:
       adapter requests recovery with the event-wake guard
 - [x] Revert each fix once; record which test went red (d: revert sleeping in materialization)
 - [x] Docs: grep public docs for affected behavior; update if they describe it
-- [ ] Rule 79 audit table in PR
+- [x] Rule 79 audit table in PR (#2295)
 
 ## Implementation notes
 
@@ -180,6 +180,14 @@ what `sleeping` means, so three user-visible features break for slept VM tasks:
   (`task-status-lifecycle-sets.test.ts`); queued/woken run holds the slot (classification
   table); cross-reference comments for the replicated DO wake alarm and the real-recovery test.
 
+### Merge gates (PR #2295)
+
+- CI run 38051769532 and E2E Smoke on 09e4a9d97: success.
+- SonarCloud quality gate OK after sharing the eviction route harness (duplication 1.2%, was 4.2%).
+- CodeRabbit requested via the `coderabbit-review` label at 12:39:38Z; review APPROVED at 12:47:46Z
+  with no actionable comments.
+- Follow-ups (out of scope for this wave): SAM idea `01M4JVVG3K1BP55ANVKMGFHTHW`.
+
 ## Acceptance criteria
 
 - [x] A `message_session` schedule targeting a slept VM task is admitted and requests a wake
@@ -190,7 +198,7 @@ what `sleeping` means, so three user-visible features break for slept VM tasks:
 - [x] Event wake delivery to a slept VM chat requests recovery through the real adapter
 - [x] One shared live/wakeable status set used by the fixed checks
 - [x] Every new guard proven discriminating by reverting it
-- [ ] Production: next "Daily blog post" fire admitted (trigger_executions), or note when checkable
+- [ ] Production: next "Daily blog post" fire admitted (trigger_executions), or note when checkable — post-merge; result recorded in the SAM task completion evidence and a PR #2295 comment
 
 ## References
 
