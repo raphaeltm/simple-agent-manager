@@ -126,6 +126,13 @@ Idea `01M4JMZVVMGRKMNC0GBV3CQN8E`. Coordinator task `01M4JK3X7BART9SDKJ3KGCDE0Q`
 - [x] `configuration.md`: measure interval and alert interval semantics; poison row mentions the alert
 - [x] `self-hosting.mdx` storage/breaker section: superadmins are notified once per opening
 
+## Validation
+
+- `pnpm check:fast`, root `pnpm typecheck` (19/19), root `pnpm build` (9/9), relevant `quality:*`
+  scripts, docs site build (235 pages) and link check (0 broken).
+- API unit/integration: 847 files, 11,908 tests passed (2 skipped). API Workers: 123 files,
+  1,468 tests passed.
+
 ## Implementation Notes
 
 - Commit `8ec8116bb`: measurement clock, error timestamps, per-reason alert throttle (written
@@ -164,6 +171,8 @@ Idea `01M4JMZVVMGRKMNC0GBV3CQN8E`. Coordinator task `01M4JK3X7BART9SDKJ3KGCDE0Q`
 - [x] A breaker opening (closed/absent → open) produces exactly one `/admin/errors` row and one superadmin notification; none while it stays open; none while it is closed
 - [x] No new `wrangler.toml` vars, no D1 or DO migration
 - [ ] Production: within ~1-2 h of deploy the root DO writes a new history row and storage-alarm completions show `measured:true`
+  (verified after the production deploy; evidence is recorded in the PR and the SAM task completion,
+  because nothing may be committed to `main` after merge)
 
 ## References
 
