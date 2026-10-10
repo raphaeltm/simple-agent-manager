@@ -11,7 +11,7 @@ vi.mock('cloudflare:workers', () => ({ DurableObject: class {} }));
 
 import * as schema from '../../../src/db/schema';
 import { NodeLifecycle } from '../../../src/durable-objects/node-lifecycle';
-import { TaskRunner } from '../../../src/durable-objects/task-runner';
+import { hasRecoveryAuthority } from '../../../src/durable-objects/task-runner/recovery-authority';
 import type { StartTaskInput } from '../../../src/durable-objects/task-runner/types';
 import { VmAgentContainer } from '../../../src/durable-objects/vm-agent-container';
 import type { Env } from '../../../src/env';
@@ -25,6 +25,8 @@ import {
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const databases: Database.Database[] = [];
+// Start-time inputs carry no runner state, so the guard never reads DO storage.
+const startTimeCtx = {} as DurableObjectState;
 afterEach(() => {
   for (const sqlite of databases.splice(0)) sqlite.close();
 });
@@ -120,9 +122,6 @@ describe('recovery event authority at final asynchronous boundaries', () => {
       .exec(`INSERT INTO users (id, email, status) VALUES ('creator', 'creator@example.test', 'active');
       INSERT INTO project_members (project_id, user_id, role, status)
       VALUES ('project', 'creator', 'maintainer', 'active');`);
-    const runner = Object.assign(Object.create(TaskRunner.prototype), { env: f.env }) as {
-      hasRecoveryAuthority(input: StartTaskInput): Promise<boolean>;
-    };
     const input = {
       taskId: 'T2',
       projectId: 'project',
@@ -133,12 +132,12 @@ describe('recovery event authority at final asynchronous boundaries', () => {
         recoveryRequiredProjectMemberId: 'creator',
       },
     } as StartTaskInput;
-    await expect(runner.hasRecoveryAuthority(input)).resolves.toBe(true);
+    await expect(hasRecoveryAuthority(f.env, startTimeCtx, input)).resolves.toBe(true);
     f.sqlite.exec(mutation);
-    await expect(runner.hasRecoveryAuthority(input)).resolves.toBe(false);
+    await expect(hasRecoveryAuthority(f.env, startTimeCtx, input)).resolves.toBe(false);
     // A human recovery has no scheduled-creator authority requirement.
     input.config.recoveryRequiredProjectMemberId = null;
-    await expect(runner.hasRecoveryAuthority(input)).resolves.toBe(true);
+    await expect(hasRecoveryAuthority(f.env, startTimeCtx, input)).resolves.toBe(true);
   });
 
   it.each([
@@ -212,11 +211,8 @@ describe('recovery event authority at final asynchronous boundaries', () => {
       f.sqlite.exec("UPDATE tasks SET status = 'cancelled' WHERE id = 'T2'");
       return true;
     });
-    const runner = Object.assign(Object.create(TaskRunner.prototype), { env: f.env }) as {
-      hasRecoveryAuthority(input: StartTaskInput): Promise<boolean>;
-    };
     await expect(
-      runner.hasRecoveryAuthority({
+      hasRecoveryAuthority(f.env, startTimeCtx, {
         taskId: 'T2',
         projectId: 'project',
         userId: 'user',
