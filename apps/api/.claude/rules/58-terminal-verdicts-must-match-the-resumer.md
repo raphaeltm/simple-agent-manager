@@ -183,6 +183,33 @@ running agent session, and the container DO tests mocked `loadRuntimeRecoveryCon
   commits every unguarded wake itself (`services/container-wake-commit.ts`), so no caller can
   forget.
 
+## The Self-Revoking Re-check: The Guarded Work Must Not Falsify Its Own Authority
+
+VM wakes failed at the handoff for weeks after 2026-10-09 (4 of 26), each killing a prompt the
+new agent had already started (idea `01M4JMYRY5909JYND1XRXMM9DC`). The TaskRunner re-checks
+recovery authority before committing a wake, and for a project-event wake that check requires
+the event batch to still be `pending` (`validateProjectEventWakeRecoveryAuthority`). Delivering
+that batch is the wake's whole purpose: a backoff retry of the queued wake prompt reached the
+replacement runtime before the commit, its acceptance flipped the batch to `delivered`, and the
+re-check read the wake's own success as revocation. The release path that was meant to deliver
+the prompt (the committed handoff's readiness signal, `signalSessionWakeReady`) was correct; the
+delivery target's own admission check (`resolveVmPromptDeliveryTarget`) keyed on the agent session
+reading `running`, a mirror that turns true before the commit.
+
+- **List every writer of the state a terminating re-check reads, including the work it guards.**
+  If the guarded work's success changes that state, either the re-check must accept the success
+  state, or the work must be held until after the final re-check. Here the work is now held:
+  `isVmWakeHandoffPending` keeps durable delivery at `not_ready` until the commit.
+- **A commit that publishes readiness must also gate admission.** A post-commit release signal
+  schedules the happy path; it does not stop a retry that arrives first. Every consumer's own
+  readiness check must consult the committed state, not a mirror written earlier in the flow.
+- **Name the refusing check.** Every `SessionRecoveryAuthorityRevokedError` carries `check` and
+  logs `session_recovery.authority_revoked` with the snapshot claim. One shared message across
+  every throw site is what made this incident take days to attribute.
+- **Test the success landing mid-flight.** Hold the guarded work at its midpoint and drive the
+  real producer of the success state into the gap
+  (`tests/workers/vm-wake-event-delivery-handoff.test.ts`).
+
 ## Quick Compliance Check
 
 - [ ] The terminal verdict reads the resumer's own record, not just a status enum
@@ -190,6 +217,7 @@ running agent session, and the container DO tests mocked `loadRuntimeRecoveryCon
 - [ ] A changed resumer precondition has a round-trip test through the real sleep writers
 - [ ] Callers that reach a widened wake precondition only to signal have their own non-waking check
 - [ ] Every path that wakes the resource leaves every mirror the sleeper wrote awake, not only D1
+- [ ] No terminating re-check reads state that the guarded work's own success advances
 - [ ] A comment names the resumer function the predicate mirrors
 - [ ] Any extra strictness vs. the resumer is justified in that comment
 - [ ] Preserve verdicts are bounded by an env-configurable retention; absent bound → terminal
@@ -205,6 +233,7 @@ running agent session, and the container DO tests mocked `loadRuntimeRecoveryCon
 - Task: `tasks/archive/2026-08-17-fix-slept-session-classified-as-dead.md`
 - Task (the round trip): `tasks/archive/2026-09-28-instant-idle-sleep-wake.md`
 - Task (retry-renewed bound): `tasks/archive/2026-10-04-task-recovery-liveness-signal-audit.md`
+- Task (self-revoking re-check): `tasks/archive/2026-10-10-vm-wake-event-delivery-revokes-handoff.md`
 - `.claude/rules/02-quality-gates.md` — "sleep, wake, restore, replacement, probe failure,
   and unknown state are inconclusive"; one shared lifecycle classifier
 - `.claude/rules/47-control-loop-io-budget.md` — bounded escape paths, I/O budget
