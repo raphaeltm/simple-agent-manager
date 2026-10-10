@@ -60,7 +60,6 @@ export function restoredSessionPromptDelivery(
     messageClass: 'deliver',
     sourceKind: 'checkpoint_continuation',
     ttlMs,
-    metadata: { restoredAgentSessionId: input.agentSessionId },
   };
 }
 

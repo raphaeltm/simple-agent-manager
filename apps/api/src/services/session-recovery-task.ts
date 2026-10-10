@@ -25,6 +25,7 @@ import {
   SESSION_RECOVERY_INITIAL_PROMPT,
   sessionRecoveryInitialPrompt,
   type SessionRecoveryNextStep,
+  sessionRecoveryRestoredPrompt,
 } from './session-sleep-fallback-messages';
 import type { SessionRecoverySourceTaskGuard } from './session-snapshots';
 import { startTaskRunnerDO } from './task-runner-do';
@@ -221,6 +222,7 @@ export async function startRecoveryTask(
       capacityPoolSelection: placementResolution.capacityPoolSelection,
       vmSizeSource: placementResolution.placement.vmSizeSource,
       resumeSnapshotChatSessionId: chatSessionId,
+      restoredSessionPrompt: sessionRecoveryRestoredPrompt(nextStep),
       evictionFence: options.evictionFence ?? null,
       recoverySourceTaskId: sourceTaskGuard?.taskId ?? null,
       recoveryAttemptId,

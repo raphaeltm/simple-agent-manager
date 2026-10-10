@@ -133,7 +133,6 @@ describe('queueRestoredSessionPrompt', () => {
       source: 'checkpoint_continuation',
       kind: 'durable_prompt_delivery',
       deliveryId,
-      restoredAgentSessionId: 'agent-2',
     });
   });
 

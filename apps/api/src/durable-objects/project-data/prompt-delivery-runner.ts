@@ -10,6 +10,7 @@ import type {
   VmPromptDeliveryTarget,
 } from '../../services/vm-prompt-delivery-adapter';
 import * as activity from './activity';
+import { invalidCheckpointContinuationTarget } from './checkpoint-continuation-delivery';
 import type { DurableExecutionConfig } from './durable-execution-config';
 import { invalidScheduledDeliveryTarget } from './project-event-schedules-delivery';
 import {
@@ -108,7 +109,8 @@ export async function runPromptDeliveryClaim(
     const validateDeliveryTarget = async (): Promise<PromptDeliveryResult | null> =>
       (await validateParentWakeTarget()) ??
       (await validateProjectEventWakeTarget()) ??
-      (await invalidScheduledDeliveryTarget(sql, env, hooks.projectId, claim));
+      (await invalidScheduledDeliveryTarget(sql, env, hooks.projectId, claim)) ??
+      (await invalidCheckpointContinuationTarget(sql, env, hooks.projectId, claim));
     // Stop-and-deliver: an urgent class rejected because the target is
     // mid-turn may cancel that turn so this delivery becomes the next
     // prompt. Informational classes never stop anything — for them the
