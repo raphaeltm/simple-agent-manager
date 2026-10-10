@@ -122,7 +122,7 @@ start config, so it could not observe this.
 - [x] Queued-message wakes get no extra prompt; conversation-mode recoveries get none
 - [x] A continuation never revives a terminal task and never raises a misleading wake failure
 - [x] Main test proven discriminating by reverting the fix
-- [ ] CI green, specialist reviews recorded, CodeRabbit requested/waited, SonarCloud clean
+- [x] CI green, specialist reviews recorded, CodeRabbit requested/waited, SonarCloud clean
 - [ ] Merged and contained in a successful Deploy Production run
 
 ## Progress Notes
@@ -168,6 +168,17 @@ start config, so it could not observe this.
 - Running `pnpm lint` (turbo 2.11.7) injected a third-party `turborepo-agent-rules` block into the
   root `AGENTS.md`; it was reverted and is not part of this change (`turbo.json` has no
   `agentGuidance: false` opt-out).
+- PR #2300 gates. SonarCloud first failed on new-code duplication (5.5% > 3%): moving the runner's
+  guards into a new file made their old internal duplication count as new code, and three test
+  harnesses copied existing suites. The fix was one shared `sourceValidationReadFailure` for the
+  parent-wake, project-event and checkpoint read failures, with messages unchanged (a one-off
+  comparison against the old helpers matched, and a new test pins them), plus the bootstrap test's
+  fixtures built once. That brought duplication to 1.7%. Three gate-neutral smells were also fixed:
+  `handleAgentSession` complexity (the queueing moved into `queueRestoredSessionPromptIfNeeded`),
+  a `.find` used as a boolean, and a nested ternary. Final head: Quality Gate OK, 0 issues; CI
+  green. A third Cloudflare review pass over these commits: PASS. CodeRabbit did not review: quota
+  limit, then rate limit, then `Review skipped: automatic reviews are disabled`. Recorded per rule
+  25 and not re-triggered.
 - Staging: not run. The optional eviction check would require driving a staging VM into
   system-wide memory exhaustion (devcontainers have no per-container memory limit), which is not a
   safe, deterministic trigger. The delivery-after-commit mechanics were live-verified on staging by
