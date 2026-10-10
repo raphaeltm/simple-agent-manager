@@ -10,7 +10,11 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
-import { SLEEPING_TASK_STATUSES, taskStatusSqlList } from './task-status';
+import {
+  SLEEPING_TASK_STATUSES,
+  taskStatusIsNonTerminalSql,
+  TERMINAL_STATUS_VALUES,
+} from './task-status';
 import { resolveTriggerExecutionUserId } from './trigger-execution-principal';
 import { type SubmittedTriggerTask, TriggerTaskSubmissionPendingError } from './trigger-submission';
 import { submitTriggeredTask } from './trigger-submit';
@@ -29,14 +33,20 @@ const TERMINAL_TASK_STATUSES = new Set<string>(TASK_TERMINAL_STATUSES);
  * A sleeping run does not: its task released the runtime and is not running. It stays
  * wakeable, so a follow-up can still resume it, but it must not block the next run
  * until its snapshot expires days later.
+ *
+ * Both task-status checks are denylists, so a new task status holds the slot until
+ * someone decides otherwise (`packages/shared/.claude/rules/79`). The status
+ * classification test in `trigger-admission-run-slot.test.ts` fails until it does.
+ * Bind {@link EXECUTION_HOLDS_RUN_SLOT_BINDINGS} at this predicate's position.
  */
 const EXECUTION_HOLDS_RUN_SLOT_SQL = `(
   (
     e.status IN ('queued', 'running')
-    OR (e.task_id IS NOT NULL AND t.status NOT IN (${taskStatusSqlList(TASK_TERMINAL_STATUSES)}))
+    OR (e.task_id IS NOT NULL AND ${taskStatusIsNonTerminalSql('t.status')})
   )
-  AND (t.status IS NULL OR t.status NOT IN (${taskStatusSqlList(SLEEPING_TASK_STATUSES)}))
+  AND (t.status IS NULL OR t.status NOT IN (${SLEEPING_TASK_STATUSES.map(() => '?').join(', ')}))
 )`;
+const EXECUTION_HOLDS_RUN_SLOT_BINDINGS = [...TERMINAL_STATUS_VALUES, ...SLEEPING_TASK_STATUSES];
 
 export type TriggerAdmissionResult =
   | {
@@ -161,7 +171,7 @@ async function classifyReservationFailure(
            AND ${EXECUTION_HOLDS_RUN_SLOT_SQL}) AS activeCount
      FROM triggers WHERE id = ? AND project_id = ?`
   )
-    .bind(trigger.id, trigger.projectId)
+    .bind(...EXECUTION_HOLDS_RUN_SLOT_BINDINGS, trigger.id, trigger.projectId)
     .first<{
       status: string;
       skipIfRunning: number;
@@ -226,7 +236,8 @@ export async function admitAndSubmitTriggerExecution(
     now,
     trigger.id,
     trigger.projectId,
-    allowPaused
+    allowPaused,
+    ...EXECUTION_HOLDS_RUN_SLOT_BINDINGS
   );
   const increment = env.DATABASE.prepare(
     `UPDATE triggers SET next_execution_sequence = next_execution_sequence + 1, updated_at = ?

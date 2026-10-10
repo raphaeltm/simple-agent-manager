@@ -147,16 +147,38 @@ what `sleeping` means, so three user-visible features break for slept VM tasks:
 
 ### Discrimination evidence (each fix reverted once)
 
-| Revert                                                            | Red                                                                                                                                                          | Green controls                                                  |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| Trigger sleeping exclusion removed                                | 2 × "admits the next cron fire while the previous run sleeps", "admits the next fire after the real hard-residence backstop"                                 | queued/delegated/in_progress skips, max_concurrent live control |
-| Schedule authority back to the pre-fix list                       | "admits the schedule, queues the scheduled message and asks to wake the slept chat", "accepts a new self-wake schedule created after the task already slept" | completed-task and suspended-member controls                    |
-| Schedule authority status predicate deleted                       | "still refuses the self-wake when the task completed while it slept"                                                                                         | others                                                          |
-| Reconcile `started` without sleeping                              | "observes sleeping without replaying task admission"                                                                                                         | 18 others                                                       |
-| Eviction `wakeCause` removed                                      | 2 task-mode eviction cases                                                                                                                                   | conversation-mode eviction, user follow-up wake                 |
-| `startRecoveryTask` task-mode gate removed                        | "keeps the conversation-mode wording after an eviction"                                                                                                      | 3 others                                                        |
-| Wake materialization `c.status = 'active'` only (pre-#2266/#2292) | "delivers a pull request event to the slept chat and asks to wake it"                                                                                        | others                                                          |
-| Delivery target drops the `sleeping` workspace recovery branch    | schedule self-wake + event wake delivery cases                                                                                                               | controls                                                        |
+| Revert                                                                     | Red                                                                                                                                                          | Green controls                                                  |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| Trigger sleeping exclusion removed                                         | 2 × "admits the next cron fire while the previous run sleeps", "admits the next fire after the real hard-residence backstop"                                 | queued/delegated/in_progress skips, max_concurrent live control |
+| Schedule authority back to the pre-fix list                                | "admits the schedule, queues the scheduled message and asks to wake the slept chat", "accepts a new self-wake schedule created after the task already slept" | completed-task and suspended-member controls                    |
+| Schedule authority status predicate deleted                                | "still refuses the self-wake when the task completed while it slept"                                                                                         | others                                                          |
+| Reconcile `started` without sleeping                                       | "observes sleeping without replaying task admission"                                                                                                         | 18 others                                                       |
+| Eviction `wakeCause` removed                                               | 2 task-mode eviction cases                                                                                                                                   | conversation-mode eviction, user follow-up wake                 |
+| `startRecoveryTask` task-mode gate removed                                 | "keeps the conversation-mode wording after an eviction"                                                                                                      | 3 others                                                        |
+| Wake materialization `c.status = 'active'` only (pre-#2266/#2292)          | "delivers a pull request event to the slept chat and asks to wake it"                                                                                        | others                                                          |
+| Delivery target drops the `sleeping` workspace recovery branch             | schedule self-wake + event wake delivery cases                                                                                                               | controls                                                        |
+| Trigger sleeping exclusion removed (bound-parameter version, after review) | 2 × "a previous run whose task is sleeping" (skip_if_running, max_concurrent), "releases the slot for a running execution whose task went to sleep"          | 20 other classification rows                                    |
+
+### Phase 5 review outcomes (all PASS, no CRITICAL/HIGH)
+
+- constitution-validator: PASS, no findings.
+- security-auditor: PASS. MEDIUM `taskStatusSqlList` interpolated literals with an unrestricted
+  type → removed; trigger admission now binds parameters through the existing
+  `taskStatusIsNonTerminalSql` + `TERMINAL_STATUS_VALUES`. LOW: sleeping runs no longer bound
+  per-trigger fan-out beyond cadence/max_concurrent/7-day snapshot TTL → follow-up idea.
+- doc-sync-validator: PASS except stale `trigger-execution-cleanup.ts` JSDoc + hard-max message
+  ("until the task terminalizes") → fixed; the checklist item had been ticked before the edit.
+- cloudflare-specialist: PASS. LOW: no genuine-D1 Workers test of the sleeping schedule-authority
+  branch (portable `IN (?…)` binds; Workers project-schedules suite still green) → follow-up idea.
+- task-completion-validator: PASS. Informational: sam-session tools use a non-`TaskStatus`
+  `ACTIVE_STATUSES` → follow-up idea (out of scope).
+- architecture-reviewer: PASS. Addressed: rule-79 note on the denylist plus a status
+  classification test; reconcile `started` derived from the shared sets; duplicate SQL-list helper
+  removed; VM-only comment in `startRecoveryTask`. Deferred (other owner / out of scope):
+  converge `session-recovery-authority.ts` `LIVE_TASK_STATUSES_SQL` (Agent A's file).
+- test-engineer: PASS. Addressed: direct membership tests for the shared sets and MCP sets
+  (`task-status-lifecycle-sets.test.ts`); queued/woken run holds the slot (classification
+  table); cross-reference comments for the replicated DO wake alarm and the real-recovery test.
 
 ## Acceptance criteria
 

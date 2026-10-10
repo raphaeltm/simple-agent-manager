@@ -4,7 +4,7 @@ import type {
   ProjectScheduleMutationResult,
 } from '@simple-agent-manager/shared';
 
-import { SLEEPING_TASK_STATUSES } from '../../services/task-status';
+import { TERMINAL_STATUS_VALUES, WAKEABLE_TASK_STATUSES } from '../../services/task-status';
 import { requireScheduleAction } from './project-event-schedules-authority';
 import { scheduleLimits } from './project-event-schedules-config';
 import { getSchedule, ProjectScheduleNotFoundError } from './project-event-schedules-storage';
@@ -249,17 +249,12 @@ export async function reconcileSchedule(
     schedule.action.kind === 'message_session'
       ? ['acked', 'expired', 'failed'].includes(execution.status)
       : ['completed', 'failed', 'cancelled'].includes(execution.status);
-  // A sleeping task started before it slept: only delegated/in_progress can sleep.
+  // Every status past queued has started, including a task that started and then slept.
   const started =
     schedule.action.kind === 'start_session' &&
     [
-      'delegated',
-      'in_progress',
-      'awaiting_followup',
-      ...SLEEPING_TASK_STATUSES,
-      'completed',
-      'failed',
-      'cancelled',
+      ...WAKEABLE_TASK_STATUSES.filter((status) => status !== 'queued'),
+      ...TERMINAL_STATUS_VALUES,
     ].includes(execution.status);
   const known = !['unavailable', 'not_started', 'ambiguous'].includes(execution.status);
   const outcome = retry

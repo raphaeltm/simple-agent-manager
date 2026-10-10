@@ -97,8 +97,10 @@ interface ExecutionRecoveryAction {
  * owner, so wall-clock age alone is inconclusive and the execution remains active.
  *
  * Rule 47: the hard residence bound is a separate backstop. Admission and incident
- * dispatch reclaim also read task liveness, so this backstop cannot by itself admit
- * a colliding sibling or release a live incident task's lease.
+ * dispatch reclaim also read the linked task's status, so this backstop cannot by
+ * itself admit a colliding sibling or release a live incident task's lease. A linked
+ * task that went to sleep released its admission slot already
+ * (`trigger-admission.ts`), whether or not this backstop has fired.
  */
 function buildRecoveryAction(
   exec: StaleExecution,
@@ -136,7 +138,7 @@ function buildRecoveryAction(
     return {
       exec,
       toStatus: 'failed',
-      errorMessage: `${TRIGGER_EXECUTION_HARD_MAX_FAILURE_PREFIX} of ${options.hardMaxHours} hours while linked task ${exec.task_id} remained ${task.status}; task liveness still controls trigger admission and incident dispatch lease ownership until the task terminalizes.`,
+      errorMessage: `${TRIGGER_EXECUTION_HARD_MAX_FAILURE_PREFIX} of ${options.hardMaxHours} hours while linked task ${exec.task_id} remained ${task.status}; the linked task's status, not this execution's, still decides trigger admission and incident dispatch lease ownership.`,
     };
   }
 

@@ -66,11 +66,6 @@ export const WAKEABLE_TASK_STATUSES: readonly string[] = Object.freeze([
   ...SLEEPING_TASK_STATUSES,
 ]);
 
-/** SQL list literal of static status identifiers (never user input), e.g. `'a', 'b'`. */
-export function taskStatusSqlList(statuses: readonly string[]): string {
-  return statuses.map((status) => `'${status}'`).join(', ');
-}
-
 const TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   draft: ['ready', 'cancelled'],
   ready: ['queued', 'delegated', 'cancelled'],

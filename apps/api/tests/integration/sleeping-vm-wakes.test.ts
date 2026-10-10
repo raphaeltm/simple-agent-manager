@@ -4,7 +4,8 @@
  * session transition, then fires through the production schedule or event-wake code and the
  * durable prompt-delivery alarm into the real VM delivery adapter. Only the wake itself
  * (`ensureSessionRecovery`) is a boundary: delivery must ask it to wake this chat with the
- * authority the wake carries.
+ * authority the wake carries. `eviction-recovery-prompt.test.ts` runs the real wake from a
+ * queued-message delivery down to the TaskRunner start it requests.
  */
 import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
@@ -293,7 +294,11 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
       );
     }
 
-    /** The steps of ProjectData's wake-materialization alarm, through the real functions. */
+    /**
+     * The steps of the private `ProjectData.runProjectEventWakeMaterializationAlarm`, through the
+     * real functions it calls. Its no-candidate, early-return and checkpoint branches do not
+     * apply to this single-candidate run.
+     */
     async function materializeWakes() {
       const candidates = hooks.transactionSync(() =>
         selectProjectEventWakeMaterializationCandidates(sql, env as never, PROJECT, Date.now())

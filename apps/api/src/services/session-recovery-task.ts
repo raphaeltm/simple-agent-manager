@@ -122,7 +122,8 @@ export async function startRecoveryTask(
   const taskMode =
     contract?.taskContext?.taskMode ?? (task.taskMode === 'task' ? 'task' : 'conversation');
   // A conversation agent always waits for its user; only a task agent whose runtime
-  // was lost mid-task has work to continue without a queued message.
+  // was lost mid-task has work to continue without a queued message. VM-only:
+  // ensureSessionRecovery refuses an Instant snapshot, which wakes in place.
   const nextStep =
     taskMode === 'task' && options.wakeCause === 'runtime_lost'
       ? 'continue_assigned_task'
