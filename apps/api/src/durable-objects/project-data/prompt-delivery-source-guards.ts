@@ -143,16 +143,21 @@ export async function invalidParentWakeTargetResult(
   return null;
 }
 
-export function parentWakeValidationReadFailure(
+/**
+ * A source check that could not read its authority has learned nothing: a submit retries, and
+ * a receipt reconciliation stays ambiguous. `check` names the check in the error.
+ */
+export function sourceValidationReadFailure(
   claim: PromptDeliveryClaim,
-  error: unknown
+  error: unknown,
+  check: string
 ): PromptDeliveryResult {
   const message = error instanceof Error ? error.message : String(error);
   if (claim.mode === 'reconcile') {
     return {
       kind: 'ambiguous',
       reason: 'receipt_unavailable',
-      error: `Parent wake target validation failed during receipt reconciliation: ${message}`,
+      error: `${check} failed during receipt reconciliation: ${message}`,
       runtimeIdentity: claim.message.runtimeIdentity,
       capabilities: null,
       receipt: null,
@@ -161,7 +166,7 @@ export function parentWakeValidationReadFailure(
   return {
     kind: 'retry',
     reason: 'not_ready',
-    error: `Parent wake target validation temporarily failed: ${message}`,
+    error: `${check} temporarily failed: ${message}`,
     runtimeIdentity: claim.message.runtimeIdentity,
     capabilities: null,
   };
@@ -229,30 +234,6 @@ export async function invalidProjectEventWakeSourceTaskResult(
     kind: 'failed',
     reason: 'terminal_target',
     error: 'Project event wake source task authority was revoked',
-    runtimeIdentity: claim.message.runtimeIdentity,
-    capabilities: null,
-  };
-}
-
-export function projectEventWakeValidationReadFailure(
-  claim: PromptDeliveryClaim,
-  error: unknown
-): PromptDeliveryResult {
-  const message = error instanceof Error ? error.message : String(error);
-  if (claim.mode === 'reconcile') {
-    return {
-      kind: 'ambiguous',
-      reason: 'receipt_unavailable',
-      error: `Project event wake source authority validation failed during receipt reconciliation: ${message}`,
-      runtimeIdentity: claim.message.runtimeIdentity,
-      capabilities: null,
-      receipt: null,
-    };
-  }
-  return {
-    kind: 'retry',
-    reason: 'not_ready',
-    error: `Project event wake source authority validation temporarily failed: ${message}`,
     runtimeIdentity: claim.message.runtimeIdentity,
     capabilities: null,
   };

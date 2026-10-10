@@ -30,9 +30,8 @@ import {
 import {
   invalidParentWakeTargetResult,
   invalidProjectEventWakeSourceTaskResult,
-  parentWakeValidationReadFailure,
-  projectEventWakeValidationReadFailure,
   sourceTaskGuardForClaim,
+  sourceValidationReadFailure,
 } from './prompt-delivery-source-guards';
 import * as sessionState from './session-state';
 import type { Env } from './types';
@@ -83,7 +82,7 @@ export async function runPromptDeliveryClaim(
       try {
         return await invalidParentWakeTargetResult(env, hooks.projectId, claim);
       } catch (error) {
-        return parentWakeValidationReadFailure(claim, error);
+        return sourceValidationReadFailure(claim, error, 'Parent wake target validation');
       }
     };
     const validateProjectEventWakeTarget = async (): Promise<PromptDeliveryResult | null> => {
@@ -103,7 +102,11 @@ export async function runPromptDeliveryClaim(
         if (sourceInvalid) return sourceInvalid;
         return invalidProjectEventWakeDeliveryTargetResult(sql, env, hooks.projectId, claim);
       } catch (error) {
-        return projectEventWakeValidationReadFailure(claim, error);
+        return sourceValidationReadFailure(
+          claim,
+          error,
+          'Project event wake source authority validation'
+        );
       }
     };
     const validateDeliveryTarget = async (): Promise<PromptDeliveryResult | null> =>

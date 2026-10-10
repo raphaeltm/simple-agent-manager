@@ -1,5 +1,6 @@
 import { isSessionRecoverySourceTaskGuardValid } from '../../services/session-recovery-authority';
 import type { PromptDeliveryClaim, PromptDeliveryResult } from './prompt-delivery';
+import { sourceValidationReadFailure } from './prompt-delivery-source-guards';
 import type { Env } from './types';
 
 /**
@@ -64,23 +65,6 @@ export async function invalidCheckpointContinuationTarget(
     });
     return live ? null : invalid('Checkpoint continuation task is no longer live for this chat');
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (claim.mode === 'reconcile') {
-      return {
-        kind: 'ambiguous',
-        reason: 'receipt_unavailable',
-        error: `Checkpoint continuation task check failed during receipt reconciliation: ${message}`,
-        runtimeIdentity: claim.message.runtimeIdentity,
-        capabilities: null,
-        receipt: null,
-      };
-    }
-    return {
-      kind: 'retry',
-      reason: 'not_ready',
-      error: `Checkpoint continuation task check temporarily failed: ${message}`,
-      runtimeIdentity: claim.message.runtimeIdentity,
-      capabilities: null,
-    };
+    return sourceValidationReadFailure(claim, error, 'Checkpoint continuation task check');
   }
 }
