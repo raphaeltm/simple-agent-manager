@@ -216,6 +216,20 @@ describe('recovery event authority at final asynchronous boundaries', () => {
     }
   });
 
+  it('keeps the Instant container guard strict about a consumed batch (rule 61 control)', async () => {
+    const f = fixture();
+    await expect(findSessionRecoverySourceTaskGuardFailureForEnv(f.env, guard)).resolves.toBeNull();
+    // Exact arguments: unlike the TaskRunner's re-check, the container guard must not pass
+    // acceptConsumedByTarget (its delivery row is `delivering`, so no pull can consume first).
+    expect(f.validateEvent).toHaveBeenCalledWith({
+      projectId: 'project',
+      sourceTaskId: 'root',
+      chatSessionId: 'chat',
+      batchId: 'batch',
+      subscriptionId: 'subscription',
+    });
+  });
+
   it('requires an event validator and rejects its negative result', async () => {
     const f = fixture();
     await expect(

@@ -632,6 +632,8 @@ describe('event wake authority while a VM wake is live', () => {
     { state: 'acked', via: 'pull', strict: false, liveWake: true },
     { state: 'cancelled', via: null, strict: false, liveWake: false },
     { state: 'expired', via: null, strict: false, liveWake: false },
+    { state: 'failed', via: 'prompt_queue', strict: false, liveWake: false },
+    { state: 'ambiguous', via: 'prompt_queue', strict: false, liveWake: false },
   ])(
     '$state batch (via $via): strict=$strict, live wake=$liveWake',
     async ({ state, via, strict, liveWake }) => {
