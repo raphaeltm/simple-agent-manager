@@ -135,8 +135,10 @@ Idea `01M4JMZVVMGRKMNC0GBV3CQN8E`. Coordinator task `01M4JK3X7BART9SDKJ3KGCDE0Q`
 
 ## Implementation Notes
 
-- Commit `8ec8116bb`: measurement clock, error timestamps, per-reason alert throttle (written
-  before the D1 bookkeeping), tests. Commit `d7d28c74b`: breaker alert + shared operator fan-out.
+- Commit "fix(api): stop cleanup passes from starving the hourly ProjectData storage measurement":
+  measurement clock, error timestamps, per-reason alert throttle (written before the D1
+  bookkeeping), tests. Commit "feat(api): alert operators once when an archive circuit breaker
+  opens": breaker alert + shared operator fan-out.
 - The cadence tests reproduce the incident on pre-fix code with liveness intact (storage safety
   ran on all 14 ticks and grouped cleanup returned `row_budget` on every one) while the T0+60m
   measurement never ran; the reason test saw 8 alerts in 4 hours.
@@ -151,7 +153,8 @@ Idea `01M4JMZVVMGRKMNC0GBV3CQN8E`. Coordinator task `01M4JK3X7BART9SDKJ3KGCDE0Q`
   better-sqlite3 (rule 69 harness substitution).
 - Docs also updated: `guides/notifications.md`, env-reference skill, `.env.example`.
 - `turbo` injects an agent-guidance block into `AGENTS.md`; it is reverted, not committed.
-- Review follow-ups (commit after `e4ecbed9b`): tests for the pre-upgrade shared alert slot
+- Review follow-ups (commit "test(api): cover the pre-upgrade alert slot and breaker races from
+  review"): tests for the pre-upgrade shared alert slot
   (own reason throttled until the interval passes; other reason not throttled — each direction
   proven by a surgical revert), status worsening inside the interval, `breakerWasClosedBeforeOpening`
   pure cases, and a concurrent poisoning race on Miniflare D1; destructuring moved inside the alert
