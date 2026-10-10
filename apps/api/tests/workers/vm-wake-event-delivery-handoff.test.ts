@@ -321,6 +321,19 @@ async function batchState(f: Fixture): Promise<string | undefined> {
   return row?.state;
 }
 
+async function inboxRow(f: Fixture) {
+  const [row] = await sqlRows<{
+    delivery_state: string;
+    delivery_attempts: number;
+    last_error: string | null;
+  }>(
+    f.stub,
+    'SELECT delivery_state, delivery_attempts, last_error FROM session_inbox WHERE id = ?',
+    f.deliveryId
+  );
+  return row;
+}
+
 async function runnerState(taskId: string): Promise<TaskRunnerState | null> {
   return taskRunner(taskId).getStatus();
 }
@@ -390,12 +403,22 @@ describe('VM wake handoff with its own queued event delivery', () => {
       const { alarm, vm } = await wakeToHeldRestore(f);
 
       // The parked delivery comes due again mid-handoff, as production's retry did at
-      // 15:45:01.830, and reaches the uncommitted runtime. It must wait.
-      const midpoint = await runDueDelivery(f, Date.now() + config.retryMaxMs);
-      expect(midpoint).toMatchObject({
-        kind: 'retry',
-        reason: 'not_ready',
-        error: expect.stringContaining('agent handoff not committed'),
+      // 15:45:01.830, and reaches the uncommitted runtime. It must wait. Production's
+      // delivery had retried at saturated backoff for minutes, so keep it coming due until
+      // it has been claimed more times than the attempt budget allows: the hold must not
+      // exhaust that budget and fail the prompt before the handoff commits.
+      for (let retry = 1; retry <= config.maxAttempts; retry++) {
+        const midpoint = await runDueDelivery(f, Date.now() + retry * config.retryMaxMs);
+        expect(midpoint).toMatchObject({
+          kind: 'retry',
+          reason: 'not_ready',
+          error: expect.stringContaining('agent handoff not committed'),
+        });
+      }
+      expect(await inboxRow(f)).toMatchObject({
+        delivery_state: 'retry_wait',
+        delivery_attempts: config.maxAttempts - 1,
+        last_error: expect.stringContaining('agent handoff not committed'),
       });
       expect(vm.prompts()).toEqual([]);
       expect(await batchState(f)).toBe('pending');
@@ -458,6 +481,9 @@ describe('VM wake handoff with its own queued event delivery', () => {
         recovery_status: 'waking',
         recovery_attempt_id: 'newer-wake-attempt',
       });
+      // This log assertion, not the task status, is what fails if the runner's own authority
+      // check stops refusing: `transitionToInProgress` re-checks the attempt in its guarded
+      // UPDATE and would leave the task `delegated` on its own.
       expect(authorityRevocations(warn)).toContainEqual(
         expect.objectContaining({
           check: 'recovery_attempt_not_current',
@@ -467,6 +493,8 @@ describe('VM wake handoff with its own queued event delivery', () => {
           snapshotRecoveryStatus: 'waking',
         })
       );
+      // A superseded runner leaves the runtime to the newer attempt.
+      expect(vm.stops()).toEqual([]);
       expect(vm.prompts()).toEqual([]);
     });
   });
@@ -484,6 +512,8 @@ describe('VM wake handoff with its own queued event delivery', () => {
       vm.releaseRestore();
       await alarm;
       expect(await taskRow(f.b.taskId)).toMatchObject({ status: 'cancelled' });
+      // As above, the log assertion is the discriminating one: `transitionToInProgress` also
+      // refuses a terminal source task in its guarded UPDATE.
       expect(authorityRevocations(warn)).toContainEqual(
         expect.objectContaining({
           check: 'recovery_task_authority',

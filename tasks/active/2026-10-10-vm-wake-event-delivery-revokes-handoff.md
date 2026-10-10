@@ -92,6 +92,22 @@ and suppressed `step_error`, and `returnFailedWakeToSleep` would have refused.
    The diagnostic read never masks the original error and carries no secrets.
    `task_runner_do.step_error` also carries the check.
 
+## Every path that submits a prompt to a VM runtime (rule 61)
+
+Durable delivery is the only path that delivers event batches
+(`advanceProjectEventPromptAttemptCheckpoint` → `updatePromptQueueBatchForAttempt`), so it
+is the only path that can produce the self-revocation. The direct senders below call
+`sendPromptToAgentOnNode` themselves and skip `resolveVmPromptDeliveryTarget`.
+
+| Path                                                                                                                                                                                                                                   | Held? | Why                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Durable delivery (`DefaultVmPromptDeliveryAdapter` → `resolveVmPromptDeliveryTarget`): follow-ups (`send-chat.ts`), `send_durable_message`, `send_message_to_subtask` (`orchestration-comms.ts`), parent wakes, event wakes, schedules | Yes   | The production failure path.                                                                                                                                                                                                                                                                                                                                                                       |
+| Reconciliation check-in (`project-data/reconciliation.ts` `sendCheckinToAgent`, passes `resolvedTarget`)                                                                                                                               | No    | Only `task_mode = 'task'` tasks, with the chat `active` and idle for `TASK_RECONCILIATION_IDLE_MS` (default 5 min) (`reconciliation-candidates.ts`). A wake makes the chat active (`wakeSessionForSnapshotRecovery`) in the same alarm turn that commits the handoff, so this needs a handoff stalled for 5 minutes. It sends `agent_mailbox`, never an event batch, so it cannot revoke the wake. |
+| `stop_subtask` warning (`routes/mcp/orchestration-stop.ts`)                                                                                                                                                                            | No    | The warning precedes stopping the child, and the stop revokes the wake by design.                                                                                                                                                                                                                                                                                                                  |
+| SAM `send_message_to_subtask` (`sam-session/tools/send-message-to-subtask.ts`)                                                                                                                                                         | No    | Refuses `delegated` tasks, and a wake's replacement agent session only starts after the workspace step delegates the task, so it cannot reach an uncommitted wake runtime.                                                                                                                                                                                                                         |
+| Legacy direct sends with `DURABLE_PROMPT_DELIVERY_ENABLED=false` (`send-chat.ts` `forwardPromptToLiveAgent`, `orchestration-comms.ts`, `mailbox-target.ts` `attemptImmediateDelivery`)                                                 | No    | In that configuration durable delivery and agent channels are off (`durability-foundation.ts`, `agent-message-channels.ts`), so no event batch is delivered. Legacy behavior, unchanged.                                                                                                                                                                                                           |
+| Instant / cf-container                                                                                                                                                                                                                 | No    | No TaskRunner handoff; wakes in place (`node_runtime !== 'vm'`).                                                                                                                                                                                                                                                                                                                                   |
+
 ## Checklist
 
 - [x] Root cause proven from production logs plus code; candidate writers ruled out
@@ -124,9 +140,8 @@ and suppressed `step_error`, and `returnFailedWakeToSleep` would have refused.
 - [x] Diagnostics unit tests: each check logged with snapshot fields; diagnostic read
       failure does not mask the error; no secret-bearing fields
 - [x] Revert the gate once and record which test goes red (PR body)
-- [ ] Rule 61 enumeration in PR: durable delivery (gated), reconciliation check-in
-      (`agent_mailbox`, active chat plus long idle; not an event batch), Instant (not a
-      TaskRunner wake)
+- [x] Rule 61 enumeration of every path that submits a prompt to a VM runtime (below,
+      and in the PR)
 - [x] Docs: architecture overview (prompt-delivery paragraph) and chat features
       ("Sleeping") describe the handoff hold
 - [ ] Lint, typecheck, focused and full API tests (sequential), build

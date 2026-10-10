@@ -122,15 +122,19 @@ const UNCOMMITTED_WAKE_TASK_STATUSES = ['queued', 'delegated'];
  * it signals readiness (`notifyWakeSettled` -> `signalSessionWakeReady`, validated by
  * `isSessionWakeReadyCurrent`). Before it, the replacement agent session already reads
  * `running` (`ensureAgentSessionRow` runs first), so the target looks ready while the
- * runner still re-checks its authority. Delivering then is unsafe in two ways:
- * - An accepted event-wake prompt flips its batch to `delivered`.
- *   `validateProjectEventWakeRecoveryAuthority` reads that as revocation, and the
- *   runner kills the runtime mid-prompt (production, 2026-10-09).
- * - A handoff that fails for any other reason stops the runtime with the turn inside it.
+ * runner still re-checks its authority. Delivering then is unsafe: an accepted event-wake
+ * prompt flips its batch to `delivered`, `validateProjectEventWakeRecoveryAuthority` reads
+ * that as revocation, and the runner kills the runtime mid-prompt (production,
+ * 2026-10-09). The hold covers every durable delivery, so no queued prompt enters a
+ * runtime whose handoff can still be refused. Durable delivery is the only path that
+ * delivers event batches; the direct senders that bypass it are enumerated in
+ * `tasks/archive/2026-10-10-vm-wake-event-delivery-revokes-handoff.md`.
  *
  * This mirrors the claim the runner holds: `waking` from `claimSessionSnapshotRecovery`,
  * then `restored` for this workspace once `completeSessionSnapshotRecovery` runs, while
- * the claiming task is still queued or delegated.
+ * the claiming task is still queued or delegated. `isSessionRecoveryTaskAuthorized` reads
+ * the same claim to answer a different question (may the runner still act?), so the two
+ * are not shared; a change to the commit boundary must update both.
  *
  * VM only: Instant wakes in place without a TaskRunner, and
  * `markSessionSnapshotAwakeInPlace` writes `restored` on every delivery attempt.
@@ -347,7 +351,8 @@ export async function resolveVmPromptDeliveryTarget(
     return { kind: 'retry', reason: `Target agent session is ${row.agent_session_status}` };
   }
   if (isVmWakeHandoffPending(row)) {
-    // A retry spends no delivery attempt; the committed wake's readiness signal makes it due.
+    // A not_ready retry cannot exhaust the delivery attempt budget (`applyPromptDeliveryResult`
+    // caps it below the maximum); the committed wake's readiness signal makes it due.
     return {
       kind: 'retry',
       reason: `Session is waking (${row.snapshot_recovery_task_id}); agent handoff not committed`,

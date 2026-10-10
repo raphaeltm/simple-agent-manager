@@ -2,8 +2,9 @@
  * The delivery target's wake-handoff gate, against real D1 rows (rule 28: a guard that is a
  * SQL read is tested on a real SQL engine). Each conjunct of `isVmWakeHandoffPending` has a
  * case that discriminates it: the claim status, the recovery workspace, the claiming task's
- * status and the runtime. The real-ordering wake test is
- * `vm-wake-event-delivery-handoff.test.ts`.
+ * status and the runtime. The claiming task is joined inside the workspace's project, so a
+ * claim naming another project's task reads as no claiming task (rule 11). The real-ordering
+ * wake test is `vm-wake-event-delivery-handoff.test.ts`.
  */
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
@@ -27,6 +28,11 @@ interface GateCase {
   recoveryStatus: 'waking' | 'restored' | 'failed' | null;
   recoveryWorkspace: 'target' | 'older' | null;
   taskStatus: string;
+  /**
+   * Status of a task in another project that the claim names instead of this conversation's
+   * task. Unset means the claim names this conversation's task.
+   */
+  foreignClaimTaskStatus?: string;
   held: boolean;
 }
 
@@ -103,6 +109,15 @@ const CASES: GateCase[] = [
     taskStatus: 'queued',
     held: false,
   },
+  {
+    name: "claim naming another project's in-flight task",
+    runtime: 'vm',
+    recoveryStatus: 'waking',
+    recoveryWorkspace: 'target',
+    taskStatus: 'in_progress',
+    foreignClaimTaskStatus: 'delegated',
+    held: false,
+  },
 ];
 
 async function seedDeliveryTarget(testCase: GateCase) {
@@ -133,6 +148,15 @@ async function seedDeliveryTarget(testCase: GateCase) {
     chatSessionId,
     workspaceId,
   });
+  let claimTaskId = taskId;
+  if (testCase.foreignClaimTaskStatus) {
+    const foreignProjectId = `${prefix}-foreign-project`;
+    claimTaskId = `${prefix}-foreign-task`;
+    await seedProject(foreignProjectId, userId, `${prefix}-installation`);
+    await seedTask(claimTaskId, foreignProjectId, userId, {
+      status: testCase.foreignClaimTaskStatus,
+    });
+  }
   if (testCase.recoveryStatus) {
     const recoveryWorkspaceId =
       testCase.recoveryWorkspace === 'target'
@@ -156,7 +180,7 @@ async function seedDeliveryTarget(testCase: GateCase) {
         chatSessionId,
         testCase.runtime,
         testCase.recoveryStatus,
-        taskId,
+        claimTaskId,
         recoveryWorkspaceId
       )
       .run();
