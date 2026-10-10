@@ -622,38 +622,45 @@ describe('VM wake handoff with its own queued event delivery', () => {
 
 describe('event wake authority while a VM wake is live', () => {
   // Real ProjectData SQL (rule 28). The TaskRunner sets acceptConsumedByTarget; the Instant
-  // container's per-request guard does not.
+  // container's per-request guard does not. A batch the wake prompt delivered
+  // (`prompt_queue`) is accepted as well as one the agent read (`pull`): revoking a live wake
+  // whose prompt is already running would kill that turn, which is the incident itself.
   it.each([
-    { state: 'pending', strict: true, liveWake: true },
-    { state: 'delivered', strict: false, liveWake: true },
-    { state: 'acked', strict: false, liveWake: true },
-    { state: 'cancelled', strict: false, liveWake: false },
-    { state: 'expired', strict: false, liveWake: false },
-  ])('$state batch: strict=$strict, live wake=$liveWake', async ({ state, strict, liveWake }) => {
-    await withEventWakes(async (f) => {
-      await sqlRows(
-        f.stub,
-        'UPDATE project_event_delivery_batches SET state = ? WHERE id = ?',
-        state,
-        f.deliveryId
-      );
-      const input = {
-        chatSessionId: f.b.sessionId,
-        sourceTaskId: f.b.taskId,
-        batchId: f.deliveryId,
-        subscriptionId: f.subscriptionId,
-      };
-      await expect(
-        validateProjectEventWakeRecoveryAuthority(wakeEnv(), f.projectId, input)
-      ).resolves.toBe(strict);
-      await expect(
-        validateProjectEventWakeRecoveryAuthority(wakeEnv(), f.projectId, {
-          ...input,
-          acceptConsumedByTarget: true,
-        })
-      ).resolves.toBe(liveWake);
-    });
-  });
+    { state: 'pending', via: null, strict: true, liveWake: true },
+    { state: 'delivered', via: 'pull', strict: false, liveWake: true },
+    { state: 'delivered', via: 'prompt_queue', strict: false, liveWake: true },
+    { state: 'acked', via: 'pull', strict: false, liveWake: true },
+    { state: 'cancelled', via: null, strict: false, liveWake: false },
+    { state: 'expired', via: null, strict: false, liveWake: false },
+  ])(
+    '$state batch (via $via): strict=$strict, live wake=$liveWake',
+    async ({ state, via, strict, liveWake }) => {
+      await withEventWakes(async (f) => {
+        await sqlRows(
+          f.stub,
+          'UPDATE project_event_delivery_batches SET state = ?, delivered_via = ? WHERE id = ?',
+          state,
+          via,
+          f.deliveryId
+        );
+        const input = {
+          chatSessionId: f.b.sessionId,
+          sourceTaskId: f.b.taskId,
+          batchId: f.deliveryId,
+          subscriptionId: f.subscriptionId,
+        };
+        await expect(
+          validateProjectEventWakeRecoveryAuthority(wakeEnv(), f.projectId, input)
+        ).resolves.toBe(strict);
+        await expect(
+          validateProjectEventWakeRecoveryAuthority(wakeEnv(), f.projectId, {
+            ...input,
+            acceptConsumedByTarget: true,
+          })
+        ).resolves.toBe(liveWake);
+      });
+    }
+  );
 
   it('still refuses a consumed batch once its subscription is cancelled', async () => {
     await withEventWakes(async (f) => {
