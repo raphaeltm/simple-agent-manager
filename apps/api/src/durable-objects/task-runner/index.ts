@@ -51,7 +51,12 @@ import { putTaskRunnerState, taskRunnerAttemptContext } from './attempt-storage'
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
 import { recordRunnerPhase } from './phase-timings';
-import { assertRecoveryAuthority, isCurrentRecoveryAttempt } from './recovery-authority';
+import {
+  assertCurrentRecoveryAttempt,
+  assertRecoveryAuthority,
+  isCurrentRecoveryAttempt,
+} from './recovery-authority';
+import { revokeRecoveryAuthority } from './recovery-revocation';
 import { hasTaskStepRetryBudget } from './snapshot-restore-retry';
 import { failTask } from './state-machine';
 import { redactTaskRunnerStatus } from './status';
@@ -270,7 +275,7 @@ export class TaskRunner extends DurableObject<Env> {
     state.workspaceReadyReceived = true;
     state.workspaceReadyStatus = status;
     state.workspaceErrorMessage = errorMessage;
-    await putTaskRunnerState(this.ctx.storage, state);
+    await putTaskRunnerState(this.ctx.storage, this.env.DATABASE, state);
 
     log.info('task_runner_do.workspace_ready_received', {
       taskId: state.taskId,
@@ -303,7 +308,7 @@ export class TaskRunner extends DurableObject<Env> {
     }
 
     state.workspaceReadyStartedAt = Date.now();
-    await putTaskRunnerState(this.ctx.storage, state);
+    await putTaskRunnerState(this.ctx.storage, this.env.DATABASE, state);
 
     log.info('task_runner_do.workspace_build_started', {
       taskId: state.taskId,
@@ -443,13 +448,15 @@ export class TaskRunner extends DurableObject<Env> {
         step: state.currentStep,
         retryCount: state.retryCount,
         errorMessage,
+        // Names the refusing predicate; `session_recovery.authority_revoked` has the claim.
+        authorityCheck: err instanceof SessionRecoveryAuthorityRevokedError ? err.check : null,
         durationMs,
       });
 
       if (isTransientError(err) && hasTaskStepRetryBudget(state, this.getMaxRetries())) {
         // Transient failure — retry with backoff
         state.retryCount++;
-        await putTaskRunnerState(this.ctx.storage, state);
+        await putTaskRunnerState(this.ctx.storage, this.env.DATABASE, state);
         const backoff = computeBackoffMs(
           state.retryCount,
           this.getRetryBaseDelayMs(),
@@ -475,7 +482,7 @@ export class TaskRunner extends DurableObject<Env> {
   // =========================================================================
 
   private buildContext(state: TaskRunnerState): TaskRunnerContext {
-    const attemptCtx = taskRunnerAttemptContext(this.ctx, state);
+    const attemptCtx = taskRunnerAttemptContext(this.ctx, state, this.env.DATABASE);
     return {
       env: this.env,
       ctx: attemptCtx,
@@ -483,13 +490,12 @@ export class TaskRunner extends DurableObject<Env> {
         await this.assertRecoveryAuthority(state);
       },
       advanceToStep: async (state: TaskRunnerState, nextStep: TaskExecutionStep) => {
-        if (!(await this.isCurrentRecoveryAttempt(state)))
-          throw new SessionRecoveryAuthorityRevokedError();
+        await assertCurrentRecoveryAttempt(this.env, this.ctx, state, 'task_runner.advance_to_step');
         recordRunnerPhase(state, 'success');
         state.currentStep = nextStep;
         state.retryCount = 0;
         state.lastStepAt = Date.now();
-        await putTaskRunnerState(this.ctx.storage, state);
+        await putTaskRunnerState(this.ctx.storage, this.env.DATABASE, state);
         // Schedule alarm immediately for next step
         await attemptCtx.storage.setAlarm(Date.now());
       },
@@ -504,8 +510,12 @@ export class TaskRunner extends DurableObject<Env> {
       getProvisionPollIntervalMs: () => this.getProvisionPollIntervalMs(),
       getProvisionTimeoutMs: () => this.getProvisionTimeoutMs(),
       updateD1ExecutionStep: async (taskId: string, step: TaskExecutionStep) => {
-        if (!(await this.isCurrentRecoveryAttempt(state)))
-          throw new SessionRecoveryAuthorityRevokedError();
+        await assertCurrentRecoveryAttempt(
+          this.env,
+          this.ctx,
+          state,
+          'task_runner.update_execution_step'
+        );
         // Idempotent guard: skip redundant D1 writes when the step hasn't changed.
         // This prevents updated_at from being refreshed on every poll cycle,
         // which was defeating the stuck-tasks cron's staleness detection.
@@ -515,12 +525,19 @@ export class TaskRunner extends DurableObject<Env> {
           currentState &&
           (currentState.config.recoveryAttemptId ?? null) !==
             (state.config.recoveryAttemptId ?? null)
-        )
-          throw new SessionRecoveryAuthorityRevokedError();
+        ) {
+          throw await revokeRecoveryAuthority(
+            this.env.DATABASE,
+            state,
+            'runner_attempt_superseded',
+            'task_runner.update_execution_step',
+            currentState.config.recoveryAttemptId ?? null
+          );
+        }
         if (currentState && step === currentState.lastD1Step) return;
         if (currentState) {
           currentState.lastD1Step = step;
-          await putTaskRunnerState(this.ctx.storage, currentState);
+          await putTaskRunnerState(this.ctx.storage, this.env.DATABASE, currentState);
         }
         await this.env.DATABASE.prepare(
           `UPDATE tasks SET execution_step = ?, updated_at = ? WHERE id = ?

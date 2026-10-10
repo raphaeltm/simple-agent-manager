@@ -42,7 +42,7 @@ export async function retireRevokedTaskRunner(
 ): Promise<void> {
   const complete = async () => {
     state.completed = true;
-    await putTaskRunnerState(rc.ctx.storage, state, { deleteAlarm: true });
+    await putTaskRunnerState(rc.ctx.storage, rc.env.DATABASE, state, { deleteAlarm: true });
     log.info('task_runner_do.execution_authority_revoked', {
       taskId: state.taskId,
       projectId: state.projectId,

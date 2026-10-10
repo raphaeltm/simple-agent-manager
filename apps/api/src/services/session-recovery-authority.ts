@@ -28,14 +28,10 @@ export function sourceProjectMemberAuthoritySql(): string {
   )`;
 }
 
-export class SessionRecoveryAuthorityRevokedError extends Error {
-  readonly permanent = true;
-
-  constructor() {
-    super('Session recovery authority was revoked');
-    this.name = 'SessionRecoveryAuthorityRevokedError';
-  }
-}
+export {
+  type SessionRecoveryAuthorityCheck,
+  SessionRecoveryAuthorityRevokedError,
+} from './session-recovery-authority-revocation';
 
 /**
  * Validate the parent authority used by durable prompt delivery immediately at
@@ -221,15 +217,18 @@ type ValidateProjectEventWakeAuthority = (
   input: ProjectEventWakeAuthorityInput
 ) => Promise<boolean>;
 
-/** A successful event RPC cannot preserve a D1 claim revoked while it awaited. */
-export async function isSessionRecoveryTaskAndEventAuthorized(
+/**
+ * Name the authority that refuses a replacement runner, or null when it may act.
+ * A successful event RPC cannot preserve a D1 claim revoked while it awaited.
+ */
+export async function findSessionRecoveryTaskAndEventAuthorityFailure(
   database: D1Database,
   input: SessionRecoveryTaskAuthorityInput,
   validateEvent?: ValidateProjectEventWakeAuthority
-): Promise<boolean> {
-  if (!(await isSessionRecoveryTaskAuthorized(database, input))) return false;
-  if (!input.projectEventWake) return true;
-  if (!validateEvent) return false;
+): Promise<'recovery_task_authority' | 'project_event_wake_authority' | null> {
+  if (!(await isSessionRecoveryTaskAuthorized(database, input))) return 'recovery_task_authority';
+  if (!input.projectEventWake) return null;
+  if (!validateEvent) return 'project_event_wake_authority';
   const eventAuthorized = await validateEvent({
     projectId: input.projectId,
     chatSessionId: input.chatSessionId,
@@ -237,17 +236,21 @@ export async function isSessionRecoveryTaskAndEventAuthorized(
     batchId: input.projectEventWake.batchId,
     subscriptionId: input.projectEventWake.subscriptionId,
   });
-  if (!eventAuthorized) return false;
-  return isSessionRecoveryTaskAuthorized(database, input);
+  if (!eventAuthorized) return 'project_event_wake_authority';
+  return (await isSessionRecoveryTaskAuthorized(database, input))
+    ? null
+    : 'recovery_task_authority';
 }
 
-/** Check both durable authorities inside the container before starting or submitting. */
-export async function isSessionRecoverySourceTaskGuardFullyValidForEnv(
+/** Name the durable authority that refuses a container wake guard, or null when both hold. */
+export async function findSessionRecoverySourceTaskGuardFailureForEnv(
   env: Env,
   guard: SessionRecoverySourceTaskGuard
-): Promise<boolean> {
-  if (!(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, guard))) return false;
-  if (!guard.projectEventWake) return true;
+): Promise<'source_task_guard' | 'project_event_wake_authority' | null> {
+  if (!(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, guard))) {
+    return 'source_task_guard';
+  }
+  if (!guard.projectEventWake) return null;
   const projectData = await import('./project-data');
   const eventAuthorized = await projectData.validateProjectEventWakeRecoveryAuthority(
     env,
@@ -259,8 +262,18 @@ export async function isSessionRecoverySourceTaskGuardFullyValidForEnv(
       subscriptionId: guard.projectEventWake.subscriptionId,
     }
   );
-  if (!eventAuthorized) return false;
-  return isSessionRecoverySourceTaskGuardValid(env.DATABASE, guard);
+  if (!eventAuthorized) return 'project_event_wake_authority';
+  return (await isSessionRecoverySourceTaskGuardValid(env.DATABASE, guard))
+    ? null
+    : 'source_task_guard';
+}
+
+/** Check both durable authorities inside the container before starting or submitting. */
+export async function isSessionRecoverySourceTaskGuardFullyValidForEnv(
+  env: Env,
+  guard: SessionRecoverySourceTaskGuard
+): Promise<boolean> {
+  return (await findSessionRecoverySourceTaskGuardFailureForEnv(env, guard)) === null;
 }
 
 export {

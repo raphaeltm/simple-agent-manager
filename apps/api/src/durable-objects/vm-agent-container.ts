@@ -11,10 +11,12 @@ import { commitContainerWakeFromSleep } from '../services/container-wake-commit'
 import { loadInstantRestoreWorkspace } from '../services/instant-restore-workspace';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 import {
+  findSessionRecoverySourceTaskGuardFailureForEnv,
   isSessionRecoverySourceTaskGuardFullyValidForEnv,
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../services/session-recovery-authority';
+import { sessionRecoveryAuthorityRevoked } from '../services/session-recovery-authority-revocation';
 import { prepareSessionRestoreMcp } from '../services/session-restore-mcp';
 import { assertSessionRuntimeContractCapability } from '../services/session-runtime-contract';
 import { signalSessionWakeReadyBestEffort } from '../services/session-wake-ready';
@@ -612,12 +614,19 @@ export class VmAgentContainer extends Container<Env> {
   private async assertSourceTaskGuard(
     sourceTaskGuard?: VmAgentContainerRequestGuard
   ): Promise<void> {
-    if (
-      sourceTaskGuard &&
-      !(await isSessionRecoverySourceTaskGuardFullyValidForEnv(this.env, sourceTaskGuard))
-    ) {
-      throw new SessionRecoveryAuthorityRevokedError();
-    }
+    if (!sourceTaskGuard) return;
+    const failure = await findSessionRecoverySourceTaskGuardFailureForEnv(this.env, sourceTaskGuard);
+    if (!failure) return;
+    throw await sessionRecoveryAuthorityRevoked(this.env.DATABASE, {
+      check: failure,
+      site: 'vm_agent_container.source_task_guard',
+      taskId: sourceTaskGuard.taskId,
+      projectId: sourceTaskGuard.projectId,
+      chatSessionId: sourceTaskGuard.chatSessionId,
+      recoveryAttemptId: null,
+      sourceTaskId: sourceTaskGuard.taskId,
+      projectEventWake: sourceTaskGuard.projectEventWake ?? null,
+    });
   }
 
   private async clearSourceTaskWakeGuard(
