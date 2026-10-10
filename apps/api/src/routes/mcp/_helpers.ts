@@ -10,6 +10,7 @@ import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { getPlatformOperationLimits } from '../../operations/limits';
 import { type McpTokenData, type McpTokenEnv, validateMcpToken } from '../../services/mcp-token';
+import { LIVE_TASK_STATUSES, WAKEABLE_TASK_STATUSES } from '../../services/task-status';
 
 // Re-export McpTokenData for use by tool handler files
 export type { McpTokenData } from '../../services/mcp-token';
@@ -308,12 +309,12 @@ export const MCP_PROTOCOL_VERSION = '2025-03-26';
 export const MCP_SERVER_NAME = 'sam-mcp';
 export const MCP_SERVER_VERSION = '1.0.0';
 
-// Task status sets
-export const ACTIVE_STATUSES = ['queued', 'in_progress', 'delegated', 'awaiting_followup'];
+// Task status sets (canonical definitions: services/task-status.ts)
+export const ACTIVE_STATUSES: string[] = [...LIVE_TASK_STATUSES];
 
 // Sleeping agents retain their task/chat identity and can receive durable wakes
 // or parent cancellation. They cannot act as live callers or consume dispatch slots.
-export const AGENT_TARGET_STATUSES = [...ACTIVE_STATUSES, 'sleeping'];
+export const AGENT_TARGET_STATUSES: string[] = [...WAKEABLE_TASK_STATUSES];
 
 // ─── Rate limiting ──────────────────────────────────────────────────────────
 

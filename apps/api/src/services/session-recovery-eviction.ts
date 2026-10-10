@@ -7,6 +7,12 @@ export interface SessionRecoveryOptions {
     nodeId: string;
     generation: string | null;
   };
+  /**
+   * Why the session wakes. A durable delivery wakes it to answer a queued message
+   * (the default). `runtime_lost` means the runtime died mid-work and nothing is
+   * queued, so a task-mode agent is told to continue its task instead of waiting.
+   */
+  wakeCause?: 'queued_message' | 'runtime_lost';
 }
 
 export async function evictionRecoveryFenceMatches(

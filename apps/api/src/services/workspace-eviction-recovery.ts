@@ -106,5 +106,7 @@ export async function recoverWorkspaceAfterEviction(
       nodeId: identity.nodeId,
       generation: identity.generation,
     },
+    // Eviction kills the runtime mid-work; no message is queued for the agent.
+    wakeCause: 'runtime_lost',
   });
 }
