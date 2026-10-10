@@ -231,7 +231,7 @@ beforeEach(() => {
           chatSessionId: input.config.resumeSnapshotChatSessionId!,
         }))
       )
-        throw new SessionRecoveryAuthorityRevokedError();
+        throw new SessionRecoveryAuthorityRevokedError('recovery_task_authority');
     },
   } as TaskRunnerContext;
 });

@@ -314,7 +314,7 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
       .mockResolvedValueOnce(undefined) // before create fetch
       .mockResolvedValueOnce(undefined) // after create, before restore fetch
       .mockResolvedValueOnce(undefined) // after restore
-      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError()); // inside lock
+      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError('source_task_guard')); // inside lock
     const recovery: RuntimeRecoveryState = {
       version: 1,
       phase: 'waking',
@@ -360,7 +360,7 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
       .mockResolvedValueOnce(undefined) // after create, before restore fetch
       .mockResolvedValueOnce(undefined) // after restore
       .mockResolvedValueOnce(undefined) // inside lock, before D1 commit
-      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError()); // after D1 commit
+      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError('source_task_guard')); // after D1 commit
     const recovery: RuntimeRecoveryState = {
       version: 1,
       phase: 'waking',
@@ -614,7 +614,7 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
       .mockResolvedValueOnce(undefined) // before workspace hydration
       .mockResolvedValueOnce(undefined) // after workspace hydration, before credentials
       .mockResolvedValueOnce(undefined) // before create
-      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError()); // after create
+      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError('source_task_guard')); // after create
     const recovery: RuntimeRecoveryState = {
       version: 1,
       phase: 'waking',

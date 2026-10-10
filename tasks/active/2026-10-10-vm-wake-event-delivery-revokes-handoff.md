@@ -48,7 +48,8 @@ operator deletion quarantine.
    `updatePromptQueueBatchForAttempt`, flipping the event batch from `pending` to
    `delivered`.
 4. The TaskRunner re-checks authority before committing (`agent-session-step.ts`
-   `rc.assertRecoveryAuthority` at the three handoff points). For an event wake this
+   `rc.assertRecoveryAuthority`: a per-phase `beforeExternalMutation` guard during the agent
+   bootstrap, then three recovery-commit checks). For an event wake this
    calls `validateProjectEventWakeRecoveryAuthority`, which requires a `pending` batch.
    The wake's own successful delivery therefore reads as revocation →
    `SessionRecoveryAuthorityRevokedError` → `failTask` → `returnFailedWakeToSleep` →
@@ -61,11 +62,11 @@ observed rate. Unguarded wakes (human follow-ups) have no event check, so they n
 failed this way, but their prompt could still enter a runtime whose handoff later fails.
 
 Writers the evidence idea suspected but which are **ruled out**:
-`session-snapshot-prepare.ts` and `markSessionSnapshotSleeping` clear
-`recovery_task_id`/`recovery_attempt_id`. That would have made the catch-time
-`isCurrentRecoveryAttempt` false and suppressed `step_error`, and
-`returnFailedWakeToSleep` would have refused. `restore-result` writes only
-`restore_status`.
+`session-snapshot-prepare.ts` clears `recovery_task_id`, and `markSessionSnapshotSleeping`
+clears `recovery_attempt_id` and `recovery_status`. Either would have broken the
+task-plus-attempt match, which would have made the catch-time `isCurrentRecoveryAttempt` false
+and suppressed `step_error`, and `returnFailedWakeToSleep` would have refused.
+`restore-result` writes only `restore_status`.
 
 ## Fix design
 
