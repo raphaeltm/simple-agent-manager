@@ -171,7 +171,8 @@ direct senders below call `sendPromptToAgentOnNode` themselves and skip
       11,962 tests; full Workers suite exceeds a local run, so a focused 22-file run passed
       174/174 and CI runs all shards)
 - [x] Local specialist reviews + task-completion-validator (all PASS or ADDRESSED; see PR)
-- [ ] Staging: one real VM wake via a queued event or DM (STAGING_CLAIM/RELEASE, clean up)
+- [x] Staging: one real VM wake via a queued event or DM (STAGING_CLAIM/RELEASE, clean up).
+      Run 38060861687: - an agent DM woke slept conversation B; - a delivery retry at 15:15:05 landed in the handoff window and was held; - the commit came at 15:15:13 and the prompt started at 15:15:16, after the commit; - B read the DM, replied to A, and acked the delivery; - 0 authority revocations; - both tasks closed and the node deleted.
 - [ ] PR, CI, CodeRabbit request and wait, SonarCloud, merge, production deploy and
       release check
 
