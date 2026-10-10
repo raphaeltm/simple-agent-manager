@@ -85,6 +85,10 @@ interface DeliveryTargetRow {
   agent_session_updated_at: string | null;
   snapshot_sleep_status: string | null;
   snapshot_runtime: string | null;
+  snapshot_recovery_status: string | null;
+  snapshot_recovery_task_id: string | null;
+  snapshot_recovery_workspace_id: string | null;
+  wake_task_status: string | null;
 }
 
 /** Statuses a live delivery target cannot come back from. */
@@ -107,6 +111,38 @@ const SLEEPING_CONTAINER_WAKEABLE_STATUSES = IN_PLACE_WAKEABLE_STATUSES.filter(
  */
 function isSleepingContainer(runtime: string | null, sleepStatus: string | null): boolean {
   return runtime === 'cf-container' && sleepStatus === 'sleeping';
+}
+
+/** Statuses a VM wake's task holds until `transitionToInProgress` commits its handoff. */
+const UNCOMMITTED_WAKE_TASK_STATUSES = ['queued', 'delegated'];
+
+/**
+ * Whether this VM workspace belongs to a TaskRunner wake that has not committed its
+ * agent handoff. The commit (`transitionToInProgress`) is what releases queued prompts:
+ * it signals readiness (`notifyWakeSettled` -> `signalSessionWakeReady`, validated by
+ * `isSessionWakeReadyCurrent`). Before it, the replacement agent session already reads
+ * `running` (`ensureAgentSessionRow` runs first), so the target looks ready while the
+ * runner still re-checks its authority. Delivering then is unsafe in two ways:
+ * - An accepted event-wake prompt flips its batch to `delivered`.
+ *   `validateProjectEventWakeRecoveryAuthority` reads that as revocation, and the
+ *   runner kills the runtime mid-prompt (production, 2026-10-09).
+ * - A handoff that fails for any other reason stops the runtime with the turn inside it.
+ *
+ * This mirrors the claim the runner holds: `waking` from `claimSessionSnapshotRecovery`,
+ * then `restored` for this workspace once `completeSessionSnapshotRecovery` runs, while
+ * the claiming task is still queued or delegated.
+ *
+ * VM only: Instant wakes in place without a TaskRunner, and
+ * `markSessionSnapshotAwakeInPlace` writes `restored` on every delivery attempt.
+ */
+function isVmWakeHandoffPending(row: DeliveryTargetRow): boolean {
+  if (row.node_runtime !== 'vm') return false;
+  if (!UNCOMMITTED_WAKE_TASK_STATUSES.includes(row.wake_task_status ?? '')) return false;
+  return (
+    row.snapshot_recovery_status === 'waking' ||
+    (row.snapshot_recovery_status === 'restored' &&
+      row.snapshot_recovery_workspace_id === row.workspace_id)
+  );
 }
 
 function readyTarget(
@@ -219,11 +255,16 @@ export async function resolveVmPromptDeliveryTarget(
             a.status AS agent_session_status,
             a.updated_at AS agent_session_updated_at,
             s.sleep_status AS snapshot_sleep_status,
-            s.runtime AS snapshot_runtime
+            s.runtime AS snapshot_runtime,
+            s.recovery_status AS snapshot_recovery_status,
+            s.recovery_task_id AS snapshot_recovery_task_id,
+            s.recovery_workspace_id AS snapshot_recovery_workspace_id,
+            wake.status AS wake_task_status
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
      LEFT JOIN agent_sessions a ON a.workspace_id = w.id
      LEFT JOIN session_snapshots s ON s.chat_session_id = w.chat_session_id
+     LEFT JOIN tasks wake ON wake.id = s.recovery_task_id AND wake.project_id = w.project_id
      WHERE w.project_id = ? AND w.chat_session_id = ?
      ORDER BY w.updated_at DESC, a.created_at DESC
      LIMIT 1`
@@ -304,6 +345,13 @@ export async function resolveVmPromptDeliveryTarget(
       };
     }
     return { kind: 'retry', reason: `Target agent session is ${row.agent_session_status}` };
+  }
+  if (isVmWakeHandoffPending(row)) {
+    // A retry spends no delivery attempt; the committed wake's readiness signal makes it due.
+    return {
+      kind: 'retry',
+      reason: `Session is waking (${row.snapshot_recovery_task_id}); agent handoff not committed`,
+    };
   }
 
   return readyTarget(projectId, chatSessionId, row, row.node_id, row.agent_session_id);
