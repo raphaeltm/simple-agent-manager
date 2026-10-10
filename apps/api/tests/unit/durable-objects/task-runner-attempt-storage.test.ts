@@ -54,7 +54,9 @@ function fixture(attemptId: string | null) {
 function authorityRevokedLogs(warn: ReturnType<typeof vi.spyOn>): Record<string, unknown>[] {
   return warn.mock.calls
     .map(([line]: unknown[]) => JSON.parse(String(line)) as Record<string, unknown>)
-    .filter((entry: Record<string, unknown>) => entry.event === 'session_recovery.authority_revoked');
+    .filter(
+      (entry: Record<string, unknown>) => entry.event === 'session_recovery.authority_revoked'
+    );
 }
 
 describe('TaskRunner attempt storage', () => {
@@ -68,9 +70,7 @@ describe('TaskRunner attempt storage', () => {
       f.replace({ ...f.read(), config: { ...f.read().config, recoveryAttemptId: 'wake-new' } });
       oldState.completed = true;
       const putRefusal = await ctx.storage.put('state', oldState).catch((error: unknown) => error);
-      const alarmRefusal = await ctx.storage
-        .setAlarm(Date.now())
-        .catch((error: unknown) => error);
+      const alarmRefusal = await ctx.storage.setAlarm(Date.now()).catch((error: unknown) => error);
       for (const refusal of [putRefusal, alarmRefusal]) {
         expect(refusal).toBeInstanceOf(SessionRecoveryAuthorityRevokedError);
         expect(refusal).toMatchObject({

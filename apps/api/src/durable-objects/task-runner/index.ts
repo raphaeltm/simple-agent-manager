@@ -490,7 +490,12 @@ export class TaskRunner extends DurableObject<Env> {
         await this.assertRecoveryAuthority(state);
       },
       advanceToStep: async (state: TaskRunnerState, nextStep: TaskExecutionStep) => {
-        await assertCurrentRecoveryAttempt(this.env, this.ctx, state, 'task_runner.advance_to_step');
+        await assertCurrentRecoveryAttempt(
+          this.env,
+          this.ctx,
+          state,
+          'task_runner.advance_to_step'
+        );
         recordRunnerPhase(state, 'success');
         state.currentStep = nextStep;
         state.retryCount = 0;

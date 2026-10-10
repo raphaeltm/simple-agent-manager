@@ -615,7 +615,10 @@ export class VmAgentContainer extends Container<Env> {
     sourceTaskGuard?: VmAgentContainerRequestGuard
   ): Promise<void> {
     if (!sourceTaskGuard) return;
-    const failure = await findSessionRecoverySourceTaskGuardFailureForEnv(this.env, sourceTaskGuard);
+    const failure = await findSessionRecoverySourceTaskGuardFailureForEnv(
+      this.env,
+      sourceTaskGuard
+    );
     if (!failure) return;
     throw await sessionRecoveryAuthorityRevoked(this.env.DATABASE, {
       check: failure,
