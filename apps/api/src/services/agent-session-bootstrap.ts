@@ -72,6 +72,12 @@ export interface SamAwareAgentStartResult {
   acpSessionId: string | null;
   mcpToken: string;
   agentStarted: boolean;
+  /**
+   * Whether `visibleInitialPrompt` reached the agent. False only when a snapshot restore resumed
+   * the saved agent session (LoadSession): that session never receives it, so a caller with nothing
+   * queued must deliver the wake's first prompt itself (`services/restored-session-prompt.ts`).
+   */
+  initialPromptSent: boolean;
 }
 
 async function runMaybePhased<T>(
@@ -450,6 +456,7 @@ export async function startSamAwareAgentSession(
       acpSessionId,
       mcpToken,
       agentStarted: true,
+      initialPromptSent: shouldStartFreshSession,
     };
   } catch (err) {
     // Once persisted by the caller, the token belongs to its retry lifecycle.

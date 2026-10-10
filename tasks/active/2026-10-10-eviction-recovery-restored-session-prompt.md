@@ -27,14 +27,17 @@ start config, so it could not observe this.
    condition must travel explicitly: a new config field `restoredSessionPrompt`.
 2. **Restore vs fresh is known only inside bootstrap** (`shouldStartFreshAfterSnapshotRestore`). The
    bootstrap result must say whether the wake's first prompt was sent (`initialPromptSent`).
-3. **The prompt cannot be queued inside bootstrap.** Eviction finalization runs
-   `finalizeWorkspaceLifecycleClosure` before recovery; the snapshot is not yet marked sleeping, so
-   `finalizeProjectDataSession` calls `stopSession` and the ProjectData chat session is `stopped`.
-   `messages.persistMessage` throws for a stopped session, and `acceptPromptDelivery` persists the
-   transcript row first. The session is reopened only by `wakeSessionForSnapshotRecovery`
-   (`allowStopped`), which runs in `agent-session-step.ts` after bootstrap returns. So the enqueue
-   belongs in the TaskRunner step, after `wakeSessionForSnapshotRecovery` /
-   `completeSessionSnapshotRecovery` and before `transitionToInProgress`.
+3. **The prompt is queued after the ProjectData wake commit, not inside bootstrap.** Eviction
+   finalization runs `finalizeWorkspaceLifecycleClosure` before recovery; the snapshot is not yet
+   marked sleeping, so `finalizeProjectDataSession` stops the ProjectData chat session, which keeps
+   pointing at the evicted workspace. Accepting a delivery records message activity for the chat's
+   current workspace (`runAcceptedPromptDeliveryHooks` → `updateMessageActivity`), so queueing
+   inside bootstrap would re-create idle tracking for the evicted workspace that finalization just
+   removed. `wakeSessionForSnapshotRecovery` (`allowStopped`) re-points the chat at the replacement
+   workspace; it runs in `agent-session-step.ts` after bootstrap returns. So the enqueue belongs in
+   the TaskRunner step, after `wakeSessionForSnapshotRecovery` / `completeSessionSnapshotRecovery`
+   and before `transitionToInProgress`. (Correction: an earlier draft claimed `persistMessage`
+   rejects stopped sessions; only the VM batch path `persistMessageBatch` does.)
 4. **Ordering after the commit comes from agent A's hold** (branch `sam/fix-vm-wake-regression-6vwaw0`,
    task `01M4JRRD41T0X1TER0C56VWAW0`): `isVmWakeHandoffPending` in `vm-prompt-delivery-target.ts`
    retries every durable delivery to a VM wake whose task is still `queued`/`delegated` with the
