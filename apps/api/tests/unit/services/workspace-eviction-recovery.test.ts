@@ -69,6 +69,7 @@ describe('workspace eviction recovery', () => {
       {
         excludedNodeId: 'node',
         evictionFence: { workspaceId: 'workspace', nodeId: 'node', generation: 'generation-1' },
+        wakeCause: 'runtime_lost',
       }
     );
   });

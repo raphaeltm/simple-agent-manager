@@ -19,9 +19,11 @@ import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { workspaceEvictionCallbackRoute } from '../../src/routes/projects/workspace-eviction-callback';
 import { buildAcpInteractionRuntimeConfig } from '../../src/services/acp-interaction-runtime-config';
+import type { SessionSleepFallbackRecord } from '../../src/services/session-sleep-episode';
 import {
   SESSION_RECOVERY_CONTINUE_TASK_PROMPT,
   SESSION_RECOVERY_INITIAL_PROMPT,
+  sessionRecoveryInitialPrompt,
 } from '../../src/services/session-sleep-fallback-messages';
 import { finalizeWorkspaceEvictionInNode } from '../../src/services/workspace-eviction-lifecycle';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
@@ -292,5 +294,46 @@ describe('recovery prompt chosen by the wake cause', () => {
       taskMode: 'task',
       taskDescription: SESSION_RECOVERY_INITIAL_PROMPT,
     });
+  });
+});
+
+describe('continue-task wording after a fallback recovery point', () => {
+  const fallback: SessionSleepFallbackRecord = {
+    version: 1,
+    outcome: 'slept',
+    trigger: 'attempt_budget',
+    blockedReason: null,
+    decidedAt: '2026-10-04T08:15:00.000Z',
+    episodeStartedAt: '2026-10-04T08:00:00.000Z',
+    failedAttempts: 3,
+    lastError: null,
+    recoveryPoint: {
+      generation: 'gen-3',
+      commit: 'f'.repeat(40),
+      branch: 'sam/feature',
+      detached: false,
+      upstream: 'origin/sam/feature',
+      capturedAt: '2026-10-04T08:10:00.000Z',
+      snapshotStatus: 'degraded',
+      degradation: 'home-skipped',
+      workingTreeSaved: true,
+      homeSaved: false,
+    },
+  };
+
+  it('keeps the recovery-point checks and ends by continuing the task', () => {
+    const prompt = sessionRecoveryInitialPrompt(fallback, 'continue_assigned_task');
+    expect(prompt).toContain(`confirm the workspace is at commit ${'f'.repeat(12)}`);
+    expect(prompt).toContain('Do not repeat actions with effects outside this workspace');
+    expect(
+      prompt.endsWith('Then continue your assigned task from where the transcript ends.')
+    ).toBe(true);
+    expect(prompt).not.toMatch(/wait for and answer/i);
+  });
+
+  it('defaults to answering the queued message', () => {
+    expect(sessionRecoveryInitialPrompt(fallback)).toMatch(
+      /Then wait for and answer the latest queued follow-up message\.$/
+    );
   });
 });
