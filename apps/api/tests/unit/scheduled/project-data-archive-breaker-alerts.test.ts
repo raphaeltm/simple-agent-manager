@@ -41,7 +41,10 @@ vi.mock('../../../src/services/notification', async (importOriginal) => ({
 import * as observabilitySchema from '../../../src/db/observability-schema';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { PROJECT_DATA_ARCHIVE_BREAKER_OPENED_ALERT } from '../../../src/scheduled/project-data-archive-breaker-alerts';
+import {
+  breakerWasClosedBeforeOpening,
+  PROJECT_DATA_ARCHIVE_BREAKER_OPENED_ALERT,
+} from '../../../src/scheduled/project-data-archive-breaker-alerts';
 import {
   poisonProjectDataArchiveMigration,
   runProjectDataArchiveSharding,
@@ -347,5 +350,19 @@ describe('ProjectData archive breaker alerts', () => {
     expect(readBreaker(main)?.state).toBe('open');
     expect(readBreakerAlertRows(observability)).toHaveLength(1);
     expect(sentNotifications).toHaveLength(1);
+  });
+});
+
+describe('breakerWasClosedBeforeOpening', () => {
+  it.each([
+    { before: 'no breaker row', result: { results: [] }, opened: true },
+    { before: 'closed', result: { results: [{ state: 'closed' }] }, opened: true },
+    { before: 'open', result: { results: [{ state: 'open' }] }, opened: false },
+    { before: 'frozen', result: { results: [{ state: 'frozen' }] }, opened: false },
+    // Unreadable answers alert: a duplicate costs less than a silent opening.
+    { before: 'an unreadable state', result: { results: [{ state: null }] }, opened: true },
+    { before: 'a missing batch result', result: undefined, opened: true },
+  ])('treats $before as opened by this write: $opened', ({ result, opened }) => {
+    expect(breakerWasClosedBeforeOpening(result as D1Result | undefined)).toBe(opened);
   });
 });

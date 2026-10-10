@@ -112,4 +112,33 @@ describe('ProjectData archive breaker alert on the Workers runtime', () => {
     });
     expect(notifications[0]!.metadata).toMatchObject({ migrationId: `${projectId}-m1` });
   });
+
+  it('announces one opening when two poisonings race on the real D1 binding', async () => {
+    const projectId = `breaker-alert-race-${crypto.randomUUID()}`;
+    await seedUser(OWNER);
+    await seedUser(OPERATOR);
+    await testEnv.DATABASE.prepare(
+      "UPDATE users SET role = 'superadmin', status = 'active' WHERE id = ?"
+    )
+      .bind(OPERATOR)
+      .run();
+    await seedInstallation(INSTALLATION, OWNER);
+    await seedProject(projectId, OWNER, INSTALLATION, { name: 'Breaker race project' });
+    await seedPoisonableMigration(projectId, `${projectId}-m1`);
+    await seedPoisonableMigration(projectId, `${projectId}-m2`);
+
+    await Promise.all(
+      [`${projectId}-m1`, `${projectId}-m2`].map((migrationId) =>
+        poisonProjectDataArchiveMigration(testEnv, {
+          migrationId,
+          projectId,
+          reason: 'attempts_exhausted:CompactArchiveTimeoutError',
+          now: NOW,
+        })
+      )
+    );
+
+    expect(await breakerAlertRows(projectId)).toHaveLength(1);
+    expect(await operatorNotifications(projectId)).toHaveLength(1);
+  });
 });

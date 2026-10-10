@@ -144,15 +144,25 @@ Idea `01M4JMZVVMGRKMNC0GBV3CQN8E`. Coordinator task `01M4JK3X7BART9SDKJ3KGCDE0Q`
   better-sqlite3 (rule 69 harness substitution).
 - Docs also updated: `guides/notifications.md`, env-reference skill, `.env.example`.
 - `turbo` injects an agent-guidance block into `AGENTS.md`; it is reverted, not committed.
+- Review follow-ups (commit after `e4ecbed9b`): tests for the pre-upgrade shared alert slot
+  (own reason throttled until the interval passes; other reason not throttled — each direction
+  proven by a surgical revert), status worsening inside the interval, `breakerWasClosedBeforeOpening`
+  pure cases, and a concurrent poisoning race on Miniflare D1; destructuring moved inside the alert
+  function's `try`.
+- Declined review suggestions (LOW, recorded in the PR): in-app `cron_failure` preference copy
+  (still accurate: the breaker opens inside the scheduled archive sweep), error-text redaction
+  (same superadmin audience already reads `error_message` in Admin → Storage), a cross-project
+  alert cap (each opening is a distinct operator action), the pre-existing admin-measure vs alarm
+  race, and frozen → open breaker state on poisoning (opening semantics are out of scope).
 
 ## Acceptance Criteria
 
-- [ ] Cleanup activity on every alarm tick no longer delays the hourly measurement (Workers test, proven discriminating)
-- [ ] The hourly measurement appends a telemetry history row and evaluates alerts again (same test)
-- [ ] Hourly measurements of a `critical` object produce one alert per alert interval, not one per hour
-- [ ] The grouped FTS overload back-off keys on the error's own age
-- [ ] A breaker opening (closed/absent → open) produces exactly one `/admin/errors` row and one superadmin notification; none while it stays open; none while it is closed
-- [ ] No new `wrangler.toml` vars, no D1 or DO migration
+- [x] Cleanup activity on every alarm tick no longer delays the hourly measurement (Workers test, proven discriminating)
+- [x] The hourly measurement appends a telemetry history row and evaluates alerts again (same test)
+- [x] Hourly measurements of a `critical` object produce one alert per alert interval, not one per hour
+- [x] The grouped FTS overload back-off keys on the error's own age
+- [x] A breaker opening (closed/absent → open) produces exactly one `/admin/errors` row and one superadmin notification; none while it stays open; none while it is closed
+- [x] No new `wrangler.toml` vars, no D1 or DO migration
 - [ ] Production: within ~1-2 h of deploy the root DO writes a new history row and storage-alarm completions show `measured:true`
 
 ## References

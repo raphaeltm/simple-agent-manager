@@ -341,3 +341,108 @@ describe('ProjectData storage measurement cadence', () => {
     ]);
   });
 });
+
+describe('ProjectData storage alert throttle across the upgrade', () => {
+  const MEASUREMENT_ONLY_ENV = {
+    PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
+    PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'false',
+    PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'false',
+  } satisfies Partial<Record<keyof WorkerEnv, string>>;
+
+  /** The shared slot is all an object alerted before per-reason slots existed carries. */
+  async function seedSharedAlertSlot(
+    stub: DurableObjectStub<ProjectDataTestDouble>,
+    at: number,
+    reason: string
+  ): Promise<void> {
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO do_meta (key, value)
+         VALUES ('storageSafetyLastAlertAt', ?), ('storageSafetyLastAlertStatus', 'critical'),
+                ('storageSafetyLastAlertReason', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        String(at),
+        reason
+      );
+    });
+  }
+
+  // Production's first post-deploy measurement takes this path: the root object's last critical
+  // alert sits only in the shared slot.
+  it.each([
+    {
+      sharedSlotReason: 'threshold_exceeded',
+      expectedAlerts: [T0 + 5 * HOUR],
+      meaning: 'throttles its own reason until the interval passes',
+    },
+    {
+      sharedSlotReason: 'cleanup_target_unreachable',
+      expectedAlerts: [T0],
+      meaning: 'does not throttle a different reason',
+    },
+  ])(
+    'a pre-upgrade shared alert slot for $sharedSlotReason $meaning',
+    async ({ sharedSlotReason, expectedAlerts }) => {
+      const { projectId, stub } = await createProject('alert-shared-slot');
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(T0);
+      await seedSharedAlertSlot(stub, T0 - HOUR, sharedSlotReason);
+      const limitBytes = await criticalLimitBytes(stub);
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+      await withProjectDataStorageEnv(
+        testEnv,
+        { ...MEASUREMENT_ONLY_ENV, PROJECT_DATA_STORAGE_LIMIT_BYTES: limitBytes },
+        async () => {
+          await runAlarmAt(stub, T0);
+          // One full default interval (6 h) after the shared-slot alert.
+          await runAlarmAt(stub, T0 + 5 * HOUR);
+        }
+      );
+
+      // Liveness: both ticks measured a critical object.
+      expect(storageAlarmCompletions(logSpy, projectId).map((entry) => entry.measured)).toEqual([
+        true,
+        true,
+      ]);
+      expect(await readHistoryMeasuredAt(projectId)).toEqual([T0, T0 + 5 * HOUR]);
+      const alerts = await readStorageAlerts(projectId);
+      expect(alerts.map((alert) => [alert.timestamp, alert.context.status])).toEqual(
+        expectedAlerts.map((at) => [at, 'critical'])
+      );
+    }
+  );
+
+  it('alerts at once when the status worsens inside the alert interval', async () => {
+    const { projectId, stub } = await createProject('alert-status-worsens');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const size = await runInDurableObject(
+      stub,
+      async (_instance, state) => state.storage.sql.databaseSize
+    );
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    // The limit shrinks between measurements, so the same object reads critical, then degraded.
+    for (const [at, ratio] of [
+      [T0, CRITICAL_USAGE_RATIO],
+      [T0 + HOUR, 0.97],
+      [T0 + 2 * HOUR, 0.97],
+    ] as const) {
+      await withProjectDataStorageEnv(
+        testEnv,
+        {
+          ...MEASUREMENT_ONLY_ENV,
+          PROJECT_DATA_STORAGE_LIMIT_BYTES: String(Math.ceil(size / ratio)),
+        },
+        () => runAlarmAt(stub, at)
+      );
+    }
+
+    const alerts = await readStorageAlerts(projectId);
+    expect(alerts.map((alert) => [alert.timestamp, alert.context.status])).toEqual([
+      [T0, 'critical'],
+      [T0 + HOUR, 'degraded'],
+    ]);
+  });
+});

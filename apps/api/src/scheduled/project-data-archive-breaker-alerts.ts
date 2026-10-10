@@ -55,8 +55,8 @@ export async function alertProjectDataArchiveBreakerOpened(
   env: Env,
   opening: ProjectDataArchiveBreakerOpening
 ): Promise<void> {
-  const { projectId, migrationId, reason, message, openedAt } = opening;
   try {
+    const { projectId, migrationId, reason, message, openedAt } = opening;
     const projectName = await getProjectName(env, projectId);
     log.error(PROJECT_DATA_ARCHIVE_BREAKER_OPENED_ALERT, {
       projectId,
@@ -114,8 +114,8 @@ export async function alertProjectDataArchiveBreakerOpened(
     }
   } catch (error) {
     log.error('project_data_archive_breaker_alert_failed', {
-      projectId,
-      migrationId,
+      projectId: opening.projectId,
+      migrationId: opening.migrationId,
       ...serializeError(error),
     });
   }
