@@ -283,7 +283,7 @@ describe('ensureBranchExistsOnRemote', () => {
     mocks.ensureBranchExists.mockResolvedValue({ status: 'created' });
     const state = makeState({ branch: 'feature-x' });
     const mockRc = makeContext();
-    const revoked = new SessionRecoveryAuthorityRevokedError('source task terminalized');
+    const revoked = new SessionRecoveryAuthorityRevokedError('recovery_task_authority');
     (mockRc.assertRecoveryAuthority as ReturnType<typeof vi.fn>).mockRejectedValue(revoked);
 
     await expect(ensureBranchExistsOnRemote(state, mockRc)).rejects.toBe(revoked);

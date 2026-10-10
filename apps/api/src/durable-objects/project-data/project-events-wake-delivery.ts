@@ -99,6 +99,14 @@ export interface ValidateProjectEventWakeRecoveryAuthorityInput {
   sourceTaskId: string;
   batchId: string;
   subscriptionId: string;
+  /**
+   * Set by a VM wake's TaskRunner, which re-checks this while its replacement runtime is
+   * live. Only the woken chat can consume its batch (pull, ack or the wake prompt), so a
+   * `delivered` or `acked` batch is the wake succeeding, not revocation. Durable delivery
+   * is held until the handoff commits (`isVmWakeHandoffPending`); a pull or an ack by the
+   * woken agent cannot be held. Cancellation, expiry and subscription changes still revoke.
+   */
+  acceptConsumedByTarget?: boolean;
 }
 
 export function validateProjectEventWakeRecoveryAuthority(
@@ -122,7 +130,7 @@ export function validateProjectEventWakeRecoveryAuthority(
          AND b.id = ?
          AND b.subscription_id = ?
          AND b.delivery_channel = 'prompt_queue'
-         AND b.state = 'pending'
+         AND (b.state = 'pending' OR (? = 1 AND b.state IN ('delivered', 'acked')))
          AND b.target_session_id = ?
          AND (b.delivery_expires_at IS NULL OR b.delivery_expires_at > ?)
          AND s.lifecycle_state = 'active'
@@ -137,6 +145,7 @@ export function validateProjectEventWakeRecoveryAuthority(
       input.projectId,
       input.batchId,
       input.subscriptionId,
+      input.acceptConsumedByTarget ? 1 : 0,
       input.chatSessionId,
       now,
       input.sourceTaskId,

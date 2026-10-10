@@ -45,6 +45,7 @@ import {
   selectReusableNodeDeferral,
 } from './node-placement-deferral';
 import { updatePlacementDiagnostics } from './placement-diagnostics';
+import { revokeRecoveryAuthority } from './recovery-revocation';
 import { taskPlacementStrategy } from './task-placement-strategy';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 import { isUserConversationStart } from './user-start-admission';
@@ -141,7 +142,13 @@ async function claimWarmNodeCandidate(
   const result = await stub.tryClaim(state.taskId, recoverySourceTaskGuard(state));
   if (result.reason === 'source_task_revoked') {
     await stub.releaseClaim(state.taskId).catch(() => undefined);
-    throw new SessionRecoveryAuthorityRevokedError();
+    // NodeLifecycle refused through `isSessionRecoveryTaskAuthorized`.
+    throw await revokeRecoveryAuthority(
+      rc.env.DATABASE,
+      state,
+      'recovery_task_authority',
+      'task_runner.warm_node_claim'
+    );
   }
   if (!result.claimed) return false;
 

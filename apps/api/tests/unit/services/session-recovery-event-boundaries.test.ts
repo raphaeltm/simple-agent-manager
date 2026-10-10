@@ -11,21 +11,24 @@ vi.mock('cloudflare:workers', () => ({ DurableObject: class {} }));
 
 import * as schema from '../../../src/db/schema';
 import { NodeLifecycle } from '../../../src/durable-objects/node-lifecycle';
-import { TaskRunner } from '../../../src/durable-objects/task-runner';
+import { findRecoveryAuthorityFailure } from '../../../src/durable-objects/task-runner/recovery-authority';
 import type { StartTaskInput } from '../../../src/durable-objects/task-runner/types';
 import { VmAgentContainer } from '../../../src/durable-objects/vm-agent-container';
 import type { Env } from '../../../src/env';
 import {
-  isSessionRecoverySourceTaskGuardFullyValidForEnv,
+  findSessionRecoverySourceTaskGuardFailureForEnv,
+  findSessionRecoveryTaskAndEventAuthorityFailure,
   isSessionRecoverySourceTaskGuardValid,
-  isSessionRecoveryTaskAndEventAuthorized,
   isSessionRecoveryTaskAuthorized,
   type SessionRecoverySourceTaskGuard,
 } from '../../../src/services/session-recovery-authority';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const databases: Database.Database[] = [];
+// Start-time inputs carry no runner state, so the guard never reads DO storage.
+const startTimeCtx = {} as DurableObjectState;
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const sqlite of databases.splice(0)) sqlite.close();
 });
 
@@ -35,6 +38,20 @@ const guard: SessionRecoverySourceTaskGuard = {
   chatSessionId: 'chat',
   projectEventWake: { batchId: 'batch', subscriptionId: 'subscription' },
 };
+
+function authorityRevocations(warn: ReturnType<typeof vi.spyOn>): Record<string, unknown>[] {
+  return warn.mock.calls
+    .map(([line]: unknown[]) => {
+      try {
+        return JSON.parse(String(line)) as Record<string, unknown>;
+      } catch {
+        return {};
+      }
+    })
+    .filter(
+      (entry: Record<string, unknown>) => entry.event === 'session_recovery.authority_revoked'
+    );
+}
 const recoveryInput = {
   recoveryTaskId: 'T2',
   sourceTaskId: 'root',
@@ -87,11 +104,9 @@ describe('recovery event authority at final asynchronous boundaries', () => {
     const f = fixture();
     await expect(isSessionRecoveryTaskAuthorized(f.database, recoveryInput)).resolves.toBe(true);
     await expect(
-      isSessionRecoveryTaskAndEventAuthorized(f.database, recoveryInput, f.validateEvent)
-    ).resolves.toBe(true);
-    await expect(isSessionRecoverySourceTaskGuardFullyValidForEnv(f.env, guard)).resolves.toBe(
-      true
-    );
+      findSessionRecoveryTaskAndEventAuthorityFailure(f.database, recoveryInput, f.validateEvent)
+    ).resolves.toBeNull();
+    await expect(findSessionRecoverySourceTaskGuardFailureForEnv(f.env, guard)).resolves.toBeNull();
   });
 
   it.each([
@@ -105,8 +120,8 @@ describe('recovery event authority at final asynchronous boundaries', () => {
       return true;
     });
     await expect(
-      isSessionRecoveryTaskAndEventAuthorized(f.database, recoveryInput, validate)
-    ).resolves.toBe(false);
+      findSessionRecoveryTaskAndEventAuthorityFailure(f.database, recoveryInput, validate)
+    ).resolves.toBe('recovery_task_authority');
     expect(validate).toHaveBeenCalledOnce();
   });
 
@@ -120,9 +135,6 @@ describe('recovery event authority at final asynchronous boundaries', () => {
       .exec(`INSERT INTO users (id, email, status) VALUES ('creator', 'creator@example.test', 'active');
       INSERT INTO project_members (project_id, user_id, role, status)
       VALUES ('project', 'creator', 'maintainer', 'active');`);
-    const runner = Object.assign(Object.create(TaskRunner.prototype), { env: f.env }) as {
-      hasRecoveryAuthority(input: StartTaskInput): Promise<boolean>;
-    };
     const input = {
       taskId: 'T2',
       projectId: 'project',
@@ -133,12 +145,14 @@ describe('recovery event authority at final asynchronous boundaries', () => {
         recoveryRequiredProjectMemberId: 'creator',
       },
     } as StartTaskInput;
-    await expect(runner.hasRecoveryAuthority(input)).resolves.toBe(true);
+    await expect(findRecoveryAuthorityFailure(f.env, startTimeCtx, input)).resolves.toBeNull();
     f.sqlite.exec(mutation);
-    await expect(runner.hasRecoveryAuthority(input)).resolves.toBe(false);
+    await expect(findRecoveryAuthorityFailure(f.env, startTimeCtx, input)).resolves.toBe(
+      'recovery_task_authority'
+    );
     // A human recovery has no scheduled-creator authority requirement.
     input.config.recoveryRequiredProjectMemberId = null;
-    await expect(runner.hasRecoveryAuthority(input)).resolves.toBe(true);
+    await expect(findRecoveryAuthorityFailure(f.env, startTimeCtx, input)).resolves.toBeNull();
   });
 
   it.each([
@@ -160,12 +174,12 @@ describe('recovery event authority at final asynchronous boundaries', () => {
       await expect(isSessionRecoverySourceTaskGuardValid(f.database, preBatch)).resolves.toBe(
         false
       );
-      await expect(isSessionRecoverySourceTaskGuardFullyValidForEnv(f.env, guard)).resolves.toBe(
-        false
+      await expect(findSessionRecoverySourceTaskGuardFailureForEnv(f.env, guard)).resolves.toBe(
+        'source_task_guard'
       );
       await expect(
-        isSessionRecoveryTaskAndEventAuthorized(f.database, recoveryInput, f.validateEvent)
-      ).resolves.toBe(false);
+        findSessionRecoveryTaskAndEventAuthorityFailure(f.database, recoveryInput, f.validateEvent)
+      ).resolves.toBe('recovery_task_authority');
       expect(f.validateEvent).not.toHaveBeenCalled();
       // Human follow-ups retain their existing task authority semantics.
       await expect(
@@ -189,21 +203,41 @@ describe('recovery event authority at final asynchronous boundaries', () => {
       });
       const result =
         kind === 'runner'
-          ? isSessionRecoveryTaskAndEventAuthorized(f.database, recoveryInput, f.validateEvent)
-          : isSessionRecoverySourceTaskGuardFullyValidForEnv(f.env, guard);
-      await expect(result).resolves.toBe(false);
+          ? findSessionRecoveryTaskAndEventAuthorityFailure(
+              f.database,
+              recoveryInput,
+              f.validateEvent
+            )
+          : findSessionRecoverySourceTaskGuardFailureForEnv(f.env, guard);
+      await expect(result).resolves.toBe(
+        kind === 'runner' ? 'recovery_task_authority' : 'source_task_guard'
+      );
       expect(f.validateEvent).toHaveBeenCalledOnce();
     }
   });
 
+  it('keeps the Instant container guard strict about a consumed batch (rule 61 control)', async () => {
+    const f = fixture();
+    await expect(findSessionRecoverySourceTaskGuardFailureForEnv(f.env, guard)).resolves.toBeNull();
+    // Exact arguments: unlike the TaskRunner's re-check, the container guard must not pass
+    // acceptConsumedByTarget (its delivery row is `delivering`, so no pull can consume first).
+    expect(f.validateEvent).toHaveBeenCalledWith({
+      projectId: 'project',
+      sourceTaskId: 'root',
+      chatSessionId: 'chat',
+      batchId: 'batch',
+      subscriptionId: 'subscription',
+    });
+  });
+
   it('requires an event validator and rejects its negative result', async () => {
     const f = fixture();
-    await expect(isSessionRecoveryTaskAndEventAuthorized(f.database, recoveryInput)).resolves.toBe(
-      false
-    );
     await expect(
-      isSessionRecoveryTaskAndEventAuthorized(f.database, recoveryInput, async () => false)
-    ).resolves.toBe(false);
+      findSessionRecoveryTaskAndEventAuthorityFailure(f.database, recoveryInput)
+    ).resolves.toBe('project_event_wake_authority');
+    await expect(
+      findSessionRecoveryTaskAndEventAuthorityFailure(f.database, recoveryInput, async () => false)
+    ).resolves.toBe('project_event_wake_authority');
   });
 
   it('runs the production TaskRunner guard against cancellation during its final event RPC', async () => {
@@ -212,11 +246,8 @@ describe('recovery event authority at final asynchronous boundaries', () => {
       f.sqlite.exec("UPDATE tasks SET status = 'cancelled' WHERE id = 'T2'");
       return true;
     });
-    const runner = Object.assign(Object.create(TaskRunner.prototype), { env: f.env }) as {
-      hasRecoveryAuthority(input: StartTaskInput): Promise<boolean>;
-    };
     await expect(
-      runner.hasRecoveryAuthority({
+      findRecoveryAuthorityFailure(f.env, startTimeCtx, {
         taskId: 'T2',
         projectId: 'project',
         userId: 'user',
@@ -226,13 +257,15 @@ describe('recovery event authority at final asynchronous boundaries', () => {
           projectEventWakeGuard: guard.projectEventWake,
         },
       } as StartTaskInput)
-    ).resolves.toBe(false);
+    ).resolves.toBe('recovery_task_authority');
     expect(f.validateEvent).toHaveBeenCalledWith({
       projectId: 'project',
       sourceTaskId: 'root',
       chatSessionId: 'chat',
       batchId: 'batch',
       subscriptionId: 'subscription',
+      // A live VM wake treats its own chat consuming the batch as success.
+      acceptConsumedByTarget: true,
     });
   });
 
@@ -268,6 +301,7 @@ describe('recovery event authority at final asynchronous boundaries', () => {
         },
         containerFetch,
       }) as VmAgentContainer;
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       const response = await container.proxyHttpGuarded(
         new Request('http://container/prompt', { method: 'POST' }),
         undefined,
@@ -276,6 +310,18 @@ describe('recovery event authority at final asynchronous boundaries', () => {
       expect(response.status).toBe(409);
       expect(f.validateEvent).toHaveBeenCalledTimes(2);
       expect(containerFetch).not.toHaveBeenCalled();
+      // The entry check passed, so the refusal is the final check before transport.
+      expect(authorityRevocations(warn)).toEqual([
+        expect.objectContaining({
+          check:
+            revocation === 'event cancellation'
+              ? 'project_event_wake_authority'
+              : 'source_task_guard',
+          site: 'vm_agent_container.source_task_guard',
+          taskId: 'root',
+          chatSessionId: 'chat',
+        }),
+      ]);
     }
   );
 
@@ -288,11 +334,22 @@ describe('recovery event authority at final asynchronous boundaries', () => {
       lifecycleChain: Promise.resolve(),
       ctx: { storage: { get } },
     }) as VmAgentContainer;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const response = await container.proxyHttpGuarded(
       new Request('http://container/prompt', { method: 'POST' }),
       undefined,
       guard
     );
+    // The entry check names its refusal like every other authority check.
+    expect(authorityRevocations(warn)).toEqual([
+      expect.objectContaining({
+        check: 'project_event_wake_authority',
+        site: 'vm_agent_container.proxy_http_guarded',
+        taskId: 'root',
+        projectEventBatchId: 'batch',
+        projectEventSubscriptionId: 'subscription',
+      }),
+    ]);
     expect(response.status).toBe(409);
     expect(get).not.toHaveBeenCalledWith('lifecycleStatus');
   });
@@ -419,8 +476,8 @@ describe('stable-task wake authority', () => {
   it('allows the stable owner without replacement-task lineage metadata', async () => {
     const f = stableFixture();
     await expect(
-      isSessionRecoveryTaskAndEventAuthorized(f.database, f.input, f.validateEvent)
-    ).resolves.toBe(true);
+      findSessionRecoveryTaskAndEventAuthorityFailure(f.database, f.input, f.validateEvent)
+    ).resolves.toBeNull();
   });
 
   it.each([
@@ -430,18 +487,18 @@ describe('stable-task wake authority', () => {
   ])('rejects %s while the event RPC awaited', async (_label, mutation) => {
     const f = stableFixture();
     await expect(
-      isSessionRecoveryTaskAndEventAuthorized(f.database, f.input, async () => {
+      findSessionRecoveryTaskAndEventAuthorityFailure(f.database, f.input, async () => {
         f.sqlite.exec(mutation);
         return true;
       })
-    ).resolves.toBe(false);
+    ).resolves.toBe('recovery_task_authority');
   });
 
   it('rejects a revoked event subscription for a stable owner', async () => {
     const f = stableFixture();
     await expect(
-      isSessionRecoveryTaskAndEventAuthorized(f.database, f.input, async () => false)
-    ).resolves.toBe(false);
+      findSessionRecoveryTaskAndEventAuthorityFailure(f.database, f.input, async () => false)
+    ).resolves.toBe('project_event_wake_authority');
   });
 
   it('continues to enforce scheduled-wake membership without an event subscription', async () => {

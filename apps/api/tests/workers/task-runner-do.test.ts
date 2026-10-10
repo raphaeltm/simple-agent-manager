@@ -801,7 +801,7 @@ describe('TaskRunner state write fencing', () => {
       const oldState = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
       const { taskRunnerAttemptContext } =
         await import('../../src/durable-objects/task-runner/attempt-storage');
-      const oldContext = taskRunnerAttemptContext(instance.ctx, oldState);
+      const oldContext = taskRunnerAttemptContext(instance.ctx, oldState, env.DATABASE);
       const newState = {
         ...oldState,
         config: { ...oldState.config, recoveryAttemptId: 'wake-new' },

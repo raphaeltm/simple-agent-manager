@@ -74,6 +74,8 @@ describe('TaskRunner build-started callback handling', () => {
         callback(storage as unknown as DurableObjectTransaction),
     };
     runner.ctx = { storage };
+    // D1 is only read when a newer wake attempt refuses the write; this one is current.
+    Object.assign(runner, { env: { DATABASE: {} as D1Database } });
     runner.getState = vi.fn(async () => state);
 
     const before = state.workspaceReadyStartedAt;

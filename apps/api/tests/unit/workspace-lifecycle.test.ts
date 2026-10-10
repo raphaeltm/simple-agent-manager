@@ -198,7 +198,9 @@ describe('advanceWorkspaceReady — callback signal handling', () => {
   });
 
   it('persists state after storing callback signal', () => {
-    expect(advanceSection).toContain('putTaskRunnerState(this.ctx.storage, state)');
+    expect(advanceSection).toContain(
+      'putTaskRunnerState(this.ctx.storage, this.env.DATABASE, state)'
+    );
   });
 
   it('fires immediate alarm when DO is at workspace_ready step', () => {

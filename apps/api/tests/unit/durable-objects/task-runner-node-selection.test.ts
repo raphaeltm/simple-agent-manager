@@ -950,7 +950,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     });
     vi.mocked(rc.assertRecoveryAuthority)
       .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError());
+      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError('recovery_task_authority'));
     rc.env.NODE_LIFECYCLE = {
       idFromName: vi.fn((id: string) => id),
       get: vi.fn(() => ({

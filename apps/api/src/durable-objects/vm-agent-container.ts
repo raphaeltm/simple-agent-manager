@@ -11,7 +11,7 @@ import { commitContainerWakeFromSleep } from '../services/container-wake-commit'
 import { loadInstantRestoreWorkspace } from '../services/instant-restore-workspace';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 import {
-  isSessionRecoverySourceTaskGuardFullyValidForEnv,
+  findSessionRecoverySourceTaskGuardRefusal,
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../services/session-recovery-authority';
@@ -275,7 +275,8 @@ export class VmAgentContainer extends Container<Env> {
     // before proxyHttp() reaches prepareForRequest()/ensureAwake(). A caller-
     // side check alone leaves a network-RPC window where a terminal parent can
     // still cold-start compute.
-    if (!(await isSessionRecoverySourceTaskGuardFullyValidForEnv(this.env, sourceTaskGuard))) {
+    const site = 'vm_agent_container.proxy_http_guarded';
+    if (await findSessionRecoverySourceTaskGuardRefusal(this.env, sourceTaskGuard, site)) {
       await this.abortRevokedSourceTaskWake(sourceTaskGuard);
       return revokedSourceTaskResponse();
     }
@@ -612,12 +613,14 @@ export class VmAgentContainer extends Container<Env> {
   private async assertSourceTaskGuard(
     sourceTaskGuard?: VmAgentContainerRequestGuard
   ): Promise<void> {
-    if (
-      sourceTaskGuard &&
-      !(await isSessionRecoverySourceTaskGuardFullyValidForEnv(this.env, sourceTaskGuard))
-    ) {
-      throw new SessionRecoveryAuthorityRevokedError();
-    }
+    if (!sourceTaskGuard) return;
+    const site = 'vm_agent_container.source_task_guard';
+    const refusal = await findSessionRecoverySourceTaskGuardRefusal(
+      this.env,
+      sourceTaskGuard,
+      site
+    );
+    if (refusal) throw refusal;
   }
 
   private async clearSourceTaskWakeGuard(

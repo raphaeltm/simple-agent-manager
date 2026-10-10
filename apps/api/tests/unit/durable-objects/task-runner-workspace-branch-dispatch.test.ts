@@ -174,7 +174,7 @@ describe('TaskRunner workspace branch dispatch', () => {
     vi.mocked(rc.assertRecoveryAuthority)
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError());
+      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError('recovery_task_authority'));
     mocks.createWorkspaceOnNode.mockImplementationOnce(async (...args: unknown[]) => {
       const options = args[4] as { beforeExternalMutation: () => Promise<void> };
       await options.beforeExternalMutation();
