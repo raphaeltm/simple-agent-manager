@@ -9,6 +9,7 @@ import {
   buildSamBootstrapInstructions,
   buildVisibleInitialPrompt,
 } from '../../services/agent-bootstrap-prompt';
+import type { SamAwareAgentStartResult } from '../../services/agent-session-bootstrap';
 import { getRecoverySourceTaskGuard } from './helpers';
 import { prepareSnapshotRestoreAttempt } from './snapshot-restore-retry';
 import { transitionToInProgress } from './state-machine';
@@ -31,6 +32,33 @@ function buildVisibleTaskInitialPrompt(state: TaskRunnerState): string {
     message: state.config.taskDescription || state.config.taskTitle,
     attachments: state.config.attachments,
     systemPromptAppend: state.config.systemPromptAppend,
+  });
+}
+
+/**
+ * A session the wake restored never received the wake's first prompt (`initialPromptSent`), and
+ * nothing is queued for it. Queue the continue prompt once the chat points at this workspace
+ * (the ProjectData wake), and before `agentStarted` is written: a retry after that write skips
+ * bootstrap, and with it this step. The VM wake handoff hold (`isVmWakeHandoffPending`) delivers
+ * it only after `transitionToInProgress` commits.
+ */
+async function queueRestoredSessionPromptIfNeeded(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  started: Pick<SamAwareAgentStartResult, 'agentSessionId' | 'initialPromptSent'> | null
+): Promise<void> {
+  const prompt = state.config.restoredSessionPrompt;
+  // `initialPromptSent` is false only after a snapshot restore, so the wake's chat is set.
+  const chatSessionId = state.config.resumeSnapshotChatSessionId;
+  if (!started || started.initialPromptSent || !prompt || !chatSessionId) return;
+  await rc.assertRecoveryAuthority(state);
+  const { queueRestoredSessionPrompt } = await import('../../services/restored-session-prompt');
+  await queueRestoredSessionPrompt(rc.env, {
+    projectId: state.projectId,
+    taskId: state.taskId,
+    chatSessionId,
+    agentSessionId: started.agentSessionId,
+    prompt,
   });
 }
 
@@ -65,12 +93,8 @@ export async function handleAgentSession(
   // This two-step approach ensures that if create succeeds but start fails,
   // a retry will skip creation and retry only the start call.
   let stateChanged = false;
-  // Set only by the run whose snapshot restore resumed the saved agent session.
-  let restoredSessionPrompt: {
-    chatSessionId: string;
-    agentSessionId: string;
-    prompt: string;
-  } | null = null;
+  // Set only by the run that started the agent; a retry after `agentStarted` skips bootstrap.
+  let started: SamAwareAgentStartResult | null = null;
   if (!state.stepResults.agentStarted) {
     const { drizzle } = await import('drizzle-orm/d1');
     const schema = await import('../../db/schema');
@@ -140,15 +164,7 @@ export async function handleAgentSession(
     state.stepResults.mcpToken = result.mcpToken;
     state.stepResults.agentStarted = true;
     stateChanged = true;
-    // `initialPromptSent` is false only after a snapshot restore, so the wake's chat is set.
-    const wakeChatSessionId = state.config.resumeSnapshotChatSessionId;
-    if (!result.initialPromptSent && state.config.restoredSessionPrompt && wakeChatSessionId) {
-      restoredSessionPrompt = {
-        chatSessionId: wakeChatSessionId,
-        agentSessionId: result.agentSessionId,
-        prompt: state.config.restoredSessionPrompt,
-      };
-    }
+    started = result;
 
     log.info('task_runner_do.step.agent_session_started', {
       taskId: state.taskId,
@@ -207,20 +223,7 @@ export async function handleAgentSession(
     }
   }
 
-  if (restoredSessionPrompt) {
-    // A restored session never received the wake's first prompt (`initialPromptSent`), and
-    // nothing is queued for it. Queue it once the chat points at this workspace (the wake
-    // above), and before `agentStarted` is written: a retry after that write skips bootstrap,
-    // and with it this branch. The VM wake handoff hold (`isVmWakeHandoffPending`) delivers it
-    // only after `transitionToInProgress` commits.
-    await rc.assertRecoveryAuthority(state);
-    const { queueRestoredSessionPrompt } = await import('../../services/restored-session-prompt');
-    await queueRestoredSessionPrompt(rc.env, {
-      projectId: state.projectId,
-      taskId: state.taskId,
-      ...restoredSessionPrompt,
-    });
-  }
+  await queueRestoredSessionPromptIfNeeded(state, rc, started);
 
   if (stateChanged) {
     await rc.ctx.storage.put('state', state);

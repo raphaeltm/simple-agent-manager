@@ -100,7 +100,7 @@ export async function invalidParentWakeTargetResult(
     }>();
   const tasks = new Map((response.results ?? []).map((task) => [task.id, task]));
   const parent = tasks.get(claim.message.sourceTaskId);
-  const liveRecoveryOwner = (response.results ?? []).find(
+  const hasLiveRecoveryOwner = (response.results ?? []).some(
     (task) =>
       (task.recovery_source_task_id === claim.message.sourceTaskId ||
         task.id === parent?.superseded_by_task_id) &&
@@ -112,20 +112,19 @@ export async function invalidParentWakeTargetResult(
     ? (TASK_TERMINAL_STATUSES as readonly string[]).includes(parent.status)
     : false;
   const parentIsWakeable =
-    parent && (!parentIsTerminal || (parent.status === 'cancelled' && Boolean(liveRecoveryOwner)));
+    parent && (!parentIsTerminal || (parent.status === 'cancelled' && hasLiveRecoveryOwner));
   if (
     !parent ||
     !parentIsWakeable ||
-    (parent.chat_session_id !== claim.message.targetSessionId && !liveRecoveryOwner)
+    (parent.chat_session_id !== claim.message.targetSessionId && !hasLiveRecoveryOwner)
   ) {
+    let error = 'Parent task session binding changed';
+    if (!parent) error = 'Parent task no longer exists';
+    else if (parentIsTerminal) error = `Parent task is ${parent.status}`;
     return {
       kind: 'failed',
       reason: 'terminal_target',
-      error: !parent
-        ? 'Parent task no longer exists'
-        : parentIsTerminal
-          ? `Parent task is ${parent.status}`
-          : 'Parent task session binding changed',
+      error,
       runtimeIdentity: claim.message.runtimeIdentity,
       capabilities: null,
     };
