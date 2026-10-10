@@ -107,8 +107,9 @@ start config, so it could not observe this.
   - [x] Control: conversation-mode eviction recovery with a restored session gets no prompt
   - [x] Continuation outliving its wake (review): user cancel mid-handoff, and the eviction fence
         refusing the handoff, both drop it without waking or a wake failure (workers)
-  - [x] Validator unit tests (live, terminal, unbound, cross-project, superseded, read failure,
-        reconcile) on real SQLite with continuations from the production builder
+  - [x] Validator unit tests (live, terminal, unbound, cross-project, superseded, superseded in the
+        same millisecond, read failure, reconcile) on real SQLite with continuations from the
+        production builder
   - [x] Step ordering + pre-queue authority re-check (unit)
   - [x] Guarded re-wake + TTL-expiry wake-failure tests for the kind
   - [x] Revert the fix once; record which test went red (see Progress Notes)
@@ -151,6 +152,22 @@ start config, so it could not observe this.
 - Superseded check discrimination: neutralizing `hasNewerContinuation` reddens only the
   "superseded by a later wake" case. Removing the validator from the runner chain reddens the two
   workers "outlives its wake" cases (a misleading wake failure is raised instead).
+- Delta re-review (cloudflare-specialist, `469cd2606..982fc7a32`): PASS with one MEDIUM.
+  `hasNewerContinuation` compared `created_at` strictly while claims break ties on `rowid`
+  (`noEarlierDeliverySql`), so two continuations queued in the same millisecond would both be
+  delivered. Fixed by comparing `(created_at, rowid)` against the claimed row. A new
+  same-millisecond test covers it; restoring the strict `created_at` comparison reddens only that
+  test.
+- Pre-PR validation on the final head: `pnpm check:fast` exit 0; shared + api typecheck exit 0;
+  full API unit suite 858 files passed / 1 skipped, 12,005 tests passed / 2 skipped. The full
+  workers suite ran on the local integration of this change with A's branch (before the review
+  refinements): 126 files / 1,499 tests passed, plus one vitest teardown error
+  (`Closing rpc while "onUserConsoleLog" was pending`) attributed to the untouched
+  `agent-message-channels.test.ts`. Re-running that file and the main eviction test on the final
+  head passed 22/22 with no errors. CI runs the full workers suite on the final head.
+- Running `pnpm lint` (turbo 2.11.7) injected a third-party `turborepo-agent-rules` block into the
+  root `AGENTS.md`; it was reverted and is not part of this change (`turbo.json` has no
+  `agentGuidance: false` opt-out).
 - Staging: not run. The optional eviction check would require driving a staging VM into
   system-wide memory exhaustion (devcontainers have no per-container memory limit), which is not a
   safe, deterministic trigger. The delivery-after-commit mechanics were live-verified on staging by
