@@ -76,7 +76,7 @@ Tokens contain 32 random bytes and use the `sam_wh_` prefix. SAM stores a keyed 
 
 SAM does not retain raw request bodies, arbitrary request headers, bearer tokens, idempotency keys, or rendered prompts in webhook delivery history. The audit contains outcome, HTTP status, byte count, timestamps, and linked execution/error identifiers. Canonical ProjectData webhook events retain only bounded, redacted facts for subscription matching and delivery. Audit records expire automatically; the default retention is seven days.
 
-Disabling or pausing a trigger prevents new webhook work. Best-effort IP and per-trigger request damping reduces bursts; because Cloudflare KV counters are eventually consistent, it is not a strict distributed quota. The shared trigger admission path enforces skip-if-running, concurrency, durable execution reservation, failure tracking, and task submission for cron, GitHub, webhook, and manual sources.
+Disabling or pausing a trigger prevents new webhook work. Best-effort IP and per-trigger request damping reduces bursts; because Cloudflare KV counters are eventually consistent, it is not a strict distributed quota. The shared trigger admission path enforces skip-if-running, concurrency, durable execution reservation, failure tracking, and task submission for cron, GitHub, webhook, and manual sources. A previous run whose task has gone to sleep is not running, so it no longer holds a skip-if-running or concurrency slot; its conversation stays available and a message can still wake it.
 
 ## Management API
 

@@ -119,6 +119,15 @@ export async function startRecoveryTask(
   if (task.status === 'in_progress') return;
 
   const contract = parseSessionRuntimeContract(context.snapshot.runtimeContractJson);
+  const taskMode =
+    contract?.taskContext?.taskMode ?? (task.taskMode === 'task' ? 'task' : 'conversation');
+  // A conversation agent always waits for its user; only a task agent whose runtime
+  // was lost mid-task has work to continue without a queued message. VM-only:
+  // ensureSessionRecovery refuses an Instant snapshot, which wakes in place.
+  const nextStep =
+    taskMode === 'task' && options.wakeCause === 'runtime_lost'
+      ? 'continue_assigned_task'
+      : 'answer_queued_message';
   const profile = task.agentProfileHint
     ? await db
         .select()
@@ -156,7 +165,10 @@ export async function startRecoveryTask(
       userEmail: context.user.email,
       githubId: context.user.githubId,
       taskTitle: task.title,
-      taskDescription: sessionRecoveryInitialPrompt(sleptFallbackRecord(context.snapshot)),
+      taskDescription: sessionRecoveryInitialPrompt(
+        sleptFallbackRecord(context.snapshot),
+        nextStep
+      ),
       repository: context.project.repository,
       installationId: context.project.installationId,
       outputBranch: task.outputBranch,
@@ -175,8 +187,7 @@ export async function startRecoveryTask(
       credentialAttributionUserId: placementResolution.credentialAttributionUserId,
       credentialAttributionProjectId: placementResolution.credentialAttributionProjectId,
       credentialAttributionSource: placementResolution.credentialAttributionSource,
-      taskMode:
-        contract?.taskContext?.taskMode ?? (task.taskMode === 'task' ? 'task' : 'conversation'),
+      taskMode,
       model: contract ? contract.model : (profile?.model ?? null),
       effort: contract
         ? contract.effort

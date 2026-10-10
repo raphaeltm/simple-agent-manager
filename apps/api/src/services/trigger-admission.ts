@@ -10,6 +10,11 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
+import {
+  SLEEPING_TASK_STATUSES,
+  taskStatusIsNonTerminalSql,
+  TERMINAL_STATUS_VALUES,
+} from './task-status';
 import { resolveTriggerExecutionUserId } from './trigger-execution-principal';
 import { type SubmittedTriggerTask, TriggerTaskSubmissionPendingError } from './trigger-submission';
 import { submitTriggeredTask } from './trigger-submit';
@@ -18,7 +23,30 @@ export type TriggerTaskSubmitter = typeof submitTriggeredTask;
 
 type AdmissionSkipReason = Extract<TriggerSkipReason, 'still_running' | 'concurrent_limit'>;
 const TERMINAL_TASK_STATUSES = new Set<string>(TASK_TERMINAL_STATUSES);
-const TERMINAL_TASK_STATUS_SQL = TASK_TERMINAL_STATUSES.map((status) => `'${status}'`).join(', ');
+
+/**
+ * Whether execution `e` (with its linked task `t` LEFT JOINed) still holds one of its
+ * trigger's run slots, for both skip_if_running and max_concurrent. A reserved or
+ * running execution holds it, and so does any execution whose linked task has not
+ * terminalized, which covers the cleanup sweep's hard-residence backstop.
+ *
+ * A sleeping run does not: its task released the runtime and is not running. It stays
+ * wakeable, so a follow-up can still resume it, but it must not block the next run
+ * until its snapshot expires days later.
+ *
+ * Both task-status checks are denylists, so a new task status holds the slot until
+ * someone decides otherwise (`packages/shared/.claude/rules/79`). The status
+ * classification test in `trigger-admission-run-slot.test.ts` fails until it does.
+ * Bind {@link EXECUTION_HOLDS_RUN_SLOT_BINDINGS} at this predicate's position.
+ */
+const EXECUTION_HOLDS_RUN_SLOT_SQL = `(
+  (
+    e.status IN ('queued', 'running')
+    OR (e.task_id IS NOT NULL AND ${taskStatusIsNonTerminalSql('t.status')})
+  )
+  AND (t.status IS NULL OR t.status NOT IN (${SLEEPING_TASK_STATUSES.map(() => '?').join(', ')}))
+)`;
+const EXECUTION_HOLDS_RUN_SLOT_BINDINGS = [...TERMINAL_STATUS_VALUES, ...SLEEPING_TASK_STATUSES];
 
 export type TriggerAdmissionResult =
   | {
@@ -140,13 +168,10 @@ async function classifyReservationFailure(
        (SELECT COUNT(*) FROM trigger_executions e
           LEFT JOIN tasks t ON t.id = e.task_id
          WHERE e.trigger_id = triggers.id
-           AND (
-             e.status IN ('queued', 'running')
-             OR (e.task_id IS NOT NULL AND t.status NOT IN (${TERMINAL_TASK_STATUS_SQL}))
-           )) AS activeCount
+           AND ${EXECUTION_HOLDS_RUN_SLOT_SQL}) AS activeCount
      FROM triggers WHERE id = ? AND project_id = ?`
   )
-    .bind(trigger.id, trigger.projectId)
+    .bind(...EXECUTION_HOLDS_RUN_SLOT_BINDINGS, trigger.id, trigger.projectId)
     .first<{
       status: string;
       skipIfRunning: number;
@@ -201,10 +226,7 @@ export async function admitAndSubmitTriggerExecution(
         AND (SELECT COUNT(*) FROM trigger_executions e
              LEFT JOIN tasks t ON t.id = e.task_id
              WHERE e.trigger_id = triggers.id
-               AND (
-                 e.status IN ('queued', 'running')
-                 OR (e.task_id IS NOT NULL AND t.status NOT IN (${TERMINAL_TASK_STATUS_SQL}))
-               ))
+               AND ${EXECUTION_HOLDS_RUN_SLOT_SQL})
             < CASE WHEN skip_if_running = 1 THEN 1 ELSE max_concurrent END`
   ).bind(
     executionId,
@@ -214,7 +236,8 @@ export async function admitAndSubmitTriggerExecution(
     now,
     trigger.id,
     trigger.projectId,
-    allowPaused
+    allowPaused,
+    ...EXECUTION_HOLDS_RUN_SLOT_BINDINGS
   );
   const increment = env.DATABASE.prepare(
     `UPDATE triggers SET next_execution_sequence = next_execution_sequence + 1, updated_at = ?

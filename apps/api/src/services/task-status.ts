@@ -1,4 +1,8 @@
-import { TASK_EXECUTION_STEPS, type TaskExecutionStep, type TaskStatus } from '@simple-agent-manager/shared';
+import {
+  TASK_EXECUTION_STEPS,
+  type TaskExecutionStep,
+  type TaskStatus,
+} from '@simple-agent-manager/shared';
 
 export const TASK_STATUSES: TaskStatus[] = [
   'draft',
@@ -12,7 +16,11 @@ export const TASK_STATUSES: TaskStatus[] = [
   'cancelled',
 ];
 
-export const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set(['completed', 'failed', 'cancelled']);
+export const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set([
+  'completed',
+  'failed',
+  'cancelled',
+]);
 
 /** Canonical bind values for raw SQL task terminal-state guards. */
 export const TERMINAL_STATUS_VALUES: readonly TaskStatus[] = Object.freeze([...TERMINAL_STATUSES]);
@@ -27,6 +35,36 @@ export function taskStatusIsNonTerminalSql(column = 'status'): string {
 }
 
 export const TASK_EXECUTION_STATUSES: TaskStatus[] = ['queued', 'delegated', 'in_progress'];
+
+/**
+ * A task that holds a live agent runtime or is acquiring one. Only these count as
+ * running: they hold dispatch and trigger run slots and may act as MCP callers.
+ * `awaiting_followup` is no longer a `TaskStatus` (it is an execution step), but
+ * rows written before that change can still hold it.
+ */
+export const LIVE_TASK_STATUSES: readonly string[] = Object.freeze([
+  'queued',
+  'delegated',
+  'in_progress',
+  'awaiting_followup',
+]);
+
+/**
+ * A sleeping task released its runtime but keeps its task and chat identity.
+ * Durable messages, schedules and events can wake it, but it is not running.
+ */
+export const SLEEPING_TASK_STATUSES: readonly string[] = Object.freeze([
+  'sleeping',
+] satisfies TaskStatus[]);
+
+/**
+ * Every task a durable message, schedule or event can still reach. Use it to ask
+ * "can this task be woken?", and {@link LIVE_TASK_STATUSES} to ask "is it running?".
+ */
+export const WAKEABLE_TASK_STATUSES: readonly string[] = Object.freeze([
+  ...LIVE_TASK_STATUSES,
+  ...SLEEPING_TASK_STATUSES,
+]);
 
 const TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   draft: ['ready', 'cancelled'],
@@ -87,7 +125,7 @@ export function getExecutionStepIndex(step: TaskExecutionStep): number {
  */
 export function canProgressExecutionStep(
   from: TaskExecutionStep | null,
-  to: TaskExecutionStep,
+  to: TaskExecutionStep
 ): boolean {
   if (from === null) {
     return true; // Any step is valid from unset

@@ -125,15 +125,43 @@ export function sessionSleepBlockedNotice(
 export const SESSION_RECOVERY_INITIAL_PROMPT =
   'Resume this sleeping conversation from the persisted transcript. Use get_session_messages for this chat session before relying on memory. Do not repeat prior work; wait for and answer the latest queued follow-up message.';
 
+const NO_EXTERNAL_REPLAY =
+  'Do not repeat actions with effects outside this workspace that the transcript shows already happened, such as pushes, pull requests, deployments, messages, or API calls. If you cannot tell whether one happened, check first';
+
+/**
+ * The first prompt of a task-mode wake that nothing queued: the runtime was lost
+ * mid-task (an eviction), so the agent must carry on with its task, not wait.
+ */
+export const SESSION_RECOVERY_CONTINUE_TASK_PROMPT = [
+  'Resume your assigned task from the persisted transcript. Use get_session_messages for this chat session before relying on memory.',
+  '',
+  'Your previous workspace was stopped while you were working, and no new message is queued for you. Continue the task from where the transcript ends, without redoing work it shows is finished.',
+  '',
+  `${NO_EXTERNAL_REPLAY}.`,
+].join('\n');
+
+/**
+ * What the woken agent does once it has caught up: answer the queued message that
+ * caused the wake, or continue the assigned task whose runtime was lost.
+ */
+export type SessionRecoveryNextStep = 'answer_queued_message' | 'continue_assigned_task';
+
 /**
  * The first prompt of a wake. After a fallback sleep it tells the agent which files to
  * expect, how to check them, and not to replay effects outside the workspace. Such a
  * wake always starts a new agent session (`session-snapshot-restore-response.ts`), so
  * the agent does receive it.
  */
-export function sessionRecoveryInitialPrompt(record: SessionSleepFallbackRecord | null): string {
+export function sessionRecoveryInitialPrompt(
+  record: SessionSleepFallbackRecord | null,
+  nextStep: SessionRecoveryNextStep = 'answer_queued_message'
+): string {
   const point = record?.outcome === 'slept' ? record.recoveryPoint : null;
-  if (!point) return SESSION_RECOVERY_INITIAL_PROMPT;
+  if (!point) {
+    return nextStep === 'continue_assigned_task'
+      ? SESSION_RECOVERY_CONTINUE_TASK_PROMPT
+      : SESSION_RECOVERY_INITIAL_PROMPT;
+  }
   const complete = point.snapshotStatus === 'available' && point.degradation === 'none';
   const short = shortCommit(point.commit);
   const where = point.branch ? `on branch ${point.branch}` : 'in this repository';
@@ -148,8 +176,10 @@ export function sessionRecoveryInitialPrompt(record: SessionSleepFallbackRecord 
     'Before continuing:',
     `1. Run git status and git log -1 to confirm the workspace is at commit ${short} ${where}. If it is not, tell the user what you found.`,
     '2. Compare the transcript with the files to find work that was lost, and redo only what is missing.',
-    '3. Do not repeat actions with effects outside this workspace that the transcript shows already happened, such as pushes, pull requests, deployments, messages, or API calls. If you cannot tell whether one happened, check first or ask the user.',
+    `3. ${NO_EXTERNAL_REPLAY} or ask the user.`,
     '',
-    'Then wait for and answer the latest queued follow-up message.',
+    nextStep === 'continue_assigned_task'
+      ? 'Then continue your assigned task from where the transcript ends.'
+      : 'Then wait for and answer the latest queued follow-up message.',
   ].join('\n');
 }

@@ -136,25 +136,31 @@ describe('versioned schedule recovery', () => {
     await expect(f.reconcile(true)).rejects.toThrow('version conflict');
   });
 
-  it.each(['delegated', 'in_progress', 'awaiting_followup', 'completed', 'failed', 'cancelled'])(
-    'observes %s without replaying task admission',
-    async (status) => {
-      const f = fixture();
-      f.receipt(status);
-      const result = await f.reconcile();
-      expect(result.schedule.execution).toMatchObject({ status, retrySubmissionAllowed: false });
-      expect(result.recovery?.outcome).toBe('observed');
-      expect(f.row().submission_completed_at).toEqual(expect.any(Number));
-      if (['completed', 'failed', 'cancelled'].includes(status))
-        expect(f.row().execution_finished_at).toEqual(expect.any(Number));
-      else
-        expect(f.row()).toMatchObject({
-          state: 'admitted',
-          execution_finished_at: null,
-          next_attempt_at: expect.any(Number),
-        });
-    }
-  );
+  // `sleeping` is a started task whose runtime was released: monitoring resumes like in_progress.
+  it.each([
+    'delegated',
+    'in_progress',
+    'awaiting_followup',
+    'sleeping',
+    'completed',
+    'failed',
+    'cancelled',
+  ])('observes %s without replaying task admission', async (status) => {
+    const f = fixture();
+    f.receipt(status);
+    const result = await f.reconcile();
+    expect(result.schedule.execution).toMatchObject({ status, retrySubmissionAllowed: false });
+    expect(result.recovery?.outcome).toBe('observed');
+    expect(f.row().submission_completed_at).toEqual(expect.any(Number));
+    if (['completed', 'failed', 'cancelled'].includes(status))
+      expect(f.row().execution_finished_at).toEqual(expect.any(Number));
+    else
+      expect(f.row()).toMatchObject({
+        state: 'admitted',
+        execution_finished_at: null,
+        next_attempt_at: expect.any(Number),
+      });
+  });
 
   it('refuses expired deadlines, revoked creators and colliding checkpoints', async () => {
     const f = fixture();

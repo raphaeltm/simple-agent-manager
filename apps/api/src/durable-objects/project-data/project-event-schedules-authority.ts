@@ -1,5 +1,6 @@
 import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
 
+import { WAKEABLE_TASK_STATUSES } from '../../services/task-status';
 import { ProjectEventValidationError } from './project-events-contracts';
 import type { Env } from './types';
 
@@ -53,16 +54,17 @@ export async function requireScheduleAction(
     return null;
   }
   const targetTaskId = requireScheduleTarget(sql, action.sessionId);
+  // A sleeping VM task is a valid target: the scheduled message is what wakes it.
   const task = await env.DATABASE.prepare(
     `SELECT t.id FROM tasks t
     JOIN project_members m ON m.project_id = t.project_id AND m.user_id = ?
     JOIN users u ON u.id = m.user_id
     WHERE t.id = ? AND t.project_id = ? AND t.chat_session_id = ?
-      AND t.status IN ('queued','delegated','in_progress','awaiting_followup')
+      AND t.status IN (${WAKEABLE_TASK_STATUSES.map(() => '?').join(', ')})
       AND m.status = 'active' AND u.status = 'active'
       AND m.role IN ('owner','admin','maintainer') LIMIT 1`
   )
-    .bind(userId, targetTaskId, projectId, action.sessionId)
+    .bind(userId, targetTaskId, projectId, action.sessionId, ...WAKEABLE_TASK_STATUSES)
     .first();
   if (!task)
     throw new ProjectEventValidationError(
