@@ -165,8 +165,10 @@ direct senders below call `sendPromptToAgentOnNode` themselves and skip
       and in the PR)
 - [x] Docs: architecture overview (prompt-delivery paragraph) and chat features
       ("Sleeping") describe the handoff hold
-- [ ] Lint, typecheck, focused and full API tests (sequential), build
-- [ ] Local specialist reviews + task-completion-validator
+- [x] Lint, typecheck, focused and full API tests (sequential), build (full unit suite
+      11,962 tests; full Workers suite exceeds a local run, so a focused 22-file run passed
+      174/174 and CI runs all shards)
+- [x] Local specialist reviews + task-completion-validator (all PASS or ADDRESSED; see PR)
 - [ ] Staging: one real VM wake via a queued event or DM (STAGING_CLAIM/RELEASE, clean up)
 - [ ] PR, CI, CodeRabbit request and wait, SonarCloud, merge, production deploy and
       release check
@@ -213,12 +215,15 @@ direct senders below call `sendPromptToAgentOnNode` themselves and skip
 1. Proven root cause is recorded (this file plus the PR) with production evidence.
 2. A durable delivery cannot reach a VM wake runtime before `transitionToInProgress`
    commits; it is delivered promptly after commit via the wake-ready signal.
-3. The real-ordering test fails before the fix (handoff aborted by "authority revoked")
+3. A live VM wake is not revoked when its own chat consumes the batch (reads or acks it)
+   before the commit; cancellation, expiry and subscription changes still revoke, and the
+   Instant guard stays strict.
+4. The real-ordering test fails before the fix (handoff aborted by "authority revoked")
    and passes after; controls prove superseded attempts, terminal tasks, and genuinely
    revoked event authority still abort.
-4. Every `SessionRecoveryAuthorityRevokedError` throw site logs its check and the
+5. Every `SessionRecoveryAuthorityRevokedError` throw site logs its check and the
    snapshot claim fields; no secrets.
-5. Production: count wakes since the deploy that failed with "Session recovery
+6. Production: count wakes since the deploy that failed with "Session recovery
    authority was revoked" (expected 0). The 7-day/50-wake soak is reported as pending
    with the rerunnable query.
 
