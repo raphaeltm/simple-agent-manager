@@ -24,6 +24,7 @@ import { sleptFallbackRecord } from './session-sleep-episode';
 import {
   SESSION_RECOVERY_INITIAL_PROMPT,
   sessionRecoveryInitialPrompt,
+  type SessionRecoveryNextStep,
 } from './session-sleep-fallback-messages';
 import type { SessionRecoverySourceTaskGuard } from './session-snapshots';
 import { startTaskRunnerDO } from './task-runner-do';
@@ -96,6 +97,20 @@ export async function abandonRecoveryHandoff(
   }
 }
 
+/**
+ * What the woken agent does first. A conversation agent always waits for its user; only a
+ * task agent whose runtime was lost mid-task has work to continue without a queued
+ * message. VM-only: ensureSessionRecovery refuses an Instant snapshot, which wakes in place.
+ */
+function recoveryNextStep(
+  taskMode: 'task' | 'conversation',
+  wakeCause: SessionRecoveryOptions['wakeCause']
+): SessionRecoveryNextStep {
+  return taskMode === 'task' && wakeCause === 'runtime_lost'
+    ? 'continue_assigned_task'
+    : 'answer_queued_message';
+}
+
 export async function startRecoveryTask(
   env: Env,
   context: RecoveryContext,
@@ -121,13 +136,7 @@ export async function startRecoveryTask(
   const contract = parseSessionRuntimeContract(context.snapshot.runtimeContractJson);
   const taskMode =
     contract?.taskContext?.taskMode ?? (task.taskMode === 'task' ? 'task' : 'conversation');
-  // A conversation agent always waits for its user; only a task agent whose runtime
-  // was lost mid-task has work to continue without a queued message. VM-only:
-  // ensureSessionRecovery refuses an Instant snapshot, which wakes in place.
-  const nextStep =
-    taskMode === 'task' && options.wakeCause === 'runtime_lost'
-      ? 'continue_assigned_task'
-      : 'answer_queued_message';
+  const nextStep = recoveryNextStep(taskMode, options.wakeCause);
   const profile = task.agentProfileHint
     ? await db
         .select()

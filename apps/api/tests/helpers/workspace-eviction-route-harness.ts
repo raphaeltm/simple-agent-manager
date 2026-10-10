@@ -50,7 +50,7 @@ export function createEvictionEnv(sqlite: Database.Database, vars: Partial<Env> 
     NODE_LIFECYCLE: {
       idFromName: (id: string) => id,
       get: () => ({
-        getWorkspaceDeletionAttemptState: async () => ({ pending: false }),
+        getWorkspaceDeletionAttemptState: () => Promise.resolve({ pending: false }),
         finalizeWorkspaceEviction: (
           identity: Parameters<typeof finalizeWorkspaceEvictionInNode>[1]
         ) => {
