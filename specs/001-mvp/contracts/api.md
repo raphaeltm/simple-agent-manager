@@ -37,6 +37,11 @@ Authorization: Bearer {API_TOKEN}
 
 ### Owner retained session snapshot downloads
 
+The same artifact path supports authenticated `HEAD` with the same ownership, integrity
+and private attachment headers, but no response body. The browser checks availability
+with `HEAD`, then uses a native `GET` download to avoid buffering WIP in phone memory.
+A capture/expiry change between requests can still make the final GET fail safely.
+
 `GET /api/projects/:projectId/sessions/:sessionId/retained-snapshot/:artifact`
 accepts only `manifest` or `wip`. This is a browser-session route: active approved account,
 active original-project access, original session creator, and retained snapshot owner must

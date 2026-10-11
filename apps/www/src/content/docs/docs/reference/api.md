@@ -194,6 +194,11 @@ Get the provisioning progress log for a workspace.
 
 ## Retained session work downloads
 
+The same artifact path supports authenticated `HEAD` with the same ownership, integrity
+and private attachment headers, but no response body. The browser checks availability
+with `HEAD`, then uses a native `GET` download to avoid buffering WIP in phone memory.
+A capture/expiry change between requests can still make the final GET fail safely.
+
 `GET /api/projects/:projectId/sessions/:sessionId/retained-snapshot/manifest` and
 `GET /api/projects/:projectId/sessions/:sessionId/retained-snapshot/wip` return private
 attachments using browser-session authentication. Only the approved active session creator

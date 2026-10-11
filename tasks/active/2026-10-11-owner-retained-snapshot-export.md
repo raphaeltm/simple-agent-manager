@@ -20,9 +20,9 @@ The workspace callback artifact download requires the original runtime identity.
 
 - [x] Real Worker route/DO/D1/R2 tests first: owner success, stopped/archive/missing workspace, foreign/missing nondisclosure, same-project different owner, snapshot/session mismatch, expired/deleted, capture/expiry/object races, missing/corrupt artifacts, headers/auth/errors.
 - [x] Separate browser-auth route for manifest/WIP only, canonical identity/generation/integrity and final authorization recheck, safe errors and private no-store attachment.
-- [ ] Existing session UI owner-only phone-usable download control with errors and no wake/mutations.
+- [x] Existing session UI owner-only phone-usable download control with errors and no wake/mutations.
 - [x] API contract/reference and end-user docs synchronized; existing limits documented.
-- [ ] Mobile+desktop Playwright interaction/screenshots with synthetic stress data; inspect for overflow/clipping/secrets.
+- [x] Mobile+desktop Playwright interaction/screenshots with synthetic stress data; inspect for overflow/clipping/secrets.
 - [ ] Lint/typecheck/tests/build and required CI.
 - [ ] Independent security review, fresh adversarial review, Cloudflare/UI/completion/domain review; all findings resolved.
 - [ ] Bounded staging plan: synthetic artifacts only, zero VMs/no added spend; coordinator grant BEFORE shared deployment/resources; restore prior stage.
@@ -38,4 +38,11 @@ Repository /do skill; API/web AGENTS.md; API/env references; scoped callback-aut
 
 ## Gate state
 
-Implementation mounted; real Worker/DO/D1/R2 suite 37/37 PASS including real BetterAuth cookie and HEAD preflight. Owner download uses authenticated HEAD then native GET attachment to avoid phone Blob buffering. Callback routes/services remain unchanged. Independent security mounted review PASS; fresh adversarial final browser proof pending; Cloudflare/test/docs/Principle XI review PASS. Full typecheck PASS (www reports baseline template diagnostics). Lint import sorting fixed, rerun pending. Root tests pending; parallel root build collided with test-triggered www build, needs serial rerun. Local full session-page desktop/mobile audit pending. No staging grant or deployment; bounded zero-VM synthetic plan prepared. Coordinator and Phase1 received queued interface/path messages and channel claims before additive index/sessionUI edits; Phase1 current diff had no overlap. Never merge/ready/production rollout; original A artifacts uninspected and recovery unapproved.
+Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2308 (initial API87eaa43e7; final head recorded in PR body). Never ready/merge/production deploy. Task stays active while staging authorization is pending.
+
+- Full root lint/typecheck/tests/build PASS; formatting ratchet and file-size/AST checks PASS (baseline warnings). API12010/web4045 tests plus packages passed; real Worker boundary37/37 PASS. Final web lint/typecheck/component checks PASS after UI edits.
+- Independent security and fresh adversarial source PASS; Cloudflare/test/docs/Principle XI PASS. Findings fixed: shared DO helper raw provider logging + implicit metadata write avoided; D1/DO/R2 deadlines and unused stream cancellation bounded; native browser attachment avoids large phone Blob.
+- Full real session-page Playwright9/9 PASS at375x667/320x667/1280x800: exact seven synthetic bytes via actual local HTTP attachment server (no redirects), safe404/retry, other-owner hiding, long/special/empty fixtures,35messages+35sessions, keyboard control. Final exact-candidate browser rerun15/15 PASS including56px summary assertion and390px/tablet sizes. Screenshots tasks/evidence/2026-10-11-owner-retained-export inspected by primary and UI reviewer; synthetic only, no secrets/content requiring redaction.
+- UI/docs/completion review PASS for implemented scope with CI/staging/PR gates explicitly pending. API references describe authenticated HEAD and native GET; a capture/expiry change after HEAD can make final native GET fail safely outside the component error UI. Physical iOS Safari untested.
+- No staging grant, deployment or shared resources. Bounded zero-VM plan prepared: capture current stage revisions/restore target, one <=1KiB synthetic fixture, normal designated smoke-owner flow, no VM/Container/Instant/pool/credentials/global-auth/config/migrations, clean own fixture, restore priorstage under coordinator sequencing. No production artifacts accessed; original A WIP remains unverified and recovery unapproved.
+- Coordinator/Phase1 queued exact path/interface messages and channel claims before additive index/sessionUI overlap; Phase1 current diff had no overlap. Existing snapshot callback/routes/services and original branches/PRs untouched.
