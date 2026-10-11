@@ -1,0 +1,42 @@
+[
+  {
+    "id": "4e126415-a7fc-4979-a170-031e69af806f",
+    "sessionId": "8a7ca82f-2636-459e-b32d-5ccf5f88b606",
+    "role": "tool",
+    "content": "{\n  \"totalAgents\": 0,\n  \"agents\": [],\n  \"filter\": {\n    \"prHeadBranch\": \"sam/wave-d-no-owner-probe-96510f86b\",\n    \"prUrl\": \"https://github.com/raphaeltm/simple-agent-manager/pull/999999999\"\n  }\n}",
+    "createdAt": 1791732149681,
+    "sequence": 22
+  },
+  {
+    "id": "7bf0b6a6-92cd-4a36-899c-8f3eeceeafbb",
+    "sessionId": "8a7ca82f-2636-459e-b32d-5ccf5f88b606",
+    "role": "tool",
+    "content": "Error: tool call error: tool call failed for `sam-mcp/list_project_agents`\n\nCaused by:\n    Mcp error: -32602: prHeadBranch must be a non-empty string",
+    "createdAt": 1791732154054,
+    "sequence": 24
+  },
+  {
+    "id": "d245b9cd-ef20-43be-807e-a5f25f5ca231",
+    "sessionId": "8a7ca82f-2636-459e-b32d-5ccf5f88b606",
+    "role": "tool",
+    "content": "{\n  \"tasks\": [\n    {\n      \"id\": \"01M4NRPE6Z6HRQE2QEGX0QPT3Q\",\n      \"title\": \"Wave D bounded staging MCP verification. Read-only only: do not edit files/repo, dispatch/wake ta...\",\n      \"status\": \"in_progress\",\n      \"priority\": 0,\n      \"descriptionSnippet\": \"Wave D bounded staging MCP verification. Read-only only: do not edit files/repo, dispatch/wake tasks, change profiles/credentials/trigger, merge or run missions. First call get_instructions and assert...\",\n      \"outputBranch\": null,\n      \"outputPrUrl\": null,\n      \"outputSummary\": null,\n      \"updatedAt\": \"2026-10-11T15:20:38.988Z\"\n    }\n  ],\n  \"count\": 1,\n  \"hasMore\": false,\n  \"nextCursor\": null\n}",
+    "createdAt": 1791732157123,
+    "sequence": 26
+  },
+  {
+    "id": "a8f27fcb-c7f8-416a-91ab-45945ddd1a52",
+    "sessionId": "8a7ca82f-2636-459e-b32d-5ccf5f88b606",
+    "role": "tool",
+    "content": "{\n  \"tasks\": [],\n  \"count\": 0,\n  \"hasMore\": false,\n  \"nextCursor\": null\n}",
+    "createdAt": 1791732160202,
+    "sequence": 28
+  },
+  {
+    "id": "0602118e-9d98-4798-93e2-f048314f3614",
+    "sessionId": "8a7ca82f-2636-459e-b32d-5ccf5f88b606",
+    "role": "tool",
+    "content": "{\n  \"tasks\": [],\n  \"count\": 0,\n  \"hasMore\": false,\n  \"nextCursor\": null\n}",
+    "createdAt": 1791732163165,
+    "sequence": 30
+  }
+]
