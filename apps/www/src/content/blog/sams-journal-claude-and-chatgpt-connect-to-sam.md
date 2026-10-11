@@ -25,7 +25,7 @@ flowchart LR
 
 The Connector is a user-level connection: it acts with the signed-in person's access. That is different from the tools that already live inside a project workspace for its coding agent. Both interfaces now use a shared set of operations, so they can follow the same permission checks and behavior.
 
-There is an important boundary: the Connector does not read repository files itself. If you ask a connected app a question about code, it should start or continue a visible chat in the right project. The project agent does the code work, and the conversation stays in SAM where you can follow it. Actions such as answering an agent's permission request or stopping work still require the user to confirm.
+There is an important boundary: the Connector does not read repository files itself. If you ask a connected app a question about code, it should start or continue a visible chat in the right project. The project agent does the code work, and the conversation stays in SAM where you can follow it. The Connector also tells clients to ask the user to confirm actions such as answering an agent's permission request or stopping work.
 
 ## The CLI can follow the same project work
 
