@@ -137,7 +137,9 @@ describe('task reuse metering through real placement and SQL', () => {
       arrange: (f, taskId, cs) => {
         setTask(f, taskId, 'chat_session_id', cs);
         f.sqlite
-          .prepare('UPDATE task_submission_checkpoints SET intent_fingerprint = ? WHERE task_id = ?')
+          .prepare(
+            'UPDATE task_submission_checkpoints SET intent_fingerprint = ? WHERE task_id = ?'
+          )
           .run('sha256:' + 'b'.repeat(64), taskId);
       },
       expected: () => `${RESERVED}reserved submission checkpoint no longer matches this start`,
@@ -219,15 +221,15 @@ describe('task reuse metering through real placement and SQL', () => {
     expect(
       f.sqlite.prepare('SELECT workspace_id FROM tasks WHERE id = ?').get(start.taskId)
     ).toEqual(before);
-    expect(
-      f.sqlite.prepare("SELECT status FROM workspaces WHERE id = 'allocated'").get()
-    ).toEqual({ status: 'stopped' });
+    expect(f.sqlite.prepare("SELECT status FROM workspaces WHERE id = 'allocated'").get()).toEqual({
+      status: 'stopped',
+    });
     expect(f.sqlite.prepare('SELECT COUNT(*) AS count FROM compute_usage').get()).toEqual({
       count: 0,
     });
   });
 
-  it('assigns the workspace when the task row already carries this start\'s session', async () => {
+  it("assigns the workspace when the task row already carries this start's session", async () => {
     // dispatch_task now commits tasks.chat_session_id in the task INSERT.
     const { f, start, state, rc, chatSessionId } = await claimFixture(false);
     setTask(f, start.taskId, 'chat_session_id', chatSessionId);
@@ -235,10 +237,12 @@ describe('task reuse metering through real placement and SQL', () => {
     await claimWorkspaceAllocationForTask(state, rc, 'allocated', new Date().toISOString());
 
     expect(
-      f.sqlite.prepare('SELECT workspace_id, chat_session_id FROM tasks WHERE id = ?').get(start.taskId)
+      f.sqlite
+        .prepare('SELECT workspace_id, chat_session_id FROM tasks WHERE id = ?')
+        .get(start.taskId)
     ).toEqual({ workspace_id: 'allocated', chat_session_id: chatSessionId });
-    expect(
-      f.sqlite.prepare("SELECT status FROM workspaces WHERE id = 'allocated'").get()
-    ).toEqual({ status: 'creating' });
+    expect(f.sqlite.prepare("SELECT status FROM workspaces WHERE id = 'allocated'").get()).toEqual({
+      status: 'creating',
+    });
   });
 });

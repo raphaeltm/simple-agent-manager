@@ -428,7 +428,10 @@ describe('launchInstantSession', () => {
     );
     expect(result.chatSessionId).toBe('reserved-chat-session');
     expect(updates).toContainEqual(
-      expect.objectContaining({ chatSessionId: 'reserved-chat-session', workspaceId: 'workspace-1' })
+      expect.objectContaining({
+        chatSessionId: 'reserved-chat-session',
+        workspaceId: 'workspace-1',
+      })
     );
   });
 

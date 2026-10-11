@@ -19,6 +19,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { ProjectOrchestrator } from '../../src/durable-objects/project-orchestrator';
+import { dispatchTask as samDispatchTask } from '../../src/durable-objects/sam-session/tools/dispatch-task';
+import { retrySubtask as samRetrySubtask } from '../../src/durable-objects/sam-session/tools/retry-subtask';
 import type { StartTaskInput, TaskRunner } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
 import type { McpTokenData } from '../../src/routes/mcp/_helpers';
@@ -26,6 +28,8 @@ import { handleDispatchTask } from '../../src/routes/mcp/dispatch-tool';
 import * as projectHelpers from '../../src/routes/projects/_helpers';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
 import { getOrchestratorStatus, startOrchestration } from '../../src/services/project-orchestrator';
+import * as vmAgentContainer from '../../src/services/vm-agent-container';
+import * as workspaceBranch from '../../src/services/workspace-branch';
 import { seedReadyNode } from './helpers/ready-node';
 import { seedInstallation, seedMission, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 
@@ -69,6 +73,14 @@ function envWithHeldRunnerAlarms(): Env {
       }),
     } as unknown as Env['TASK_RUNNER'],
   };
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
 }
 
 async function runTaskRunnerAlarm(taskId: string): Promise<void> {
@@ -161,13 +173,18 @@ async function seedMissionFixture(label: string) {
 async function dispatchMissionTask(
   fixture: Awaited<ReturnType<typeof seedMissionFixture>>,
   description: string,
-  dispatchEnv: Env = envWithHeldRunnerAlarms()
+  dispatchEnv: Env = envWithHeldRunnerAlarms(),
+  extra: {
+    params?: Record<string, unknown>;
+    execCtx?: { waitUntil(p: Promise<unknown>): void };
+  } = {}
 ): Promise<{ taskId: string; sessionId: string; runtime: string }> {
   const response = await handleDispatchTask(
     1,
-    { description, missionId: fixture.missionId },
+    { description, missionId: fixture.missionId, ...extra.params },
     fixture.token,
-    dispatchEnv
+    dispatchEnv,
+    extra.execCtx
   );
   expect(response.error).toBeUndefined();
   const content = (response.result as { content: Array<{ text: string }> }).content[0]!;
@@ -241,5 +258,95 @@ describe('mission dispatch has exactly one starter', () => {
       stepResults: { workspaceId: assigned?.workspace_id },
     });
     expect(await sessionIdsForTask(fixture.projectId, first.taskId)).toEqual([first.sessionId]);
+  });
+
+  it('an orchestrator cycle while an Instant launch is still setting up does not start the task', async () => {
+    const fixture = await seedMissionFixture('mission-instant-start');
+    vi.spyOn(projectHelpers, 'requireRepositoryOwnerAccess').mockResolvedValue(undefined);
+    // Hold the background launch at its first await: no node, workspace or session exists yet.
+    const branchCheck =
+      deferred<Awaited<ReturnType<typeof workspaceBranch.ensureWorkspaceBranchOnRemote>>>();
+    vi.spyOn(workspaceBranch, 'ensureWorkspaceBranchOnRemote').mockReturnValue(branchCheck.promise);
+    // Workers tests have no container service; end the launch once its session exists.
+    vi.spyOn(vmAgentContainer, 'launchVmAgentContainer').mockRejectedValue(
+      new Error('container launch is out of scope for this test')
+    );
+    const launches: Promise<unknown>[] = [];
+
+    const dispatched = await dispatchMissionTask(
+      fixture,
+      'Audit the Instant dispatch path',
+      { ...testEnv, CF_CONTAINER_ENABLED: 'true' },
+      { params: { runtime: 'cf-container' }, execCtx: { waitUntil: (p) => launches.push(p) } }
+    );
+    expect(dispatched.runtime).toBe('cf-container');
+    expect(launches).toHaveLength(1);
+    const claimedSessionId = (await taskRow(dispatched.taskId))?.chat_session_id;
+    expect(claimedSessionId).toEqual(expect.any(String));
+    expect(await sessionIdsForTask(fixture.projectId, dispatched.taskId)).toEqual([]);
+
+    await runOrchestratorCycle(fixture.projectId);
+
+    // No VM runner, no second session, no rebind for the Instant task.
+    expect(await taskRunnerStub(dispatched.taskId).getStatus()).toBeNull();
+    expect(await sessionIdsForTask(fixture.projectId, dispatched.taskId)).toEqual([]);
+    expect(await taskRow(dispatched.taskId)).toMatchObject({
+      status: 'queued',
+      chat_session_id: claimedSessionId,
+      scheduler_state: 'schedulable',
+    });
+    const status = await getOrchestratorStatus(testEnv, fixture.projectId);
+    expect(status.recentDecisions.filter((d) => d.taskId === dispatched.taskId)).toEqual([]);
+
+    // Released, the launch creates its session under the identity the task row already carries.
+    branchCheck.resolve({ status: 'skipped', reason: 'held for test' });
+    await Promise.allSettled(launches);
+    expect(await sessionIdsForTask(fixture.projectId, dispatched.taskId)).toEqual([
+      claimedSessionId,
+    ]);
+    expect((await taskRow(dispatched.taskId))?.chat_session_id).toBe(claimedSessionId);
+  });
+
+  it('the /sam dispatch_task and retry_subtask creators own their mission tasks from the insert', async () => {
+    const fixture = await seedMissionFixture('mission-sam-creators');
+    vi.spyOn(projectHelpers, 'requireRepositoryOwnerAccess').mockResolvedValue(undefined);
+    const ctx = {
+      env: envWithHeldRunnerAlarms() as unknown as Record<string, unknown>,
+      userId: fixture.userId,
+    };
+    const failedOriginal = `failed-${fixture.missionId}`;
+    await seedTask(failedOriginal, fixture.projectId, fixture.userId, { status: 'failed' });
+    await env.DATABASE.prepare('UPDATE tasks SET mission_id = ?, description = ? WHERE id = ?')
+      .bind(fixture.missionId, 'Retry the flaky audit', failedOriginal)
+      .run();
+
+    const dispatched = (await samDispatchTask(
+      { projectId: fixture.projectId, description: 'Audit via SAM', missionId: fixture.missionId },
+      ctx
+    )) as { taskId: string; sessionId: string };
+    const retried = (await samRetrySubtask({ taskId: failedOriginal }, ctx)) as {
+      newTaskId: string;
+      sessionId: string;
+    };
+    const started = [
+      { taskId: dispatched.taskId, sessionId: dispatched.sessionId },
+      { taskId: retried.newTaskId, sessionId: retried.sessionId },
+    ];
+    for (const task of started) {
+      expect(task.sessionId).toEqual(expect.any(String));
+      expect(await taskRow(task.taskId)).toMatchObject({
+        status: 'queued',
+        chat_session_id: task.sessionId,
+      });
+    }
+
+    await runOrchestratorCycle(fixture.projectId);
+
+    const status = await getOrchestratorStatus(testEnv, fixture.projectId);
+    for (const task of started) {
+      expect(await sessionIdsForTask(fixture.projectId, task.taskId)).toEqual([task.sessionId]);
+      expect((await taskRow(task.taskId))?.chat_session_id).toBe(task.sessionId);
+      expect(status.recentDecisions.filter((d) => d.taskId === task.taskId)).toEqual([]);
+    }
   });
 });
