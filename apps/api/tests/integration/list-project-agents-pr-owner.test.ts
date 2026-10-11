@@ -13,12 +13,19 @@
  *   dispatch description, which cites the PR URL, links it to the PR.
  */
 import Database from 'better-sqlite3';
-import { Hono } from 'hono';
+import type { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { listAgentActivityTasks } from '../../src/services/agent-activity';
+import {
+  callMcpTool,
+  createJsonKv,
+  createMcpApp,
+  storeMcpToken,
+  toolResult,
+} from '../helpers/mcp-route';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const PROJECT = 'project-1';
@@ -58,25 +65,6 @@ interface ListResult {
   filter?: { prHeadBranch?: string; prUrl?: string };
 }
 
-/** Handles both KV read forms the route uses: `'json'` and `{ type: 'json' }`. */
-function createTestKv(): KVNamespace {
-  const values = new Map<string, string>();
-  const wantsJson = (type: unknown) =>
-    type === 'json' || (typeof type === 'object' && type !== null && 'type' in type);
-  return {
-    get: async (key: string, type?: unknown) => {
-      const value = values.get(key) ?? null;
-      return value !== null && wantsJson(type) ? JSON.parse(value) : value;
-    },
-    put: async (key: string, value: string) => {
-      values.set(key, value);
-    },
-    delete: async (key: string) => {
-      values.delete(key);
-    },
-  } as unknown as KVNamespace;
-}
-
 describe('list_project_agents pull request owner filter', () => {
   let sqlite: Database.Database;
   let env: Env;
@@ -94,21 +82,15 @@ describe('list_project_agents pull request owner filter', () => {
     for (const id of [PROJECT, OTHER_PROJECT]) {
       sqlite.prepare('INSERT INTO projects (id, name) VALUES (?, ?)').run(id, id);
     }
-    const kv = createTestKv();
-    await kv.put(
-      `mcp:${MCP_TOKEN}`,
-      JSON.stringify({
-        taskId: CALLER_TASK,
-        projectId: PROJECT,
-        userId: 'user-1',
-        workspaceId: 'ws-shepherd',
-        createdAt: new Date().toISOString(),
-      })
-    );
+    const kv = createJsonKv();
+    await storeMcpToken(kv, MCP_TOKEN, {
+      taskId: CALLER_TASK,
+      projectId: PROJECT,
+      userId: 'user-1',
+      workspaceId: 'ws-shepherd',
+    });
     env = { DATABASE: createSqliteD1(sqlite), KV: kv } as unknown as Env;
-    const { mcpRoutes } = await import('../../src/routes/mcp');
-    app = new Hono();
-    app.route('/mcp', mcpRoutes);
+    app = await createMcpApp();
     sequence = 0;
     insertTask({ id: CALLER_TASK, status: 'in_progress', outputBranch: 'sam/shepherd-run' });
   });
@@ -147,31 +129,11 @@ describe('list_project_agents pull request owner filter', () => {
   }
 
   async function callListProjectAgents(args: Record<string, unknown>) {
-    const res = await app.request(
-      '/mcp',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${MCP_TOKEN}` },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'tools/call',
-          params: { name: 'list_project_agents', arguments: args },
-        }),
-      },
-      env
-    );
-    expect(res.status).toBe(200);
-    return (await res.json()) as {
-      result?: { content: Array<{ text: string }> };
-      error?: { code: number; message: string };
-    };
+    return callMcpTool(app, env, MCP_TOKEN, 'list_project_agents', args);
   }
 
   async function listAgents(args: Record<string, unknown>): Promise<ListResult> {
-    const body = await callListProjectAgents(args);
-    expect(body.error).toBeUndefined();
-    return JSON.parse(body.result?.content[0]?.text ?? '{}') as ListResult;
+    return toolResult<ListResult>(await callListProjectAgents(args));
   }
 
   async function ownerIds(args: Record<string, unknown>): Promise<string[]> {
