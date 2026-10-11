@@ -34,6 +34,10 @@ import * as vmAgentContainer from '../../src/services/vm-agent-container';
 import * as workspaceBranch from '../../src/services/workspace-branch';
 import { seedReadyNode } from './helpers/ready-node';
 import { seedInstallation, seedMission, seedProject, seedTask, seedUser } from './helpers/seed-d1';
+import {
+  captureProjectDataExpectedError,
+  type ProjectDataTestDouble,
+} from './support/expected-error-doubles';
 
 const testEnv = env as unknown as Env;
 let counter = 0;
@@ -278,6 +282,8 @@ describe('mission dispatch has exactly one starter', () => {
       expect((await taskRow(claim.taskId))?.chat_session_id).toBe(claim.sessionId);
     } finally {
       release.resolve();
+      // Drain the creator even when a midpoint assertion fails (mutation probes).
+      await dispatch;
     }
     expect(await dispatch).toMatchObject(claim);
     expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([claim.sessionId]);
@@ -342,22 +348,17 @@ describe('mission dispatch has exactly one starter', () => {
         "CREATE TRIGGER reject_session_insert BEFORE INSERT ON chat_sessions BEGIN SELECT RAISE(ABORT, 'injected ProjectData INSERT failure'); END"
       );
     });
-    // The Workers RPC harness reports a synchronous SQLite throw twice. Catch
-    // inside the real DO boundary and propagate the same failure to the caller.
+    // Catch the real SQL rejection inside the existing test DO adapter so the
+    // Workers pool does not report the expected rejected RPC as unhandled.
     const createSession = vi
       .spyOn(projectDataService, 'createSession')
       .mockImplementation(async (...args) => {
-        const result = await runInDurableObject(stub, async (instance) => {
-          try {
-            return {
-              sessionId: await instance.createSession(args[2], args[3], args[4], args[5], args[6]),
-            };
-          } catch (error) {
-            return { error: error instanceof Error ? error.message : String(error) };
-          }
-        });
-        if ('error' in result) throw new Error(result.error);
-        return result.sessionId;
+        const result = await captureProjectDataExpectedError(
+          stub as DurableObjectStub<ProjectDataTestDouble>,
+          { operation: 'createSession', args: [args[2], args[3], args[4], args[5], args[6]] }
+        );
+        expect(result.threw).toBe(true);
+        throw new Error(result.message);
       });
     try {
       const response = await handleDispatchTask(

@@ -135,11 +135,17 @@ The existing terminal-session-ledger reconciliation includes active sessions wit
 - [x] Preserve original workflow state locally; remove accidental tracked `.do-state.md` in additive commit `84f369dce` (history and local contents retained)
 - [x] Correct PR title/body and restore preflight/review evidence with pending gates stated
 - [x] Affected unit tests: 273 passed; runtime-state and instruction-context-budget checks passed
-- [ ] Expanded Workers failure-window tests pass
-- [ ] Recovery API lint/typecheck pass
+- [x] Expanded Workers failure-window tests: 10 passed, zero unhandled errors (47.91 s final clean rerun after discrimination, restored workspace; real SQL failure captured through existing test-only DO adapter)
+- [x] Recovery API typecheck passed; changed-file lint passed (full API lint at prior candidate had only new import-order error, corrected; current CI lint also passed)
 - [x] Coordinator confirmed original runtime may be preserved when failure readers/retry and bounded recovery are verified; shared source ownership granted, no startup cleanup added
 - [ ] Final staging, CI, CodeRabbit and production gates remain as above
 
 Session-identity audit: writers are the three mission creator INSERTs, ProjectData `sessions.createSession`, Instant `acceptInstantSession`, and TaskRunner `session-linking.ensureSessionLinked`. Relevant readers are orchestrator scheduling eligibility (`chat_session_id IS NULL`) and queued concurrency, workspace-allocation ownership, terminal failure/reconciliation, and retry deletion fencing. `/sam retrySubtask` never reads the predecessor's session ID and allocates a fresh task/session identity while inheriting the mission. MCP `orchestration-tools` retry likewise generates new identities; its existing omission of mission ID is unchanged. `replacement-deletion-fence` permits a predecessor without a workspace. Sleeping snapshot recovery and reserved trigger/schedule creators use their existing explicit identity guards and are not changed.
 
 Independent Sol failure review revised to PASS for this scoped contract after checking `project-data/terminal-session-reconciliation.ts` and `scheduled/terminal-session-ledger-reconciliation.ts`; no claim of a new independent executed suite. Reconciliation's existing completion-drain protection can defer a newly failed session, so tests advance its input clock rather than disable the production guard. Final test execution remains required.
+
+Restored-task validation: SAM autosaved the reconstructed test/docs delta as `388d9d0ba` before sleeping. Same-task wake restored the clean original branch but omitted local `.do-state.md` and ignored test logs; no previous process or local reviewer remained. State was reconstructed without deleting/replacing original commits. The restored test fix extends the existing `captureProjectDataExpectedError` test adapter with `createSession`, catching the actual SQL trigger rejection inside the DO rather than suppressing an unhandled error or self-calling an RPC. Independent fresh local Sol test-engineer/task-completion review: PASS, no blocking finding.
+
+Final discrimination (restored workspace): setting only the MCP task INSERT `chat_session_id` binding to NULL made exactly the two selected regressions fail: the new pre-session midpoint lost its claim, and the original real orchestrator cycle auto-dispatched both held VM tasks. Eight unrelated tests were skipped; no compilation or unhandled-error failure was used as proof. The dispatcher file was restored with an EXIT trap and verified identical to HEAD before the final clean run. The midpoint test drains its released creator in `finally`, including when a mutation assertion fails.
+
+Final clean rerun after restoring the mutation: all 10 Workers tests passed (47.91 s, zero unhandled errors). Current PR preflight and specialist-review evidence both validate locally. Final CI and live staging/production remain pending; task stays active.
