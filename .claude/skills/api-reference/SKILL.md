@@ -91,6 +91,7 @@ Comment threads are scoped to the ProjectData Durable Object addressed by `proje
 ## Search Input Limits
 
 - The `search_ideas`, `search_tasks`, `search_knowledge`, and `search_messages` MCP tools search every retained term separately. `SEARCH_QUERY_MAX_LENGTH` (default `4096`) and `SEARCH_QUERY_MAX_TERMS` (default `40`, higher values clamp to the safe D1 parameter ceiling) are total-input guardrails; `SEARCH_QUERY_MAX_TERM_LENGTH` (default `48`) keeps each escaped LIKE term under SQLite's pattern budget. They return the effective `query`, `queryTruncated`, and `queryLimits`.
+- `list_tasks` and `search_tasks` accept any shared `TASK_STATUSES` value as `status` (including `sleeping` and `ready`). Workspace-agent responses include `hasMore` and `nextCursor`; pass `cursor` to read the next page (`operations/task-core.ts:listTasks`).
 - `GET /api/projects/:projectId/knowledge/search?q=...`, `GET /api/sam/search?query=...`, and `GET /api/projects/:projectId/agent/search?query=...` apply the same limits and return the same metadata alongside their results.
 - Oversized queries are simplified before FTS5 or LIKE evaluation, preventing SQLite pattern/parser errors while keeping all retained terms searchable.
 
