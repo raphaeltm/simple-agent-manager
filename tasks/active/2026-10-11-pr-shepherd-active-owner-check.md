@@ -60,14 +60,13 @@ active task already owns a PR before bucket 1 (merge) or bucket 2 (dispatch a co
 
 So a server-side capability is required.
 
-### Other observations (not changed here)
+### Other observations and late implementation delta
 
 - The prompt's double-run check ("title starts with 'PR Shepherd'") never matches: run titles
   are generated as "Execute … PR Shepherd run …". Overlap is prevented by the trigger's
   `skipIfRunning=true` / `maxConcurrent=1`. Changing it to a substring match would also match
   this task's own title, so it is left as is.
-- The `list_tasks`/`search_tasks` status enum is stale (no `sleeping`/`ready`, still offers
-  `awaiting_followup`). Not needed for this fix; to be recorded on the idea (post-merge item).
+- The retained late delta (`32c69e6f7`) replaces stale `list_tasks`/`search_tasks` enums with shared `TASK_STATUSES`, including `sleeping`/`ready`, and exposes workspace pagination (`hasMore`, `nextCursor`, `cursor`). It compensates for the hidden own task before computing the next page. These changes require independent delta review and live final-candidate schema verification.
 
 ## Design
 
@@ -108,7 +107,10 @@ dropped after review: titles are AI-generated and need not keep the PR number.)
       needed: the 6 related suites, 304 tests, pass unchanged)
 - [x] `.claude/skills/api-reference/SKILL.md`: document the filter; public agents guide MCP tool
       table gains a `list_project_agents` row
-- [ ] Deploy to staging; exercise the filter through staging MCP
+- [ ] Verify final candidate on staging through real MCP (historical deployment alone is insufficient)
+- [x] Retain sleeping/status-enum and workspace pagination fixes plus real-route tests
+- [x] Complete two independent Sol delta reviews of the late status/pagination changes (both code PASS at `310d89a7`; overall completion remains pending)
+- [ ] Restore PR template, before/after prompt diff, and accurate preflight/review evidence
 - [ ] (post-merge) After production deploy: run the owner check by hand through production MCP
       against the open PRs and active tasks; compare with the D1 query. Evidence: PR comment + idea
 - [ ] (post-merge) `update_trigger` with `promptTemplate` only; verify every other field is
@@ -178,7 +180,7 @@ dropped after review: titles are AI-generated and need not keep the PR number.)
       (`never treats a %s task`, superseded, cross-project, own-task tests)
 - [x] Unfiltered calls keep working and include `outputPrUrl` and `workspaceBranch`
       ("keeps the unfiltered listing" test)
-- [x] The Shepherd prompt requires the owner check before merge/dispatch, leaves owned PRs alone,
+- [x] The reviewed proposed Shepherd prompt requires the owner check before merge/dispatch, leaves owned PRs alone,
       reports them in its digest, and fails closed (prompt diff below)
 - [ ] Only `promptTemplate` changed on the trigger; it stays `paused`
 - [ ] Hand-run owner check against current open PRs recorded with evidence
@@ -266,3 +268,15 @@ Call "Complete" tool when done regardless of outcomes.
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`, `.claude/rules/28-credential-resolution-fallback-tests.md`
 - `apps/api/.claude/rules/69-emergency-config-paths-need-their-own-coverage.md` (one test per disjunct)
 - `.claude/rules/74-proxy-signals-must-match-the-condition.md` (fail closed on degraded input)
+
+## Recovery gate record (2026-10-11)
+
+This task was archived before the live MCP, delta-review, trigger-update and completion gates were done. Recovery moves the same task back to active; it does not repeat implementation or discard original work. Sole recovery owner: `01M4NAW5A7GP6XP14S7ZA4YFA5`; original branch `sam/wave-d-reliability-wave-99djn8`; existing draft PR #2301. Coordinator released source/tests/reviews via verified SAM event `2ff7f9a8-0a0c-4315-9875-d3e1251a75ad`. Staging mutation, provisioning, migrations, merge, production and trigger mutation still require sequencing grants.
+
+Retained candidate `310d89a7bdddbbf07f1578e9eb111e93572bb4b2`: GitHub lint/typecheck/test/build, DO shards and other applicable code checks passed. Preflight Evidence failed because the PR body lacks its required block. CodeRabbit reports Review skipped for absent opt-in label; this does not establish the ready-state request/wait gate. Original transcript reports deployment of `a2db04be8`, but the KV token write failed and no real owner-query ran. Later list_tasks fixes were not part of that staging candidate. Current exposed production SAM MCP schema remains pre-fix; absence of a filter-capable callable is not a successful owner check. Trigger remains paused; reviewed prompt below is proposed, not applied.
+
+Old snapshot/WIP content cannot be read/downloaded through exposed SAM tools (only current-workspace info/diff are available). Retained snapshot metadata and clean recovery checkout do not prove all old uncommitted content was recovered. Coordinator notified of this access limitation. Preserve all old snapshots/work.
+
+Live read-only production probe (2026-10-11 14:04 UTC): authenticated `tools/call list_project_agents` with D branch and PR URL returned HTTP 200, 52 agents and **no filter echo**. Correct result is fail closed/defer; no ownership conclusion or trigger update was made. Two independent recovery local Sol reviewers found no blocking code/security issue at `310d89a7`; completion reviewer flagged the stale delta note (now corrected) and outstanding live/process gates.
+
+Recovery focused validation: 63 tests passed across owner-filter, workspace task/search paging and platform-operation suites after dependency setup and shared/providers/cloud-init builds (2026-10-11 14:05 UTC). No runtime source edits were required.
