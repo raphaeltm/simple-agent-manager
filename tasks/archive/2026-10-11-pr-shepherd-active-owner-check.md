@@ -104,12 +104,12 @@ signal; a failed or non-echoing owner check counts as owned.
 - [x] `.claude/skills/api-reference/SKILL.md`: document the filter; public agents guide MCP tool
       table gains a `list_project_agents` row
 - [ ] Deploy to staging; exercise the filter through staging MCP
-- [ ] After production deploy: run the owner check by hand through production MCP against the
-      open PRs and active tasks; compare with the D1 query
-- [ ] `update_trigger` with `promptTemplate` only; verify every other field is unchanged and the
-      trigger is still `paused`
+- [ ] (post-merge) After production deploy: run the owner check by hand through production MCP
+      against the open PRs and active tasks; compare with the D1 query. Evidence: PR comment + idea
+- [ ] (post-merge) `update_trigger` with `promptTemplate` only; verify every other field is
+      unchanged and the trigger is still `paused`. Evidence: PR comment + idea
 - [ ] PR body: full before/after prompt diff
-- [ ] Update idea `01M496QHP8MY2S8W3F2BJPV2XN` with outcome
+- [ ] (post-merge) Update idea `01M496QHP8MY2S8W3F2BJPV2XN` with outcome
 
 ## Implementation Notes
 
