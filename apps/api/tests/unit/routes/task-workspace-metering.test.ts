@@ -67,6 +67,8 @@ describe('task reuse metering through real placement and SQL', () => {
     reserved: boolean;
     arrange: (f: ReturnType<typeof fixture>, taskId: string, chatSessionId: string) => void;
     expected: (chatSessionId: string) => string;
+    /** The allocated workspace row afterwards; tombstoned unless the case removed it. */
+    workspaceAfter?: { status: string } | undefined;
   };
   const ORDINARY = 'Task start abandoned before workspace assignment: ';
   const RESERVED = 'Reserved task submission authority revoked before workspace assignment: ';
@@ -174,6 +176,30 @@ describe('task reuse metering through real placement and SQL', () => {
       expected: (cs) =>
         `${ORDINARY}workspace allocated is bound to chat session other-chat, not ${cs}`,
     },
+    {
+      name: 'the allocated workspace row is gone',
+      reserved: false,
+      arrange: (f, taskId, cs) => {
+        setTask(f, taskId, 'chat_session_id', cs);
+        f.sqlite.pragma('foreign_keys = OFF');
+        f.sqlite.prepare("DELETE FROM workspaces WHERE id = 'allocated'").run();
+      },
+      expected: () => `${ORDINARY}workspace allocated no longer exists`,
+      workspaceAfter: undefined,
+    },
+    {
+      name: 'the reserved checkpoint names another session',
+      reserved: true,
+      arrange: (f, taskId, cs) => {
+        setTask(f, taskId, 'chat_session_id', cs);
+        f.sqlite
+          .prepare(
+            "UPDATE task_submission_checkpoints SET chat_session_id = 'other-chat' WHERE task_id = ?"
+          )
+          .run(taskId);
+      },
+      expected: () => `${RESERVED}reserved submission checkpoint no longer matches this start`,
+    },
   ];
 
   async function claimFixture(reserved: boolean) {
@@ -230,7 +256,8 @@ describe('task reuse metering through real placement and SQL', () => {
     return { f, start, state, rc, chatSessionId };
   }
 
-  it.each(refusals)('names the refusal when $name', async ({ reserved, arrange, expected }) => {
+  it.each(refusals)('names the refusal when $name', async (refusal) => {
+    const { reserved, arrange, expected } = refusal;
     const { f, start, state, rc, chatSessionId } = await claimFixture(reserved);
     arrange(f, start.taskId, chatSessionId);
     const before = f.sqlite
@@ -251,9 +278,9 @@ describe('task reuse metering through real placement and SQL', () => {
     expect(
       f.sqlite.prepare('SELECT workspace_id FROM tasks WHERE id = ?').get(start.taskId)
     ).toEqual(before);
-    expect(f.sqlite.prepare("SELECT status FROM workspaces WHERE id = 'allocated'").get()).toEqual({
-      status: 'stopped',
-    });
+    expect(f.sqlite.prepare("SELECT status FROM workspaces WHERE id = 'allocated'").get()).toEqual(
+      'workspaceAfter' in refusal ? refusal.workspaceAfter : { status: 'stopped' }
+    );
     expect(f.sqlite.prepare('SELECT COUNT(*) AS count FROM compute_usage').get()).toEqual({
       count: 0,
     });

@@ -90,11 +90,24 @@ async function runTaskRunnerAlarm(taskId: string): Promise<void> {
   });
 }
 
-async function runOrchestratorCycle(projectId: string): Promise<void> {
+/** Run one real orchestrator alarm and prove it processed `missionId` (liveness for absence checks). */
+async function runOrchestratorCycleOver(projectId: string, missionId: string) {
+  const lastCheckedAt = async () =>
+    (await getOrchestratorStatus(testEnv, projectId)).activeMissions.find(
+      (mission) => mission.missionId === missionId
+    )?.lastCheckedAt;
+  const before = await lastCheckedAt();
+  expect(before).toEqual(expect.any(Number));
+
   await runInDurableObject(orchestratorStub(projectId), async (instance) => {
     await instance.alarm();
     await instance.ctx.storage.deleteAlarm();
   });
+
+  const status = await getOrchestratorStatus(testEnv, projectId);
+  const after = status.activeMissions.find((mission) => mission.missionId === missionId);
+  expect(after?.lastCheckedAt).toBeGreaterThan(before!);
+  return status;
 }
 
 async function sessionIdsForTask(projectId: string, taskId: string): Promise<string[]> {
@@ -199,7 +212,7 @@ describe('mission dispatch has exactly one starter', () => {
     // Two tasks, as in the production mission; both runners are held before node selection.
     const first = await dispatchMissionTask(fixture, 'Audit the mission scheduler');
     const second = await dispatchMissionTask(fixture, 'Audit the dispatch tool');
-    expect(first.runtime).toBe('vm');
+    expect([first.runtime, second.runtime]).toEqual(['vm', 'vm']);
     for (const dispatched of [first, second]) {
       expect(await taskRunnerStub(dispatched.taskId).getStatus()).toMatchObject({
         currentStep: 'node_selection',
@@ -212,14 +225,8 @@ describe('mission dispatch has exactly one starter', () => {
       });
     }
 
-    const before = await getOrchestratorStatus(testEnv, fixture.projectId);
-    await runOrchestratorCycle(fixture.projectId);
-    const after = await getOrchestratorStatus(testEnv, fixture.projectId);
-
-    // Liveness: the cycle ran over this mission and saw both tasks as schedulable.
-    const missionBefore = before.activeMissions.find((m) => m.missionId === fixture.missionId);
-    const missionAfter = after.activeMissions.find((m) => m.missionId === fixture.missionId);
-    expect(missionAfter?.lastCheckedAt).toBeGreaterThan(missionBefore?.lastCheckedAt ?? Infinity);
+    // The cycle runs over this mission while both tasks are queued and schedulable.
+    const after = await runOrchestratorCycleOver(fixture.projectId, fixture.missionId);
     expect(
       after.recentDecisions.filter(
         (decision) => decision.missionId === fixture.missionId && decision.taskId !== null
@@ -285,7 +292,7 @@ describe('mission dispatch has exactly one starter', () => {
     expect(claimedSessionId).toEqual(expect.any(String));
     expect(await sessionIdsForTask(fixture.projectId, dispatched.taskId)).toEqual([]);
 
-    await runOrchestratorCycle(fixture.projectId);
+    const status = await runOrchestratorCycleOver(fixture.projectId, fixture.missionId);
 
     // No VM runner, no second session, no rebind for the Instant task.
     expect(await taskRunnerStub(dispatched.taskId).getStatus()).toBeNull();
@@ -295,7 +302,6 @@ describe('mission dispatch has exactly one starter', () => {
       chat_session_id: claimedSessionId,
       scheduler_state: 'schedulable',
     });
-    const status = await getOrchestratorStatus(testEnv, fixture.projectId);
     expect(status.recentDecisions.filter((d) => d.taskId === dispatched.taskId)).toEqual([]);
 
     // Released, the launch creates its session under the identity the task row already carries.
@@ -340,9 +346,7 @@ describe('mission dispatch has exactly one starter', () => {
       });
     }
 
-    await runOrchestratorCycle(fixture.projectId);
-
-    const status = await getOrchestratorStatus(testEnv, fixture.projectId);
+    const status = await runOrchestratorCycleOver(fixture.projectId, fixture.missionId);
     for (const task of started) {
       expect(await sessionIdsForTask(fixture.projectId, task.taskId)).toEqual([task.sessionId]);
       expect((await taskRow(task.taskId))?.chat_session_id).toBe(task.sessionId);
