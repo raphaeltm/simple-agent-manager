@@ -283,6 +283,22 @@ keeps running. You can:
 An Instant session always takes this path when its snapshots keep failing, because it can only
 sleep with a complete snapshot.
 
+## Download retained work
+
+If you created the session, open **Download saved work** above its conversation. Choose
+**Download manifest** for the saved capture record or **Download WIP bundle** for the exact
+saved Git work. This does not start the agent and works without its original workspace.
+
+These downloads may contain private code. Keep them private. The WIP bundle is a Git bundle,
+not a replacement workspace or a guarantee that every file was captured. Read the manifest
+for capture omissions. This control does not export the agent's home directory or credentials.
+
+Downloads require your approved account and continued access to the original project. Other
+project members, including project administrators, cannot download your saved work. If the
+capture expired, was deleted, failed integrity checks, or was never retained, the download is
+unavailable. Archiving or deleting a session can remove its saved artifacts; this control
+cannot recover deleted work or extend retention.
+
 ## Expired saved workspace
 
 After the seven-day sleep retention window, the conversation shows **Expired**. This is a normal end state, not a task failure. Your transcript stays readable. Choose **Fork conversation** to continue with its context in a new session; the expired workspace itself cannot be restored.

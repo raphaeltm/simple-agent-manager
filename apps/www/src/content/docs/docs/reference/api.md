@@ -192,6 +192,20 @@ rejection as a pending deletion.
 
 Get the provisioning progress log for a workspace.
 
+## Retained session work downloads
+
+`GET /api/projects/:projectId/sessions/:sessionId/retained-snapshot/manifest` and
+`GET /api/projects/:projectId/sessions/:sessionId/retained-snapshot/wip` return private
+attachments using browser-session authentication. Only the approved active session creator
+who still has original-project access and owns the retained snapshot can download it.
+Project membership or administrator status alone is insufficient. No live workspace is needed.
+
+The server selects the retained generation, verifies identity, expiry, exact length and
+SHA-256, and rechecks ownership/generation before streaming. Success uses `private, no-store`,
+`nosniff` and attachment headers. Foreign/missing/expired/deleted/inconsistent artifacts share
+`404 NOT_FOUND`; infrastructure errors are generic. No HOME, snapshot listing, object-key
+parameters, agent-token authentication, public URLs, lifecycle mutations or retention extension.
+
 ## Agent Sessions
 
 ### `POST /api/workspaces/:id/agent-sessions`
