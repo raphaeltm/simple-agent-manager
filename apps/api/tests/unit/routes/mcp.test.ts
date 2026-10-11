@@ -2538,8 +2538,16 @@ describe('MCP Routes', () => {
       // .run() for conditional INSERT + status event insert
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
 
-      // DO mocks — createSession returns a session ID
-      mockDoStub.createSession = vi.fn().mockResolvedValue('sess-new-1');
+      // DO mocks — like ProjectData, createSession keeps the id the task INSERT reserved
+      mockDoStub.createSession = vi.fn(
+        async (
+          _workspaceId: unknown,
+          _topic: unknown,
+          _taskId: unknown,
+          _userId: unknown,
+          reservedSessionId?: string | null
+        ) => reservedSessionId ?? 'sess-new-1'
+      );
       mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-new-1');
     }
 
@@ -2591,7 +2599,9 @@ describe('MCP Routes', () => {
         runtimeReason: 'explicit-cf-container',
         taskMode: 'task',
       });
-      expect(data.sessionId).toBeUndefined();
+      // The session id is reserved in the task INSERT, so it is known before the
+      // background launch creates the session.
+      expect(data.sessionId).toEqual(expect.any(String));
       expect(data.message).toContain('get_task_details');
       expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
       expect(mockDoStub.createSession).not.toHaveBeenCalled();
@@ -2602,6 +2612,7 @@ describe('MCP Routes', () => {
         expect.anything(),
         expect.objectContaining({
           taskId: expect.any(String),
+          chatSessionId: data.sessionId,
           userId: 'user-789',
           taskMode: 'task',
           branch: 'sam/runtime-router',
@@ -2847,7 +2858,10 @@ describe('MCP Routes', () => {
 
       const data = JSON.parse(body.result.content[0].text);
       expect(data.taskId).toBeDefined();
-      expect(data.sessionId).toBe('sess-new-1');
+      // The session is created under the id the task INSERT already committed.
+      const reservedSessionId = vi.mocked(mockDoStub.createSession).mock.calls[0]?.[4];
+      expect(reservedSessionId).toEqual(expect.any(String));
+      expect(data.sessionId).toBe(reservedSessionId);
       expect(data.branchName).toBeDefined();
       expect(data.status).toBe('queued');
       expect(data.taskMode).toBe('task');

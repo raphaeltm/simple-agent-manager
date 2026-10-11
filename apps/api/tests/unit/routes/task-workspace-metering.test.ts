@@ -144,6 +144,36 @@ describe('task reuse metering through real placement and SQL', () => {
       },
       expected: () => `${RESERVED}reserved submission checkpoint no longer matches this start`,
     },
+    {
+      name: 'the task row is gone',
+      reserved: false,
+      arrange: (f, taskId) => {
+        f.sqlite.pragma('foreign_keys = OFF');
+        f.sqlite.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
+      },
+      expected: () => `${ORDINARY}task task-1 no longer exists`,
+    },
+    {
+      name: 'the task moved to another user',
+      reserved: false,
+      arrange: (f, taskId, cs) => {
+        setTask(f, taskId, 'chat_session_id', cs);
+        setTask(f, taskId, 'user_id', 'owner');
+      },
+      expected: () => `${ORDINARY}task task-1 now belongs to a different project or user`,
+    },
+    {
+      name: 'the allocated workspace is bound to another session',
+      reserved: false,
+      arrange: (f, taskId, cs) => {
+        setTask(f, taskId, 'chat_session_id', cs);
+        f.sqlite
+          .prepare("UPDATE workspaces SET chat_session_id = 'other-chat' WHERE id = 'allocated'")
+          .run();
+      },
+      expected: (cs) =>
+        `${ORDINARY}workspace allocated is bound to chat session other-chat, not ${cs}`,
+    },
   ];
 
   async function claimFixture(reserved: boolean) {

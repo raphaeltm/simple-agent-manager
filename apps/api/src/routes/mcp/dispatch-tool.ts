@@ -764,7 +764,7 @@ export async function handleDispatchTask(
 
   log.info('mcp.dispatch_task.created', {
     taskId,
-    sessionId,
+    sessionId: chatSessionId,
     branchName,
     parentTaskId: tokenData.taskId,
     projectId: tokenData.projectId,
@@ -784,7 +784,7 @@ export async function handleDispatchTask(
     env,
     projectId: tokenData.projectId,
     taskId,
-    sessionId,
+    sessionId: chatSessionId,
     executionRuntime,
     runtimeReason: placement.runtime.reason,
     branchName,

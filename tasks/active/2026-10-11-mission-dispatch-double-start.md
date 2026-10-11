@@ -26,8 +26,9 @@ Each has two `session_summaries` rows; the task row ended on S2.
 Production baseline (2026-10-11, read-only): **11 of 123 mission tasks ever created have more than one
 `session_summaries` row** — 2026-05-11 (1 task, 6 sessions), 2026-08-08 (3), 2026-08-09 (3), 2026-08-12 (1),
 2026-09-25 (1), 2026-10-10 (2). 9 of the 11 failed. The August failures are Instant tasks
-(`standalone git clone failed …`) plus one `session already exists`, so the race hit both runtimes long
-before the 14-day window the idea looked at.
+(`standalone git clone failed …`) plus one `session already exists`. Two sessions on one mission task is
+this race's signature, so the race very likely hit both runtimes long before the 14-day window the idea
+looked at; that is an inference from the signature — the older incidents were not traced one by one.
 
 ## Research findings
 
@@ -106,11 +107,11 @@ time- or runner-existence-based orchestrator heuristics (proxies with residual w
 
 ## Acceptance criteria
 
-- [ ] A mission task dispatched through MCP has exactly one chat session, even when an orchestrator cycle runs before the runner links it
-- [ ] That task reaches workspace assignment (`delegated`, `workspace_id` set, workspace bound to the dispatch session)
-- [ ] The same holds for the Instant branch and the /sam creators (no orchestrator start of a creator-owned task)
-- [ ] The vertical slice fails on pre-fix code
-- [ ] Claim-failure messages name the real mismatch; ordinary starts never say "reserved submission authority"
+- [x] A mission task dispatched through MCP has exactly one chat session, even when an orchestrator cycle runs before the runner links it
+- [x] That task reaches workspace assignment (`delegated`, `workspace_id` set, workspace bound to the dispatch session)
+- [x] The same holds for the Instant branch and the /sam creators (no orchestrator start of a creator-owned task)
+- [x] The vertical slice fails on pre-fix code
+- [x] Claim-failure messages name the real mismatch; ordinary starts never say "reserved submission authority"
 - [ ] Staging: a real mission with ≥2 dispatched tasks, one session per task, resources cleaned up
 - [ ] Production: idea query returns 0 duplicate sessions for missions created after the deploy
 

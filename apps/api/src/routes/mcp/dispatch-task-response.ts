@@ -48,7 +48,7 @@ export function buildDispatchTaskSuccessResponse(input: {
             dispatchDepth: input.newDepth,
             url: taskUrl,
             message: input.isInstantRuntime
-              ? 'Task queued for Instant launch. The chat session is created asynchronously; use get_task_details to obtain sessionId.'
+              ? 'Task queued for Instant launch. Its chat session (sessionId) is created in the background and becomes readable a few seconds after dispatch; use get_task_details to follow the task.'
               : `Task dispatched successfully. The agent will start working independently. Track progress at: ${taskUrl}`,
           },
           null,
