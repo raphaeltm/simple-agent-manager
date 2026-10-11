@@ -23,6 +23,12 @@ Production, 2026-10-10 15:37Z: tasks `01M4K7CQPHMM31GS0R263JNNFN` and `01M4K7CYV
 mission `a3e6b0b1-0183-434b-9af9-69545ac37f48`, parent started from ChatGPT through the SAM Connector.
 Each has two `session_summaries` rows; the task row ended on S2.
 
+Production baseline (2026-10-11, read-only): **11 of 123 mission tasks ever created have more than one
+`session_summaries` row** — 2026-05-11 (1 task, 6 sessions), 2026-08-08 (3), 2026-08-09 (3), 2026-08-12 (1),
+2026-09-25 (1), 2026-10-10 (2). 9 of the 11 failed. The August failures are Instant tasks
+(`standalone git clone failed …`) plus one `session already exists`, so the race hit both runtimes long
+before the 14-day window the idea looked at.
+
 ## Research findings
 
 - **Every mission-task creator starts its own task immediately.** The only writers of `tasks.mission_id`:
@@ -89,7 +95,7 @@ time- or runner-existence-based orchestrator heuristics (proxies with residual w
   `chat_<taskId>`, so dispatched session URLs keep their shape.
 - Discrimination (surgical revert of the INSERT column to `null`, everything else kept):
   - VM vertical slice: the orchestrator auto-dispatched both tasks (`Auto-dispatched schedulable task
-    (slot 1/5)`, `(slot 2/5)`); each task had 2 sessions and its row ended on the orchestrator's
+(slot 1/5)`, `(slot 2/5)`); each task had 2 sessions and its row ended on the orchestrator's
     session — the exact production signature.
   - Instant: the orchestrator started a VM TaskRunner for the Instant task.
   - /sam: the /sam-dispatched mission task got a second session.

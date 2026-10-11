@@ -11,6 +11,12 @@ import { TaskRunnerStartGuardRevokedError } from '../../services/task-runner-sta
 import { releaseVmProvisioningLease } from '../../services/vm-admission-control';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
+/** Workspace statuses a task may claim; the claim SQL and its refusal reason share this list. */
+const ALLOCATABLE_WORKSPACE_STATUSES: readonly string[] = ['creating', 'running', 'recovery'];
+const ALLOCATABLE_WORKSPACE_STATUS_SQL = ALLOCATABLE_WORKSPACE_STATUSES.map(
+  (status) => `'${status}'`
+).join(', ');
+
 export async function recoverWorkspaceFromD1(
   state: TaskRunnerState,
   rc: TaskRunnerContext
@@ -143,8 +149,9 @@ export async function claimWorkspaceAllocationForTask(
   const guard =
     state.config.startGuard?.kind === 'reserved_submission' ? state.config.startGuard : null;
   const reservedIntentFingerprint = guard?.intentFingerprint ?? null;
-  // Ordinary starts link their new session during ensureSessionLinked after this
-  // claim. Reserved submissions already committed that identity with the checkpoint.
+  // Some ordinary starts only link their session in ensureSessionLinked after this
+  // claim, so they may claim a task row that has none yet. Dispatched tasks carry it
+  // from their INSERT; reserved submissions committed it with the checkpoint.
   const result = await rc.env.DATABASE.prepare(
     `UPDATE tasks
         SET workspace_id = ?, ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS}, updated_at = ?
@@ -164,7 +171,7 @@ export async function claimWorkspaceAllocationForTask(
              AND guarded_workspace.project_id = tasks.project_id
              AND guarded_workspace.user_id = tasks.user_id
              AND (? IS NULL OR guarded_workspace.chat_session_id = ?)
-             AND guarded_workspace.status IN ('creating', 'running', 'recovery')
+             AND guarded_workspace.status IN (${ALLOCATABLE_WORKSPACE_STATUS_SQL})
         )
         AND NOT EXISTS (
           SELECT 1
@@ -238,7 +245,8 @@ export async function claimWorkspaceAllocationForTask(
   await tombstoneUndispatchedWorkspaceAllocation(state, rc, workspaceId, reason);
   state.stepResults.workspaceId = null;
   await rc.ctx.storage.put('state', state);
-  // Either way the start cannot be reconciled: abandon the allocation, fail permanently.
+  // Every refusal means this start no longer owns the task: the allocation is
+  // abandoned above and the start fails permanently; nothing retries it.
   throw new TaskRunnerStartGuardRevokedError(
     guard
       ? `Reserved task submission authority revoked before workspace assignment: ${reason}`
@@ -268,9 +276,10 @@ interface WorkspaceClaim {
   reservedIntentFingerprint: string | null;
 }
 
-const ALLOCATABLE_WORKSPACE_STATUSES = new Set(['creating', 'running', 'recovery']);
-
-/** Name the first claim predicate the current rows fail, in the claim UPDATE's order. */
+/**
+ * Name the claim predicate the current rows fail: the task's own state first,
+ * then its session, then the allocated workspace, then the reserved checkpoint.
+ */
 export function describeWorkspaceClaimRefusal(
   row: WorkspaceClaimRow | null,
   claim: WorkspaceClaim
@@ -295,7 +304,7 @@ export function describeWorkspaceClaimRefusal(
     return `chat session ${row.taskChatSessionId} was revoked (${row.revocationReason})`;
   }
   if (!row.workspaceStatus) return `workspace ${claim.workspaceId} no longer exists`;
-  if (!ALLOCATABLE_WORKSPACE_STATUSES.has(row.workspaceStatus)) {
+  if (!ALLOCATABLE_WORKSPACE_STATUSES.includes(row.workspaceStatus)) {
     return `workspace ${claim.workspaceId} is ${row.workspaceStatus}`;
   }
   if (claim.chatSessionId && row.workspaceChatSessionId !== claim.chatSessionId) {

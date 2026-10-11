@@ -131,8 +131,35 @@ Tells:
   terminal verdict.
 - **Both runtimes** (`.claude/rules/61`) if more than one reaper exists.
 
+## The First Owner: Record the Claim in the Write That Creates the Work
+
+The first handoff is creation. When two components can start the same work and coordinate
+through a "not yet claimed" predicate, every starter must record its claim in the same atomic
+write that makes the work visible to the other.
+
+On 2026-10-10 two production mission tasks were started twice. `dispatch_task` inserted each
+task with `chat_session_id = NULL`, created session S1 and started the TaskRunner, but wrote S1
+to the task only after the runner's workspace claim. The ProjectOrchestrator reads
+`chat_session_id IS NULL` as "nobody started this", so its cycle in that window created S2,
+rebound the task and made the original runner's claim fail the task. The orchestrator also
+recomputes scheduler state itself, so the window opened at the INSERT, not at the creator's
+own "make it schedulable" step.
+
+- Commit the claim in the creating write. When the owner record lives in another store (a
+  ProjectData session for a D1 task), pre-allocate its id, insert the work with it, then create
+  the owner record under that id (`createSession(..., reservedSessionId)`; reserved submissions
+  do the same with checkpoints).
+- Enumerate every creator of the work, not only the one in the incident. Here: MCP
+  `dispatch_task` (VM and Instant branches), /sam `dispatch_task`, /sam `retry_subtask`. A new
+  surface that creates the same work (a new dispatch tool, the Mastra /sam rebuild) claims at
+  insert too.
+- Test it by holding the creator right after its start, running the other starter's real
+  cycle, and asserting one owner. Prove it red by reverting only the claim column in the
+  INSERT (`tests/workers/mission-dispatch-single-start.test.ts`).
+
 ## Quick Compliance Check
 
+- [ ] Every creator of contested work commits its claim in the creating write
 - [ ] The handoff records supersession on the replaced record, in the same transaction
 - [ ] Every column the handoff nulls is enumerated against its consumers
 - [ ] Reapers can tell "superseded" from "dead" without heuristics
@@ -148,6 +175,8 @@ Tells:
 - Implementation: `apps/api/src/services/task-runtime-liveness.ts`
   (`loadTaskSupersession`, `needsTaskSupersessionProbe`, `supersessionVerdict`)
 - Follow-up idea: `01M0SG7ZEE1XARK4QDG7V6HDPN`
+- First-owner incident: `tasks/archive/2026-10-11-mission-dispatch-double-start.md`
+  (idea `01M4KKNAZY6KSSCXR610T01E11`)
 - `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md` — the destroyer must
   read the record the resumer reads; this rule is its ownership-transfer sibling
 - `.claude/rules/63-widening-a-table-can-delete-an-auth-check.md` — nulling a column
