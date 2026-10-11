@@ -94,9 +94,9 @@ time- or runner-existence-based orchestrator heuristics (proxies with residual w
 - Session ids are pre-allocated with `crypto.randomUUID()` (the DO's own format), not the trigger flow's
   `chat_<taskId>`, so dispatched session URLs keep their shape.
 - Discrimination (surgical revert of the INSERT column to `null`, everything else kept):
-  - VM vertical slice: the orchestrator auto-dispatched both tasks (`Auto-dispatched schedulable task
-(slot 1/5)`, `(slot 2/5)`); each task had 2 sessions and its row ended on the orchestrator's
-    session — the exact production signature.
+  - VM vertical slice: the orchestrator auto-dispatched both tasks (decisions "Auto-dispatched
+    schedulable task (slot 1/5)" and "(slot 2/5)"); each task had 2 sessions and its row ended on the
+    orchestrator's session — the exact production signature.
   - Instant: the orchestrator started a VM TaskRunner for the Instant task.
   - /sam: the /sam-dispatched mission task got a second session.
 - Docs: no public or agent doc describes the session-link timing, the auto-dispatch, or the old error
