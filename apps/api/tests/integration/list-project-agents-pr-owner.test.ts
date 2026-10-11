@@ -202,6 +202,22 @@ describe('list_project_agents pull request owner filter', () => {
     });
   });
 
+  it('matches long URL descriptions literally while retaining case-insensitive description matching', async () => {
+    const url = "https://github.com/example-org/repository_with_%_and_'quote/pull/2302";
+    insertTask({
+      id: 'literal-owner',
+      status: 'queued',
+      description: `Complete ${url.toUpperCase()}.`,
+    });
+    insertTask({
+      id: 'wildcard-control',
+      status: 'queued',
+      description: `Complete ${url.replace('%', 'anything')}.`,
+    });
+    insertTask({ id: 'exact-owner', status: 'sleeping', outputPrUrl: url });
+    expect(await ownerIds({ prUrl: url })).toEqual(['exact-owner', 'literal-owner']);
+  });
+
   it('finds the #2243 completion-task shape through the workspace branch alone', async () => {
     seedOneOwnerPerLink();
 

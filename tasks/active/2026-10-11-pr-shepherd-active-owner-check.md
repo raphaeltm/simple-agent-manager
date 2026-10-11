@@ -292,3 +292,22 @@ Pinned deployment `96510f86b` succeeded in [run38146141473](https://github.com/r
 Cleanup: session stop200/workspaceDeleted:true; own temporary profile `01M4NRNYAMJ5WGWVXW1ZJ58TXP` DELETE200; profile/node `01M4NRPEH57EWRRHTD9985D865`/workspace `01M4NRPEPHZ7GS3JPZX8K85GF4` GET404; stopped session retained200 for audit. Coordinator independently confirmed cancelled task/deleted compute. Final STAGING_RELEASE event `fb0c7ece-1352-4884-912a-ff33f0f034ac`; zero own active compute, no extra attempt/redeploy.
 
 Applicable candidate CI checks pass, including preflight, lint, typecheck, tests/build, DO shards and Sonar: [run38145854513](https://github.com/raphaeltm/simple-agent-manager/actions/runs/38145854513). Remaining gates: honest live-fixture gap assessment, one bounded CodeRabbit request/wait, coordinator merge/production sequencing, verified production capability then authorized prompt-only update. Trigger remains paused. Snapshot-content access gap remains; existing work preserved.
+
+## Production URL-query correction (2026-10-11)
+
+Coordinator accepted the retained staging filter exercise and 63 real-route tests as the original premerge gate; individual extra live cases remain honestly unverified. PR #2301 merged as `dd5ebce4d132a2a70086066e813191c8c3cce46e`. Canonical CI `38163754488` and production `38164808358` succeeded. Cloudflare deployment `0eaa9881-cdce-4068-af48-3b1824a00f01` serves Worker `6cc2bacd-918d-4bf7-9f31-f16d6cedc00c` at 100%.
+
+Mandatory production owner queries exposed an actual defect: the existing task-scoped MCP caller's branch-only query for open PR #2302 returned sleeping owner `01M4NAW17AVHSJCF4FNZGVRX1C` via its original workspace branch, matching read-only D1. Adding the canonical PR URL twice returned `-32603: D1_ERROR: LIKE or GLOB pattern too complex`. `agent-activity.ts` placed the full URL inside a LIKE pattern; deployed D1 limits such patterns to 50 bytes (already documented in `search-query-limits.ts`). This is a genuine original acceptance blocker, not extra coverage. Prompt remains unapplied and Shepherd paused.
+
+Coordinator event `d98b4f96-8576-4055-8b1a-236951528654` grants a narrow additive follow-up, sole D writer, on `sam/wave-d-pr-owner-literal-url`, initially draft. Replace description LIKE with parameterized literal substring matching while preserving its ASCII case-insensitivity. Keep exact output URL comparison, project scope, status/caller/superseded exclusions and fail-closed errors. Audit found no other D PR-URL LIKE query path.
+
+- [x] Real MCP/workerd D1 regression reproduces the >50-byte canonical URL failure before the fix and passes after it
+- [x] Literal punctuation, case-insensitivity and owner isolation regressions pass
+- [ ] Fresh independent Sol review and applicable CI pass
+- [ ] Coordinated pinned staging validation (no deployment before lease/grant)
+- [ ] Follow-up merge and automatic production receipt after sequencing release
+- [ ] Existing production caller full-URL queries/D1 comparison pass; prompt-only update/readback while paused
+
+Preserve all original snapshots/WIP/history. No new profile, caller session, VM, or spend is part of this correction. Task is not complete.
+
+Follow-up local validation: real workerd MCP/D1 test reproduced `-32603 LIKE or GLOB pattern too complex` before the fix and passed afterward (1/1). Related service/integration tests 34/34, targeted ESLint, API typecheck and Worker dry-run bundle passed. Dry-run excluded container rollout because Docker is unavailable; no container paths changed. Fresh independent Sol `literal_url_review` PASS, independently ran integration suite 28/28; no blocking code/security/constitution/docs findings. CI and staged deployment remain pending.

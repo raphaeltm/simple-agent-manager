@@ -6,7 +6,6 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
-import { escapeSearchQueryForLike } from '../lib/search-query-limits';
 import { isRestorableSnapshot } from './session-snapshot-artifacts';
 import {
   sessionRecoveryAttemptDecayMs,
@@ -229,8 +228,10 @@ function appendPullRequestOwnerCondition(
     binds.push(filter.headBranch, filter.headBranch);
   }
   if (filter.url) {
-    links.push('t.output_pr_url = ?', "t.description LIKE ? ESCAPE '\\'");
-    binds.push(filter.url, `%${escapeSearchQueryForLike(filter.url)}%`);
+    // Canonical PR URLs exceed D1's LIKE pattern ceiling. Literal substring
+    // matching avoids that limit; lower() preserves LIKE's ASCII case folding.
+    links.push('t.output_pr_url = ?', 'instr(lower(t.description), lower(?)) > 0');
+    binds.push(filter.url, filter.url);
   }
   // An empty filter would return every task as an owner; refuse it outright.
   if (links.length === 0) {
