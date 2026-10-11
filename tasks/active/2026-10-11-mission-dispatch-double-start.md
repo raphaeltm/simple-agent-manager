@@ -69,19 +69,34 @@ time- or runner-existence-based orchestrator heuristics (proxies with residual w
 
 ## Implementation checklist
 
-- [ ] `createSession` (service, ProjectData DO RPC, `sessions.createSession`) accepts an optional pre-allocated session id
-- [ ] MCP `dispatch_task`: allocate the session id before the INSERT, insert `chat_session_id`, create the VM session with it
-- [ ] MCP `dispatch_task` Instant branch: pass the allocated id to `launchDispatchedInstantSession` → `launchInstantSession`
-- [ ] `launchInstantSession`: optional `chatSessionId` input used for the session
-- [ ] /sam `dispatch_task` and /sam `retry_subtask`: same INSERT-time claim
-- [ ] `claimWorkspaceAllocationForTask`: name the first failed predicate (task missing / not queued / assigned elsewhere / chat-session mismatch / session revoked / workspace not allocatable / reserved checkpoint); ordinary starts no longer say "reserved submission authority"
-- [ ] Workers vertical slice: real `handleDispatchTask` with `missionId`, runner paused, one real orchestrator cycle, then the real runner to workspace assignment; assert one session per task and assignment
-- [ ] Workers test for the Instant branch: orchestrator cycle while the launch is parked does not start the task
-- [ ] Claim-failure reason tests against real SQLite for every reason, ordinary and reserved
-- [ ] /sam creator tests: the inserted `chat_session_id` equals the created session id
-- [ ] Prove discrimination: revert the INSERT-time claim (keep exports) → vertical slice red; record in PR
-- [ ] Docs: search for dispatch/session-link descriptions and update
-- [ ] SHARED_FILE notices on `reliability-wave-1011` for files Wave B also edits
+- [x] `createSession` (service, ProjectData DO RPC, `sessions.createSession`) accepts an optional pre-allocated session id
+- [x] MCP `dispatch_task`: allocate the session id before the INSERT, insert `chat_session_id`, create the VM session with it
+- [x] MCP `dispatch_task` Instant branch: pass the allocated id to `launchDispatchedInstantSession` → `launchInstantSession`
+- [x] `launchInstantSession`: optional `chatSessionId` input used for the session
+- [x] /sam `dispatch_task` and /sam `retry_subtask`: same INSERT-time claim
+- [x] `claimWorkspaceAllocationForTask`: name the first failed predicate (task missing / not queued / assigned elsewhere / chat-session mismatch / session revoked / workspace not allocatable / reserved checkpoint); ordinary starts no longer say "reserved submission authority"
+- [x] Workers vertical slice: real `handleDispatchTask` with `missionId`, runner paused, one real orchestrator cycle, then the real runner to workspace assignment; assert one session per task and assignment
+- [x] Workers test for the Instant branch: orchestrator cycle while the launch is parked does not start the task
+- [x] Claim-failure reason tests against real SQLite for every reason, ordinary and reserved
+- [x] /sam creator tests: the inserted `chat_session_id` equals the created session id
+- [x] Prove discrimination: revert the INSERT-time claim (keep exports) → vertical slice red; record in PR
+- [x] Docs: search for dispatch/session-link descriptions and update
+- [x] SHARED_FILE notices on `reliability-wave-1011` for files Wave B also edits
+
+## Implementation notes
+
+- Session ids are pre-allocated with `crypto.randomUUID()` (the DO's own format), not the trigger flow's
+  `chat_<taskId>`, so dispatched session URLs keep their shape.
+- Discrimination (surgical revert of the INSERT column to `null`, everything else kept):
+  - VM vertical slice: the orchestrator auto-dispatched both tasks (`Auto-dispatched schedulable task
+    (slot 1/5)`, `(slot 2/5)`); each task had 2 sessions and its row ended on the orchestrator's
+    session — the exact production signature.
+  - Instant: the orchestrator started a VM TaskRunner for the Instant task.
+  - /sam: the /sam-dispatched mission task got a second session.
+- Docs: no public or agent doc describes the session-link timing, the auto-dispatch, or the old error
+  text (searched `apps/www/src/content/docs/docs`, `.claude/skills/api-reference`). No doc change.
+- `dispatch-tool.ts` is at 796 lines (hard limit 800); not split here to avoid colliding with Wave B's
+  concurrent edits in the same files.
 
 ## Acceptance criteria
 
