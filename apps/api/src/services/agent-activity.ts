@@ -47,6 +47,9 @@ export interface AgentActivityTask {
   chatSessionId: string | null;
   supersededByTaskId: string | null;
   outputBranch: string | null;
+  outputPrUrl: string | null;
+  /** Branch the task's current workspace checked out; null before one exists. */
+  workspaceBranch: string | null;
   priority: number;
   createdAt: string;
   startedAt: string | null;
@@ -67,6 +70,8 @@ interface AgentActivitySqlRow {
   chatSessionId: string | null;
   supersededByTaskId: string | null;
   outputBranch: string | null;
+  outputPrUrl: string | null;
+  workspaceBranch: string | null;
   priority: number | null;
   createdAt: string;
   startedAt: string | null;
@@ -80,11 +85,21 @@ interface AgentActivitySqlRow {
   snapshotRecoveryFailedAt: string | null;
 }
 
+/** Identifies one pull request; a task matching any link counts as its owner. */
+export interface PullRequestOwnerFilter {
+  /** The PR's head branch, matched against output and workspace branches. */
+  headBranch?: string;
+  /** The PR's URL, matched against the task's output PR URL. */
+  url?: string;
+}
+
 export interface ListAgentActivityTasksOptions {
   userId?: string;
   projectId?: string;
   activeOnly?: boolean;
   excludeTaskId?: string | null;
+  /** Restrict the list to tasks that own this pull request. */
+  ownsPullRequest?: PullRequestOwnerFilter;
   limit?: number;
   nowMs?: number;
 }
@@ -187,6 +202,37 @@ function appendActiveCondition(conditions: string[], binds: unknown[]): void {
   conditions.push('t.superseded_by_task_id IS NULL');
 }
 
+/**
+ * A task owns a pull request when it will push to the PR's head branch or has
+ * reported the PR as its output. No single column covers every owner:
+ * - `t.output_branch`: the task that opened the PR. The VM agent also rewrites it
+ *   to the pushed branch whenever a task-mode turn ends.
+ * - `w.branch`: a completion task dispatched with `branch=<head>`. Until its first
+ *   turn ends, its output branch is still its own generated name.
+ * - `t.output_pr_url`: written by `complete_task`, including conversation-mode
+ *   tasks that stay active awaiting follow-up.
+ */
+function appendPullRequestOwnerCondition(
+  conditions: string[],
+  binds: unknown[],
+  filter: PullRequestOwnerFilter
+): void {
+  const links: string[] = [];
+  if (filter.headBranch) {
+    links.push('t.output_branch = ?', 'w.branch = ?');
+    binds.push(filter.headBranch, filter.headBranch);
+  }
+  if (filter.url) {
+    links.push('t.output_pr_url = ?');
+    binds.push(filter.url);
+  }
+  // An empty filter would return every task as an owner; refuse it outright.
+  if (links.length === 0) {
+    throw new Error('ownsPullRequest requires a headBranch or url');
+  }
+  conditions.push(`(${links.join(' OR ')})`);
+}
+
 function normalizedLimit(limit: number | undefined): number | null {
   if (limit === undefined) return null;
   if (!Number.isFinite(limit) || limit <= 0) return null;
@@ -211,6 +257,9 @@ export async function listAgentActivityTasks(
     binds.push(options.excludeTaskId);
   }
   if (activeOnly) appendActiveCondition(conditions, binds);
+  if (options.ownsPullRequest) {
+    appendPullRequestOwnerCondition(conditions, binds, options.ownsPullRequest);
+  }
 
   const limit = normalizedLimit(options.limit);
   const sql = `
@@ -228,6 +277,8 @@ export async function listAgentActivityTasks(
       t.chat_session_id AS chatSessionId,
       t.superseded_by_task_id AS supersededByTaskId,
       t.output_branch AS outputBranch,
+      t.output_pr_url AS outputPrUrl,
+      w.branch AS workspaceBranch,
       t.priority AS priority,
       t.created_at AS createdAt,
       t.started_at AS startedAt,
@@ -275,6 +326,8 @@ export async function listAgentActivityTasks(
     chatSessionId: row.chatSessionId,
     supersededByTaskId: row.supersededByTaskId,
     outputBranch: row.outputBranch,
+    outputPrUrl: row.outputPrUrl,
+    workspaceBranch: row.workspaceBranch,
     priority: row.priority ?? 0,
     createdAt: row.createdAt,
     startedAt: row.startedAt,

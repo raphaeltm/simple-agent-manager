@@ -506,7 +506,7 @@ mcpRoutes.post('/', async (c) => {
           case 'check_dns_status':
             return c.json(await handleCheckDnsStatus(requestId, tokenData, c.env));
           case 'list_project_agents':
-            return c.json(await handleListProjectAgents(requestId, tokenData, c.env));
+            return c.json(await handleListProjectAgents(requestId, toolArgs, tokenData, c.env));
           case 'get_peer_agent_output':
             return c.json(await handleGetPeerAgentOutput(requestId, toolArgs, tokenData, c.env));
           case 'get_task_dependencies':
