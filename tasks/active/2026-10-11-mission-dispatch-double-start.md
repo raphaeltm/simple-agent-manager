@@ -1,0 +1,101 @@
+# Mission tasks are started twice: dispatch_task and the ProjectOrchestrator both claim the task
+
+SAM task `01M4MZT5TBPA4ABBHH0MEH88H7` (Wave C of `reliability-wave-1011`, coordinator `01M4MXGVH4EMVNE1CT2XRH484J`).
+Source idea: `01M4KKNAZY6KSSCXR610T01E11`.
+
+## Problem
+
+A task dispatched with a `missionId` can be started by two owners.
+
+1. `dispatch_task` inserts the task as `queued` with `chat_session_id = NULL`, creates chat session S1,
+   and starts the TaskRunner with `chatSessionId = S1`. Nothing writes S1 to `tasks.chat_session_id`
+   until the runner's `ensureSessionLinked`, which runs after the workspace claim, seconds later.
+2. The ProjectOrchestrator's cycle (`scheduling.ts` `processMission`) recomputes scheduler states itself
+   and then auto-dispatches mission tasks that are `schedulable`, `queued` and `chat_session_id IS NULL`.
+   During that window it creates S2, persists the description into it, binds `tasks.chat_session_id = S2`
+   and calls `startTaskRunnerDO` again (a no-op: one TaskRunner per task already exists).
+3. The runner's `claimWorkspaceAllocationForTask` requires `tasks.chat_session_id = S1`, changes 0 rows,
+   tombstones the workspace and fails the task with
+   `Reserved task submission authority revoked before workspace assignment: task is queued`, which names
+   neither the cause nor anything reserved.
+
+Production, 2026-10-10 15:37Z: tasks `01M4K7CQPHMM31GS0R263JNNFN` and `01M4K7CYV774BHVRHC847Y5WES`,
+mission `a3e6b0b1-0183-434b-9af9-69545ac37f48`, parent started from ChatGPT through the SAM Connector.
+Each has two `session_summaries` rows; the task row ended on S2.
+
+## Research findings
+
+- **Every mission-task creator starts its own task immediately.** The only writers of `tasks.mission_id`:
+  MCP `dispatch_task` (`routes/mcp/dispatch-tool.ts`, VM and Instant branches), /sam `dispatch_task`
+  (`durable-objects/sam-session/tools/dispatch-task.ts`) and /sam `retry_subtask`
+  (`durable-objects/sam-session/tools/retry-subtask.ts`). REST task creation, MCP `retry_subtask`, trials,
+  workspace-create and chat submit never set `mission_id`. No API creates a mission task that waits for the
+  orchestrator, and `add_dependency` only links tasks that already exist (and are already started).
+- **The orchestrator's gate keys on a proxy.** `chat_session_id IS NULL` stands in for "no starter owns this
+  task". It diverges whenever a creator has claimed the task but not yet written the claim
+  (rule 74). #1876 already patched one divergence (VM admission waiters) by excluding `vm_task_admissions`.
+- **The orchestrator recomputes scheduler states in its own cycle** (`processMission` step 2), so binding the
+  session "before dispatch_task's recompute" is not enough: any window between the task INSERT and the bind
+  is visible. The only airtight claim is one committed in the INSERT itself.
+- **Precedent for an INSERT-time claim.** Reserved submissions (triggers, schedules) insert the task with its
+  pre-allocated `chat_session_id` and create the ProjectData session with that identity afterwards
+  (`reserved-task-submission-storage.ts`, `createReservedTaskSession`). Chat submit binds right after
+  `createSession` (`services/submit-task.ts:647`). `dispatch_task` is the outlier.
+- **Instant branch is worse.** `launchDispatchedInstantSession` creates the session inside the background
+  launch (`services/instant-session.ts`), so the task is unclaimed for the whole node/workspace/session setup.
+  An orchestrator cycle there would start a VM TaskRunner for an Instant task.
+- **The orchestrator's start is a degraded config**: `profile: null`, checkout of the project default
+  branch, no task mode. It must never win against the creator.
+- **TaskRunner tolerates an early claim.** `claimWorkspaceAllocationForTask` (`chat_session_id = ?`),
+  `reserveWorkspacePlacement` (`requireChatSessionMatch = 0` for ordinary starts) and `ensureSessionLinked`
+  (`chat_session_id IS NULL OR = ?`) all accept a task already bound to the runner's session.
+- **Claim-failure message.** `workspace-reserved-allocation.ts:221-231` prefixes every failure with
+  "Reserved task submission authority revoked" and reports only `task is <status>`, even for ordinary starts
+  and even when the real mismatch is the chat session. Consumers: the TaskRunner step handler (permanent →
+  `failTask`); no code parses the text (only `tests/unit/routes/task-workspace-metering.test.ts`).
+- Not changed: MCP `retry_subtask` drops `mission_id` (separate behaviour; not a double-start).
+
+## Decision
+
+The creator is the only authoritative starter. Every mission-task creator commits its chat-session identity
+in the same INSERT that creates the task (a pre-allocated UUID), then creates the ProjectData session with
+that identity. The orchestrator never sees an unclaimed creator task, so its existing `chat_session_id IS NULL`
+gate becomes exact; its code is unchanged.
+
+Rejected: removing orchestrator auto-dispatch (no legitimate trigger exists today, but it touches MCP tools,
+REST routes, config knobs and mission budgets — larger blast radius than the bug); binding after
+`createSession` only (leaves an INSERT-to-bind window the orchestrator's own recompute can see);
+time- or runner-existence-based orchestrator heuristics (proxies with residual windows).
+
+## Implementation checklist
+
+- [ ] `createSession` (service, ProjectData DO RPC, `sessions.createSession`) accepts an optional pre-allocated session id
+- [ ] MCP `dispatch_task`: allocate the session id before the INSERT, insert `chat_session_id`, create the VM session with it
+- [ ] MCP `dispatch_task` Instant branch: pass the allocated id to `launchDispatchedInstantSession` → `launchInstantSession`
+- [ ] `launchInstantSession`: optional `chatSessionId` input used for the session
+- [ ] /sam `dispatch_task` and /sam `retry_subtask`: same INSERT-time claim
+- [ ] `claimWorkspaceAllocationForTask`: name the first failed predicate (task missing / not queued / assigned elsewhere / chat-session mismatch / session revoked / workspace not allocatable / reserved checkpoint); ordinary starts no longer say "reserved submission authority"
+- [ ] Workers vertical slice: real `handleDispatchTask` with `missionId`, runner paused, one real orchestrator cycle, then the real runner to workspace assignment; assert one session per task and assignment
+- [ ] Workers test for the Instant branch: orchestrator cycle while the launch is parked does not start the task
+- [ ] Claim-failure reason tests against real SQLite for every reason, ordinary and reserved
+- [ ] /sam creator tests: the inserted `chat_session_id` equals the created session id
+- [ ] Prove discrimination: revert the INSERT-time claim (keep exports) → vertical slice red; record in PR
+- [ ] Docs: search for dispatch/session-link descriptions and update
+- [ ] SHARED_FILE notices on `reliability-wave-1011` for files Wave B also edits
+
+## Acceptance criteria
+
+- [ ] A mission task dispatched through MCP has exactly one chat session, even when an orchestrator cycle runs before the runner links it
+- [ ] That task reaches workspace assignment (`delegated`, `workspace_id` set, workspace bound to the dispatch session)
+- [ ] The same holds for the Instant branch and the /sam creators (no orchestrator start of a creator-owned task)
+- [ ] The vertical slice fails on pre-fix code
+- [ ] Claim-failure messages name the real mismatch; ordinary starts never say "reserved submission authority"
+- [ ] Staging: a real mission with ≥2 dispatched tasks, one session per task, resources cleaned up
+- [ ] Production: idea query returns 0 duplicate sessions for missions created after the deploy
+
+## References
+
+- `apps/api/src/routes/mcp/dispatch-tool.ts`, `apps/api/src/durable-objects/project-orchestrator/scheduling.ts`
+- `apps/api/src/durable-objects/task-runner/workspace-reserved-allocation.ts`
+- `.claude/rules/62-tests-must-observe-the-real-trigger.md`, `.claude/rules/74-proxy-signals-must-match-the-condition.md`
+- `apps/api/.claude/rules/72-error-categories-must-match-the-recovery-action.md`, `.claude/rules/61-guards-must-cover-every-runtime.md`
