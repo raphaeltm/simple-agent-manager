@@ -26,7 +26,9 @@ import type { Env } from '../../src/env';
 import type { McpTokenData } from '../../src/routes/mcp/_helpers';
 import { handleDispatchTask } from '../../src/routes/mcp/dispatch-tool';
 import * as projectHelpers from '../../src/routes/projects/_helpers';
+import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
+import * as projectDataService from '../../src/services/project-data';
 import { getOrchestratorStatus, startOrchestration } from '../../src/services/project-orchestrator';
 import * as vmAgentContainer from '../../src/services/vm-agent-container';
 import * as workspaceBranch from '../../src/services/workspace-branch';
@@ -91,7 +93,7 @@ async function runTaskRunnerAlarm(taskId: string): Promise<void> {
 }
 
 /** Run one real orchestrator alarm and prove it processed `missionId` (liveness for absence checks). */
-async function runOrchestratorCycleOver(projectId: string, missionId: string) {
+async function runOrchestratorCycleOver(projectId: string, missionId: string, terminal = false) {
   const lastCheckedAt = async () =>
     (await getOrchestratorStatus(testEnv, projectId)).activeMissions.find(
       (mission) => mission.missionId === missionId
@@ -106,7 +108,14 @@ async function runOrchestratorCycleOver(projectId: string, missionId: string) {
 
   const status = await getOrchestratorStatus(testEnv, projectId);
   const after = status.activeMissions.find((mission) => mission.missionId === missionId);
-  expect(after?.lastCheckedAt).toBeGreaterThan(before!);
+  if (terminal) {
+    expect(after).toBeUndefined();
+    expect(
+      await env.DATABASE.prepare('SELECT status FROM missions WHERE id = ?').bind(missionId).first()
+    ).toEqual({ status: 'failed' });
+  } else {
+    expect(after?.lastCheckedAt).toBeGreaterThan(before!);
+  }
   return status;
 }
 
@@ -205,6 +214,323 @@ async function dispatchMissionTask(
 }
 
 describe('mission dispatch has exactly one starter', () => {
+  it('session creation rejection after INSERT fails the claimed task without an orchestrator takeover', async () => {
+    const fixture = await seedMissionFixture('session-rejection');
+    const entered = deferred<{ taskId: string; sessionId: string }>();
+    const release = deferred<void>();
+    vi.spyOn(projectDataService, 'createSession').mockImplementation(async (...args) => {
+      entered.resolve({ taskId: args[4]!, sessionId: args[6]! });
+      await release.promise;
+      throw new Error('injected session creation failure');
+    });
+    const dispatch = handleDispatchTask(
+      1,
+      { description: 'Fail session creation', missionId: fixture.missionId },
+      fixture.token,
+      envWithHeldRunnerAlarms()
+    );
+    const claim = await entered.promise;
+    expect(await taskRow(claim.taskId)).toMatchObject({
+      status: 'queued',
+      chat_session_id: claim.sessionId,
+    });
+    release.resolve();
+    expect((await dispatch).error).toMatchObject({
+      message: expect.stringContaining('injected session creation failure'),
+    });
+    expect(await taskRow(claim.taskId)).toMatchObject({
+      status: 'failed',
+      chat_session_id: claim.sessionId,
+      error_message: expect.stringContaining('Session creation failed'),
+    });
+    const status = await runOrchestratorCycleOver(fixture.projectId, fixture.missionId, true);
+    expect(status.recentDecisions.filter((d) => d.taskId === claim.taskId)).toEqual([]);
+    expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([]);
+    expect(await taskRunnerStub(claim.taskId).getStatus()).toBeNull();
+  });
+
+  it('a real orchestrator cycle during session creation preserves the INSERT-time identity', async () => {
+    const fixture = await seedMissionFixture('session-midpoint');
+    vi.spyOn(projectHelpers, 'requireRepositoryOwnerAccess').mockResolvedValue(undefined);
+    const entered = deferred<{ taskId: string; sessionId: string }>();
+    const release = deferred<void>();
+    const createSession = projectDataService.createSession;
+    let firstCreation = true;
+    vi.spyOn(projectDataService, 'createSession').mockImplementation(async (...args) => {
+      if (!firstCreation) return createSession(...args);
+      firstCreation = false;
+      entered.resolve({ taskId: args[4]!, sessionId: args[6]! });
+      await release.promise;
+      return createSession(...args);
+    });
+    const dispatch = dispatchMissionTask(fixture, 'Pause before session creation');
+    const claim = await entered.promise;
+    try {
+      expect(await taskRow(claim.taskId)).toMatchObject({
+        status: 'queued',
+        chat_session_id: claim.sessionId,
+      });
+      expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([]);
+      const status = await runOrchestratorCycleOver(fixture.projectId, fixture.missionId);
+      expect(status.recentDecisions.filter((d) => d.taskId === claim.taskId)).toEqual([]);
+      expect(await taskRunnerStub(claim.taskId).getStatus()).toBeNull();
+      expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([]);
+      expect((await taskRow(claim.taskId))?.chat_session_id).toBe(claim.sessionId);
+    } finally {
+      release.resolve();
+    }
+    expect(await dispatch).toMatchObject(claim);
+    expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([claim.sessionId]);
+    expect(await taskRunnerStub(claim.taskId).getStatus()).toMatchObject({
+      currentStep: 'node_selection',
+      stepResults: { chatSessionId: claim.sessionId },
+    });
+  });
+
+  it('initial-message rejection terminalizes the task and real reconciliation fails its created session', async () => {
+    const fixture = await seedMissionFixture('message-rejection');
+    const entered = deferred<{ taskId: string; sessionId: string }>();
+    const release = deferred<void>();
+    vi.spyOn(projectDataService, 'persistMessage').mockImplementation(async (...args) => {
+      const row = await env.DATABASE.prepare('SELECT id FROM tasks WHERE chat_session_id = ?')
+        .bind(args[2])
+        .first<{ id: string }>();
+      entered.resolve({ taskId: row!.id, sessionId: args[2] });
+      await release.promise;
+      throw new Error('injected initial message failure');
+    });
+    const dispatch = handleDispatchTask(
+      1,
+      { description: 'Fail initial message', missionId: fixture.missionId },
+      fixture.token,
+      envWithHeldRunnerAlarms()
+    );
+    const claim = await entered.promise;
+    expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([claim.sessionId]);
+    expect(
+      await projectDataService.getSession(testEnv, fixture.projectId, claim.sessionId)
+    ).toMatchObject({ status: 'active' });
+    release.resolve();
+    expect((await dispatch).error).toMatchObject({
+      message: expect.stringContaining('injected initial message failure'),
+    });
+    expect(await taskRow(claim.taskId)).toMatchObject({
+      status: 'failed',
+      chat_session_id: claim.sessionId,
+    });
+    const status = await runOrchestratorCycleOver(fixture.projectId, fixture.missionId, true);
+    expect(status.recentDecisions.filter((d) => d.taskId === claim.taskId)).toEqual([]);
+    expect(await taskRunnerStub(claim.taskId).getStatus()).toBeNull();
+    const reconciled = await projectDataService.reconcileTerminalTaskSessions(
+      testEnv,
+      fixture.projectId,
+      { nowIso: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() }
+    );
+    expect(reconciled).toMatchObject({ selected: 1, failed: 1, errors: 0 });
+    expect(
+      await projectDataService.getSession(testEnv, fixture.projectId, claim.sessionId)
+    ).toMatchObject({ status: 'failed' });
+    expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([claim.sessionId]);
+  });
+
+  it('a real ProjectData session INSERT rejection leaves a terminal claim that supported SAM retry replaces', async () => {
+    const fixture = await seedMissionFixture('real-session-insert-rejection');
+    vi.spyOn(projectHelpers, 'requireRepositoryOwnerAccess').mockResolvedValue(undefined);
+    const stub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(fixture.projectId));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        "CREATE TRIGGER reject_session_insert BEFORE INSERT ON chat_sessions BEGIN SELECT RAISE(ABORT, 'injected ProjectData INSERT failure'); END"
+      );
+    });
+    // The Workers RPC harness reports a synchronous SQLite throw twice. Catch
+    // inside the real DO boundary and propagate the same failure to the caller.
+    const createSession = vi
+      .spyOn(projectDataService, 'createSession')
+      .mockImplementation(async (...args) => {
+        const result = await runInDurableObject(stub, async (instance) => {
+          try {
+            return {
+              sessionId: await instance.createSession(args[2], args[3], args[4], args[5], args[6]),
+            };
+          } catch (error) {
+            return { error: error instanceof Error ? error.message : String(error) };
+          }
+        });
+        if ('error' in result) throw new Error(result.error);
+        return result.sessionId;
+      });
+    try {
+      const response = await handleDispatchTask(
+        1,
+        { description: 'Reject the real session insert', missionId: fixture.missionId },
+        fixture.token,
+        envWithHeldRunnerAlarms()
+      );
+      expect(response.error).toMatchObject({
+        message: expect.stringContaining('injected ProjectData INSERT failure'),
+      });
+    } finally {
+      await runInDurableObject(stub, async (_instance, state) => {
+        state.storage.sql.exec('DROP TRIGGER reject_session_insert');
+      });
+      createSession.mockRestore();
+    }
+    const failed = await env.DATABASE.prepare(
+      'SELECT id, status, chat_session_id FROM tasks WHERE parent_task_id = ?'
+    )
+      .bind(fixture.token.taskId)
+      .first<{ id: string; status: string; chat_session_id: string }>();
+    expect(failed).toMatchObject({ status: 'failed', chat_session_id: expect.any(String) });
+    expect(await sessionIdsForTask(fixture.projectId, failed!.id)).toEqual([]);
+    expect(await taskRunnerStub(failed!.id).getStatus()).toBeNull();
+    const retried = (await samRetrySubtask(
+      { taskId: failed!.id },
+      {
+        env: envWithHeldRunnerAlarms() as unknown as Record<string, unknown>,
+        userId: fixture.userId,
+      }
+    )) as { newTaskId: string; sessionId: string };
+    expect(retried.newTaskId).not.toBe(failed!.id);
+    expect(retried.sessionId).not.toBe(failed!.chat_session_id);
+    expect(await taskRow(retried.newTaskId)).toMatchObject({
+      status: 'queued',
+      chat_session_id: retried.sessionId,
+    });
+    expect(await sessionIdsForTask(fixture.projectId, retried.newTaskId)).toEqual([
+      retried.sessionId,
+    ]);
+    const status = await runOrchestratorCycleOver(fixture.projectId, fixture.missionId);
+    expect(status.recentDecisions.filter((d) => d.taskId === retried.newTaskId)).toEqual([]);
+    expect(await sessionIdsForTask(fixture.projectId, failed!.id)).toEqual([]);
+    expect(await sessionIdsForTask(fixture.projectId, retried.newTaskId)).toEqual([
+      retried.sessionId,
+    ]);
+    expect(await taskRunnerStub(retried.newTaskId).getStatus()).toMatchObject({
+      currentStep: 'node_selection',
+      stepResults: { chatSessionId: retried.sessionId },
+    });
+  });
+
+  it('a committed session whose creation response is lost remains claimed until real terminal reconciliation', async () => {
+    const fixture = await seedMissionFixture('session-response-loss');
+    const createSession = projectDataService.createSession;
+    let committed!: { taskId: string; sessionId: string };
+    vi.spyOn(projectDataService, 'createSession').mockImplementation(async (...args) => {
+      const sessionId = await createSession(...args);
+      committed = { taskId: args[4]!, sessionId };
+      throw new Error('injected response loss after committed session');
+    });
+    // An unavailable authoritative reader must not turn an uncertain RPC response
+    // into a cleared claim or prevent the creator from terminalizing its task.
+    const readSession = vi
+      .spyOn(projectDataService, 'getSession')
+      .mockRejectedValue(new Error('injected authoritative read outage'));
+    const response = await handleDispatchTask(
+      1,
+      { description: 'Lose session response', missionId: fixture.missionId },
+      fixture.token,
+      envWithHeldRunnerAlarms()
+    );
+    expect(response.error).toMatchObject({
+      message: expect.stringContaining('injected response loss'),
+    });
+    expect(readSession).not.toHaveBeenCalled();
+    readSession.mockRestore();
+    expect(await taskRow(committed.taskId)).toMatchObject({
+      status: 'failed',
+      chat_session_id: committed.sessionId,
+    });
+    expect(await sessionIdsForTask(fixture.projectId, committed.taskId)).toEqual([
+      committed.sessionId,
+    ]);
+    expect(
+      await projectDataService.getSession(testEnv, fixture.projectId, committed.sessionId)
+    ).toMatchObject({ status: 'active' });
+    const status = await runOrchestratorCycleOver(fixture.projectId, fixture.missionId, true);
+    expect(status.recentDecisions.filter((d) => d.taskId === committed.taskId)).toEqual([]);
+    expect(await taskRunnerStub(committed.taskId).getStatus()).toBeNull();
+    const reconciled = await projectDataService.reconcileTerminalTaskSessions(
+      testEnv,
+      fixture.projectId,
+      { nowIso: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() }
+    );
+    expect(reconciled).toMatchObject({ selected: 1, failed: 1, errors: 0 });
+    expect(
+      await projectDataService.getSession(testEnv, fixture.projectId, committed.sessionId)
+    ).toMatchObject({ status: 'failed' });
+    expect((await taskRow(committed.taskId))?.chat_session_id).toBe(committed.sessionId);
+  });
+
+  it('recovery terminalizes crash-leftover claims whose sessions were never created and continues the sweep', async () => {
+    const fixture = await seedMissionFixture('crash-leftover');
+    // A process crash between INSERT and ProjectData RPC leaves precisely these rows.
+    const taskIds = [unique('crashed-claim'), unique('next-crashed-claim')];
+    for (const taskId of taskIds) {
+      await seedTask(taskId, fixture.projectId, fixture.userId, { status: 'queued' });
+      await env.DATABASE.prepare(
+        "UPDATE tasks SET mission_id = ?, chat_session_id = ?, execution_step = 'node_selection', scheduler_state = 'schedulable', updated_at = ? WHERE id = ?"
+      )
+        .bind(
+          fixture.missionId,
+          `missing-${taskId}`,
+          new Date(Date.now() - 10 * 60_000).toISOString(),
+          taskId
+        )
+        .run();
+      expect(await sessionIdsForTask(fixture.projectId, taskId)).toEqual([]);
+    }
+    const status = await runOrchestratorCycleOver(fixture.projectId, fixture.missionId);
+    expect(status.recentDecisions.filter((d) => taskIds.includes(d.taskId ?? ''))).toEqual([]);
+    const result = await recoverStuckTasks({ ...testEnv, TASK_STUCK_QUEUED_TIMEOUT_MS: '60000' });
+    expect(result.failedQueued).toBeGreaterThanOrEqual(taskIds.length);
+    expect(result.errors).toBe(0);
+    for (const taskId of taskIds) {
+      expect(await taskRow(taskId)).toMatchObject({
+        status: 'failed',
+        chat_session_id: `missing-${taskId}`,
+        error_message: expect.stringContaining("Task stuck in 'queued'"),
+      });
+      expect(await sessionIdsForTask(fixture.projectId, taskId)).toEqual([]);
+      expect(await taskRunnerStub(taskId).getStatus()).toBeNull();
+    }
+  });
+
+  it('a rejected task INSERT creates neither a session nor a dangling task reservation', async () => {
+    const fixture = await seedMissionFixture('insert-rejection');
+    const createSession = vi.spyOn(projectDataService, 'createSession');
+    // D1 rejects only this creator's INSERT; all fixture reads and other writes remain real.
+    await env.DATABASE.exec(
+      `CREATE TRIGGER reject_dispatch_insert BEFORE INSERT ON tasks WHEN NEW.parent_task_id = '${fixture.token.taskId}' BEGIN SELECT RAISE(ABORT, 'injected task INSERT failure'); END`
+    );
+    try {
+      await expect(
+        handleDispatchTask(
+          1,
+          { description: 'Reject task insertion', missionId: fixture.missionId },
+          fixture.token,
+          envWithHeldRunnerAlarms()
+        )
+      ).rejects.toThrow('injected task INSERT failure');
+      expect(createSession).not.toHaveBeenCalled();
+      expect(
+        (
+          await env.DATABASE.prepare('SELECT id FROM tasks WHERE parent_task_id = ?')
+            .bind(fixture.token.taskId)
+            .all()
+        ).results
+      ).toEqual([]);
+      const stub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(fixture.projectId));
+      expect(
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.sql.exec('SELECT id FROM chat_sessions').toArray()
+        )
+      ).toEqual([]);
+      await runOrchestratorCycleOver(fixture.projectId, fixture.missionId);
+    } finally {
+      await env.DATABASE.exec('DROP TRIGGER reject_dispatch_insert');
+    }
+  });
+
   it('an orchestrator cycle before the runner links its session neither re-starts nor steals the tasks', async () => {
     const fixture = await seedMissionFixture('mission-double-start');
     vi.spyOn(projectHelpers, 'requireRepositoryOwnerAccess').mockResolvedValue(undefined);

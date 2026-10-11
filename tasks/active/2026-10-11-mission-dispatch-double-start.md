@@ -101,7 +101,7 @@ time- or runner-existence-based orchestrator heuristics (proxies with residual w
   - Instant: the orchestrator started a VM TaskRunner for the Instant task.
   - /sam: the /sam-dispatched mission task got a second session.
 - Docs: no public or agent doc describes the session-link timing, the auto-dispatch, or the old error
-  text (searched `apps/www/src/content/docs/docs`, `.claude/skills/api-reference`). No doc change.
+  text (searched `apps/www/src/content/docs/docs`, `.claude/skills/api-reference`). No public/reference doc change required. MCP descriptions/response wording and the scoped ownership rule were updated.
 - `dispatch-tool.ts` is at 796 lines (hard limit 800); not split here to avoid colliding with Wave B's
   concurrent edits in the same files.
 
@@ -121,3 +121,25 @@ time- or runner-existence-based orchestrator heuristics (proxies with residual w
 - `apps/api/src/durable-objects/task-runner/workspace-reserved-allocation.ts`
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`, `.claude/rules/74-proxy-signals-must-match-the-condition.md`
 - `apps/api/.claude/rules/72-error-categories-must-match-the-recovery-action.md`, `.claude/rules/61-guards-must-cover-every-runtime.md`
+
+## Recovery validation (Sol, 2026-10-11)
+
+Recovery task `01M4NAW17AVHSJCF4FNZGVRX1C` reuses this branch and PR #2302. The original coordinator handoff was verified by recovery coordinator `01M4NA4ERCGYH3VK5ARVN317N6`; its writer release permits source validation, while staging, migrations, merge and production remain sequenced separately.
+
+The original saved HEAD (`ee5999104`) contains the three happy-path Workers cases but not the failure-window tests mentioned in the quota-interrupted transcript. Current SAM MCP exposes no snapshot-content recovery operation, so retained WIP metadata cannot establish completeness. Missing validation is reconstructed without replacing the substantive implementation.
+
+Failure-window coverage drives task INSERT rejection through a real D1 trigger, holds ProjectData creation after the INSERT across a real orchestrator cycle, rejects session creation or initial-message persistence, and exercises real terminal-session reconciliation and queued-timeout recovery. A rejected task INSERT leaves neither a task nor a session; a reserved session ID cannot make the orchestrator a second starter. An actual process crash before startup is bounded by existing queued-timeout failure, rather than introducing a second start path.
+
+The existing terminal-session-ledger reconciliation includes active sessions with no workspace/ACP assignment and fails them after the owning task becomes terminal. No dispatcher retries the session-creation RPC today, so new replay infrastructure is unnecessary. A failed task can retain a reserved ID whose session was never created; the coordinator clarified that retaining this diagnostic reservation is acceptable if terminal readers and fresh retry remain safe. Clearing it on transport ambiguity could discard a committed or late-arriving session identity; no cosmetic cleanup or unused replay mechanism is added.
+
+- [x] Preserve original workflow state locally; remove accidental tracked `.do-state.md` in additive commit `84f369dce` (history and local contents retained)
+- [x] Correct PR title/body and restore preflight/review evidence with pending gates stated
+- [x] Affected unit tests: 273 passed; runtime-state and instruction-context-budget checks passed
+- [ ] Expanded Workers failure-window tests pass
+- [ ] Recovery API lint/typecheck pass
+- [x] Coordinator confirmed original runtime may be preserved when failure readers/retry and bounded recovery are verified; shared source ownership granted, no startup cleanup added
+- [ ] Final staging, CI, CodeRabbit and production gates remain as above
+
+Session-identity audit: writers are the three mission creator INSERTs, ProjectData `sessions.createSession`, Instant `acceptInstantSession`, and TaskRunner `session-linking.ensureSessionLinked`. Relevant readers are orchestrator scheduling eligibility (`chat_session_id IS NULL`) and queued concurrency, workspace-allocation ownership, terminal failure/reconciliation, and retry deletion fencing. `/sam retrySubtask` never reads the predecessor's session ID and allocates a fresh task/session identity while inheriting the mission. MCP `orchestration-tools` retry likewise generates new identities; its existing omission of mission ID is unchanged. `replacement-deletion-fence` permits a predecessor without a workspace. Sleeping snapshot recovery and reserved trigger/schedule creators use their existing explicit identity guards and are not changed.
+
+Independent Sol failure review revised to PASS for this scoped contract after checking `project-data/terminal-session-reconciliation.ts` and `scheduled/terminal-session-ledger-reconciliation.ts`; no claim of a new independent executed suite. Reconciliation's existing completion-drain protection can defer a newly failed session, so tests advance its input clock rather than disable the production guard. Final test execution remains required.

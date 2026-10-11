@@ -175,7 +175,7 @@ own "make it schedulable" step.
 - Implementation: `apps/api/src/services/task-runtime-liveness.ts`
   (`loadTaskSupersession`, `needsTaskSupersessionProbe`, `supersessionVerdict`)
 - Follow-up idea: `01M0SG7ZEE1XARK4QDG7V6HDPN`
-- First-owner incident: `tasks/archive/2026-10-11-mission-dispatch-double-start.md`
+- First-owner incident: `tasks/active/2026-10-11-mission-dispatch-double-start.md`
   (idea `01M4KKNAZY6KSSCXR610T01E11`)
 - `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md` — the destroyer must
   read the record the resumer reads; this rule is its ownership-transfer sibling
