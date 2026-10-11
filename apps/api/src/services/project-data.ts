@@ -536,16 +536,18 @@ function sessionStatus(session: Record<string, unknown> | null): string | null {
   return typeof session?.status === 'string' ? session.status : null;
 }
 
+/** `reservedSessionId`: create the session under an identity the caller already committed. */
 export async function createSession(
   env: Env,
   projectId: string,
   workspaceId: string | null,
   topic: string | null,
   taskId: string | null = null,
-  createdByUserId: string | null = null
+  createdByUserId: string | null = null,
+  reservedSessionId: string | null = null
 ): Promise<string> {
   const sessionId = await callProjectDataNoRetry(env, projectId, 'createSession', (stub) =>
-    stub.createSession(workspaceId, topic, taskId, createdByUserId)
+    stub.createSession(workspaceId, topic, taskId, createdByUserId, reservedSessionId)
   );
   await recordSessionLifecycleEventBestEffort(env, {
     projectId,

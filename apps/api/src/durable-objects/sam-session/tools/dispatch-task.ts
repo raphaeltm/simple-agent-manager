@@ -310,6 +310,8 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
 
   const explicitBranch = input.branch?.trim();
   const taskId = ulid();
+  // Committed in the INSERT so the ProjectOrchestrator never sees this mission task unclaimed.
+  const chatSessionId = crypto.randomUUID();
 
   const placementResolution = await resolveTaskStartPlacementCredentialAttribution(
     db,
@@ -386,14 +388,14 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
 
   // ── Insert task ────────────────────────────────────────────────────────
   await env.DATABASE.prepare(
-    `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
+    `INSERT INTO tasks (id, project_id, user_id, parent_task_id, chat_session_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
      task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, triggered_by,
      requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirement_plan_json, resource_requirements_source, resolved_reservation_json,
      credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
      ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
      created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
      ?, ?, ?, ?, ?, 'mcp',
      ?, ?, ?, ?, ?, ?,
      ?, ?, ?,
@@ -405,6 +407,7 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       input.projectId,
       ctx.userId,
       parentTaskId,
+      chatSessionId,
       taskTitle,
       description,
       priority,
@@ -450,7 +453,8 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       null,
       taskTitle,
       taskId,
-      ctx.userId
+      ctx.userId,
+      chatSessionId
     );
 
     await projectDataService.persistMessage(

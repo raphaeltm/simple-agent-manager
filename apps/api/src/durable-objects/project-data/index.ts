@@ -287,7 +287,8 @@ export class ProjectData extends DurableObject<Env> {
     workspaceId: string | null,
     topic: string | null,
     taskId: string | null = null,
-    createdByUserId: string | null = null
+    createdByUserId: string | null = null,
+    reservedSessionId: string | null = null
   ): Promise<string> {
     const { id, now } = sessions.createSession(
       this.sql,
@@ -295,7 +296,8 @@ export class ProjectData extends DurableObject<Env> {
       workspaceId,
       topic,
       taskId,
-      createdByUserId
+      createdByUserId,
+      reservedSessionId
     );
     this.runSessionCreatedHooks({ id, workspaceId, taskId, createdByUserId, topic, now });
     return id;

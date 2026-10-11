@@ -205,30 +205,110 @@ export async function claimWorkspaceAllocationForTask(
   if (result.meta.changes && result.meta.changes > 0) return;
 
   const winner = await rc.env.DATABASE.prepare(
-    `SELECT t.status, t.workspace_id AS workspaceId, r.reason AS revocationReason
+    `SELECT t.project_id AS projectId, t.user_id AS userId, t.status, t.workspace_id AS workspaceId,
+            t.chat_session_id AS taskChatSessionId, r.reason AS revocationReason,
+            w.status AS workspaceStatus, w.chat_session_id AS workspaceChatSessionId,
+            c.intent_fingerprint AS checkpointIntentFingerprint,
+            c.chat_session_id AS checkpointChatSessionId
        FROM tasks t
        LEFT JOIN reserved_task_session_revocations r
          ON r.project_id = t.project_id
         AND r.chat_session_id = t.chat_session_id
+       LEFT JOIN workspaces w
+         ON w.id = ?
+        AND w.project_id = t.project_id
+        AND w.user_id = t.user_id
+       LEFT JOIN task_submission_checkpoints c ON c.task_id = t.id
       WHERE t.id = ?
       LIMIT 1`
   )
-    .bind(state.taskId)
-    .first<{ status: string; workspaceId: string | null; revocationReason: string | null }>();
+    .bind(workspaceId, state.taskId)
+    .first<WorkspaceClaimRow>();
 
   if (winner?.workspaceId === workspaceId) return;
 
-  const reason = winner?.revocationReason
-    ? `reserved session revoked (${winner.revocationReason})`
-    : winner?.status
-      ? `task is ${winner.status}`
-      : 'task is missing';
+  const reason = describeWorkspaceClaimRefusal(winner, {
+    taskId: state.taskId,
+    projectId: state.projectId,
+    userId: state.userId,
+    workspaceId,
+    chatSessionId,
+    reservedIntentFingerprint,
+  });
   await tombstoneUndispatchedWorkspaceAllocation(state, rc, workspaceId, reason);
   state.stepResults.workspaceId = null;
   await rc.ctx.storage.put('state', state);
+  // Either way the start cannot be reconciled: abandon the allocation, fail permanently.
   throw new TaskRunnerStartGuardRevokedError(
-    `Reserved task submission authority revoked before workspace assignment: ${reason}`
+    guard
+      ? `Reserved task submission authority revoked before workspace assignment: ${reason}`
+      : `Task start abandoned before workspace assignment: ${reason}`
   );
+}
+
+interface WorkspaceClaimRow {
+  projectId: string;
+  userId: string;
+  status: string;
+  workspaceId: string | null;
+  taskChatSessionId: string | null;
+  revocationReason: string | null;
+  workspaceStatus: string | null;
+  workspaceChatSessionId: string | null;
+  checkpointIntentFingerprint: string | null;
+  checkpointChatSessionId: string | null;
+}
+
+interface WorkspaceClaim {
+  taskId: string;
+  projectId: string;
+  userId: string;
+  workspaceId: string;
+  chatSessionId: string | null;
+  reservedIntentFingerprint: string | null;
+}
+
+const ALLOCATABLE_WORKSPACE_STATUSES = new Set(['creating', 'running', 'recovery']);
+
+/** Name the first claim predicate the current rows fail, in the claim UPDATE's order. */
+export function describeWorkspaceClaimRefusal(
+  row: WorkspaceClaimRow | null,
+  claim: WorkspaceClaim
+): string {
+  if (!row) return `task ${claim.taskId} no longer exists`;
+  if (row.projectId !== claim.projectId || row.userId !== claim.userId) {
+    return `task ${claim.taskId} now belongs to a different project or user`;
+  }
+  if (row.status !== 'queued') return `task is ${row.status}, not queued`;
+  if (row.workspaceId) return `task is already assigned to workspace ${row.workspaceId}`;
+  const reserved = claim.reservedIntentFingerprint !== null;
+  if (
+    claim.chatSessionId &&
+    row.taskChatSessionId !== claim.chatSessionId &&
+    (row.taskChatSessionId !== null || reserved)
+  ) {
+    return row.taskChatSessionId
+      ? `task is bound to chat session ${row.taskChatSessionId}, not this start's session ${claim.chatSessionId}`
+      : `task has no chat session; this start owns session ${claim.chatSessionId}`;
+  }
+  if (row.revocationReason) {
+    return `chat session ${row.taskChatSessionId} was revoked (${row.revocationReason})`;
+  }
+  if (!row.workspaceStatus) return `workspace ${claim.workspaceId} no longer exists`;
+  if (!ALLOCATABLE_WORKSPACE_STATUSES.has(row.workspaceStatus)) {
+    return `workspace ${claim.workspaceId} is ${row.workspaceStatus}`;
+  }
+  if (claim.chatSessionId && row.workspaceChatSessionId !== claim.chatSessionId) {
+    return `workspace ${claim.workspaceId} is bound to chat session ${row.workspaceChatSessionId ?? 'none'}, not ${claim.chatSessionId}`;
+  }
+  if (
+    reserved &&
+    (row.checkpointIntentFingerprint !== claim.reservedIntentFingerprint ||
+      row.checkpointChatSessionId !== claim.chatSessionId)
+  ) {
+    return `reserved submission checkpoint no longer matches this start`;
+  }
+  return `task ${claim.taskId} changed before workspace assignment`;
 }
 
 export async function recoverReservedWorkspaceAllocationForCleanup(
