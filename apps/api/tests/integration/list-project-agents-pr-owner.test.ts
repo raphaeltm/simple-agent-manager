@@ -127,7 +127,7 @@ describe('list_project_agents pull request owner filter', () => {
         task.id,
         task.projectId ?? PROJECT,
         `Task ${task.id}`,
-        task.description ?? `Work on ${task.id}.`,
+        task.description === undefined ? `Work on ${task.id}.` : task.description,
         task.status,
         task.executionStep ?? null,
         task.outputBranch ?? null,
@@ -274,11 +274,16 @@ describe('list_project_agents pull request owner filter', () => {
       status: 'queued',
       description: 'Complete PR https://github.com/acme/repo/pull/9999.',
     });
+    insertTask({ id: 'no-description', status: 'queued', description: null });
 
     expect(await ownerIds({ prUrl: PR_URL })).toEqual(['owner-description']);
-    // No branch links it yet; the unfiltered list proves it is an active agent.
+    // No branch links it yet; the unfiltered list proves all three are active agents.
     expect(await ownerIds({ prHeadBranch: HEAD })).toEqual([]);
-    expect(await ownerIds({})).toEqual(['other-pr-description', 'owner-description']);
+    expect(await ownerIds({})).toEqual([
+      'no-description',
+      'other-pr-description',
+      'owner-description',
+    ]);
   });
 
   it.each(ACTIVE_STATUSES)('treats a %s task on the head branch as an owner', async (status) => {
