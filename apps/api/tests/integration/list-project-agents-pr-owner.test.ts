@@ -9,6 +9,8 @@
  * - #2243: an in-flight completion task whose `output_branch` is its own generated
  *   name and whose workspace checked out the PR head. Only `workspaces.branch`
  *   links it to the PR.
+ * - A completion task still waiting for node capacity has no workspace yet; only its
+ *   dispatch description, which cites the PR URL, links it to the PR.
  */
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
@@ -37,6 +39,8 @@ interface TaskFixture {
   outputPrUrl?: string | null;
   workspaceId?: string | null;
   supersededByTaskId?: string | null;
+  description?: string | null;
+  executionStep?: string | null;
   createdAt?: string;
 }
 
@@ -115,15 +119,17 @@ describe('list_project_agents pull request owner filter', () => {
     sequence += 1;
     sqlite
       .prepare(
-        `INSERT INTO tasks (id, project_id, user_id, title, status, priority, output_branch,
-           output_pr_url, workspace_id, superseded_by_task_id, created_at)
-         VALUES (?, ?, 'user-1', ?, ?, 0, ?, ?, ?, ?, ?)`
+        `INSERT INTO tasks (id, project_id, user_id, title, description, status, execution_step,
+           priority, output_branch, output_pr_url, workspace_id, superseded_by_task_id, created_at)
+         VALUES (?, ?, 'user-1', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`
       )
       .run(
         task.id,
         task.projectId ?? PROJECT,
         `Task ${task.id}`,
+        task.description ?? `Work on ${task.id}.`,
         task.status,
+        task.executionStep ?? null,
         task.outputBranch ?? null,
         task.outputPrUrl ?? null,
         task.workspaceId ?? null,
@@ -194,7 +200,15 @@ describe('list_project_agents pull request owner filter', () => {
       outputPrUrl: PR_URL,
       workspaceId: 'ws-conversation',
     });
-    // Active, but working on something else: the liveness control.
+    // A completion task still waiting for node capacity: no workspace yet, only
+    // its dispatch description links it to the PR.
+    insertTask({
+      id: 'owner-description',
+      status: 'queued',
+      outputBranch: 'sam/complete-pr-2279-q7w8e9',
+      description: `Complete PR ${PR_URL}: fix lint and preflight gates.`,
+    });
+    // Active, but working on another PR: the liveness control for every link.
     insertWorkspace('ws-unrelated', 'sam/unrelated-work');
     insertTask({
       id: 'unrelated-active',
@@ -202,20 +216,22 @@ describe('list_project_agents pull request owner filter', () => {
       outputBranch: 'sam/unrelated-work',
       outputPrUrl: 'https://github.com/acme/repo/pull/9999',
       workspaceId: 'ws-unrelated',
+      description: 'Complete PR https://github.com/acme/repo/pull/9999.',
     });
   }
 
-  it('returns exactly the owners linked by output branch, workspace branch or PR URL', async () => {
+  it('returns exactly the owners linked by output branch, workspace branch, PR URL or description', async () => {
     seedOneOwnerPerLink();
 
     const result = await listAgents({ prHeadBranch: HEAD, prUrl: PR_URL });
 
     expect(result.agents.map((agent) => agent.taskId).sort()).toEqual([
+      'owner-description',
       'owner-output-branch',
       'owner-pr-url',
       'owner-workspace-branch',
     ]);
-    expect(result.totalAgents).toBe(3);
+    expect(result.totalAgents).toBe(4);
     expect(result.filter).toEqual({ prHeadBranch: HEAD, prUrl: PR_URL });
     expect(result.agents.find((agent) => agent.taskId === 'owner-workspace-branch')).toMatchObject({
       branch: 'sam/complete-pr-2279-x0btnm',
@@ -233,12 +249,36 @@ describe('list_project_agents pull request owner filter', () => {
     ]);
   });
 
-  it('finds an owner through the PR URL alone and ignores branch-only owners', async () => {
+  it('finds owners through the PR URL alone and ignores branch-only owners', async () => {
     seedOneOwnerPerLink();
 
-    expect(await ownerIds({ prUrl: PR_URL })).toEqual(['owner-pr-url']);
-    // A trailing slash on the caller's URL still matches the canonical stored value.
-    expect(await ownerIds({ prUrl: `${PR_URL}/` })).toEqual(['owner-pr-url']);
+    expect(await ownerIds({ prUrl: PR_URL })).toEqual(['owner-description', 'owner-pr-url']);
+    // A trailing slash on the caller's URL still matches, and the echo is canonical.
+    const result = await listAgents({ prUrl: `${PR_URL}/` });
+    expect(result.agents.map((agent) => agent.taskId).sort()).toEqual([
+      'owner-description',
+      'owner-pr-url',
+    ]);
+    expect(result.filter).toEqual({ prUrl: PR_URL });
+  });
+
+  it('finds a dispatched task that has no workspace yet through its description alone', async () => {
+    insertTask({
+      id: 'owner-description',
+      status: 'queued',
+      outputBranch: 'sam/complete-pr-2279-q7w8e9',
+      description: `Complete PR ${PR_URL}: fix lint and preflight gates.`,
+    });
+    insertTask({
+      id: 'other-pr-description',
+      status: 'queued',
+      description: 'Complete PR https://github.com/acme/repo/pull/9999.',
+    });
+
+    expect(await ownerIds({ prUrl: PR_URL })).toEqual(['owner-description']);
+    // No branch links it yet; the unfiltered list proves it is an active agent.
+    expect(await ownerIds({ prHeadBranch: HEAD })).toEqual([]);
+    expect(await ownerIds({})).toEqual(['other-pr-description', 'owner-description']);
   });
 
   it.each(ACTIVE_STATUSES)('treats a %s task on the head branch as an owner', async (status) => {
@@ -246,6 +286,24 @@ describe('list_project_agents pull request owner filter', () => {
 
     expect(await ownerIds({ prHeadBranch: HEAD, prUrl: PR_URL })).toEqual([`owner-${status}`]);
   });
+
+  it.each(['in_progress', 'sleeping'])(
+    'treats a %s task awaiting follow-up after complete_task as an owner',
+    async (status) => {
+      // awaiting_followup is an execution step on a live or sleeping task, not a status.
+      insertTask({
+        id: `owner-followup-${status}`,
+        status,
+        executionStep: 'awaiting_followup',
+        outputBranch: 'sam/conversation-abc123',
+        outputPrUrl: PR_URL,
+      });
+
+      expect(await ownerIds({ prHeadBranch: HEAD, prUrl: PR_URL })).toEqual([
+        `owner-followup-${status}`,
+      ]);
+    }
+  );
 
   it.each(INACTIVE_STATUSES)('never treats a %s task as an owner', async (status) => {
     insertWorkspace(`ws-${status}`, HEAD);
@@ -255,6 +313,7 @@ describe('list_project_agents pull request owner filter', () => {
       outputBranch: HEAD,
       outputPrUrl: PR_URL,
       workspaceId: `ws-${status}`,
+      description: `Complete PR ${PR_URL}.`,
     });
     // Liveness: an active owner in the same database is still found.
     insertTask({ id: 'owner-live', status: 'in_progress', outputBranch: HEAD });
@@ -268,10 +327,11 @@ describe('list_project_agents pull request owner filter', () => {
       status: 'in_progress',
       outputBranch: HEAD,
       supersededByTaskId: 'successor',
+      description: `Complete PR ${PR_URL}.`,
     });
     insertTask({ id: 'successor', status: 'sleeping', outputBranch: HEAD });
 
-    expect(await ownerIds({ prHeadBranch: HEAD })).toEqual(['successor']);
+    expect(await ownerIds({ prHeadBranch: HEAD, prUrl: PR_URL })).toEqual(['successor']);
   });
 
   it('never reports another project, even through a cross-project workspace row', async () => {
@@ -283,6 +343,7 @@ describe('list_project_agents pull request owner filter', () => {
       outputBranch: HEAD,
       outputPrUrl: PR_URL,
       workspaceId: 'ws-other-project',
+      description: `Complete PR ${PR_URL}.`,
     });
     // A project-1 task pointing at a project-2 workspace must not inherit its branch.
     insertTask({
@@ -301,6 +362,18 @@ describe('list_project_agents pull request owner filter', () => {
     insertTask({ id: 'owner-peer', status: 'sleeping', outputBranch: HEAD });
 
     expect(await ownerIds({ prHeadBranch: HEAD })).toEqual(['owner-peer']);
+  });
+
+  it('trims surrounding whitespace and echoes the value it matched', async () => {
+    seedOneOwnerPerLink();
+
+    const result = await listAgents({ prHeadBranch: `  ${HEAD}\t` });
+
+    expect(result.agents.map((agent) => agent.taskId).sort()).toEqual([
+      'owner-output-branch',
+      'owner-workspace-branch',
+    ]);
+    expect(result.filter).toEqual({ prHeadBranch: HEAD });
   });
 
   it('returns an empty owner list with the filter echoed when nothing owns the PR', async () => {
@@ -328,6 +401,7 @@ describe('list_project_agents pull request owner filter', () => {
       const result = await listAgents(args);
       expect(result.filter).toBeUndefined();
       expect(result.agents.map((agent) => agent.taskId).sort()).toEqual([
+        'owner-description',
         'owner-output-branch',
         'owner-pr-url',
         'owner-workspace-branch',
@@ -343,6 +417,17 @@ describe('list_project_agents pull request owner filter', () => {
     }
   });
 
+  it('reports a failed owner query as an error, never as an empty owner list', async () => {
+    seedOneOwnerPerLink();
+    sqlite.exec('DROP TABLE tasks');
+
+    const body = await callListProjectAgents({ prHeadBranch: HEAD, prUrl: PR_URL });
+
+    expect(body.result).toBeUndefined();
+    expect(body.error).toMatchObject({ code: -32603 });
+    expect(body.error?.message).toContain('Failed to list project agents');
+  });
+
   it('refuses an empty owner filter at the service instead of matching every task', async () => {
     seedOneOwnerPerLink();
 
@@ -354,7 +439,7 @@ describe('list_project_agents pull request owner filter', () => {
       projectId: PROJECT,
       ownsPullRequest: { url: PR_URL },
     });
-    expect(rows.map((row) => row.id)).toEqual(['owner-pr-url']);
+    expect(rows.map((row) => row.id).sort()).toEqual(['owner-description', 'owner-pr-url']);
   });
 
   it.each([

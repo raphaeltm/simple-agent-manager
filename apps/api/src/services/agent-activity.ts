@@ -6,6 +6,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import { escapeSearchQueryForLike } from '../lib/search-query-limits';
 import { isRestorableSnapshot } from './session-snapshot-artifacts';
 import {
   sessionRecoveryAttemptDecayMs,
@@ -89,7 +90,7 @@ interface AgentActivitySqlRow {
 export interface PullRequestOwnerFilter {
   /** The PR's head branch, matched against output and workspace branches. */
   headBranch?: string;
-  /** The PR's URL, matched against the task's output PR URL. */
+  /** The PR's URL, matched against the output PR URL and cited in the description. */
   url?: string;
 }
 
@@ -203,14 +204,19 @@ function appendActiveCondition(conditions: string[], binds: unknown[]): void {
 }
 
 /**
- * A task owns a pull request when it will push to the PR's head branch or has
- * reported the PR as its output. No single column covers every owner:
+ * A task owns a pull request when it will push to the PR's head branch, has
+ * reported the PR as its output, or was dispatched to work on it. No single
+ * column covers every owner:
  * - `t.output_branch`: the task that opened the PR. The VM agent also rewrites it
  *   to the pushed branch whenever a task-mode turn ends.
  * - `w.branch`: a completion task dispatched with `branch=<head>`. Until its first
- *   turn ends, its output branch is still its own generated name.
+ *   turn ends, its output branch is still its own generated name. The column keeps
+ *   the branch checked out at workspace creation and is never resynced.
  * - `t.output_pr_url`: written by `complete_task`, including conversation-mode
  *   tasks that stay active awaiting follow-up.
+ * - `t.description` citing the URL: a task dispatched for the PR whose workspace
+ *   does not exist yet (for example while waiting for node capacity). A URL that
+ *   is a prefix of another PR's URL also matches; a false owner only defers.
  */
 function appendPullRequestOwnerCondition(
   conditions: string[],
@@ -223,8 +229,8 @@ function appendPullRequestOwnerCondition(
     binds.push(filter.headBranch, filter.headBranch);
   }
   if (filter.url) {
-    links.push('t.output_pr_url = ?');
-    binds.push(filter.url);
+    links.push('t.output_pr_url = ?', "t.description LIKE ? ESCAPE '\\'");
+    binds.push(filter.url, `%${escapeSearchQueryForLike(filter.url)}%`);
   }
   // An empty filter would return every task as an owner; refuse it outright.
   if (links.length === 0) {
