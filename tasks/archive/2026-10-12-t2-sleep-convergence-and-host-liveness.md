@@ -74,3 +74,7 @@ T1 has the staging lease; its deploy38248633596 failed with Cloudflare subdomain
 Sleeping chat could not wake because sleepingAt was absent; stopped host looked live and wrote duplicate preservation records. Stopping rows aged out in b291dce39 (#2223) without a running-workspace repair owner. Node fan-out in a08e9ceea refreshed ACP independently of host status. LIKE in176385d9a (#2222) exceeded D1's pattern limit.
 
 Class: incomplete convergence after lost acknowledgement, proxy/condition confusion, mock-hidden database limits. Earlier tests did not combine real producers with stale runtime and retained recovery state. This PR applies existing rules62/74 using real route/sweep/D1 tests and revert-red proof; no additional standing rule is needed.
+
+## Main integration checkpoint
+
+Merged origin/main b67fed80e without conflicts/history rewrite (ff384721a). Post-merge root lint/typecheck32/32 tasks PASS; sleep integration59/59 and realWorkers13/13 PASS. T1 main integration will be repeated before final staging/readiness if it lands afterward.
