@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { ProjectData } from '../../src/durable-objects/project-data';
 import { terminalizeIdleTaskInD1 } from '../../src/durable-objects/project-data/idle-cleanup-terminalization';
 import type { Env } from '../../src/env';
+import { captureProjectDataExpectedError, type ProjectDataTestDouble } from './support/expected-error-doubles';
 import { runSessionSleepLifecycleRepair } from '../../src/scheduled/session-sleep-lifecycle-repair';
 import {
   seedInstallation,
@@ -174,7 +175,7 @@ describe('confirmed sleep retires obsolete idle cleanup only for its exact owner
 
 // Exercise the actual public DO RPC, not a local transition or API-side guard double.
 describe('sleep RPC captured runtime and stopping claim fence', () => {
-  it.each(['replacement', 'claim', 'workspace_link', 'current'])('%s intent cannot sleep a successor chat', async (boundary) => {
+  it.each(['replacement', 'claim', 'workspace_link', 'current', 'lookup_error'])('%s intent cannot sleep a successor chat', async (boundary) => {
     const suffix = crypto.randomUUID();
     const userId = `guard-u-${suffix}`, projectId = `guard-p-${suffix}`,
       nodeId = `guard-n-${suffix}`, workspaceId = `guard-w-${suffix}`;
@@ -194,6 +195,55 @@ describe('sleep RPC captured runtime and stopping claim fence', () => {
     const options = { failedOnly: false, runtimeGuard: {
       projectId,userId,workspaceId,nodeId,evictionGeneration:'original',claimId:'old-claim',
     } };
+    if (boundary === 'lookup_error') {
+      const marker = `same-instance-${suffix}`;
+      await runInDurableObject(stub, async (instance) => {
+        const testInstance = instance as unknown as { env: Env; sleepGateTestMarker?: string };
+        testInstance.sleepGateTestMarker = marker;
+        const originalEnv = testInstance.env;
+        const database = originalEnv.DATABASE;
+        let rejectLookup = true;
+        // Inject only the D1 query boundary. The real workerd concurrency gate,
+        // sleep method, local SQL, and subsequent healthy lookup stay intact.
+        testInstance.env = { ...originalEnv, DATABASE: {
+          prepare(query: string) {
+            const statement = database.prepare(query);
+            if (!query.includes('JOIN session_snapshots s ON s.workspace_id = w.id')) return statement;
+            return {
+              bind(...values: unknown[]) {
+                const bound = statement.bind(...values);
+                return {
+                  async first() {
+                    if (rejectLookup) {
+                      rejectLookup = false;
+                      return database.prepare('SELECT * FROM t2_missing_sleep_guard_table').first();
+                    }
+                    return bound.first();
+                  },
+                };
+              },
+            };
+          },
+        } as D1Database };
+      });
+      // The Workers pool treats a raw rejected RPC as unhandled even when the
+      // caller catches it. Its existing test adapter catches only after the
+      // production method has run, preserving the real gate reset behavior.
+      const rejected = await captureProjectDataExpectedError(
+        stub as DurableObjectStub<ProjectDataTestDouble>, { operation: 'sleepSession', args: [chatId, options] }
+      ).catch((error: unknown) => ({ threw: true, message: String(error) }));
+      expect(rejected.threw).toBe(true);
+      expect(rejected.message).toContain('t2_missing_sleep_guard_table');
+      expect((await stub.getSession(chatId))?.status).toBe('active');
+      // Durable SQL alone survives a reset. This transient marker proves the
+      // failing gate did not destroy and reconstruct the object instance.
+      expect(await runInDurableObject(stub, async (instance) =>
+        (instance as unknown as { sleepGateTestMarker?: string }).sleepGateTestMarker
+      )).toBe(marker);
+      expect(await stub.sleepSession(chatId, options)).toBe(true);
+      expect((await stub.getSession(chatId))?.status).toBe('sleeping');
+      return;
+    }
     if (boundary === 'replacement') await env.DATABASE.prepare("UPDATE workspaces SET eviction_generation='replacement' WHERE id=?").bind(workspaceId).run();
     if (boundary === 'claim') await env.DATABASE.prepare("UPDATE session_snapshots SET sleep_claim_id='new-claim' WHERE chat_session_id=?").bind(chatId).run();
     if (boundary === 'workspace_link') await runInDurableObject(stub, async (_instance,state) => {
