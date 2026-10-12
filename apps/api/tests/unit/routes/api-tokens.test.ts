@@ -55,9 +55,39 @@ function createMockDB(options: {
   };
 }
 
+/** A BetterAuth getSession result: requireAuth() reads both the user and the session record. */
+function browserSession(user: { id: string; status?: string; role?: string }) {
+  return {
+    user,
+    session: {
+      id: 'session-1',
+      token: 'session-token-1',
+      expiresAt: new Date(Date.now() + 60_000),
+    },
+  };
+}
+
 function buildApp(envOverrides: Partial<Env> = {}) {
   return buildAuthTestApp(apiTokenRoutes, '/api/auth', envOverrides);
 }
+
+const TOKEN_MANAGEMENT_ROUTES = [
+  {
+    method: 'GET',
+    path: '/api/auth/api-tokens',
+    body: undefined,
+  },
+  {
+    method: 'POST',
+    path: '/api/auth/api-tokens',
+    body: { name: 'blocked' },
+  },
+  {
+    method: 'DELETE',
+    path: '/api/auth/api-tokens/token-1',
+    body: undefined,
+  },
+] as const;
 
 describe('API token routes', () => {
   beforeEach(() => {
@@ -67,7 +97,7 @@ describe('API token routes', () => {
 
   it('lists API tokens for the authenticated user without a feature gate', async () => {
     currentMockDB = createMockDB({ selectAllResults: [[{ id: 'token-1', name: 'CLI' }]] });
-    mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mockGetSession.mockResolvedValue(browserSession({ id: 'user-1' }));
 
     const res = await buildApp().request('/api/auth/api-tokens');
 
@@ -77,7 +107,7 @@ describe('API token routes', () => {
 
   it('creates a token with sam_pat_ prefix', async () => {
     currentMockDB = createMockDB({ selectAllResults: [[]] });
-    mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mockGetSession.mockResolvedValue(browserSession({ id: 'user-1' }));
 
     const res = await buildApp().request('/api/auth/api-tokens', {
       method: 'POST',
@@ -93,36 +123,20 @@ describe('API token routes', () => {
 
   it('revokes a token owned by the authenticated user', async () => {
     currentMockDB = createMockDB({ updateChanges: 1 });
-    mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
+    mockGetSession.mockResolvedValue(browserSession({ id: 'user-1' }));
 
     const res = await buildApp().request('/api/auth/api-tokens/token-1', { method: 'DELETE' });
 
     expect(res.status).toBe(200);
   });
 
-  it.each([
-    {
-      method: 'GET',
-      path: '/api/auth/api-tokens',
-      body: undefined,
-    },
-    {
-      method: 'POST',
-      path: '/api/auth/api-tokens',
-      body: { name: 'blocked' },
-    },
-    {
-      method: 'DELETE',
-      path: '/api/auth/api-tokens/token-1',
-      body: undefined,
-    },
-  ] as const)(
+  it.each(TOKEN_MANAGEMENT_ROUTES)(
     '$method $path rejects suspended browser sessions before API-token management work',
     async ({ method, path, body }) => {
       currentMockDB = createMockDB({ selectAllResults: [[{ id: 'token-1', name: 'CLI' }]] });
-      mockGetSession.mockResolvedValue({
-        user: { id: 'user-1', status: 'suspended', role: 'superadmin' },
-      });
+      mockGetSession.mockResolvedValue(
+        browserSession({ id: 'user-1', status: 'suspended', role: 'superadmin' })
+      );
 
       const res = await buildApp().request(path, {
         method,
@@ -140,6 +154,43 @@ describe('API token routes', () => {
       expect(currentMockDB.update).not.toHaveBeenCalled();
     }
   );
+
+  it.each(TOKEN_MANAGEMENT_ROUTES)(
+    '$method $path rejects a pending account while signup approval is on',
+    async ({ method, path, body }) => {
+      currentMockDB = createMockDB({ selectAllResults: [[{ id: 'token-1', name: 'CLI' }]] });
+      mockGetSession.mockResolvedValue(
+        browserSession({ id: 'user-1', status: 'pending', role: 'user' })
+      );
+
+      const res = await buildApp({ REQUIRE_APPROVAL: 'true' }).request(path, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toMatchObject({ error: 'APPROVAL_REQUIRED' });
+      expect(currentMockDB.insert).not.toHaveBeenCalled();
+      expect(currentMockDB.update).not.toHaveBeenCalled();
+    }
+  );
+
+  it('lets an approved account create a token while signup approval is on', async () => {
+    currentMockDB = createMockDB({ selectAllResults: [[]] });
+    mockGetSession.mockResolvedValue(
+      browserSession({ id: 'user-1', status: 'active', role: 'user' })
+    );
+
+    const res = await buildApp({ REQUIRE_APPROVAL: 'true' }).request('/api/auth/api-tokens', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Work laptop' }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(currentMockDB.insert).toHaveBeenCalledTimes(1);
+  });
 
   it('token-login accepts new sam_pat_ tokens and returns sessionCookie in JSON', async () => {
     currentMockDB = createMockDB({

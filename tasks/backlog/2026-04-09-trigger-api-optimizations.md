@@ -1,5 +1,15 @@
 # Trigger API Optimizations
 
+> **Reconciliation 2026-10-12:** #2258 (`2de93fe80`) removed the raw SQL from MCP
+> `handleCreateTrigger`. It now writes through the shared Drizzle `createTrigger` service
+> (`apps/api/src/routes/mcp/trigger-create-tool.ts:80,92-99`,
+> `apps/api/src/services/trigger-create.ts:152-267`), with real-Worker MCP tests
+> (`apps/api/tests/workers/mcp-trigger-tools.test.ts:206,310`). The `wrangler.toml [vars]` item is
+> superseded: since #2303 (`d23d66498`) `[vars]` holds only values that differ from the code default
+> (`.claude/rules/07-env-and-urls.md:98`). If operators need the three vars, document them in
+> `apps/api/.env.example`, where they are absent. Still open: the consecutive-failure query still
+> runs before the reservation (`services/trigger-admission.ts:196-211`, reservation at `:218`).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

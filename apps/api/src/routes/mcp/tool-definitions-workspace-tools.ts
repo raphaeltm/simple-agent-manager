@@ -84,10 +84,21 @@ export const WORKSPACE_TOOLS = [
   {
     name: 'list_project_agents',
     description:
-      'List all active agent sessions in this project (excluding yourself). Shows task IDs, titles, statuses, and branches. Useful for multi-agent coordination.',
+      'List all active agent sessions in this project (excluding yourself): queued, delegated, in-progress and sleeping tasks, with task IDs, titles, statuses, output branch (branch), workspace branch and output PR URL. Pass prHeadBranch and/or prUrl to list only the active tasks that own a pull request; a filtered response echoes the applied filter. Useful for multi-agent coordination.',
     inputSchema: {
       type: 'object' as const,
-      properties: {},
+      properties: {
+        prHeadBranch: {
+          type: 'string',
+          description:
+            "A pull request's head branch. Returns only active tasks whose output branch or workspace branch is this branch.",
+        },
+        prUrl: {
+          type: 'string',
+          description:
+            "A pull request's URL (https://github.com/<owner>/<repo>/pull/<number>). Returns only active tasks whose output PR URL is this URL or whose description cites it. With prHeadBranch, a task matching either is returned.",
+        },
+      },
       additionalProperties: false,
     },
   },

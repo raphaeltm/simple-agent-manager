@@ -178,7 +178,7 @@ bound on the result set. `chat_messages`, `chat_messages_grouped`, and
 
 ## References
 
-- Task: `tasks/active/2026-09-03-projectdata-production-capacity-emergency.md`; PR #2014
+- Task: `tasks/archive/2026-09-03-projectdata-production-capacity-emergency.md`; PR #2014
 - Implementation: `apps/api/src/durable-objects/project-data/tool-payload-cleanup.ts`
   (`createToolPayloadCleanupPlan`, `scanApprovedToolPayloadCleanupBatch`),
   `apps/api/src/durable-objects/project-data/tool-payload-cleanup-manifest.ts`

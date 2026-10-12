@@ -1,5 +1,16 @@
 # Auto-commit push guard can block a legitimate push on manually created workspaces
 
+> **Reconciliation 2026-10-12:** The Instant caller now sends `defaultBranch`. #2261 (`ab76c0f42`)
+> passes the project default branch as `defaultBranch` and `baseBranch` on the Instant
+> create-workspace call (`apps/api/src/services/instant-session.ts:442-443`; test
+> `apps/api/tests/unit/services/instant-session.test.ts:442-443`), and Instant restore carries it
+> too (`apps/api/src/services/instant-restore-workspace.ts:55-56`), so the Instant output-branch
+> case traced on 2026-09-30 no longer applies. Still open: the manual
+> (`routes/workspaces/_helpers.ts:417`), trial (`trial-orchestrator/steps.ts:755`) and node-lifecycle
+> (`routes/node-lifecycle.ts:246`) callers still omit it, the VM agent still falls back to the
+> checkout branch (`packages/vm-agent/internal/server/server.go:1795-1798`), and none of the listed
+> tests exist.
+
 > **Reconciliation 2026-09-30:** still open. Traced in code, not tested live: the fallback may
 > also block Instant task-mode output branches (`submit-instant-task.ts:104` passes the output
 > branch, `instant-session.ts:432` sends no `defaultBranch`, and the VM agent reads it only from

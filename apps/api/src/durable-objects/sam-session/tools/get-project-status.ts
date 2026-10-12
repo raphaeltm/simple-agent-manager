@@ -1,7 +1,11 @@
+import type { OrchestratorStatus } from '@simple-agent-manager/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
+import type { Env } from '../../../env';
+import { log } from '../../../lib/logger';
+import * as orchestratorService from '../../../services/project-orchestrator';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 export const getProjectStatusDef: AnthropicToolDef = {
@@ -22,20 +26,17 @@ export const getProjectStatusDef: AnthropicToolDef = {
 
 export async function getProjectStatus(
   input: { projectId: string },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
-  const db = drizzle(ctx.env.DATABASE as D1Database, { schema });
+  // ToolContext.env is the SamSession Durable Object's Worker Env (same cast as get-orchestrator-status).
+  const env = ctx.env as unknown as Env;
+  const db = drizzle(env.DATABASE, { schema });
 
   // Verify ownership
   const project = await db
     .select()
     .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.id, input.projectId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
     .get();
 
   if (!project) {
@@ -55,18 +56,15 @@ export async function getProjectStatus(
     .orderBy(desc(schema.tasks.createdAt))
     .limit(10);
 
-  // Try to get orchestrator status
-  let orchestratorStatus = null;
+  // Orchestrator status is optional context: report null rather than fail the whole tool.
+  let orchestratorStatus: OrchestratorStatus | null = null;
   try {
-    const orchNs = ctx.env.PROJECT_ORCHESTRATOR as DurableObjectNamespace;
-    const orchId = orchNs.idFromName(input.projectId);
-    const orchStub = orchNs.get(orchId);
-    const resp = await orchStub.fetch('https://orch/status');
-    if (resp.ok) {
-      orchestratorStatus = await resp.json();
-    }
-  } catch {
-    // Orchestrator not available — not critical
+    orchestratorStatus = await orchestratorService.getOrchestratorStatus(env, input.projectId);
+  } catch (err) {
+    log.warn('sam.get_project_status.orchestrator_status_failed', {
+      projectId: input.projectId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   return {

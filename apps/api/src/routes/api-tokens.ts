@@ -5,14 +5,11 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
+import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { rateLimit } from '../middleware/rate-limit';
 import { ApiTokenCreateSchema, ApiTokenRedeemSchema, jsonValidator } from '../schemas';
-import {
-  assertUserCanCreateSession,
-  buildSessionLoginResponse,
-  getAuthenticatedUser,
-} from '../services/session-factory';
+import { assertUserCanCreateSession, buildSessionLoginResponse } from '../services/session-factory';
 
 const TOKEN_PREFIX = 'sam_pat_';
 const LEGACY_TOKEN_PREFIX = 'sam_test_';
@@ -56,8 +53,11 @@ const tokenLoginRateLimit = rateLimit({
 
 const apiTokenRoutes = new Hono<{ Bindings: Env }>();
 
-apiTokenRoutes.get('/api-tokens', async (c) => {
-  const user = await getAuthenticatedUser(c);
+// Token management is per-route (not `use('/*')`): this router shares `/api/auth` with the
+// BetterAuth handler, which pending accounts must still reach to see their status and sign out.
+// A pending account may not mint a PAT; token-login and the Connector re-check approval anyway.
+apiTokenRoutes.get('/api-tokens', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
 
   const db = drizzle(c.env.DATABASE, { schema });
   const tokens = await db
@@ -69,57 +69,63 @@ apiTokenRoutes.get('/api-tokens', async (c) => {
       revokedAt: schema.apiTokens.revokedAt,
     })
     .from(schema.apiTokens)
-    .where(eq(schema.apiTokens.userId, user.id))
+    .where(eq(schema.apiTokens.userId, userId))
     .all();
 
   return c.json(tokens);
 });
 
-apiTokenRoutes.post('/api-tokens', jsonValidator(ApiTokenCreateSchema), async (c) => {
-  const user = await getAuthenticatedUser(c);
+apiTokenRoutes.post(
+  '/api-tokens',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(ApiTokenCreateSchema),
+  async (c) => {
+    const userId = getUserId(c);
 
-  const body = c.req.valid('json');
-  const maxNameLength =
-    parseInt(c.env.MAX_API_TOKEN_NAME_LENGTH || '', 10) || DEFAULT_MAX_TOKEN_NAME_LENGTH;
-  const name = (body.name || '').trim();
-  if (!name || name.length > maxNameLength) {
-    throw errors.badRequest(
-      `Token name is required and must be ${maxNameLength} characters or fewer`
-    );
+    const body = c.req.valid('json');
+    const maxNameLength =
+      parseInt(c.env.MAX_API_TOKEN_NAME_LENGTH || '', 10) || DEFAULT_MAX_TOKEN_NAME_LENGTH;
+    const name = (body.name || '').trim();
+    if (!name || name.length > maxNameLength) {
+      throw errors.badRequest(
+        `Token name is required and must be ${maxNameLength} characters or fewer`
+      );
+    }
+
+    const maxTokens =
+      parseInt(c.env.MAX_API_TOKENS_PER_USER || '', 10) || DEFAULT_MAX_TOKENS_PER_USER;
+    const db = drizzle(c.env.DATABASE, { schema });
+    const existing = await db
+      .select({ id: schema.apiTokens.id })
+      .from(schema.apiTokens)
+      .where(and(eq(schema.apiTokens.userId, userId), isNull(schema.apiTokens.revokedAt)))
+      .all();
+
+    if (existing.length >= maxTokens) {
+      throw errors.badRequest(
+        `Maximum of ${maxTokens} active tokens per user. Revoke an existing token first.`
+      );
+    }
+
+    const tokenBytes = parseInt(c.env.API_TOKEN_BYTES || '', 10) || DEFAULT_TOKEN_BYTES;
+    const rawToken = generateToken(tokenBytes);
+    const tokenHash = await hmacToken(rawToken, c.env.ENCRYPTION_KEY);
+    const id = ulid();
+
+    await db.insert(schema.apiTokens).values({
+      id,
+      userId,
+      tokenHash,
+      name,
+    });
+
+    return c.json({ id, token: rawToken, name }, 201);
   }
+);
 
-  const maxTokens =
-    parseInt(c.env.MAX_API_TOKENS_PER_USER || '', 10) || DEFAULT_MAX_TOKENS_PER_USER;
-  const db = drizzle(c.env.DATABASE, { schema });
-  const existing = await db
-    .select({ id: schema.apiTokens.id })
-    .from(schema.apiTokens)
-    .where(and(eq(schema.apiTokens.userId, user.id), isNull(schema.apiTokens.revokedAt)))
-    .all();
-
-  if (existing.length >= maxTokens) {
-    throw errors.badRequest(
-      `Maximum of ${maxTokens} active tokens per user. Revoke an existing token first.`
-    );
-  }
-
-  const tokenBytes = parseInt(c.env.API_TOKEN_BYTES || '', 10) || DEFAULT_TOKEN_BYTES;
-  const rawToken = generateToken(tokenBytes);
-  const tokenHash = await hmacToken(rawToken, c.env.ENCRYPTION_KEY);
-  const id = ulid();
-
-  await db.insert(schema.apiTokens).values({
-    id,
-    userId: user.id,
-    tokenHash,
-    name,
-  });
-
-  return c.json({ id, token: rawToken, name }, 201);
-});
-
-apiTokenRoutes.delete('/api-tokens/:id', async (c) => {
-  const user = await getAuthenticatedUser(c);
+apiTokenRoutes.delete('/api-tokens/:id', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
 
   const tokenId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -127,7 +133,7 @@ apiTokenRoutes.delete('/api-tokens/:id', async (c) => {
   const result = await db
     .update(schema.apiTokens)
     .set({ revokedAt: new Date() })
-    .where(and(eq(schema.apiTokens.id, tokenId), eq(schema.apiTokens.userId, user.id)));
+    .where(and(eq(schema.apiTokens.id, tokenId), eq(schema.apiTokens.userId, userId)));
 
   if ((result as { meta?: { changes?: number } }).meta?.changes === 0) {
     throw errors.notFound('Token not found');

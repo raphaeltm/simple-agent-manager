@@ -1,30 +1,26 @@
 /**
  * MCP tool definitions — project awareness tools (read-only queries for tasks, sessions, messages).
  */
+import { TASK_STATUSES } from '@simple-agent-manager/shared';
+
+const TASK_PAGE_CURSOR = {
+  type: 'string',
+  description: 'nextCursor from the previous response, to fetch the next page.',
+} as const;
 
 export const PROJECT_AWARENESS_TOOLS = [
   // ─── Project awareness tools (read-only) ──────────────────────────────
   {
     name: 'list_tasks',
     description:
-      'List tasks in your project. Useful for understanding what other work exists, avoiding duplicates, or finding context from completed tasks. Your own task is excluded by default.',
+      'List tasks in your project, most recently updated first. Useful for understanding what other work exists, avoiding duplicates, or finding context from completed tasks. Your own task is excluded by default. When hasMore is true, pass nextCursor as cursor to read the next page.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         status: {
           type: 'string',
-          description:
-            'Filter by task status (draft, queued, in_progress, delegated, awaiting_followup, completed, failed, cancelled). Omit for all statuses.',
-          enum: [
-            'draft',
-            'queued',
-            'in_progress',
-            'delegated',
-            'awaiting_followup',
-            'completed',
-            'failed',
-            'cancelled',
-          ],
+          description: 'Filter by task status. Omit for all statuses.',
+          enum: [...TASK_STATUSES],
         },
         include_own: {
           type: 'boolean',
@@ -34,6 +30,7 @@ export const PROJECT_AWARENESS_TOOLS = [
           type: 'number',
           description: 'Max results to return (default: 10, max: 50)',
         },
+        cursor: TASK_PAGE_CURSOR,
       },
       additionalProperties: false,
     },
@@ -57,7 +54,7 @@ export const PROJECT_AWARENESS_TOOLS = [
   {
     name: 'search_tasks',
     description:
-      'Search tasks in your project by keyword. Searches both title and description fields, requiring every retained term to match. Queries beyond the server-configured guardrails are truncated; the response reports queryTruncated, the effective query, and queryLimits.',
+      'Search tasks in your project by keyword. Searches both title and description fields, requiring every retained term to match. Queries beyond the server-configured guardrails are truncated; the response reports queryTruncated, the effective query, and queryLimits. When hasMore is true, pass nextCursor as cursor to read the next page.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -69,21 +66,13 @@ export const PROJECT_AWARENESS_TOOLS = [
         status: {
           type: 'string',
           description: 'Filter by task status. Omit for all statuses.',
-          enum: [
-            'draft',
-            'queued',
-            'in_progress',
-            'delegated',
-            'awaiting_followup',
-            'completed',
-            'failed',
-            'cancelled',
-          ],
+          enum: [...TASK_STATUSES],
         },
         limit: {
           type: 'number',
           description: 'Max results to return (default: 10, max: 20)',
         },
+        cursor: TASK_PAGE_CURSOR,
       },
       required: ['query'],
       additionalProperties: false,

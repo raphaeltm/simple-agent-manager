@@ -143,7 +143,7 @@ function requiredTimestamp(raw: string | undefined): number {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : -1;
 }
 
-function configFromEnv(env: Env): PreflightConfig {
+export function configFromEnv(env: Env): PreflightConfig {
   const planId = env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PLAN_ID?.trim() ?? '';
   const projectId = env.PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PROJECT_ID?.trim() ?? '';
   const cutoffCreatedAt = requiredTimestamp(

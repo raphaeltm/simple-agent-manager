@@ -1,5 +1,11 @@
 # Undefined --sam-color-* tokens in apps/web (was: ResourceSparkline gap marker has no colour)
 
+> **Reconciliation 2026-10-12:** Scope grew again; nothing was fixed. #2294 (`a95b46191`) added a
+> 28th `text-fg-secondary` file, `apps/web/src/components/ConnectorChip.tsx:5`, and `fg-secondary`
+> is still defined nowhere in `packages/ui/src` or `apps/web/src/app.css`. #2238 and #2280 moved the
+> `SessionHeader.tsx` references: `--sam-color-accent-tint` is now at `:289,473` and
+> `--sam-color-surface-hover` at `:474`. Still open: the whole undefined-token sweep (criterion 3).
+
 > **Reconciliation 2026-10-05:** Scope grew. The three new ACP cards use the Tailwind class
 > `text-fg-secondary` (`apps/web/src/components/project-message-view/Acp{Permission,Form,Url}Card.tsx`),
 > so it is now in 27 `apps/web` files (24 in the 2026-09-30 block, plus those 3). The separate

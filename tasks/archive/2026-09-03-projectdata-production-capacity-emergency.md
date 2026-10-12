@@ -707,3 +707,63 @@ Still open:
    `sam/implement-reliable-projectdata-archiving-tc49jm`, now 217 commits behind `main`.
 3. Rebuild grouped FTS rows after the wall recovery:
    `tasks/backlog/2026-10-02-rebuild-grouped-fts-after-wall-recovery.md`.
+
+## Reconciliation — 2026-10-12 (weekly queue audit): archived
+
+**Verdict: the size target is met; archived.** The root object fell below 9,000,000,000 bytes
+on 2026-10-10 and is still falling. The drop came mainly from archive sharding after the breaker
+closed on 10-02, plus #2215's wall recovery.
+
+The approved tool-payload plan above ran its first stage and was armed for the second:
+
+- **Preflight:** the read-only preflight completed on 2026-09-04
+  (`project_data_storage_relief_preflights`: plan
+  `prod-p0-projectdata-01khrjganbbwgdy1nz0kvf0d4j-20260904`, 15,539 eligible rows, 165,879,666
+  bytes, manifest written).
+- **Cleanup:** on 2026-09-14 the GitHub `production` Environment bound
+  `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_*` to that manifest and set `…_ENABLED=true`. Its reclaim
+  cap (about 166 MB) was small next to the gap.
+
+This file never recorded the cleanup's outcome or an observation window, so acceptance criteria
+1 to 8 stay unticked: their evidence was not captured, and the size target was reached by other
+means. The six implementation items still unticked were left that way when #2014 merged on
+2026-09-04. The staging section above covers part of the staging item; this audit did not
+re-derive the rest.
+
+**Still armed in production (operator follow-up).** All 31 plan variables
+(`PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_*` and `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_*`) are still set
+in the `production` Environment and ship as Worker text bindings, with both `…_ENABLED` flags
+`true`. The plan's own variable table says to set `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED`
+to `false` once the preflight has served its purpose. Removing the 31 variables would also free 31
+of `sam-api-prod`'s 175 text bindings.
+
+Measured 2026-10-12 (read-only production D1 `sam-prod`):
+
+- `project_data_storage_telemetry`: **8,752,312,320 bytes** at 06:16Z (usage ratio 0.875, status
+  `warning`, no longer `degraded`). The latest hourly history row is 8,748,388,352 bytes at 06:12Z.
+- Daily minimums from `project_data_storage_telemetry_history`, in GB: 9.541 (10-05), 9.553
+  (10-06), 9.444 (10-07), 9.281 (10-08), 9.123 (10-09, a single sample), 8.923 (10-10), 8.807
+  (10-11), 8.748 (10-12 so far). Hourly measurement was silent from 10-08 17:42Z to 10-10 16:12Z
+  until #2296 restored it.
+- `project_data_archive_circuit_breakers`: SAM is **`closed`** ("Closed from admin UI", updated
+  2026-10-06 20:24Z, after the 10-06 02:12Z re-open).
+- Archive migrations: **866 `published`, 87 `frozen`**, and nothing failed, poisoned or in flight.
+  Publishes per day: 66, 15, 71, 67, 60, 64 and 69 (10-05 to 10-11). The latest was at 06:11Z
+  on 10-12.
+
+Shipped this week that bears on it:
+
+- #2248 (`61348bbc5`): per-operation R2 timeouts in the compact-archive writer. This is the
+  `CompactArchiveTimeoutError` class that re-opened the breaker on 10-06.
+- #2269 (`ef0e38a53`): bounded grouped-FTS cleanup, which fixed the SQLITE_NOMEM.
+- #2296 (`2f77bdf10`): restored hourly measurement and alerts on breaker openings.
+
+Where the remaining work lives now:
+
+1. Slice C (bounded root history indexing) is still unmerged: commit `7868bc894` on
+   `sam/implement-reliable-projectdata-archiving-tc49jm`, now 311 commits behind `main`, with no
+   PR. It was the lever only if the drain flattened above 9.0 GB, and it did not. It is tracked in
+   SAM idea `01M0YZNBKSKQZ47NC0K7M8N5AX`.
+2. Rebuild grouped FTS rows after the wall recovery:
+   `tasks/backlog/2026-10-02-rebuild-grouped-fts-after-wall-recovery.md`.
+3. Ongoing storage health is watched by the restored hourly measurement and its alerts (#2296).

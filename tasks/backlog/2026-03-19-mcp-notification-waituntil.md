@@ -1,5 +1,13 @@
 # Wrap MCP notification blocks in waitUntil()
 
+> **Reconciliation 2026-10-12:** Scope unchanged: all three blocks still `await` the notification
+> round-trip. Pointers moved: #2293 (`6973ceb77`) and #2307 (`b5f866a90`) cut
+> `apps/api/src/routes/mcp/task-tools.ts` to 454 lines; the blocks are now `:126-153`
+> (`update_task_status`), `:253-272` (conversation-mode `complete_task`) and `:377-398` (task-mode
+> `complete_task`). `request_human_input` moved to `routes/mcp/human-input-tool.ts` (#2213). The
+> context is already passed to `handleCompleteTask` (`routes/mcp/index.ts:309-315`) but ignored
+> (`_executionCtx`, `task-tools.ts:171`); `handleUpdateTaskStatus` gets none (`index.ts:300`).
+
 > **Reconciliation 2026-09-30:** still open. Scope is now the 3 blocks in `task-tools.ts`
 > (`:244-270`, `:389-409`, `:531-553`); `request_human_input` must stay synchronous (its reply uses
 > the notification id). `apps/api/src/routes/mcp.ts` is now `apps/api/src/routes/mcp/task-tools.ts`.

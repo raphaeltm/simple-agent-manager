@@ -1,5 +1,13 @@
 # Instant chat start renders as "Provisioning VM (1/4)"
 
+> **Reconciliation 2026-10-12:** Still open; pointer correction. #2231 (`1c7f8dd90`) moved the
+> provisioning restore cited below out of `useProjectChatState.ts` into
+> `apps/web/src/pages/project-chat/useProvisioningTracker.ts:143-198`, now gated on `queued` /
+> `delegated` (`apps/web/src/pages/project-chat/types.ts:86-93`). An Instant start is a `queued`
+> task with `instant_persistence`, which the API still maps to null
+> (`apps/api/src/lib/mappers.ts:230`), so the indicator still marks "Provisioning VM" as the current
+> stage (`apps/web/src/pages/project-chat/ProvisioningIndicator.tsx:30-35`).
+
 > **Reconciliation 2026-09-30:** still open; the symptom changed. The API maps the unknown
 > `instant_persistence` step to null (`apps/api/src/lib/mappers.ts:230`), so the header now reads
 > "Starting..." while the stage grid still marks "Provisioning VM" as the current stage

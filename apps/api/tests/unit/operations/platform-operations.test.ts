@@ -390,6 +390,9 @@ describe('shared platform operation authorization on real SQLite', () => {
                     },
                   ],
                   count: 1,
+                  // Workspace agents learn whether the page was complete (rule 65).
+                  hasMore: false,
+                  nextCursor: null,
                 },
                 null,
                 2

@@ -220,7 +220,10 @@ export async function listTasks(ctx: OperationContext, input: ListTasksInput) {
     );
   const external = ctx.actor.via !== 'workspace-agent';
   const includeOwn = input.include_own === true;
-  const fetchLimit = external ? limit + 1 : search || includeOwn ? limit : limit + 1;
+  // A workspace agent's own task is hidden unless it asks for it. Fetch one row to
+  // replace it and one more to learn whether another page exists.
+  const ownTaskId = search || includeOwn ? undefined : ctx.actor.workspace?.taskId;
+  const fetchLimit = limit + 1 + (ownTaskId ? 1 : 0);
   const rows = await db
     .select({
       id: schema.tasks.id,
@@ -241,20 +244,20 @@ export async function listTasks(ctx: OperationContext, input: ListTasksInput) {
     .where(and(...conditions))
     .orderBy(desc(schema.tasks.updatedAt), desc(schema.tasks.id))
     .limit(fetchLimit);
-  const tasks = (
-    search || includeOwn ? rows : rows.filter((task) => task.id !== ctx.actor.workspace?.taskId)
-  ).slice(0, limit);
+  const visible = ownTaskId ? rows.filter((task) => task.id !== ownTaskId) : rows;
+  const tasks = visible.slice(0, limit);
+  const hasMore = visible.length > limit;
   const result = tasks.map((task) => ({
     ...toTaskSearchResult(task, limits.taskDescriptionSnippetLength, external),
     ...(external ? { link: operationLink(ctx, task.projectId) } : {}),
   }));
   const last = tasks[tasks.length - 1];
+  const nextCursor = hasMore && last ? formatOperationCursor(last) : null;
   return {
     tasks: result,
     count: result.length,
     ...(normalizedQuery ?? {}),
-    ...(external
-      ? { nextCursor: rows.length > limit && last ? formatOperationCursor(last) : null }
-      : {}),
+    // Agents must be able to tell a full page from a complete answer.
+    ...(external ? { nextCursor } : { hasMore, nextCursor }),
   };
 }

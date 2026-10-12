@@ -20,8 +20,6 @@ export const DEFAULT_TRIAL_WORKSPACE_TTL_MS = 20 * 60 * 1000;
 export const DEFAULT_TRIAL_REPO_MAX_KB = 500 * 1024; // 500 MB
 /** Timeout for the GitHub repo metadata probe. */
 export const DEFAULT_TRIAL_GITHUB_TIMEOUT_MS = 5_000;
-/** Retention window (hours) after which expired/failed/claimed trials are reaped. */
-export const DEFAULT_TRIAL_DATA_RETENTION_HOURS = 24 * 7; // 7 days
 /** Stale-counter months to keep in TrialCounter DO SQLite. */
 export const DEFAULT_TRIAL_COUNTER_KEEP_MONTHS = 3;
 /** How long to wait after the reset date before purging notified waitlist rows. */
@@ -65,15 +63,6 @@ export function resolveGithubTimeoutMs(env: Env): number {
   }
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TRIAL_GITHUB_TIMEOUT_MS;
-}
-
-export function resolveRetentionHours(env: Env): number {
-  const raw = env.TRIAL_DATA_RETENTION_HOURS;
-  if (raw === undefined || raw === null || raw === '') {
-    return DEFAULT_TRIAL_DATA_RETENTION_HOURS;
-  }
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TRIAL_DATA_RETENTION_HOURS;
 }
 
 export function resolveCounterKeepMonths(env: Env): number {

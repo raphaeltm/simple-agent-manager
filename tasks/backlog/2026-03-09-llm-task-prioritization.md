@@ -1,5 +1,12 @@
 # LLM-Powered Task Prioritization
 
+> **Reconciliation 2026-10-12:** Pointer correction only; nothing this week touched the scope, and
+> no prioritization code exists. The research doc was deleted by #1174 (`cd4c6e83d`); read it with
+> `git show cd4c6e83d^:docs/notes/2026-03-09-llm-task-prioritization-research.md`. Moved paths:
+> `apps/api/src/routes/tasks.ts` is now the `apps/api/src/routes/tasks/` directory, and
+> `packages/shared/src/constants.ts` is now `packages/shared/src/constants/`. Still open: all of
+> it.
+
 **Created**: 2026-03-09
 **Research**: `docs/notes/2026-03-09-llm-task-prioritization-research.md`
 

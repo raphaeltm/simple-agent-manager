@@ -40,16 +40,47 @@ function getDnsCheckTimeout(env: Env): number {
 
 // ─── Category A: Handled directly in sam-mcp ────────────────────────────────
 
+function optionalFilterValue(field: string, normalize: (value: string) => string = (s) => s) {
+  return v.optional(
+    v.nullable(
+      v.pipe(
+        v.string(`${field} must be a string`),
+        v.trim(),
+        v.transform(normalize),
+        v.nonEmpty(`${field} must be a non-empty string`)
+      )
+    )
+  );
+}
+
+const ListProjectAgentsArgsSchema = v.object({
+  prHeadBranch: optionalFilterValue('prHeadBranch'),
+  // Stored PR URLs are canonical (no trailing slash); tolerate one on input.
+  prUrl: optionalFilterValue('prUrl', (url) => url.replace(/\/+$/, '')),
+});
+
 export async function handleListProjectAgents(
   requestId: string | number | null,
+  params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
+  // A malformed filter must fail loudly: ignoring it would list every agent,
+  // which a caller checking PR ownership would read as an answer.
+  const parsed = v.safeParse(ListProjectAgentsArgsSchema, params);
+  if (!parsed.success) {
+    return jsonRpcError(requestId, INVALID_PARAMS, parsed.issues[0].message);
+  }
+  const prHeadBranch = parsed.output.prHeadBranch ?? undefined;
+  const prUrl = parsed.output.prUrl ?? undefined;
+  const filter = prHeadBranch || prUrl ? { prHeadBranch, prUrl } : null;
+
   try {
     const tasks = await listAgentActivityTasks(env, {
       projectId: tokenData.projectId,
       activeOnly: true,
       excludeTaskId: tokenData.taskId,
+      ...(filter ? { ownsPullRequest: { headBranch: prHeadBranch, url: prUrl } } : {}),
     });
 
     const agents = tasks.map((t) => ({
@@ -58,13 +89,16 @@ export async function handleListProjectAgents(
       status: t.status,
       state: t.agentActivityState,
       branch: t.outputBranch,
+      workspaceBranch: t.workspaceBranch,
+      outputPrUrl: t.outputPrUrl,
       workspaceId: t.workspaceId,
     }));
 
+    // Echoing the applied filter lets the caller tell "no owners" apart from a
+    // server that ignored the arguments.
+    const result = { totalAgents: agents.length, agents, ...(filter ? { filter } : {}) };
     return jsonRpcSuccess(requestId, {
-      content: [
-        { type: 'text', text: JSON.stringify({ totalAgents: agents.length, agents }, null, 2) },
-      ],
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
     });
   } catch (e) {
     return jsonRpcError(

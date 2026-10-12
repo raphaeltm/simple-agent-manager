@@ -13,8 +13,8 @@ Main ca040cf72 run 37736428804 job 113224567463: 25m21s job, Vitest 1409.72s (se
 - [x] Inspect SDK permission attempt-scoping runtime and fix flake with discriminating guard proof.
 - [x] Fix snapshot operation deadline flake with discriminating deadline proof.
 - [x] Run affected suites and lint/typecheck/build; local specialist review and completion validation.
-- [ ] Record before/after CI timings in PR and ideas; CodeRabbit request/wait, merge, verify faster main CI.
-- [ ] Announce shared setup merge; publish MERGED/DONE and cancel subscription.
+- [x] Record before/after CI timings in PR and ideas; CodeRabbit request/wait, merge, verify faster main CI. (2026-10-12 reconciliation: #2271 merged as `2a5f2e7d3`; main CI 37821475649 ran the Workers job in 11m07s against the 25m21s baseline, with all 112 files; ideas completed per task `01M4DV59SH1MCGWD5D9CZX5RB0`. CodeRabbit was never requested: the PR Shepherd merged the PR while its owner slept. The task recorded that exception.)
+- [x] Announce shared setup merge; publish MERGED/DONE and cancel subscription. (2026-10-12 reconciliation: task `01M4DV59SH1MCGWD5D9CZX5RB0` output summary: "DONE published, subscriptions cancelled".)
 
 CI-only changes are explicitly exempt from staging. Runtime changes require coordinated staging.
 
@@ -41,3 +41,14 @@ CI-only changes are explicitly exempt from staging. Runtime changes require coor
 Baseline25m21s → branch run37788609053 critical path10m46s (first shard13:58:34Z → aggregate14:09:20Z),58% faster. Shards10m06s/5m33s/6m17s all pass. Artifact union112 distinct files38+37+37 exactly equals suite; logs436+545+410=1,391 passing tests, identical to baseline. Full per-file after CSV committed alongside baseline sample. Single pre-merge run, not a new median. Main verification pending.
 
 Full branch workflow 37788609053 PASS, including root Test, Lint, Type Check, Build, full Go race suite, Marketing Site, and all Workers shards/gate. Local redundant bounded root unit run continues; no failures observed. Active task retained until merge and main verification, per completion review.
+
+## Reconciliation 2026-10-12 (weekly queue audit): archived
+
+Shipped and live. SAM task `01M4DV59SH1MCGWD5D9CZX5RB0` completed on 2026-10-08.
+
+- Landing PR: #2271, merge commit `2a5f2e7d3` (2026-10-08 18:04Z).
+- Main CI 37821475649: Workers job 11m07s (baseline 25m21s, 56% faster), 112 files kept.
+- First successful production deploy containing the merge: Deploy Production run 37824431034
+  (head `e25b40d66`). No runtime code changed.
+- SDK peer-cancel ordering stays open in idea `01M4DWVB4749F6GPJY0E9QVAX7`, as the
+  Measurements section says.

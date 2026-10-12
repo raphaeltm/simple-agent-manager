@@ -1,5 +1,16 @@
 # TDF-1: Task State Machine — Hardened State Transitions & Execution Step Tracking
 
+> **Reconciliation 2026-10-12:** #2264 (`23d5c8865`) gave one non-failure transition optimistic
+> locking. Conversation close writes `completed` only if status, `updatedAt` and `workspaceId`
+> still match what it read, else returns 409 (`apps/api/src/routes/tasks/crud.ts:821-890`). Test
+> on real SQL: `apps/api/tests/unit/routes/shared-project-task-lifecycle-positive.test.ts:505-522`.
+> Still open: the status event is still a separate write after the transition, on that path too
+> (`crud.ts:893`), in `setTaskStatus` (`routes/tasks/_helpers.ts:301`; its unfenced UPDATE at
+> `:295-298` has no status predicate) and in `task-runner/state-machine.ts:192-204`. Also, the
+> TaskRunner's own `failTask` does not use #2167's batch (`services/task-failure.ts:45-80`): its
+> UPDATE (`state-machine.ts:348-368`) and event INSERT (`:388-393`) are separate. Race tests for
+> the other transitions are still missing.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

@@ -12,6 +12,7 @@ The reference covers:
 - GitHub Environment Secrets (`GH_*` prefix)
 - `GH_*` to `GITHUB_*` mapping (done by `configure-secrets.sh`)
 - API Worker Runtime Environment Variables:
+  - How Worker variables are set: `[vars]` in `apps/api/wrangler.toml` holds only values that differ from the code default (Cloudflare caps a Worker's text bindings); omitted defaults are recorded in `scripts/deploy/worker-var-defaults.ts`; forwarded GitHub Environment variables replace or add values
   - Core settings
   - Cloudflare Container instant-session runtime flags
   - Resource limits (MAX_NODES_PER_USER, MAX_AGENT_SESSIONS_PER_WORKSPACE, etc.)

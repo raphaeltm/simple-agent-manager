@@ -381,7 +381,7 @@ async function parseMessageBatchRequest(c: RuntimeContext): Promise<MessageBatch
   return result.output;
 }
 
-function resolveMaxMessageBytes(env: Env): number {
+export function resolveMaxMessageBytes(env: Env): number {
   return env.MESSAGE_SIZE_THRESHOLD
     ? Number.parseInt(env.MESSAGE_SIZE_THRESHOLD, 10)
     : DEFAULT_MESSAGE_SIZE_THRESHOLD_BYTES;

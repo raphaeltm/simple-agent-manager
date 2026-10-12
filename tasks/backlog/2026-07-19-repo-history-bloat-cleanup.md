@@ -1,5 +1,18 @@
 # Repo History Bloat: Purge Accidentally-Committed Agent State + Add Size Guard
 
+> **Reconciliation 2026-10-12:** The auto-commit now stages the `/do` and `/workflow` state
+> files. #2227 (`97f454fdc`) stopped gitignoring `.do-state.md` and `.workflow-state.md`, so sleep
+> snapshots keep them (`.gitignore:79-86`). The completion auto-commit still runs `git add -A`
+> with no exclusion (`packages/vm-agent/internal/server/server.go:1717`, called at `:1505`).
+>
+> - **Branches:** 37 "chore: save agent work" commits touched those files on remote branches
+>   between #2227 and 2026-10-12. The month before had none.
+> - **`main`:** two such commits reached its history through merge commits: `ac037ed47` (via #2303)
+>   and `cba976fa1` (via #2307). Each was undone by a later commit (`fd0a4dfbf`, `43fccea52`), so
+>   the net tree change is zero. `quality:runtime-state-files` keeps them out of a PR's net diff.
+> - **Tracking:** SAM idea `01M4E7NERTBA6NR9MJB193AW0J` tracks the fix: exclude runtime-state paths
+>   from the autosave and stop opening PRs from intermediate turns.
+
 > **Reconciliation 2026-10-05:** A new instance of the auto-commit problem, this time a behavior change rather than bloat. The vm-agent rewrites a SAM-managed block inside the tracked `.codex/config.toml` (`packages/vm-agent/internal/acp/codex_config.go:240-244`), and "chore: save agent work" auto-commits carried that rewrite to `main` inside #2217: `c9316fb3f` set `model_reasoning_effort` back to `"low"`, undoing the deliberate `2f78efcff` ("preserve shared Codex reasoning setting", `"medium"`). Four auto-commits on 2026-10-01 touched only that file, and `main` still says `"low"`. The blob guard and the rewrite decision are still open.
 
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**

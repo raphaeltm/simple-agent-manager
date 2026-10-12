@@ -1,5 +1,15 @@
 # Follow-ups from knowledge-injection relevance ranking (R3)
 
+> **Reconciliation 2026-10-12:** item 2 is half done. #2213 (`57aaa057b`) moved the knowledge
+> formatters (`KnowledgeEntry`, `formatKnowledgeDirectives`, `formatKnowledgeEntityIndex`,
+> `buildKnowledgeInstructions`) to `routes/mcp/instruction-formatting.ts:138-294`, and
+> `request_human_input` to `routes/mcp/human-input-tool.ts`. `instruction-tools.ts` fell from 699
+> to 372 lines. Still open: the `knowledge.ts` half of item 2 (747 lines, unchanged), and items 1
+> and 3-6. Item 3's four `parse*(...) || DEFAULT` limits are now at `instruction-tools.ts:142-152`.
+> Item 5's unconditional `ensureProjectId` is at `services/project-data-policies.ts:10-13`. The
+> 2026-09-30 sequencing remark no longer applies: what remains of item 2 does not touch
+> `instruction-tools.ts`.
+
 > **Reconciliation 2026-09-30:** still open; all six items remain. Correction to item 2:
 > `knowledge.ts` is now 747 lines and `instruction-tools.ts` 699. PR #1893 moved policy formatting
 > into `routes/mcp/instruction-formatting.ts`, so `instruction-tools.ts` is no longer near the

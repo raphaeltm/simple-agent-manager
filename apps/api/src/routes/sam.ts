@@ -11,13 +11,13 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { normalizeSearchQuery } from '../lib/search-query-limits';
-import { requireAuth } from '../middleware/auth';
+import { requireApproved, requireAuth } from '../middleware/auth';
 import { AgentChatRequestSchema, jsonValidator } from '../schemas';
 
 const app = new Hono<{ Bindings: Env }>();
 
-// All SAM routes require authentication
-app.use('/*', requireAuth());
+// All SAM routes require an approved account: chat spends the platform LLM budget.
+app.use('/*', requireAuth(), requireApproved());
 
 /** Get the SamSession DO stub for the current user. */
 function getSamSession(env: Env, userId: string): DurableObjectStub {

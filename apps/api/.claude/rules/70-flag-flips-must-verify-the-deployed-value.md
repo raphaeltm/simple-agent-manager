@@ -72,10 +72,16 @@ Tells:
    skip reason must distinguish "disabled" from "not due" from "missing binding".
 
 4. **The deploy log names every override that differs from the checked-in value.**
-   `listEnvironmentVarOverrides` in `scripts/deploy/sync-wrangler-config.ts` prints
-   `Environment override: NAME="x" replaces wrangler.toml "y"` for each one. Do not bypass it by
-   adding a new spread of `process.env` values elsewhere; route new optional vars through the
-   existing list.
+   `listEnvironmentVarOverrides` in `scripts/deploy/environment-var-overrides.ts` prints
+   `Environment override: NAME="x" replaces wrangler.toml "y"` for each one, or
+   `replaces code default "y"` for a var omitted from `[vars]` because it equals the default
+   recorded in `scripts/deploy/worker-var-defaults.ts`. Do not bypass it by adding a new spread
+   of `process.env` values elsewhere; route new optional vars through the existing list.
+5. **A var absent from `[vars]` is not absent from the Worker's behaviour.** Many tunables ship
+   no binding because `[vars]` holds only non-default values (`.claude/rules/07`). For those, the
+   deployed value is the code default unless the settings API shows an override binding; read
+   the default from `OMITTED_WORKER_VAR_DEFAULTS` or the `DEFAULT_*` constant, not from a
+   missing binding.
 
 ## Required Evidence in the PR
 
@@ -94,8 +100,9 @@ Tells:
 ## References
 
 - Task: `tasks/archive/2026-09-06-archive-drain-enable-unfence-and-throughput.md`; PR #2023 (the flip), this fix's PR
-- `scripts/deploy/sync-wrangler-config.ts` (`getOptionalProcessEnvVars`,
-  `listEnvironmentVarOverrides`), `.github/workflows/deploy-reusable.yml` (`wrangler_sync_env`)
+- `scripts/deploy/sync-wrangler-config.ts` (`getOptionalProcessEnvVars`),
+  `scripts/deploy/environment-var-overrides.ts` (`listEnvironmentVarOverrides`),
+  `.github/workflows/deploy-reusable.yml` (`wrangler_sync_env`)
 - `.claude/rules/07-env-and-urls.md` — how environment sections are generated
 - `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md` — the symptom is an
   absence

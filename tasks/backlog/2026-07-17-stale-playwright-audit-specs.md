@@ -1,5 +1,13 @@
 # Repair or retire stale Playwright audit specs (164 failures on main)
 
+> **Reconciliation 2026-10-12:** One spec left quarantine. #2287 (`195f9f7ca`) repaired
+> `fork-retry-new-chat-audit.spec.ts` and deleted its `visual-audit-quarantine.txt` entry, so the
+> CI visual job now runs it (`scripts/quality/select-playwright-visual-audits.ts` runs every
+> non-quarantined audit spec). The four audit specs added this week (connector, credential-limits,
+> session-expiry, sleeping-session) are not quarantined, so the count is now 98 of 124. The removed
+> line shifts two pointers below: recoverable-error is now `visual-audit-quarantine.txt:79` and
+> scaling-settings `:91`. Still open: everything in the 2026-10-05 list.
+
 > **Reconciliation 2026-10-05:** No spec left quarantine this week. #2217 (b79136805) added the onboarding-wizard dismissal seed (`project-chat-recoverable-error-audit.spec.ts:108`) and 11 ACP auth/loopback-guidance tests to that spec. The ACP task reports them passing locally (`tasks/archive/2026-10-01-acp-auth-diagnosis.md:59`), but the spec is still quarantined (`visual-audit-quarantine.txt:80`), so none of its 13 tests run in CI. The 5 audit specs added this week are not quarantined, so the count is now 99 of 120. Still open:
 > - Run the recoverable-error spec in CI mode and un-quarantine it. It still does not assert the "Send another message to retry" guidance (now `FailureCard.tsx:330`).
 > - Repair or retire every other quarantined spec and delete its entry. This includes `knowledge-ui-audit` against the still-quarantined `agent-context-audit`, and the still-unverified nav-toggle and chat-file-viewer fixes.

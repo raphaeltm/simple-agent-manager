@@ -505,7 +505,7 @@ function resolveSweepAffordability(
   };
 }
 
-function resolveConfig(env: Env): ArchiveCoordinatorConfig {
+export function resolveConfig(env: Env): ArchiveCoordinatorConfig {
   const sweepMessageBudget = envInt(
     env.PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET,
     PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET,
@@ -924,7 +924,7 @@ async function finishGlobalSweepCadence(
   stats.cadence = cadenceStateFromRow(config, finalRow, completedAt, true);
 }
 
-function scopedConfig(
+export function scopedConfig(
   env: Env,
   config: ArchiveCoordinatorConfig,
   overrides: ArchiveCoordinatorBudgetOverrides = {}

@@ -8,7 +8,7 @@ import {
 
 export const DEFAULT_CRON_FAILURE_NOTIFICATION_KV_PREFIX = 'cron-failure-notification';
 
-function throttleKey(env: Env, sweepName: string): string {
+export function throttleKey(env: Env, sweepName: string): string {
   const prefix =
     env.CRON_FAILURE_NOTIFICATION_KV_PREFIX ?? DEFAULT_CRON_FAILURE_NOTIFICATION_KV_PREFIX;
   return `${prefix}:${sweepName}`;

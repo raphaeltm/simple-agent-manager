@@ -1,5 +1,15 @@
 # Durable Interrupts Phase 1 — Test Coverage Gaps
 
+> **Reconciliation 2026-10-12:** #2213 (`57aaa057b`) changed G6's path and covered two of its three
+> hops. `send_durable_message` now sends notify/deliver over a shared agent-message channel first
+> (`apps/api/src/routes/mcp/mailbox-tools.ts:98-111`; code default off, enabled in the checked-in
+> `apps/api/wrangler.toml:175`). Only urgent classes, or disabled channels, still reach
+> `acceptPromptDelivery` (`:116-123`). New workerd tests drive the real MCP route into ProjectData
+> on both paths and assert the queued inbox rows
+> (`apps/api/tests/workers/agent-message-channels.test.ts:59-75,79-168`). Still open: the last hop
+> (inbox to VM agent) in one chained test; G3 (`runDeliverySweep`, `mailbox.ts:433`, still no test
+> references); G4.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** G5. `apps/api/tests/unit/routes/mcp-orchestration-comms.test.ts:440-501` asserts

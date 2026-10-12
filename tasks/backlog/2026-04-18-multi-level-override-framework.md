@@ -1,5 +1,14 @@
 # Multi-Level Override Framework (Meta-Spec)
 
+> **Reconciliation 2026-10-12:** #2261 (`ab76c0f42`) now stores the resolved agent type, model,
+> effort and permission mode on each agent session the task runner or an Instant session starts
+> (`agent_sessions.runtime_contract_json`, written at
+> `apps/api/src/services/agent-session-bootstrap.ts:306-310`; shape in
+> `apps/api/src/services/session-runtime-contract.ts:18-36`). That partly answers the audit-trail
+> question: it keeps the values, not which tier supplied them, and no UI shows them. Still open:
+> phases 3, 4, 5, 6 and 8, the source tier for the audit trail, and the parameter-table refresh.
+> The triggers table cited for phase 5 is now at `apps/api/src/db/schema.ts:2644`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

@@ -334,6 +334,7 @@ let mockRootSearchCoverage = {
 const mockDoStub = {
   fetch: vi.fn().mockResolvedValue(new Response('ok')),
   ensureProjectId: vi.fn(),
+  recordActivityEvent: vi.fn().mockResolvedValue('activity-1'),
   listSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
   getSession: vi.fn().mockResolvedValue(null),
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
@@ -2869,6 +2870,26 @@ describe('MCP Routes', () => {
       expect(data.url).toContain('app.example.com');
       expect(data.url).toContain('proj-456');
       expect(data.message).toContain('dispatched successfully');
+
+      // The dispatch reaches the ProjectData activity RPC (it used to POST to a path the
+      // Durable Object never served). The real row is asserted in
+      // tests/workers/mcp-task-activity-events.test.ts.
+      const dispatchedCall = mockDoStub.recordActivityEvent.mock.calls.find(
+        (call: unknown[]) => call[0] === 'task.dispatched'
+      );
+      expect(dispatchedCall).toBeDefined();
+      const [, actorType, actorId, workspaceId, , taskId, payload] = dispatchedCall!;
+      expect({ actorType, actorId, workspaceId, taskId }).toEqual({
+        actorType: 'agent',
+        actorId: 'ws-abc',
+        workspaceId: 'ws-abc',
+        taskId: data.taskId,
+      });
+      expect(JSON.parse(payload as string)).toMatchObject({
+        parentTaskId: 'task-123',
+        dispatchDepth: 1,
+        branchName: data.branchName,
+      });
     });
 
     it('should reject dispatch before provisioning when GitHub owner access is revoked', async () => {
@@ -4761,6 +4782,71 @@ describe('MCP Routes', () => {
       // Core operation must succeed even when notification is best-effort
       expect(body.result).toBeDefined();
       expect(body.error).toBeUndefined();
+    });
+
+    it('update_task_status should remain successful when the activity event cannot be recorded', async () => {
+      mockD1Results(mockD1._stmt, [
+        { id: 'task-123', status: 'in_progress', user_id: 'user-789', title: 'Implement feature' },
+      ]);
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+      mockDoStub.recordActivityEvent.mockRejectedValueOnce(new Error('ProjectData unavailable'));
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_task_status',
+          arguments: { message: 'Step done' },
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(body.result.content[0].text).toBe('Progress update recorded.');
+      // The failing RPC was really attempted: activity is best-effort, not skipped.
+      expect(mockDoStub.recordActivityEvent).toHaveBeenCalledWith(
+        'task.progress',
+        'agent',
+        'ws-abc',
+        'ws-abc',
+        null,
+        'task-123',
+        expect.any(String)
+      );
+    });
+
+    it('complete_task in conversation mode should remain successful when the activity event cannot be recorded', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        task_mode: 'conversation',
+        user_id: 'user-789',
+        title: 'Review code',
+        output_pr_url: null,
+        output_branch: null,
+      });
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+      mockDoStub.recordActivityEvent.mockRejectedValueOnce(new Error('ProjectData unavailable'));
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'complete_task',
+          arguments: { summary: 'Done exploring' },
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(body.result.content[0].text).toContain('Conversation remains open');
+      expect(mockDoStub.recordActivityEvent).toHaveBeenCalledWith(
+        'task.awaiting_followup',
+        'agent',
+        'ws-abc',
+        'ws-abc',
+        null,
+        'task-123',
+        expect.any(String)
+      );
     });
 
     it('complete_task in conversation mode should call notifySessionEnded', async () => {

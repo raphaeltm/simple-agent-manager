@@ -1,5 +1,10 @@
 # Notification Phase 2 — Performance & Correctness Follow-ups
 
+> **Reconciliation 2026-10-12:** Nothing in scope shipped. Pointer fix: #2213 (`57aaa057b`) moved
+> `request_human_input` into `apps/api/src/routes/mcp/human-input-tool.ts`, so the `'suppressed'`
+> id check cited below at `instruction-tools.ts:663` is now `human-input-tool.ts:168`. Still open:
+> the four items below; `apps/api/src/durable-objects/notification.ts` was not touched this week.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

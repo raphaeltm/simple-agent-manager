@@ -4,7 +4,7 @@
 **Branch:** `claude/sam-project-loading-zlgaux`
 **Parent work:** `tasks/archive/2026-08-31-projectdata-terminal-archive-sharding.md`,
 `tasks/archive/2026-09-04-archive-sharding-bind-variable-limit.md`,
-`tasks/active/2026-09-03-projectdata-production-capacity-emergency.md`
+`tasks/archive/2026-09-03-projectdata-production-capacity-emergency.md`
 
 ## Problem
 

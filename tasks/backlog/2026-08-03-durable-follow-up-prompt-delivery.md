@@ -1,5 +1,16 @@
 # Durable follow-up prompt delivery for existing chat sessions
 
+> **Reconciliation 2026-10-12:** The server half of the idempotency item shipped. #2291
+> (`d4fa4f372`) runs `POST .../sessions/:sessionId/prompt` through `cliOperationReceipt`
+> (`apps/api/src/routes/chat-prompt-route.ts:17-30`), so a retry that repeats the same
+> `Idempotency-Key` header replays the stored response instead of creating a second delivery
+> (`apps/api/src/services/cli-operation-receipts.ts:26-91`; test
+> `apps/api/tests/unit/routes/cli-worker-contract.test.ts:183-200`). Only the CLI sends that header
+> (`packages/cli/internal/cli/client.go:407`). Still open: the web client sends no key and still
+> ignores `deliveryId`/`status` (`apps/web/src/lib/api/sessions.ts:392-404`), nothing in the web
+> app consumes `mailbox.delivery_updated` (now `prompt-delivery-runner.ts:249`), and there is no
+> retry UI.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the server side, in PR #1785 (00169b016):

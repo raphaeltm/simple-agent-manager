@@ -6,6 +6,7 @@ const dispatchTaskMocks = vi.hoisted(() => ({
   },
   createSession: vi.fn(),
   persistMessage: vi.fn(),
+  recordActivityEvent: vi.fn(),
   resolveCredentialSource: vi.fn(),
   resolveTaskStartPlacementCredentialAttribution: vi.fn(),
   resolveAgentProfile: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('../../../src/services/placement-resolver', () => ({
 vi.mock('../../../src/services/project-data', () => ({
   createSession: dispatchTaskMocks.createSession,
   persistMessage: dispatchTaskMocks.persistMessage,
+  recordActivityEvent: dispatchTaskMocks.recordActivityEvent,
 }));
 
 vi.mock('../../../src/services/task-title', () => ({
@@ -157,6 +159,7 @@ export function resetDispatchTaskMocks(options: { title?: string } = {}) {
   dispatchTaskMocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
   dispatchTaskMocks.createSession.mockResolvedValue('session-1');
   dispatchTaskMocks.persistMessage.mockResolvedValue('message-1');
+  dispatchTaskMocks.recordActivityEvent.mockResolvedValue('activity-1');
   dispatchTaskMocks.startTaskRunnerDO.mockResolvedValue(undefined);
 }
 
@@ -199,12 +202,6 @@ export function buildDispatchCtx(
             { success: true, results: [], meta: { changes: 1 } },
             { success: true, results: [], meta: { changes: 1 } },
           ]),
-        },
-        PROJECT_DATA: {
-          idFromName: vi.fn(() => 'project-data-id'),
-          get: vi.fn(() => ({
-            fetch: vi.fn().mockResolvedValue(new Response('ok')),
-          })),
         },
         AI: {},
         BASE_DOMAIN: 'example.com',

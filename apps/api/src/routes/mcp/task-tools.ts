@@ -19,7 +19,6 @@ import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import * as notificationService from '../../services/notification';
-import * as projectDataService from '../../services/project-data';
 import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup';
@@ -39,6 +38,7 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+import { recordMcpActivityEvent } from './activity-events';
 
 export async function handleUpdateTaskStatus(
   requestId: string | number | null,
@@ -64,30 +64,15 @@ export async function handleUpdateTaskStatus(
     tokenData.contextType === 'direct-workspace' ||
     tokenData.contextType === 'trial'
   ) {
-    try {
-      await projectDataService.recordActivityEvent(
-        env,
-        tokenData.projectId,
-        `${tokenData.contextType ?? 'session'}.progress`,
-        'agent',
-        tokenData.agentSessionId ?? tokenData.workspaceId,
-        tokenData.workspaceId,
-        tokenData.chatSessionId ?? null,
-        null,
-        {
-          message: trimmedMessage.slice(0, getMcpLimits(env).activityMessageMaxLength),
-          contextType: tokenData.contextType ?? 'conversation',
-        }
-      );
-    } catch (err) {
-      log.warn('mcp.update_task_status.taskless_activity_event_failed', {
-        projectId: tokenData.projectId,
-        workspaceId: tokenData.workspaceId,
-        chatSessionId: tokenData.chatSessionId,
-        contextType: tokenData.contextType,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    await recordMcpActivityEvent(env, tokenData, {
+      eventType: `${tokenData.contextType ?? 'session'}.progress`,
+      taskId: null,
+      payload: {
+        message: trimmedMessage.slice(0, getMcpLimits(env).activityMessageMaxLength),
+        contextType: tokenData.contextType ?? 'conversation',
+      },
+      failureLogEvent: 'mcp.update_task_status.taskless_activity_event_failed',
+    });
 
     log.info('mcp.update_task_status.taskless', {
       projectId: tokenData.projectId,
@@ -130,31 +115,12 @@ export async function handleUpdateTaskStatus(
     );
   }
 
-  // Record the progress update as an activity event via ProjectData DO
-  try {
-    const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
-    const doStub = env.PROJECT_DATA.get(doId);
-    await doStub.fetch(
-      new Request('https://do/activity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'task.progress',
-          actorType: 'agent',
-          actorId: tokenData.workspaceId,
-          metadata: {
-            taskId: tokenData.taskId,
-            message: trimmedMessage.slice(0, getMcpLimits(env).activityMessageMaxLength),
-          },
-        }),
-      })
-    );
-  } catch (err) {
-    log.warn('mcp.update_task_status.activity_event_failed', {
-      taskId: tokenData.taskId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  await recordMcpActivityEvent(env, tokenData, {
+    eventType: 'task.progress',
+    taskId: tokenData.taskId,
+    payload: { message: trimmedMessage.slice(0, getMcpLimits(env).activityMessageMaxLength) },
+    failureLogEvent: 'mcp.update_task_status.activity_event_failed',
+  });
 
   // Emit progress notification (best-effort) — use tokenData.userId as authoritative target
   if (env.NOTIFICATION && tokenData.userId) {
@@ -274,31 +240,13 @@ export async function handleCompleteTask(
       summary: summary?.slice(0, getMcpLimits(env).logMessageMaxLength) ?? null,
     });
 
-    // Fire activity event so the remap is visible in activity feeds
-    try {
-      const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
-      const doStub = env.PROJECT_DATA.get(doId);
-      await doStub.fetch(
-        new Request('https://do/activity', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'task.awaiting_followup',
-            actorType: 'agent',
-            actorId: tokenData.workspaceId,
-            metadata: {
-              taskId: tokenData.taskId,
-              summary: summary?.slice(0, getMcpLimits(env).activityMessageMaxLength) ?? null,
-            },
-          }),
-        })
-      );
-    } catch (err) {
-      log.warn('mcp.complete_task.conversation_activity_event_failed', {
-        taskId: tokenData.taskId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    // Record the remap so it is visible in activity feeds
+    await recordMcpActivityEvent(env, tokenData, {
+      eventType: 'task.awaiting_followup',
+      taskId: tokenData.taskId,
+      payload: { summary: summary?.slice(0, getMcpLimits(env).activityMessageMaxLength) ?? null },
+      failureLogEvent: 'mcp.complete_task.conversation_activity_event_failed',
+    });
 
     // Emit session_ended notification for conversation-mode remap (agent finished turn)
     // Use tokenData.userId as authoritative target
@@ -411,31 +359,12 @@ export async function handleCompleteTask(
     }
   }
 
-  // Record completion activity event
-  try {
-    const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
-    const doStub = env.PROJECT_DATA.get(doId);
-    await doStub.fetch(
-      new Request('https://do/activity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'task.completed',
-          actorType: 'agent',
-          actorId: tokenData.workspaceId,
-          metadata: {
-            taskId: tokenData.taskId,
-            summary: summary?.slice(0, getMcpLimits(env).activityMessageMaxLength) ?? null,
-          },
-        }),
-      })
-    );
-  } catch (err) {
-    log.warn('mcp.complete_task.activity_event_failed', {
-      taskId: tokenData.taskId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  await recordMcpActivityEvent(env, tokenData, {
+    eventType: 'task.completed',
+    taskId: tokenData.taskId,
+    payload: { summary: summary?.slice(0, getMcpLimits(env).activityMessageMaxLength) ?? null },
+    failureLogEvent: 'mcp.complete_task.activity_event_failed',
+  });
 
   // Note: Token is NOT revoked here. The MCP connection outlives individual
   // tasks (scoped to the ACP session / workspace lifetime). Revoking on

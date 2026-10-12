@@ -1,5 +1,18 @@
 # Agent Session Startup Optimization
 
+> **Reconciliation 2026-10-12:** #2261 (ab76c0f42) has the control plane resolve each session's
+> settings and pass them with `settingsResolved: true`
+> (`apps/api/src/services/agent-session-bootstrap.ts:265-286`), so `loadAgentSettings` skips the
+> settings HTTP call (`packages/vm-agent/internal/acp/session_host_selection.go:229-233`; test
+> `session_host_contract_test.go:11`). Bootstrapped starts and contract-bearing restores no longer
+> call `fetchAgentSettings`; other starts, such as trial discovery
+> (`trial-orchestrator/steps.ts:983`), still fetch it after the key
+> (`session_host_selection.go:51`, `:234`). #2234
+> (a3110a0a5) raised the on-demand Codex download to 136,245,837 bytes
+> (`codex_runtime_distribution.go:24`); `ensureAgentInstalled` is now `session_host.go:633`.
+> Still open: the per-session key fetch before install, Phase 1b, Phase 2 pre-install (including
+> the Codex runtime), Phase 3 credential caching, and Phase 4.
+
 > **Reconciliation 2026-10-05:** Scope grew this week instead of shipping. Since #2217, VM Codex sessions verify, download (about 132.6 MB) and install the pinned Codex runtime when a session starts (`packages/vm-agent/internal/acp/session_host.go:625-637` → `codex_runtime_distribution.go:56`, 5-minute default timeout in `config.go:35`). That belongs in this file's Phase 2 pre-install scope. Key and settings fetches are still sequential (`session_host_selection.go:51,229`). The references to `@zed-industries/claude-code-acp` and `session_host.go:295-330` below are stale.
 
 **Created**: 2026-02-20

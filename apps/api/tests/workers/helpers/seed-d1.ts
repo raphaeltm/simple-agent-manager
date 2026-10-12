@@ -27,12 +27,18 @@ export async function seedUser(
 }
 
 /**
- * Approve a seeded user, sign them in, and return the Cookie header their browser
- * would send, so a test can reach session-authenticated routes through the real
- * worker.
+ * Set a seeded user's account status (approved by default), sign them in, and return
+ * the Cookie header their browser would send, so a test can reach session-authenticated
+ * routes through the real worker. The session row is written directly, so BetterAuth's
+ * session hooks (e.g. the first-user superadmin self-heal) do not run.
  */
-export async function seedSignedInUser(userId: string): Promise<string> {
-  await env.DATABASE.prepare("UPDATE users SET status = 'active' WHERE id = ?").bind(userId).run();
+export async function seedSignedInUser(
+  userId: string,
+  opts?: { status?: 'active' | 'pending' | 'suspended' }
+): Promise<string> {
+  await env.DATABASE.prepare('UPDATE users SET status = ? WHERE id = ?')
+    .bind(opts?.status ?? 'active', userId)
+    .run();
   const token = `browser-session-${crypto.randomUUID()}`;
   await env.DATABASE.prepare(
     `INSERT INTO sessions (id, expires_at, token, created_at, updated_at, user_id)

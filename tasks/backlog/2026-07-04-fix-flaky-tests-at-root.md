@@ -1,5 +1,16 @@
 # Fix All Known Flaky Tests at the Root (No Retries)
 
+> **Reconciliation 2026-10-12:** #2271 (`2a5f2e7d3`) fixed one file this task's pattern audit
+> names: `apps/web/tests/unit/components/repo-selector.test.tsx` now waits until the response has
+> rendered, not just until the mock was called (`:80`, `:98`, `:125`, `:154`, `:181`, `:202`). It
+> also fixed two Go flakes not listed here:
+> `packages/vm-agent/internal/acp/session_host_interactions_sdk_test.go` and
+> `packages/vm-agent/internal/server/session_restore_retry_test.go`. Still open: everything else in
+> the two notes below, including the rest of the pattern audit. The `replay_done` send cited below
+> is now at `packages/vm-agent/internal/acp/session_host.go:465-469`. A related ordering flake was
+> already fixed by #2213 and is archived:
+> `tasks/archive/2026-10-07-credential-limits-randomized-order-assertion.md`.
+
 > **Reconciliation 2026-10-05:** Two more load-sensitive tests surfaced in this week's PRs and are tracked nowhere else: `apps/api/tests/unit/routes/nodes-max-nodes-quota.test.ts` hits its 5 s timeout under a full parallel `pnpm test`, also on `main` (#2205), and `apps/web/tests/unit/components/admin/error-trends.test.tsx` failed once under CI load (#2199). None of this file's fixes shipped; none of its named tests failed in the 15 failed CI runs since 2026-09-30.
 
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**

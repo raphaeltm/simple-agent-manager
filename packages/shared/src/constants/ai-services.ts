@@ -397,6 +397,18 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
   }),
   // --- Anthropic (via AI Gateway) ---
   anthropicModel({
+    id: 'claude-haiku-5-5',
+    label: 'Claude Haiku 5.5',
+    tier: 'standard',
+    // Conservative long-prompt price; Anthropic charges less at 100K tokens or below.
+    costPer1kInputTokens: 0.0005,
+    costPer1kOutputTokens: 0.0025,
+    contextWindow: 1000000,
+    toolCallSupport: 'excellent',
+    intendedRole: 'utility',
+    fallbackGroup: 'anthropic-fast',
+  }),
+  anthropicModel({
     id: 'claude-haiku-4-5-20251001',
     label: 'Claude Haiku 4.5',
     tier: 'standard',

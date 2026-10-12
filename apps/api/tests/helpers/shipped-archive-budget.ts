@@ -16,6 +16,8 @@ import { resolve } from 'node:path';
 
 import * as TOML from '@iarna/toml';
 
+import { OMITTED_WORKER_VAR_DEFAULTS } from '../../../../scripts/deploy/worker-var-defaults';
+
 const WRANGLER_PATH = resolve(import.meta.dirname, '../../wrangler.toml');
 
 /** The trigger `scheduled/handler.ts` runs its sweep chain, archive sharding included, on. */
@@ -36,10 +38,16 @@ function readShippedConfig(): { vars?: Record<string, unknown>; triggers?: { cro
   };
 }
 
+/**
+ * The value a deployment ships with: the `[vars]` entry, or the recorded code default when
+ * wrangler.toml omits the var because it equals that default (`OMITTED_WORKER_VAR_DEFAULTS`).
+ */
 export function readShippedVar(name: string): string {
-  const value = readShippedConfig().vars?.[name];
+  const value = readShippedConfig().vars?.[name] ?? OMITTED_WORKER_VAR_DEFAULTS[name];
   if (typeof value !== 'string') {
-    throw new Error(`${name} is not a string in the [vars] table of apps/api/wrangler.toml`);
+    throw new Error(
+      `${name} is neither a string in the [vars] table of apps/api/wrangler.toml nor a recorded omitted default`
+    );
   }
   return value;
 }

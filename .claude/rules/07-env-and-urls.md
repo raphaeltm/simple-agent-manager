@@ -91,8 +91,28 @@ Every name in the optional list that `getOptionalProcessEnvVars` reads is taken 
 Environment (via `wrangler_sync_env`) when set, and that value REPLACES the top-level `wrangler.toml`
 value for the generated environment. Flipping a value in `wrangler.toml` therefore ships nothing if
 an Environment variable of the same name still pins the old value. The sync script prints every
-such override that differs from `wrangler.toml`; before merging a var change, list the overrides
-and verify the deployed value afterwards. See `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`.
+such override that differs from `wrangler.toml` (or, for an omitted var, from its recorded code
+default); before merging a var change, list the overrides and verify the deployed value afterwards.
+See `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`.
+
+### `[vars]` holds only values that differ from the code default
+
+Every top-level `[vars]` entry ships as a plain-text binding on every deployed API Worker, and
+Cloudflare caps a Worker's text bindings (plain-text vars plus secrets). `assertWorkerTextBindingLimit`
+in `scripts/deploy/sync-wrangler-config.ts` fails the deploy above its guard limit. A var whose value
+equals what the code does when it is absent costs a binding and buys nothing.
+
+1. Put a tunable's default in code (a `DEFAULT_*` constant and its parse fallback). Add a `[vars]`
+   entry only when deployments must run with a value that differs from that default.
+2. When a `[vars]` entry is removed because it equals the code default, record its name and value
+   in `OMITTED_WORKER_VAR_DEFAULTS` (`scripts/deploy/worker-var-defaults.ts`) and add a probe for
+   its real read path to `apps/api/tests/unit/config/omitted-worker-var-defaults.test.ts`. That
+   test proves the absent var resolves exactly like the recorded value; the deploy override report
+   compares GitHub Environment overrides against the record.
+3. Removing a var from `[vars]` does not stop a GitHub Environment override of it: a name in the
+   `getOptionalProcessEnvVars` list still ships whenever the Environment sets it.
+4. Changing a recorded code default changes what every deployment runs. The probe test fails until
+   the record is updated in the same PR, so the change is deliberate.
 
 ### Required action when adding a Worker var consumed by sync-wrangler-config
 

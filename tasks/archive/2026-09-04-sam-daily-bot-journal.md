@@ -47,7 +47,7 @@ SAM's public engineering journal needs a daily post only when recent code has a 
 
 - `apps/www/src/content/CLAUDE.md`
 - `apps/www/src/content/blog/sams-journal-cleanup-got-a-safe-switch.md`
-- `tasks/active/2026-09-03-projectdata-production-capacity-emergency.md`
+- `tasks/archive/2026-09-03-projectdata-production-capacity-emergency.md`
 - `apps/api/src/scheduled/project-data-storage-relief-preflight.ts`
 - `apps/api/src/durable-objects/project-data/tool-payload-cleanup-manifest.ts`
 - PR #2014 / commit `831d14e2a05c0bed92f419646828a826f9616c73`

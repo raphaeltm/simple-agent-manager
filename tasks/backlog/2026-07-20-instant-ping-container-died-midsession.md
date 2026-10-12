@@ -1,5 +1,15 @@
 # Instant container died mid-session during production verification ping; no parent-side terminal path for dead-node children
 
+> **Reconciliation 2026-10-12:** The `sleeping` refusal noted on 2026-10-05 is fixed. #2240
+> (`7300c003c`) lets `stop_subtask` cancel a sleeping child without contacting its released runtime
+> (`apps/api/src/routes/mcp/orchestration-stop.ts:98-108`; test
+> `apps/api/tests/unit/routes/mcp-orchestration-comms.test.ts:654`), and `send_message_to_subtask`
+> queues a durable delivery for it (it refuses only when durable delivery is off,
+> `orchestration-comms.ts:126-132`). #2213 (`57aaa057b`) then moved target resolution into
+> `apps/api/src/routes/mcp/orchestration-target.ts`; the node-not-running refusal this file is about
+> is now `orchestration-target.ts:181-193`, unchanged. Still open: a DB-side terminal path for a
+> child whose node is dead or `error`, with its regression test.
+
 > **Reconciliation 2026-10-05:** #2230 widened this. VM teardown now sets tasks to `sleeping` (`apps/api/src/services/session-sleep-teardown.ts:214-230`), and MCP `ACTIVE_STATUSES` (`apps/api/src/routes/mcp/_helpers.ts:322`) does not include it, so `stop_subtask` and `send_message_to_subtask` refuse a slept child (`routes/mcp/orchestration-comms.ts:146`), even though `sleeping → cancelled` is an allowed transition (`services/task-status.ts:37`). That part is tracked with the other `sleeping` gaps in `2026-10-05-sleeping-task-status-follow-ups.md`. The node-not-running refusal this file describes is unchanged (`orchestration-comms.ts:190-204`).
 
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**

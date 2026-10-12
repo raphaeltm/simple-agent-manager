@@ -1,0 +1,26 @@
+[
+  {
+    "route": "/dashboard",
+    "url": "https://app.sammy.party/dashboard",
+    "title": "Simple Agent Manager",
+    "errors": []
+  },
+  {
+    "route": "/projects",
+    "url": "https://app.sammy.party/projects",
+    "title": "Simple Agent Manager",
+    "errors": []
+  },
+  {
+    "route": "/settings",
+    "url": "https://app.sammy.party/settings/cloud-provider",
+    "title": "Simple Agent Manager",
+    "errors": []
+  },
+  {
+    "route": "/projects/01M4N4D24AEPFCWK6ETBEEHAQ8",
+    "url": "https://app.sammy.party/projects/01M4N4D24AEPFCWK6ETBEEHAQ8/chat",
+    "title": "Simple Agent Manager",
+    "errors": []
+  }
+]

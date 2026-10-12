@@ -557,24 +557,16 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
 
   // ── Activity event (best-effort) ──────────────────────────────────────
   try {
-    const doId = env.PROJECT_DATA.idFromName(input.projectId);
-    const doStub = env.PROJECT_DATA.get(doId);
-    await doStub.fetch(
-      new Request('https://do/activity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'task.dispatched',
-          actorType: 'user',
-          actorId: ctx.userId,
-          metadata: {
-            taskId,
-            title: taskTitle,
-            branchName,
-            source: 'sam',
-          },
-        }),
-      })
+    await projectDataService.recordActivityEvent(
+      env,
+      input.projectId,
+      'task.dispatched',
+      'user',
+      ctx.userId,
+      null,
+      sessionId,
+      taskId,
+      { title: taskTitle, branchName, source: 'sam' }
     );
   } catch (err) {
     log.warn('sam.dispatch_task.activity_event_failed', {

@@ -12,7 +12,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import * as TOML from '@iarna/toml';
 import { describe, expect, it } from 'vitest';
+
+import { OMITTED_WORKER_VAR_DEFAULTS } from '../deploy/worker-var-defaults.js';
 
 const workflow = readFileSync(
   new URL('../../.github/workflows/deploy-reusable.yml', import.meta.url),
@@ -190,6 +193,20 @@ function stepBlock(stepName: string): string {
     throw new Error(`Unable to find workflow step: ${stepName}`);
   }
   return block;
+}
+
+/**
+ * The value the repository ships for a Worker var without any GitHub Environment override: its
+ * top-level `[vars]` entry, else the code default recorded for a var wrangler.toml omits.
+ */
+function checkedInDefault(name: string): string | undefined {
+  const vars = (
+    TOML.parse(readFileSync(new URL('../../apps/api/wrangler.toml', import.meta.url), 'utf8')) as {
+      vars?: Record<string, unknown>;
+    }
+  ).vars;
+  if (vars && Object.prototype.hasOwnProperty.call(vars, name)) return String(vars[name]);
+  return OMITTED_WORKER_VAR_DEFAULTS[name];
 }
 
 function extractOptionalWorkerEnvVars(): string[] {
@@ -1125,12 +1142,11 @@ describe('deploy reusable workflow', () => {
         expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
       }
     }
-    const wranglerToml = readFileSync(
-      new URL('../../apps/api/wrangler.toml', import.meta.url),
-      'utf8'
-    );
-    expect(wranglerToml).toMatch(/^ACP_INTERACTION_FORMS_ENABLED = "false"$/m);
-    expect(wranglerToml).toMatch(/^ACP_INTERACTION_URLS_ENABLED = "false"$/m);
+    // Off unless a deployment opts in: the code default is "false" (proved by
+    // apps/api/tests/unit/config/omitted-worker-var-defaults.test.ts), so wrangler.toml omits the
+    // flags and the deploy override report compares an opt-in against that recorded default.
+    expect(checkedInDefault('ACP_INTERACTION_FORMS_ENABLED')).toBe('false');
+    expect(checkedInDefault('ACP_INTERACTION_URLS_ENABLED')).toBe('false');
   });
 
   /**
@@ -1140,9 +1156,10 @@ describe('deploy reusable workflow', () => {
    * sweep's candidate ceiling, its fall-through depth and its stall alert — exactly the
    * knobs an operator reaches for when the sweep is misbehaving.
    *
-   * They must ALSO exist in the top-level `[vars]`, because `listEnvironmentVarOverrides`
-   * only logs an override for a name it can compare against a checked-in value. Without
-   * that, an override of one of these would ship with no line in the deploy log — the
+   * They must ALSO have a checked-in value — a top-level `[vars]` entry, or the recorded code
+   * default in `OMITTED_WORKER_VAR_DEFAULTS` when wrangler.toml omits them — because
+   * `listEnvironmentVarOverrides` only logs an override for a name it can compare against one.
+   * Without that, an override of one of these would ship with no line in the deploy log — the
    * `.claude/rules/70` failure mode verbatim.
    */
   it('forwards the archive sweep affordability tunables into every wrangler config sync env', () => {
@@ -1151,14 +1168,10 @@ describe('deploy reusable workflow', () => {
       stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)'),
       stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)'),
     ];
-    const wranglerToml = readFileSync(
-      new URL('../../apps/api/wrangler.toml', import.meta.url),
-      'utf8'
-    );
 
     for (const name of ARCHIVE_SWEEP_AFFORDABILITY_ENV_VARS) {
       expect(optionalWorkerVars).toContain(name);
-      expect(wranglerToml).toMatch(new RegExp(`^${name} = "`, 'm'));
+      expect(checkedInDefault(name), name).toBeDefined();
       for (const sync of syncBlocks) {
         expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
       }
