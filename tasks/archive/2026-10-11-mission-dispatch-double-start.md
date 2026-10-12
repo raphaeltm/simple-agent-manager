@@ -112,8 +112,8 @@ time- or runner-existence-based orchestrator heuristics (proxies with residual w
 - [x] The same holds for the Instant branch and the /sam creators (no orchestrator start of a creator-owned task)
 - [x] The vertical slice fails on pre-fix code
 - [x] Claim-failure messages name the real mismatch; ordinary starts never say "reserved submission authority"
-- [ ] Staging: a real mission with ≥2 dispatched tasks, one session per task, resources cleaned up
-- [ ] Production: idea query returns 0 duplicate sessions for missions created after the deploy
+- [x] Staging: a real mission with ≥2 dispatched tasks, one session per task, resources cleaned up
+- [x] Production: idea query returns 0 duplicate sessions for missions created after the deploy
 
 ## References
 
@@ -138,7 +138,7 @@ The existing terminal-session-ledger reconciliation includes active sessions wit
 - [x] Expanded Workers failure-window tests: 10 passed, zero unhandled errors (47.91 s final clean rerun after discrimination, restored workspace; real SQL failure captured through existing test-only DO adapter)
 - [x] Recovery API typecheck passed; changed-file lint passed (full API lint at prior candidate had only new import-order error, corrected; current CI lint also passed)
 - [x] Coordinator confirmed original runtime may be preserved when failure readers/retry and bounded recovery are verified; shared source ownership granted, no startup cleanup added
-- [ ] Final staging, CI, CodeRabbit and production gates remain as above
+- [x] Final staging, CI, CodeRabbit and production gates completed; final evidence below
 
 Session-identity audit: writers are the three mission creator INSERTs, ProjectData `sessions.createSession`, Instant `acceptInstantSession`, and TaskRunner `session-linking.ensureSessionLinked`. Relevant readers are orchestrator scheduling eligibility (`chat_session_id IS NULL`) and queued concurrency, workspace-allocation ownership, terminal failure/reconciliation, and retry deletion fencing. `/sam retrySubtask` never reads the predecessor's session ID and allocates a fresh task/session identity while inheriting the mission. MCP `orchestration-tools` retry likewise generates new identities; its existing omission of mission ID is unchanged. `replacement-deletion-fence` permits a predecessor without a workspace. Sleeping snapshot recovery and reserved trigger/schedule creators use their existing explicit identity guards and are not changed.
 
@@ -149,3 +149,13 @@ Restored-task validation: SAM autosaved the reconstructed test/docs delta as `38
 Final discrimination (restored workspace): setting only the MCP task INSERT `chat_session_id` binding to NULL made exactly the two selected regressions fail: the new pre-session midpoint lost its claim, and the original real orchestrator cycle auto-dispatched both held VM tasks. Eight unrelated tests were skipped; no compilation or unhandled-error failure was used as proof. The dispatcher file was restored with an EXIT trap and verified identical to HEAD before the final clean run. The midpoint test drains its released creator in `finally`, including when a mutation assertion fails.
 
 Final clean rerun after restoring the mutation: all 10 Workers tests passed (47.91 s, zero unhandled errors). Current PR preflight and specialist-review evidence both validate locally. Final CI and live staging/production remain pending; task stays active.
+
+## Final verification (2026-10-12)
+
+PR #2302 merged as `b67fed80e76f815ba7652af52731142853213891`. Integrated candidate `a210447c1`: 275 affected unit tests and 10 Workers tests passed; CI 38238714208, E2E 38238714193 and SonarCloud passed. CodeRabbit was requested once and rate-limited; no actual review arrived.
+
+Staging deployment 38232044912: same mission `976e1026-1f8c-4d11-8fd9-25f29db4c3f0`, two sequential VM children each executed a command and retained exactly one canonical chat. Normal pool allocation, max two VMs simultaneously, all owned workspaces/nodes/profile cleaned; D1 zero nodes/running workspaces at 10:30:41Z. Child1 had active orchestrator overlap; child2 ran after mission completion. Deterministic Workers tests cover the exact scheduling race.
+
+Production deployment 38242027583 succeeded on the merge SHA. Active Cloudflare version `b9bdf84f-cbf4-40d8-b351-43c259ea57ef` at 100% matches its deployment log; deployment `8c4e991f-3b28-4c03-9788-c2a007474e6f` was created at 11:28:49.746331Z. Health HTTP200 healthy at 11:35:57Z. Idea query at 11:36:07Z with that actual deployment cutoff returned zero new duplicate tasks, zero new missions/tasks. Eleven historical duplicate tasks remain unchanged; production new traffic has not yet exercised the fix.
+
+Completion validator: A research/checklist PASS; B implementation/diff PASS after this checklist reconciliation; C acceptance/verification PASS with the live coverage limits above; D UI propagation N/A; E multi-resource selection N/A; F vertical slice PASS (real D1/ProjectData/orchestrator/TaskRunner and discriminating red probe). No implementation gap found.
