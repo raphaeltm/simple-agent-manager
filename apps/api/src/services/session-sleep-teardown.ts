@@ -193,7 +193,8 @@ export async function finishSleepComputeCleanup(
 
 export async function ensureProjectDataSleeping(
   env: Env,
-  workspace: SleepWorkspace
+  workspace: SleepWorkspace,
+  claimId?: string
 ): Promise<void> {
   const chatSession = await projectDataService.getSession(
     env,
@@ -206,9 +207,18 @@ export async function ensureProjectDataSleeping(
   const slept = await projectDataService.sleepSession(
     env,
     workspace.projectId,
-    workspace.chatSessionId
+    workspace.chatSessionId,
+    ...(claimId ? [{ runtimeGuard: {
+      projectId: workspace.projectId,
+      userId: workspace.userId,
+      workspaceId: workspace.id,
+      nodeId: workspace.nodeId,
+      evictionGeneration: workspace.evictionGeneration ?? null,
+      claimId,
+    } }] as const : [] as const)
   );
   if (slept) return;
+  if (claimId) throw new SessionSleepRuntimeChangedError();
   const repaired = await projectDataService.getSession(
     env,
     workspace.projectId,
@@ -229,7 +239,7 @@ export async function completeSleepTeardown(
 ) {
   const db = drizzle(env.DATABASE, { schema });
   await assertSleepRuntimeIdentity(env, workspace);
-  await ensureProjectDataSleeping(env, workspace);
+  await ensureProjectDataSleeping(env, workspace, claimId);
 
   // `stopping` is durable before this I/O. An interrupted or ambiguous stop
   // is retried forward; it is never rolled back to a deliverable active chat.

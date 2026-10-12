@@ -45,9 +45,9 @@ Minimal #2305 overlap: `services/session-sleep-teardown.ts`, `scheduled/session-
 
 - Root lint13/13 PASS; typecheck19/19 PASS, refreshed after final fixture corrections.
 - Full root tests21/21 tasks PASS; API863 files/12086 tests PASS, one file/two tests skipped. Root build9/9 PASS.
-- Real workerd/D1 suite13/13 PASS across three files on final generation-guard source: signed node-heartbeat route, both production liveness adapters, actual idle cleanup/repair and D1 dedupe.
-- Sleep integration59 PASS: real stale stuck sweep at25h BEFORE sleep sweep; D1 running/stopped exact409; prepare/R2 uploads with omitted complete callback; actual ensureSessionRecovery to TaskRunner boundary and restore-result route; cap5/CAS race; no/expired recovery; warm retention and original budget; subsequent ceiling remains bounded.
-- Twelve generation interleaves: full/fallback/explicit entry points × before dispatch, VM generation rejection, after stop/before D1, post-D1/pre-snapshot. Successor states unchanged and subsequent real sweep performs no extra stop/release.
+- Real workerd/D1 suite17/17 PASS across three files on final generation-guard source: signed node-heartbeat route, both production liveness adapters, actual idle cleanup/repair and D1 dedupe.
+- Sleep integration62 PASS: real stale stuck sweep at25h BEFORE sleep sweep; D1 running/stopped exact409; prepare/R2 uploads with omitted complete callback; actual ensureSessionRecovery to TaskRunner boundary and restore-result route; cap5/CAS race; no/expired recovery; warm retention and original budget; subsequent ceiling remains bounded.
+- Fifteen generation interleaves: full/fallback/explicit entry points × before guarded chat RPC, before dispatch, VM generation rejection, after stop/before D1, post-D1/pre-snapshot. Successor states unchanged and subsequent real sweep performs no extra stop/release.
 - Older external fixture corrections preserve real classifiers and existing behavior assertions. Host-list corrections253 targeted tests PASS; final error-export/guarded-stop/legacy unit DB get+batch corrections79 tests PASS. Independent test review PASS. Legacy unit DB doubles assume identity/write success; real integration/Workers tests remain the guard/race authority.
 
 ## Revert evidence
@@ -78,3 +78,9 @@ Class: incomplete convergence after lost acknowledgement, proxy/condition confus
 ## Main integration checkpoint
 
 Merged origin/main b67fed80e without conflicts/history rewrite (ff384721a). Post-merge root lint/typecheck32/32 tasks PASS; sleep integration59/59 and realWorkers13/13 PASS. T1 main integration will be repeated before final staging/readiness if it lands afterward.
+
+## Final chat transition guard
+
+Optional captured owner/generation/stopping-claim guard on the existing sleepSession RPC performs a final real D1 read under DO concurrency serialization, then checks the local chat workspace and applies its synchronous transition. Legacy callers remain unchanged. Four real public-DO RPC tests failed before implementation and now pass; integration covers all three entry points at the RPC-admission boundary. Final targeted core141, Workers17 and root lint/typecheck32 PASS; final full root sequential tests21/21 PASS (/tmp/t2-final-tests-sequential.log); combined-head build refresh pending.
+
+This closes the demonstrated pre-RPC rebuild admission race. The final D1 read and serialized DO transition are not a cross-store transaction; external D1 admission after that read remains a distributed race limit. No admission implementation or speculative coordination mechanism is added.

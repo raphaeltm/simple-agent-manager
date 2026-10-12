@@ -95,6 +95,7 @@ import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
 import * as sessionActivityProbe from './session-activity-probe';
 import * as sessionActivityReconciliation from './session-activity-reconciliation';
 import * as sessionReads from './session-reads';
+import { guardedSessionSleep, type SessionSleepRuntimeGuard } from './session-sleep-runtime-guard';
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessionWakeProgress from './session-wake-progress';
@@ -487,7 +488,20 @@ export class ProjectData extends DurableObject<Env> {
     return false;
   }
 
-  async sleepSession(sessionId: string, options?: sessions.SleepSessionOptions): Promise<boolean> {
+  async sleepSession(sessionId: string, options?: sessions.SleepSessionOptions & {
+    runtimeGuard?: SessionSleepRuntimeGuard;
+  }): Promise<boolean> {
+    const runtimeGuard = options?.runtimeGuard;
+    if (runtimeGuard) {
+      return this.ctx.blockConcurrencyWhile(() => guardedSessionSleep(
+        this.env.DATABASE, this.sql, sessionId, runtimeGuard,
+        () => this.applySessionSleep(sessionId, options)
+      ));
+    }
+    return this.applySessionSleep(sessionId, options);
+  }
+
+  private applySessionSleep(sessionId: string, options?: sessions.SleepSessionOptions): boolean {
     const updated = sessions.sleepSession(this.sql, sessionId, options);
     if (updated) {
       // Most sessions worth searching are sleeping, not stopped, and every

@@ -646,7 +646,9 @@ export async function sleepSession(
   env: Env,
   projectId: string,
   sessionId: string,
-  options?: import('../durable-objects/project-data/sessions').SleepSessionOptions
+  options?: import('../durable-objects/project-data/sessions').SleepSessionOptions & {
+    runtimeGuard?: import('../durable-objects/project-data/session-sleep-runtime-guard').SessionSleepRuntimeGuard;
+  }
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'sleepSession');
   const stub = await getStub(env, projectId);

@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as observabilitySchema from '../../src/db/observability-schema';
 import * as schema from '../../src/db/schema';
+import { type SessionSleepRuntimeGuard,sessionSleepRuntimeIsCurrent } from '../../src/durable-objects/project-data/session-sleep-runtime-guard';
 import type { Env } from '../../src/env';
 import { sessionSnapshotRoutes } from '../../src/routes/workspaces/session-snapshots';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
@@ -399,7 +400,8 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
         projectData.get(chatSessionId) ?? null
     );
     mocks.sleepSession.mockImplementation(
-      async (_env: Env, _projectId: string, chatSessionId: string) => {
+      async (_env: Env, _projectId: string, chatSessionId: string, options?: { runtimeGuard?: SessionSleepRuntimeGuard }) => {
+        if (options?.runtimeGuard && !(await sessionSleepRuntimeIsCurrent(_env.DATABASE, chatSessionId, options.runtimeGuard))) return false;
         const state = projectData.get(chatSessionId);
         if (state?.status !== 'active') return false;
         state.status = 'sleeping';
@@ -1020,7 +1022,7 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       expect(row()).toMatchObject({ sleep_status: 'sleeping' });
     });
 
-    it.each(['before_dispatch', 'node_generation_check', 'after_stop', 'before_snapshot_commit']
+    it.each(['before_chat_sleep_rpc', 'before_dispatch', 'node_generation_check', 'after_stop', 'before_snapshot_commit']
       .flatMap((boundary) => ['full', 'fallback', 'explicit'].map((phase) => ({ boundary, phase }))))(
       'ends a superseded $phase sleep at $boundary without adopting its successor on another sweep',
       async ({ boundary, phase }) => {
@@ -1040,6 +1042,14 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
           sqlite.prepare("UPDATE tasks SET status = 'in_progress', execution_step = 'running' WHERE id = 'task-a'").run();
           projectData.set('chat-a', { status: 'active' });
         };
+        if (boundary === 'before_chat_sleep_rpc') {
+          const sleep = mocks.sleepSession.getMockImplementation();
+          if (!sleep) throw new Error('Missing external DO fixture');
+          mocks.sleepSession.mockImplementationOnce(async (...args) => {
+            replaceRuntime();
+            return sleep(...args);
+          });
+        }
         mocks.stopWorkspaceOnNode.mockImplementationOnce(async (_node, _workspace, _env, _user, options) => {
           expect(options.expectedEvictionGeneration).toBe('original');
           if (boundary === 'before_dispatch') replaceRuntime();
@@ -1064,7 +1074,7 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
         expect(row()).toMatchObject({ sleep_status: 'terminal_failed', sleeping_at: null, sleep_episode_failures: failuresBefore + 1 });
         expect(fallbackRecord()).toMatchObject({ outcome: 'blocked', blockedReason: 'runtime_changed' });
         expect(interleave?.fired ?? true).toBe(true);
-        expect(remoteStops).toBe(boundary === 'before_dispatch' || boundary === 'node_generation_check' ? 0 : 1);
+        expect(remoteStops).toBe(['before_chat_sleep_rpc', 'before_dispatch', 'node_generation_check'].includes(boundary) ? 0 : 1);
         expect(workspaceStatus()).toBe('running');
         expect(sqlite.prepare("SELECT status FROM agent_sessions WHERE id = 'agent-a'").get()).toEqual({ status: 'running' });
         expect(sqlite.prepare("SELECT status, execution_step FROM tasks WHERE id = 'task-a'").get())
@@ -1077,7 +1087,7 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
         expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
         expect(notices.at(-1)?.content).toContain('replacement runtime has been left alone');
         await sweepAt(tick(phase === 'fallback' ? 4 : 1));
-        expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+        expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(boundary === 'before_chat_sleep_rpc' ? 0 : 1);
         expect(workspaceStatus()).toBe('running');
       }
     );

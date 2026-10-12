@@ -171,3 +171,38 @@ describe('confirmed sleep retires obsolete idle cleanup only for its exact owner
     expect((await stub.getSession(chatId))?.status).toBe('active');
   });
 });
+
+// Exercise the actual public DO RPC, not a local transition or API-side guard double.
+describe('sleep RPC captured runtime and stopping claim fence', () => {
+  it.each(['replacement', 'claim', 'workspace_link', 'current'])('%s intent cannot sleep a successor chat', async (boundary) => {
+    const suffix = crypto.randomUUID();
+    const userId = `guard-u-${suffix}`, projectId = `guard-p-${suffix}`,
+      nodeId = `guard-n-${suffix}`, workspaceId = `guard-w-${suffix}`;
+    await seedUser(userId);
+    await seedInstallation(`guard-i-${suffix}`, userId);
+    await seedProject(projectId, userId, `guard-i-${suffix}`);
+    await seedNode(nodeId, userId, { status: 'running' });
+    const stub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(projectId)) as DurableObjectStub<ProjectData>;
+    await stub.ensureProjectId(projectId);
+    const chatId = await stub.createSession(workspaceId, 'Guarded sleep');
+    await seedWorkspace(workspaceId, nodeId, userId, { projectId, chatSessionId: chatId, status: 'running' });
+    await env.DATABASE.prepare("UPDATE workspaces SET eviction_generation='original' WHERE id=?").bind(workspaceId).run();
+    await env.DATABASE.prepare(`INSERT INTO session_snapshots
+      (id,project_id,workspace_id,node_id,user_id,chat_session_id,runtime,status,manifest_r2_key,expires_at,sleep_status,sleep_claim_id)
+      VALUES (?,?,?,?,?,?,'vm','available','guard-manifest',?,'stopping','old-claim')`)
+      .bind(`guard-s-${suffix}`,projectId,workspaceId,nodeId,userId,chatId,new Date(Date.now()+86400000).toISOString()).run();
+    const options = { failedOnly: false, runtimeGuard: {
+      projectId,userId,workspaceId,nodeId,evictionGeneration:'original',claimId:'old-claim',
+    } };
+    if (boundary === 'replacement') await env.DATABASE.prepare("UPDATE workspaces SET eviction_generation='replacement' WHERE id=?").bind(workspaceId).run();
+    if (boundary === 'claim') await env.DATABASE.prepare("UPDATE session_snapshots SET sleep_claim_id='new-claim' WHERE chat_session_id=?").bind(chatId).run();
+    if (boundary === 'workspace_link') await runInDurableObject(stub, async (_instance,state) => {
+      state.storage.sql.exec("UPDATE chat_sessions SET workspace_id='successor-workspace' WHERE id=?",chatId);
+    });
+    expect(await stub.sleepSession(chatId, options)).toBe(boundary === 'current');
+    expect((await stub.getSession(chatId))?.status).toBe(boundary === 'current' ? 'sleeping' : 'active');
+    // Same valid intent is idempotent; refusal continues to protect the successor.
+    expect(await stub.sleepSession(chatId, options)).toBe(boundary === 'current');
+    expect((await stub.getSession(chatId))?.status).toBe(boundary === 'current' ? 'sleeping' : 'active');
+  });
+});
