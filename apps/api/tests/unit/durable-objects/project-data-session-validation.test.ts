@@ -143,6 +143,41 @@ describe('ProjectData DO session validation behavior', () => {
     vi.clearAllMocks();
   });
 
+  it('rejects a failed sleep runtime lookup outside the concurrency gate and remains reusable', async () => {
+    const { ctx, projectData } = createProjectData(() => []);
+    const lookupError = new Error('D1 runtime lookup unavailable');
+    const first = vi.fn().mockRejectedValueOnce(lookupError).mockResolvedValueOnce(null);
+    projectData.env.DATABASE = { prepare: () => ({ bind: () => ({ first }) }) };
+    const gateOutcomes: unknown[] = [];
+    const gateErrors: unknown[] = [];
+    ctx.blockConcurrencyWhile.mockImplementation(async (callback) => {
+      try {
+        const outcome = await callback();
+        gateOutcomes.push(outcome);
+        return outcome;
+      } catch (error) {
+        // Cloudflare resets the object when this callback rejects.
+        gateErrors.push(error);
+        throw error;
+      }
+    });
+    ctx.sqlExec.mockClear();
+    const runtimeGuard = {
+      projectId: 'project-1', userId: 'user-1', workspaceId: 'workspace-1',
+      nodeId: 'node-1', evictionGeneration: null, claimId: 'claim-1',
+    };
+
+    await expect(projectData.sleepSession('session-1', { runtimeGuard })).rejects.toBe(lookupError);
+    expect(gateErrors).toEqual([]);
+    expect(gateOutcomes).toEqual([{ ok: false, error: lookupError }]);
+    expect(ctx.sqlExec).not.toHaveBeenCalled();
+
+    await expect(projectData.sleepSession('session-1', { runtimeGuard })).resolves.toBe(false);
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(gateErrors).toEqual([]);
+    expect(ctx.sqlExec).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       name: 'a different session than the socket tag',

@@ -493,10 +493,21 @@ export class ProjectData extends DurableObject<Env> {
   }): Promise<boolean> {
     const runtimeGuard = options?.runtimeGuard;
     if (runtimeGuard) {
-      return await this.ctx.blockConcurrencyWhile(() => guardedSessionSleep(
-        this.env.DATABASE, this.sql, sessionId, runtimeGuard,
-        () => this.applySessionSleep(sessionId, options)
-      ));
+      const outcome = await this.ctx.blockConcurrencyWhile(async () => {
+        try {
+          const updated = await guardedSessionSleep(
+            this.env.DATABASE, this.sql, sessionId, runtimeGuard,
+            () => this.applySessionSleep(sessionId, options)
+          );
+          return { ok: true as const, updated };
+        } catch (error) {
+          // Rejecting the gate callback resets the DO. Surface lookup failures
+          // to the RPC caller after releasing the gate instead.
+          return { ok: false as const, error };
+        }
+      });
+      if (!outcome.ok) throw outcome.error;
+      return outcome.updated;
     }
     return this.applySessionSleep(sessionId, options);
   }

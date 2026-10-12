@@ -39,12 +39,14 @@ import {
   createAgentSessionOnNode,
   createWorkspaceOnNode,
   deleteWorkspaceOnNode,
+  fetchNodeAgent,
   getCfContainerCreateWorkspaceTimeoutMs,
   NodeAgentRequestError,
   sendPromptToAgentOnNode,
   startAgentSessionOnNode,
 } from '../../../src/services/node-agent';
 import { restoreAgentSessionOnNode } from '../../../src/services/node-agent-session-snapshots';
+import { SessionSleepRuntimeChangedError } from '../../../src/services/session-sleep-runtime-identity';
 import { getDeliveryCapabilities } from '../../../src/services/vm-prompt-delivery-runtime-queries';
 import { versionedPromptCapabilities } from '../../helpers/vm-prompt-delivery-fixtures';
 
@@ -85,6 +87,27 @@ describe('getCfContainerCreateWorkspaceTimeoutMs', () => {
 });
 
 describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
+  it.each(['cf-container', 'vm', 'no-database'])(
+    'preserves a sleep identity error before any %s external fetch', async (runtime) => {
+      mocks.drizzle.mockReturnValue({
+        select: () => ({ from: () => ({ where: () => ({ get: async () => ({ runtime }) }) }) }),
+      });
+      const directFetch = vi.fn();
+      vi.stubGlobal('fetch', directFetch);
+      const error = new SessionSleepRuntimeChangedError();
+      const beforeExternalMutation = vi.fn().mockRejectedValue(error);
+      const env = runtime === 'no-database' ? { BASE_DOMAIN: 'example.com' } : cfContainerEnv;
+
+      await expect(fetchNodeAgent('node-1', env as never,
+        'https://node-1.vm.example.com/workspaces/ws-1/stop', { method: 'POST' }, 30_000,
+        { beforeExternalMutation })).rejects.toBe(error);
+
+      expect(beforeExternalMutation).toHaveBeenCalledOnce();
+      expect(directFetch).not.toHaveBeenCalled();
+      expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
+      expect(mocks.container.markVmAgentContainerRequestInterrupted).not.toHaveBeenCalled();
+    }
+  );
   beforeEach(() => {
     vi.useFakeTimers();
     mocks.jwt.signNodeManagementToken.mockResolvedValue({ token: 'mgmt-token' });

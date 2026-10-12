@@ -75,6 +75,12 @@ func TestWorkspaceStopGenerationValidation(t *testing.T) {
 			if rec.Code != tt.want {
 				t.Fatalf("stop = %d %s, want %d", rec.Code, rec.Body.String(), tt.want)
 			}
+			if tt.name == "stale initial generation" || tt.name == "stale generation" {
+				const wantBody = `{"error":"workspace eviction generation changed"}`
+				if got := strings.TrimSpace(rec.Body.String()); got != wantBody {
+					t.Fatalf("stale-generation response body = %s, want %s", got, wantBody)
+				}
+			}
 			wantStatus := tt.status
 			if tt.want == http.StatusOK {
 				wantStatus = "stopped"
