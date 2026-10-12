@@ -513,7 +513,7 @@ Recorded here so the next weekly run can see what changed.
 1. **ProjectData root DO over its limit and growing, with the archive breaker open since 09-27.**
    Human-gated: triage the failed and poisoned migrations, then close the breaker in Admin →
    Storage, and decide on the #2161 rollback trigger. Engineering: land Slice C from `7868bc894`.
-   (`tasks/active/2026-09-03-projectdata-production-capacity-emergency.md`)
+   (`tasks/archive/2026-09-03-projectdata-production-capacity-emergency.md`)
 2. **A failed wake attempt permanently fails the conversation**, as with the flight coordinator on
    09-28. Unfixed in `main`. (SAM idea `01M3MFDMZ5AS0BXPHZWS3CRFED`,
    `tasks/backlog/2026-09-25-stopping-sleep-with-failed-projectdata-session.md`)

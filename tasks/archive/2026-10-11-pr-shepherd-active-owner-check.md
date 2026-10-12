@@ -108,15 +108,30 @@ dropped after review: titles are AI-generated and need not keep the PR number.)
 - [x] `.claude/skills/api-reference/SKILL.md`: document the filter; public agents guide MCP tool
       table gains a `list_project_agents` row
 - [ ] Verify final candidate on staging through real MCP (historical deployment alone is insufficient)
+      (2026-10-12 reconciliation: left unticked. Pinned staging run 38166945375 passed the standard
+      Playwright smoke at 12/12. The deployed staging owner-tool case was never run, because no
+      authorized caller existed; coordinator event 661fedc8 accepted that gap. The production
+      owner queries below cover the behavior.)
 - [x] Retain sleeping/status-enum and workspace pagination fixes plus real-route tests
 - [x] Complete two independent Sol delta reviews of the late status/pagination changes (both code PASS at `310d89a7`; overall completion remains pending)
-- [ ] Restore PR template, before/after prompt diff, and accurate preflight/review evidence
-- [ ] (post-merge) After production deploy: run the owner check by hand through production MCP
+- [x] Restore PR template, before/after prompt diff, and accurate preflight/review evidence
+      (2026-10-12 reconciliation: the #2301 body has the template sections, "Full reviewed trigger
+      prompt diff" and Agent Preflight; candidate CI 38145854513 passed the preflight check.)
+- [x] (post-merge) After production deploy: run the owner check by hand through production MCP
       against the open PRs and active tasks; compare with the D1 query. Evidence: PR comment + idea
-- [ ] (post-merge) `update_trigger` with `promptTemplate` only; verify every other field is
+      (2026-10-12 reconciliation: #2309 comment 6113167759. All 10 open PRs were checked by canonical
+      URL and head branch, and every owner set matched read-only D1. Idea updated 2026-10-12.)
+- [x] (post-merge) `update_trigger` with `promptTemplate` only; verify every other field is
       unchanged and the trigger is still `paused`. Evidence: PR comment + idea
-- [ ] PR body: full before/after prompt diff
-- [ ] (post-merge) Update idea `01M496QHP8MY2S8W3F2BJPV2XN` with outcome
+      (2026-10-12 reconciliation: same comment. The full D1 read-back matches the reviewed
+      3,699-character After prompt, the status is `paused`, and only `updated_at` changed.
+      `list_triggers` still shows the trigger `paused` on 2026-10-12.)
+- [x] PR body: full before/after prompt diff (2026-10-12 reconciliation: the #2301 body section
+      "Full reviewed trigger prompt diff (not applied)"; it was applied after merge, see above.)
+- [x] (post-merge) Update idea `01M496QHP8MY2S8W3F2BJPV2XN` with outcome (2026-10-12
+      reconciliation: done by task `01M4QB6HK8D9VE5V5KP69JT8BR`. The idea stays open for the
+      paused trigger and for the merge bucket's missing current-head Sonar and CodeRabbit-wait
+      requirement.)
 
 ## Implementation Notes
 
@@ -182,8 +197,10 @@ dropped after review: titles are AI-generated and need not keep the PR number.)
       ("keeps the unfiltered listing" test)
 - [x] The reviewed proposed Shepherd prompt requires the owner check before merge/dispatch, leaves owned PRs alone,
       reports them in its digest, and fails closed (prompt diff below)
-- [ ] Only `promptTemplate` changed on the trigger; it stays `paused`
-- [ ] Hand-run owner check against current open PRs recorded with evidence
+- [x] Only `promptTemplate` changed on the trigger; it stays `paused` (2026-10-12: #2309
+      comment 6113167759, plus `list_triggers` on 2026-10-12)
+- [x] Hand-run owner check against current open PRs recorded with evidence (2026-10-12: #2309
+      comment 6113167759)
 
 ## Trigger Prompt Change (reviewed record)
 
@@ -303,11 +320,31 @@ Coordinator event `d98b4f96-8576-4055-8b1a-236951528654` grants a narrow additiv
 
 - [x] Real MCP/workerd D1 regression reproduces the >50-byte canonical URL failure before the fix and passes after it
 - [x] Literal punctuation, case-insensitivity and owner isolation regressions pass
-- [ ] Fresh independent Sol review and applicable CI pass
-- [ ] Coordinated pinned staging validation (no deployment before lease/grant)
-- [ ] Follow-up merge and automatic production receipt after sequencing release
-- [ ] Existing production caller full-URL queries/D1 comparison pass; prompt-only update/readback while paused
+- [x] Fresh independent Sol review and applicable CI pass (2026-10-12: task
+      `01M4NAW5A7GP6XP14S7ZA4YFA5` evidence, PR CI 38167030847 and main CI 38168489448)
+- [x] Coordinated pinned staging validation (no deployment before lease/grant) (2026-10-12:
+      run 38166945375 at `68ae4311`, byte-identical runtime to the final head; Playwright 12/12)
+- [x] Follow-up merge and automatic production receipt after sequencing release (2026-10-12:
+      #2309 merged as `898c18597`; Deploy Production 38169330561; Worker version
+      `4c1cd7ae-58c8-4794-b4a4-7b4e9554f402` at 100%)
+- [x] Existing production caller full-URL queries/D1 comparison pass; prompt-only update/readback while paused
+      (2026-10-12: #2309 comment 6113167759)
 
 Preserve all original snapshots/WIP/history. No new profile, caller session, VM, or spend is part of this correction. Task is not complete.
 
 Follow-up local validation: real workerd MCP/D1 test reproduced `-32603 LIKE or GLOB pattern too complex` before the fix and passed afterward (1/1). Related service/integration tests 34/34, targeted ESLint, API typecheck and Worker dry-run bundle passed. Dry-run excluded container rollout because Docker is unavailable; no container paths changed. Fresh independent Sol `literal_url_review` PASS, independently ran integration suite 28/28; no blocking code/security/constitution/docs findings. CI and staged deployment remain pending.
+
+## Reconciliation 2026-10-12 (weekly queue audit): archived
+
+Shipped and live. The earlier notes ending "Task is not complete." are superseded. Recovery task
+`01M4NAW5A7GP6XP14S7ZA4YFA5` completed on 2026-10-11 20:04Z.
+
+- Landing PRs: #2301 (merge `dd5ebce4d`, 2026-10-11 18:25Z; Deploy Production 38164808358) and
+  the URL-query correction #2309 (merge `898c18597`, 19:32Z; Deploy Production 38169330561).
+- The reviewed prompt is applied. Trigger `01KPED8FFDM34EZNNFTW672S5E` is still `paused` on
+  2026-10-12. The reliability-wave-1011 coordinator owns the decision to resume it.
+- Still open, in idea `01M496QHP8MY2S8W3F2BJPV2XN`: the Shepherd's merge bucket does not require a
+  current-head SonarCloud result or a recorded CodeRabbit request/wait.
+- The original Wave D task `01M4MZTACYDRW4B3SC9S99DJN8` still reads `sleeping`; it hit a usage
+  limit on 2026-10-11 09:28Z. Its recovery task finished the work. Nothing here cancels the
+  sleeping task, because recovery instructions forbid acting on the old owner.

@@ -502,7 +502,7 @@ Recorded here so the next weekly run can see what changed.
    (`tasks/backlog/2026-09-26-trustworthy-task-status.md`, SAM idea `01KZNGJG1DCH8DBC835Y0272P4`)
 6. **ProjectData root object to ≤ 9.0 GB.** It is recovering on its own (9.72 GB, falling 250 to
    370 MB a day). Re-measure around 10-08; land Slice C (`7868bc894`) if the drain flattens; then
-   rebuild grouped FTS. (`tasks/active/2026-09-03-projectdata-production-capacity-emergency.md`)
+   rebuild grouped FTS. (`tasks/archive/2026-09-03-projectdata-production-capacity-emergency.md`)
 7. **`update_idea` silently drops appends at 64 KiB.** The ACP and ProjectData plans are full; this
    run had to retitle them instead of appending.
    (`tasks/backlog/2026-09-30-update-idea-append-silently-truncated-at-cap.md`)

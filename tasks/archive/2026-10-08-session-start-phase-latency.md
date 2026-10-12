@@ -20,8 +20,14 @@ Warm user starts measured p50 82s/p90 185s; reused-node wakes 159s/219s. Workspa
 - [x] Tests for bounded/safe telemetry, compatibility, user/background discrimination and atomic capacity race.
 - [x] Documentation and local specialist review.
 - [x] Lease staging; fresh VM binary, heartbeat/access, start/sleep/wake checks; delete VMs and release.
-- [ ] PR/CI/CodeRabbit, merge, production deploy and first phase measurements.
-- [ ] Append evidence and next-cut proposal to ideas; complete only fully shipped scope.
+- [x] PR/CI/CodeRabbit, merge, production deploy and first phase measurements. (2026-10-12
+      reconciliation: #2268 merged as `096afcd8f`; main CI 37845795998; Deploy Production
+      37848333921; CodeRabbit rate-limited after the wait; first production phase report in the
+      #2268 body, "Production ship / first phase report — 2026-10-08 22:04 UTC".)
+- [x] Append evidence and next-cut proposal to ideas; complete only fully shipped scope.
+      (2026-10-12 reconciliation: the report and the prebuilt-VM-image next cut are in ideas
+      `01M27MAVRGWCFZ8FCEBGVQ00BA`, `01M0VZ205TN8A1JYHNJN77DS4F` and
+      `01M0FV9VBP8ZATBG2E63R8GD0M`, all updated 2026-10-08 22:04Z and left open.)
 
 ## Acceptance criteria
 
@@ -48,3 +54,14 @@ VM rules 27/54/78; API rule 69; telemetry policy 235ad923; scheduling policy 95c
 - Both VMs, both workspaces, the snapshot and owned setup resources were deleted with API confirmation and empty D1 results. The borrowed project/profile were retained; original pool policy and all 139 candidate settings were restored and compared successfully.
 - Lease released at 20:47 UTC (channel sequence 111); next queued task received a durable direct handoff. No staging resources remain held.
 - Task-completion review: premerge PASS with no implementation findings. Production deployment, production samples and final idea reports remain pending; do not archive before those finish.
+
+## Reconciliation 2026-10-12 (weekly queue audit): archived
+
+Shipped and live. SAM task `01M4DV4W134BJJ5PT04PCFYXQQ` completed on 2026-10-08.
+
+- Landing PR: #2268, merge commit `096afcd8f` (2026-10-08 21:18Z).
+- First successful production deploy: Deploy Production run 37848333921 (head `096afcd8f`),
+  Worker version `e187d44f-1e70-480e-99a0-9c10459fb32d`.
+- First production wake sample: the largest phase is node-agent readiness, at 185.976 s.
+- Proposed next cut, not implemented: a versioned prebuilt VM image. It is tracked in the three
+  source ideas, which stay open.

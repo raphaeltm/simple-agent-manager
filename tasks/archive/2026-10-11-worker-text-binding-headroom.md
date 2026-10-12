@@ -144,7 +144,11 @@ Doc bugs found on the way and fixed: `PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_M
 - [x] Every GitHub Environment override still ships and is still reported when it differs from the default
 - [x] The 340 guard is unchanged; the generated staging/production count drops substantially
 - [x] Staging deploy: Worker settings binding count drops and sampled vars keep the same effective values
-- [ ] Production deploy: `sam-api-prod` settings read back through the Cloudflare API, count reported
+- [x] Production deploy: `sam-api-prod` settings read back through the Cloudflare API, count reported
+      (2026-10-12 reconciliation: recovery task `01M4NAW8MFHJK953103ACFY4NH` read back 321 → 175
+      (150 plain + 25 secret) after Deploy Production 38159699324, with zero mismatches across the
+      178 effective-value comparisons. Re-read on 2026-10-12 through the script-settings API: 150
+      `plain_text` + 25 `secret_text` on deployment `741061e7` / version `4c1cd7ae`.)
 - [x] env-reference skill and docs describe how vars are set (defaults in code; `[vars]` = non-defaults)
 
 ## References
@@ -248,3 +252,16 @@ Merge and production remain pending explicit coordinator sequencing. Production 
 150 plain is a generator result; the latest production read-only baseline is 296 plain + 25
 secret = 321. A post-production readback is still required. Historical snapshot content was
 not inspected; its supported access limitation remains recorded above. No Phase1 integration.
+
+## Reconciliation 2026-10-12 (weekly queue audit): archived
+
+Shipped and live. The "post-production readback is still required" note above is superseded.
+
+- Landing PR: #2303, merge commit `73feb757d` (2026-10-11 17:12Z). The original task
+  `01M4MZTMG7RHYYFZXXNNQSDSAR` failed (`agent_prompt_failed`). Recovery task
+  `01M4NAW8MFHJK953103ACFY4NH` finished the PR on the original branch.
+- First successful production deploy: Deploy Production run 38159699324 (head `73feb757d`).
+- `sam-api-prod` now has 175 text bindings (150 plain + 25 secret), down from 321. The deploy
+  guard is still 340.
+- The supporting inventory `2026-10-11-worker-text-binding-inventory.md` is archived with this
+  file, so the relative link above still resolves.

@@ -100,7 +100,10 @@ Every other internal `stub.fetch('https://…')` targets a DO with a matching `f
 - [x] Unit: MCP `dispatch_task` reaches the activity RPC; /sam `dispatch_task` records `task.dispatched` via the service
 - [x] Workers test: /sam `get_project_status` returns real orchestrator status for an active mission (fails pre-fix)
 - [x] Original guard discrimination runs recorded in implementation notes
-- [ ] Copy exact-head discrimination and validation evidence into the draft PR
+- [ ] Copy exact-head discrimination and validation evidence into the draft PR (2026-10-12
+      reconciliation: left unticked. The #2307 body carries the exact-head CI, SonarCloud and
+      staging evidence for `44543a67c` and `40b84b721`. The per-guard discrimination runs exist
+      only in this file's Implementation notes. Moot now that #2307 has merged.)
 - [x] Docs: public self-hosting guide states what a pending account can reach
 - [x] File sizes: `task-tools.ts` below 500 after the change
 
@@ -159,3 +162,16 @@ concurrency rerun passed cloud-init 181/181 and is still running. No staging or 
 PR created. Snapshot/WIP metadata does not establish content completeness; read-only content access
 remains requested from the coordinator. Dispatch proof is caller-unit plus helper-to-real-DO, not
 a full provisioning test.
+
+## Reconciliation 2026-10-12 (weekly queue audit): archived
+
+Shipped and live. The "no PR created" status in the recovery note above is superseded.
+
+- Landing PR: #2307, merge commit `af4341f90` (2026-10-11 17:51Z). The merged head `43fccea52`
+  adds only two SAM auto-commits after `40b84b721`, and they cancel out: `cba976fa1` added
+  `.do-state.md` and `43fccea52` removed it.
+- First successful production deploy: Deploy Production run 38162201788 (head `af4341f90`).
+- Known limit, recorded in #2307: the live pending-user 403 was not exercised on staging,
+  because no authorized pending identity existed. Coverage comes from the 37 real-worker
+  approval tests plus independent security and adversarial reviews. Raphaël's 2026-10-11 recovery
+  clarification says not to make that optional live case a merge gate.
