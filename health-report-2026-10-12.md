@@ -1,6 +1,6 @@
 # SAM weekly production health review — 2026-10-12
 
-**Window:** 2026-10-05T09:04:23Z–2026-10-12T09:04:23Z, contiguous with [the October 5 report](health-report-2026-10-05.md). Production APIs were queried with the debugging token; no code, configuration, resources, task lifecycle, branches or PRs were changed. Only report/library and idea artifacts were authored. Current deployment: CF `45d690b8-f5cc-43e9-bb8b-8d5def216c6f`, Worker `5d8df34c-7 fb8-4f08-8b5b-2f0df4158f99` at 100% (Oct 12 08:33:32Z), matching successful Deploy Production [38223482812](https://github.com/raphaeltm/simple-agent-manager/actions/runs/38223482812) on `e82d14ec13745378e1a5008b95410b77e9a1d4e5`. Local code citations use that revision. The three remediation commits #2241, #2269 and #2279 are ancestors of this deployed revision (git ancestry exit0 for each).
+**Window:** 2026-10-05T09:04:23Z–2026-10-12T09:04:23Z, contiguous with the October 5 report (not retained in this repository; its comparison baseline was not independently reverified during PR completion). Production APIs were queried with the debugging token; no code, configuration, resources, task lifecycle, branches or PRs were changed. Only report/library and idea artifacts were authored. Current deployment: CF `45d690b8-f5cc-43e9-bb8b-8d5def216c6f`, Worker `5d8df34c-7fb8-4f08-8b5b-2f0df4158f99` at 100% (Oct 12 08:33:32Z), matching successful Deploy Production [38223482812](https://github.com/raphaeltm/simple-agent-manager/actions/runs/38223482812) on `e82d14ec13745378e1a5008b95410b77e9a1d4e5`. Local code citations use that revision. The three remediation commits #2241, #2269 and #2279 are ancestors of this deployed revision (git ancestry exit0 for each).
 
 **Freshness:** newest platform row at query time 2026-10-12T09:06:53.804Z; newest AI Gateway call 09:00:18.068Z; root storage measurement 09:01:12.650Z. Post-cutoff platform rows are excluded from seven-day totals. AI Gateway pagination discarded 36 older rows. Workers Observability clips its available start and returns sampled estimates; these are explicitly separated from GraphQL invocation counts. Counts below cite named query results; reproducible query definitions are in the evidence appendix.
 
@@ -36,49 +36,49 @@
 
 ## 1. Workers analytics — sam-api-prod
 
-| Invocation outcome | Requests | Runtime errors | Subrequests | CPU P50/P99 (ms) | Wall P50/P99 (ms) |
-|---|---:|---:|---:|---:|---:|
-| clientDisconnected | 2,528 | 0 | 2,184 | 6.052/196.590 | 9,997.016/3,115,968.000 |
-| responseStreamDisconnected | 1,625 | 0 | 2,570 | 75.793/235.840 | 136,632.670/8,877,213.000 |
-| success | 665,342 | 0 | 756,867 | 5.459/121.960 | 265.118/2,726.640 |
-| **Total** | **669,495** | **0** | **761,621** | — | — |
+| Invocation outcome         |    Requests | Runtime errors | Subrequests | CPU P50/P99 (ms) |         Wall P50/P99 (ms) |
+| -------------------------- | ----------: | -------------: | ----------: | ---------------: | ------------------------: |
+| clientDisconnected         |       2,528 |              0 |       2,184 |    6.052/196.590 |   9,997.016/3,115,968.000 |
+| responseStreamDisconnected |       1,625 |              0 |       2,570 |   75.793/235.840 | 136,632.670/8,877,213.000 |
+| success                    |     665,342 |              0 |     756,867 |    5.459/121.960 |         265.118/2,726.640 |
+| **Total**                  | **669,495** |          **0** | **761,621** |                — |                         — |
 
 [Q1] Requests fell 16.9% from 806,067. Success CPU P50 fell 6.8% (5.859→5.459 ms), but P99 rose 73.0% (70.488→121.960 ms); wall P50 rose 6.5% (248.824→265.118 ms), P99 rose 8.1% (2,522→2,726.640 ms). Response-stream disconnects are flat (1,616→1,625,+0.6%). These outcome quantiles cannot attribute an endpoint or prove a user-visible regression.
 
-| UTC day | Success | clientDisconnected | Ratio to success |
-|---|---:|---:|---:|
-| 2026-10-05 (partial) | 52,813 | 315 | 0.005964:1 |
-| 2026-10-06 | 100,151 | 833 | 0.008317:1 |
-| 2026-10-07 | 108,921 | 354 | 0.003250:1 |
-| 2026-10-08 | 124,331 | 469 | 0.003772:1 |
-| 2026-10-09 | 93,354 | 200 | 0.002142:1 |
-| 2026-10-10 | 84,798 | 148 | 0.001745:1 |
-| 2026-10-11 | 83,501 | 180 | 0.002156:1 |
-| 2026-10-12 (partial) | 17,473 | 29 | 0.001660:1 |
+| UTC day              | Success | clientDisconnected | Ratio to success |
+| -------------------- | ------: | -----------------: | ---------------: |
+| 2026-10-05 (partial) |  52,813 |                315 |       0.005964:1 |
+| 2026-10-06           | 100,151 |                833 |       0.008317:1 |
+| 2026-10-07           | 108,921 |                354 |       0.003250:1 |
+| 2026-10-08           | 124,331 |                469 |       0.003772:1 |
+| 2026-10-09           |  93,354 |                200 |       0.002142:1 |
+| 2026-10-10           |  84,798 |                148 |       0.001745:1 |
+| 2026-10-11           |  83,501 |                180 |       0.002156:1 |
+| 2026-10-12 (partial) |  17,473 |                 29 |       0.001660:1 |
 
 [Q1] Most disconnected invocations retain a ~10-second median (9,997.016 ms overall). **Hypothesis:** the shared VM transport response-header timeout participates (`packages/vm-agent/internal/config/helpers.go:202`); intentionally closed browser streams also exist. Endpoint-specific causal attribution was not established.
 
 **HTTP response codes — sampled Workers Observability estimates [Q2].** These are weighted sampled fetch-event estimates, **not** the GraphQL invocation total. Status0 is not an HTTP error code. Available series startsOct 5 14:14:03Z (~5h10m later than requested), so comparisons are approximate.
 
 | Code | Estimated events |
-|---|---:|
-| 0 | 669,750 |
-| 200 | 759,020 |
-| 201 | 140 |
-| 202 | 710 |
-| 204 | 113,250 |
-| 301 | 2,740 |
-| 304 | 6,580 |
-| 308 | 170 |
-| 400 | 670 |
-| 401 | 10 |
-| 403 | 110 |
-| 404 | 13,250 |
-| 405 | 80 |
-| 410 | 70 |
-| 428 | 20 |
-| 500 | 240 |
-| 503 | 10 |
+| ---- | ---------------: |
+| 0    |          669,750 |
+| 200  |          759,020 |
+| 201  |              140 |
+| 202  |              710 |
+| 204  |          113,250 |
+| 301  |            2,740 |
+| 304  |            6,580 |
+| 308  |              170 |
+| 400  |              670 |
+| 401  |               10 |
+| 403  |              110 |
+| 404  |           13,250 |
+| 405  |               80 |
+| 410  |               70 |
+| 428  |               20 |
+| 500  |              240 |
+| 503  |               10 |
 
 Estimated 5 xx **250** (500240,50310) versus 2,030 prior (−87.7%); 4 xx **14,210** versus 11,490 (+23.7%), dominated by 40413,250. The scan does not establish whether 404s are expected requests or broken links, and no vague 404 idea was filed. The lack of runtime errors does not imply zero application 500s: Q6 proves KV and callback 500s.
 
@@ -88,20 +88,20 @@ Other Workers [Q1b]: sam-tail-worker-prod **1,537,341 invocations/0 errors** (pr
 
 **8,866 rows: 530 error,160 warn,8,176 info.** Prior9,187:1,471 error,163 warn,7,553 info. Error rows fell 64.0%; warnings fell 1.8%. [Q4]
 
-| Source | Error | Warn | Info |
-|---|---:|---:|---:|
-| api | 373 | 107 | 973 |
-| vm-agent | 157 | 53 | 7203 |
+| Source   | Error | Warn | Info |
+| -------- | ----: | ---: | ---: |
+| api      |   373 |  107 |  973 |
+| vm-agent |   157 |   53 | 7203 |
 
 Top five **normalized incident categories** (pairing duplicate API/VM manifestations and combining numeric storage percentages; exact-message ranking follows):
 
-| Rank | Category | Level/source count | Prior | Trend / last occurrence |
-|---:|---|---|---:|---|
-| 1 | Snapshot prepare teardown 500 | API/error 145 +VM/error 145 =290 | 60+61 | Higher weekly count; last Oct 8 20:02:14Z before fix rollout; zero later |
-| 2 | Storage threshold alerts | API/error 56 degraded +22 critical =78 | 12 degraded | Higher pre-fix count; last Oct 8 17:42:50Z; nowwarning 87.52% |
-| 3 | Hetzner placement412 | API/error 76 | 56 | +35.7%, stillOct 11 15:06Z; zero corresponding failed-task messages |
-| 4 | Resource-chunk failed inserts | API/error 20 | 29 | −31.0%; last Oct 6 05:53Z, no later matching inserts |
-| 5 | SQLITE_NOMEM | API/error 17 | 1 (+1 prior tail) | Higher pre-fix count; last Oct 8 15:50Z, zero later |
+| Rank | Category                      | Level/source count                     |             Prior | Trend / last occurrence                                                  |
+| ---: | ----------------------------- | -------------------------------------- | ----------------: | ------------------------------------------------------------------------ |
+|    1 | Snapshot prepare teardown 500 | API/error 145 +VM/error 145 =290       |             60+61 | Higher weekly count; last Oct 8 20:02:14Z before fix rollout; zero later |
+|    2 | Storage threshold alerts      | API/error 56 degraded +22 critical =78 |       12 degraded | Higher pre-fix count; last Oct 8 17:42:50Z; nowwarning 87.52%            |
+|    3 | Hetzner placement412          | API/error 76                           |                56 | +35.7%, stillOct 11 15:06Z; zero corresponding failed-task messages      |
+|    4 | Resource-chunk failed inserts | API/error 20                           |                29 | −31.0%; last Oct 6 05:53Z, no later matching inserts                     |
+|    5 | SQLITE_NOMEM                  | API/error 17                           | 1 (+1 prior tail) | Higher pre-fix count; last Oct 8 15:50Z, zero later                      |
 
 [Q4] Exact message/source ordering is snapshot API 145, provider41276, SQLITE_NOMEM17, shared-core4036 and snapshot-sleeping4106 (tied). Dynamic VM500 requestIds each occur once; normalized145 is the useful comparison. Exact storage percentage messages split the78 rows across values and are not a single exact-message bucket.
 
@@ -115,25 +115,25 @@ Three scheduled-sweep error rows persist [Q4,Q6]: capacity_pool_reconciliation1 
 
 Tasks are grouped by **created_at in the window**, with status read after cutoff. This is a snapshot of a created cohort, not a count of all failures completed this week. Ideas and repaired legacy conversation records share this table; their counts bias raw percentages. [Q3,Q13,Q14]
 
-| Mode | Completed | Failed | In progress | Sleeping | Cancelled | Draft | Ready |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| task | 118 | 11 | 3 | 11 | 2 | 57 | 1 |
-| conversation | 14 | 12 | 1 | 37 | 3 | 0 | 0 |
-| **Total** | **132** | **23** | **4** | **48** | **5** | **57** | **1** |
+| Mode         | Completed | Failed | In progress | Sleeping | Cancelled |  Draft | Ready |
+| ------------ | --------: | -----: | ----------: | -------: | --------: | -----: | ----: |
+| task         |       118 |     11 |           3 |       11 |         2 |     57 |     1 |
+| conversation |        14 |     12 |           1 |       37 |         3 |      0 |     0 |
+| **Total**    |   **132** | **23** |       **4** |   **48** |     **5** | **57** | **1** |
 
 Raw failed share, matching the prior denominator, **23/(132+23+4)=14.47%** (prior 22.16%). Terminal share **23/(132+23)=14.84%** (prior 28.47%). Adding48 sleeping to the raw denominator gives **11.11%**. These are row shares; they are not a clean estimate of executed-agent success.
 
 **Failed causes [Q3]:**
 
-| Exact cause / category | Count | Interpretation |
-|---|---:|---|
-| Task runtime conclusively gone (workspace_missing) | 9 | All nine describe legacy taskless-chat materialization and have workspace_id NULL; all terminalizedOct 8 20:45–20:47Z. Historical repair cohort, not proof of nine new runtime deletions [Q14] |
-| agent_prompt_failed | 7 | Generic safe category; attribution unresolved. Four of seven are original wave tasks failingOct 11 09:27–09:33Z |
-| Prompt timed out after 8h | 2 | Oct 7 18:11/18:12Z; bounded legacy behavior. Current managed-task deadlines disabled; fresh host rollout not verified |
-| Reserved submission authority revoked: task is queued | 2 | Mission double-start, proved two session rows each [Q10] |
-| Provisioned node disappeared during node_agent_ready | 1 | Oct 5 14:46Z; not a provider422/412 terminal failure |
-| Session recovery authority was revoked | 1 | Oct 9; known wake handoff issue, existing01M4JMYRY5909JYND1XRXMM9DC shipped#2299 according to its ledger; this scan did not run a wake soak |
-| Absolute runaway-cost ceiling1440min | 1 | Explicit configured safety ceiling, not itself proof of malfunction |
+| Exact cause / category                                | Count | Interpretation                                                                                                                                                                                 |
+| ----------------------------------------------------- | ----: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Task runtime conclusively gone (workspace_missing)    |     9 | All nine describe legacy taskless-chat materialization and have workspace_id NULL; all terminalizedOct 8 20:45–20:47Z. Historical repair cohort, not proof of nine new runtime deletions [Q14] |
+| agent_prompt_failed                                   |     7 | Generic safe category; attribution unresolved. Four of seven are original wave tasks failingOct 11 09:27–09:33Z                                                                                |
+| Prompt timed out after 8h                             |     2 | Oct 7 18:11/18:12Z; bounded legacy behavior. Current managed-task deadlines disabled; fresh host rollout not verified                                                                          |
+| Reserved submission authority revoked: task is queued |     2 | Mission double-start, proved two session rows each [Q10]                                                                                                                                       |
+| Provisioned node disappeared during node_agent_ready  |     1 | Oct 5 14:46Z; not a provider422/412 terminal failure                                                                                                                                           |
+| Session recovery authority was revoked                |     1 | Oct 9; known wake handoff issue, existing01M4JMYRY5909JYND1XRXMM9DC shipped#2299 according to its ledger; this scan did not run a wake soak                                                    |
+| Absolute runaway-cost ceiling1440min                  |     1 | Explicit configured safety ceiling, not itself proof of malfunction                                                                                                                            |
 
 No provider422, provider412, startup-model-apply failure, human-input expiry, git-token transport failure or prompt-cancel-grace failure appears among these23 rows.
 
@@ -147,41 +147,41 @@ No provider422, provider412, startup-model-apply failure, human-input expiry, gi
 
 [Q15] Five pages /250 retained rows: **214 in-window**,36 older rows discarded,0 post-cutoff. In-window timestampsOct 5 10:30:38.472Z–Oct 12 09:00:18.068Z. **214/214HTTP 200**, zero401/403/429/5 xx; all workers-ai. This covers Gateway-recorded SAM calls, not direct Claude/Codex runtime subscription traffic, so it cannot refute the7 opaque task failures.
 
-| Model | Calls | Outcomes | Duration P50/P99/max ms | Provider latency P50/P99 (ms) | Cost |
-|---|---:|---|---:|---:|---:|
-| @cf/google/gemma-4-26b-a4b-it | 162 | 162×200 | 913/4,534/8,663 | 797.621/4,483.660 | $0.015255 |
-| @cf/zai-org/glm-5.2 | 52 | 52×200 | 11,127/55,883/55,883 | 10,919.766/55,819.795 | $0.843156 |
+| Model                         | Calls | Outcomes | Duration P50/P99/max ms | Provider latency P50/P99 (ms) |      Cost |
+| ----------------------------- | ----: | -------- | ----------------------: | ----------------------------: | --------: |
+| @cf/google/gemma-4-26b-a4b-it |   162 | 162×200  |         913/4,534/8,663 |             797.621/4,483.660 | $0.015255 |
+| @cf/zai-org/glm-5.2           |    52 | 52×200   |    11,127/55,883/55,883 |         10,919.766/55,819.795 | $0.843156 |
 
 Nearest-rank sample quantiles. Volume270→214(−20.7%); Gemma P99 4,717→4,534 ms(−3.9%); GLM P99 67,545→55,883 ms(−17.3%). GLM has only 52 samples so P99 equalsmax; it is not a robust high-volume population quantile. No current auth/overload failure was found in this Gateway sample.
 
 ## 5. Trends and ProjectData storage
 
-| Signal | October 5 report | October 12 | Interpretation |
-|---|---:|---:|---|
-| API invocations | 806,067 | 669,495 | −16.9% |
-| Runtime errors | 2 | 0 | No recurrence |
-| Client-disconnect/success | 0.007730 | 0.003800 | −50.8% |
-| Success CPU P99 ms | 70.488 | 121.960 | +73.0%; cause unverified |
-| Sampled5xx | 2,030 | 250 | −87.7%; clipped/sampled comparability |
-| Platform error rows | 1,471 | 530 | −64.0% |
-| Task terminal failure row share | 28.47% | 14.84% | Lower, cohort biased by ideas/repairs |
-| ACP Prompt failed warnings | 4 | 40 | +900%; all opaque |
-| AI Gateway HTTP 200 | 270/270 | 214/214 | 100% in both windows |
-| Root ProjectData bytes | 9,688,842,240 | 8,751,788,032 | −937,054,208B; warning 87.52% |
-| Root archive breaker | closed Oct 2 | closed Oct  6 20:24:50Z | Closure timestamp changed; reopening history not independently queried |
+| Signal                          | October 5 report |             October 12 | Interpretation                                                         |
+| ------------------------------- | ---------------: | ---------------------: | ---------------------------------------------------------------------- |
+| API invocations                 |          806,067 |                669,495 | −16.9%                                                                 |
+| Runtime errors                  |                2 |                      0 | No recurrence                                                          |
+| Client-disconnect/success       |         0.007730 |               0.003800 | −50.8%                                                                 |
+| Success CPU P99 ms              |           70.488 |                121.960 | +73.0%; cause unverified                                               |
+| Sampled5xx                      |            2,030 |                    250 | −87.7%; clipped/sampled comparability                                  |
+| Platform error rows             |            1,471 |                    530 | −64.0%                                                                 |
+| Task terminal failure row share |           28.47% |                 14.84% | Lower, cohort biased by ideas/repairs                                  |
+| ACP Prompt failed warnings      |                4 |                     40 | +900%; all opaque                                                      |
+| AI Gateway HTTP 200             |          270/270 |                214/214 | 100% in both windows                                                   |
+| Root ProjectData bytes          |    9,688,842,240 |          8,751,788,032 | −937,054,208B; warning 87.52%                                          |
+| Root archive breaker            |     closed Oct 2 | closed Oct 6 20:24:50Z | Closure timestamp changed; reopening history not independently queried |
 
 [Q7] Root storage history minimum/maximum by UTC date:
 
-| Date | Minimum bytes | Maximum bytes | Samples |
-|---|---:|---:|---:|
-| 2026-10-05 | 9,541,365,760 | 9,733,488,640 | 16 |
-| 2026-10-06 | 9,552,822,272 | 9,664,290,816 | 24 |
-| 2026-10-07 | 9,444,429,824 | 9,570,394,112 | 24 |
-| 2026-10-08 | 9,281,208,320 | 9,416,060,928 | 18 |
-| 2026-10-09 | 9,122,566,144 | 9,122,566,144 | 1 |
-| 2026-10-10 | 8,923,267,072 | 8,976,478,208 | 9 |
-| 2026-10-11 | 8,807,157,760 | 8,917,176,320 | 25 |
-| 2026-10-12 | 8,746,332,160 | 8,807,477,248 | 9 |
+| Date       | Minimum bytes | Maximum bytes | Samples |
+| ---------- | ------------: | ------------: | ------: |
+| 2026-10-05 | 9,541,365,760 | 9,733,488,640 |      16 |
+| 2026-10-06 | 9,552,822,272 | 9,664,290,816 |      24 |
+| 2026-10-07 | 9,444,429,824 | 9,570,394,112 |      24 |
+| 2026-10-08 | 9,281,208,320 | 9,416,060,928 |      18 |
+| 2026-10-09 | 9,122,566,144 | 9,122,566,144 |       1 |
+| 2026-10-10 | 8,923,267,072 | 8,976,478,208 |       9 |
+| 2026-10-11 | 8,807,157,760 | 8,917,176,320 |      25 |
+| 2026-10-12 | 8,746,332,160 | 8,807,477,248 |       9 |
 
 Oct 9 has only 1 history sample; the series does not establish continuous hourly measurement that day. Latest sampleOct 12 09:01:12.650Z is warning, last_error NULL, cleanup_health running. Stored growth_rate 0 and estimated_days_to_limit NULL do not support a predictive “days remaining” claim. Global migrations at query time: **1,436 published/101 frozen/0 other states**; root-project-only **874 published/87 frozen/0 other states**. Global published_at in the review window 476. Root counts are separated from global counts; the prior report474published/49 frozen root snapshot was later Oct 5 and includes its own tail. No historical storage repair or R2 audit was performed.
 
@@ -189,15 +189,15 @@ Oct 9 has only 1 history sample; the series does not establish continuous hourly
 
 All causes below are code-grounded by local read-only sub-agent exploration and spot checks; uncertain causal attribution is labelled hypothesis. Paths refer to deployed revision e82d14ec1.
 
-| Priority / severity | Finding | Evidence | Responsible code / suspected cause | Idea |
-|---|---|---|---|---|
-| 1 / High preservation/reliability | F1 stale sleep teardown | 1 task; stopping claim; 3 attempts;409 already-stopped;179 idle rows;17h58m | `apps/api/src/` unless full path above: VM stop excludes already-stopped state (`packages/vm-agent/internal/server/workspaces.go:853–859`). API calls stop before D1 sleep convergence (`services/session-sleep-teardown.ts:189–207`); stale stopping excluded from candidates (`scheduled/session-sleep-candidates.ts:81–86`), repair requires workspace already sleeping (`session-sleep-lifecycle-repair.ts:100–109`), missing-intent scan rejects non-NULL stopping (`session-sleep-intent-reconciliation.ts:64`). Actual runtime state unverified. | [01KZZ9Y0B4957R9KR40TNEE3KP](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01KZZ9Y0B4957R9KR40TNEE3KP) |
-| 2 / Medium | F2 mission double-start | 2 failed tasks;2 session rows each | `apps/api/src/` unless full path above: MCP creates S1 before binding task chat (`routes/mcp/dispatch-tool.ts:601,674,757`); orchestrator selects null chat identity (`durable-objects/project-orchestrator/scheduling.ts:278–284`), creates/binds S2 (`:447,468–482`); original allocation CAS rejects mismatch (`task-runner/workspace-reserved-allocation.ts:149–183`). | [01M4KKNAZY6KSSCXR610T01E11](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01M4KKNAZY6KSSCXR610T01E11) |
-| 3 / Medium | F3 opaque prompt failures | 7 failed tasks;40 warns vs 4 | `apps/api/src/` unless full path above: Intentional safe fallback (`packages/vm-agent/internal/server/server.go:1535–1551`); wrapper classification (`internal/acp/auth_failure.go:14–43`). Quota/auth/overload attribution not verified; add safe categorical provenance rather than raw provider text. | [01KWKDYXNB97J4Z5Q9RGS8APPF](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01KWKDYXNB97J4Z5Q9RGS8APPF) |
-| 4 / Medium | F4 KV 429→500 | 5 callbacks:3MCP+2 bootlog | `apps/api/src/` unless full path above: Repeated task/window KV writes (`routes/mcp/_helpers.ts:358,363,373`, awaited `index.ts:268`); workspace log read/rewrite (`services/boot-log.ts:34–42`, awaited `runtime.ts:1827`). Repeated-key quota is hypothesis. | [01M4QNWEZG8KQQDF2R9VTK8TWM](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01M4QNWEZG8KQQDF2R9VTK8TWM) |
-| 5 / Low | F5 diagnostic dedupe | 179 same-task/key rows;10 sampled driver lookup failures | `apps/api/src/` unless full path above: Unsupported LIKE query (`scheduled/stuck-task-live-runtime.ts:230–237`), catch returns false (`:238–244`), insert repeats (`:263–278`). Log explicitly says pattern too complex; 0 truncated contexts. | [01M4QP1EX1YVKRVVPTBP2G0RD8](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01M4QP1EX1YVKRVVPTBP2G0RD8) |
-| 6 / Low | F6 Instant timestamps | 3 completed Instant runs missing started_at | `apps/api/src/` unless full path above: Instant task update omits startedAt (`services/instant-session.ts:518–527`). | [01KZNGJG1DCH8DBC835Y0272P4](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01KZNGJG1DCH8DBC835Y0272P4) |
-| 7 / Low / watch | F7 snapshot 410 noise | 9 vs135;last Oct 8;0 later | `apps/api/src/` unless full path above: VM generic non-2xx error (`internal/server/session_snapshot_control_plane.go:135–136`); background filter ignores HTTP 410 (`session_snapshot_coordinator.go:129–153`). | [01M31M9FVCDWTGN3QCNAXWZ0K6](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01M31M9FVCDWTGN3QCNAXWZ0K6) |
+| Priority / severity               | Finding                   | Evidence                                                                    | Responsible code / suspected cause                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Idea                                                                                                                                    |
+| --------------------------------- | ------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 / High preservation/reliability | F1 stale sleep teardown   | 1 task; stopping claim; 3 attempts;409 already-stopped;179 idle rows;17h58m | `apps/api/src/` unless full path above: VM stop excludes already-stopped state (`packages/vm-agent/internal/server/workspaces.go:853–859`). API calls stop before D1 sleep convergence (`services/session-sleep-teardown.ts:189–207`); stale stopping excluded from candidates (`scheduled/session-sleep-candidates.ts:81–86`), repair requires workspace already sleeping (`session-sleep-lifecycle-repair.ts:100–109`), missing-intent scan rejects non-NULL stopping (`session-sleep-intent-reconciliation.ts:64`). Actual runtime state unverified. | [01KZZ9Y0B4957R9KR40TNEE3KP](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01KZZ9Y0B4957R9KR40TNEE3KP) |
+| 2 / Medium                        | F2 mission double-start   | 2 failed tasks;2 session rows each                                          | `apps/api/src/` unless full path above: MCP creates S1 before binding task chat (`routes/mcp/dispatch-tool.ts:601,674,757`); orchestrator selects null chat identity (`durable-objects/project-orchestrator/scheduling.ts:278–284`), creates/binds S2 (`:447,468–482`); original allocation CAS rejects mismatch (`durable-objects/task-runner/workspace-reserved-allocation.ts:149–183`).                                                                                                                                                              | [01M4KKNAZY6KSSCXR610T01E11](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01M4KKNAZY6KSSCXR610T01E11) |
+| 3 / Medium                        | F3 opaque prompt failures | 7 failed tasks;40 warns vs 4                                                | `apps/api/src/` unless full path above: Intentional safe fallback (`packages/vm-agent/internal/server/server.go:1535–1551`); wrapper classification (`packages/vm-agent/internal/acp/auth_failure.go:14–43`). Quota/auth/overload attribution not verified; add safe categorical provenance rather than raw provider text.                                                                                                                                                                                                                              | [01KWKDYXNB97J4Z5Q9RGS8APPF](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01KWKDYXNB97J4Z5Q9RGS8APPF) |
+| 4 / Medium                        | F4 KV 429→500             | 5 callbacks:3MCP+2 bootlog                                                  | `apps/api/src/` unless full path above: Repeated task/window KV writes (`routes/mcp/_helpers.ts:358,363,373`, awaited `index.ts:268`); workspace log read/rewrite (`services/boot-log.ts:34–42`, awaited `runtime.ts:1827`). Repeated-key quota is hypothesis.                                                                                                                                                                                                                                                                                          | [01M4QNWEZG8KQQDF2R9VTK8TWM](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01M4QNWEZG8KQQDF2R9VTK8TWM) |
+| 5 / Low                           | F5 diagnostic dedupe      | 179 same-task/key rows;10 sampled driver lookup failures                    | `apps/api/src/` unless full path above: LIKE-based dedupe lookup fails with pattern-too-complex (`scheduled/stuck-task-live-runtime.ts:230–237`), catch returns false (`:238–244`), insert repeats (`:263–278`). Log explicitly says pattern too complex; 0 truncated contexts.                                                                                                                                                                                                                                                                         | [01M4QP1EX1YVKRVVPTBP2G0RD8](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01M4QP1EX1YVKRVVPTBP2G0RD8) |
+| 6 / Low                           | F6 Instant timestamps     | 3 completed Instant runs missing started_at                                 | `apps/api/src/` unless full path above: Instant task update omits startedAt (`services/instant-session.ts:518–527`).                                                                                                                                                                                                                                                                                                                                                                                                                                    | [01KZNGJG1DCH8DBC835Y0272P4](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01KZNGJG1DCH8DBC835Y0272P4) |
+| 7 / Low / watch                   | F7 snapshot 410 noise     | 9 vs135;last Oct 8;0 later                                                  | `apps/api/src/` unless full path above: VM generic non-2xx error (`packages/vm-agent/internal/server/session_snapshot_control_plane.go:135–136`); background filter ignores HTTP 410 (`packages/vm-agent/internal/server/session_snapshot_coordinator.go:129–153`).                                                                                                                                                                                                                                                                                     | [01M31M9FVCDWTGN3QCNAXWZ0K6](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01M31M9FVCDWTGN3QCNAXWZ0K6) |
 
 Acceptance priorities: F1 must reconcile the exact already-stopped generation without touching a successor; F2 must prove one-session dispatch under an orchestrator interleaving; F3 must preserve redaction while producing safe source/category/attempt evidence; F4 must preserve correct limiter behavior and boot-log entries under KV 429; F5 must dedupe repeated sweeps on actual D1; F6 must set start timestamp only on real start.
 
@@ -208,7 +208,7 @@ Acceptance priorities: F1 must reconcile the exact already-stopped generation wi
 - **Provider fallback evidence:**76 placement412+6 shared-core403,0 matching terminal messages among23 failed tasks.403 here explicitly means shared-core quota, not authentication (`packages/providers/src/hetzner-account-limits.ts:38–47`) [Q3,Q4].
 - **Storage drain:**87.52%warning,0 storage-full rows, root 874 published/87 frozen/0 failed or in-flight at query time [Q4,Q7].
 - **Resolved signatures:** snapshot body-too-large0, expired callback token0, incident-dedup UNIQUE0, git-token terminal failures0, unsupported-location4220, legacy in_progress/deleted0 [Q3,Q4,Q5].
-- **Improvement after October 8:** daily error totals154→13→13→24→1 partial; snapshot prepare  500 and NOMEM 0 after their last October 8 occurrence [Q4,Q4d]. This is recurrence evidence, not a blanket causal claim.
+- **Improvement after October 8:** daily error totals154→13→13→24→1 partial; snapshot prepare 500 and NOMEM 0 after their last October 8 occurrence [Q4,Q4d]. This is recurrence evidence, not a blanket causal claim.
 
 ## Ideas touched by this review
 
