@@ -36,7 +36,7 @@ vi.mock('../../src/services/node-agent', async (importOriginal) => ({
 }));
 
 vi.mock('../../src/services/project-data', () => ({
-  finishConfirmedSessionSleep: vi.fn(async () => true),
+  finishConfirmedSessionSleep: vi.fn(() => Promise.resolve(true)),
   failSession: vi.fn(),
   getAcpSession: (...args: unknown[]) => sleepBoundaryMocks.getAcpSession(...args),
   getSession: (...args: unknown[]) => sleepBoundaryMocks.getSession(...args),

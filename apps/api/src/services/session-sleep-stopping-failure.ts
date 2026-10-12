@@ -29,7 +29,7 @@ export async function settleUnconfirmedSleepStop(
     .from(schema.sessionSnapshots)
     .where(eq(schema.sessionSnapshots.chatSessionId, chatSessionId))
     .get();
-  if (!snapshot || snapshot.sleepStatus !== 'stopping' || snapshot.sleepClaimId !== claimId)
+  if (snapshot?.sleepStatus !== 'stopping' || snapshot.sleepClaimId !== claimId)
     return false;
   const config = sessionSleepEpisodeConfig(env);
   const runtimeChanged = sessionSleepRuntimeChanged(error);

@@ -179,10 +179,11 @@ export async function blockSessionSleepEpisode(
   }
 ): Promise<boolean> {
   const snapshots = schema.sessionSnapshots;
+  const claimedSleepStatus = input.expected.kind === 'claim' ? 'preparing' : 'stopping';
   const expectation =
     input.expected.kind === 'claim' || input.expected.kind === 'stopping_claim'
       ? and(
-          eq(snapshots.sleepStatus, input.expected.kind === 'claim' ? 'preparing' : 'stopping'),
+          eq(snapshots.sleepStatus, claimedSleepStatus),
           eq(snapshots.sleepClaimId, input.expected.claimId)
         )
       : and(

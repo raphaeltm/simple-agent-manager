@@ -12,6 +12,38 @@ export type TaskAgentHostProbe =
 
 const LIVE_HOST_STATUSES = new Set(['starting', 'ready', 'prompting']);
 
+function classifyTaskAgentHosts(
+  entries: Array<{ id: string; workspaceId: string; hostStatus?: unknown }>,
+  sessions: TaskRuntimeLivenessSignals['acpSessions'],
+  workspaceId: string,
+  fallbackSessionId: string
+): TaskAgentHostProbe {
+  let unknown = false;
+  for (const candidate of sessions) {
+    const matches = entries.filter((entry) => entry.id === candidate.id);
+    // A well-formed listing explicitly absent this exact host is authoritative.
+    if (!matches.length) continue;
+    const match = matches[0];
+    if (matches.length !== 1 || !match || match.workspaceId !== workspaceId) {
+      unknown = true;
+      continue;
+    }
+    const hostStatus: unknown = match.hostStatus;
+    if (typeof hostStatus === 'string' && LIVE_HOST_STATUSES.has(hostStatus))
+      return { outcome: 'running', sessionId: candidate.id };
+    // Go omits hostStatus when no SessionHost exists (omitempty).
+    if (
+      hostStatus != null &&
+      hostStatus !== 'stopped' &&
+      hostStatus !== 'error' &&
+      hostStatus !== 'idle'
+    ) unknown = true;
+  }
+  // Without an explicit expected ID, one stopped historical ACP row cannot
+  // hide another genuinely running host for this task's chat and workspace.
+  return { outcome: unknown ? 'unknown' : 'stopped', sessionId: fallbackSessionId };
+}
+
 export async function probeTaskAgentHost(
   env: Env,
   signals: TaskRuntimeLivenessSignals
@@ -55,29 +87,7 @@ export async function probeTaskAgentHost(
     ) {
       return { outcome: 'unknown', sessionId: session.id };
     }
-    let unknown = false;
-    for (const candidate of sessions) {
-      const matches = entries.filter((entry) => entry.id === candidate.id);
-      // A well-formed listing explicitly absent this exact host is authoritative.
-      if (!matches.length) continue;
-      if (matches.length !== 1 || matches[0].workspaceId !== workspace.id) {
-        unknown = true;
-        continue;
-      }
-      const hostStatus: unknown = matches[0].hostStatus;
-      if (typeof hostStatus === 'string' && LIVE_HOST_STATUSES.has(hostStatus))
-        return { outcome: 'running', sessionId: candidate.id };
-      // Go omits hostStatus when no SessionHost exists (omitempty).
-      if (
-        hostStatus != null &&
-        hostStatus !== 'stopped' &&
-        hostStatus !== 'error' &&
-        hostStatus !== 'idle'
-      ) unknown = true;
-    }
-    // Without an explicit expected ID, one stopped historical ACP row cannot
-    // hide another genuinely running host for this task's chat and workspace.
-    return { outcome: unknown ? 'unknown' : 'stopped', sessionId: session.id };
+    return classifyTaskAgentHosts(entries, sessions, workspace.id, session.id);
   } catch {
     // Node presence is only a signal. An unreachable/unparseable host cannot
     // prove this task dead, regardless of its node-refreshed ACP heartbeat.

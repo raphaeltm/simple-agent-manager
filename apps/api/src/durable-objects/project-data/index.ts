@@ -493,7 +493,7 @@ export class ProjectData extends DurableObject<Env> {
   }): Promise<boolean> {
     const runtimeGuard = options?.runtimeGuard;
     if (runtimeGuard) {
-      return this.ctx.blockConcurrencyWhile(() => guardedSessionSleep(
+      return await this.ctx.blockConcurrencyWhile(() => guardedSessionSleep(
         this.env.DATABASE, this.sql, sessionId, runtimeGuard,
         () => this.applySessionSleep(sessionId, options)
       ));
