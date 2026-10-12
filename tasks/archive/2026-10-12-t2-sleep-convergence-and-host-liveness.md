@@ -63,11 +63,15 @@ Snapshot runtimeGuard-only revert: all three entry points red at post-D1/pre-sna
 - Test engineer PASS: real route/sweep/D1 controls and revert proof; multi-host ID correction; external fixture updates preserve assertions.
 - Completion/doc-sync final PASS A–F: implementation complete and phase4 archive permitted after record reconciliation; architecture prose matches final behavior. Later workflow gates expressly excluded from this PASS.
 
-## Staging plan and pending evidence
+## Staging evidence and blocked fault path
 
-Coordinator accepts one normal-pool VM after T1. Real Sol capture/R2, supported guarded VM stop, real scheduled sweep, sleeping chat then wake/prompt, old container absence and D1 agreement are required. If supported owner endpoints cannot force lost response, a staging-only stopping-intent fixture AFTER real stop is approved; label that fault boundary and the live callback-network-loss gap. No production fault hook. Delete own fixture workspace/node/profile/project and verify zero nodes at rest; never alter capacity pools.
+Final runtime head abb89b0f77e41d58603e951cfa688ef6b58bdfdf: CI38266525413 and staging deployment38266563371, including smoke tests, PASS. API version5ef1822c-fc59-453e-974c-bdc2c98d2204 served the test. PR2317 remains DRAFT; no MERGE_READY or merge grant. Coordinator is taking the live coverage gap to the owner.
 
-T1 released staging at14:00:42Z after zero-resource cleanup; its retry deployment38248633596 succeeded. Its live OOM proof remains unmerged. T2 has no claim/resources/PR yet. Protected production read-only12:26:27Z remains original shape with available/stopping snapshot, null sleeping_at and unexpired point; no manual mutation.
+**Ordinary control LIVE PASS:** one normal-pool VM; real Sol-produced full recovery point; real idle sweep completed sleep at15:41:24.959UTC with chat/task/workspace/snapshot agreement and sleepingAt. Old workspace deletion confirmed by VM agent at15:46:32.193UTC; owner container listing confirmed absence. Normal owner wake restored the committed marker at15:49 on successor workspace01M4RCRRMRXHJB39XB5CDFQVB5. Browser dashboard/settings/chat rendered with zero page errors; screenshot reviewed. Existing warm retention was unchanged.
+
+**Core stale-stopping convergence NOT verified live.** Coordinator approved an explicitly labelled own-row stopping-intent fixture after supported owner agent-session Stop. The staging-only D1 UPDATE was rejected HTTP400/code7500, “You do not have permission to perform this operation”, using workspace CF_TOKEN. Cause is unestablished (possibly token D1 permission scope); no rows changed. A literal retry also failed. Coordinator then retracted the retry hint under owner direction: all D1 writes stopped, no alternate identity, credential or write route used. No supported owner API produces stale stopping intent: workspace Stop clears it. Exact already-stopped409 and lost snapshot-complete callback are local tests only; real-D1/DO Workers tests cover convergence. Supported stopped-host diagnostics were inconclusive, never live, despite fresh node heartbeat.
+
+**Cleanup PASS:** owner DELETE temporary task, workspace, node and project each returned200, completed16:06UTC. Project deletion removed the temporary profile. Read-only D1 at16:07UTC returned zero non-deleted staging nodes and no own project/profile/workspace/snapshot rows. One VM peak, under50minutes, no capacity-pool/auth/security changes or production mutations. STAGING_RELEASE published on reliability-wave-1012, event5a321daf-66e0-49d9-bb9c-f020673c30e0. Production rollout and post-deploy checks remain pending; task is not complete.
 
 ## Post-mortem
 
