@@ -44,7 +44,7 @@ Minimal #2305 overlap: `services/session-sleep-teardown.ts`, `scheduled/session-
 ## Validation
 
 - Root lint13/13 PASS; typecheck19/19 PASS, refreshed after final fixture corrections.
-- Full root tests21/21 tasks PASS; API863 files/12086 tests PASS, one file/two tests skipped. Root build9/9 PASS.
+- Full root tests21/21 tasks PASS; API864 files/12104 tests PASS, one file/two tests skipped. Root build9/9 PASS.
 - Real workerd/D1 suite17/17 PASS across three files on final generation-guard source: signed node-heartbeat route, both production liveness adapters, actual idle cleanup/repair and D1 dedupe.
 - Sleep integration62 PASS: real stale stuck sweep at25h BEFORE sleep sweep; D1 running/stopped exact409; prepare/R2 uploads with omitted complete callback; actual ensureSessionRecovery to TaskRunner boundary and restore-result route; cap5/CAS race; no/expired recovery; warm retention and original budget; subsequent ceiling remains bounded.
 - Fifteen generation interleaves: full/fallback/explicit entry points × before guarded chat RPC, before dispatch, VM generation rejection, after stop/before D1, post-D1/pre-snapshot. Successor states unchanged and subsequent real sweep performs no extra stop/release.
@@ -67,7 +67,7 @@ Snapshot runtimeGuard-only revert: all three entry points red at post-D1/pre-sna
 
 Coordinator accepts one normal-pool VM after T1. Real Sol capture/R2, supported guarded VM stop, real scheduled sweep, sleeping chat then wake/prompt, old container absence and D1 agreement are required. If supported owner endpoints cannot force lost response, a staging-only stopping-intent fixture AFTER real stop is approved; label that fault boundary and the live callback-network-loss gap. No production fault hook. Delete own fixture workspace/node/profile/project and verify zero nodes at rest; never alter capacity pools.
 
-T1 has the staging lease; its deploy38248633596 failed with Cloudflare subdomain GET504/malformed response at12:37Z. T2 has no claim/resources/PR yet. Protected production read-only12:26:27Z remains original shape with available/stopping snapshot, null sleeping_at and unexpired point; no manual mutation.
+T1 released staging at14:00:42Z after zero-resource cleanup; its retry deployment38248633596 succeeded. Its live OOM proof remains unmerged. T2 has no claim/resources/PR yet. Protected production read-only12:26:27Z remains original shape with available/stopping snapshot, null sleeping_at and unexpired point; no manual mutation.
 
 ## Post-mortem
 
@@ -81,6 +81,6 @@ Merged origin/main b67fed80e without conflicts/history rewrite (ff384721a). Post
 
 ## Final chat transition guard
 
-Optional captured owner/generation/stopping-claim guard on the existing sleepSession RPC performs a final real D1 read under DO concurrency serialization, then checks the local chat workspace and applies its synchronous transition. Legacy callers remain unchanged. Four real public-DO RPC tests failed before implementation and now pass; integration covers all three entry points at the RPC-admission boundary. Final targeted core141, Workers17 and root lint/typecheck32 PASS; final full root sequential tests21/21 PASS (/tmp/t2-final-tests-sequential.log); combined-head build refresh pending.
+Optional captured owner/generation/stopping-claim guard on the existing sleepSession RPC performs a final real D1 read under DO concurrency serialization, then checks the local chat workspace and applies its synchronous transition. Legacy callers remain unchanged. Four real public-DO RPC tests failed before implementation and now pass; integration covers all three entry points at the RPC-admission boundary. Final targeted core141, Workers17 and root lint/typecheck32 PASS; final full root sequential tests21/21 PASS (/tmp/t2-final-tests-sequential.log); combined-head build9/9 PASS. Currentmain3581c1723 merged cleanly without history rewrite; accidental tracked runtime memory removed/restored locally. Final merged root lint/typecheck32/32 PASS.
 
 This closes the demonstrated pre-RPC rebuild admission race. The final D1 read and serialized DO transition are not a cross-store transaction; external D1 admission after that read remains a distributed race limit. No admission implementation or speculative coordination mechanism is added.
