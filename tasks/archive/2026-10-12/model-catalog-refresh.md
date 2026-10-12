@@ -21,8 +21,16 @@ Sources checked 2026-10-12:
 - [x] Label Gemini 3.7 Flash deprecation while preserving existing selection.
 - [x] Update focused catalog tests.
 - [x] Run local quality checks.
-- [ ] Run staging verification.
-- [ ] Review, open PR, wait for CI and CodeRabbit, merge, monitor production deploy.
+- [x] Run staging verification.
+- [x] Complete local specialist review.
+
+PR, CI, merge, and production status are tracked in SAM task `01M4QNEP7AX6JHYP9Y1R8Z4MRZ`.
 
 ## Acceptance
 Catalog only gains provider-confirmed models; stale OpenCode IDs leave the fallback; Claude Haiku is routable; focused tests and repository gates pass; staging selector/API behavior works.
+
+## Verification
+- Root `pnpm lint && pnpm typecheck && pnpm test && pnpm build`: passed.
+- Staging deploy run 38230104609: passed after a transient Cloudflare startup CPU rejection on the first run (38229198531).
+- Authenticated staging catalog responses included Claude Haiku 5.5, Gemini 3.7 deprecation label, and OpenCode Haiku 5.5.
+- Playwright staged browser showed Claude Haiku 5.5 in the model selector.
