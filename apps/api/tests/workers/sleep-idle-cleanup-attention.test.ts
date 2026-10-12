@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 import type { ProjectData } from '../../src/durable-objects/project-data';
 import { terminalizeIdleTaskInD1 } from '../../src/durable-objects/project-data/idle-cleanup-terminalization';
 import type { Env } from '../../src/env';
-import { captureProjectDataExpectedError, type ProjectDataTestDouble } from './support/expected-error-doubles';
 import { runSessionSleepLifecycleRepair } from '../../src/scheduled/session-sleep-lifecycle-repair';
 import {
   seedInstallation,
@@ -14,6 +13,7 @@ import {
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
+import { captureProjectDataExpectedError, type ProjectDataTestDouble } from './support/expected-error-doubles';
 
 describe('confirmed sleep retires obsolete idle cleanup only for its exact owner', () => {
   it('runs the real lifecycle repair then resolves only that chat and workspace failure marker', async () => {
