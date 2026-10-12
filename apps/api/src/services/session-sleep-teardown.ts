@@ -124,7 +124,7 @@ function workspaceStopAlreadyConfirmed(error: unknown): boolean {
     return (
       !!body &&
       typeof body === 'object' &&
-      (body as { message?: unknown }).message ===
+      'message' in body && body.message ===
         'Workspace cannot be stopped from current state: stopped'
     );
   } catch {

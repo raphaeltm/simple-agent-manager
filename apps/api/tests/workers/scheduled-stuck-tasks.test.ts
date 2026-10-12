@@ -576,7 +576,7 @@ describe('recoverStuckTasks — vertical slice', () => {
       expect(beforeSweep?.liveness).toMatchObject({
         live: false,
         conclusive: false,
-        reason: 'task_acp_session_stale',
+        reason: 'task_agent_host_unknown',
         workspaceStatus: 'running',
         nodeId,
       });
