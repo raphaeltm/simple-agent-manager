@@ -45,11 +45,13 @@ import { maybeJsonRecord } from '../lib/runtime-validation';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { expireSleepingConversation } from '../services/session-expiry';
+import { convergeStaleTaskSleep, DEFAULT_TASK_SLEEP_CONVERGENCE_LIMIT } from '../services/session-sleep-task-convergence';
 import {
   sessionRecoveryAttemptDecayMs,
   sessionRecoveryMaxAttempts,
 } from '../services/session-snapshot-recovery-budget';
 import { sessionSleepInFlightMaxAgeMs } from '../services/session-snapshot-sleep-predicate';
+import { inspectTaskAgentHost } from '../services/task-agent-host-probe';
 import { cleanupTaskRun } from '../services/task-runner';
 import {
   classifyTaskRuntimeLiveness,
@@ -810,13 +812,15 @@ async function classifyTaskRuntime(
         acpProbeOutcome: 'timeout',
       });
     }
-    return finish({
-      ...livenessSignals,
-      acpProbeOutcome: 'ok',
-      acpSessions: probe.sessions as RuntimeAcpSessionSnapshot[],
-      sessionWork: probe.sessionWork,
-      workEvidence: probe.workEvidence,
-    });
+    return finish(
+      await inspectTaskAgentHost(env, {
+        ...livenessSignals,
+        acpProbeOutcome: 'ok',
+        acpSessions: probe.sessions as RuntimeAcpSessionSnapshot[],
+        sessionWork: probe.sessionWork,
+        workEvidence: probe.workEvidence,
+      })
+    );
   } catch (err) {
     log.warn('stuck_task.liveness_probe_failed', {
       workspaceId: task.workspace_id,
@@ -1135,6 +1139,9 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
   result.candidateCursorWrapped = candidateSelection.wrapped;
   result.candidateCursorErrors = candidateSelection.cursorErrors;
 
+  const sleepConvergenceBudget = {
+    remaining: Math.min(maxCandidates, DEFAULT_TASK_SLEEP_CONVERGENCE_LIMIT),
+  };
   for (const task of candidateSelection.tasks) {
     if (task.status === 'in_progress' && task.chat_session_id) {
       try {
@@ -1304,6 +1311,19 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
           const executionMs = now.getTime() - startedAt;
           if (executionMs > maxExecutionMs) {
+            if (
+              (await convergeStaleTaskSleep(
+                env,
+                {
+                  projectId: task.project_id,
+                  chatSessionId: task.chat_session_id,
+                  workspaceId: task.workspace_id,
+                  userId: task.user_id,
+                },
+                now,
+                sleepConvergenceBudget
+              )) !== 'none'
+            ) break;
             const ceiling = await evaluateRunawayCostCeiling(
               env,
               {

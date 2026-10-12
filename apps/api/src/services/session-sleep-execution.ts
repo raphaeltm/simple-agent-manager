@@ -1,3 +1,4 @@
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -12,6 +13,7 @@ import {
 } from './session-sleep-eligibility';
 import { persistSessionSleepFallbackNotice } from './session-sleep-fallback-notices';
 import { confirmSessionSleepFallbackStopping } from './session-sleep-recovery-point';
+import { sessionSleepRuntimeChanged } from './session-sleep-runtime-identity';
 import { waitForFinalSessionSnapshot } from './session-sleep-snapshot-wait';
 import {
   completeSleepTeardown,
@@ -129,7 +131,13 @@ async function verifyAndBeginSleepTeardown(
  */
 export async function sleepWorkspaceSession(
   env: Env,
-  input: { workspaceId: string; userId: string; reason: string; sleepClaimId?: string }
+  input: {
+    workspaceId: string;
+    userId: string;
+    reason: string;
+    sleepClaimId?: string;
+    stopRequestTimeoutMs?: number;
+  }
 ): Promise<SleepWorkspaceSessionResult> {
   const db = drizzle(env.DATABASE, { schema });
   const workspace = await loadSleepWorkspace(env, input.workspaceId, input.userId);
@@ -137,11 +145,29 @@ export async function sleepWorkspaceSession(
   const alreadySleeping = await finishAlreadySleeping(db, env, workspace, snapshot);
   if (alreadySleeping) return alreadySleeping;
 
-  if (!['running', 'recovery', 'sleeping'].includes(workspace.status)) {
+  if (
+    !['running', 'recovery', 'sleeping'].includes(workspace.status) &&
+    !(workspace.status === 'stopped' && snapshot?.sleepStatus === 'stopping')
+  ) {
     throw new Error(`Workspace cannot sleep from status ${workspace.status}`);
   }
 
-  const agentSession = await loadResumableAgentSession(db, workspace.id);
+  // After teardown a late callback may already have stopped the D1 agent row.
+  // Resume the exact captured owner; never choose a newer, unrelated agent.
+  const agentSession =
+    snapshot?.sleepStatus === 'stopping' && snapshot.agentSessionId
+      ? await db
+          .select({ id: schema.agentSessions.id, agentType: schema.agentSessions.agentType })
+          .from(schema.agentSessions)
+          .where(
+            and(
+              eq(schema.agentSessions.id, snapshot.agentSessionId),
+              eq(schema.agentSessions.workspaceId, workspace.id)
+            )
+          )
+          .get()
+      : await loadResumableAgentSession(db, workspace.id);
+  if (!agentSession) throw new Error('Stopping snapshot agent owner is missing');
 
   await ensureSessionSnapshotForSleep(db, env, {
     workspaceId: workspace.id,
@@ -221,6 +247,7 @@ export async function sleepWorkspaceSession(
     });
     verified = await completeSleepTeardown(env, workspace, agentSession, claimId, verified, {
       fallback,
+      requestTimeoutMs: input.stopRequestTimeoutMs,
     });
     log.info('session_lifecycle.sleep_phase', {
       workspaceId: workspace.id,
@@ -238,6 +265,10 @@ export async function sleepWorkspaceSession(
     const message = error instanceof Error ? error.message : String(error);
     if (pointOfNoReturn) {
       await deferSessionSnapshotStopping(db, env, workspace.chatSessionId, claimId, message);
+      if (sessionSleepRuntimeChanged(error)) {
+        const { settleUnconfirmedSleepStop } = await import('./session-sleep-stopping-failure');
+        await settleUnconfirmedSleepStop(env, workspace.chatSessionId, claimId, error, new Date());
+      }
     } else {
       await failSessionSnapshotSleepBeforeTeardown(
         db,

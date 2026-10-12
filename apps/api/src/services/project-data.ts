@@ -2189,6 +2189,25 @@ export async function scheduleIdleCleanup(
   return stub.scheduleIdleCleanup(sessionId, workspaceId, taskId);
 }
 
+export async function finishBlockedSessionSleep(
+  env: Env,
+  projectId: string,
+  input: { snapshotId: string; chatSessionId: string; workspaceId: string; recordJson: string }
+): Promise<boolean> {
+  const stub = await getStub(env, projectId);
+  return stub.finishBlockedSessionSleep(input);
+}
+
+export async function finishConfirmedSessionSleep(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  workspaceId: string
+): Promise<boolean> {
+  const stub = await getStub(env, projectId);
+  return stub.finishConfirmedSessionSleep(sessionId, workspaceId);
+}
+
 export async function cancelIdleCleanup(
   env: Env,
   projectId: string,

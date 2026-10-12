@@ -58,6 +58,11 @@ vi.mock('../../src/lib/logger', async (importOriginal) => ({
   createModuleLogger: () => logSpy,
 }));
 
+vi.mock('../../src/services/jwt', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/jwt')>()),
+  signNodeManagementToken: vi.fn(async () => ({ token: 'test-node-management' })),
+}));
+
 /** The cron adapter reaches ProjectData over RPC; route it to the real reader. */
 const { projectDataRpc } = vi.hoisted(() => ({
   projectDataRpc: {
@@ -321,7 +326,15 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(T0);
   vi.clearAllMocks();
-  fetchWithTimeoutMock.mockResolvedValue(new Response(null, { status: 200 }));
+  fetchWithTimeoutMock.mockImplementation(async (url: string) =>
+    url.includes('/agent-sessions')
+      ? Response.json({
+          sessions: [
+            { id: ACP_ID, workspaceId: WORKSPACE_ID, status: 'running', hostStatus: 'ready' },
+          ],
+        })
+      : new Response(null, { status: 200 })
+  );
   cleanupTaskRunMock.mockResolvedValue(undefined);
   d1 = new Database(':memory:');
   createSchemaTables(d1, [
@@ -373,8 +386,8 @@ describe('live-runtime record: what kept the task, and why', () => {
     expect(row.level).toBe('info');
     expect(row.context).toMatchObject({
       recoveryType: 'stuck_task_heartbeat_skip',
-      preservationKey: 'task_acp_session_live:idle',
-      livenessReason: 'task_acp_session_live',
+      preservationKey: 'task_agent_host_running:idle',
+      livenessReason: 'task_agent_host_running',
       workState: 'idle',
       activity: 'idle',
       acpHeartbeatAgeMs: 20_000,
@@ -386,7 +399,7 @@ describe('live-runtime record: what kept the task, and why', () => {
     expect(row.message).toContain('its agent session is alive but idle');
     expect(row.message).toContain('control handed back 8h 0m ago');
     expect(row.message).toContain('No sleep is scheduled or in flight for it.');
-    expect(row.message).toContain('Live basis: task_acp_session_live.');
+    expect(row.message).toContain('Live basis: task_agent_host_running.');
     expect(row.message).toContain(
       'bounded only by the 1440-min absolute ceiling on runtime-generation age (now 540 min)'
     );
@@ -420,7 +433,7 @@ describe('live-runtime record: what kept the task, and why', () => {
 
     const rows = liveRuntimeRows();
     expect(rows.map((row) => row.context.preservationKey)).toEqual([
-      'task_acp_session_live:idle',
+      'task_agent_host_running:idle',
       'task_prompt_turn_active:prompt_turn_active',
     ]);
     expect(rows[1].message).toContain('a prompt turn is in progress');
@@ -446,7 +459,7 @@ describe('live-runtime record: what kept the task, and why', () => {
 
     expect(liveRuntimeRows().map((row) => row.context.preservationKey)).toEqual([
       'taskXacpXsessionXlive:idle',
-      'task_acp_session_live:idle',
+      'task_agent_host_running:idle',
     ]);
   });
 
@@ -740,7 +753,7 @@ describe('live-runtime record: what kept the task, and why', () => {
     const [row] = liveRuntimeRows();
     expect(row.level).toBe('warn');
     expect(row.context).toMatchObject({
-      preservationKey: 'task_acp_session_live:prompt_turn_unproven',
+      preservationKey: 'task_agent_host_running:prompt_turn_unproven',
       workState: 'prompt_turn_unproven',
       promptStartedAgeMs: 3 * HOUR,
     });
@@ -833,10 +846,9 @@ describe('live-runtime record: what kept the task, and why', () => {
 
   /**
    * A healthy host does not make a task live: its own ACP session's heartbeat has
-   * gone stale, so the verdict is inconclusive. Kept (never failed on stale
-   * evidence), and not recorded as a live runtime either.
+   * gone stale, so the runtime host inspection still proves it live.
    */
-  it('keeps but does not call live a task whose own ACP heartbeat is stale on a healthy host', async () => {
+  it('keeps a genuinely running host live even when its ACP heartbeat is stale', async () => {
     seedTask({ startedAt: T0 - 9 * HOUR });
     seedLiveRuntime({ generationStartedAt: T0 - 9 * HOUR, nodeHeartbeatAt: T0 - 30_000 });
     seedAcpSession({ heartbeatAt: T0 - 20 * MINUTE });
@@ -845,8 +857,8 @@ describe('live-runtime record: what kept the task, and why', () => {
     const result = await recoverStuckTasks(env());
 
     expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
-    expect(result.heartbeatSkipped).toBe(0);
-    expect(liveRuntimeRows()).toHaveLength(0);
+    expect(result.heartbeatSkipped).toBe(1);
+    expect(liveRuntimeRows()).toHaveLength(1);
     expect(result.candidatesScanned).toBe(1);
   });
 

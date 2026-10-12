@@ -189,6 +189,8 @@ export type SupersessionProbeOutcome = 'ok' | 'error' | 'not_run';
 export type TaskSupersession = 'none' | 'live' | 'terminal';
 
 export interface TaskRuntimeLivenessSignals {
+  /** Authoritative task host inspection; node-refreshed ACP heartbeat is only a proxy. */
+  agentHost?: import('./task-agent-host-probe').TaskAgentHostProbe;
   /** The task's project — re-checked against the snapshot row in memory. */
   projectId: string;
   taskWorkspaceId: string | null;

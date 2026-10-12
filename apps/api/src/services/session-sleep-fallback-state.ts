@@ -159,6 +159,7 @@ export async function revertSessionSnapshotFallbackStopping(
 /** Which writer is ending the episode, and the exact state it observed. */
 export type BlockedEpisodeExpectation =
   | { kind: 'claim'; claimId: string }
+  | { kind: 'stopping_claim'; claimId: string }
   | { kind: 'observed'; sleepStatus: string | null; sleepEpisodeFailures: number };
 
 /**
@@ -179,9 +180,9 @@ export async function blockSessionSleepEpisode(
 ): Promise<boolean> {
   const snapshots = schema.sessionSnapshots;
   const expectation =
-    input.expected.kind === 'claim'
+    input.expected.kind === 'claim' || input.expected.kind === 'stopping_claim'
       ? and(
-          eq(snapshots.sleepStatus, 'preparing'),
+          eq(snapshots.sleepStatus, input.expected.kind === 'claim' ? 'preparing' : 'stopping'),
           eq(snapshots.sleepClaimId, input.expected.claimId)
         )
       : and(
@@ -193,7 +194,9 @@ export async function blockSessionSleepEpisode(
     .update(snapshots)
     .set({
       sleepStatus: TERMINAL_SESSION_SLEEP_STATUS,
-      sleepAfter: null,
+      // A blocked stop still owes a durable chat/task reconciliation.
+      sleepAfter:
+        input.expected.kind === 'stopping_claim' ? (input.now ?? new Date()).toISOString() : null,
       sleepError: sessionLifecycleError(env, input.error),
       sleepFallbackJson: input.recordJson,
       sleepClaimId: null,

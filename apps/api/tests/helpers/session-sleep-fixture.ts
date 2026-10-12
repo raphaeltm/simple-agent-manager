@@ -26,7 +26,8 @@ const sleepBoundaryMocks = vi.hoisted(() => ({
   transitionAcpSession: vi.fn(),
 }));
 
-vi.mock('../../src/services/node-agent', () => ({
+vi.mock('../../src/services/node-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/node-agent')>()),
   sendPromptToAgentOnNode: (...args: unknown[]) => sleepBoundaryMocks.sendPrompt(...args),
   stopAgentSessionOnNode: (...args: unknown[]) => sleepBoundaryMocks.stopAgent(...args),
   hibernateAgentSessionOnNode: (...args: unknown[]) =>
@@ -35,6 +36,7 @@ vi.mock('../../src/services/node-agent', () => ({
 }));
 
 vi.mock('../../src/services/project-data', () => ({
+  finishConfirmedSessionSleep: vi.fn(async () => true),
   failSession: vi.fn(),
   getAcpSession: (...args: unknown[]) => sleepBoundaryMocks.getAcpSession(...args),
   getSession: (...args: unknown[]) => sleepBoundaryMocks.getSession(...args),

@@ -16,11 +16,15 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as observabilitySchema from '../../src/db/observability-schema';
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { sessionSnapshotRoutes } from '../../src/routes/workspaces/session-snapshots';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
 import { runSessionSnapshotPurge } from '../../src/scheduled/session-snapshot-purge';
+import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
+import { NodeAgentHttpError } from '../../src/services/node-agent';
+import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep';
 import { parseSessionSleepFallbackRecord } from '../../src/services/session-sleep-episode';
 import { sessionRecoveryInitialPrompt } from '../../src/services/session-sleep-fallback-messages';
@@ -28,17 +32,20 @@ import { findRestorableOrInFlightSleepSnapshot } from '../../src/services/sessio
 import {
   cancelScheduledSessionSleep,
   claimSessionSnapshotRecovery,
+  claimSessionSnapshotSleep,
   completeSessionSnapshot,
   completeSessionSnapshotRecovery,
   recordSessionSnapshotProgress,
 } from '../../src/services/session-snapshots';
-import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
+import { createAllSchemaTables, createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createRouteTestApp } from '../unit/routes/route-test-app';
 
 const mocks = vi.hoisted(() => ({
   cleanupTaskRun: vi.fn(),
+  startTaskRunnerDO: vi.fn(),
   destroyVmAgentContainer: vi.fn(),
   failSession: vi.fn(),
+  finishBlockedSessionSleep: vi.fn(),
   getAcpSession: vi.fn(),
   getSession: vi.fn(),
   getSessionState: vi.fn(),
@@ -61,12 +68,15 @@ vi.mock('../../src/services/jwt', async (importOriginal) => ({
   verifyCallbackToken: (...args: unknown[]) => mocks.verifyCallbackToken(...args),
 }));
 
-vi.mock('../../src/services/node-agent', () => ({
+vi.mock('../../src/services/node-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/node-agent')>()),
   hibernateAgentSessionOnNode: (...args: unknown[]) => mocks.hibernateAgentSessionOnNode(...args),
   stopWorkspaceOnNode: (...args: unknown[]) => mocks.stopWorkspaceOnNode(...args),
 }));
 
 vi.mock('../../src/services/project-data', () => ({
+  finishConfirmedSessionSleep: vi.fn(async () => true),
+  finishBlockedSessionSleep: (...args: unknown[]) => mocks.finishBlockedSessionSleep(...args),
   failSession: (...args: unknown[]) => mocks.failSession(...args),
   getAcpSession: (...args: unknown[]) => mocks.getAcpSession(...args),
   getSession: (...args: unknown[]) => mocks.getSession(...args),
@@ -79,6 +89,11 @@ vi.mock('../../src/services/project-data', () => ({
 
 vi.mock('../../src/services/compute-usage', () => ({
   stopComputeTracking: (...args: unknown[]) => mocks.stopComputeTracking(...args),
+}));
+
+vi.mock('../../src/services/task-runner-do', () => ({
+  startTaskRunnerDO: (...args: unknown[]) => mocks.startTaskRunnerDO(...args),
+  ensureTaskRunnerStarted: vi.fn(async () => false),
 }));
 
 vi.mock('../../src/services/task-runner', () => ({
@@ -361,19 +376,7 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
     vi.setSystemTime(START);
     vi.resetAllMocks();
     sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [
-      schema.projects,
-      schema.nodes,
-      schema.workspaces,
-      schema.tasks,
-      schema.taskStatusEvents,
-      schema.sessionSummaries,
-      schema.agentSessions,
-      schema.sessionSnapshots,
-      schema.computeUsage,
-      // Read by the wake claim's archive-migration fence.
-      schema.projectDataSessionLocations,
-    ]);
+    createAllSchemaTables(sqlite, schema);
     sqlite.exec(
       'CREATE UNIQUE INDEX idx_session_snapshots_chat_session_id ON session_snapshots(chat_session_id)'
     );
@@ -430,6 +433,21 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
         return messageId;
       }
     );
+    mocks.failSession.mockImplementation(async (_env, _project, chatId) => {
+      const state = projectData.get(chatId);
+      if (state) state.status = 'failed';
+      return true;
+    });
+    mocks.finishBlockedSessionSleep.mockImplementation(async (_env, projectId, input) => {
+      const current = row();
+      if (
+        current.sleep_status !== 'terminal_failed' ||
+        current.sleep_fallback_json !== input.recordJson
+      )
+        return false;
+      await mocks.failSession(_env, projectId, input.chatSessionId);
+      return true;
+    });
     mocks.getAcpSession.mockResolvedValue(null);
     mocks.stopComputeTracking.mockResolvedValue(1);
     mocks.cleanupTaskRun.mockResolvedValue(undefined);
@@ -573,7 +591,8 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
         'node-1',
         'ws-a',
         expect.anything(),
-        'user-1'
+        'user-1',
+        expect.objectContaining({ expectedEvictionGeneration: '', beforeExternalMutation: expect.any(Function) })
       );
       expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1');
       // The only workspace on the node: it turns warm, keeping warm retention.
@@ -1001,6 +1020,381 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       expect(row()).toMatchObject({ sleep_status: 'sleeping' });
     });
 
+    it.each(['before_dispatch', 'node_generation_check', 'after_stop', 'before_snapshot_commit']
+      .flatMap((boundary) => ['full', 'fallback', 'explicit'].map((phase) => ({ boundary, phase }))))(
+      'ends a superseded $phase sleep at $boundary without adopting its successor on another sweep',
+      async ({ boundary, phase }) => {
+        seedSession({ id: 'a', taskStatus: 'in_progress' });
+        capture = 'complete';
+        sqlite.prepare("UPDATE workspaces SET eviction_generation = 'original' WHERE id = 'ws-a'").run();
+        if (phase === 'fallback') {
+          capture = 'unreachable';
+          await spendFullBudget();
+          completeGeneration('chat-a', 'ws-a', 'last-complete', 'complete');
+        }
+        const failuresBefore = phase === 'fallback' ? row().sleep_episode_failures ?? 0 : 0;
+        let remoteStops = 0;
+        const replaceRuntime = () => {
+          sqlite.prepare("UPDATE workspaces SET eviction_generation = 'replacement', status = 'running' WHERE id = 'ws-a'").run();
+          sqlite.prepare("UPDATE agent_sessions SET status = 'running' WHERE id = 'agent-a'").run();
+          sqlite.prepare("UPDATE tasks SET status = 'in_progress', execution_step = 'running' WHERE id = 'task-a'").run();
+          projectData.set('chat-a', { status: 'active' });
+        };
+        mocks.stopWorkspaceOnNode.mockImplementationOnce(async (_node, _workspace, _env, _user, options) => {
+          expect(options.expectedEvictionGeneration).toBe('original');
+          if (boundary === 'before_dispatch') replaceRuntime();
+          await options.beforeExternalMutation();
+          if (boundary === 'node_generation_check') {
+            replaceRuntime();
+            throw new NodeAgentHttpError(409, '{"error":"workspace eviction generation changed"}');
+          }
+          remoteStops++;
+          if (boundary === 'after_stop') replaceRuntime();
+        });
+        const interleave = boundary === 'before_snapshot_commit'
+          ? interleaveBefore(/^update "session_snapshots" set [\s\S]*"sleeping_at" = \?/i, replaceRuntime)
+          : null;
+
+        if (phase === 'explicit') {
+          await expect(sleepWorkspaceSession(env, { workspaceId: 'ws-a', userId: 'user-1', reason: 'Explicit sleep' }))
+            .rejects.toThrow('runtime identity changed');
+        } else {
+          await sweepAt(tick(phase === 'fallback' ? 3 : 0));
+        }
+        expect(row()).toMatchObject({ sleep_status: 'terminal_failed', sleeping_at: null, sleep_episode_failures: failuresBefore + 1 });
+        expect(fallbackRecord()).toMatchObject({ outcome: 'blocked', blockedReason: 'runtime_changed' });
+        expect(interleave?.fired ?? true).toBe(true);
+        expect(remoteStops).toBe(boundary === 'before_dispatch' || boundary === 'node_generation_check' ? 0 : 1);
+        expect(workspaceStatus()).toBe('running');
+        expect(sqlite.prepare("SELECT status FROM agent_sessions WHERE id = 'agent-a'").get()).toEqual({ status: 'running' });
+        expect(sqlite.prepare("SELECT status, execution_step FROM tasks WHERE id = 'task-a'").get())
+          .toEqual({ status: 'in_progress', execution_step: 'running' });
+        expect(sqlite.prepare("SELECT count(*) AS count FROM task_status_events WHERE to_status = 'sleeping'").get())
+          .toEqual({ count: boundary === 'before_snapshot_commit' ? 1 : 0 });
+        expect(projectData.get('chat-a')?.status).toBe('active');
+        expect(mocks.failSession).not.toHaveBeenCalled();
+        expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
+        expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+        expect(notices.at(-1)?.content).toContain('replacement runtime has been left alone');
+        await sweepAt(tick(phase === 'fallback' ? 4 : 1));
+        expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+        expect(workspaceStatus()).toBe('running');
+      }
+    );
+
+    async function seedStaleStoppingTasks(ids: string[]) {
+      for (const id of ids) seedSession({ id, taskStatus: 'in_progress' });
+      capture = 'complete';
+      mocks.stopWorkspaceOnNode.mockRejectedValue(new Error('stop response lost'));
+      await sweepAt(tick(0));
+      createSchemaTables(sqlite, [observabilitySchema.platformErrors]);
+      const old = new Date(START.getTime() - 25 * 60 * 60 * 1000).toISOString();
+      sqlite.prepare("UPDATE tasks SET started_at = ?, chat_session_id = 'chat-' || substr(id, 6)").run(old);
+      sqlite.prepare('UPDATE workspaces SET created_at = ?').run(old);
+      env.OBSERVABILITY_DATABASE = env.DATABASE;
+      env.KV = { get: async () => null, put: async () => undefined } as unknown as KVNamespace;
+      mocks.stopWorkspaceOnNode.mockResolvedValue(undefined);
+      mocks.stopWorkspaceOnNode.mockClear();
+      vi.setSystemTime(tick(10));
+    }
+
+    it('caps final convergence attempts per stuck sweep and leaves overflow to the next owner', async () => {
+      await seedStaleStoppingTasks(['a', 'b', 'c', 'd', 'e', 'f']);
+      const result = await recoverStuckTasks(env);
+      expect(result.failedInProgress).toBe(0);
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(5);
+      expect(sqlite.prepare("SELECT count(*) AS count FROM session_snapshots WHERE sleep_status = 'sleeping'").get()).toEqual({ count: 5 });
+      expect(sqlite.prepare("SELECT count(*) AS count FROM session_snapshots WHERE sleep_status = 'stopping'").get()).toEqual({ count: 1 });
+      await sweepAt(tick(10));
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(6);
+    });
+
+    it.each(['missing', 'expired'])('blocks a stale teardown with %s recovery without stopping runtime', async (kind) => {
+      await seedStaleStoppingTasks(['a']);
+      if (kind === 'expired') {
+        sqlite.prepare("UPDATE session_snapshots SET expires_at = ? WHERE chat_session_id = 'chat-a'").run(tick(1).toISOString());
+      } else {
+        sqlite.prepare("UPDATE session_snapshots SET status = 'failed', snapshot_generation = NULL, manifest_r2_key = NULL, manifest_json = NULL, home_r2_key = NULL, wip_r2_key = NULL WHERE chat_session_id = 'chat-a'").run();
+      }
+      await recoverStuckTasks(env);
+      expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+      expect(row()).toMatchObject({ sleep_status: 'terminal_failed', sleeping_at: null });
+      expect(notices.some((notice) => notice.content.includes('cannot'))).toBe(true);
+      expect(workspaceStatus()).toBe('running');
+    });
+
+    it('keeps the existing runaway bound after an unrecoverable stopping episode blocks', async () => {
+      await seedStaleStoppingTasks(['a']);
+      sqlite.prepare("UPDATE session_snapshots SET expires_at = ? WHERE chat_session_id = 'chat-a'").run(tick(1).toISOString());
+      await recoverStuckTasks(env);
+      expect(row()).toMatchObject({ sleep_status: 'terminal_failed' });
+      vi.setSystemTime(tick(11));
+      await recoverStuckTasks(env);
+      expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'task-a'").get()).toEqual({ status: 'failed' });
+      expect(mocks.cleanupTaskRun).toHaveBeenCalled();
+    });
+
+    it('counts a failed final convergence claim once', async () => {
+      await seedStaleStoppingTasks(['a']);
+      const failures = row().sleep_episode_failures;
+      mocks.stopWorkspaceOnNode.mockRejectedValue(new Error('still unreachable'));
+      await recoverStuckTasks(env);
+      expect(row().sleep_episode_failures).toBe((failures ?? 0) + 1);
+      expect(row()).toMatchObject({ sleep_status: 'terminal_failed' });
+    });
+
+    it('shares one teardown claim between concurrent stuck and sleep sweeps', async () => {
+      await seedStaleStoppingTasks(['a']);
+      const background: Promise<unknown>[] = [];
+      await Promise.all([
+        recoverStuckTasks(env),
+        runSessionSleepSweep(env, tick(10), { waitUntil: (promise: Promise<unknown>) => background.push(promise) }),
+      ]);
+      await Promise.all(background);
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+      expect(row()).toMatchObject({ sleep_status: 'sleeping' });
+      expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'task-a'").get()).toEqual({ status: 'sleeping' });
+    });
+
+    it.each(['running', 'stopped'])(
+      'converges a lost stop response after the in-flight window with D1 %s and reaches wake',
+      async (d1Status) => {
+        seedSession({ id: 'a', taskStatus: 'in_progress' });
+        await spendFullBudget();
+        completeGeneration('chat-a', 'ws-a', 'last-complete', 'complete');
+        mocks.stopWorkspaceOnNode.mockImplementationOnce(async () => {
+          if (d1Status === 'stopped') {
+            sqlite.prepare("UPDATE workspaces SET status = 'stopped' WHERE id = 'ws-a'").run();
+            sqlite
+              .prepare("UPDATE agent_sessions SET status = 'stopped' WHERE id = 'agent-a'")
+              .run();
+          }
+          throw new Error('stop response lost after runtime teardown');
+        });
+        await sweepAt(tick(3));
+        expect(row()).toMatchObject({ sleep_status: 'stopping', sleeping_at: null });
+        expect(projectData.get('chat-a')?.status).toBe('sleeping');
+        expect(workspaceStatus()).toBe(d1Status);
+
+        // Runtime teardown happened but its completion response/callback was lost.
+        // Retry crosses the old selection cutoff with D1 still saying running.
+        mocks.stopWorkspaceOnNode.mockRejectedValueOnce(
+          new NodeAgentHttpError(
+            409,
+            '{"message":"Workspace cannot be stopped from current state: stopped"}'
+          )
+        );
+        // The real cron checks stuck tasks before its sleep sweep. Drive that
+        // ordering beyond the runtime ceiling; the pre-verdict converger owns it.
+        createSchemaTables(sqlite, [observabilitySchema.platformErrors]);
+        const old = new Date(START.getTime() - 25 * 60 * 60 * 1000).toISOString();
+        sqlite
+          .prepare(
+            "UPDATE tasks SET started_at = ?, chat_session_id = 'chat-a' WHERE id = 'task-a'"
+          )
+          .run(old);
+        sqlite.prepare("UPDATE workspaces SET created_at = ? WHERE id = 'ws-a'").run(old);
+        env.OBSERVABILITY_DATABASE = env.DATABASE;
+        env.KV = { get: async () => null, put: async () => undefined } as unknown as KVNamespace;
+        vi.setSystemTime(tick(10));
+        const stuck = await recoverStuckTasks(env);
+        expect(stuck.failedInProgress).toBe(0);
+
+        expect(row()).toMatchObject({ sleep_status: 'sleeping', status: 'available' });
+        expect(row().sleeping_at).not.toBeNull();
+        expect(workspaceStatus()).toBe('sleeping');
+        expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'task-a'").get()).toEqual({
+          status: 'sleeping',
+        });
+        expect(projectData.get('chat-a')?.status).toBe('sleeping');
+        expect(mocks.markIdle).toHaveBeenCalledWith('node-1', 'user-1', 2700000);
+        sqlite.exec(`
+        INSERT INTO users (id, name, email, github_id, status) VALUES ('user-1', 'Test', 'test@example.com', 'gh-1', 'active');
+        INSERT INTO credentials (id, user_id, provider, credential_type, credential_kind, is_active, encrypted_token, iv, created_at, updated_at)
+          VALUES ('credential-1', 'user-1', 'hetzner', 'cloud-provider', 'api-key', 1, 'test', 'test', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+        UPDATE projects SET user_id = 'user-1', repository = 'owner/repo', installation_id = 'install-1', default_branch = 'main', default_location = 'nbg1' WHERE id = 'project-1';
+        UPDATE tasks SET chat_session_id = 'chat-a', task_mode = 'conversation', triggered_by = 'mcp', dispatch_depth = 0 WHERE id = 'task-a';
+        UPDATE workspaces SET vm_size = 'small', vm_location = 'nbg1', workspace_profile = 'lightweight' WHERE id = 'ws-a';
+        UPDATE nodes SET vm_size = 'small', vm_location = 'nbg1', cloud_provider = 'hetzner' WHERE id = 'node-1';
+      `);
+        const lifecycle = env.NODE_LIFECYCLE;
+        env.NODE_LIFECYCLE = {
+          ...lifecycle,
+          get: () => ({
+            getWorkspaceDeletionAttemptState: async () => ({ pending: false }),
+            scheduleWorkspaceDeletion: mocks.scheduleWorkspaceDeletion,
+            markIdle: mocks.markIdle,
+          }),
+        } as unknown as Env['NODE_LIFECYCLE'];
+        mocks.startTaskRunnerDO.mockResolvedValue(undefined);
+        expect(await ensureSessionRecovery(env, 'project-1', 'chat-a')).toEqual({
+          status: 'waking',
+          taskId: 'task-a',
+        });
+        expect(mocks.startTaskRunnerDO).toHaveBeenCalledOnce();
+        const restore = await restoreResponse();
+        expect(restore.manifest).toMatchObject({ chatSessionId: 'chat-a', workspaceId: 'ws-a' });
+        await sweepAt(tick(11));
+        expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(2);
+      }
+    );
+
+    it('converges when the VM prepares uploads but its snapshot-complete callback never arrives', async () => {
+      seedSession({ id: 'a', taskStatus: 'in_progress' });
+      await sweepAt(tick(0));
+      completeGeneration('chat-a', 'ws-a', 'last-complete', 'complete');
+      env.SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS = '10';
+      mocks.verifyCallbackToken.mockResolvedValue({
+        workspace: 'ws-a',
+        type: 'callback',
+        scope: 'workspace',
+      });
+      mocks.hibernateAgentSessionOnNode.mockImplementation(async () => {
+        const response = await createRouteTestApp('/api/workspaces', sessionSnapshotRoutes).request(
+          '/api/workspaces/ws-a/session-snapshot/prepare',
+          {
+            method: 'POST',
+            headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chatSessionId: 'chat-a',
+              agentSessionId: 'agent-a',
+              runtime: 'vm',
+            }),
+          },
+          env
+        );
+        expect(response.status).toBe(200);
+        const prepared = (await response.json()) as { generation: string };
+        r2Objects.set(`session-snapshots/chat-a/${prepared.generation}/home.tar`, {
+          size: 4,
+          sha256: HOME_SHA256,
+        });
+        r2Objects.set(`session-snapshots/chat-a/${prepared.generation}/wip.bundle`, {
+          size: 9,
+          sha256: WIP_SHA256,
+        });
+        // Deliberately lose the /complete POST after uploads: the real sweep must
+        // detect the absence, preserve the old generation and exhaust its budget.
+        return { status: 'pending', accepted: true };
+      });
+      for (const index of [1, 2]) {
+        const operation = sweepAt(tick(index));
+        await vi.runAllTimersAsync();
+        await operation;
+      }
+      expect(row()).toMatchObject({
+        snapshot_generation: 'last-complete',
+        capture_generation: null,
+      });
+      await sweepAt(tick(3));
+      expect(row()).toMatchObject({
+        sleep_status: 'sleeping',
+        status: 'available',
+        snapshot_generation: 'last-complete',
+      });
+      expect(projectData.get('chat-a')?.status).toBe('sleeping');
+      expect(workspaceStatus()).toBe('sleeping');
+      const restore = await restoreResponse();
+      expect(restore.available).toBe(true);
+      expect(restore.manifest).toMatchObject({ chatSessionId: 'chat-a', status: 'available' });
+    });
+
+    it('ends an unconfirmed stop visibly blocked within the existing teardown budget', async () => {
+      seedSession({ id: 'a', taskStatus: 'in_progress' });
+      await spendFullBudget();
+      mocks.stopWorkspaceOnNode.mockRejectedValue(new Error('Node Agent request timed out'));
+      await sweepAt(tick(3));
+      await sweepAt(tick(4));
+      expect(row()).toMatchObject({ sleep_status: 'terminal_failed', sleeping_at: null });
+      expect(fallbackRecord()).toMatchObject({
+        outcome: 'blocked',
+        blockedReason: 'teardown_unconfirmed',
+      });
+      expect(notices.at(-1)?.content).toContain('cannot promise a safe wake');
+      expect(mocks.failSession).toHaveBeenCalled();
+      expect(workspaceStatus()).toBe('running');
+      expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'task-a'").get()).toEqual({
+        status: 'in_progress',
+      });
+      expect(await sweepAt(tick(6))).toMatchObject({ selected: 0 });
+    });
+
+    it('does not fail a new sleep episode reopened while the blocked notice is being persisted', async () => {
+      seedSession({ id: 'a', taskStatus: 'in_progress' });
+      await spendFullBudget();
+      mocks.stopWorkspaceOnNode.mockRejectedValue(new Error('runtime stop unavailable'));
+      await sweepAt(tick(3));
+      const persist = mocks.persistMessage.getMockImplementation()!;
+      let reopened = false;
+      mocks.persistMessage.mockImplementation(async (...args) => {
+        const result = await persist(...args);
+        if (!reopened && String(args[4]).includes('cannot promise a safe wake')) {
+          reopened = true;
+          expect(
+            await claimSessionSnapshotSleep(drizzle(env.DATABASE, { schema }), env, {
+              chatSessionId: 'chat-a',
+              claimId: 'new-person-claim',
+              force: true,
+              reopenBlockedEpisode: true,
+            })
+          ).toMatchObject({ status: 'claimed' });
+        }
+        return result;
+      });
+      await sweepAt(tick(4));
+      expect(reopened).toBe(true);
+      expect(row()).toMatchObject({
+        sleep_status: 'preparing',
+        sleep_claim_id: 'new-person-claim',
+        sleep_fallback_json: null,
+      });
+      expect(mocks.failSession).not.toHaveBeenCalled();
+      expect(
+        sqlite.prepare("SELECT status, error_message FROM tasks WHERE id = 'task-a'").get()
+      ).toEqual({ status: 'in_progress', error_message: null });
+    });
+
+    it('retries blocked chat finalization when ProjectData fails after the terminal snapshot CAS', async () => {
+      seedSession({ id: 'a', taskStatus: 'in_progress' });
+      await spendFullBudget();
+      mocks.stopWorkspaceOnNode.mockRejectedValue(new Error('runtime stop unavailable'));
+      mocks.failSession.mockRejectedValueOnce(new Error('ProjectData unavailable'));
+      await sweepAt(tick(3));
+      await sweepAt(tick(4));
+      expect(row()).toMatchObject({ sleep_status: 'terminal_failed' });
+      expect(row().sleep_after).not.toBeNull();
+      expect(projectData.get('chat-a')?.status).toBe('sleeping');
+      const stops = mocks.stopWorkspaceOnNode.mock.calls.length;
+      mocks.failSession.mockImplementation(async (_env, _project, chatId) => {
+        projectData.get(chatId)!.status = 'failed';
+        return true;
+      });
+      await sweepAt(tick(5));
+      expect(row()).toMatchObject({ sleep_status: 'terminal_failed', sleep_after: null });
+      expect(projectData.get('chat-a')?.status).toBe('failed');
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(stops);
+      expect(
+        notices.filter((notice) => notice.content.includes('cannot promise a safe wake'))
+      ).toHaveLength(1);
+      expect(await sweepAt(tick(6))).toMatchObject({ selected: 0 });
+    });
+
+    it.each([
+      [409, 'Workspace cannot be stopped from current state: stopping'],
+      [409, 'Workspace cannot be stopped from current state: error'],
+      [500, 'Workspace cannot be stopped from current state: stopped'],
+      [409, 'Workspace cannot be stopped from current state: stopped_extra'],
+    ])('rejects non-confirming stop response %s %s', async (status, message) => {
+      seedSession({ id: 'a' });
+      await spendFullBudget();
+      mocks.stopWorkspaceOnNode.mockRejectedValueOnce(
+        new NodeAgentHttpError(status, JSON.stringify({ message }))
+      );
+      await sweepAt(tick(3));
+      expect(row()).toMatchObject({ sleep_status: 'stopping', sleeping_at: null });
+      expect(workspaceStatus()).toBe('running');
+    });
+
     it('rolls a crashed fallback teardown forward after a restart', async () => {
       seedSession({ id: 'a' });
       await spendFullBudget();
@@ -1041,7 +1435,8 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
         'node-1',
         'ws-a',
         expect.anything(),
-        'user-1'
+        'user-1',
+        expect.objectContaining({ expectedEvictionGeneration: '', beforeExternalMutation: expect.any(Function) })
       );
       expect(workspaceStatus('b')).toBe('running');
       expect(mocks.markIdle).not.toHaveBeenCalled();

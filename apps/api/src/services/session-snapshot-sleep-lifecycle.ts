@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, ne, or, type SQL,sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -72,6 +72,7 @@ export async function deferSessionSnapshotStopping(
     .set({
       sleepAfter: new Date(now.getTime() + retryDelayMs).toISOString(),
       sleepError: sessionLifecycleError(env, error),
+      sleepEpisodeFailures: sql`COALESCE(${schema.sessionSnapshots.sleepEpisodeFailures}, 0) + 1`,
       sleepClaimedAt: now.toISOString(),
       updatedAt: now.toISOString(),
     })
@@ -79,6 +80,7 @@ export async function deferSessionSnapshotStopping(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
         eq(schema.sessionSnapshots.sleepStatus, 'stopping'),
+        isNull(schema.sessionSnapshots.sleepAfter),
         claimId === null
           ? isNull(schema.sessionSnapshots.sleepClaimId)
           : eq(schema.sessionSnapshots.sleepClaimId, claimId)
@@ -182,7 +184,8 @@ async function markSessionSnapshotSleepingWithConfig(
   claimId?: string,
   sleepWarning?: string | null,
   expectedGeneration?: string,
-  fallback = false
+  fallback = false,
+  runtimeGuard?: SQL
 ): Promise<boolean> {
   const ttlDays = env ? getSessionSnapshotConfig(env).ttlDays : DEFAULT_SESSION_SNAPSHOT_TTL_DAYS;
   const warning = sleepWarning && env ? sessionLifecycleError(env, sleepWarning) : null;
@@ -210,6 +213,7 @@ async function markSessionSnapshotSleepingWithConfig(
     .where(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
+        ...(runtimeGuard ? [runtimeGuard] : []),
         ...(expectedGeneration
           ? [
               eq(schema.sessionSnapshots.snapshotGeneration, expectedGeneration),
@@ -252,7 +256,7 @@ export async function finalizeSessionSnapshotSleeping(
   chatSessionId: string,
   claimId: string,
   now = new Date(),
-  options: { sleepWarning?: string | null; expectedGeneration?: string; fallback?: boolean } = {}
+  options: { sleepWarning?: string | null; expectedGeneration?: string; fallback?: boolean; runtimeGuard?: SQL } = {}
 ): Promise<boolean> {
   const finalized = await markSessionSnapshotSleepingWithConfig(
     db,
@@ -262,7 +266,8 @@ export async function finalizeSessionSnapshotSleeping(
     claimId,
     options.sleepWarning,
     options.expectedGeneration,
-    options.fallback ?? false
+    options.fallback ?? false,
+    options.runtimeGuard
   );
   if (finalized) {
     // Every sleep finalizes here — the sleep sweep and an Instant container's own

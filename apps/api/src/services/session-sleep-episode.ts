@@ -113,6 +113,8 @@ export function sessionSleepEpisodeTrigger(
 
 /** Why a bounded episode could not release compute through the fallback. */
 export type SessionSleepBlockedReason =
+  | 'teardown_unconfirmed'
+  | 'runtime_changed'
   /** No completed snapshot generation holds a Git commit. */
   | 'no_git_baseline'
   /** A commit is recorded but its objects were not retained (local-only hash). */
@@ -143,6 +145,8 @@ const FallbackRecordSchema = v.object({
   trigger: v.picklist(['attempt_budget', 'elapsed_budget', 'retry_ceiling']),
   blockedReason: v.nullable(
     v.picklist([
+      'teardown_unconfirmed',
+      'runtime_changed',
       'no_git_baseline',
       'commit_objects_unavailable',
       'recovery_point_expired',

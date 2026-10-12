@@ -1,5 +1,6 @@
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
+import { stoppingTaskSleepOwnsCleanup } from '../../services/session-sleep-task-convergence';
 import {
   isSupersededTerminalReason,
   livenessEvidenceLogFields,
@@ -195,6 +196,18 @@ export async function terminalizeIdleTaskInD1(
     return { outcome: 'rejected', taskId: task.id, liveness: null, errorMessage: null };
   }
   if (!ACTIVE_TASK_STATUSES.includes(task.status as (typeof ACTIVE_TASK_STATUSES)[number])) {
+    return { outcome: 'not_active', taskId: task.id, liveness: null, errorMessage: null };
+  }
+
+  // A claimed sleep has its own bounded converger. Retire this obsolete cleanup
+  // schedule instead of racing it to fail the task or holding a self-RPC open.
+  if (
+    await stoppingTaskSleepOwnsCleanup(env.DATABASE, {
+      projectId: reporter.projectId,
+      chatSessionId: reporter.sessionId,
+      workspaceId: reporter.workspaceId,
+    })
+  ) {
     return { outcome: 'not_active', taskId: task.id, liveness: null, errorMessage: null };
   }
 

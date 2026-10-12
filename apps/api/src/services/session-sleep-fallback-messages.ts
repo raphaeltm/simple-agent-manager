@@ -90,6 +90,8 @@ export function sessionSleepFallbackNotice(record: SessionSleepFallbackRecord): 
 }
 
 const BLOCKED_REASON_TEXT: Record<SessionSleepBlockedReason, string> = {
+  teardown_unconfirmed: 'the workspace stop or its recovery point could not be confirmed',
+  runtime_changed: 'the workspace runtime changed during teardown',
   no_git_baseline: 'no saved snapshot records which Git commit the workspace is on',
   commit_objects_unavailable:
     'the saved Git commit was not kept with its objects, so a new workspace may not be able to restore it',
@@ -104,6 +106,19 @@ export function sessionSleepBlockedNotice(
   runtime: string
 ): string {
   const reason = record.blockedReason ?? 'retry_ceiling';
+  if (reason === 'runtime_changed') {
+    return 'SAM blocked the old sleep attempt because this workspace runtime changed. ' +
+      'The replacement runtime has been left alone, and the previous checkpoint is retained. ' +
+      'Check the current workspace before sleeping or restarting the session again.';
+  }
+  if (reason === 'teardown_unconfirmed') {
+    return [
+      'SAM could not finish putting this session to sleep.',
+      `The workspace stop or recovery point could not be confirmed within the sleep budget.${lastErrorClause(record)}`,
+      'Automatic sleep retries have stopped. The conversation and saved snapshot artifacts are retained, but this session cannot promise a safe wake.',
+      'Check the workspace from the Workspaces page before restarting it. Commit and push any work still present there. Contact your SAM administrator if the workspace is unavailable.',
+    ].join('\n\n');
+  }
   const keepsRunning =
     runtime === 'cf-container'
       ? 'This Instant workspace keeps running.'

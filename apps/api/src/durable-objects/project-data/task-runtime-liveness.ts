@@ -10,6 +10,7 @@ import {
   sessionRecoveryAttemptDecayMs,
   sessionRecoveryMaxAttempts,
 } from '../../services/session-snapshot-recovery-budget';
+import { inspectTaskAgentHost } from '../../services/task-agent-host-probe';
 import {
   classifyTaskRuntimeLiveness,
   isSessionResumable,
@@ -331,13 +332,15 @@ async function classifyLocalTaskRuntime(
       limit,
       nowMs,
     });
-    return finish({
-      ...livenessSignals,
-      acpProbeOutcome: 'ok',
-      acpSessions: probe.sessions,
-      sessionWork: probe.sessionWork,
-      workEvidence: probe.workEvidence,
-    });
+    return finish(
+      await inspectTaskAgentHost(env as unknown as WorkerEnv, {
+        ...livenessSignals,
+        acpProbeOutcome: 'ok',
+        acpSessions: probe.sessions,
+        sessionWork: probe.sessionWork,
+        workEvidence: probe.workEvidence,
+      })
+    );
   } catch (err) {
     log.warn('local_acp_read_failed', {
       projectId: task.projectId,

@@ -6,19 +6,21 @@
  * workspace through the same idempotent lifecycle. Split out of
  * `session-sleep-execution.ts` (`.claude/rules/18-file-size-limits.md`).
  */
-import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, exists, inArray, isNull, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import { stopWorkspaceOnNode } from './node-agent';
+import { NodeAgentHttpError, stopWorkspaceOnNode } from './node-agent';
 import * as projectDataService from './project-data';
+import { finishConfirmedSleepAttention } from './session-sleep-attention';
 import {
   finishSleepingWorkspaceComputeCleanup,
   markWorkspaceNodeWarmIfEmpty,
 } from './session-sleep-cleanup';
+import { sessionSleepRuntimeChanged,SessionSleepRuntimeChangedError } from './session-sleep-runtime-identity';
 import {
   finalizeSessionSnapshotSleeping,
   getRestorableSessionSnapshot,
@@ -42,6 +44,7 @@ export async function loadSleepWorkspace(env: Env, workspaceId: string, userId: 
       projectId: schema.workspaces.projectId,
       chatSessionId: schema.workspaces.chatSessionId,
       status: schema.workspaces.status,
+      evictionGeneration: schema.workspaces.evictionGeneration,
       nodeId: schema.workspaces.nodeId,
       nodeRuntime: schema.nodes.runtime,
       nodeRole: schema.nodes.nodeRole,
@@ -90,6 +93,44 @@ export async function loadSleepWorkspace(env: Env, workspaceId: string, userId: 
 }
 
 export type SleepWorkspace = Awaited<ReturnType<typeof loadSleepWorkspace>>;
+
+function sleepRuntimeIdentity(workspace: SleepWorkspace) {
+  return and(
+    eq(schema.workspaces.id, workspace.id),
+    eq(schema.workspaces.userId, workspace.userId),
+    eq(schema.workspaces.projectId, workspace.projectId),
+    eq(schema.workspaces.nodeId, workspace.nodeId),
+    eq(schema.workspaces.chatSessionId, workspace.chatSessionId),
+    workspace.evictionGeneration == null
+      ? isNull(schema.workspaces.evictionGeneration)
+      : eq(schema.workspaces.evictionGeneration, workspace.evictionGeneration)
+  );
+}
+
+async function assertSleepRuntimeIdentity(env: Env, workspace: SleepWorkspace): Promise<void> {
+  const current = await drizzle(env.DATABASE, { schema })
+    .select({ id: schema.workspaces.id })
+    .from(schema.workspaces)
+    .where(and(sleepRuntimeIdentity(workspace),
+      inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping', 'stopped'])))
+    .get();
+  if (!current) throw new SessionSleepRuntimeChangedError();
+}
+
+function workspaceStopAlreadyConfirmed(error: unknown): boolean {
+  if (!(error instanceof NodeAgentHttpError) || error.statusCode !== 409) return false;
+  try {
+    const body: unknown = JSON.parse(error.responseBody);
+    return (
+      !!body &&
+      typeof body === 'object' &&
+      (body as { message?: unknown }).message ===
+        'Workspace cannot be stopped from current state: stopped'
+    );
+  } catch {
+    return false;
+  }
+}
 
 /** The workspace's latest agent session that a sleep can snapshot and stop. */
 export async function loadResumableAgentSession(
@@ -159,6 +200,7 @@ export async function ensureProjectDataSleeping(
     workspace.projectId,
     workspace.chatSessionId
   );
+  await assertSleepRuntimeIdentity(env, workspace);
   if (!chatSession) throw new Error('ProjectData chat session is missing');
   if (chatSession.status === 'sleeping') return;
   const slept = await projectDataService.sleepSession(
@@ -183,9 +225,10 @@ export async function completeSleepTeardown(
   agentSession: { id: string },
   claimId: string,
   verified: Awaited<ReturnType<typeof getRestorableSessionSnapshot>>,
-  options: { fallback?: boolean } = {}
+  options: { fallback?: boolean; requestTimeoutMs?: number } = {}
 ) {
   const db = drizzle(env.DATABASE, { schema });
+  await assertSleepRuntimeIdentity(env, workspace);
   await ensureProjectDataSleeping(env, workspace);
 
   // `stopping` is durable before this I/O. An interrupted or ambiguous stop
@@ -193,23 +236,37 @@ export async function completeSleepTeardown(
   if (workspace.nodeRuntime === 'cf-container') {
     await sleepVmAgentContainer(env, workspace.nodeId);
   } else {
-    await stopWorkspaceOnNode(workspace.nodeId, workspace.id, env, workspace.userId);
+    try {
+      await stopWorkspaceOnNode(workspace.nodeId, workspace.id, env, workspace.userId, {
+        expectedEvictionGeneration: workspace.evictionGeneration ?? '',
+        requestTimeoutMs: options.requestTimeoutMs,
+        beforeExternalMutation: () => assertSleepRuntimeIdentity(env, workspace),
+      });
+    } catch (error) {
+      // A lost stop response is retried against the same workspace. Only the
+      // runtime's exact terminal-state response confirms that retry succeeded.
+      if (sessionSleepRuntimeChanged(error)) throw new SessionSleepRuntimeChangedError();
+      if (!workspaceStopAlreadyConfirmed(error)) throw error;
+    }
   }
 
   const now = new Date().toISOString();
+  const confirmedRuntime = exists(db.select({ id: schema.workspaces.id })
+    .from(schema.workspaces)
+    .where(and(sleepRuntimeIdentity(workspace), eq(schema.workspaces.status, 'sleeping'))));
   const workspaceSleeping = db
     .update(schema.workspaces)
     .set({ status: 'sleeping', errorMessage: null, updatedAt: now })
     .where(
       and(
-        eq(schema.workspaces.id, workspace.id),
-        inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping'])
+        sleepRuntimeIdentity(workspace),
+        inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping', 'stopped'])
       )
     );
   const agentSleeping = db
     .update(schema.agentSessions)
     .set({ status: 'sleeping', errorMessage: null, updatedAt: now })
-    .where(eq(schema.agentSessions.id, agentSession.id));
+    .where(and(eq(schema.agentSessions.id, agentSession.id), confirmedRuntime));
   // Instant wakes its existing runtime in place and keeps the task active.
   // Only VM recovery reactivates a sleeping task through TaskRunner.
   const taskSleeping =
@@ -225,6 +282,7 @@ export async function completeSleepTeardown(
           .where(
             and(
               eq(schema.tasks.id, workspace.taskId),
+              confirmedRuntime,
               inArray(schema.tasks.status, ['queued', 'delegated', 'in_progress', 'sleeping'])
             )
           )
@@ -250,11 +308,13 @@ export async function completeSleepTeardown(
             .where(
               and(
                 eq(schema.tasks.id, workspace.taskId),
+                confirmedRuntime,
                 inArray(schema.tasks.status, ['queued', 'delegated', 'in_progress'])
               )
             )
         )
       : null;
+  let workspaceChanges: number;
   if (workspace.nodeRuntime === 'cf-container') {
     const nodeSleeping = db
       .update(schema.nodes)
@@ -264,13 +324,17 @@ export async function completeSleepTeardown(
         errorMessage: null,
         updatedAt: now,
       })
-      .where(eq(schema.nodes.id, workspace.nodeId));
-    await db.batch([workspaceSleeping, agentSleeping, nodeSleeping]);
+      .where(and(eq(schema.nodes.id, workspace.nodeId), confirmedRuntime));
+    const result = await db.batch([workspaceSleeping, agentSleeping, nodeSleeping]);
+    workspaceChanges = result[0].meta.changes ?? 0;
   } else if (taskSleeping && taskSleepEvent) {
-    await db.batch([workspaceSleeping, agentSleeping, taskSleepEvent, taskSleeping]);
+    const result = await db.batch([workspaceSleeping, agentSleeping, taskSleepEvent, taskSleeping]);
+    workspaceChanges = result[0].meta.changes ?? 0;
   } else {
-    await db.batch([workspaceSleeping, agentSleeping]);
+    const result = await db.batch([workspaceSleeping, agentSleeping]);
+    workspaceChanges = result[0].meta.changes ?? 0;
   }
+  if (!workspaceChanges) throw new SessionSleepRuntimeChangedError();
   const sleepWarning = options.fallback
     ? `Workspace slept through the bounded sleep fallback (transcript and Git recovery point, snapshot ${verified?.status ?? 'unknown'}/${verified?.degradation ?? 'unknown'})`
     : verified?.status === 'degraded'
@@ -286,9 +350,11 @@ export async function completeSleepTeardown(
       sleepWarning,
       expectedGeneration: verified?.snapshotGeneration ?? undefined,
       fallback: options.fallback ?? false,
+      runtimeGuard: confirmedRuntime,
     }
   );
   if (!finalized) {
+    await assertSleepRuntimeIdentity(env, workspace);
     const snapshot = await getRestorableSessionSnapshot(db, workspace.chatSessionId);
     if (!snapshot?.sleepingAt || snapshot.sleepStatus !== 'sleeping') {
       throw new Error('Verified snapshot lost availability before sleep commit');
@@ -298,6 +364,12 @@ export async function completeSleepTeardown(
   if (!completed?.sleepingAt || completed.sleepStatus !== 'sleeping') {
     throw new Error('Workspace sleep finalization was not durably verified');
   }
+  await finishConfirmedSleepAttention(
+    env,
+    workspace.projectId,
+    workspace.chatSessionId,
+    workspace.id
+  );
   return completed;
 }
 
@@ -314,6 +386,12 @@ export async function finishAlreadySleeping(
     snapshot.sleepingAt
   ) {
     await projectDataService.sleepSession(env, workspace.projectId, workspace.chatSessionId);
+    await finishConfirmedSleepAttention(
+      env,
+      workspace.projectId,
+      workspace.chatSessionId,
+      workspace.id
+    );
     await scheduleSleepingWorkspaceDeletion(
       env,
       workspace,

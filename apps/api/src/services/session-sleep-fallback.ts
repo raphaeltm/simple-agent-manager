@@ -63,6 +63,7 @@ import {
   revertSessionSnapshotFallbackStopping,
 } from './session-sleep-fallback-state';
 import { assessSessionSleepRecoveryPoint } from './session-sleep-recovery-point';
+import { sessionSleepRuntimeChanged } from './session-sleep-runtime-identity';
 import {
   completeSleepTeardown,
   finishSleepCleanup,
@@ -84,6 +85,8 @@ export type SessionSleepFallbackOutcome =
   | 'slept'
   /** The episode ended without a recovery point; the runtime keeps running. */
   | 'blocked'
+  /** The old intent was blocked; the replacement runtime must be left alone. */
+  | 'superseded'
   /** A transient failure, counted against the episode; retried by a later sweep. */
   | 'retry'
   /** The session is not idle; nothing was spent. */
@@ -411,6 +414,11 @@ export async function runSessionSleepFallback(
         error: sessionLifecycleError(env, persistenceError),
       });
     });
+    if (pointOfNoReturn && sessionSleepRuntimeChanged(error)) {
+      const { settleUnconfirmedSleepStop } = await import('./session-sleep-stopping-failure');
+      await settleUnconfirmedSleepStop(env, chatSessionId, claimId, error, now);
+      return 'superseded';
+    }
     log.warn('session_sleep.fallback_failed', {
       chatSessionId,
       workspaceId: workspace.id,

@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, lte, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -10,11 +10,13 @@ import {
   finishSleepingWorkspaceComputeCleanup,
   markWorkspaceNodeWarmIfEmpty,
 } from '../services/session-sleep';
+import { finishConfirmedSleepAttention } from '../services/session-sleep-attention';
 import { chatSessionTaskOwnerJoins } from '../services/session-sleep-task-owner';
 import { verifySessionSnapshotArtifactsForSleep } from '../services/session-snapshot-artifacts';
 import { getRestorableSessionSnapshot } from '../services/session-snapshot-persistence';
 import { markSessionSnapshotSleeping } from '../services/session-snapshot-sleep-lifecycle';
 import { sessionSleepInFlightMaxAgeMs } from '../services/session-snapshot-sleep-predicate';
+import { repairConfirmedSleepAttention } from './session-sleep-attention-repair';
 
 export const DEFAULT_SESSION_SLEEP_IN_FLIGHT_REPAIR_BATCH_SIZE = 25;
 export const MAX_SESSION_SLEEP_IN_FLIGHT_REPAIR_BATCH_SIZE = 100;
@@ -71,6 +73,7 @@ export async function runSessionSleepLifecycleRepair(
   env: Env,
   now = new Date()
 ): Promise<SessionSleepLifecycleRepairStats> {
+  await repairConfirmedSleepAttention(env, now, repairBatchSize(env));
   const db = drizzle(env.DATABASE, { schema });
   const cutoff = new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString();
   const snapshotChatOwner = chatSessionTaskOwnerJoins(schema.sessionSnapshots.chatSessionId);
@@ -225,7 +228,26 @@ export async function runSessionSleepLifecycleRepair(
             updatedAt: nowIso,
           })
           .where(eq(schema.agentSessions.workspaceId, row.workspaceId)),
+        ...(row.taskId && !terminalFailure && row.runtime !== 'cf-container'
+          ? [
+              db
+                .update(schema.tasks)
+                .set({
+                  status: 'sleeping',
+                  executionStep: null,
+                  errorMessage: null,
+                  updatedAt: nowIso,
+                })
+                .where(
+                  and(
+                    eq(schema.tasks.id, row.taskId),
+                    inArray(schema.tasks.status, ['queued', 'delegated', 'in_progress', 'sleeping'])
+                  )
+                ),
+            ]
+          : []),
       ]);
+      if (!terminalFailure) await finishConfirmedSleepAttention(env, row.projectId, row.chatSessionId, row.workspaceId);
       await finishSleepingWorkspaceComputeCleanup(db, env, {
         workspaceId: row.workspaceId,
         taskId: row.taskId ?? null,

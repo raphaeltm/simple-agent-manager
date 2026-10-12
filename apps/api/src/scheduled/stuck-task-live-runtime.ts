@@ -91,7 +91,9 @@ function formatAge(ms: number | null): string {
 function needsSleepSummary(liveness: TaskRuntimeLiveness): boolean {
   const workState = liveness.evidence?.workState ?? null;
   return (
-    liveness.reason === 'task_acp_session_live' && (workState === 'idle' || workState === null)
+    (liveness.reason === 'task_acp_session_live' ||
+      liveness.reason === 'task_agent_host_running') &&
+    (workState === 'idle' || workState === null)
   );
 }
 
@@ -113,7 +115,7 @@ function describeSleep(sleep: SleepSummary | null): string {
 
 function describeBasis(liveness: TaskRuntimeLiveness): { text: string; level: 'info' | 'warn' } {
   const evidence = liveness.evidence;
-  const heartbeat = `ACP heartbeat ${formatAge(evidence?.acpHeartbeatAgeMs ?? null)} ago`;
+  const heartbeat = `${liveness.reason === 'task_agent_host_running' ? 'host confirmed running; ' : ''}ACP heartbeat ${formatAge(evidence?.acpHeartbeatAgeMs ?? null)} ago`;
   switch (liveness.reason) {
     case 'task_prompt_turn_active':
       return {
@@ -129,6 +131,7 @@ function describeBasis(liveness: TaskRuntimeLiveness): { text: string; level: 'i
       };
     case 'cf_container_active_work':
       return { level: 'info', text: 'its Instant container reports active work.' };
+    case 'task_agent_host_running':
     case 'task_acp_session_live':
       break;
     default:
@@ -222,17 +225,12 @@ async function loadSleepSummary(
   };
 }
 
-/** Escape LIKE wildcards so the key matches literally (keys contain `_`). */
-function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
-}
-
 async function hasDurableRecord(env: Env, taskId: string, key: string): Promise<boolean> {
   try {
     const existing = await env.OBSERVABILITY_DATABASE.prepare(
-      `SELECT id FROM platform_errors WHERE task_id = ? AND context LIKE ? ESCAPE '\\' LIMIT 1`
+      `SELECT id FROM platform_errors WHERE task_id = ? AND instr(context, ?) > 0 LIMIT 1`
     )
-      .bind(taskId, `%"preservationKey":"${escapeLike(key)}"%`)
+      .bind(taskId, `"preservationKey":${JSON.stringify(key)}`)
       .first();
     return existing !== null;
   } catch (err) {

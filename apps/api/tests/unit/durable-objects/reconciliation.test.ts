@@ -33,6 +33,7 @@ const nodeAgentMocks = vi.hoisted(() => ({
   runtimeIdentity: 'runtime-1',
   nodeAgentRequest: vi.fn(),
   sendPromptToAgentOnNode: vi.fn(),
+  listAgentSessionsOnNode: vi.fn(),
   cancelAgentSessionOnNode: vi.fn().mockResolvedValue({ success: true, status: 200 }),
 }));
 vi.mock('../../../src/services/node-agent', async (importOriginal) => ({
@@ -40,6 +41,7 @@ vi.mock('../../../src/services/node-agent', async (importOriginal) => ({
   nodeAgentRequest: nodeAgentMocks.nodeAgentRequest,
   sendPromptToAgentOnNode: nodeAgentMocks.sendPromptToAgentOnNode,
   cancelAgentSessionOnNode: nodeAgentMocks.cancelAgentSessionOnNode,
+  listAgentSessionsOnNode: nodeAgentMocks.listAgentSessionsOnNode,
 }));
 vi.mock('../../../src/services/project-data', () => ({ reconcileTaskWaits: vi.fn() }));
 vi.mock('../../../src/services/vm-admission-control', () => ({
@@ -298,6 +300,11 @@ describe('Task Reconciliation Module', () => {
         )
       );
     nodeAgentMocks.cancelAgentSessionOnNode.mockResolvedValue({ success: true, status: 200 });
+    nodeAgentMocks.listAgentSessionsOnNode.mockReset().mockImplementation(async (_nodeId: string, workspaceId: string) => ({
+      sessions: db.prepare('SELECT id, workspace_id AS workspaceId, status FROM acp_sessions WHERE workspace_id = ?')
+        .all(workspaceId).map((session) => ({ ...(session as object), hostStatus: 'ready' })),
+    }));
+
   });
 
   afterEach(() => {

@@ -1991,6 +1991,41 @@ export class ProjectData extends DurableObject<Env> {
     return result;
   }
 
+  async finishBlockedSessionSleep(input: {
+    snapshotId: string;
+    chatSessionId: string;
+    workspaceId: string;
+    recordJson: string;
+  }): Promise<boolean> {
+    const { finishBlockedSessionSleep } = await import('./session-sleep-blocked-finalization');
+    return finishBlockedSessionSleep(this.sql, this.env, this.getProjectId(), input, () =>
+      this.failSession(
+        input.chatSessionId,
+        'Sleep blocked: workspace stop or recovery point could not be confirmed. Check the workspace before restarting.',
+        { workspaceId: input.workspaceId }
+      )
+    );
+  }
+
+  async finishConfirmedSessionSleep(sessionId: string, workspaceId: string): Promise<boolean> {
+    const { finishConfirmedSessionSleep } = await import('./idle-cleanup-attention');
+    const result = await finishConfirmedSessionSleep(
+      this.sql, this.env, this.getProjectId(), sessionId, workspaceId
+    );
+    if (result.applied) {
+      await this.recalculateAlarm();
+      this.scheduleSummarySync();
+      if (result.markersResolved) {
+        this.broadcastEvent('attention.resolved', {
+          sessionId,
+          count: result.markersResolved,
+          reason: 'sleep_confirmed',
+        });
+      }
+    }
+    return result.applied;
+  }
+
   async cancelIdleCleanup(sessionId: string): Promise<void> {
     idleCleanup.cancelIdleCleanup(this.sql, sessionId);
     await this.recalculateAlarm();

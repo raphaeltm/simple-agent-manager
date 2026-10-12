@@ -255,8 +255,27 @@ export function classifyTaskRuntimeLiveness(
     });
   }
 
+  if (signals.agentHost?.outcome === 'stopped') {
+    return conclusiveDeath(
+      signals,
+      workspace,
+      'task_agent_host_stopped',
+      signals.agentHost.sessionId
+    );
+  }
+  if (signals.agentHost?.outcome === 'unknown') {
+    return result(workspace, {
+      live: false,
+      conclusive: false,
+      reason: 'task_agent_host_unknown',
+      activeAcpSessionId: null,
+    });
+  }
+
   if (
     signals.sessionWork?.active &&
+    (signals.agentHost?.outcome !== 'running' ||
+      signals.sessionWork.activeAcpSessionId === signals.agentHost.sessionId) &&
     (!signals.expectedAcpSessionId ||
       signals.sessionWork.activeAcpSessionId === signals.expectedAcpSessionId)
   ) {
@@ -272,14 +291,17 @@ export function classifyTaskRuntimeLiveness(
     });
   }
 
-  // Process liveness, not work: the task's own agent is alive and reporting.
-  // That proves the runtime is not dead, which is the only question asked here.
+  // The condition is this task's host running. Node fan-out refreshes the ACP
+  // heartbeat even when its host stopped; the runtime inspection above is the
+  // authority when these signals diverge.
   // Whether the agent is working or idle is in `evidence.workState`.
   const active = signals.acpSessions.find((session) => {
     if (signals.expectedAcpSessionId && session.id !== signals.expectedAcpSessionId) return false;
     if (!ACTIVE_ACP_STATUSES.has(session.status) || session.workspaceId !== workspace.id) {
       return false;
     }
+    if (signals.agentHost?.outcome === 'running')
+      return signals.agentHost.sessionId === session.id;
     const heartbeatAt = acpSessionHeartbeatAt(session);
     return Number.isFinite(heartbeatAt) && signals.nowMs - heartbeatAt <= signals.heartbeatStaleMs;
   });
@@ -287,7 +309,10 @@ export function classifyTaskRuntimeLiveness(
     return result(workspace, {
       live: true,
       conclusive: true,
-      reason: 'task_acp_session_live',
+      reason:
+        signals.agentHost?.outcome === 'running'
+          ? 'task_agent_host_running'
+          : 'task_acp_session_live',
       activeAcpSessionId: active.id,
       evidence: describeTaskRuntimeLivenessEvidence(signals, active.id),
     });

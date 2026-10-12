@@ -75,6 +75,15 @@ const { projectDataMocks } = vi.hoisted(() => ({
   },
 }));
 vi.mock('../../src/services/project-data', () => projectDataMocks);
+vi.mock('../../src/services/node-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/node-agent')>()),
+  listAgentSessionsOnNode: vi.fn(async (_nodeId: string, workspaceId: string) => {
+    const probe = await projectDataMocks.getTaskAcpLivenessSignals.mock.results.at(-1)?.value;
+    return { sessions: (probe?.sessions ?? []).filter((session: { workspaceId: string }) => session.workspaceId === workspaceId)
+      .map((session: { id: string; workspaceId: string; status: string }) => ({ ...session, hostStatus: 'ready' })) };
+  }),
+}));
+
 
 // Mock trigger execution sync
 const { syncTriggerExecutionMock } = vi.hoisted(() => ({
@@ -232,7 +241,12 @@ function createMockEnv(
       }
       for (const [substring, config] of prepareResponses.entries()) {
         if (sql.includes(substring)) {
-          return mockPreparedStatement(config.results, config.changes ?? 1);
+          return mockPreparedStatement(
+            sql.includes('w.chat_session_id')
+              ? config.results.map((row) => ({ user_id: 'user-1', ...(row as object) }))
+              : config.results,
+            config.changes ?? 1
+          );
         }
       }
       return mockPreparedStatement([]);
@@ -922,12 +936,16 @@ describe('recoverStuckTasks', () => {
         sessionWork: null,
       });
 
+      const { listAgentSessionsOnNode } = await import('../../src/services/node-agent');
+      vi.mocked(listAgentSessionsOnNode)
+        .mockRejectedValueOnce(new Error('Host inspection unavailable'))
+        .mockRejectedValueOnce(new Error('Host inspection unavailable'));
       const diagnostics = await getTaskReconciliationDiagnostics(env, 'task-stale-projectdata-acp');
       expect(diagnostics?.decision).toBe('preserve_inconclusive_runtime');
       expect(diagnostics?.liveness).toMatchObject({
         live: false,
         conclusive: false,
-        reason: 'task_acp_session_stale',
+        reason: 'task_agent_host_unknown',
         workspaceStatus: 'running',
         nodeId: 'node-1',
       });

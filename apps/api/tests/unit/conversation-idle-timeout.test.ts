@@ -2,6 +2,12 @@ import { WORKSPACE_IDLE_CHECK_INTERVAL_MS } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const hostListingMock = vi.hoisted(() => vi.fn());
+vi.mock('../../src/services/node-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/node-agent')>()),
+  listAgentSessionsOnNode: hostListingMock,
+}));
+
 const loggerMocks = vi.hoisted(() => ({
   info: vi.fn(),
   warn: vi.fn(),
@@ -169,6 +175,10 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
     d1Db = new Database(':memory:');
     sql = createSqlStorage(projectDb);
     runMigrations(sql);
+    hostListingMock.mockReset().mockImplementation(async (_nodeId: string, workspaceId: string) => ({
+      sessions: projectDb.prepare('SELECT id, workspace_id AS workspaceId, status FROM acp_sessions WHERE workspace_id = ?')
+        .all(workspaceId).map((session) => ({ ...(session as object), hostStatus: 'ready' })),
+    }));
     d1Db.exec(D1_SCHEMA);
     d1Db
       .prepare('INSERT INTO projects (id, workspace_idle_timeout_ms) VALUES (?, NULL)')
@@ -1261,7 +1271,7 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
     expect(local).toMatchObject({
       live: true,
       conclusive: true,
-      reason: 'task_acp_session_live',
+      reason: 'task_agent_host_running',
       // The fixture has no session_state row, so neither side may claim work.
       evidence: { workState: 'unknown', acpHeartbeatAgeMs: expect.any(Number) },
     });

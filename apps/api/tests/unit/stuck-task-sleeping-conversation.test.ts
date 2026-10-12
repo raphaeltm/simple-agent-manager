@@ -52,6 +52,15 @@ const { getTaskAcpLivenessSignalsMock, containerLifecycleMock } = vi.hoisted(() 
 vi.mock('../../src/services/vm-agent-container', () => ({
   inspectVmAgentContainerLifecycle: containerLifecycleMock,
 }));
+vi.mock('../../src/services/node-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/node-agent')>()),
+  listAgentSessionsOnNode: vi.fn(async (_nodeId: string, workspaceId: string) => {
+    const probe = await getTaskAcpLivenessSignalsMock.mock.results.at(-1)?.value;
+    return { sessions: (probe?.sessions ?? [])
+      .filter((session: { workspaceId: string }) => session.workspaceId === workspaceId)
+      .map((session: object) => ({ ...session, hostStatus: 'ready' })) };
+  }),
+}));
 vi.mock('../../src/services/project-data', () => ({
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
   listSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
@@ -392,12 +401,17 @@ describe('runaway-cost ceiling — a sleeping conversation is not runaway comput
    * (30 min default) no longer preserves, so a wedged capture cannot make a live
    * 25h runtime immortal (`.claude/rules/47`).
    */
-  it('still terminalizes a 25h live runtime whose sleep capture has gone stale', async () => {
+  it('still terminalizes a 25h live runtime after its stale sleep convergence blocks', async () => {
     seedTask({ executionStep: 'running' });
     seedWorkspace({ status: 'running', createdAt: iso(PAST_CEILING) });
     seedNode({ heartbeatAt: iso(-30_000) });
     seedSnapshot({ sleepStatus: 'stopping', sleepingAt: null, sleepClaimedAt: iso(-2 * HOUR) });
 
+    await recoverStuckTasks(env());
+    expect(sqlite.prepare('SELECT sleep_status FROM session_snapshots WHERE chat_session_id = ?').get(CHAT_SESSION_ID))
+      .toEqual({ sleep_status: 'terminal_failed' });
+    // One bounded convergence attempt precedes the verdict; a blocked episode
+    // gains no extra preservation on the next sweep.
     await recoverStuckTasks(env());
 
     expect(taskRow().status).toBe('failed');

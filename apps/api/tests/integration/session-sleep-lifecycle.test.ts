@@ -560,7 +560,8 @@ describe('terminal session sleep lifecycle integration', () => {
       'mixed-vm-node',
       'mixed-vm-workspace',
       env,
-      'user-1'
+      'user-1',
+      expect.objectContaining({ expectedEvictionGeneration: '', beforeExternalMutation: expect.any(Function) })
     );
     expect(mocks.sleepVmAgentContainer).toHaveBeenCalledWith(env, 'mixed-instant-node');
     expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalledWith(

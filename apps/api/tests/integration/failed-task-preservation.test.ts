@@ -58,7 +58,8 @@ vi.mock('../../src/services/nodes', () => ({
   deleteNodeResourcesStrict: vi.fn(),
 }));
 
-vi.mock('../../src/services/node-agent', () => ({
+vi.mock('../../src/services/node-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/node-agent')>()),
   getNodeAgentBackgroundRequestTimeoutMs: () => 5000,
   hibernateAgentSessionOnNode: (...args: unknown[]) => mocks.hibernateAgentSessionOnNode(...args),
   stopWorkspaceOnNode: (...args: unknown[]) => mocks.stopWorkspaceOnNode(...args),

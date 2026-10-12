@@ -41,12 +41,14 @@ import {
 const nodeAgentMocks = vi.hoisted(() => ({
   runtimeIdentity: 'runtime-lifecycle-1',
   nodeAgentRequest: vi.fn(),
+  listAgentSessionsOnNode: vi.fn(),
   sendPromptToAgentOnNode: vi.fn(),
 }));
 
 vi.mock('../../src/services/node-agent', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/services/node-agent')>()),
   nodeAgentRequest: nodeAgentMocks.nodeAgentRequest,
+  listAgentSessionsOnNode: nodeAgentMocks.listAgentSessionsOnNode,
   sendPromptToAgentOnNode: nodeAgentMocks.sendPromptToAgentOnNode,
 }));
 
@@ -162,6 +164,10 @@ describe('agent lifecycle orchestration integration', () => {
     db = new Database(':memory:');
     sql = createSqlStorage(db);
     runMigrations(sql);
+    nodeAgentMocks.listAgentSessionsOnNode.mockReset().mockImplementation(async (_nodeId: string, workspaceId: string) => ({
+      sessions: db.prepare('SELECT id, workspace_id AS workspaceId, status FROM acp_sessions WHERE workspace_id = ?')
+        .all(workspaceId).map((session) => ({ ...(session as object), hostStatus: 'ready' })),
+    }));
     tasks = {
       'task-1': {
         task_mode: 'task',

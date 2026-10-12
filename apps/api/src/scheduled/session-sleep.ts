@@ -26,6 +26,11 @@ import {
   isDeadSleepIntentWorkspace,
   retireDeadWorkspaceSleepIntent,
 } from '../services/session-sleep-fallback-state';
+import { sessionSleepRuntimeChanged } from '../services/session-sleep-runtime-identity';
+import {
+  reconcileUnconfirmedSleepBlock,
+  settleUnconfirmedSleepStop,
+} from '../services/session-sleep-stopping-failure';
 import {
   claimSessionSnapshotSleep,
   DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS,
@@ -124,6 +129,10 @@ async function sleepClaimedSession(
         sessionSleepEpisodeConfig(env)
       ) !== 'full';
     const lifecycleError = sessionLifecycleError(env, error);
+    await deferSessionSnapshotStopping(db, env, candidate.chatSessionId, claimId, lifecycleError, now);
+    // The execution catch records a stopping failure. Failures before it can
+    // load the runtime identity still need the same bounded terminal decision.
+    await settleUnconfirmedSleepStop(env, candidate.chatSessionId, claimId, error, now);
     await failSessionSnapshotSleepBeforeTeardown(
       db,
       env,
@@ -148,7 +157,8 @@ async function sleepClaimedSession(
       exhausted,
       error: lifecycleError,
     });
-    await settleFailedTaskPreservation(env, candidate, 'failed');
+    if (!sessionSleepRuntimeChanged(error))
+      await settleFailedTaskPreservation(env, candidate, 'failed');
     return { status: 'failed', exhausted };
   }
 }
@@ -219,6 +229,12 @@ export async function runSessionSleepSweep(
     const workspaceId = candidate.workspaceId;
     let claimId: string;
     try {
+      if (candidate.sleepStatus === 'terminal_failed') {
+        const reconciled = await reconcileUnconfirmedSleepBlock(env, candidate.chatSessionId, now);
+        if (reconciled) stats.blocked++;
+        else stats.failed++;
+        continue;
+      }
       if (!workspaceId) {
         if (await terminalizeMissingSleepSource(db, candidate, now)) {
           stats.exhausted++;
@@ -329,7 +345,7 @@ export async function runSessionSleepSweep(
           } else {
             const outcome = await fallback;
             if (outcome === 'slept') stats.slept++;
-            else if (outcome === 'blocked') {
+            else if (outcome === 'blocked' || outcome === 'superseded') {
               stats.blocked++;
               stats.exhausted++;
             } else if (outcome === 'retry') stats.failed++;
