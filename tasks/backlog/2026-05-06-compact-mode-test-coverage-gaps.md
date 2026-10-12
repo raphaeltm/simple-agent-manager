@@ -1,5 +1,11 @@
 # Compact Mode Test Coverage Gaps
 
+> **Reconciliation 2026-10-12:** #2287 (`195f9f7ca`) deleted the summarize and fork-prepare routes,
+> with `apps/api/src/routes/chat-fork.ts` and `apps/api/tests/unit/routes/chat-fork.test.ts`, so the
+> summarize-route item (assert `getMessages` gets compact off) no longer applies. Still open: the
+> three `ToolCallCard` assertions (loading state, loaded content, no second `onLoadContent` call)
+> and the `contentSize === 0` case; neither test file changed this week.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

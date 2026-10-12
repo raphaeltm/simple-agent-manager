@@ -1,5 +1,15 @@
 # MCP Page-Size Limits Not Configurable via Env Vars
 
+> **Reconciliation 2026-10-12:** #2293 (`6973ceb77`) made three of the five configurable:
+> `taskListLimit`, `taskListMax` and `taskSearchMax` now come from `getPlatformOperationLimits`
+> (`apps/api/src/operations/limits.ts:19-22`; read at `routes/mcp/_helpers.ts:135,149-151` and
+> `operations/task-core.ts:181,193-198`), are typed in `apps/api/src/env.ts:1063-1066` and are
+> documented in `apps/api/.env.example:750-753`. A parity test covers the shared values
+> (`apps/api/tests/unit/operations/platform-operations.test.ts:515`). Still open:
+> `sessionListLimit`/`sessionListMax` are bare constants (`routes/mcp/_helpers.ts:79-80,152-153`,
+> read by `list_sessions` at `routes/mcp/session-tools.ts:29-30`), and `MCP_MESSAGE_SEARCH_MAX` is
+> still not in `.env.example` (only `MCP_MESSAGE_SEARCH_LIMIT` is, `:758`).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** `messageSearchMax` now reads `MCP_MESSAGE_SEARCH_MAX` (PR #460;

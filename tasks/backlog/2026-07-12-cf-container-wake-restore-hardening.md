@@ -1,5 +1,14 @@
 # cf-container wake/restore hardening follow-ups
 
+> **Reconciliation 2026-10-12:** All five items are still open. #2261 (`ab76c0f42`) moved three of
+> the locations in the 2026-10-05 note. Before restoring, `wakeFromSnapshot` now probes the
+> container's capabilities and re-creates the workspace and the agent session, each call with an
+> `AbortSignal.timeout` (`apps/api/src/durable-objects/vm-agent-container.ts:918`, `:951`, `:988`).
+> The `/restore` `containerFetch` itself (`:1000-1018`) still has no deadline.
+> `absoluteControlPlaneURL` is now at `session_snapshot.go:424`, and the circular re-export at
+> `node-agent.ts:750-754`. `skipOversizedUntracked` (`session_snapshot_wip.go:128`, `:150`) and the
+> TTL reuse in `jwt.ts` have not moved.
+
 > **Reconciliation 2026-10-05:** All five open items are still open, but #2218 moved the cited code. Current locations: `skipOversizedUntracked` is at `packages/vm-agent/internal/server/session_snapshot_wip.go:128` and still uses `context.Background()` at `:150`; `absoluteControlPlaneURL` is at `session_snapshot.go:412`; the restore fetch is at `apps/api/src/durable-objects/vm-agent-container.ts:901`; the node-management TTL is at `apps/api/src/services/jwt.ts:189`; the circular import is at `apps/api/src/services/node-agent.ts:758-762`.
 
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**

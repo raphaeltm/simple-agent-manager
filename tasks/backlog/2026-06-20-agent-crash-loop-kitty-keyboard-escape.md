@@ -1,5 +1,16 @@
 # Agent process crash loop on kitty-keyboard terminal escape sequences
 
+> **Reconciliation 2026-10-12:** #2236 (`beee2833b`) capped the `[SAM Orchestrator Check-In]`
+> prompts that this incident kept sending to the crashed agent
+> (`apps/api/src/durable-objects/project-data/reconciliation.ts:61`). After
+> `TASK_RECONCILIATION_MAX_CHECKINS` check-ins (default 3,
+> `packages/shared/src/constants/reconciliation.ts:109`) with no completed tool call or human
+> message, SAM stops checking in and raises a `needs_input` marker (`reconciliation-loop.ts:58-64`
+> and `reconciliation-episode.ts:124-182` in the same directory; test
+> `apps/api/tests/unit/durable-objects/reconciliation-loop.test.ts:152`). The pause never fails the
+> task (`reconciliation-loop.ts:70-71`). Still open: the root cause, handling the escape
+> sequences, the regression test, and the "failed, not perpetually in_progress" part of criterion 3.
+
 ## Problem
 
 A dispatched task agent (Claude Code) can enter an unrecoverable crash loop where

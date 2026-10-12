@@ -1,5 +1,10 @@
 # Document GCP Prerequisites for Self-Hosting
 
+> **Reconciliation 2026-10-12:** Nothing shipped. Path fix: the guide is
+> `apps/www/src/content/docs/docs/guides/self-hosting.mdx`; `docs/guides/self-hosting.md` does not
+> exist. Its "GCP provisioning credentials" section (`:170-183`) already covers the infrastructure
+> OAuth client's redirect URIs and scope, but not the five APIs below. Still open: every criterion.
+
 ## Problem
 
 The GCP OIDC integration requires several APIs to be enabled on the GCP project where the OAuth client is created (the SAM operator's project). All API calls made via the user's OAuth token are billed/rate-limited against the OAuth client's project, so that project needs every API enabled that the setup flow calls. Without them, the setup fails with 403 "API has not been used in project" errors.

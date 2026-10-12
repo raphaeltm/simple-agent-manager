@@ -1,5 +1,15 @@
 # Project chat requests a reaped task and logs a 404
 
+> **Reconciliation 2026-10-12:** still open, and the request pattern changed. #2231 (`1c7f8dd90`)
+> moved the restore-provisioning effect out of `useProjectChatState.ts` into
+> `apps/web/src/pages/project-chat/useProvisioningTracker.ts:147-198`. It is the only page-load
+> caller of `getProjectTask` for an ended chat's task (`SessionHeader.tsx:145` waits for the header
+> to expand). It now keys on the selected session's `taskId` rather than the whole session list,
+> which probably removes the second request seen here. But its catch block (`:178-184`) retries any
+> failure, a 404 included, up to `PROVISIONING_RESTORE_RETRIES` times (default 3, `types.ts:100`)
+> 2 s apart, so a reaped task can now cost up to four failed requests per open.
+> `use-provisioning-tracker.test.tsx:210` pins that retry count and has no 404 case.
+
 **Status**: backlog
 **Created**: 2026-09-09
 **Found**: during staging verification for PR #2052 (unrelated to that change)

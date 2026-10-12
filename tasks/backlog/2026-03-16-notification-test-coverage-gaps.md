@@ -1,5 +1,11 @@
 # Notification Phase 2 — Test Coverage Gaps
 
+> **Reconciliation 2026-10-12:** No notification tests landed this week. Pointer fixes: gap 9's
+> options cap moved with `request_human_input` to
+> `apps/api/src/routes/mcp/human-input-tool.ts:80-81` (#2213, `57aaa057b`), and gap 6's
+> `notification side-effects` block is now `apps/api/tests/unit/routes/mcp.test.ts:4719`. Still
+> open: every item in the 2026-09-30 block.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

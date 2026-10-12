@@ -1,5 +1,11 @@
 # Avoid deleted-workspace requests when opening ended chat history
 
+> **Reconciliation 2026-10-12:** still open; `useSessionInfrastructure.ts` did not change this week.
+> Pointer fix for the "Related" line at the end: #2231 (`1c7f8dd90`) moved the restore-provisioning
+> effect from `useProjectChatState.ts:525-557` to
+> `pages/project-chat/useProvisioningTracker.ts:147-198`. See the 2026-10-12 note in
+> `2026-09-09-chat-requests-reaped-task-404.md`.
+
 > **Reconciliation 2026-09-30:** still open. `useSessionInfrastructure.ts:20-66` still fetches the
 > workspace unconditionally and retries on a 404 (unchanged since #2030). This file now absorbs the
 > duplicate `2026-09-29-chat-page-404s-on-deleted-session-workspace.md`; see the section at the end.

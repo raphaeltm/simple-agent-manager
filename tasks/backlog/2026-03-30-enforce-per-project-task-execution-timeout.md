@@ -1,5 +1,14 @@
 # Enforce Per-Project Task Execution Timeout
 
+> **Reconciliation 2026-10-12:** Premise update. Since #2232 (`f7e68a284`),
+> `TASK_RUN_MAX_EXECUTION_MS` gates a kill path again: past it, a live `in_progress` task is failed
+> when the Clef classifier judges its turn stalled (quiet at least 60 min, confidence at least 0.8;
+> `apps/api/src/scheduled/stuck-tasks.ts:1347-1363,1416-1436`, defaults in
+> `packages/shared/src/constants/ai-services.ts:29,32`). A live turn the classifier does not call
+> stalled is still kept until `TASK_RUN_ABSOLUTE_CEILING_MS`, so the 30-minute criterion still needs
+> its own kill path. Still open: the sweep reads only the env value (`stuck-tasks.ts:1098`), never
+> the project's.
+
 > **Reconciliation 2026-10-05:** The premise needs correcting. `TASK_RUN_MAX_EXECUTION_MS` has not killed a live task since #1567; #2222 documents this at `apps/api/src/scheduled/stuck-task-live-runtime.ts:17-18`. The only hard stop is `TASK_RUN_ABSOLUTE_CEILING_MS` (24h, `packages/shared/src/constants/task-execution.ts:26`). Option A would therefore only move the recovery check: the "terminated after 30 minutes" criterion needs its own kill path (Option B, or a per-project absolute ceiling). The per-project value is still not read by the stuck-task sweep or TaskRunner (`apps/api/src/scheduled/stuck-tasks.ts:1113` reads env only).
 
 ## Problem Statement

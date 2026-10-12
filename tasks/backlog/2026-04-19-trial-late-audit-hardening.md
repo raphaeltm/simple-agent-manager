@@ -1,5 +1,13 @@
 # Trial Onboarding — Late-Audit Hardening Follow-ups
 
+> **Reconciliation 2026-10-12:** nothing in scope shipped; four pointers moved. HIGH-4's only
+> `bridgeAcpSessionTransition` caller is now `durable-objects/project-data/index.ts:2194-2198` and
+> still passes no `workspaceUrl`. LOW-SEC-3's `rateLimitAnonymous` is now
+> `middleware/rate-limit.ts:393`, still unused. LOW-SEC-1's `clearClaimCookie` call is now
+> `routes/trial/claim.ts:201` (#2293 added an owner-membership transfer to the claim above it).
+> #2303 (`d23d66498`) cut `apps/api/wrangler.toml` to 568 lines, so LOW-CF-2's v9 migration is now
+> at `:424-425`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** source paths are under `apps/api/src/`.

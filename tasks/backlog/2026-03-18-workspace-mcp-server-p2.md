@@ -1,5 +1,12 @@
 # Workspace-Aware MCP Server — Priority 2 (Extended Tools)
 
+> **Reconciliation 2026-10-12:** None of the 17 tools shipped. New overlap for
+> `get_project_context`: #2294 (`a95b46191`) added the Connector operation `sam_project_get`
+> (`apps/api/src/operations/connector-operations.ts:54-62`, `connector-read-core.ts:146-186`):
+> project summary, recent tasks and chats, idea and trigger counts. Workspace agents cannot call it
+> (the #2293 adapter map, `operations/workspace-adapter.ts:19-33`, omits it). Extend and map that
+> operation rather than writing a second implementation.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** `get_workspace_diff_summary`

@@ -1,5 +1,14 @@
 # Replace Source-Contract Tests with Behavioral Integration Tests
 
+> **Reconciliation 2026-10-12:** No source-contract test was replaced. #2294 (`a95b46191`) moved
+> task submission into `apps/api/src/services/submit-task.ts` and repointed the
+> `routes/tasks/submit.ts` string reads in 11 of the 28 listed files to that service file (for
+> example `apps/api/tests/unit/project-agent-defaults.test.ts:392`; its `routes/mcp/dispatch-tool.ts`
+> read at `:405` remains). Counting route reads only, 27 files remain:
+> `unit/durable-objects/task-runner-initial-prompt` now reads only service and TaskRunner source, but
+> it is still a source-contract test, so keep it on the list. The detector regex
+> (`scripts/quality/check-source-contract-tests.ts:52-55`) is unchanged.
+
 > **Reconciliation 2026-10-05:** PR #2225 (9ef726c20) deleted the agent-settings-callback source-contract block from `apps/api/tests/unit/project-agent-defaults.test.ts`. That block read `routes/workspaces/runtime.ts`. It was replaced by a behavioral route test on a real SQL engine, `apps/api/tests/unit/routes/workspace-agent-settings-callback.test.ts:47-194` (`app.request`, no `readFileSync`). Still open: every item in the 2026-09-30 block. `project-agent-defaults.test.ts` still reads `routes/tasks/submit.ts` and `routes/mcp/dispatch-tool.ts` (`:391-415`), so all 28 listed files remain. The detector regex in `scripts/quality/check-source-contract-tests.ts:52-55` is still unfixed. No new route source-contract tests were added this week.
 
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**

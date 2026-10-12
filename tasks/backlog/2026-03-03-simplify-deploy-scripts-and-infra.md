@@ -1,5 +1,14 @@
 # Simplify Deploy Scripts and Infrastructure
 
+> **Reconciliation 2026-10-12:** #2303 (`73feb757d`, commit `8e68d27ba`) moved the environment
+> override report out of `sync-wrangler-config.ts` into
+> `scripts/deploy/environment-var-overrides.ts` (213 lines). The file is now 1,327 lines (1,463 on
+> 2026-10-05). This is a partial split, not one of the three planned modules. Correction: the
+> FILE SIZE EXCEPTION target, `2026-04-03-split-oversized-files.md`, does list it (line 8). Still
+> open: the rest of the split (still over the 800-line ceiling), `types.ts` (527 lines),
+> `utils/github.ts` (465), the logger (30 exports), the four validators, the regex parsing
+> (`setup-local-dev.ts:48,77`), the DNS factory and a shared `AppError`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

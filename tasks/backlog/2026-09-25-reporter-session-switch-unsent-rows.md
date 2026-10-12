@@ -1,5 +1,10 @@
 # Recover unsent VM reporter rows across warm session switches
 
+> **Reconciliation 2026-10-12:** Nothing shipped this week; pointer correction only. #2224
+> (`4f223d6fa`, before the last run) moved the code: in
+> `packages/vm-agent/internal/messagereport/reporter.go`, `SetSessionID` now starts at `:182` (was
+> `:165`) and the delete is at `:202` (was `:185`). Still open: everything below.
+
 > **Reconciliation 2026-09-30:** still open (`reporter.go:165,185` still deletes the old session's
 > rows). This is the focused fix for hypothesis B1 in
 > `tasks/backlog/2026-03-07-research-chat-truncation-causes.md`.
