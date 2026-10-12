@@ -24,6 +24,29 @@ func workspaceStopRequest(token, body string) *http.Request {
 	return r
 }
 
+// This real-handler response is consumed by workspaceStopAlreadyConfirmed in
+// apps/api/src/services/session-sleep-teardown.ts; keep both sides in sync.
+func TestWorkspaceStopAlreadyStoppedResponseContract(t *testing.T) {
+	s, token, finish := newRestartGenerationTestServer(t, "stopped")
+	defer finish(errors.New("test complete"))
+	s.workspaces["ws-restart"].EvictionGeneration = restartTestGeneration
+
+	rec := httptest.NewRecorder()
+	s.handleStopWorkspace(rec, workspaceStopRequest(token,
+		`{"expectedEvictionGeneration":"`+restartTestGeneration+`"}`))
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("already-stopped response = %d %s, want 409", rec.Code, rec.Body.String())
+	}
+	const want = `{"error":"invalid_transition","message":"Workspace cannot be stopped from current state: stopped"}`
+	if got := strings.TrimSpace(rec.Body.String()); got != want {
+		t.Fatalf("already-stopped response body = %s, want %s", got, want)
+	}
+	if current := s.snapshotWorkspaceRuntime(s.workspaces["ws-restart"]); current.Status != "stopped" || current.EvictionGeneration != restartTestGeneration {
+		t.Fatalf("already-stopped request mutated runtime: %#v", current)
+	}
+}
+
 func TestWorkspaceStopGenerationValidation(t *testing.T) {
 	for _, tt := range []struct {
 		name, body, generation, status string

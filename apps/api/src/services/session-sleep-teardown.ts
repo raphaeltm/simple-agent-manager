@@ -117,6 +117,8 @@ async function assertSleepRuntimeIdentity(env: Env, workspace: SleepWorkspace): 
   if (!current) throw new SessionSleepRuntimeChangedError();
 }
 
+// handleStopWorkspace in packages/vm-agent/internal/server/workspaces.go emits
+// this response; TestWorkspaceStopAlreadyStoppedResponseContract pins its JSON.
 function workspaceStopAlreadyConfirmed(error: unknown): boolean {
   if (!(error instanceof NodeAgentHttpError) || error.statusCode !== 409) return false;
   try {
