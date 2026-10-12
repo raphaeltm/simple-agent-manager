@@ -141,19 +141,7 @@ func TestWorkspaceStopGenerationRechecksAfterLifecycleWait(t *testing.T) {
 		defer close(done)
 		s.handleStopWorkspace(rec, workspaceStopRequest(token, `{"expectedEvictionGeneration":""}`))
 	}()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		s.workspaceLifecycleMu.Lock()
-		waiting := s.workspaceLifecycleLocks["ws-restart"].users == 2
-		s.workspaceLifecycleMu.Unlock()
-		if waiting {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("stop did not wait for lifecycle ownership")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitForWorkspaceStopLifecycleWaiter(t, s, "ws-restart")
 	// Complete the durable generation transition while the stale stop waits.
 	if changed, err := s.store.CompareAndSwapWorkspaceEvictionGeneration("ws-restart", "", restartTestGeneration); err != nil || !changed {
 		t.Fatalf("persist successor generation: %v %v", changed, err)
@@ -179,5 +167,22 @@ func TestWorkspaceStopGenerationRechecksAfterLifecycleWait(t *testing.T) {
 	}
 	if data, err := os.ReadFile(dockerLog); err == nil && len(data) > 0 {
 		t.Fatalf("stale stop ran Docker: %s", data)
+	}
+}
+
+func waitForWorkspaceStopLifecycleWaiter(t *testing.T, s *Server, workspaceID string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s.workspaceLifecycleMu.Lock()
+		waiting := s.workspaceLifecycleLocks[workspaceID].users == 2
+		s.workspaceLifecycleMu.Unlock()
+		if waiting {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stop did not wait for lifecycle ownership")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
