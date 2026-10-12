@@ -75,12 +75,7 @@ func TestWorkspaceStopGenerationValidation(t *testing.T) {
 			if rec.Code != tt.want {
 				t.Fatalf("stop = %d %s, want %d", rec.Code, rec.Body.String(), tt.want)
 			}
-			if tt.name == "stale initial generation" || tt.name == "stale generation" {
-				const wantBody = `{"error":"workspace eviction generation changed"}`
-				if got := strings.TrimSpace(rec.Body.String()); got != wantBody {
-					t.Fatalf("stale-generation response body = %s, want %s", got, wantBody)
-				}
-			}
+			assertWorkspaceStopStaleGenerationResponse(t, tt.name, rec)
 			wantStatus := tt.status
 			if tt.want == http.StatusOK {
 				wantStatus = "stopped"
@@ -89,6 +84,17 @@ func TestWorkspaceStopGenerationValidation(t *testing.T) {
 				t.Fatalf("unexpected stop mutation: %#v", got)
 			}
 		})
+	}
+}
+
+func assertWorkspaceStopStaleGenerationResponse(t *testing.T, caseName string, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if caseName != "stale initial generation" && caseName != "stale generation" {
+		return
+	}
+	const wantBody = `{"error":"workspace eviction generation changed"}`
+	if got := strings.TrimSpace(rec.Body.String()); got != wantBody {
+		t.Fatalf("stale-generation response body = %s, want %s", got, wantBody)
 	}
 }
 
