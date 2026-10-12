@@ -91,6 +91,11 @@ const mermaidPosts = [
     path: '/blog/sams-journal-one-task-through-every-wake/',
     screenshotName: 'stable-task-identity',
   },
+  {
+    name: 'the safe-recovery-handoff journal',
+    path: '/blog/sams-journal-recovery-needs-a-safe-handoff/',
+    screenshotName: 'safe-recovery-handoff',
+  },
 ];
 
 for (const post of mermaidPosts) {
