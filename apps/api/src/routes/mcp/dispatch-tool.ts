@@ -283,6 +283,9 @@ export async function handleDispatchTask(
 
   // ── Create the task ─────────────────────────────────────────────────────
   const taskId = ulid();
+  // Committed in the INSERT: the ProjectOrchestrator auto-starts mission tasks
+  // whose chat_session_id is NULL, so this start must own the task from its first row.
+  const chatSessionId = crypto.randomUUID();
   const now = new Date().toISOString();
 
   // Generate branch name (CPU-only, no I/O)
@@ -443,14 +446,14 @@ export async function handleDispatchTask(
   // ── Atomic conditional INSERT (prevents TOCTOU race) ─────────────────
   const statusPlaceholders = ACTIVE_STATUSES.map(() => '?').join(', ');
   const conditionalInsertResult = await env.DATABASE.prepare(
-    `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
+    `INSERT INTO tasks (id, project_id, user_id, parent_task_id, chat_session_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
      task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, coordination_channel, triggered_by,
      requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirement_plan_json, resource_requirements_source, resolved_reservation_json,
      credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
      ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
      created_at, updated_at)
-     SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
+     SELECT ?, ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
      ?, ?, ?, ?, ?, ?, 'mcp',
      ?, ?, ?, ?, ?, ?,
      ?, ?, ?,
@@ -473,6 +476,7 @@ export async function handleDispatchTask(
       tokenData.projectId,
       tokenData.userId,
       tokenData.taskId,
+      chatSessionId,
       taskTitle,
       fullDescription,
       priority,
@@ -574,6 +578,7 @@ export async function handleDispatchTask(
       env,
       {
         taskId,
+        chatSessionId,
         project,
         userId: tokenData.userId,
         fullDescription,
@@ -604,7 +609,8 @@ export async function handleDispatchTask(
         null, // workspaceId — linked later by TaskRunner DO
         taskTitle,
         taskId,
-        tokenData.userId
+        tokenData.userId,
+        chatSessionId
       );
 
       // Persist the description as the initial user message
@@ -758,7 +764,7 @@ export async function handleDispatchTask(
 
   log.info('mcp.dispatch_task.created', {
     taskId,
-    sessionId,
+    sessionId: chatSessionId,
     branchName,
     parentTaskId: tokenData.taskId,
     projectId: tokenData.projectId,
@@ -778,7 +784,7 @@ export async function handleDispatchTask(
     env,
     projectId: tokenData.projectId,
     taskId,
-    sessionId,
+    sessionId: chatSessionId,
     executionRuntime,
     runtimeReason: placement.runtime.reason,
     branchName,

@@ -213,13 +213,15 @@ describe('launchInstantSession', () => {
       workspaceProfile: 'lightweight',
       agentProfileHint: 'profile-1',
     });
+    // No reserved identity: ProjectData generates the session id.
     expect(mocks.projectData.createSession).toHaveBeenCalledWith(
       expect.anything(),
       'project-1',
       'workspace-1',
       'clean prompt',
       'task-1',
-      'user-1'
+      'user-1',
+      null
     );
     expect(mocks.projectData.persistMessage).toHaveBeenNthCalledWith(
       1,
@@ -401,6 +403,35 @@ describe('launchInstantSession', () => {
     expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][8]).toEqual(persistedContract);
     expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][12]).toEqual(
       persistedContract.acpInteractions
+    );
+  });
+
+  it('creates the session under the identity the task row already carries', async () => {
+    const { db, updates } = makeDb();
+    mocks.projectData.createSession.mockImplementationOnce(
+      async (...args: unknown[]) => args[6] as string
+    );
+
+    const result = await launchInstantSession(db as never, env, {
+      ...baseLaunchInput(),
+      chatSessionId: 'reserved-chat-session',
+    });
+
+    expect(mocks.projectData.createSession).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      'workspace-1',
+      expect.any(String),
+      'task-1',
+      'user-1',
+      'reserved-chat-session'
+    );
+    expect(result.chatSessionId).toBe('reserved-chat-session');
+    expect(updates).toContainEqual(
+      expect.objectContaining({
+        chatSessionId: 'reserved-chat-session',
+        workspaceId: 'workspace-1',
+      })
     );
   });
 

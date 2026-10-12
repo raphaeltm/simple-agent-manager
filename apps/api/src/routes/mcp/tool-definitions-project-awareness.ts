@@ -38,7 +38,7 @@ export const PROJECT_AWARENESS_TOOLS = [
   {
     name: 'get_task_details',
     description:
-      'Get full details of a specific task in your project, including its description, output summary, output branch, PR URL, structured completion evidence, and the chat sessionId once the session exists (Instant dispatches create it asynchronously).',
+      'Get full details of a specific task in your project, including its description, output summary, output branch, PR URL, structured completion evidence, and the chat sessionId (for an Instant dispatch, the session becomes readable when background session creation completes).',
     inputSchema: {
       type: 'object' as const,
       properties: {

@@ -96,6 +96,7 @@ describe('model-catalog', () => {
       const allModels = groups.flatMap((g) => g.models);
       expect(allModels.some((m) => m.id === 'gemini-3.8-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.7-flash')).toBe(true);
+      expect(allModels.find((m) => m.id === 'gemini-3.7-flash')?.name).toContain('Deprecated');
       expect(allModels.some((m) => m.id === 'gemini-2.5-pro')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.6-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.5-flash')).toBe(true);
@@ -141,7 +142,12 @@ describe('model-catalog', () => {
         true
       );
       expect(allModels.some((m) => m.id === 'opencode/ling-3.0-flash-fin-free')).toBe(true);
-      expect(allModels.some((m) => m.id === 'opencode/fledge-alpha-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/fledge-alpha-free')).toBe(false);
+      expect(allModels.some((m) => m.id === 'opencode/exo-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/claude-haiku-5-5')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/claude-haiku-5-5')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/space-bunny')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/space-bunny-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode/ling-3.1-flash-free')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/longcat-2.5-preview-free')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/qwen3.8-max')).toBe(true);
@@ -173,6 +179,7 @@ describe('model-catalog', () => {
       expect(models.some((m) => m.id === 'claude-fable-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-5-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-sonnet-5-5')).toBe(true);
+      expect(models.some((m) => m.id === 'claude-haiku-5-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-sonnet-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-4-8')).toBe(true);
@@ -193,6 +200,7 @@ describe('model-catalog', () => {
         'claude-opus-5',
         'claude-sonnet-5-5',
         'claude-sonnet-5',
+        'claude-haiku-5-5',
         'claude-opus-4-8[1m]',
         'claude-opus-4-7[1m]',
         'claude-opus-4-6[1m]',

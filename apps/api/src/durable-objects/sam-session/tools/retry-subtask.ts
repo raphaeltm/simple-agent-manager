@@ -157,6 +157,8 @@ export async function retrySubtask(
         )
       : null;
   const newTaskId = ulid();
+  // Committed in the INSERT so the ProjectOrchestrator never sees this mission task unclaimed.
+  const chatSessionId = crypto.randomUUID();
   const skillResourceRequirements = parseSkillResourceRequirementsJson(
     resolvedProfile?.resourceRequirementsJson
   );
@@ -242,14 +244,14 @@ export async function retrySubtask(
   // Insert new task + status event (batched for atomicity)
   await env.DATABASE.batch([
     env.DATABASE.prepare(
-      `INSERT INTO tasks (id, project_id, user_id, title, description,
+      `INSERT INTO tasks (id, project_id, user_id, chat_session_id, title, description,
        status, execution_step, priority, dispatch_depth, output_branch, created_by,
        task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, coordination_channel,
        requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirements_source, resolved_reservation_json,
        credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
        ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
        created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', 0, 0, ?, ?,
+       VALUES (?, ?, ?, ?, ?, ?, 'queued', 'node_selection', 0, 0, ?, ?,
        ?, ?, ?, ?, ?, ?,
        ?, ?, ?, ?, ?,
        ?, ?, ?,
@@ -259,6 +261,7 @@ export async function retrySubtask(
       newTaskId,
       original.projectId,
       ctx.userId,
+      chatSessionId,
       taskTitle,
       description,
       branchName,
@@ -297,7 +300,8 @@ export async function retrySubtask(
       null,
       taskTitle,
       newTaskId,
-      ctx.userId
+      ctx.userId,
+      chatSessionId
     );
     await projectDataService.persistMessage(
       env,

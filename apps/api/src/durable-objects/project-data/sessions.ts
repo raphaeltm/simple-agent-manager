@@ -179,13 +179,19 @@ function assertReservedSessionMatches(
   return typeof row.updated_at === 'number' ? row.updated_at : Date.now();
 }
 
+/**
+ * `reservedSessionId` is an identity the caller already committed elsewhere,
+ * e.g. as `tasks.chat_session_id` in the task INSERT, so the task is never
+ * visible without its session claim. Omitted, the DO generates one.
+ */
 export function createSession(
   sql: SqlStorage,
   env: Env,
   workspaceId: string | null,
   topic: string | null,
   taskId: string | null = null,
-  createdByUserId: string | null = null
+  createdByUserId: string | null = null,
+  reservedSessionId: string | null = null
 ): { id: string; now: number } {
   const maxSessions = parseInt(env.MAX_SESSIONS_PER_PROJECT || '10000', 10);
   const countRow = sql.exec('SELECT COUNT(*) as cnt FROM chat_sessions').toArray()[0];
@@ -193,7 +199,7 @@ export function createSession(
     throw new Error(`Maximum ${maxSessions} sessions per project exceeded`);
   }
 
-  const id = generateId();
+  const id = reservedSessionId ?? generateId();
   const now = Date.now();
   sql.exec(
     `INSERT INTO chat_sessions (id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, created_at, updated_at)

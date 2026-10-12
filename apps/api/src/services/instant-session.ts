@@ -37,6 +37,8 @@ type Db = ReturnType<typeof drizzle<typeof schema>>;
 
 export interface LaunchInstantSessionInput {
   taskId: string;
+  /** Session identity the task row already carries; omitted, the session gets a new one. */
+  chatSessionId?: string | null;
   project: schema.Project;
   userId: string;
   initialPrompt: string;
@@ -317,7 +319,8 @@ export async function acceptInstantSession(
     workspaceId,
     workspaceName,
     input.taskId,
-    input.userId
+    input.userId,
+    input.chatSessionId ?? null
   );
   await db
     .update(schema.tasks)

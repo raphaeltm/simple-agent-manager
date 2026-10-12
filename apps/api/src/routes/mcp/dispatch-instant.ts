@@ -51,6 +51,8 @@ function appendSystemPrompt(prompt: string, systemPromptAppend: string | null | 
 
 export interface LaunchDispatchedInstantInput {
   taskId: string;
+  /** Session identity already committed as tasks.chat_session_id by the task INSERT. */
+  chatSessionId: string;
   project: schema.Project;
   userId: string;
   fullDescription: string;
@@ -71,6 +73,7 @@ export function launchDispatchedInstantSession(
 ): Promise<void> {
   const launch = launchInstantSession(db, env, {
     taskId: input.taskId,
+    chatSessionId: input.chatSessionId,
     project: input.project,
     userId: input.userId,
     initialPrompt: appendSystemPrompt(input.fullDescription, input.systemPromptAppend),
