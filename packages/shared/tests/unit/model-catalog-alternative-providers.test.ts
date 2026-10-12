@@ -11,6 +11,10 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode/claude-opus-5',
   'opencode/claude-sonnet-5',
   'opencode/claude-sonnet-5-5',
+  'opencode/claude-haiku-5-5',
+  'opencode/exo-free',
+  'opencode/step-5-preview-free',
+  'opencode/mistral-large-4',
   'opencode/gemini-3.8-flash',
   'opencode/gemini-3.7-flash',
   'opencode/gemini-3.6-flash',
@@ -35,6 +39,9 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode-go/kimi-k3',
   'opencode-go/muse-spark-1.3-contributor',
   'opencode-go/qwen3.8-max',
+  'opencode-go/claude-haiku-5-5',
+  'opencode-go/space-bunny',
+  'opencode-go/step-5-preview-free',
 ] as const;
 
 const EXPECTED_GROUP_LABELS = ['OpenCode Zen', 'OpenCode Go'] as const;
@@ -61,6 +68,7 @@ describe('OpenCode model catalog entries', () => {
 
     expect(namesById.get('opencode/deepseek-v4-flash')).toBe('DeepSeek V4 Flash');
     expect(namesById.get('opencode/claude-sonnet-5-5')).toBe('Claude Sonnet 5.5');
+    expect(namesById.get('opencode/claude-haiku-5-5')).toBe('Claude Haiku 5.5');
     expect(namesById.get('opencode/gpt-6-astra')).toBe('GPT-6 Astra');
     expect(namesById.get('opencode/gpt-6.1-sol')).toBe('GPT-6.1 Sol');
     expect(namesById.get('opencode/gpt-5.6-sol')).toBe('GPT-5.6 Sol');
@@ -73,6 +81,7 @@ describe('OpenCode model catalog entries', () => {
     expect(namesById.get('opencode-go/gpt-5.6-luna')).toBe('GPT-5.6 Luna');
     expect(namesById.get('opencode-go/hy3')).toBe('Hy3');
     expect(namesById.get('opencode-go/kimi-k3')).toBe('Kimi K3');
+    expect(namesById.get('opencode-go/space-bunny')).toBe('Space Bunny');
   });
 
   it('keeps OpenCode groups discoverable by provider label', () => {
@@ -105,6 +114,7 @@ describe('OpenCode model catalog entries', () => {
   it('excludes inactive Models.dev records from the static fallback', () => {
     for (const inactiveModelId of [
       'opencode/claude-opus-4-1',
+      'opencode/fledge-alpha-free',
       'opencode/deepseek-v4-flash-free',
       'opencode/laguna-s-2.1-free',
       'opencode/ling-3.0-flash-free',
@@ -113,6 +123,7 @@ describe('OpenCode model catalog entries', () => {
       'opencode/north-mini-code-free',
       'opencode/x-preview-f-free',
       'opencode-go/ox-alpha-free',
+      'opencode-go/space-bunny-free',
       'opencode/qwen3.7-plus',
     ]) {
       expect(

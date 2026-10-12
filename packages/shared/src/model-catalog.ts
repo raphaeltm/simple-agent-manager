@@ -67,6 +67,7 @@ const CLAUDE_MODELS: ModelGroup[] = [
       { id: 'claude-opus-5', name: 'Claude Opus 5 (1M context)', group: 'Claude 5 (Frontier)' },
       { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5 (1M context)', group: 'Claude 5 (Frontier)' },
       { id: 'claude-sonnet-5', name: 'Claude Sonnet 5 (1M context)', group: 'Claude 5 (Frontier)' },
+      { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5 (1M context)', group: 'Claude 5 (Frontier)' },
     ],
   },
   {
@@ -142,7 +143,10 @@ const CODEX_MODELS: ModelGroup[] = [
 
 const OPENCODE_MODELS: ModelGroup[] = [
   modelGroup('OpenCode Zen', [
-    { id: 'opencode/fledge-alpha-free', name: 'Fledge Alpha Free' },
+    { id: 'opencode/exo-free', name: 'Exo Free' },
+    { id: 'opencode/step-5-preview-free', name: 'Step 5 Preview Free' },
+    { id: 'opencode/mistral-large-4', name: 'Mistral Large 4' },
+    { id: 'opencode/claude-haiku-5-5', name: 'Claude Haiku 5.5' },
     { id: 'opencode/ling-3.1-flash-free', name: 'Ling 3.1 Flash Free' },
     { id: 'opencode/ling-3.0-flash-fin-free', name: 'Ling 3.0 Flash Fin Free' },
     { id: 'opencode/longcat-2.5-preview-free', name: 'LongCat 2.5 Preview Free' },
@@ -236,7 +240,9 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode-go/longcat-2.0', name: 'LongCat-2.0' },
     { id: 'opencode-go/longcat-2.5-preview-free', name: 'LongCat 2.5 Preview Free' },
     { id: 'opencode-go/minimax-m2.7', name: 'MiniMax-M2.7' },
-    { id: 'opencode-go/space-bunny-free', name: 'Space Bunny Free' },
+    { id: 'opencode-go/space-bunny', name: 'Space Bunny' },
+    { id: 'opencode-go/step-5-preview-free', name: 'Step 5 Preview Free' },
+    { id: 'opencode-go/claude-haiku-5-5', name: 'Claude Haiku 5.5' },
     { id: 'opencode-go/mimo-v2.5-pro', name: 'MiMo V2.5 Pro' },
     { id: 'opencode-go/mimo-v2.6-flash', name: 'MiMo-V2.6-Flash' },
     { id: 'opencode-go/minimax-m3', name: 'MiniMax-M3' },
@@ -293,7 +299,7 @@ const MISTRAL_MODELS: ModelGroup[] = [
 const GEMINI_MODELS: ModelGroup[] = [
   modelGroupFromTuples('Gemini 3 (Latest)', [
     ['gemini-3.8-flash', 'Gemini 3.8 Flash'],
-    ['gemini-3.7-flash', 'Gemini 3.7 Flash'],
+    ['gemini-3.7-flash', 'Gemini 3.7 Flash (Deprecated; routes to 3.8)'],
     ['gemini-3.6-flash', 'Gemini 3.6 Flash'],
     ['gemini-3.5-flash', 'Gemini 3.5 Flash'],
     ['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite'],
