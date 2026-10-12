@@ -2,8 +2,8 @@
 
 > **Reconciliation 2026-10-12:** Pointer correction only; nothing this week touched the scope.
 > #592 (`512510d87`) split `apps/web/src/pages/Workspace.tsx`. Worktrees now load through
-> `refreshWorktrees` in `apps/web/src/pages/workspace/useWorkspaceNavigation.ts:131-159`, on mount
-> and after create/remove (`:319`, `:331`), with no polling. The limit default moved to
+> `refreshWorktrees` (`apps/web/src/pages/workspace/useWorkspaceNavigation.ts:131-142`), called on
+> mount (`:157-159`) and after create/remove (`:319`, `:331`), with no polling. The limit default moved to
 > `packages/vm-agent/internal/config/config_load.go:259` (still 5); enforcement is
 > `packages/vm-agent/internal/server/worktrees.go:278`. Still open: all of it (limit, polling,
 > redesign).

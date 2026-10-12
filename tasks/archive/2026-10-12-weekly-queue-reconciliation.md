@@ -62,18 +62,18 @@ Before: 7 + 212 + 1,222 = 1,441. After: 0 + 210 + 1,231 = 1,441.
 
 Every file was merged, deployed to production and checked against the production state its
 criteria name. Each archived file got a provenance footer. Stale boxes were ticked only with
-cited evidence; two stay unticked with the reason on the line, and one file keeps its criteria
-unticked because the operation they describe never ran.
+cited evidence; two stay unticked with the reason on the line. One file keeps its criteria
+unticked because their evidence was never recorded and its size target was reached another way.
 
-| File                                                        | Shipped by                                                                                           | First production deploy            | Boxes left unticked                                                                            |
-| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `2026-09-03-projectdata-production-capacity-emergency`      | No single PR. The size target was met by ordinary archive sharding, helped by #2248, #2269 and #2296 | n/a                                | All criteria: they describe a destructive relief operation that was never approved or executed |
-| `2026-10-08-session-start-phase-latency`                    | #2268 `096afcd8f`                                                                                    | run 37848333921                    | none                                                                                           |
-| `2026-10-08-workers-ci-duration-and-flakes`                 | #2271 `2a5f2e7d3`                                                                                    | run 37824431034 (head `e25b40d66`) | none                                                                                           |
-| `2026-10-11-approval-gate-activity-rpc-orchestrator-status` | #2307 `af4341f90`                                                                                    | run 38162201788                    | evidence copy into the draft PR (moot after merge)                                             |
-| `2026-10-11-pr-shepherd-active-owner-check`                 | #2301 `dd5ebce4d` + #2309 `898c18597`                                                                | runs 38164808358 and 38169330561   | staging owner-tool case (accepted gap; covered by production queries)                          |
-| `2026-10-11-worker-text-binding-headroom`                   | #2303 `73feb757d`                                                                                    | run 38159699324                    | none                                                                                           |
-| `2026-10-11-worker-text-binding-inventory`                  | #2303 (supporting evidence)                                                                          | run 38159699324                    | n/a (no checklist)                                                                             |
+| File                                                        | Shipped by                                                                                           | First production deploy            | Boxes left unticked                                                                                              |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `2026-09-03-projectdata-production-capacity-emergency`      | No single PR. The size target was met by ordinary archive sharding, helped by #2248, #2269 and #2296 | n/a                                | All criteria: the approved relief plan's outcome was never recorded; the size target was met by archive sharding |
+| `2026-10-08-session-start-phase-latency`                    | #2268 `096afcd8f`                                                                                    | run 37848333921                    | none                                                                                                             |
+| `2026-10-08-workers-ci-duration-and-flakes`                 | #2271 `2a5f2e7d3`                                                                                    | run 37824431034 (head `e25b40d66`) | none                                                                                                             |
+| `2026-10-11-approval-gate-activity-rpc-orchestrator-status` | #2307 `af4341f90`                                                                                    | run 38162201788                    | evidence copy into the draft PR (moot after merge)                                                               |
+| `2026-10-11-pr-shepherd-active-owner-check`                 | #2301 `dd5ebce4d` + #2309 `898c18597`                                                                | runs 38164808358 and 38169330561   | staging owner-tool case (accepted gap; covered by production queries)                                            |
+| `2026-10-11-worker-text-binding-headroom`                   | #2303 `73feb757d`                                                                                    | run 38159699324                    | none                                                                                                             |
+| `2026-10-11-worker-text-binding-inventory`                  | #2303 (supporting evidence)                                                                          | run 38159699324                    | n/a (no checklist)                                                                                               |
 
 Production checks made for these verdicts (all read-only):
 
@@ -133,6 +133,13 @@ on the Sonar credential. #2160 was closed on 2026-10-08 as an obsolete experimen
 - **An expired chat's details panel shows "Cancelled"** in a badge with an undefined colour token,
   while the header chip says "Expired" (from #2280). Recorded on
   `2026-04-24-session-header-a11y-token-fixes`.
+- **The completed 2026-09-04 relief plan is still armed in production.** All 31 of its variables
+  (`PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_*`, `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_*`) are still set
+  in the `production` Environment and ship as Worker text bindings, with both `…_ENABLED` flags
+  `true`. Its preflight completed on 09-04, and the cleanup was bound to the approved manifest on
+  09-14. The plan itself says to turn the preflight off afterwards. Removing the variables is an
+  operator action, and it would free 31 of `sam-api-prod`'s 175 text bindings. Recorded on
+  `tasks/archive/2026-09-03-projectdata-production-capacity-emergency.md`.
 - **The 10-11 recovery wave is stalled with two items unmerged.** C (#2302, mission double-start)
   is green and mergeable but held on a live staging mission that needs new spend Raphaël has not
   approved. A (#2305, empty-node reaping) is a draft with 3 failing checks and a sleeping owner.
@@ -160,7 +167,7 @@ archived.
 
 - `2026-07-29-observability-info-events-persisted-as-errors` (shipped, **deleted**). #2291
   (`d4fa4f372`) limits the noise gate's repeated-error query to `level = 'error'`
-  (`scripts/quality/check-observability-noise.ts:352`), with a real-SQLite regression test
+  (`scripts/quality/check-observability-noise.ts:351`), with a real-SQLite regression test
   (`check-observability-noise.test.ts:122`). ACP lifecycle events have been reported at info level
   since #892, pinned by `TestSessionHostReportLifecycleSeverityMapping`. The noise gate
   (`quality:observability-noise`) passed on staging on 2026-10-12. Nothing links to its path;
@@ -513,9 +520,11 @@ Recorded here so the next weekly run can see what changed.
    `01M4E7NERTBA6NR9MJB193AW0J`)
 5. **Phase 1 admin settings (#2304) has stalled.** It is approved (policy `9017df94`), but its
    owner has been idle since about 10-11 15:00Z and 2 checks fail.
-6. **Parked PRs need Raphaël's call.** Close #1788 and #1817 (recommended), decide #2062, give
-   #2265 the Sonar credential, close #2310, and fix or close blog PR #2306 (its Marketing Site
-   build and Preflight Evidence fail).
+6. **Decisions and operator actions for Raphaël.** Close #1788 and #1817 (recommended), decide
+   #2062, give #2265 the Sonar credential, close #2310, and fix or close blog PR #2306 (its
+   Marketing Site build and Preflight Evidence fail). Also disarm the completed 2026-09-04 relief
+   plan: it has 31 production Environment variables, both `…_ENABLED` flags are still `true`, and
+   removing it frees 31 Worker text bindings.
 7. **SAM Connector.** The claude.ai connection has never been tested (only ChatGPT is
    registered). Hardening is still open: an unguarded `JSON.parse`, failures returned as HTTP 200
    without logs, and refresh-token reuse revoking the connection. (SAM idea

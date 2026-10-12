@@ -710,12 +710,32 @@ Still open:
 
 ## Reconciliation — 2026-10-12 (weekly queue audit): archived
 
-**Verdict: the target is met, without the planned operation.** The root object fell below
-9,000,000,000 bytes on 2026-10-10 through ordinary archive sharding, and it is still falling. The
-"Exact production mutation plan" above was never approved or executed, and it is no longer needed.
-Acceptance criteria 2 to 8 describe that operation, so they stay unticked and no longer apply.
-Criterion 1 also stays unticked: its wording says "after the approved operation", and the size
-was reached another way.
+**Verdict: the size target is met; archived.** The root object fell below 9,000,000,000 bytes
+on 2026-10-10 and is still falling. The drop came mainly from archive sharding after the breaker
+closed on 10-02, plus #2215's wall recovery.
+
+The approved tool-payload plan above ran its first stage and was armed for the second:
+
+- **Preflight:** the read-only preflight completed on 2026-09-04
+  (`project_data_storage_relief_preflights`: plan
+  `prod-p0-projectdata-01khrjganbbwgdy1nz0kvf0d4j-20260904`, 15,539 eligible rows, 165,879,666
+  bytes, manifest written).
+- **Cleanup:** on 2026-09-14 the GitHub `production` Environment bound
+  `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_*` to that manifest and set `…_ENABLED=true`. Its reclaim
+  cap (about 166 MB) was small next to the gap.
+
+This file never recorded the cleanup's outcome or an observation window, so acceptance criteria
+1 to 8 stay unticked: their evidence was not captured, and the size target was reached by other
+means. The six implementation items still unticked were left that way when #2014 merged on
+2026-09-04. The staging section above covers part of the staging item; this audit did not
+re-derive the rest.
+
+**Still armed in production (operator follow-up).** All 31 plan variables
+(`PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_*` and `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_*`) are still set
+in the `production` Environment and ship as Worker text bindings, with both `…_ENABLED` flags
+`true`. The plan's own variable table says to set `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED`
+to `false` once the preflight has served its purpose. Removing the 31 variables would also free 31
+of `sam-api-prod`'s 175 text bindings.
 
 Measured 2026-10-12 (read-only production D1 `sam-prod`):
 

@@ -6,7 +6,8 @@
 > settings HTTP call (`packages/vm-agent/internal/acp/session_host_selection.go:229-233`; test
 > `session_host_contract_test.go:11`). Bootstrapped starts and contract-bearing restores no longer
 > call `fetchAgentSettings`; other starts, such as trial discovery
-> (`trial-orchestrator/steps.ts:983`), still fetch it after the key (`:51`, `:234`). #2234
+> (`trial-orchestrator/steps.ts:983`), still fetch it after the key
+> (`session_host_selection.go:51`, `:234`). #2234
 > (a3110a0a5) raised the on-demand Codex download to 136,245,837 bytes
 > (`codex_runtime_distribution.go:24`); `ensureAgentInstalled` is now `session_host.go:633`.
 > Still open: the per-session key fetch before install, Phase 1b, Phase 2 pre-install (including
