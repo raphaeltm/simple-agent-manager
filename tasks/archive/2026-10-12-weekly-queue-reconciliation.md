@@ -60,10 +60,12 @@ Before: 7 + 212 + 1,222 = 1,441. After: 0 + 210 + 1,231 = 1,441.
 
 ## Active: 7 → 0
 
-Every file was merged, deployed to production and checked against the production state its
-criteria name. Each archived file got a provenance footer. Stale boxes were ticked only with
-cited evidence; two stay unticked with the reason on the line. One file keeps its criteria
-unticked because their evidence was never recorded and its size target was reached another way.
+Six files were merged, deployed to production and checked against the production state their
+criteria name. The seventh, the ProjectData emergency, has no landing PR. It is archived because
+its 9.0 GB size target was met through archive sharding; the outcome of its approved relief plan
+was never recorded, so its criteria stay unticked. Each archived file got a provenance footer.
+Stale boxes were ticked only with cited evidence, and two stay unticked with the reason on the
+line.
 
 | File                                                        | Shipped by                                                                                           | First production deploy            | Boxes left unticked                                                                                              |
 | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -572,8 +574,9 @@ Also open and unchanged:
 
 ## Acceptance criteria
 
-- [x] `tasks/active/` is empty. Every one of the 7 files is merged, deployed and verified, including
-      the ProjectData emergency, whose 9.0 GB target was met on 10-10.
+- [x] `tasks/active/` is empty. Six files are merged, deployed and verified.
+- [x] The ProjectData emergency's 9.0 GB target was met on 10-10 through archive sharding. Its
+      relief-plan outcome is recorded as unknown, not as done.
 - [x] Every archived file states how it shipped, and no box is ticked without evidence.
 - [x] Every backlog removal has a one-line rationale in the PR description and in this ledger.
 - [x] No citation in the repo points at a task path this PR moved or deleted.

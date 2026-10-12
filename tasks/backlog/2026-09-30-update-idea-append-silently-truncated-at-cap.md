@@ -7,7 +7,10 @@
 > longer exist. #2294 (`a95b46191`) exposes the same operation to the SAM Connector as
 > `sam_idea_update` (`apps/api/src/operations/platform-operations.ts:153,228`, served by
 > `apps/api/src/routes/connector-mcp.ts`). It still returns `updated: true` with no truncation
-> notice (`idea-core.ts:381`). Still open: every acceptance criterion, for both surfaces.
+> notice (`idea-core.ts:381`). Still open: every acceptance criterion, for both surfaces. Both
+> routes call the same operation, but the regression criterion below names only the MCP route.
+> A fix should also be exercised through the Connector's `sam_idea_update`, because its
+> registration and response translation are separate.
 > Titles behave the same way. On 2026-10-12 a 215-character `update_idea` title for idea
 > `01M0YZNBKSKQZ47NC0K7M8N5AX` came back `updated: true` but was stored cut at 200 characters
 > (`ideaTitleMaxLength`, `limits.ts:38`). It lost its trailing "text FULL at 64 KiB" marker and
