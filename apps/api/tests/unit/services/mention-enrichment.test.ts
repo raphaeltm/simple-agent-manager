@@ -67,7 +67,7 @@ describe('mention syntax and real SQLite enrichment', () => {
     'bump @types/node',
     '@reviewer/extra',
     '@release.bot..',
-    '@\"reviewer\".suffix',
+    '@"reviewer".suffix',
     '@reviewer+extra',
     '@reviewer@example.com',
     '@"reviewer"suffix',
@@ -84,7 +84,7 @@ describe('mention syntax and real SQLite enrichment', () => {
 
   it('enriches sentence-final bare and quoted names through SQLite', async () => {
     const result = await enrichMessageWithMentions(
-      'Ask @release.bot. Then @\"Code Reviewer\".',
+      'Ask @release.bot. Then @"Code Reviewer".',
       db,
       'project',
       'user',
