@@ -134,14 +134,18 @@ type Server struct {
 	stopOnce               sync.Once
 	stopErrMu              sync.Mutex
 	stopErr                error
-	publishJobsMu          sync.Mutex
-	publishJobs            map[string]publishJobState
-	buildPublishRunner     func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error)
-	applyWatchdogMu        sync.Mutex
-	applyWatchdogs         map[string]chan struct{}
-	sessionSnapshotMu      sync.Mutex
-	sessionSnapshotLocks   map[string]sessionSnapshotLock
-	sessionSnapshotRunner  func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error)
+	secretExecMu           sync.Mutex
+	secretExecJobs         map[string]*secretExecState
+	// Optional external runtime observation hook for integration tests.
+	secretExecContextResolver func(context.Context, string, string) (string, string, string, error)
+	publishJobsMu             sync.Mutex
+	publishJobs               map[string]publishJobState
+	buildPublishRunner        func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error)
+	applyWatchdogMu           sync.Mutex
+	applyWatchdogs            map[string]chan struct{}
+	sessionSnapshotMu         sync.Mutex
+	sessionSnapshotLocks      map[string]sessionSnapshotLock
+	sessionSnapshotRunner     func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error)
 
 	workspaceLifecycleMu    sync.Mutex
 	workspaceLifecycleLocks map[string]*workspaceLifecycleEntry
@@ -1197,6 +1201,10 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/diff-summary", s.handleMcpDiffSummary)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish", s.handleMcpBuildAndPublish)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish-jobs/{jobId}/start", s.handleMcpBuildAndPublishJobStart)
+
+	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/secret-exec", s.handleMcpSecretExecStart)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/secret-exec/{jobId}", s.handleMcpSecretExecStatus)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/secret-exec/{jobId}/cancel", s.handleMcpSecretExecCancel)
 
 	// Boot log WebSocket (available during bootstrap for real-time streaming)
 	mux.HandleFunc("GET /boot-log/ws", s.handleBootLogWS)

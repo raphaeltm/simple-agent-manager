@@ -692,3 +692,17 @@ For older agents, `agent_prompt_failed` only receives this treatment with a just
 Admission reads the existing credential-limit windows and holds before VM placement using the TaskRunner alarm. Credential selection is never changed; a retained recovery pin is checked at the authenticated agent-key injection boundary. A mismatched, absent or malformed recovery pin cannot return a substitute credential and blocks for review. No new Worker environment bindings or production fault-injection controls are added. `pnpm test:e2e:provider-limits` uses only test processes and transport fixtures.
 
 Admission rechecks immediately before the initial agent start. A rejection observed after provisioning uses a visible bounded in-place hold, retrying the same unstarted step after reset; its allocated runtime remains subject to the normal absolute compute ceiling. The existing VM start protocol requires a nonempty prompt and cannot create a snapshot-ready idle harness without delivering it. This late-admission fallback is an explicit verification/rollout gap; no new no-prompt VM protocol is implied. Durable indexed task wait intents close the admission gap while a credential observation write is pending or capacity-bound.
+
+## Managed secret execution (MCP and VM Agent)
+
+MCP tools `exec_with_secrets`, `exec_with_secrets_status`, and `exec_with_secrets_cancel` require a verified token with project, user, workspace and agent-session identity. `exec_with_secrets` accepts exactly literal `argv` or `command` plus explicit `bash`/`sh`, selected managed `secretNames`, optional absolute `cwd`, nonsecret `env`, positive `timeoutMs`, and optional `idempotencyKey`. It never accepts a caller-selected user, container, workspace or session.
+
+The Worker checks session ownership and merges project → profile → skill stored env rows before decrypting selected secrets. Ordinary runtime-assets responses return `__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__NAME__` for managed secret env entries. Runtime files keep existing delivery semantics.
+
+Private node-management-authenticated VM endpoints:
+
+- `POST /workspaces/:workspaceId/mcp/secret-exec` starts an idempotent, persisted job.
+- `GET /workspaces/:workspaceId/mcp/secret-exec/:jobId?agentSessionId=...` reads its same-session snapshot.
+- `POST /workspaces/:workspaceId/mcp/secret-exec/:jobId/cancel?agentSessionId=...` requests cancellation.
+
+These endpoints are control-plane transport, not browser/public APIs. Responses contain `jobId`, `status`, `stdout`, `stderr`, `exitCode`, `timedOut`, `redacted`, `truncated`, and `execution` (`containerId`, `user`, `cwd`, `environmentMode`). Statuses are `running`, `completed`, `failed`, `cancelled`, `timed_out`, and `interrupted`. Running output is empty. Cancel can initially return running; poll until terminal. Exact selected values are redacted before persistence and response. Restart interrupts active jobs without replaying them. Existing active session environments are not restarted/migrated; results disclose legacy env-file state.

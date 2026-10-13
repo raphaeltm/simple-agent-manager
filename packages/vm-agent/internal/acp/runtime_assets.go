@@ -37,7 +37,11 @@ func appendRuntimeEnvVars(envVars []string, secretKeys map[string]bool, runtimeE
 			return envVars, fmt.Errorf("invalid runtime env var key %q", envVar.Key)
 		}
 		envVars = removeEnvVar(envVars, key)
-		envVars = append(envVars, key+"="+envVar.Value)
+		value := envVar.Value
+		if envVar.IsSecret {
+			value = "__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__" + key + "__"
+		}
+		envVars = append(envVars, key+"="+value)
 		if envVar.IsSecret {
 			secretKeys[key] = true
 		}

@@ -3708,3 +3708,13 @@ func TestIsValidMirrorHostname(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectSecretEnvIsPlaceholderEvenFromLegacyState(t *testing.T) {
+	script, err := buildProjectRuntimeEnvScript([]ProjectRuntimeEnvVar{{Key: "SENTINEL", Value: "synthetic-old-value", IsSecret: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(script, "synthetic-old-value") || !strings.Contains(script, "__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__SENTINEL__") {
+		t.Fatalf("unexpected script %q", script)
+	}
+}

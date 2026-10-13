@@ -904,11 +904,27 @@ OAuth public endpoints additionally use `CONNECTOR_OAUTH_REQUEST_MAX_BYTES` (163
 
 Connector protocol overrides (optional GitHub environment variables are forwarded by both deployment sync steps; omitted values use runtime defaults):
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `CONNECTOR_REQUEST_MAX_BYTES` | 262144 | MCP request body bound |
-| `CONNECTOR_CLIENT_NAME_MAX_LENGTH` | 200 | Dynamic registration name length |
-| `CONNECTOR_REDIRECT_URI_MAX_COUNT` | 10 | Dynamic registration redirect count |
-| `CONNECTOR_INBOX_SESSION_LIMIT` | 5 | Maximum session/interaction-store fanout per inbox page |
+| Variable                           | Default | Purpose                                                 |
+| ---------------------------------- | ------- | ------------------------------------------------------- |
+| `CONNECTOR_REQUEST_MAX_BYTES`      | 262144  | MCP request body bound                                  |
+| `CONNECTOR_CLIENT_NAME_MAX_LENGTH` | 200     | Dynamic registration name length                        |
+| `CONNECTOR_REDIRECT_URI_MAX_COUNT` | 10      | Dynamic registration redirect count                     |
+| `CONNECTOR_INBOX_SESSION_LIMIT`    | 5       | Maximum session/interaction-store fanout per inbox page |
 
 `CONNECTOR_REGISTRATION_PER_IP_PER_HOUR` is a shared-egress abuse bound, not a user quota. Operators serving many clients behind vendor/NAT egress should size this and the atomic `CONNECTOR_REGISTRATION_GLOBAL_PER_HOUR` backstop for expected connection volume. All `CONNECTOR_*` environment fallbacks are forwarded into deployed Workers when explicitly configured; Admin settings remain higher-priority overrides.
+
+### Managed secret command execution (VM Agent)
+
+The `exec_with_secrets` job supervisor reads these VM-agent process environment overrides (not Worker bindings):
+
+| Variable                         | Default   | Purpose                                                            |
+| -------------------------------- | --------- | ------------------------------------------------------------------ |
+| `SECRET_EXEC_TIMEOUT_MS`         | `600000`  | Default command deadline                                           |
+| `SECRET_EXEC_MAX_TIMEOUT_MS`     | `3600000` | Maximum caller deadline                                            |
+| `SECRET_EXEC_OUTPUT_BYTES`       | `65536`   | Returned/persisted bytes per output stream                         |
+| `SECRET_EXEC_MAX_ACTIVE`         | `8`       | Concurrent secret execution jobs per VM-agent process              |
+| `SECRET_EXEC_BODY_BYTES`         | `1048576` | Private start request body limit                                   |
+| `SECRET_EXEC_TRANSPORT_GRACE_MS` | `2000`    | Additional host transport cleanup grace after in-container cleanup |
+| `SECRET_EXEC_GRACE_MS`           | `1000`    | TERM-to-KILL grace for the in-container process group              |
+
+Positive integer values override defaults. These are local VM-agent service/container configuration; generated cloud-init does not forward additional Worker variables for them. Existing `WORKSPACE_TOOL_TIMEOUT_MS` bounds start/status/cancel transport calls, not the accepted job lifetime. Project/profile/skill managed `isSecret` env values are placeholders in fresh ordinary delivery. Harness credentials and runtime secret files retain existing paths.

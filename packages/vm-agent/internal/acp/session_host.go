@@ -155,6 +155,7 @@ type SessionHost struct {
 	// Agent state (guarded by mu)
 	mu                       sync.RWMutex
 	process                  agentProcess
+	secretExecContainerID    string
 	acpConn                  *acpsdk.ClientSideConnection
 	agentType                string
 	codexC2SelectionMu       sync.Mutex // independent: startup can hold mu
@@ -788,4 +789,12 @@ func (h *SessionHost) loadMirroredStatus() SessionHostStatus {
 		return v
 	}
 	return HostIdle
+}
+
+// SecretExecutionContext returns the live process container and configured session
+// identity without resolving/recreating a container or waking the session.
+func (h *SessionHost) SecretExecutionContext() (containerID, user, workDir string, active bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.secretExecContainerID, h.config.ContainerUser, h.config.ContainerWorkDir, h.process != nil
 }

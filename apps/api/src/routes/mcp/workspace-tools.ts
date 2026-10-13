@@ -414,3 +414,38 @@ export async function handleGetWorkspaceDiffSummary(
     );
   }
 }
+
+/** Private same-session execution transport; never expose raw upstream errors. */
+export async function proxySecretExecOnVm(
+  env: Env,
+  caller: McpTokenData,
+  operation: 'start' | 'status' | 'cancel',
+  jobId: string,
+  body?: unknown
+): Promise<unknown> {
+  const workspace = await lookupWorkspaceForVmAgent(env, caller.workspaceId, caller.projectId);
+  const { token } = await signNodeManagementToken(
+    caller.userId,
+    workspace.nodeId,
+    workspace.id,
+    env
+  );
+  const base = `/workspaces/${encodeURIComponent(workspace.id)}/mcp/secret-exec`;
+  const path =
+    operation === 'start'
+      ? base
+      : `${base}/${encodeURIComponent(jobId)}${operation === 'cancel' ? '/cancel' : ''}?agentSessionId=${encodeURIComponent(caller.agentSessionId ?? '')}`;
+  return fetchVmAgentJson(
+    env,
+    workspace.nodeId,
+    vmAgentUrlForPath(env, workspace.nodeId, path),
+    operation === 'status' ? 'GET' : 'POST',
+    {
+      Authorization: `Bearer ${token}`,
+      'X-SAM-Node-Id': workspace.nodeId,
+      'X-SAM-Workspace-Id': workspace.id,
+    },
+    body,
+    getWorkspaceToolTimeout(env)
+  );
+}

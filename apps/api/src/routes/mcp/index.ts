@@ -146,6 +146,7 @@ import {
   handleListSubscriptionEvents,
 } from './project-event-tools';
 import { handleScheduleTool } from './project-schedule-tools';
+import { handleSecretExec } from './secret-exec-tools';
 import {
   handleGetArchivedToolPayloads,
   handleGetResourceHistory,
@@ -494,6 +495,12 @@ mcpRoutes.post('/', async (c) => {
             // Synchronous — no async I/O needed for static content
             return c.json(handleGetDeploymentGuide(requestId));
           // ─── Workspace tools (unified from workspace-mcp) ──────────────
+          case 'exec_with_secrets':
+            return c.json(await handleSecretExec(requestId, toolArgs, tokenData, c.env, 'start'));
+          case 'exec_with_secrets_status':
+            return c.json(await handleSecretExec(requestId, toolArgs, tokenData, c.env, 'status'));
+          case 'exec_with_secrets_cancel':
+            return c.json(await handleSecretExec(requestId, toolArgs, tokenData, c.env, 'cancel'));
           case 'get_workspace_info':
             return c.json(await handleGetWorkspaceInfo(requestId, tokenData, c.env));
           case 'get_credential_status':

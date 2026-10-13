@@ -377,3 +377,9 @@ completion or permission to replay. The response includes `recovery.outcome` and
 - `GET /api/admin/connector/clients`, `PATCH /api/admin/connector/clients/:id` `{blocked}` — registered clients and block/unblock.
 
 Connector connection/client inventories accept `cursor` and return `nextCursor`. Own connections are enumerated through the OAuth provider's grant listing; the admin view uses the D1 grant index. Settings/Admin revocation and client blocking take effect immediately through D1 gates. Refresh-token reuse revokes the entire connection, enforced by atomic D1 admission after provider validation. OAuth protocol revocation is RFC 7009 at `/oauth/revoke`.
+
+## Managed runtime secret execution
+
+`exec_with_secrets` accepts literal `argv` OR `command` + explicit `shell` (`bash`/`sh`), `secretNames`, optional absolute `cwd`, nonsecret `env`, `timeoutMs`, and `idempotencyKey`. `exec_with_secrets_status(jobId)` and `exec_with_secrets_cancel(jobId)` are scoped to the caller's verified workspace and agent session. See `specs/001-mvp/contracts/api.md` and public guide `guides/secret-execution.md` for the lifecycle and compatibility scope.
+
+Private VM-agent node-management routes: `POST /workspaces/:workspaceId/mcp/secret-exec`; `GET /workspaces/:workspaceId/mcp/secret-exec/:jobId?agentSessionId=...`; `POST /workspaces/:workspaceId/mcp/secret-exec/:jobId/cancel?agentSessionId=...`. Direct browser/workspace auth is insufficient. Ordinary managed secret environment delivery uses named placeholders; selected values go only into the job's framed stdin environment, with bounded redacted results persisted in existing VM job storage.

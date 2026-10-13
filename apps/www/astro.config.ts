@@ -53,6 +53,7 @@ export default defineConfig({
             { slug: 'docs/guides/webhook-triggers' },
             { slug: 'docs/guides/scheduled-actions' },
             { slug: 'docs/guides/mcp-servers' },
+            { slug: 'docs/guides/secret-execution' },
             { slug: 'docs/guides/sam-connector' },
             { slug: 'docs/guides/app-deployments' },
             { slug: 'docs/guides/self-hosting' },

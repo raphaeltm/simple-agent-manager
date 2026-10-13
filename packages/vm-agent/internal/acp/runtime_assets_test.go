@@ -82,3 +82,13 @@ func TestResolveStandaloneRuntimeFilePathExpandsHome(t *testing.T) {
 		t.Fatalf("path = %q, want %q", got, want)
 	}
 }
+
+func TestManagedSecretOverridesFallbackWithPlaceholder(t *testing.T) {
+	env, err := appendRuntimeEnvVars([]string{"SENTINEL=synthetic-fallback"}, map[string]bool{}, []RuntimeEnvVar{{Key: "SENTINEL", Value: "synthetic-old-state", IsSecret: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(env) != 1 || env[0] != "SENTINEL=__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__SENTINEL__" {
+		t.Fatalf("unexpected env %v", env)
+	}
+}

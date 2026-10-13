@@ -61,6 +61,8 @@ func (s *Server) Stop(ctx context.Context) error {
 			}
 		}
 
+		s.stopSecretExecutions(ctx)
+
 		// Close persistence store
 		if s.store != nil {
 			if err := s.store.Close(); err != nil {

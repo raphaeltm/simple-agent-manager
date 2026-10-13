@@ -47,6 +47,7 @@ func (h *SessionHost) startAgentWithSessionMode(ctx context.Context, agentType s
 	}
 
 	h.process = process
+	h.secretExecContainerID = startup.containerID
 	h.attachACPConnection(process, agentType)
 	go h.monitorStderr(process)
 	// The monitor OUTLIVES this call. It restarts the agent after a crash or an
