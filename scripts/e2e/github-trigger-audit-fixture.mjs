@@ -87,14 +87,36 @@ export function smokeSessionCookie(setCookieHeader) {
 }
 
 export function hasAuditReply(task, messages, marker) {
+  const assistantText = messages
+    .filter((item) => item.role === 'assistant' && typeof item.content === 'string')
+    .map((item) => item.content)
+    .join('');
   return (
     task.status === 'in_progress' &&
     task.executionStep === 'awaiting_followup' &&
-    messages.some(
-      (item) =>
-        item.role === 'assistant' &&
-        typeof item.content === 'string' &&
-        item.content.includes(marker)
-    )
+    assistantText.includes(marker)
   );
+}
+
+export async function readAuditMessages(fetchPage, maxPages = 10) {
+  const messages = [];
+  let after;
+  for (let page = 0; page < maxPages; page++) {
+    const result = await fetchPage(after);
+    assert(Array.isArray(result.messages), 'Invalid message page');
+    messages.push(...result.messages);
+    if (!result.hasMore) return messages;
+    const last = result.messages.at(-1);
+    assert(
+      last &&
+        Number.isSafeInteger(last.createdAt) &&
+        Number.isSafeInteger(last.sequence) &&
+        typeof last.id === 'string',
+      'Missing exact message cursor'
+    );
+    const next = JSON.stringify([last.createdAt, last.sequence, last.id]);
+    assert(next !== after, 'Message cursor did not advance');
+    after = next;
+  }
+  throw new Error('Audit message inventory incomplete');
 }

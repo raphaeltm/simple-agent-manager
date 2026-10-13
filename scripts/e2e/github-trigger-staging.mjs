@@ -7,6 +7,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import {
   auditPrompt,
   hasAuditReply,
+  readAuditMessages,
   findOwnedAuditTrigger,
   resolveAuditRepository,
   smokeSessionCookie,
@@ -397,10 +398,12 @@ if (phase === 'send') {
           ) {
             const workspace = await request(`/api/workspaces/${task.workspaceId}`);
             if (workspace.chatSessionId) {
-              const messages = await request(
-                `${prefix}/sessions/${workspace.chatSessionId}/messages?role=assistant&limit=20`
+              const messages = await readAuditMessages((after) =>
+                request(
+                  `${prefix}/sessions/${workspace.chatSessionId}/messages?role=assistant&limit=500&order=asc${after ? `&after=${encodeURIComponent(after)}` : ''}`
+                )
               );
-              if (hasAuditReply(task, messages.messages, fixture.marker)) {
+              if (hasAuditReply(task, messages, fixture.marker)) {
                 agentResponded = true;
                 break;
               }

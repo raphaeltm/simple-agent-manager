@@ -126,3 +126,45 @@ At the earlier 424e578b review, App metadata GETs did not yet inspect `/app/hook
 Candidate first commit: `bf785e28c714a9d18912c05812e8e8bdcf7585a0`; exact 35-path code/test/helper fingerprint `0383bba8dbc79a32084397b42060999845ecdd5f50c179d140fb25cb179e7b4b`, independently security-reviewed PASS as reported by the release owner. Inspected `scripts/e2e/github-trigger-staging.mjs`: it now performs fixed read-only GET `/app/hook/config` with the existing in-memory App JWT and prints only `contentType`, `tlsVerified` and `destinationMatchesExpected`. It rejects a destination differing from the staging endpoint, URL credentials/query/fragment, non-JSON serialization or disabled TLS verification. It never prints the hook secret or full configuration. The writer reports 18 signed-helper tests passed, and no additional credentials or permissions were created.
 
 **Live hook configuration verification remains pending** until the existing trusted staging job executes. Natural GitHub-origin delivery on the final candidate remains a separate coverage gap even after a successful metadata read and signed synthetic admission test. No staging/deployment/production completion is inferred from this code/test supplement.
+
+## Observed staging evidence and incomplete acceptance
+
+This section supersedes earlier pending live metadata statements; it does **not** claim full staging end-to-end success or production deployment.
+
+- Normal [staging deployment 38381329627](https://github.com/raphaeltm/simple-agent-manager/actions/runs/38381329627) succeeded for runtime `bf785e28`, with existing smoke coverage passing. Release-owner evidence identifies Worker version `f3caf7c0-712b-411f-bc3b-de08adeb1911` and applied migration 0194.
+- Trusted [signed send 38385384520](https://github.com/raphaeltm/simple-agent-manager/actions/runs/38385384520) read actual staging App/installation/hook metadata: App `sammy-party`, all four supported subscriptions enabled, JSON serialization, TLS verification enabled, exact expected staging destination, installation unsuspended with all-repository selection. Existing Issues/Pull requests/Contents write permissions were observed and preserved; the minimum required read access was therefore present. No GitHub permission expansion or credentials were created.
+- Actual authenticated desktop/mobile form preparation persisted `actions: [opened]`, restrictive marker filters and unrelated configuration preservation. An observed account setup dialog was dismissed using its normal **Exit setup** control. No authentication, setup state, provider or pool bypass was used.
+- Repeated signed deliveries using one GUID produced one execution/task. This verifies deployed ingress/filter/admission/dedup for those synthetic issues payloads, not execution completion or every GitHub event/action.
+
+Two acceptance failures are preserved: the initial cold-node run exceeded the harness's 120-second window (observed readiness approximately 5.5 minutes later); the warm run initially returned `pass: true` on `in_progress` but later failed `agent_prompt_failed` under an implicit OpenCode project default. That earlier running-only verifier result is a **false positive and is not full end-to-end acceptance**. Its root provider cause was not fully classified. Supported cleanup removed the temporary triggers and deleted the warm workspace; final node/resource release still requires release-owner confirmation.
+
+Current helper candidate is `55c02b9e30ec5dde625dd1ca3eadab09024f8282`, reviewed 35-path fingerprint `3730505f366e25969b9e82623ed50b931cfd69c7e5726f672dbe88d15bbd08be`. Runtime remains staged `bf785e28`; later changes are verification-helper fixes. The helper now selects existing full Codex profile `01KXG9TF76VP9DNY916CAZSSXR` with conversation mode and requires **both** `awaiting_followup` and an actual assistant reply containing the unique marker. This avoids treating scheduler/task progress as proof of successful agent execution.
+
+Independently read current prepare evidence: marker `github-trigger-audit-07177289-e050-463f-a284-3ec835a7c508`, trigger `01M4TG80G43XW2DH77MFTY8JZW`, GUID `0b7d8cf7-e2d4-48ac-906e-d29192868ac7`, existing project/repository/installation as above. Preparation passed. [Fresh signed send 38390321094](https://github.com/raphaeltm/simple-agent-manager/actions/runs/38390321094) and matching local verification are **in progress/pending** according to release-owner status. The existing `verify-result.json` still belongs to the superseded warm-run marker and cannot certify this fresh fixture.
+
+Remaining gaps are tracked in SAM Idea `01M4TBZJTKH78R14RQNNKC837N`, including durable post-200 ingress recovery, legacy nullable repository-ID fallback/lifecycle reconciliation/parallel producer scope and CSV entry representation. Unsupported events remain deliberately outside automation coverage. A successful corrected synthetic staging run will not prove final-candidate natural GitHub-origin delivery, every action/filter edge, large-payload/latency guarantees or production behavior. PR/CI/review/merge/deploy/production acceptance remain pending until separately observed.
+
+### Subsequent strict verification and main integration
+
+The fresh `07177289-e050-463f-a284-3ec835a7c508` verifier exited unsuccessfully with `failedStep: actual admission` and no acceptance checks. Although its task reached `awaiting_followup`, assistant messages lacked the expected marker; the null-model Codex profile inherited legacy `gpt-5.4-mini` and emitted model-configuration notices. This is **not** full end-to-end success. Its temporary trigger was removed and task terminalized through ordinary cleanup; subsequent supported deletion confirmed its workspace absent.
+
+Integration commit `1a04462069298d14fe33fcb1e10f91bc533e65e4` merges upstream roster commit `711fdc35` while preserving trigger code/helper/tests from `55c02b9e`. Within the 35-path trigger review set, only `.claude/skills/api-reference/SKILL.md` changes, adding four upstream roster documentation lines. Independent scoped documentation overlap review: **PASS**; trigger PATCH and GitHub config replacement/resume descriptions remain intact, and upstream roster documentation is preserved. Reported new 35-path fingerprint is `1dae814206f45831bbbe24c754a1d0b919ff4f2801d201ef564c37247245a8de`. The separately reviewed roster implementation is outside this trigger compatibility matrix's code-review claim.
+
+A reversible fixture-only profile was created through normal APIs with explicit `gpt-6.1-sol`, VM/full/conversation. No global default, persistent credential, permission or security exception changed.
+
+Public fixture metadata:
+
+| Field | Identifier |
+|---|---|
+| Temporary profile | `01M4TGZ4BGN6KYK5A3BE5QY5KF` |
+| Marker | `github-trigger-audit-695bf2cf-0c18-4586-aaa4-aadfc6881a2f` |
+| Trigger | `01M4TH5Y01B0GM5YFXQCT2Z6YJ` |
+| GUID | `6b5bf227-918a-42a9-a36d-5e91950dba2e` |
+
+New preparation passed. [Signed send 38392277453](https://github.com/raphaeltm/simple-agent-manager/actions/runs/38392277453) succeeded according to the release owner. A task reaching `awaiting_followup` alone is insufficient. Existing `verify-result.json` belongs to the failed prior marker and must not be reused as current evidence. No trigger production deployment is claimed.
+
+### Streamed assistant reply and cleanup status
+
+Release-owner read-only evidence at 11:52 UTC established the actual Sol reply: an ordered, bounded 500-record assistant-message query returned 27 stream chunks with no further page. Concatenating those assistant chunks contains the fixture's unique marker, while no individual chunk contains the whole marker. The task is `awaiting_followup`. The initial single-record/unpaginated verifier therefore failed to recognize a valid streamed reply; stopping that local observer did not cancel the task or replay its delivery.
+
+The same Sol writer implemented bounded chronological assistant paging/aggregation, with 30 helper tests reported passed and independent incremental code review. Current actual reply is proven, but completed updated-verifier cleanup is **pending**. Normal login encountered HTTP 429 with `Retry-After: 354`; the release owner is respecting that limit before another supported cleanup attempt. No new token, header bypass, task dispatch, signed send or runtime deployment is required. Temporary task/workspace/profile removal, test-node deletion and zero-at-rest verification remain release gates. This section is not full end-to-end or production acceptance.

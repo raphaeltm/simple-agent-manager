@@ -8,8 +8,9 @@ import { parse } from 'yaml';
 
 import {
   auditPrompt,
-  hasAuditReply,
   findOwnedAuditTrigger,
+  hasAuditReply,
+  readAuditMessages,
   resolveAuditRepository,
   smokeSessionCookie,
 } from '../e2e/github-trigger-audit-fixture.mjs';
@@ -307,4 +308,46 @@ describe('successful audit reply requirement', () => {
       )
     ).toBe(false);
   });
+});
+
+it('reads ordered assistant chunks across exact-cursor pages and never uses user text', async () => {
+  const chunks = [...fixture.marker].map((content, i) => ({
+    id: `chunk-${i}`,
+    createdAt: 1000,
+    sequence: i,
+    role: 'assistant',
+    content,
+  }));
+  const seen = [];
+  const messages = await readAuditMessages(async (after) => {
+    seen.push(after);
+    const start = after ? JSON.parse(after)[1] + 1 : 0;
+    return { messages: chunks.slice(start, start + 20), hasMore: start + 20 < chunks.length };
+  });
+  expect(seen[1]).toBe(JSON.stringify([1000, 19, 'chunk-19']));
+  expect(
+    hasAuditReply(
+      { status: 'in_progress', executionStep: 'awaiting_followup' },
+      messages,
+      fixture.marker
+    )
+  ).toBe(true);
+  expect(
+    hasAuditReply(
+      { status: 'in_progress', executionStep: 'awaiting_followup' },
+      chunks.map((x) => ({ ...x, role: 'user' })),
+      fixture.marker
+    )
+  ).toBe(false);
+});
+it('rejects truncated or stalled message pagination', async () => {
+  await expect(
+    readAuditMessages(async () => ({
+      messages: [{ id: 'same', createdAt: 1, sequence: 1, role: 'assistant', content: 'x' }],
+      hasMore: true,
+    }))
+  ).rejects.toThrow('Message cursor did not advance');
+  await expect(readAuditMessages(async () => ({ messages: [], hasMore: true }))).rejects.toThrow(
+    'Missing exact message cursor'
+  );
 });
