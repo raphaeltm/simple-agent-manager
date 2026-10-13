@@ -131,6 +131,23 @@ func TestSecretExecValidation(t *testing.T) {
 	}
 }
 
+func TestSecretExecReadonlyNamesRejected(t *testing.T) {
+	for _, name := range []string{"UID", "EUID", "PPID", "SHELLOPTS", "BASHOPTS", "BASH_VERSINFO"} {
+		for _, req := range []secretExecRequest{
+			{Argv: []string{"true"}, SecretNames: []string{name}},
+			{Argv: []string{"true"}, Env: map[string]string{name: "synthetic"}},
+			{Argv: []string{"true"}, ManagedEnv: []secretExecEnv{{Key: name, Value: "synthetic"}}},
+		} {
+			req.JobID = "sx-" + strings.Repeat("a", 64)
+			req.Fingerprint = strings.Repeat("b", 64)
+			req.SessionID = "session"
+			if validateSecretExecRequest(&req) == nil {
+				t.Fatalf("unsupported name accepted: %s", name)
+			}
+		}
+	}
+}
+
 func TestSecretExecAcceptedJobSurvivesRequestAndRetriesDoNotReplay(t *testing.T) {
 	s, key := secretExecTestServer(t)
 	store, err := persistence.Open(filepath.Join(t.TempDir(), "jobs.db"))

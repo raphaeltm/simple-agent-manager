@@ -261,7 +261,20 @@ func (s *Server) handleMcpSecretExecStart(w http.ResponseWriter, r *http.Request
 	go s.runSecretExec(ctx, state, argv, values, secrets)
 	writeJSON(w, http.StatusAccepted, snapshot)
 }
+func unsupportedSecretExecEnvName(name string) bool {
+	switch name {
+	case "ENV", "BASH_ENV", "UID", "EUID", "PPID", "SHELLOPTS", "BASHOPTS", "BASH_VERSINFO":
+		return true
+	}
+	return false
+}
+
 func validateSecretExecRequest(req *secretExecRequest) error {
+	for _, item := range req.ManagedEnv {
+		if unsupportedSecretExecEnvName(item.Key) {
+			return fmt.Errorf("Unsupported managed shell environment variable name")
+		}
+	}
 	if !secretExecJobID.MatchString(req.JobID) || req.SessionID == "" || len(req.Fingerprint) != 64 {
 		return fmt.Errorf("Invalid job identity")
 	}
@@ -283,16 +296,16 @@ func validateSecretExecRequest(req *secretExecRequest) error {
 		return fmt.Errorf("Command cannot contain NUL")
 	}
 	for key, value := range req.Env {
-		if key == "ENV" || key == "BASH_ENV" {
-			return fmt.Errorf("Shell startup control environment is reserved")
+		if unsupportedSecretExecEnvName(key) {
+			return fmt.Errorf("Unsupported shell environment variable name")
 		}
 		if !secretExecEnvKey.MatchString(key) || strings.ContainsRune(value, 0) {
 			return fmt.Errorf("Invalid environment override")
 		}
 	}
 	for _, name := range req.SecretNames {
-		if name == "ENV" || name == "BASH_ENV" {
-			return fmt.Errorf("Shell startup control environment is reserved")
+		if unsupportedSecretExecEnvName(name) {
+			return fmt.Errorf("Unsupported shell environment variable name")
 		}
 	}
 	if req.TimeoutMs == 0 {

@@ -4,6 +4,7 @@ import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { errors } from '../../middleware/error';
 import {
   getSecretExecutionEnv,
@@ -23,6 +24,16 @@ const literal = v.pipe(
   v.string(),
   v.check((s) => !s.includes('\0'))
 );
+const unsupportedEnvNames = new Set([
+  'ENV',
+  'BASH_ENV',
+  'UID',
+  'EUID',
+  'PPID',
+  'SHELLOPTS',
+  'BASHOPTS',
+  'BASH_VERSINFO',
+]);
 const envKey = v.pipe(v.string(), v.regex(/^[A-Za-z_][A-Za-z0-9_]*$/));
 export const SecretExecSchema = v.pipe(
   v.strictObject({
@@ -44,9 +55,7 @@ export const SecretExecSchema = v.pipe(
   v.check((r) => (r.command !== undefined ? r.shell !== undefined : r.shell === undefined)),
   v.check(
     (r) =>
-      ![...r.secretNames, ...Object.keys(r.env ?? {})].some(
-        (name) => name === 'ENV' || name === 'BASH_ENV'
-      )
+      ![...r.secretNames, ...Object.keys(r.env ?? {})].some((name) => unsupportedEnvNames.has(name))
   )
 );
 const JobSchema = v.strictObject({ jobId: v.pipe(v.string(), v.regex(/^sx-[a-f0-9]{64}$/)) });
@@ -132,10 +141,17 @@ export async function handleSecretExec(
       const { envVars } = await getSecretExecutionEnv(
         db,
         input,
-        env.ENCRYPTION_KEY,
+        getCredentialEncryptionKey(env),
         request.secretNames
       );
       for (const item of envVars) {
+        if (unsupportedEnvNames.has(item.key)) {
+          return jsonRpcError(
+            requestId,
+            INVALID_PARAMS,
+            'Managed environment contains an unsupported shell variable name'
+          );
+        }
         if (item.isSecret && Object.hasOwn(request.env ?? {}, item.key)) {
           return jsonRpcError(
             requestId,

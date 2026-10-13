@@ -40,6 +40,7 @@ async function fixture() {
     );
   }
   const encryptionKey = btoa('01234567890123456789012345678901');
+  const legacyEncryptionKey = btoa('98765432109876543210987654321098');
   const cipher = await encrypt("synthetic-selected\n'$(exit 99)'", encryptionKey);
   sqlite
     .prepare('INSERT INTO project_runtime_env_vars VALUES(?,?,?,?,?,?)')
@@ -64,7 +65,8 @@ async function fixture() {
     ['sign', 'verify']
   );
   const pkcs8 = await crypto.subtle.exportKey('pkcs8', keys.privateKey);
-  const pem = `-----BEGIN PRIVATE KEY-----\n${btoa(String.fromCharCode(...new Uint8Array(pkcs8)))}\n-----END PRIVATE KEY-----`;
+  // Generated synthetic fixture only; no embedded private key.
+  const pem = `-----BEGIN PRIVATE KEY-----\n${btoa(String.fromCharCode(...new Uint8Array(pkcs8)))}\n-----END PRIVATE KEY-----`; // gitleaks:allow
   const store = new Map<string, string>();
   const kv = {
     get: async (key: string) => {
@@ -81,7 +83,8 @@ async function fixture() {
   const env = {
     DATABASE: createSqliteD1(sqlite),
     KV: kv,
-    ENCRYPTION_KEY: encryptionKey,
+    ENCRYPTION_KEY: legacyEncryptionKey,
+    CREDENTIAL_ENCRYPTION_KEY: encryptionKey,
     JWT_PRIVATE_KEY: pem,
     BASE_DOMAIN: 'synthetic.example',
   } as unknown as Env;
@@ -118,7 +121,7 @@ async function fixture() {
 }
 
 describe('HTTP MCP → real auth/D1/encryption → mock VM HTTP', () => {
-  it('resolves only the winning selected row and sends every other secret as a placeholder', async () => {
+  it('prefers the credential encryption key and resolves only the winning selected row and sends every other secret as a placeholder', async () => {
     const { env, token } = await fixture();
     const response = await callMcp(
       1,
