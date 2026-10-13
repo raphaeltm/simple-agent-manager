@@ -51,6 +51,8 @@ Product bugs found (filed as SAM ideas, not docs work):
   throwaway real-SQLite probe of `enrichMessageWithMentions`; five callers don't catch.
 - `01M4SN2FPBD0NNJWTTHZ5D0XYJ`: in-app Tools → CLI page stale (cookie login, "tokens coming soon",
   hardcoded API URL, wrong chat command).
+- `01M4SQ4VSJ42K1NH0M6TYGCPHV` (priority 2): Resources timeline hour labels can overlap in Active
+  time mode.
 
 ## Implementation checklist
 
@@ -69,9 +71,11 @@ Product bugs found (filed as SAM ideas, not docs work):
 - [x] CLI guide (install, sign in, project, work loop) + sidebar entries
 - [x] Small: chat-features Retry hidden when expired; app-deployments `use_api_socket`; security
       isolation links; agents.md MCP table
-- [ ] Screenshots via Playwright spec (real components, mock data): Connector Settings → Access and
-      consent; Fork pre-filled composer; Expired chat. Optional: repair Resources drawer docs spec
-- [ ] `recent-product-changes.md`: new 6 – 13 October cycle; roll previous cycles; "8 October" → 9
+- [x] Screenshots via Playwright spec (real components, mock data): Connector Settings → Access and
+      consent (new `docs-screenshots-connector.spec.ts`); Fork pre-filled composer and Expired chat
+      (`docs-screenshots-chat-states.spec.ts`). Repaired the Resources drawer docs scenes
+      (`docs-screenshots-sessions.spec.ts` now serves the shared overnight timeline scenario).
+- [x] `recent-product-changes.md`: new 6 – 13 October cycle; roll previous cycles; "8 October" → 9
 - [ ] Local sub-agent review loop until no actionable feedback
 - [ ] `pnpm --filter @simple-agent-manager/www build` + link check; PR; CI green; merge
 
