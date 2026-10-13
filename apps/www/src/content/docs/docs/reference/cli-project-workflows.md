@@ -3,7 +3,7 @@ title: CLI project workflows
 description: Inspect projects and perform scoped assistant workflows with explicit selection, JSON and safe work receipts.
 ---
 
-Use `sam <family> --help` for the current command contract. Commands accept `--project <exact-name|unique-ID-prefix|full-ID>` and `--json`; prefer full project/resource IDs in scripts. Project and profile names must resolve unambiguously. An explicit profile such as Sol is never silently replaced by a default. `sam project use` changes only local CLI selection; it is unnecessary when every command has `--project`.
+New to the CLI? Start with [SAM CLI](/docs/guides/cli/) to install it and sign in. Use `sam <family> --help` for the current command contract. Commands accept `--project <exact-name|unique-ID-prefix|full-ID>` and `--json`; prefer full project/resource IDs in scripts. Project and profile names must resolve unambiguously. An explicit profile such as Sol is never silently replaced by a default. `sam project use` changes only local CLI selection; it is unnecessary when every command has `--project`.
 
 ## Work loop
 
