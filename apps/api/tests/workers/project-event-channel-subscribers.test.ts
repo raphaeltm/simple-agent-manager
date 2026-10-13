@@ -195,6 +195,7 @@ describe('read-only channel subscriber roster through MCP', () => {
       { state: 'any', cursor: page.nextCursor },
       { cursor: 'null' },
       { cursor: 'not-json' },
+      { cursor: JSON.stringify([1, f.projectId, 'builds', 'active', 'id', 'extra']) },
       { cursor: JSON.stringify([1, f.projectId, 'builds', 'active', 3]) },
       { state: 'unknown' },
       { state: 3 },

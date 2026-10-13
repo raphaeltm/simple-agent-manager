@@ -5,6 +5,7 @@ import {
   PROJECT_EVENT_SUBSCRIPTION_STATES,
   type ProjectEventChannelSubscriberList,
 } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 
 import { channelName } from './project-event-channels-config';
 import { ProjectEventCursorError, ProjectEventValidationError } from './project-events-contracts';
@@ -37,19 +38,16 @@ export function listChannelSubscribers(
   let after = '';
   if (input.cursor !== undefined) {
     try {
-      const cursor: unknown = JSON.parse(
-        normalizeText(input.cursor, 'cursor', limits.maxMetadataBytes)
+      const cursor = v.parse(
+        v.strictTuple([
+          v.literal(1),
+          v.literal(projectId),
+          v.literal(channel),
+          v.literal(state),
+          v.string(),
+        ]),
+        JSON.parse(normalizeText(input.cursor, 'cursor', limits.maxMetadataBytes))
       );
-      if (
-        !Array.isArray(cursor) ||
-        cursor.length !== 5 ||
-        cursor[0] !== 1 ||
-        cursor[1] !== projectId ||
-        cursor[2] !== channel ||
-        cursor[3] !== state ||
-        typeof cursor[4] !== 'string'
-      )
-        throw new Error('Invalid cursor');
       after = normalizeText(cursor[4], 'cursor subscription', limits.maxFilterStringBytes);
     } catch {
       throw new ProjectEventCursorError('Invalid subscriber cursor');
