@@ -5,7 +5,110 @@ description: User-facing SAM changes from the latest development cycles, with pr
 
 This page summarizes recent changes that affect how people use SAM. Use it as a quick orientation when returning to the product after a week away, then follow the linked guides for the full workflow.
 
-## This cycle: 29 September – 6 October 2026
+## This cycle: 6 – 13 October 2026
+
+### For everyone
+
+- **Use SAM from Claude and ChatGPT.** Connect the AI app you already use to SAM, then ask it what
+  needs your attention, start a chat in a project, reply to one, or answer an agent that's waiting
+  for you, without opening SAM. → [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/)
+- **Agents can set up automation for you.** Ask an agent to create a schedule, GitHub, or webhook
+  trigger, and it appears on the project's **Triggers** page like one you made yourself.
+  → [Triggers](/docs/guides/triggers/#ask-an-agent-to-set-one-up)
+- **A chat wakes up as it went to sleep.** A sleeping chat now wakes with the agent, model,
+  permission mode, and approval cards it started with, and a **Task** still commits, pushes, and
+  opens its pull request after a wake. → [After a chat wakes from sleep](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
+- **Fork and Retry open instantly.** Fork no longer waits for an AI summary: the new chat is
+  pre-filled with the old session's IDs, and its agent reads the original conversation itself.
+  Retry pre-fills the original request. → [Conversation Forking](/docs/guides/chat-features/#conversation-forking)
+- **An expired chat says so.** A chat that slept longer than its saved workspace is kept shows
+  **Expired** and offers **Fork conversation**, instead of failing when you try to wake it.
+  → [Expired saved workspace](/docs/guides/session-troubleshooting/#expired-saved-workspace)
+- **A failed wake keeps the chat asleep.** If a VM chat can't wake, it goes back to sleep on the
+  same task and you can try again, instead of the task failing. → [Wake failed](/docs/guides/session-troubleshooting/#wake-failed)
+- **Running out of memory moves your session.** When a VM runs short of memory, SAM moves the session
+  to another machine again; that move had been failing since 9 October.
+  → [None of these fit](/docs/guides/session-troubleshooting/#none-of-these-fit)
+- **New models.** Claude Haiku 5.5, and more OpenCode models. → [New models](#new-models)
+- **A guide to the command line.** Install the `sam` CLI, sign in, and start, follow, and reply to
+  work from a terminal or a script. → [SAM CLI](/docs/guides/cli/)
+
+Also changed this week:
+
+- **Archive works on sleeping VM chats.** It used to fail with "Task cannot be closed from status
+  'sleeping'".
+- **Sleeping Instant chats can be woken for the full seven days**, instead of only about four
+  hours, and **Stop** and **Archive** finish reliably on them.
+- **Long tasks that keep making progress are no longer stopped after eight hours.** They run until
+  SAM's inactivity check or the 24-hour limit.
+- **A new VM that fails to start is retried, then replaced once**, instead of failing the task on
+  the first error.
+- **Messages and events reach sleeping chats.** Wakes triggered by another agent's message, a
+  scheduled action, or an event no longer fail at random, arrive as soon as the chat is ready, and
+  one unread notification no longer holds up the rest for a day.
+- **A sleep that can't finish ends visibly.** If SAM can't confirm a workspace stopped, the chat
+  says so and ends, instead of promising a wake it couldn't guarantee.
+  → [SAM could not finish putting the session to sleep](/docs/guides/session-troubleshooting/#sam-could-not-finish-putting-the-session-to-sleep)
+- **Claude usage chips appear.** Readings from Claude Pro and Max subscriptions were being dropped,
+  so the usage chip never showed for Claude. → [Usage Limits](/docs/guides/agents/#usage-limits)
+- **Messages between agents arrive as a notice from SAM.** The recipient's chat shows a short SAM
+  notice, and the conversation between the two agents is on the project's **Events** page.
+  → [Messages between agents](/docs/guides/agents/#messages-between-agents)
+- **A new Chat you start on a VM no longer waits** for another workspace on the same machine to
+  finish building.
+- **The **Resources** panel's totals no longer double-count** the history it uploaded twice.
+  Sessions recorded before the fix keep their inflated totals.
+
+**Known issue:** since 9 October, sending a message that contains `@` followed by a word, such as
+an email address (`bob@example.com`) or a package name (`@types/node`), fails with **Agent profile
+not found** unless the word is the name of one of your agent profiles. Until a fix ships, write the
+address without the `@` (`bob at example.com`), or put a space after it.
+
+### For self-hosters & admins
+
+Update to v2026.10.12 or later. The fixes for interrupted sleeps and memory-pressure moves arrive in
+the release after v2026.10.12. There are no new secrets or Cloudflare token permissions; the new
+database migrations run in the deploy pipeline, and the deploy creates the Connector's storage.
+
+- **The SAM Connector is on after you update** (from v2026.10.10). To keep it off, switch off
+  **Enable Connector** in **Admin → Integrations → Connector**, or set the `CONNECTOR_ENABLED`
+  GitHub Environment variable to `false` before you deploy.
+  → [SAM Connector settings](/docs/reference/configuration/#sam-connector)
+- **Chats asleep when you update wake in Manual.** A sleeping chat started before v2026.10.08 has no
+  recorded settings, so it wakes asking for approval before it changes anything. If you haven't
+  [turned agent requests on](/docs/guides/self-hosting/#let-agents-ask-in-chat), those requests are
+  refused, so tell people to fork such a chat rather than keep using it.
+- **Pending accounts are held back everywhere.** With signup approval on, an account waiting for
+  approval can no longer use agent chats, create API tokens, or open workspaces in the browser.
+  → [Signup approval](/docs/guides/self-hosting/#signup-approval)
+- **About 180 Worker variables left `wrangler.toml`.** They only repeated SAM's built-in defaults,
+  so nothing changes when you deploy. If your fork edited one of those lines, syncing will conflict
+  there; keep your value as described in [Worker Variables](/docs/reference/configuration/#worker-variables).
+- **Superadmins hear when archiving stops.** When a project's archive circuit breaker opens, every
+  superadmin gets an **Operational Failure** notification linking to **Admin → Storage**, and the
+  hourly storage measurement runs again.
+  → [Storage and archive circuit breakers](/docs/guides/self-hosting/#storage-and-archive-circuit-breakers)
+- **Agent messages travel over channels on every install.** The checked-in `wrangler.toml` turns on
+  `AGENT_MESSAGE_CHANNELS_ENABLED`.
+- **Removed:** `ACP_TASK_PROMPT_TIMEOUT` (long tasks now end only through the inactivity check or
+  the 24-hour limit). If you set it, you can delete it.
+- **New optional settings**, with working defaults, for retrying a VM that fails to start
+  (`ORIGIN_CA_*`, `CLOUD_INIT_*`, `TASK_RUNNER_BOOT_MAX_REPLACEMENTS`,
+  `TASK_RUNNER_FIRST_HEARTBEAT_TIMEOUT_MS`) and for the Connector (`CONNECTOR_*`).
+  → [Fresh VM boot recovery](/docs/reference/configuration/#fresh-vm-boot-recovery)
+- **The Pulumi state repair workflow no longer prints raw state.** Its export shows resource counts
+  and URNs only.
+
+### New models
+
+Profiles can now use **Claude Haiku 5.5 (1M context)** with Claude Code, and with OpenCode Zen and
+OpenCode Go. OpenCode Zen adds **Exo Free**, **Step 5 Preview Free**, and **Mistral Large 4**, and
+drops **Fledge Alpha Free**; OpenCode Go adds **Step 5 Preview Free** and renames **Space Bunny Free**
+to **Space Bunny**. Gemini CLI's **Gemini 3.7 Flash** is now marked deprecated: Google routes it to
+3.8. A profile already set to a model that left the list keeps it, shown as a custom model. See
+[Choosing a model](/docs/guides/agents/#choosing-a-model).
+
+## Previous cycle: 29 September – 6 October 2026
 
 ### For everyone
 
@@ -42,7 +145,7 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
   stopping an old chat no longer moves it to the top.
   → [Switching Between Chats](/docs/guides/chat-features/#switching-between-chats)
 - **New models.** OpenAI **GPT-6.1 Sol** with Codex, **Claude Sonnet 5.5**, **Gemini 3 Flash
-  Preview**, and more OpenCode Zen models. → [New models](#new-models)
+  Preview**, and more OpenCode Zen models. → [New models](#new-models-1)
 
 Also changed this week:
 
@@ -84,7 +187,7 @@ installations alike.
    ([Updating an existing instance](/docs/guides/self-hosting/#updating-an-existing-self-hosted-instance)).
    v2026.10.05 is the first where Claude Code agents with no mode set start in Bypass Permissions; on
    v2026.10.01 to v2026.10.04 they ask, and with requests off are refused every time. The check-in cap, usage chips, the Codex upgrade for GPT-6.1 Sol, and sleeping
-   tasks on Active Tasks arrive in the release after v2026.10.05.
+   tasks on Active Tasks arrive in v2026.10.06.
 3. **If you left requests off, find the saved modes that will be refused** — in profiles, skills,
    projects' **Agent Overrides**, and users' **Settings → Agents**, where saving on a release before
    v2026.10.05 stored the old always-ask default, now shown as **Manual**.
@@ -172,7 +275,7 @@ OpenCode Zen. SAM also upgraded the Codex it
 installs, so a profile set to GPT-6.1 Sol starts instead of being rejected. See
 [Choosing a model](/docs/guides/agents/#choosing-a-model).
 
-## Previous cycle: 23–29 September 2026
+## Earlier cycle: 23–29 September 2026
 
 ### For everyone
 
@@ -250,7 +353,7 @@ and disk alone — see [Compute Pools](/docs/guides/compute-pools/).
   `AI_PROXY_ALLOWED_MODELS`. → [Admin AI Allowances](/docs/reference/api/#admin-ai-allowances)
 - **Spending on summaries and voice is capped.** Fork/Retry summaries (30 per hour) and voice
   transcription (30 per minute) are rate-limited per user: `RATE_LIMIT_SESSION_SUMMARIZE`,
-  `RATE_LIMIT_TRANSCRIBE`. (Since 8 October, Fork and Retry no longer generate summaries, so
+  `RATE_LIMIT_TRANSCRIBE`. (Since 9 October, Fork and Retry no longer generate summaries, so
   `RATE_LIMIT_SESSION_SUMMARIZE` is gone.)
 - **Setup stops echoing secrets.** Saving the `/setup` wizard no longer returns the platform secrets
   in its response.
