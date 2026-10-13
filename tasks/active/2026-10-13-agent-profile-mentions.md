@@ -16,7 +16,8 @@ Mention enrichment calls the strict profile resolver and propagates unknown-name
 - [x] Composer behavioral and desktop/mobile browser evidence.
 - [x] Relevant lint/typecheck/test/build; regression discrimination.
 - [x] Local specialist reviews; coordinated staging verification.
-- [ ] Create tested draft PR; CI and best-effort CodeRabbit; update canonical Idea.
+- [x] Create tested draft PR and finish CI; update canonical Idea.
+- [ ] Finish in-progress best-effort CodeRabbit review (status recorded in PR).
 
 ## Scope exclusions
 
@@ -41,4 +42,6 @@ Global-profile editing is unrelated and remains in canonical Idea. Retry stored 
 
 ## Remaining handoff
 
-Create DRAFT PR, finish CI/CodeRabbit, update canonical Idea. Keep the PR draft and unmerged.
+DRAFT PR: https://github.com/raphaeltm/simple-agent-manager/pull/2331 . CI run38431249226 passes all applicable checks, including Test, Durable Object Workers, Playwright, SonarCloud and corrected Preflight Evidence. Canonical Idea updated in place with PR, evidence and precise retry follow-up. Final task-completion review A–F PASS; no substantive code/test gaps.
+
+CodeRabbit requested once via opt-in label and trusted main workflow38441420126 at17:46UTC; request workflow succeeded and review started. Final review outcome belongs in the PR CodeRabbit evidence and canonical Idea before SAM task completion. Keep this task record active pending user confirmation; deliverable is a tested draft, not a merged or production-shipped fix. Keep the PR draft and unmerged.
