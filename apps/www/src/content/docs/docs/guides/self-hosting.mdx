@@ -127,7 +127,7 @@ They take effect at the next deploy: run **Deploy Production**, or set them befo
 [update](#updating-an-existing-self-hosted-instance) so the update's deploy picks them up. Turning a
 switch on applies to chats started after that deploy, including after they sleep and wake. Chats
 started before it on v2026.10.08 or later still can't ask; older chats pick up the current switches
-when they wake.
+the first time they wake, and keep them after that.
 To check that it works, start a new chat with a Claude Code profile set to **Manual** and ask the
 agent to create a file: a card with a **Permission needed** badge should appear. Turning a switch off refuses new requests straight away,
 even in running chats; any already waiting can still be answered until they expire. Deadlines and

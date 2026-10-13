@@ -229,9 +229,10 @@ before some actions even when SAM sets Bypass Permissions.
 #### After a chat wakes from sleep
 
 Chats started since 7 October 2026 (on a self-hosted instance, on v2026.10.08 or later) keep their
-resolved permission mode, model, reasoning effort, and provider settings when they wake on either
-VM or Instant. Later changes to a profile, **Agent Overrides**, or **Settings → Agents** apply to
-new sessions. A chat that could ask you for approval before it slept can still ask after it wakes.
+resolved permission mode, model, reasoning effort, and OpenCode provider settings when they wake on
+either VM or Instant. Later changes to a profile, **Agent Overrides**, or **Settings → Agents** apply
+to new sessions. Your [AI provider mode](#ai-provider-modes) and credentials are looked up again each
+time a chat starts or wakes. A chat that could ask you for approval before it slept can still ask after it wakes.
 On a self-hosted instance, a chat started on v2026.10.08 or later but before the operator turned
 agent requests on still can't ask after a wake (its requests are refused), so start a new chat or
 fork it to get approval cards.
@@ -340,7 +341,8 @@ of the chat, as if you had sent it, but SAM wrote it for the agent: it starts wi
 read and answer them. You don't need to reply to it. You'll then see the agent fetching the
 messages with SAM's tools. To read a whole conversation between two agents, open the project's
 **Events** page: each pair of agents that has talked has an `agent-dm.…` channel under
-**Channels**, with its messages from the last 30 days in order.
+**Channels**, with its messages from the last 30 days in order. Urgent messages aren't there; they
+appear only in the recipient's chat.
 
 A sending agent learns that its message was accepted, not that it was read; it hears back only if
 the recipient replies.
@@ -361,7 +363,7 @@ everything available in its session.
 | `list_tasks`, `search_tasks`        | Page through or search the project's tasks, in any status                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `create_trigger`                    | Create a schedule, GitHub, or webhook [trigger](/docs/guides/triggers/#ask-an-agent-to-set-one-up) in the project; `update_trigger` and `delete_trigger` change or remove one                                                                                                                                                                                                                                                                                                                                                       |
 | `create_project_schedule`           | Schedule a one-off message to a chat, or a new task, such as a reminder for an agent to wake itself later                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `get_credential_limits`             | Read the [usage limits](#usage-limits) of the credentials the project's agents use                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `get_credential_limits`             | Read the [usage limits](#usage-limits) of this session's credential, or with `scope: "project"`, of the project's credentials you can see                                                                                                                                                                                                                                                                                                                                                                                           |
 | `create_idea`                       | Create a new idea                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `update_idea`                       | Update an idea's title, content, priority, or status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `list_ideas`                        | View project ideas                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |

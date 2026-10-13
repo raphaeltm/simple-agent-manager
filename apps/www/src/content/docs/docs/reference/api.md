@@ -146,8 +146,8 @@ Notes for client developers:
   During a long tool run that window can hold no assistant text, so the summary is `null`; read the
   chat for older progress.
 - To answer an agent, send its `interactionId` with an `optionId`, `formContent`, or
-  `decline: true`. A link request is accepted with `optionId: "accept"`. SAM generates the receipt
-  metadata.
+  `decline: true`. A link request is accepted with `optionId: "accept"`. An attention question takes
+  its `markerId` and an `answer` instead. SAM generates the receipt metadata.
 
 ## Authentication
 

@@ -722,15 +722,16 @@ aggregate operator-visible counters.
 
 ## Event Trigger Cleanup
 
-| Variable                                     | Default            | Description                                                                                                                                                                               |
-| -------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TRIGGER_STALE_EXECUTION_TIMEOUT_MS`         | `1800000` (30 min) | Age before running executions are checked against linked task liveness                                                                                                                    |
-| `TRIGGER_STALE_QUEUED_TIMEOUT_MS`            | `300000` (5 min)   | Age before queued executions are checked against linked task liveness                                                                                                                     |
-| `TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS` | `48`               | Hard maximum execution residence backstop; live linked tasks still control concurrency and incident dispatch use                                                                          |
-| `TRIGGER_EXECUTION_LOG_RETENTION_DAYS`       | `90`               | Completed/failed/skipped execution log retention                                                                                                                                          |
-| `TRIGGER_EXECUTION_CLEANUP_ENABLED`          | enabled            | Set to `false` to disable the cleanup sweep                                                                                                                                               |
-| `TRIGGER_STALE_RECOVERY_BATCH_SIZE`          | `100`              | Maximum stale execution candidates processed per sweep                                                                                                                                    |
-| `MAX_TRIGGERS_PER_PROJECT`                   | `20`               | Platform default trigger cap per project. `wrangler.toml` ships `10`. A project owner can raise or lower it per project via UI (Project → Settings → Scaling & Scheduling → Task Limits). |
+| Variable                                     | Default            | Description                                                                                                                                                               |
+| -------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TRIGGER_STALE_EXECUTION_TIMEOUT_MS`         | `1800000` (30 min) | Age before running executions are checked against linked task liveness                                                                                                    |
+| `TRIGGER_STALE_QUEUED_TIMEOUT_MS`            | `300000` (5 min)   | Age before queued executions are checked against linked task liveness                                                                                                     |
+| `TRIGGER_EXECUTION_HARD_MAX_RESIDENCE_HOURS` | `48`               | Hard maximum execution residence backstop; live linked tasks still control concurrency and incident dispatch use                                                          |
+| `TRIGGER_EXECUTION_LOG_RETENTION_DAYS`       | `90`               | Completed/failed/skipped execution log retention                                                                                                                          |
+| `TRIGGER_EXECUTION_CLEANUP_ENABLED`          | enabled            | Set to `false` to disable the cleanup sweep                                                                                                                               |
+| `TRIGGER_STALE_RECOVERY_BATCH_SIZE`          | `100`              | Maximum stale execution candidates processed per sweep                                                                                                                    |
+| `MAX_TRIGGERS_PER_PROJECT`                   | `20`               | Platform default trigger cap per project; `wrangler.toml` ships `10`. A project owner can change it under Settings → Infrastructure → Scaling & Scheduling → Max Triggers |
+| `GITHUB_TRIGGERS_ENABLED`                    | unset              | `false` turns GitHub event triggers off and `true` forces them on; unset means on once a GitHub webhook secret is configured. Set it in `wrangler.toml` `[vars]`          |
 
 ## Generic Webhook Triggers
 
@@ -876,21 +877,29 @@ creates the `OAUTH_KV` namespace the Connector stores OAuth state in; no setup i
 
 These protocol bounds are set only by environment variable:
 
-| Variable                                 | Default             | Description                                                              |
-| ---------------------------------------- | ------------------- | ------------------------------------------------------------------------ |
-| `CONNECTOR_REGISTRATION_PER_IP_PER_HOUR` | `20`                | Dynamic client registrations per IP address per hour                     |
-| `CONNECTOR_REGISTRATION_GLOBAL_PER_HOUR` | `100`               | Dynamic client registrations per hour across the installation (atomic)   |
-| `CONNECTOR_CLIENT_IDLE_TTL_SECONDS`      | `7776000` (90 days) | A registered client unused this long expires; a token exchange renews it |
-| `CONNECTOR_CLIENT_NAME_MAX_LENGTH`       | `200`               | Longest client name accepted at registration                             |
-| `CONNECTOR_REDIRECT_URI_MAX_COUNT`       | `10`                | Most redirect URIs per registered client                                 |
-| `CONNECTOR_OAUTH_REQUEST_MAX_BYTES`      | `16384` (16 KiB)    | Largest OAuth request body                                               |
-| `CONNECTOR_REQUEST_MAX_BYTES`            | `262144` (256 KiB)  | Largest MCP request body                                                 |
-| `CONNECTOR_RESPONSE_MAX_BYTES`           | `120000`            | Largest complete MCP response, text and structured data together         |
-| `CONNECTOR_LIST_PAGE_SIZE`               | `50`                | Page size for the connection and client lists in Settings and Admin      |
-| `CONNECTOR_INBOX_SESSION_LIMIT`          | `5`                 | Most chats, tasks, and notifications on one "What needs me?" inbox page  |
+| Variable                                 | Default             | Description                                                            |
+| ---------------------------------------- | ------------------- | ---------------------------------------------------------------------- |
+| `CONNECTOR_REGISTRATION_PER_IP_PER_HOUR` | `20`                | Dynamic client registrations per IP address per hour                   |
+| `CONNECTOR_REGISTRATION_GLOBAL_PER_HOUR` | `100`               | Dynamic client registrations per hour across the installation (atomic) |
+| `CONNECTOR_CLIENT_IDLE_TTL_SECONDS`      | `7776000` (90 days) | How long an unused registered client lasts (see below)                 |
+| `CONNECTOR_CLIENT_NAME_MAX_LENGTH`       | `200`               | Longest client name accepted at registration                           |
+| `CONNECTOR_REDIRECT_URI_MAX_COUNT`       | `10`                | Most redirect URIs per registered client                               |
+| `CONNECTOR_OAUTH_REQUEST_MAX_BYTES`      | `16384` (16 KiB)    | Largest OAuth request body                                             |
+| `CONNECTOR_REQUEST_MAX_BYTES`            | `262144` (256 KiB)  | Largest MCP request body                                               |
+| `CONNECTOR_RESPONSE_MAX_BYTES`           | `120000`            | Largest complete MCP response, text and structured data together       |
+| `CONNECTOR_LIST_PAGE_SIZE`               | `50`                | Page size for the connection and client lists in Settings and Admin    |
+| `CONNECTOR_INBOX_SESSION_LIMIT`          | `5`                 | Chats, tasks, and notifications each inbox page checks (see below)     |
 
 The per-IP registration limit also applies to vendor servers and NAT gateways that many people share,
 so size it, and the installation-wide limit, for how many people you expect to connect apps.
+
+A registered client expires `CONNECTOR_CLIENT_IDLE_TTL_SECONDS` after it registered or was last
+renewed. A token exchange renews it only once half that time has passed, so an unused client
+expires between half and all of that time after its last token exchange.
+
+`CONNECTOR_INBOX_SESSION_LIMIT` caps chats, tasks, and unread notifications separately on each
+"What needs me?" page. It counts the most recently active chats before leaving out those that don't
+need the person, so a page can list fewer; the app follows `nextCursor` for more.
 
 ## Voice & Text-to-Speech
 
@@ -1416,7 +1425,7 @@ Safe operator sequence for ProjectData storage relief:
 | `PROJECT_EVENT_SOURCE_OUTBOX_PROCESSING_LEASE_MS`           | `60000`                     | Lease before an in-flight source event admission intent can be claimed by reconciliation                                                                                                                                       |
 | `PROJECT_EVENT_RETENTION_INTERVAL_MS`                       | `86400000`                  | Default delay before the next ProjectData event retention alarm after a complete pass; daily by default                                                                                                                        |
 | `PROJECT_EVENT_RETENTION_MIN_ALARM_DELAY_MS`                | `60000`                     | Minimum delay before a follow-up event retention alarm when more bounded work remains or a due checkpoint is re-armed                                                                                                          |
-| `PROJECT_EVENT_WAKE_ENABLED`                                | `false`                     | Enables same-chat ProjectData event wake materialization for v2 `existing_session_prompt` and `runtime_interrupt` subscriptions; opt in with `true`; unset or `false` leaves event delivery pull-only                          |
+| `PROJECT_EVENT_WAKE_ENABLED`                                | `true`                      | `wrangler.toml` sets `true` (code fallback `false`). Enables same-chat ProjectData event wake materialization for v2 `existing_session_prompt` and `runtime_interrupt` subscriptions; `false` leaves event delivery pull-only  |
 | `PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS`     | `1000`                      | Minimum delay before a ProjectData alarm retries wake materialization after due matches are present                                                                                                                            |
 | `PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS`        | `5000`                      | Initial persisted backoff for a failed event-wake materialization or retention alarm phase                                                                                                                                     |
 | `PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS`         | `300000`                    | Maximum persisted backoff for repeated event-wake materialization or retention alarm failures                                                                                                                                  |

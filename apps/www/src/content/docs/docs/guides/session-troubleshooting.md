@@ -33,9 +33,9 @@ your work is safe and what to do next. Everything here applies to both
   so SAM slept the chat on a Git recovery point. → [See what was kept](#sam-could-not-save-a-complete-snapshot)
 - **"SAM could not put this session to sleep."** Snapshots kept failing and there was no safe
   recovery point, so the workspace keeps running. → [Decide what to do](#sam-could-not-save-a-complete-snapshot)
-- **"SAM could not finish putting this session to sleep."**, or a failure card reading **"Sleep
-  teardown blocked; saved artifacts retained."** SAM saved the session but couldn't confirm its
-  workspace stopped, so it can't promise a wake.
+- **"SAM could not finish putting this session to sleep."**, often with a **Failed** card whose
+  error reads **"Sleep teardown blocked; saved artifacts retained."** SAM saved the session but
+  couldn't confirm its workspace stopped, so it can't promise a wake.
   → [Check the workspace](#sam-could-not-finish-putting-the-session-to-sleep)
 - **Expired** in the session list, and a **Fork conversation** button where the message box was.
   The chat slept for longer than its saved workspace is kept. → [Fork it](#expired-saved-workspace)
@@ -302,9 +302,11 @@ sleep with a complete snapshot.
 
 Going to sleep has two steps: SAM saves a snapshot of the workspace, then stops the workspace. If it
 can't confirm the second step in time, it stops retrying and ends the session instead of promising
-a wake it can't guarantee. The chat says **"SAM could not finish putting this session to sleep."**,
-the session ends, and the failure card under the chat header reads **"Sleep teardown blocked; saved
-artifacts retained. Check the workspace before restarting."**
+a wake it can't guarantee. The chat says **"SAM could not finish putting this session to sleep."**
+and the session ends. A **Failed** card usually appears under the chat header too; expand it, and
+its **Error** reads **"Sleep teardown blocked; saved artifacts retained. Check the workspace before
+restarting."** On a **Chat**, that card may also be marked **Recoverable** and say the session is
+still active and that sending another message retries it. Don't rely on that.
 
 The conversation and the saved snapshot are kept, but this session can't be woken. To carry on:
 
@@ -316,9 +318,10 @@ The conversation and the saved snapshot are kept, but this session can't be woke
    self-hosted instance, tell your administrator).
 
 A related notice, **"SAM blocked the old sleep attempt because this workspace runtime changed."**,
-means the session had already moved to a new workspace (after a restart, for example) while an
-older sleep attempt was finishing. SAM left the new workspace alone and kept the previous
-checkpoint. Check the current workspace before you put the session to sleep or restart it.
+means the workspace's runtime was replaced (after a restart or rebuild, for example) while an older
+sleep attempt was finishing. SAM left the replacement alone and kept the previous checkpoint, and the
+session keeps running. Check the current workspace before you put the session to sleep or restart
+it.
 
 ## Expired saved workspace
 
@@ -339,9 +342,9 @@ new conversation."_ This is a normal end, not a failure, and the chat leaves the
 To carry on, select **Fork conversation**. The new chat's agent can read this conversation, but the
 expired workspace's files can't be restored: anything the agent pushed is still on GitHub, and
 anything it didn't push, including commits it made only in the workspace, is gone. The new chat
-starts on a new branch from your default branch, so to build on what was pushed, tell it to start
-from the original branch, shown as **Branch** on the **Forking from** banner. **Retry** isn't
-offered for an expired chat.
+starts from your default branch, not the original's, so to build on what was pushed, tell it to
+continue from the original chat's branch; its agent can look the branch up from the parent task ID
+in the message. **Retry** isn't offered for an expired chat.
 
 ## Wake failed
 
@@ -362,8 +365,9 @@ received it.
 </picture>
 
 On a VM, a failed wake doesn't end the chat. As long as its saved workspace can still be restored,
-the chat goes back to sleep on the same task, nothing is marked failed, and an agent that started
-it as a subtask isn't told it failed. Every message you send starts a new wake attempt, so what matters is
+the chat goes back to sleep on the same task, the task isn't marked failed (though the wake error
+can show in a card under the chat header), and an agent that started it as a subtask isn't told it
+failed. Every message you send starts a new wake attempt, so what matters is
 whether the cause is something you can fix first:
 
 - **Cloud provider credentials are missing for this wake.** No cloud credential is available to pay
@@ -496,14 +500,18 @@ re-explain it. Neither brings this chat's files. Or start a new chat from scratc
 ## "Agent profile not found" when you send a message
 
 Typing `@` and the name of one of your [agent profiles](/docs/guides/agents/#agent-profiles)
-mentions that profile: SAM tells the agent the profile exists, so it can hand work to it.
+mentions that profile: SAM tells the agent the profile exists, so it can hand work to it. Pick the
+profile from the list that opens when you type `@`; a mention has to match the profile's name
+exactly, capitals included.
 
 :::caution[Known issue]
-Since 9 October 2026 (v2026.10.10 on a self-hosted instance), a message with `@` directly followed by
-any other word is refused with **Agent profile not found**, so it never reaches the agent. That
-includes email addresses (`bob@example.com`), package names (`@types/node`), and code with
-decorators or annotations (`@dataclass`, `@Override`). Until a fix ships, write the `@` so it isn't
-directly followed by a word, for example `bob at example.com` or `@ dataclass`, and send again.
+Since 9 October 2026 (v2026.10.10 and later on a self-hosted instance), a message with `@` directly
+followed by any other word is refused with **Agent profile not found**, so it never reaches the
+agent. That includes email addresses (`bob@example.com`), package names (`@types/node`), code with
+decorators or annotations (`@dataclass`, `@Override`), and `@` followed by a double quote (`@"…"`).
+It also includes text SAM fills in for you: Fork quotes the original chat's title, and Retry the
+original request, so check those too. Until a fix ships, write the `@` so a word or quote doesn't
+directly follow it, for example `bob at example.com` or `@ dataclass`, and send again.
 :::
 
 ## SAM moved the session to another machine

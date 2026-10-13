@@ -11,9 +11,9 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 Since 9 October (v2026.10.10 and later on a self-hosted instance), a message in which `@` is directly
 followed by a word fails with **Agent profile not found** and never reaches the agent, unless the
 word is the name of one of your agent profiles. That includes email addresses (`bob@example.com`),
-package names (`@types/node`), and code with decorators or annotations (`@dataclass`, `@Override`).
-Until a fix ships, write the `@` so a word doesn't directly follow it, for example
-`bob at example.com` or `@ dataclass`.
+package names (`@types/node`), and code with decorators or annotations (`@dataclass`, `@Override`),
+as well as a chat title or request that Fork or Retry fills in for you. Until a fix ships, write
+the `@` so a word doesn't directly follow it, for example `bob at example.com` or `@ dataclass`.
 → [Agent profile not found](/docs/guides/session-troubleshooting/#agent-profile-not-found-when-you-send-a-message)
 :::
 
@@ -41,7 +41,7 @@ Until a fix ships, write the `@` so a word doesn't directly follow it, for examp
   **Sleeping** for a moment and wakes on another machine with its files. These moves had been
   failing since 9 October.
   → [SAM moved the session to another machine](/docs/guides/session-troubleshooting/#sam-moved-the-session-to-another-machine)
-- **New models.** Claude Haiku 5.5, and more OpenCode models. → [New models](#new-models)
+- **New models.** Claude Haiku 5.5 for Claude Code. → [New models](#new-models)
 - **A guide to the command line.** Install the `sam` CLI, sign in, and start, follow, and reply to
   work from a terminal or a script. → [SAM CLI](/docs/guides/cli/)
 
@@ -76,18 +76,20 @@ Also changed this week:
 ### For self-hosters & admins
 
 Before you update, know about two regressions. Releases v2026.10.09 to v2026.10.12 can't move a
-session off a VM that runs short of memory; the release after v2026.10.12 fixes that, and
-interrupted sleeps. Every release from v2026.10.10 has the `@` known issue above, which no release
-fixes yet. There are no new secrets or Cloudflare token permissions; the new database migrations run
-in the deploy pipeline, and the deploy creates the Connector's storage.
+session off a VM that runs short of memory; the release after v2026.10.12 fixes that, and is also
+the first in which a
+[sleep that can't finish](/docs/guides/session-troubleshooting/#sam-could-not-finish-putting-the-session-to-sleep)
+ends visibly. Every release from v2026.10.10 has the `@` known issue above, which no release fixes
+yet. There are no new secrets or Cloudflare token permissions; the new database migrations run in
+the deploy pipeline, and the deploy creates the Connector's storage.
 
 - **The SAM Connector is on after you update** (from v2026.10.10). To keep it off, switch off
   **Enable Connector** in **Admin → Integrations → Connector**, or set the `CONNECTOR_ENABLED`
   GitHub Environment variable to `false` before you deploy. Claude's and ChatGPT's servers must be
   able to reach your API, so a Cloudflare Access login wall or a WAF challenge in front of it stops
   connections. → [Self-hosted installations](/docs/guides/sam-connector/#self-hosted-installations)
-- **Chats asleep when you update wake in Manual.** A sleeping chat started before v2026.10.08 has no
-  recorded settings, so it wakes asking for approval before it changes anything. If you haven't
+- **Chats started before v2026.10.08 wake in Manual.** They have no recorded settings, so they wake
+  asking for approval before changing anything (Codex agents never ask). If you haven't
   [turned agent requests on](/docs/guides/self-hosting/#let-agents-ask-in-chat), those requests are
   refused, so tell people to fork such a chat rather than keep using it.
 - **Pending accounts are held back everywhere.** With signup approval on, an account waiting for
@@ -108,21 +110,24 @@ in the deploy pipeline, and the deploy creates the Connector's storage.
 - **Removed:** `ACP_TASK_PROMPT_TIMEOUT` (long tasks now end only through the inactivity check or
   the 24-hour limit). If you set it, you can delete it.
 - **New optional settings**, with working defaults, for retrying a VM that fails to start
-  (`ORIGIN_CA_*`, `CLOUD_INIT_*`, `TASK_RUNNER_BOOT_MAX_REPLACEMENTS`,
-  `TASK_RUNNER_FIRST_HEARTBEAT_TIMEOUT_MS`) and for the Connector (`CONNECTOR_*`).
-  → [Fresh VM boot recovery](/docs/reference/configuration/#fresh-vm-boot-recovery)
+  (`ORIGIN_CA_RETRY_*`, `ORIGIN_CA_REQUEST_TIMEOUT_MS`, `CLOUD_INIT_*`,
+  `TASK_RUNNER_BOOT_MAX_REPLACEMENTS`, `TASK_RUNNER_FIRST_HEARTBEAT_TIMEOUT_MS`; see
+  [Fresh VM boot recovery](/docs/reference/configuration/#fresh-vm-boot-recovery)) and for the
+  Connector (`CONNECTOR_*`; see [SAM Connector](/docs/reference/configuration/#sam-connector)).
 - **The Pulumi state repair workflow no longer prints raw state.** Its export shows resource counts
   and URNs only. If you ran it before v2026.10.07, delete those workflow runs: their summaries show
   the start of the raw state, which can include generated keys.
 
 ### New models
 
-Profiles can now use **Claude Haiku 5.5 (1M context)** with Claude Code, and with OpenCode Zen and
-OpenCode Go. OpenCode Zen adds **Exo Free**, **Step 5 Preview Free**, and **Mistral Large 4**, and
-drops **Fledge Alpha Free**; OpenCode Go adds **Step 5 Preview Free** and renames **Space Bunny Free**
-to **Space Bunny**. Gemini CLI's **Gemini 3.7 Flash** is now marked deprecated: Google routes it to
-3.8. A profile already set to a model that left the list keeps it, shown as a custom model. See
-[Choosing a model](/docs/guides/agents/#choosing-a-model).
+Profiles can now use **Claude Haiku 5.5 (1M context)** with Claude Code, and Gemini CLI's
+**Gemini 3.7 Flash** is marked deprecated (Google routes it to 3.8). OpenCode's model list comes live
+from models.dev; SAM's built-in copy, used when that can't be reached, now matches it: Claude Haiku
+5.5 on OpenCode Zen and OpenCode Go, **Exo Free**, **Step 5 Preview Free**, and **Mistral Large 4**
+on Zen, **Step 5 Preview Free** on Go, **Space Bunny Free** renamed **Space Bunny**, and **Fledge
+Alpha Free** gone. A profile already set to a model that left the list keeps it, shown as a custom
+model, so if a profile uses **Fledge Alpha Free** or **Space Bunny Free**, choose its model again:
+OpenCode no longer lists those IDs. See [Choosing a model](/docs/guides/agents/#choosing-a-model).
 
 ## Previous cycle: 29 September – 6 October 2026
 

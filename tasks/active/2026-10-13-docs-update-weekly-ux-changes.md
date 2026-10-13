@@ -54,6 +54,16 @@ Product bugs found (filed as SAM ideas, not docs work):
   hardcoded API URL, wrong chat command).
 - `01M4SQ4VSJ42K1NH0M6TYGCPHV` (priority 2): Resources timeline hour labels can overlap in Active
   time mode.
+- `01M4SRSG31V5SJNC8KCHP0KMH4` (priority 6): GitHub trigger traps: default **Actions** `created`
+  blocks issue/PR/push triggers; clearing **Ignore draft pull requests** does nothing; **Resume**
+  after auto-pause re-pauses.
+- `01M4SW5TRK3ZB6CXT69TA2TSV0` (priority 4): Fork/Retry banners never show the parent's branch or
+  error, because the session list API omits `outputBranch`/`errorMessage`.
+- `01M4SW64BE2CXX18F5TN2TMWR2` (priority 7): the self-hosted GitHub App is created with Pull
+  requests: Read-only, so tasks on default self-hosted installs push a branch but can't open a PR.
+- `01M4SW6CX2P87ZA760FT6J9DS6` (priority 3): Max Triggers placeholder 20 vs shipped 10; teardown
+  card says **Recoverable** on a failed chat; `GITHUB_TRIGGERS_ENABLED` not forwarded; dead
+  `FORK_CONTEXT_MESSAGES` constant.
 
 ## Implementation checklist
 
@@ -77,7 +87,7 @@ Product bugs found (filed as SAM ideas, not docs work):
       (`docs-screenshots-chat-states.spec.ts`). Repaired the Resources drawer docs scenes
       (`docs-screenshots-sessions.spec.ts` now serves the shared overnight timeline scenario).
 - [x] `recent-product-changes.md`: new 6 – 13 October cycle; roll previous cycles; "8 October" → 9
-- [ ] Local sub-agent review loop until no actionable feedback
+- [ ] Local sub-agent review loop until no actionable feedback (round 1 done; round 2 running)
 - [ ] `pnpm --filter @simple-agent-manager/www build` + link check; PR; CI green; merge
 
 ## Local environment notes
@@ -104,4 +114,57 @@ Product bugs found (filed as SAM ideas, not docs work):
 
 ## Review log
 
-_Not started._
+### Round 1 (two local reviewers, read-only)
+
+- **User journeys** (10 journeys: Connector incl. phone, triggers incl. agent webhook, Expired → fork,
+  Fork vs Retry, wake settings, CLI on self-hosted, self-hoster update, SAM notice, `@` failure,
+  changelog): 0 CRITICAL, 7 HIGH, 9 MEDIUM, LOW polish.
+- **Code fact-check** (five parallel checkers, findings re-verified): 1 CRITICAL, 7 HIGH, 13 MEDIUM,
+  LOW set.
+- Addressed in `3d620ff2a` (fork screenshot shows the IDs and a typed instruction; phone variant) and
+  `6b98b85c6` (all other items): auto-pause needs **Run now** before **Resume**; GitHub form defaults
+  (**Actions** starts at `created`) and real labels (**Text contains**, **Create Trigger**); webhook
+  token caution names Codex as the only agent that can fetch it, with the **Rotate token** workaround;
+  triage example no longer needs issue write access; Fork works on a new branch, keep the IDs, Fork vs
+  Retry table, lineage labels, profile check; API tokens obey **Enable Connector**/**Allow writes**
+  and limits; writes need a reconnect; ChatGPT set up on the web; CLI project names, `auth status`,
+  Task Mode, Intel Mac, self-hosted sign-in, `SAM_API_TOKEN`/`SAM_API_URL`; sleep-teardown card text;
+  VM-only failed-wake; `@` known issue as a caution with decorators and release ranges; self-hoster
+  regression ranges, Connector reachability, trials, Pulumi state repair runs; Resources history
+  wording; troubleshooting index entries and a section for memory-pressure moves; dropped the
+  retired `ACP_TASK_PROMPT_TIMEOUT` from `apps/api/.env.example`.
+- Pushed back: "broken anchor `notifications/#request_human_input`" (the id exists). Not adopted:
+  advising self-hosters to stay on old releases; the docs state the regression ranges instead.
+- Re-checked after fixes: www build OK, `check:links` 0 broken across 35 pages, new anchors present in
+  `dist`, Prettier clean on touched files, ESLint clean on the changed specs.
+
+### Round 2
+
+- **User journeys:** 1 HIGH, 4 MEDIUM, 9 LOW; every round-1 fix confirmed in place. All verified in
+  code and adopted: CLI lists shorten IDs to 7 characters that `sam chat <id>`/`send` reject
+  (`TruncateID`, `runChatView`), so say where full IDs come from; CLI starts without a profile go to
+  a VM (`/tasks/submit` is `via: 'web'` → `explicitRuntime: 'vm'`); Connector starts default to Task
+  on a VM and Chat on Instant (`resolveTaskMode`, `submit-instant-task.ts`); Fork/Retry pre-fills
+  and `@"…"` hit the `@` issue, and mentions match names exactly (palette in
+  `ProjectChatComposer.tsx`); self-hoster paragraph wording; Intel Mac under **Other platforms**;
+  Max Triggers on **Settings → Infrastructure**; ▶-only Run now on phones; Instant forks have no
+  branch of their own; dated wake claim in chat-features; "Reconnect with sam.write permission."
+  row; re-pick retired OpenCode models; secrets live under **Settings → Runtime**; hedged Claude
+  phone fallback.
+- **Code fact-check:** 4 HIGH, 6 MEDIUM, LOW set (plus a late sub-checker report with overlapping
+  findings). Adopted after verifying each in code:
+  - #2319 isn't in production (main CI red on `5895f58bb`, deploys skipped; production is
+    `8976bfb45`) and `deploy-www.yml` publishes docs on any `apps/www` push to main, so **merge only
+    once production includes #2319**, or reword the memory-pressure claims first. Self-hoster
+    ranges are worded around release notes listing #2319/#2317 (tag cut daily at 06:00 UTC).
+  - Fork/Retry banners never show a branch/error (list route lacks the fields): reworded, fork
+    scenes now serve the list in its real shape, screenshots re-captured without a branch.
+  - Teardown card shows **Failed** (`classifyFailure` → `unknown`), text under **Error** when
+    expanded, may say **Recoverable** on a Chat; self-hosted App can't open PRs; CLI env-token
+    signs in per command (20/hour/IP, `sam project use` needs a saved sign-in); refresh-token
+    reuse wording; GitHub trigger **Edit** locks event/filters; plus LOW wording fixes (Hourly,
+    expired runs count toward auto-pause, `update_trigger`, `GITHUB_TRIGGERS_ENABLED`, OpenCode
+    list from models.dev, `PROJECT_EVENT_WAKE_ENABLED` ships `true`, client idle-TTL half-life,
+    inbox limit per kind, attention answers, urgent messages skip channels, provider mode read
+    live, fork depth vs dispatch depth, first wake records settings, Codex never asks, credential
+    limits scope, CLI help/IDs/sign-in details).

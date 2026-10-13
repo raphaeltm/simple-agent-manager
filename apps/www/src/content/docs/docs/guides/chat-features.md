@@ -402,8 +402,8 @@ Fork and Retry both start a new chat linked to the one you're in, and both open 
 | The new agent   | Reads the original conversation, then does what you add                | Starts the request again from scratch                             |
 | Use it to       | Try a different direction, or carry on from a chat that can't be woken | Run a failed or stopped request again, perhaps with another model |
 
-Neither copies the original workspace's files: the new chat starts on a new branch from your
-default branch (and, on a VM, in a new workspace). Forking works for any chat, whether it started
+Neither copies the original workspace's files: the new chat starts from your default branch in a
+new workspace, and on a VM it also gets a new `sam/…` branch of its own. Forking works for any chat, whether it started
 from an idea, a task, or a quick question, and SAM records the new chat's parent.
 
 ### How to Fork
@@ -415,22 +415,21 @@ from an idea, a task, or a quick question, and SAM records the new chat's parent
    the previous chat with SAM's tools (`get_session_messages`, `search_messages`), then the previous
    chat's title and its project, session, and task IDs.
 4. Add what to do next at the end of the message, keeping the IDs, and send it. To build on what
-   the original agent pushed, say so, for example "continue from branch sam/…" with the branch shown
-   on the **Forking from** banner.
+   the original agent pushed, say so, for example "continue from the original chat's branch": the
+   new agent can look the branch up from the parent task ID.
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/chat-fork-composer-mobile.png 2x" />
   <img
     src="/images/docs/chat-fork-composer.png"
-    alt="The new-chat screen after Fork. A banner reads &quot;Forking from: Add a CSV export to the orders page&quot; with the original branch, sam/add-csv-export-orders-page, and a close button. Below it is the selected profile, &quot;Build and test&quot; on a VM, and the message box, scrolled to its end: the previous chat's project, session, and task IDs, then an instruction the user has added, &quot;Now add the same CSV export to the invoices page.&quot;"
+    alt="The new-chat screen after Fork. A banner reads &quot;Forking from: Add a CSV export to the orders page&quot;, with a close button. Below it is the selected profile, &quot;Build and test&quot; on a VM, and the message box, scrolled to its end: the previous chat's IDs, then an instruction the user has added, &quot;Now add the same CSV export to the invoices page.&quot;"
   />
 </picture>
 
 ### Retrying a Session
 
-**Retry** opens the new-chat screen with the original request filled in, and the banner shows the
-previous error if there was one. If SAM can't load the original request, the message box says so
-and you can type it yourself. Retry isn't offered for a chat whose saved workspace has
+**Retry** opens the new-chat screen with the original request filled in. If SAM can't load the
+original request, the message box says so and you can type it yourself. Retry isn't offered for a chat whose saved workspace has
 [expired](/docs/guides/session-troubleshooting/#expired-saved-workspace); fork it instead.
 
 ### Before you send
@@ -438,6 +437,9 @@ and you can type it yourself. Retry isn't offered for a chat whose saved workspa
 - **Check the profile.** Fork and Retry use the profile selected in the message box, which isn't
   necessarily the one the original chat used. Picking another profile is how you retry with a
   different agent or model.
+- **Check for `@`.** Until a [known issue](/docs/guides/session-troubleshooting/#agent-profile-not-found-when-you-send-a-message)
+  is fixed, an `@` followed by a word in the pre-filled title or request, as in `@types/node`, makes
+  sending fail.
 - **The ✕ on the banner** removes the link to the original chat. The text stays in the message box,
   and sending it starts an ordinary new chat.
 - **How the new chat is labelled.** In the session list it's marked **⑂ from** and the start of the
@@ -446,8 +448,9 @@ and you can type it yourself. Retry isn't offered for a chat whose saved workspa
 
 ### Fork Limits
 
-- Maximum depth: 10 levels, counting every fork, retry, and dispatched subtask in the chain
-  (configurable via `ACP_SESSION_MAX_FORK_DEPTH`)
+- Fork and Retry stop at a depth of 10, counting every fork, retry, and dispatched subtask in the
+  chain (configurable via `ACP_SESSION_MAX_FORK_DEPTH`). Agents dispatching subtasks have their own,
+  lower limit (`MCP_DISPATCH_MAX_DEPTH`, 3 by default).
 
 ## Finding Past Conversations
 
@@ -502,7 +505,7 @@ SAM also collapses platform-injected setup messages in the chat timeline. Those 
 
 Persistent chat sessions can sleep and recover on both [Instant and VM-backed runtimes](/docs/guides/instant-sessions/):
 
-- **Sleeping.** The session went idle or you manually chose **Sleep** for an awake idle conversation-mode session with a workspace. SAM writes a checkpoint, releases compute, and keeps the composer visible so sending a message wakes the same chat, with the same agent, model, and permission mode it started with. A message sent in the first minutes after it slept waits (up to an hour) until the old workspace has finished shutting down, then wakes it, usually within a minute or two of the shutdown. Your message, or a notification from another agent or a subscribed event, reaches the agent once the woken session has fully started.
+- **Sleeping.** The session went idle or you manually chose **Sleep** for an awake idle conversation-mode session with a workspace. SAM writes a checkpoint, releases compute, and keeps the composer visible so sending a message wakes the same chat, with the same agent, model, and permission mode it started with (for chats started since 7 October 2026; older ones wake in Manual, see [After a chat wakes from sleep](/docs/guides/agents/#after-a-chat-wakes-from-sleep)). A message sent in the first minutes after it slept waits (up to an hour) until the old workspace has finished shutting down, then wakes it, usually within a minute or two of the shutdown. Your message, or a notification from another agent or a subscribed event, reaches the agent once the woken session has fully started.
 - **Archiving a sleeping conversation.** Choose **Archive** in the dock and confirm when you are finished with the chat. This also works for sleeping VM conversations. SAM immediately requests deletion of your linked workspace and discards its restore snapshots once runtime deletion is confirmed. If cleanup is interrupted, retry Archive; SAM keeps deletion retryable without completing the conversation twice. Archiving a shared conversation does not delete another member's workspace.
 - **Snapshots that keep failing.** If SAM cannot save a complete snapshot after a few tries (three, or 15 minutes, by default), it stops retrying. A VM session whose earlier snapshot saved its exact Git commit sleeps anyway, keeping the conversation and the repository but not every file, and the chat says what was kept. Otherwise the chat says SAM could not put the session to sleep, and the workspace keeps running. [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot) explains both.
 - **Recovery.** SAM is rebuilding the session's runtime and restoring its saved state. Wait for it to finish instead of resending.
