@@ -417,7 +417,8 @@ from an idea, a task, or a quick question, and SAM records the new chat's parent
 4. Add what to do next at the end of the message, keeping the IDs, and send it. To build on what
    the original agent pushed, say so, for example "continue from the original chat's branch". If
    the original ran on a VM, the new agent can look the branch up from the parent task ID; a chat
-   started on an Instant profile has no branch of its own, so name the branch its agent pushed to.
+   started from the message box on an Instant profile has no branch of its own, so name the branch
+   its agent pushed to.
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/chat-fork-composer-mobile.png 2x" />
@@ -429,8 +430,10 @@ from an idea, a task, or a quick question, and SAM records the new chat's parent
 
 ### Retrying a Session
 
-**Retry** opens the new-chat screen with the original request filled in. If SAM can't load the
-original request, the message box says so and you can type it yourself. Retry isn't offered for a chat whose saved workspace has
+**Retry** opens the new-chat screen with the original request filled in. If that request mentioned
+a profile, the box also contains a note SAM added for the agent, from a `---` line starting
+`[SAM: The user mentioned` down to `[End of mention context]`; delete it before you send. If SAM
+can't load the original request, the message box says so and you can type it yourself. Retry isn't offered for a chat whose saved workspace has
 [expired](/docs/guides/session-troubleshooting/#expired-saved-workspace); fork it instead.
 
 ### Before you send

@@ -186,3 +186,17 @@ Product bugs found (filed as SAM ideas, not docs work):
   INTERVAL_MS` / `ACP_SESSION_RECONCILIATION_TIMEOUT_MS` are read by nothing, so their
   configuration rows and the `.env.example` note are gone (constants noted on idea
   `01M4SW6CX2P87ZA760FT6J9DS6`); `sam chat --help` lists subcommands, not `sam chat new`.
+
+### Round 4
+
+- **User journeys:** no HIGH or MEDIUM; all round-3 changes confirmed. 3 LOW, adopted: `sam chat
+  fork|retry` only prints the prepared prompt without `--launch` (`workflow_lineage.go:44-45`);
+  Retry pre-fills SAM's hidden mention note (descriptions store `enrichedMessage`), so tell users to
+  delete it (product side appended to idea `01M4SN1TA0YTFK8QWQEFWR4K83`); a misparsable changelog
+  sentence.
+- **Code fact-check:** no CRITICAL/HIGH/MEDIUM; 5 LOW, adopted: Connector starts with an **Auto**
+  profile can run on Instant (`creating-workspaces.md`); only message-box Instant chats lack a
+  branch (other Instant starts go through `submit-instant-task.ts`, which sets one); `sam --help`
+  wording; link requests also need SAM or the Connector; quote punctuated profile names in the
+  changelog caution. Side finding filed as idea `01M4SYZTSP9T1K836DJM35TW6S` (`release.yml`
+  can diff against a pre-release, so some shipped PRs appear in no release notes).

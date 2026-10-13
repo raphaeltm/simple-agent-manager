@@ -10,9 +10,10 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 :::caution[Known issue: messages with @ and a word fail]
 Since 9 October (v2026.10.10 and later on a self-hosted instance), a message in which `@` is directly
 followed by a word fails with **Agent profile not found** and never reaches the agent, unless the
-word is the name of one of your agent profiles. That includes email addresses (`bob@example.com`),
-package names (`@types/node`), and code with decorators or annotations (`@dataclass`, `@Override`),
-as well as a chat title or request that Fork or Retry fills in for you. Until a fix ships, write
+word is the name of one of your agent profiles (put a name with punctuation in quotes, such as
+`@"code-reviewer"`). That includes email addresses (`bob@example.com`), package names
+(`@types/node`), and code with decorators or annotations (`@dataclass`, `@Override`), as well as a
+chat title or request that Fork or Retry fills in for you. Until a fix ships, write
 the `@` so a word doesn't directly follow it, for example `bob at example.com` or `@ dataclass`.
 → [Agent profile not found](/docs/guides/session-troubleshooting/#agent-profile-not-found-when-you-send-a-message)
 :::
@@ -128,7 +129,7 @@ in the deploy pipeline, and the deploy creates the Connector's storage.
 ### New models
 
 Profiles can now use **Claude Haiku 5.5 (1M context)** with Claude Code, and with OpenCode Zen and
-OpenCode Go. The OpenCode list profiles pick from, which is built into SAM, also adds **Exo Free**,
+OpenCode Go. SAM's built-in OpenCode list, which profiles pick from, also adds **Exo Free**,
 **Step 5 Preview Free**, and **Mistral Large 4** on Zen and **Step 5 Preview Free** on Go; on Go,
 **Space Bunny Free** is now **Space Bunny**, and Zen's **Fledge Alpha Free** is gone. (**Settings →
 Agents** loads OpenCode's list live from models.dev.) Gemini CLI's **Gemini 3.7 Flash** is marked

@@ -24,8 +24,10 @@ A workspace runs either as an **Instant** container on Cloudflare's network or a
 - **A profile whose runtime is "Instant container"** → Instant. Starts in seconds and needs no cloud account, but has no `.devcontainer` build, no Docker, and no automatic port exposure.
 - **Anything else** → a task on a VM, with your full environment.
 
-A submitted task uses a VM unless its profile's runtime is Instant, so a project that mainly runs
-tasks on VM profiles needs cloud compute.
+A task you submit in SAM or with the CLI uses a VM unless its profile's runtime is Instant, so a
+project that mainly runs tasks on VM profiles needs cloud compute. Work started through the
+[Connector](/docs/guides/sam-connector/) with an **Auto** profile, or none, runs on Instant when
+neither you nor the project has a cloud credential connected.
 
 A VM belongs to you alone: SAM never places another person's workspace on it, though several of your
 own workspaces can share one. That machine, not the devcontainer, is the security boundary, which

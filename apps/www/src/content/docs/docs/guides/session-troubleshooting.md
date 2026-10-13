@@ -345,8 +345,8 @@ expired workspace's files can't be restored: anything the agent pushed is still 
 anything it didn't push, including commits it made only in the workspace, is gone. The new chat
 starts from your default branch, not the original's, so to build on what was pushed, tell it to
 continue from the original chat's branch. If the original ran on a VM, the new agent can look the
-branch up from the parent task ID in the message; for a chat started on an Instant profile, name
-the branch its agent pushed to. **Retry** isn't offered for an expired chat.
+branch up from the parent task ID in the message; for a chat started from the message box on an
+Instant profile, name the branch its agent pushed to. **Retry** isn't offered for an expired chat.
 
 ## Wake failed
 
