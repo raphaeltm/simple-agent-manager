@@ -97,7 +97,10 @@ function stableRequest(request: SecretExecRequest): string {
     command: request.command,
     shell: request.shell,
     cwd: request.cwd,
-    secretNames: [...new Set(request.secretNames)].sort(),
+    secretNames: [...new Set(request.secretNames)].sort((a, b) => {
+      if (a === b) return 0;
+      return a < b ? -1 : 1;
+    }),
     env: Object.fromEntries(
       Object.entries(request.env ?? {}).sort(([a], [b]) => a.localeCompare(b))
     ),
