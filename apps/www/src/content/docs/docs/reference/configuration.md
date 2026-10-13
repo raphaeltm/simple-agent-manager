@@ -887,7 +887,7 @@ These protocol bounds are set only by environment variable:
 | `CONNECTOR_REQUEST_MAX_BYTES`            | `262144` (256 KiB)  | Largest MCP request body                                                 |
 | `CONNECTOR_RESPONSE_MAX_BYTES`           | `120000`            | Largest complete MCP response, text and structured data together         |
 | `CONNECTOR_LIST_PAGE_SIZE`               | `50`                | Page size for the connection and client lists in Settings and Admin      |
-| `CONNECTOR_INBOX_SESSION_LIMIT`          | `5`                 | Most chats on one page of the "What needs me?" inbox, across projects    |
+| `CONNECTOR_INBOX_SESSION_LIMIT`          | `5`                 | Most chats, tasks, and notifications on one "What needs me?" inbox page  |
 
 The per-IP registration limit also applies to vendor servers and NAT gateways that many people share,
 so size it, and the installation-wide limit, for how many people you expect to connect apps.

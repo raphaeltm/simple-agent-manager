@@ -33,9 +33,10 @@ your work is safe and what to do next. Everything here applies to both
   so SAM slept the chat on a Git recovery point. → [See what was kept](#sam-could-not-save-a-complete-snapshot)
 - **"SAM could not put this session to sleep."** Snapshots kept failing and there was no safe
   recovery point, so the workspace keeps running. → [Decide what to do](#sam-could-not-save-a-complete-snapshot)
-- **"SAM could not finish putting this session to sleep."**, or an error reading **"Sleep
-  blocked: …"**. SAM saved the session but couldn't confirm its workspace stopped, so it can't
-  promise a wake. → [Check the workspace](#sam-could-not-finish-putting-the-session-to-sleep)
+- **"SAM could not finish putting this session to sleep."**, or a failure card reading **"Sleep
+  teardown blocked; saved artifacts retained."** SAM saved the session but couldn't confirm its
+  workspace stopped, so it can't promise a wake.
+  → [Check the workspace](#sam-could-not-finish-putting-the-session-to-sleep)
 - **Expired** in the session list, and a **Fork conversation** button where the message box was.
   The chat slept for longer than its saved workspace is kept. → [Fork it](#expired-saved-workspace)
 - **A system message starting "Wake failed:"**, and **Wake failed** in the session list. SAM could
@@ -51,6 +52,14 @@ your work is safe and what to do next. Everything here applies to both
   → [Start a new chat or fork](#the-session-has-ended)
 - **No message at all: the agent just stopped mid-sentence** (VM). It may have run out of memory.
   → [Check the Resources panel](#none-of-these-fit)
+- **The chat showed Sleeping on its own, then woke again** (VM). Its machine ran short of memory,
+  so SAM moved the session to another one. → [Check where the agent got to](#sam-moved-the-session-to-another-machine)
+- **"Agent profile not found" when you send a message.** Your message has `@` followed by a word,
+  such as an email address. → [Rephrase it](#agent-profile-not-found-when-you-send-a-message)
+- **A message on your side of the chat that you didn't write, starting "SAM notice
+  (system-generated, not a human message)".** Another agent sent this chat a message; SAM wrote the
+  notice for the agent. You don't need to reply.
+  → [Messages between agents](/docs/guides/agents/#messages-between-agents)
 
 Anything else — including a message that delivery "could not be confirmed" — means SAM couldn't
 classify the failure. Treat it like the interrupted case: check before you resend.
@@ -294,13 +303,13 @@ sleep with a complete snapshot.
 Going to sleep has two steps: SAM saves a snapshot of the workspace, then stops the workspace. If it
 can't confirm the second step in time, it stops retrying and ends the session instead of promising
 a wake it can't guarantee. The chat says **"SAM could not finish putting this session to sleep."**,
-and the session ends with the error **"Sleep blocked: workspace stop or recovery point could not be
-confirmed. Check the workspace before restarting."**
+the session ends, and the failure card under the chat header reads **"Sleep teardown blocked; saved
+artifacts retained. Check the workspace before restarting."**
 
 The conversation and the saved snapshot are kept, but this session can't be woken. To carry on:
 
-1. Open the workspace from the **Workspaces** page. If it's still there, commit and push anything
-   you want to keep.
+1. Open the workspace from the **Workspaces** page (under **Infrastructure** in the main
+   navigation). If it's still there, commit and push anything you want to keep.
 2. Start a new chat, or [fork](/docs/guides/chat-features/#conversation-forking) this one so the
    new agent can read it.
 3. If the workspace is gone or won't open, [report it](/docs/guides/reporting-issues/) (on a
@@ -328,8 +337,11 @@ new conversation."_ This is a normal end, not a failure, and the chat leaves the
 </picture>
 
 To carry on, select **Fork conversation**. The new chat's agent can read this conversation, but the
-expired workspace's files can't be restored: anything the agent pushed is still on GitHub,
-uncommitted changes are gone. **Retry** isn't offered for an expired chat.
+expired workspace's files can't be restored: anything the agent pushed is still on GitHub, and
+anything it didn't push, including commits it made only in the workspace, is gone. The new chat
+starts on a new branch from your default branch, so to build on what was pushed, tell it to start
+from the original branch, shown as **Branch** on the **Forking from** banner. **Retry** isn't
+offered for an expired chat.
 
 ## Wake failed
 
@@ -349,9 +361,9 @@ received it.
   />
 </picture>
 
-A failed wake doesn't end the chat. As long as its saved workspace can still be restored, the chat
-goes back to sleep on the same task, nothing is marked failed, and an agent that started it as a
-subtask isn't told it failed. Every message you send starts a new wake attempt, so what matters is
+On a VM, a failed wake doesn't end the chat. As long as its saved workspace can still be restored,
+the chat goes back to sleep on the same task, nothing is marked failed, and an agent that started
+it as a subtask isn't told it failed. Every message you send starts a new wake attempt, so what matters is
 whether the cause is something you can fix first:
 
 - **Cloud provider credentials are missing for this wake.** No cloud credential is available to pay
@@ -481,6 +493,27 @@ Start again from the [session tool rail](/docs/guides/chat-features/#the-session
 pre-filled with this chat's IDs, so its agent can read this conversation and you don't have to
 re-explain it. Neither brings this chat's files. Or start a new chat from scratch.
 
+## "Agent profile not found" when you send a message
+
+Typing `@` and the name of one of your [agent profiles](/docs/guides/agents/#agent-profiles)
+mentions that profile: SAM tells the agent the profile exists, so it can hand work to it.
+
+:::caution[Known issue]
+Since 9 October 2026 (v2026.10.10 on a self-hosted instance), a message with `@` directly followed by
+any other word is refused with **Agent profile not found**, so it never reaches the agent. That
+includes email addresses (`bob@example.com`), package names (`@types/node`), and code with
+decorators or annotations (`@dataclass`, `@Override`). Until a fix ships, write the `@` so it isn't
+directly followed by a word, for example `bob at example.com` or `@ dataclass`, and send again.
+:::
+
+## SAM moved the session to another machine
+
+When a VM runs short of memory, SAM may move a session off it: the chat shows **Sleeping** for a
+moment, then wakes on another machine with its files. A **Task**'s agent is told to carry on from
+where it stopped; a **Chat** waits for your next message, so check what the agent was doing and tell
+it how to continue. The session's **Resources** history covers both machines; see
+[Session Resource History](/docs/guides/session-resources/).
+
 ## None of these fit
 
 If the agent simply stopped mid-sentence with no banner and this is a **VM** session, open
@@ -488,11 +521,6 @@ If the agent simply stopped mid-sentence with no banner and this is a **VM** ses
 common cause, and it is the one the chat itself cannot tell you about. See
 [Session Resource History](/docs/guides/session-resources/). (Instant sessions have no resource
 history — there is nothing to check there.)
-
-When a VM runs short of memory, SAM may move a session off it instead: the chat shows **Sleeping**
-for a moment, then wakes on another machine with its files. A **Task**'s agent is told to carry on
-from where it stopped; a **Chat** waits for your next message, so check what the agent was doing
-and tell it how to continue.
 
 If a session is stuck in a state this page doesn't describe, or recovery repeatedly fails on work you
 need, [report it](/docs/guides/reporting-issues/) from the session tool rail — the report can attach

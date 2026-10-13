@@ -96,12 +96,12 @@ Use `create_trigger` with `sourceType: "webhook"`, an explicit project-local `ag
 
 Redeem from the originating workspace/session with its existing `SAM_MCP_TOKEN`. No SAM CLI installation is needed. The URL alone grants no access. An authenticated POST succeeds once; GET, HEAD, expired claims, and replays cannot retrieve the token. The default lifetime is ten minutes. Current project write membership is checked again at redemption.
 
-:::caution[Claude Code and Amp sessions can't redeem yet]
-SAM sets `SAM_MCP_TOKEN` only for **Codex** sessions. **Claude Code** and **Amp** receive their SAM
-credential another way, so the variable is empty in their shell and redemption fails with an
-authentication error. In that case, open the trigger's page in SAM, select **Rotate token**, and copy
-the endpoint and token from the **Save your webhook credential** dialog into the sending service
-yourself. Rotating cancels the pending claim.
+:::caution[Only Codex sessions can redeem]
+SAM sets `SAM_MCP_TOKEN` only for **Codex** sessions. **Claude Code**, **OpenCode**, **Gemini CLI**,
+**Mistral Vibe**, and **Amp** receive their SAM credential another way, so the variable is empty in
+their shell and redemption fails with an authentication error. In that case, open the trigger's page
+in SAM, select **Rotate token**, and copy the endpoint and token from the **Save your webhook
+credential** dialog into the sending service yourself. Rotating cancels the pending claim.
 :::
 
 Pipe the response into a secret command accepting stdin. This Bash example keeps authentication out of curl's process arguments and rejects empty input before updating a Cloudflare Worker secret:

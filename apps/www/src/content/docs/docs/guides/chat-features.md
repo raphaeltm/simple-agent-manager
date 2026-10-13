@@ -196,7 +196,7 @@ the conversation you are in rather than opening something beside it.)
 | **Events**    | This session's subscriptions, schedules, and watches — [Scheduled actions](/docs/guides/scheduled-actions/)                                                        | Always                                                   |
 | **Comments**  | Comment threads on this session. Unresolved threads show as a dot in icons mode and a count in labels mode; the marker turns amber when a thread is waiting on you | Always                                                   |
 | **Retry**     | Start a new chat with the original task prompt — [Retrying a Session](#retrying-a-session)                                                                         | When the session has a task, unless the chat has expired |
-| **Fork**      | Start a new task from this session — [Conversation Forking](#conversation-forking)                                                                                 | When the session has a task                              |
+| **Fork**      | Start a new chat that can read this one — [Conversation Forking](#conversation-forking)                                                                            | When the session has a task                              |
 | **Report**    | File a problem report — [Reporting Issues](/docs/guides/reporting-issues/)                                                                                         | When the deployment has reporting configured             |
 | **Complete**  | Mark the task complete                                                                                                                                             | When the session has a task that is not already finished |
 | **Details**   | Session identifiers and the infrastructure it ran on                                                                                                               | Always                                                   |
@@ -394,35 +394,60 @@ Agent responses can be played back as audio. SAM uses Deepgram Aura 2 (via Worke
 
 ## Conversation Forking
 
-You can branch off from a conversation to explore an alternative approach without losing the original thread. A fork starts a new session that is linked to the original one — it is session-scoped, not anchored to a particular message.
+Fork and Retry both start a new chat linked to the one you're in, and both open instantly.
 
-Forking applies to task-backed chat sessions broadly, including instant-container and conversation-style sessions. You do not need to know whether the original session started from an idea, a task, or a lightweight chat; SAM records the new session's parent so the lineage is preserved.
+|                 | **Fork**                                                               | **Retry**                                                         |
+| --------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Pre-filled with | An instruction to read the original chat, and its IDs                  | The original request                                              |
+| The new agent   | Reads the original conversation, then does what you add                | Starts the request again from scratch                             |
+| Use it to       | Try a different direction, or carry on from a chat that can't be woken | Run a failed or stopped request again, perhaps with another model |
+
+Neither copies the original workspace's files: the new chat starts on a new branch from your
+default branch (and, on a VM, in a new workspace). Forking works for any chat, whether it started
+from an idea, a task, or a quick question, and SAM records the new chat's parent.
 
 ### How to Fork
 
-1. Open the session you want to branch from
-2. Click **Fork** in the [session tool rail](#the-session-tool-rail)
-3. The new-chat screen opens straight away with the message box filled in: a short instruction for the agent plus the previous session's title and its project, session, and task IDs
-4. Edit the message to say what to do next, then send it
+1. Open the chat you want to branch from.
+2. Select **Fork** in the [session tool rail](#the-session-tool-rail), or **Fork conversation** on
+   an [expired](/docs/guides/session-troubleshooting/#expired-saved-workspace) chat.
+3. The new-chat screen opens with the message box filled in: an instruction for the agent to read
+   the previous chat with SAM's tools (`get_session_messages`, `search_messages`), then the previous
+   chat's title and its project, session, and task IDs.
+4. Add what to do next at the end of the message, keeping the IDs, and send it. To build on what
+   the original agent pushed, say so, for example "continue from branch sam/…" with the branch shown
+   on the **Forking from** banner.
 
-<img
-  src="/images/docs/chat-fork-composer.png"
-  alt="The new-chat screen after Fork. A banner reads &quot;Forking from: Add a CSV export to the orders page&quot; with the branch sam/sess-expired and a close button. Below it the selected profile, &quot;Build and test&quot; on a VM, and the message box already filled in with &quot;Use the SAM MCP tools (get_session_messages, search_messages) to review the previous session for full context about what was done and what needs to happen next.&quot;, with a Send button beside it."
-  width="552"
-/>
-
-The new agent does not get a copy of the old conversation. It reads what it needs with the SAM MCP tools (`get_session_messages`, `search_messages`), using the IDs in the message.
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/chat-fork-composer-mobile.png 2x" />
+  <img
+    src="/images/docs/chat-fork-composer.png"
+    alt="The new-chat screen after Fork. A banner reads &quot;Forking from: Add a CSV export to the orders page&quot; with the original branch, sam/add-csv-export-orders-page, and a close button. Below it is the selected profile, &quot;Build and test&quot; on a VM, and the message box, scrolled to its end: the previous chat's project, session, and task IDs, then an instruction the user has added, &quot;Now add the same CSV export to the invoices page.&quot;"
+  />
+</picture>
 
 ### Retrying a Session
 
-**Retry** opens the new-chat screen with the original task prompt filled in, and the banner shows the previous error if there was one. The new session is linked to the original as its parent. If SAM cannot load the original prompt, the message box says so and you can type the prompt yourself. Retry isn't offered for a chat whose saved workspace has [expired](/docs/guides/session-troubleshooting/#expired-saved-workspace); fork it instead.
+**Retry** opens the new-chat screen with the original request filled in, and the banner shows the
+previous error if there was one. If SAM can't load the original request, the message box says so
+and you can type it yourself. Retry isn't offered for a chat whose saved workspace has
+[expired](/docs/guides/session-troubleshooting/#expired-saved-workspace); fork it instead.
 
-Fork and Retry both open instantly. Before you send, you can edit the message and pick a different agent profile, for example to retry with another model; select the **✕** on the **Forking from** or **Retrying** banner to cancel. In the session list and the chat header, the new chat is labelled **⑂ from** and the original's title, or **↩ attempt 2**, **3**, and so on once the same chat has more than one.
+### Before you send
+
+- **Check the profile.** Fork and Retry use the profile selected in the message box, which isn't
+  necessarily the one the original chat used. Picking another profile is how you retry with a
+  different agent or model.
+- **The ✕ on the banner** removes the link to the original chat. The text stays in the message box,
+  and sending it starts an ordinary new chat.
+- **How the new chat is labelled.** In the session list it's marked **⑂ from** and the start of the
+  original's title, and its header shows **⑂ fork**. Once a chat has been forked or retried more
+  than once, the new chats are numbered **↩ attempt 2**, **3**, and so on.
 
 ### Fork Limits
 
-- Maximum fork depth: 10 levels, counting retries too (configurable via `ACP_SESSION_MAX_FORK_DEPTH`)
-- Each fork starts a new chat; on a VM it gets its own branch and workspace
+- Maximum depth: 10 levels, counting every fork, retry, and dispatched subtask in the chain
+  (configurable via `ACP_SESSION_MAX_FORK_DEPTH`)
 
 ## Finding Past Conversations
 
@@ -477,7 +502,7 @@ SAM also collapses platform-injected setup messages in the chat timeline. Those 
 
 Persistent chat sessions can sleep and recover on both [Instant and VM-backed runtimes](/docs/guides/instant-sessions/):
 
-- **Sleeping.** The session went idle or you manually chose **Sleep** for an awake idle conversation-mode session with a workspace. SAM writes a checkpoint, releases compute, and keeps the composer visible so sending a message wakes the same chat. A message sent in the first minutes after it slept waits (up to an hour) until the old workspace has finished shutting down, then wakes it, usually within a minute or two of the shutdown. Your message, or a notification from another agent or a subscribed event, reaches the agent once the woken session has fully started.
+- **Sleeping.** The session went idle or you manually chose **Sleep** for an awake idle conversation-mode session with a workspace. SAM writes a checkpoint, releases compute, and keeps the composer visible so sending a message wakes the same chat, with the same agent, model, and permission mode it started with. A message sent in the first minutes after it slept waits (up to an hour) until the old workspace has finished shutting down, then wakes it, usually within a minute or two of the shutdown. Your message, or a notification from another agent or a subscribed event, reaches the agent once the woken session has fully started.
 - **Archiving a sleeping conversation.** Choose **Archive** in the dock and confirm when you are finished with the chat. This also works for sleeping VM conversations. SAM immediately requests deletion of your linked workspace and discards its restore snapshots once runtime deletion is confirmed. If cleanup is interrupted, retry Archive; SAM keeps deletion retryable without completing the conversation twice. Archiving a shared conversation does not delete another member's workspace.
 - **Snapshots that keep failing.** If SAM cannot save a complete snapshot after a few tries (three, or 15 minutes, by default), it stops retrying. A VM session whose earlier snapshot saved its exact Git commit sleeps anyway, keeping the conversation and the repository but not every file, and the chat says what was kept. Otherwise the chat says SAM could not put the session to sleep, and the workspace keeps running. [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot) explains both.
 - **Recovery.** SAM is rebuilding the session's runtime and restoring its saved state. Wait for it to finish instead of resending.

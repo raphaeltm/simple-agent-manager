@@ -108,11 +108,11 @@ returns to and warns when that host is a local program.
 - Tokens are stored hashed, and their authorization properties are encrypted.
 - Refresh tokens rotate on every refresh. Reusing a spent refresh token revokes the whole
   connection, including its access tokens, and the app has to reconnect.
-- A revoked connection is rejected at once by an authorization check in D1, and its tokens are also
-  deleted from KV.
+- A revoked connection is rejected at once by an authorization check in D1. Revoking it from
+  Settings or Admin also deletes its tokens from KV.
 - Every operation runs as the person, with their current project membership, and only on chats they
   started when it replies to, answers, or stops work. Personal API tokens used as Connector bearers
-  get full read and write access.
+  carry both scopes, still subject to the installation's Connector and write switches and limits.
 
 ### Callback Tokens
 

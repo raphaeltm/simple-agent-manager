@@ -79,10 +79,9 @@ How a chat shows that an MCP server isn't signed in depends on the server:
   usually a token or API key from its dashboard.
 
 The last two only happen in sessions labelled **Chat** (see
-[Chat or Task](/docs/guides/chat-features/#chat-or-task)), only where link requests are turned on
-(they are on the hosted service; self-hosted operators turn them on as described in
-[Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat)) when the chat started.
-Elsewhere
+[Chat or Task](/docs/guides/chat-features/#chat-or-task)), and only where link requests were turned
+on when the chat started. They are on the hosted service; self-hosted operators turn them on as
+described in [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat). Elsewhere
 a server that wants a browser sign-in just fails, or its tools don't appear, so connect it with a
 token or API key from its dashboard instead. The chat's shortcut to personal MCP settings appears
 only for the person who started it; shared servers are managed by project administrators.

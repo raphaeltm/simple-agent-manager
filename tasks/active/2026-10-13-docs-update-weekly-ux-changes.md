@@ -2,6 +2,7 @@
 
 Branch: `sam/docs-update-s37s74`
 Task: `01M4SKTY1JD3X8MRHYEDS37S74`
+PR: https://github.com/raphaeltm/simple-agent-manager/pull/2324 (opened as draft during review)
 
 ## Goal
 

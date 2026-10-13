@@ -7,6 +7,16 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ## This cycle: 6 – 13 October 2026
 
+:::caution[Known issue: messages with @ and a word fail]
+Since 9 October (v2026.10.10 and later on a self-hosted instance), a message in which `@` is directly
+followed by a word fails with **Agent profile not found** and never reaches the agent, unless the
+word is the name of one of your agent profiles. That includes email addresses (`bob@example.com`),
+package names (`@types/node`), and code with decorators or annotations (`@dataclass`, `@Override`).
+Until a fix ships, write the `@` so a word doesn't directly follow it, for example
+`bob at example.com` or `@ dataclass`.
+→ [Agent profile not found](/docs/guides/session-troubleshooting/#agent-profile-not-found-when-you-send-a-message)
+:::
+
 ### For everyone
 
 - **Use SAM from Claude and ChatGPT.** Connect the AI app you already use to SAM, then ask it what
@@ -15,9 +25,10 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 - **Agents can set up automation for you.** Ask an agent to create a schedule, GitHub, or webhook
   trigger, and it appears on the project's **Triggers** page like one you made yourself.
   → [Triggers](/docs/guides/triggers/#ask-an-agent-to-set-one-up)
-- **A chat wakes up as it went to sleep.** A sleeping chat now wakes with the agent, model,
-  permission mode, and approval cards it started with, and a **Task** still commits, pushes, and
-  opens its pull request after a wake. → [After a chat wakes from sleep](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
+- **A chat wakes up as it went to sleep.** A chat started since 7 October wakes with the agent,
+  model, and permission mode it started with, and can still ask you for approval if it could before.
+  A **Task** still commits, pushes, and opens its pull request after a wake.
+  → [After a chat wakes from sleep](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
 - **Fork and Retry open instantly.** Fork no longer waits for an AI summary: the new chat is
   pre-filled with the old session's IDs, and its agent reads the original conversation itself.
   Retry pre-fills the original request. → [Conversation Forking](/docs/guides/chat-features/#conversation-forking)
@@ -26,9 +37,10 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
   → [Expired saved workspace](/docs/guides/session-troubleshooting/#expired-saved-workspace)
 - **A failed wake keeps the chat asleep.** If a VM chat can't wake, it goes back to sleep on the
   same task and you can try again, instead of the task failing. → [Wake failed](/docs/guides/session-troubleshooting/#wake-failed)
-- **Running out of memory moves your session.** When a VM runs short of memory, SAM moves the session
-  to another machine again; that move had been failing since 9 October.
-  → [None of these fit](/docs/guides/session-troubleshooting/#none-of-these-fit)
+- **SAM can once again move a session off a VM that runs short of memory.** The chat shows
+  **Sleeping** for a moment and wakes on another machine with its files. These moves had been
+  failing since 9 October.
+  → [SAM moved the session to another machine](/docs/guides/session-troubleshooting/#sam-moved-the-session-to-another-machine)
 - **New models.** Claude Haiku 5.5, and more OpenCode models. → [New models](#new-models)
 - **A guide to the command line.** Install the `sam` CLI, sign in, and start, follow, and reply to
   work from a terminal or a script. → [SAM CLI](/docs/guides/cli/)
@@ -41,55 +53,58 @@ Also changed this week:
   hours, and **Stop** and **Archive** finish reliably on them.
 - **Long tasks that keep making progress are no longer stopped after eight hours.** They run until
   SAM's inactivity check or the 24-hour limit.
-- **A new VM that fails to start is retried, then replaced once**, instead of failing the task on
-  the first error.
+- **A new VM that fails to start gets another chance.** SAM retries its certificate and setup steps,
+  then replaces the VM once, instead of failing the task on the first error.
 - **Messages and events reach sleeping chats.** Wakes triggered by another agent's message, a
   scheduled action, or an event no longer fail at random, arrive as soon as the chat is ready, and
-  one unread notification no longer holds up the rest for a day.
+  one pending event no longer silences a chat for a day.
 - **A sleep that can't finish ends visibly.** If SAM can't confirm a workspace stopped, the chat
   says so and ends, instead of promising a wake it couldn't guarantee.
   → [SAM could not finish putting the session to sleep](/docs/guides/session-troubleshooting/#sam-could-not-finish-putting-the-session-to-sleep)
-- **Claude usage chips appear.** Readings from Claude Pro and Max subscriptions were being dropped,
-  so the usage chip never showed for Claude. → [Usage Limits](/docs/guides/agents/#usage-limits)
-- **Messages between agents arrive as a notice from SAM.** The recipient's chat shows a short SAM
-  notice, and the conversation between the two agents is on the project's **Events** page.
-  → [Messages between agents](/docs/guides/agents/#messages-between-agents)
+- **Claude usage chips work.** Readings from many Claude Pro and Max credentials were being dropped,
+  and the rest showed one limit without a percentage. The chip now shows the five-hour and weekly
+  limits. → [Usage Limits](/docs/guides/agents/#usage-limits)
+- **Messages between agents arrive as a notice from SAM.** The recipient's chat shows a SAM notice
+  written for its agent, which you don't need to answer, and the conversation between the two
+  agents is on the project's **Events** page. → [Messages between agents](/docs/guides/agents/#messages-between-agents)
 - **A new Chat you start on a VM no longer waits** for another workspace on the same machine to
   finish building.
-- **The **Resources** panel's totals no longer double-count** the history it uploaded twice.
-  Sessions recorded before the fix keep their inflated totals.
-
-**Known issue:** since 9 October, sending a message that contains `@` followed by a word, such as
-an email address (`bob@example.com`) or a package name (`@types/node`), fails with **Agent profile
-not found** unless the word is the name of one of your agent profiles. Until a fix ships, write the
-address without the `@` (`bob at example.com`), or put a space after it.
+- **Resource history is no longer counted twice when a workspace re-sends it.** The duplicate
+  inflated the totals agents read with `get_resource_history` and could drop that stretch's detail
+  from the **Resources** panel. Sessions recorded before the fix keep the inflated totals and gaps.
 
 ### For self-hosters & admins
 
-Update to v2026.10.12 or later. The fixes for interrupted sleeps and memory-pressure moves arrive in
-the release after v2026.10.12. There are no new secrets or Cloudflare token permissions; the new
-database migrations run in the deploy pipeline, and the deploy creates the Connector's storage.
+Before you update, know about two regressions. Releases v2026.10.09 to v2026.10.12 can't move a
+session off a VM that runs short of memory; the release after v2026.10.12 fixes that, and
+interrupted sleeps. Every release from v2026.10.10 has the `@` known issue above, which no release
+fixes yet. There are no new secrets or Cloudflare token permissions; the new database migrations run
+in the deploy pipeline, and the deploy creates the Connector's storage.
 
 - **The SAM Connector is on after you update** (from v2026.10.10). To keep it off, switch off
   **Enable Connector** in **Admin → Integrations → Connector**, or set the `CONNECTOR_ENABLED`
-  GitHub Environment variable to `false` before you deploy.
-  → [SAM Connector settings](/docs/reference/configuration/#sam-connector)
+  GitHub Environment variable to `false` before you deploy. Claude's and ChatGPT's servers must be
+  able to reach your API, so a Cloudflare Access login wall or a WAF challenge in front of it stops
+  connections. → [Self-hosted installations](/docs/guides/sam-connector/#self-hosted-installations)
 - **Chats asleep when you update wake in Manual.** A sleeping chat started before v2026.10.08 has no
   recorded settings, so it wakes asking for approval before it changes anything. If you haven't
   [turned agent requests on](/docs/guides/self-hosting/#let-agents-ask-in-chat), those requests are
   refused, so tell people to fork such a chat rather than keep using it.
 - **Pending accounts are held back everywhere.** With signup approval on, an account waiting for
-  approval can no longer use agent chats, create API tokens, or open workspaces in the browser.
-  → [Signup approval](/docs/guides/self-hosting/#signup-approval)
+  approval can no longer use the SAM and project agent chats, manage API tokens, or open workspaces
+  in the browser. → [Signup approval](/docs/guides/self-hosting/#signup-approval)
+- **Keep anonymous trials off.** Every trial visitor runs under one shared account and can land on
+  the same machine as another visitor, so per-user isolation doesn't separate them.
+  → [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access)
 - **About 180 Worker variables left `wrangler.toml`.** They only repeated SAM's built-in defaults,
   so nothing changes when you deploy. If your fork edited one of those lines, syncing will conflict
   there; keep your value as described in [Worker Variables](/docs/reference/configuration/#worker-variables).
 - **Superadmins hear when archiving stops.** When a project's archive circuit breaker opens, every
-  superadmin gets an **Operational Failure** notification linking to **Admin → Storage**, and the
-  hourly storage measurement runs again.
+  active superadmin gets an **Operational Failure** notification linking to **Admin → Storage**, and
+  the hourly storage measurement runs again.
   → [Storage and archive circuit breakers](/docs/guides/self-hosting/#storage-and-archive-circuit-breakers)
 - **Agent messages travel over channels on every install.** The checked-in `wrangler.toml` turns on
-  `AGENT_MESSAGE_CHANNELS_ENABLED`.
+  `AGENT_MESSAGE_CHANNELS_ENABLED`, unless your GitHub Environment sets it to `false`.
 - **Removed:** `ACP_TASK_PROMPT_TIMEOUT` (long tasks now end only through the inactivity check or
   the 24-hour limit). If you set it, you can delete it.
 - **New optional settings**, with working defaults, for retrying a VM that fails to start
@@ -97,7 +112,8 @@ database migrations run in the deploy pipeline, and the deploy creates the Conne
   `TASK_RUNNER_FIRST_HEARTBEAT_TIMEOUT_MS`) and for the Connector (`CONNECTOR_*`).
   → [Fresh VM boot recovery](/docs/reference/configuration/#fresh-vm-boot-recovery)
 - **The Pulumi state repair workflow no longer prints raw state.** Its export shows resource counts
-  and URNs only.
+  and URNs only. If you ran it before v2026.10.07, delete those workflow runs: their summaries show
+  the start of the raw state, which can include generated keys.
 
 ### New models
 

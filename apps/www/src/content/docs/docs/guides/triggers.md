@@ -23,16 +23,24 @@ You can create triggers yourself, or ask an agent in the project to create them 
 1. Open the project and select **Triggers** in the project navigation, then **New Trigger**.
 2. Give it a name, and choose its **Source**: **Schedule**, **GitHub event**, or **Webhook**.
 3. Fill in what makes it run:
-   - **Schedule**: pick **Hourly**, **Daily**, **Weekly**, or **Monthly** and a time and timezone,
-     or **Advanced** for a cron expression such as `0 9 * * 1-5`. A schedule runs at most every
-     15 minutes.
+   - **Schedule**: pick **Hourly** (every few hours, at a minute you choose), **Daily**,
+     **Weekly**, or **Monthly** (at a time you choose), and a timezone, or **Advanced** for a cron
+     expression such as `0 9 * * 1-5`. A schedule runs at most every 15 minutes.
    - **GitHub event**: pick the **GitHub event** (**Issue**, **Issue comment**, **Pull request**, or
      **Push**), then narrow it down. **Actions** limits it to actions such as `opened` or
      `labeled`, **Ignore actors** skips accounts such as `dependabot[bot]`, **Required labels**
      (issues and pull requests) needs every listed label, **Command prefix** (issue comments) only
      reacts to comments starting with, say, `/sam`, **Branches** (pull requests and pushes) limits
-     the branches, **Body contains** looks for a keyword, and **Ignore draft pull requests** does
-     what it says.
+     the branch pushed to, or a pull request's source branch, and **Text contains** (not for
+     pushes) looks for a keyword in the title, body, or comment. Draft pull requests are skipped.
+
+     :::caution[Check Actions when you change the event]
+     The form starts on **Issue comment**, with **Actions** set to `created`. That value suits only
+     issue comments: for **Issue** and **Pull request**, change it (for example to `opened`, or
+     `opened, labeled` to also catch labels added later), and for **Push**, which has no actions,
+     clear it. Otherwise the trigger never runs.
+     :::
+
    - **Webhook**: optional filters on the JSON the service sends. See
      [Webhook Triggers](/docs/guides/webhook-triggers/).
 4. Write the **Prompt Template**: the instructions the agent gets on every run. **Available
@@ -40,10 +48,11 @@ You can create triggers yourself, or ask an agent in the project to create them 
 5. Choose the agent profile that does the work. A webhook trigger asks for one in the form; for
    schedule and GitHub triggers it's under **Advanced Options** and starts as **Project default**.
    **Advanced Options** also has **Skip if previous execution still running** (on by default),
-   **Max concurrent runs**, how big a machine the runs ask for, and **Task mode**: **Task (run
-   once, complete)**, the default, or **Conversation (interactive)** for runs you want to steer.
-6. Save. For a webhook trigger, SAM shows its endpoint and bearer token once: copy them into the
-   service that will send the webhooks.
+   **Max concurrent runs** (used when skipping is off), how big a machine the runs ask for, and
+   **Task mode**: **Task (run once, complete)**, the default, or **Conversation (interactive)** for
+   runs you want to steer.
+6. Select **Create Trigger**. For a webhook trigger, SAM shows its endpoint and bearer token once:
+   copy them into the service that will send the webhooks, not into a chat.
 
 Each trigger card has **Run now**, and a menu with **Edit**, **Pause** or **Resume**, **View
 history**, and **Delete**. **View history** opens the trigger's page with its past runs (and, for a
@@ -54,30 +63,36 @@ webhook, its credential).
 Agents can create, change, and delete triggers in their own project. Describe what you want in a
 chat, for example:
 
-- _"Create a trigger that triages every new issue labelled bug: add an area label and ask the
-  reporter for steps to reproduce if they're missing."_
+- _"Create a trigger that looks into every new issue labelled bug: find the likely cause in the
+  code and write it up in the chat."_
 - _"Every weekday at 9:00 Paris time, check our dependencies for security updates and open a pull
   request if any are needed."_
 - _"Set up a webhook trigger called Deploy failed, using the Backend profile, that investigates
-  failed deployments. Store its token in our Cloudflare Worker as `SAM_WEBHOOK_TOKEN`."_
+  failed deployments."_
 
 The agent creates the trigger with SAM's tools, and it appears on the **Triggers** page like one you
 made yourself, where you can check it, edit it, or pause it. It runs as you, the person whose chat
 created it.
 
+What a run can do on GitHub itself, such as comment on an issue, add a label, or open a pull
+request, depends on the permissions of your SAM installation's GitHub App and the agent's profile.
+The GitHub App that self-hosted SAM sets up can read issues but not change them.
+
 ### Webhook tokens an agent sets up
 
-An agent never sees a webhook trigger's token in the conversation. SAM gives it a single-use link,
-valid for 10 minutes, which it redeems from inside its workspace and passes straight to the service
-that will send the webhooks, such as a Worker secret or your CI's secret store. Nothing in the
-transcript reveals the token.
+SAM never puts a webhook trigger's token in a tool result. Instead it gives the agent a single-use
+link, valid for 10 minutes, and tells it to fetch the token from inside its workspace and pipe it
+straight into the service that will send the webhooks, such as a Worker secret or your CI's secret
+store, so the token stays out of the conversation. The agent needs credentials for that service in
+its workspace, for example a Cloudflare API token as a project secret to update a Worker secret.
 
-:::caution[Claude Code agents can't fetch the token yet]
-Redeeming the link needs a SAM credential that only **Codex** sessions are given. An agent on
-**Claude Code** (or Amp) can create the trigger, but its attempt to fetch the token fails. Fetch it
-yourself instead: open the trigger's page (**View history**), select **Rotate token** under
-**Webhook credential**, and copy the endpoint and token from the **Save your webhook credential**
-dialog into the sending service. Rotating also cancels the agent's unused link.
+:::caution[Only Codex agents can fetch the token]
+Fetching the token needs a SAM credential that only **Codex** sessions are given. With **Claude
+Code**, **OpenCode**, **Gemini CLI**, **Mistral Vibe**, or **Amp**, the agent can create the trigger
+but its attempt to fetch the token fails. Fetch it yourself instead: open the trigger's page
+(**View history**), select **Rotate token** under **Webhook credential**, and copy the endpoint and
+token from the **Save your webhook credential** dialog into the sending service. Rotating also
+cancels the agent's unused link.
 :::
 
 ## When a trigger runs
@@ -85,13 +100,15 @@ dialog into the sending service. Rotating also cancels the agent's unused link.
 - **Each run starts a chat** in the project's session list, labelled **Task** or **Chat** by the
   trigger's task mode (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)).
 - **One run at a time, by default.** A trigger skips its turn while its previous run is still
-  working. A previous run that has gone to sleep doesn't count, so a quiet chat can't block the
-  next run.
-- **Repeated failures pause it.** After three failed runs in a row, SAM pauses the trigger. Fix the
-  cause, then select **Resume**.
-- **Limits.** A project can have up to 10 triggers unless your administrator changed that. GitHub
-  triggers need your SAM installation to receive the GitHub App's webhooks, which is the default;
-  on a self-hosted instance an operator can turn them off.
+  going, including a run that has finished its turn but is still awake. A run that has gone to
+  sleep doesn't count, so a quiet chat doesn't block the next run for long.
+- **Repeated failures pause it.** After three failed or stopped runs in a row, SAM pauses the
+  trigger the next time it would run. Fix the cause, then use **Run now** until a run succeeds, and
+  only then select **Resume**: resuming straight away pauses it again at its next turn.
+- **Limits.** A project can have 10 triggers unless that's changed in the project's **Settings**,
+  under **Scaling & Scheduling**, **Max Triggers**. GitHub triggers need your SAM installation to
+  receive the GitHub App's webhooks, which is the default; on a self-hosted instance an operator
+  can turn them off.
 
 ## For agents: the trigger tools
 
