@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { exportPKCS8 } from 'jose';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const boundary = vi.hoisted(() => ({ fetch: vi.fn() }));
@@ -64,9 +65,7 @@ async function fixture() {
     true,
     ['sign', 'verify']
   );
-  const pkcs8 = await crypto.subtle.exportKey('pkcs8', keys.privateKey);
-  // Generated synthetic fixture only; no embedded private key.
-  const pem = `-----BEGIN PRIVATE KEY-----\n${btoa(String.fromCharCode(...new Uint8Array(pkcs8)))}\n-----END PRIVATE KEY-----`; // gitleaks:allow
+  const pem = await exportPKCS8(keys.privateKey);
   const store = new Map<string, string>();
   const kv = {
     get: async (key: string) => {
