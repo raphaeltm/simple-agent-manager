@@ -112,8 +112,8 @@ coming before an agent stops on it.
 
 - **In a chat**, a small chip under the chat's title shows the credential that chat's agent uses —
   for example `Claude · 5h 78% · Week 31%`, shortest limit first. Select it to see every limit, how
-  much of it is used, and when it resets. It appears once SAM has a reading, usually after the
-  agent's first reply; credentials that report nothing (see the list below) never show one.
+  much of it is used, and when it resets. It appears once SAM has a reading (for Claude Code, after
+  a few model calls); credentials that report nothing (see the list below) never show one.
 - **In Settings → Advanced**, each of your personal credentials in the **Credentials** list shows the
   same chip once an agent has used it.
 - **Agents** can read the same numbers with the `get_credential_limits` tool, so an agent
@@ -132,8 +132,8 @@ When a limit is nearly used up, wait for the reset time shown in the dialog, or 
 profile for a different agent — Codex instead of Claude Code, say. If a limit runs out in the middle of work, a **Task** fails but
 SAM keeps its workspace (see [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)),
 and a **Chat** just stops with the provider's error. Either way, reply in the same chat after the
-reset to carry on. By then the chat has usually gone to sleep, so it wakes
-[without some of its settings](#after-a-chat-wakes-from-sleep).
+reset to carry on. By then the chat has usually gone to sleep; your reply wakes it with the same
+agent, model, and permission mode it started with.
 
 The numbers are the last reading SAM took while an agent was using that credential, not live figures
 from the provider. A credential nobody has used for a while keeps its last reading for up to 30 days,
@@ -195,8 +195,10 @@ ID is refused.
 ### Permission mode
 
 Agents start in **Bypass Permissions** mode, so they edit files and run commands without stopping to
-ask. Each workspace is its own isolated VM or container. To make an agent more careful, choose
-another mode:
+ask. They can't reach other people's work: your VM workspaces run on machines that only you use,
+and each Instant session has its own container (see the
+[workspace isolation model](/docs/architecture/security/#workspace-isolation-model)). To make an
+agent more careful, choose another mode:
 
 | Mode                             | What the agent does                                                        |
 | -------------------------------- | -------------------------------------------------------------------------- |
@@ -227,8 +229,10 @@ before some actions even when SAM sets Bypass Permissions.
 
 Sessions started on the current version keep their resolved permission mode, model, reasoning
 effort, and provider settings when they wake on either VM or Instant. Later changes to a profile,
-**Agent Overrides**, or **Settings → Agents** apply to new sessions. Agent requests still appear
-as cards after wake when your operator has enabled them.
+**Agent Overrides**, or **Settings → Agents** apply to new sessions. A chat that could ask you
+for approval before it slept can still ask after it wakes. On a self-hosted instance, a chat started
+before the operator turned agent requests on still can't ask after a wake (its requests are refused),
+so start a new chat or fork it to get approval cards.
 
 A **Task** keeps its task completion and commit, push, and pull request behavior after waking;
 a **Chat** remains a Chat. On a VM, if SAM starts fresh from a degraded snapshot, it keeps these
@@ -285,9 +289,11 @@ Agent output streams to your browser in real-time via WebSocket. You see code be
 
 ### Conversation Forking
 
-**Fork** in the session tool rail starts a new session that carries an AI-written summary of the
-current one, so you can try an alternative without losing the original thread. A fork covers the
-whole session, not a single message. See
+**Fork** in the session tool rail opens a new chat linked to the current one, with its message box
+already filled in: the previous session's title and IDs, and an instruction for the new agent to
+read the original conversation with SAM's tools. Add what you want done and send it, so you can try
+an alternative without losing the original thread or explaining it again. A fork covers the whole
+session, not a single message, and doesn't copy the old workspace's files. See
 [Conversation Forking](/docs/guides/chat-features/#conversation-forking) for the steps and limits.
 
 ### Voice Input

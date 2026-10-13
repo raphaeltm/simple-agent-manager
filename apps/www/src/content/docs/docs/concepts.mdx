@@ -103,7 +103,7 @@ A **trigger** starts agent work automatically, without you opening a chat. User-
 - **GitHub event** — react to activity on the linked repository
 - **Webhook** — start work when an authenticated external request arrives (see [Webhook Triggers](/docs/guides/webhook-triggers/))
 
-Each trigger runs with a specific agent profile (and optional skill), so triggered work behaves like a chat you started yourself.
+Each trigger runs with an agent profile (and optional skill), so triggered work behaves like a chat you started yourself. Schedule and GitHub triggers without a profile use the project's default; webhook triggers always name one. You can create triggers yourself on the project's **Triggers** page, or ask an agent to create one for you — see [Triggers](/docs/guides/triggers/).
 
 SAM also has a private operator-only incident trigger source used by the configured platform feedback project. It dispatches agents from grouped private incident backlog summaries rather than from external user/project events.
 
@@ -131,7 +131,7 @@ Ideas can be linked to chat sessions, creating a many-to-many association. This 
 
 ### Agent-to-Agent Dispatch
 
-Running agents can spawn follow-up ideas within the same project using MCP tools. This enables multi-step workflows where one agent delegates sub-work to others.
+Running agents can start follow-up tasks in the same project with SAM's `dispatch_task` tool, then message, check on, or stop them. This enables multi-step workflows where one agent delegates sub-work to others.
 
 See the [Idea Execution guide](/docs/guides/idea-execution/) for full details.
 
@@ -157,7 +157,7 @@ Sessions support:
 - Streaming responses (real-time output as the agent works)
 - Multiple concurrent sessions per workspace (each in its own terminal tab)
 - Persistence across page refreshes (tabs restored from VM Agent SQLite)
-- **Conversation forking** — start a new session that carries a summary of this one, to explore an alternative
+- **Conversation forking** — start a new session linked to this one, whose agent can read the original conversation, to explore an alternative
 - **Voice input** and **text-to-speech playback**
 - **File browsing** — browse, view, and diff files directly in the chat panel
 - **File upload/download** — attach files to conversations and download from workspaces

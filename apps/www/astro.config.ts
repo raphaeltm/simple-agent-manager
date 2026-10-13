@@ -50,6 +50,7 @@ export default defineConfig({
             { slug: 'docs/guides/reporting-issues' },
             { slug: 'docs/guides/recent-product-changes' },
             { slug: 'docs/guides/notifications' },
+            { slug: 'docs/guides/triggers' },
             { slug: 'docs/guides/webhook-triggers' },
             { slug: 'docs/guides/scheduled-actions' },
             { slug: 'docs/guides/mcp-servers' },

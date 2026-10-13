@@ -54,17 +54,12 @@ For every kind of request:
   unconfirmed, or that the request was interrupted because the agent stopped first, check whether
   the agent carried on. If it's still waiting, select **Interrupt** first, then send your decision as
   a message.
-
-:::caution[Current limitations]
-
-- **Sleep and wake retain agent requests.** Sessions started on the current version keep their
-  recorded settings and can ask after waking when requests are enabled. Older saved sessions use
-  [conservative compatibility](/docs/guides/agents/#after-a-chat-wakes-from-sleep).
-- **Answer before the deadline on the card.** SAM's stalled-turn check respects pending requests
-  until their response deadline; waiting for your answer is not treated as a stall. If the request
-  expires, the agent is told no — send a message saying how to continue.
-
-:::
+- **A chat that sleeps can still ask when it wakes**, as long as it could ask when it started. Older
+  chats may not have their settings recorded; see
+  [After a chat wakes from sleep](/docs/guides/agents/#after-a-chat-wakes-from-sleep).
+- **Waiting for you is not a stall.** SAM's check for stuck agents leaves a chat alone while a
+  request is open, until its deadline. If the request expires, the agent is told no, so send a
+  message saying how to continue.
 
 :::note[Self-hosted instances]
 These requests are off until an operator turns them on — see

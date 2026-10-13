@@ -3,7 +3,7 @@ title: Webhook Triggers
 description: Start SAM tasks from any service that can send an authenticated JSON webhook.
 ---
 
-Generic webhook triggers let external systems submit task context to an agent without a provider-specific integration. Each trigger has its own bearer token, deterministic payload filters, template, agent profile, concurrency policy, and redacted delivery history.
+Generic webhook triggers let external systems submit task context to an agent without a provider-specific integration. Each trigger has its own bearer token, deterministic payload filters, template, agent profile, concurrency policy, and redacted delivery history. For schedule and GitHub triggers, and for asking an agent to set a trigger up, see [Triggers](/docs/guides/triggers/).
 
 ## Create a Trigger
 
@@ -16,7 +16,7 @@ Open a project, select **Triggers**, and create a **Webhook** trigger. Configure
 - Optional safe request headers to expose to the prompt.
 - The normal trigger concurrency and skip-if-running controls.
 
-SAM shows the raw token only after creation or rotation. Copy it before closing the credential dialog. Later API responses expose only the final four characters.
+SAM shows the raw token only after creation or rotation. Copy it before closing the credential dialog. Later API responses expose only the final four characters. A trigger an agent created never shows its token in the UI: the agent receives a one-time link instead (see [Creating Webhooks through MCP](#creating-webhooks-through-mcp)), and you can always get a new token with **Rotate token** on the trigger's page.
 
 ## Send a Delivery
 
@@ -95,6 +95,14 @@ Authenticated project members can use the same management surface as the UI. Pro
 Use `create_trigger` with `sourceType: "webhook"`, an explicit project-local `agentProfileId`, and `webhookConfig` (for example `{ "sourceLabel": "build", "filters": [] }`). The result includes the trigger ID and `webhookClaim` containing `claimUrl`, `expiresAt`, and the ingress endpoint. The credential never appears in the MCP response.
 
 Redeem from the originating workspace/session with its existing `SAM_MCP_TOKEN`. No SAM CLI installation is needed. The URL alone grants no access. An authenticated POST succeeds once; GET, HEAD, expired claims, and replays cannot retrieve the token. The default lifetime is ten minutes. Current project write membership is checked again at redemption.
+
+:::caution[Claude Code and Amp sessions can't redeem yet]
+SAM sets `SAM_MCP_TOKEN` only for **Codex** sessions. **Claude Code** and **Amp** receive their SAM
+credential another way, so the variable is empty in their shell and redemption fails with an
+authentication error. In that case, open the trigger's page in SAM, select **Rotate token**, and copy
+the endpoint and token from the **Save your webhook credential** dialog into the sending service
+yourself. Rotating cancels the pending claim.
+:::
 
 Pipe the response into a secret command accepting stdin. This Bash example keeps authentication out of curl's process arguments and rejects empty input before updating a Cloudflare Worker secret:
 

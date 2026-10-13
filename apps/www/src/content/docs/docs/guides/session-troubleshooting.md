@@ -106,9 +106,9 @@ keeps coming back — would otherwise be nudged forever. SAM pauses and posts on
   model. Choose a model it supports — in the agent's
   [profile](/docs/guides/agents/#choosing-a-model), the project's **Agent Overrides**, or
   **Settings → Agents**, wherever the model was set — then start a new chat, or
-  [Fork](/docs/guides/chat-features/#conversation-forking) this one to carry a summary of it over.
-  The notice says to send a message to retry, but while it's awake the chat keeps its model, so that
-  would hit the same error.
+  [Fork](/docs/guides/chat-features/#conversation-forking) this one so the new agent can read it.
+  The notice says to send a message to retry, but a chat keeps the model it started with, even after
+  it sleeps and wakes, so that would hit the same error.
 
 The chat is marked **Needs input** until someone replies. Your next message, or a new tool step
 finishing successfully, starts the check-ins again with a fresh count. (On a self-hosted instance
@@ -134,7 +134,7 @@ or in the failure card under the chat header (expand the card for the next step)
 - **A failure card: "Model unavailable for this account."** The credential works, but your plan or
   account can't use that model — or the model ID is mistyped. Pick another model in the agent's
   profile, the project's **Agent Overrides**, or **Settings → Agents**, then start a new chat, or
-  [Fork](/docs/guides/chat-features/#conversation-forking) this one to carry a summary of it over.
+  [Fork](/docs/guides/chat-features/#conversation-forking) this one so the new agent can read it.
 
 A tool the agent connects to through an [MCP server](/docs/guides/mcp-servers/) can fail to sign in
 too:
@@ -232,7 +232,8 @@ once more (`CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`, two attempts in all):
 - If it works, the chat carries on with its files.
 - If it fails again, SAM marks the session and its task **failed** rather than leaving you watching
   a spinner, and the session ends. Check GitHub for anything the agent pushed, then start a new
-  chat, or [fork](/docs/guides/chat-features/#conversation-forking) this one to keep its context.
+  chat, or [fork](/docs/guides/chat-features/#conversation-forking) this one so the new agent can
+  read it.
 
 **On a VM**, the chat says SAM **restored this sleeping conversation from a degraded snapshot**, so
 the agent is starting fresh. The chat is back, but the agent has lost its own memory of the session
@@ -285,7 +286,15 @@ sleep with a complete snapshot.
 
 ## Expired saved workspace
 
-After the seven-day sleep retention window, the conversation shows **Expired**. This is a normal end state, not a task failure. Your transcript stays readable. Choose **Fork conversation** to continue with its context in a new session; the expired workspace itself cannot be restored.
+A sleeping chat can be woken for seven days. After that its saved workspace is deleted and the chat
+ends: it shows **Expired** in its header and in the session list, and the message box is replaced by
+_"The saved workspace has expired. Your transcript is still available. Choose Fork to continue in a
+new conversation."_ This is a normal end, not a failure, and the chat leaves the dashboard's
+**Active Tasks**.
+
+To carry on, select **Fork conversation**. The new chat's agent can read this conversation, but the
+expired workspace's files can't be restored: anything the agent pushed is still on GitHub,
+uncommitted changes are gone. **Retry** isn't offered for an expired chat.
 
 ## Wake failed
 
@@ -363,9 +372,9 @@ its work before removing the workspace.
 The failure card under the chat header stays either way. It is red, or grey when there is nothing to
 debug — an expired question, for example. Two tools in the
 [session tool rail](/docs/guides/chat-features/#the-session-tool-rail) start over: **Retry** opens a
-new chat pre-filled with the task's original request, and **Fork** opens one for a new instruction.
-Both carry a summary of this chat, but not its files. Read the chat to see whether the work was
-kept:
+new chat pre-filled with the task's original request, and **Fork** opens one pre-filled with this
+chat's IDs, so its agent can read this conversation before it follows your new instruction. Neither
+brings this chat's files. Read the chat to see whether the work was kept:
 
 - **The chat goes to Sleeping, and the composer is still there.** The work was kept. Reply in the
   same chat: it wakes with its files restored, and you can tell the agent how to carry on. A Task
@@ -431,9 +440,9 @@ wake: the session was stopped or archived, or it failed in a way SAM could not p
 says so when that is the reason — see [When a task fails](#when-a-task-fails)).
 
 Start again from the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail):
-**Retry** opens a new chat pre-filled with the task's original request, and **Fork** opens one for a
-new instruction. Both carry a summary of this chat, so you don't have to re-explain it, but not its
-files. Or start a new chat from scratch.
+**Retry** opens a new chat pre-filled with the task's original request, and **Fork** opens one
+pre-filled with this chat's IDs, so its agent can read this conversation and you don't have to
+re-explain it. Neither brings this chat's files. Or start a new chat from scratch.
 
 ## None of these fit
 

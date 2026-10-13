@@ -52,10 +52,24 @@ Product bugs found (filed as SAM ideas, not docs work):
 
 ## Implementation checklist
 
-- [ ] Research complete; table of user-facing changes with code citations
-- [ ] Docs edits (pages TBD from research)
-- [ ] Screenshots via Playwright spec (real components, mock data) where a picture helps
-- [ ] `recent-product-changes.md`: new 6 – 13 October cycle; roll previous cycles
+- [x] Research complete; table of user-facing changes with code citations
+- [ ] Stale fixes: fork "summary" (7, done), wake remnants (agents.md:135, self-hosting:128 & 596,
+      mcp-servers:81, chat-features caution box, agents.md:230), agents.md:198 isolation claim,
+      agents.md:115 chip timing, concepts:106/134, configuration.md:820/1363/1707
+- [ ] Troubleshooting: Expired (done), #2317 sleep notices, failed wake stays Sleeping (#2276),
+      eviction relocation (#2319), index entries
+- [ ] `sam-connector.md` rewritten for users (+ admin/self-host part); links from quickstart,
+      overview, concepts, mcp-servers; account vs project "Settings → Access"
+- [ ] `configuration.md`: SAM Connector section (`CONNECTOR_*`, `OAUTH_KV`)
+- [ ] Triggers: agents can create GitHub/webhook triggers; Claude Code redemption gap + Rotate
+      workaround; webhook-triggers:19; move GitHub MCP section out of mcp-servers
+- [ ] Agent messages (#2213): what the recipient chat shows; MCP tools table rows
+- [ ] CLI guide (install, sign in, project, work loop) + sidebar entries
+- [ ] Small: chat-features Retry hidden when expired; app-deployments `use_api_socket`; security
+      isolation links; agents.md MCP table
+- [ ] Screenshots via Playwright spec (real components, mock data): Connector Settings → Access and
+      consent; Fork pre-filled composer; Expired chat. Optional: repair Resources drawer docs spec
+- [ ] `recent-product-changes.md`: new 6 – 13 October cycle; roll previous cycles; "8 October" → 9
 - [ ] Local sub-agent review loop until no actionable feedback
 - [ ] `pnpm --filter @simple-agent-manager/www build` + link check; PR; CI green; merge
 
