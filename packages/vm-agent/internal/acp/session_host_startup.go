@@ -165,6 +165,8 @@ func (h *SessionHost) applyRuntimeAssets(ctx context.Context, containerID string
 	}
 	assets, err := h.config.RuntimeAssetsProvider(ctx)
 	if err != nil {
+		// Fail closed even in existing containers: their cached env may contain
+		// legacy values or lack the current profile's protected names.
 		return envVars, fmt.Errorf("failed to fetch runtime assets: %w", err)
 	}
 	if containerID == "" {

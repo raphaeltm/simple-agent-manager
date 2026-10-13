@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -132,6 +133,17 @@ func TestFreshContainerSessionGetsEnvOverlayWithoutWritingFiles(t *testing.T) {
 	}
 	if !keys["SENTINEL"] {
 		t.Fatal("managed protected key not tracked")
+	}
+}
+
+func TestContainerStartupRejectsUnavailableManagedEnvironment(t *testing.T) {
+	host := NewSessionHost(SessionHostConfig{RuntimeAssetsProvider: func(context.Context) (RuntimeAssets, error) {
+		return RuntimeAssets{}, errors.New("synthetic runtime-assets outage")
+	}})
+	defer host.Stop()
+	_, err := host.applyRuntimeAssets(context.Background(), "existing-container", []string{"SENTINEL=synthetic-stale-protected-value"}, map[string]bool{})
+	if err == nil {
+		t.Fatal("provider outage must reject startup instead of allowing stale environment")
 	}
 }
 func TestProtectedEnvCannotRegainHarnessValues(t *testing.T) {
