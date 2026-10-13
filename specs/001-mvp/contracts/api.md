@@ -649,6 +649,16 @@ cache headers for a published archive. Installers must verify the pinned SHA-256
 before extraction or execution. This public binary endpoint grants no workspace
 access and does not enable ACP features.
 
+## MCP Channel Subscriber Roster
+
+`list_channel_subscribers` accepts `{ channel, state?, cursor?, limit? }` for the verified MCP token's current project. An active task-backed agent/session with existing project `task:read` membership is required; caller-supplied project/owner/target overrides are rejected. No new credential scope or cross-owner mutation authority is granted.
+
+The MCP text content wraps `{ result: { channel, subscribers, hasMore, nextCursor }, eventReadFence }`. Each subscriber contains only `subscriptionId`, `owner` (type/id/name), `target` (session/task/runtime/agent IDs), effective `state`, `expiresAt` and `createdAt`. Reasons, private filters, idempotency keys, payloads and delivery receipts are excluded. Subscription presence is not proof of reading, acknowledgment or action.
+
+Filters must match all canonical channel publication dimensions: source `sam.agent_channel`, type `agent.channel.published`, subject type `agent_channel`, stable channel name and severity `info`, including exact, set and omitted dimensions. This is filter eligibility, not a guarantee that routing or wake delivery will occur. State defaults to `active`; `expired`, `cancelled` and `any` are supported. Elapsed expiry makes stored-active rows effectively expired without a write or cleanup sweep; cancelled rows remain cancelled.
+
+SQL applies matching and state filtering before the configured event page cap (including default limits), fetches one lookahead row and orders by immutable subscription ID. `nextCursor` binds project/channel/state and the last returned ID; callers continue it unchanged with the same channel/state. Pages reflect current state, not a frozen snapshot. Invalid cursors and arguments return JSON-RPC invalid-params errors; revoked caller authority fails before disclosing results. Existing subscription get/cancel remains own-only.
+
 ## MCP Webhook Credential Claim
 
 `create_trigger` accepts `sourceType: "webhook"`, an explicit project-local `agentProfileId`, and `webhookConfig`. It returns safe `webhookClaim` metadata (`claimUrl`, ISO `expiresAt`, `endpointUrl`, `headerName`, `method`, handling instructions), never a plaintext credential. REST creation and rotation continue returning credentials once.

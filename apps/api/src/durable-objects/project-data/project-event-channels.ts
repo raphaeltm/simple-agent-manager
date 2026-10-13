@@ -1,3 +1,4 @@
+export { listChannelSubscribers } from './project-event-channel-subscribers';
 export { catchUpChannel, followChannel } from './project-event-channels-follow';
 export { prepareChannelPublish, publishChannel } from './project-event-channels-publish';
 export {
@@ -10,9 +11,11 @@ export type {
   FollowProjectEventChannelInput,
   FollowProjectEventChannelResult,
   ListProjectEventChannelsInput,
+  ListProjectEventChannelSubscribersInput,
   ProjectEventChannelHistory,
   ProjectEventChannelHistoryInput,
   ProjectEventChannelList,
+  ProjectEventChannelSubscriberList,
   PublishProjectEventChannelInput,
   PublishProjectEventChannelResult,
 } from '@simple-agent-manager/shared';

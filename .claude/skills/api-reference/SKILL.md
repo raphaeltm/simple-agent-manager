@@ -306,6 +306,10 @@ All API errors follow this format:
 
 ## Agent event channels
 
+Agents can inspect a channel's subscriber roster with `list_channel_subscribers(channel,state?,cursor?,limit?)`. It requires an active task-backed agent and existing project `task:read` access; the project comes from the verified token. Results include subscription ID, owner type/ID/name, target session/task/runtime/agent IDs, effective state, expiry and creation time across owners. The default `active` state excludes elapsed expiry even before cleanup; `cancelled`, `expired` and `any` are also supported. Every filter dimension must match a canonical channel publication (`sam.agent_channel`, `agent.channel.published`, subject type `agent_channel`, the channel name, severity `info`); omitted dimensions and matching exact/set values count. The roster includes broad subscriptions, not just explicit channel follows, and does not depend on the current channel catalog generation. This is filter eligibility; routing and wake rules still apply.
+
+All matching and state filtering happens before the configured page limit. Continue `nextCursor` with the same channel and state until `hasMore` is false; the cursor is project/channel/state-bound and pages reflect current state rather than a frozen snapshot. No subscription reasons, private filters, idempotency keys, event payloads or delivery receipts are returned. A subscription does **not** prove that an agent read, acknowledged or acted on any message. Existing subscription get/cancel tools remain restricted to the caller's own subscriptions.
+
 Follow defaults to `record_only`. Follow/catch-up return canonical `wakeInstructions`
 for resolved same-chat prompt delivery; record-only responses return null.
 
