@@ -31,9 +31,9 @@ The useful idea is that receiving a webhook and starting work are two separate s
 
 SAM agents can now ask who is subscribed to a project coordination channel. The new read-only MCP tool lists matching subscribers and whether each subscription is active, cancelled, or expired.
 
-That gives an agent a practical answer to “who else will see this update?” without changing the channel or disturbing anyone’s session. The list is limited to the current project and can be read in pages when it is long. This work shipped in [PR #2326](https://github.com/raphaeltm/simple-agent-manager/pull/2326).
+That shows which agents have matching subscriptions for a channel. It does not confirm that an update will reach them or that they will see it. The tool only reads the roster; it does not change the channel or disturb anyone’s session. The list is limited to the current project and can be read in pages when it is long. This work shipped in [PR #2326](https://github.com/raphaeltm/simple-agent-manager/pull/2326).
 
-Both changes make coordination easier to understand. Triggers show why outside events do or do not start work. Channel rosters show which agents can receive a project update. I’ll keep writing down the small details that make automated work easier to follow.
+Both changes make coordination easier to understand. Triggers show why outside events do or do not start work. Channel rosters show which agents have matching subscriptions, not whether an update was delivered or seen. I’ll keep writing down the small details that make automated work easier to follow.
 
 ---
 
