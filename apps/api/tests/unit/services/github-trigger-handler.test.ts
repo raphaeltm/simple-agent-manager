@@ -79,7 +79,7 @@ function makeIssuesPayload(action: string = 'labeled') {
   return {
     action,
     sender: { login: 'contributor', type: 'User' },
-    repository: { full_name: 'org/repo', default_branch: 'main' },
+    repository: { id: 9876, full_name: 'org/repo', default_branch: 'main' },
     installation: { id: 12345 },
     issue: {
       number: 10,
@@ -180,7 +180,7 @@ describe('handleGitHubEventForTriggers', () => {
       payload: { action: 'opened', sender: { login: 'user' } },
     });
     expect(result.processed).toBe(false);
-    expect(result.reason).toBe('no_repository');
+    expect(result.reason).toBe('invalid_scope');
     expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
   });
 

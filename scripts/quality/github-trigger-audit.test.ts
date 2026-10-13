@@ -1,0 +1,189 @@
+import { execFileSync } from 'node:child_process';
+import { generateKeyPairSync } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
+
+import { auditPrompt, findOwnedAuditTrigger } from '../e2e/github-trigger-audit-fixture.mjs';
+
+const root = resolve(import.meta.dirname, '../..');
+const fixture = {
+  marker: 'github-trigger-audit-12345678-1234-1234-1234-123456789abc',
+  deliveryId: '12345678-1234-1234-1234-123456789abc',
+  projectId: '01KP5SJ5XZFZFZCQM8YG5H847V',
+  triggerId: '01KP5SJ5XZFZFZCQM8YG5H847W',
+  repository: 'test/repo',
+  repositoryId: 9876,
+  installationId: 12345,
+};
+const ephemeralKey = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  .privateKey.export({ type: 'pkcs1', format: 'pem' })
+  .toString();
+const mock = `
+import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
+let sent = 0;
+const fixture = JSON.parse(process.env.GITHUB_TRIGGER_AUDIT_FIXTURE);
+globalThis.fetch = async (url, options) => {
+  assert(options.signal instanceof AbortSignal);
+  assert(options.redirect === 'error');
+  if (url === 'https://api.github.com/app') {
+    assert(options.headers.Authorization.startsWith('Bearer '));
+    assert(options.headers['X-GitHub-Api-Version'] === '2026-03-10');
+    if (process.env.TEST_VARIANT === 'metadata-failure') throw new Error(process.env.GH_APP_PRIVATE_KEY);
+    return new Response(JSON.stringify({ slug: 'test-app', events: ['issues','issue_comment','pull_request','push'], permissions: { issues: 'write', contents: 'read' }, privateCanary: 'PRIVATE_METADATA_CANARY' }));
+  }
+  if (url === 'https://api.github.com/app/installations/' + fixture.installationId) return new Response(JSON.stringify({ permissions: { issues: 'write' }, repository_selection: 'selected', suspended_at: null, account: { privateCanary: 'PRIVATE_METADATA_CANARY' } }));
+  if (url === 'https://api.github.com/app/hook/config') return new Response(JSON.stringify({ content_type: process.env.TEST_VARIANT === 'hook-content' ? 'form' : 'json', insecure_ssl: process.env.TEST_VARIANT === 'hook-tls' ? '1' : '0', url: (process.env.GITHUB_TRIGGER_AUDIT_ENVIRONMENT === 'production' ? 'https://api.example.test' : 'https://api.sammy.party') + '/api/github/webhook' + (process.env.TEST_VARIANT === 'hook-destination' ? '?secret=PRIVATE_METADATA_CANARY' : ''), secret: 'PRIVATE_METADATA_CANARY' }));
+  assert(url === 'https://api.sammy.party/api/github/webhook' || url === 'https://api.example.test/api/github/webhook');
+  assert(options.method === 'POST');
+  assert(options.headers['X-GitHub-Delivery'] === fixture.deliveryId);
+  assert(options.headers['X-Hub-Signature-256'] === 'sha256=' + createHmac('sha256', process.env.GH_WEBHOOK_SECRET).update(options.body).digest('hex'));
+  const body = JSON.parse(options.body);
+  assert(body.action === 'opened' && body.issue.body === fixture.marker);
+  assert(body.sender.login === (process.env.GITHUB_TRIGGER_AUDIT_ENVIRONMENT === 'production' ? 'simple-agent-manager[bot]' : 'sam-staging-audit'));
+  sent++;
+  if (process.env.TEST_VARIANT === 'send-failure') throw new Error(options.headers['X-Hub-Signature-256']);
+  return new Response('{}');
+};
+process.on('exit', () => {
+  if (!process.env.TEST_VARIANT) assert(sent === 2);
+  if (['metadata-failure', 'hook-content', 'hook-tls', 'hook-destination'].includes(process.env.TEST_VARIANT)) assert(sent === 0);
+});
+`;
+function run(overrides: Record<string, string> = {}) {
+  return execFileSync(
+    process.execPath,
+    [
+      '--import',
+      `data:text/javascript;base64,${Buffer.from(mock).toString('base64')}`,
+      'scripts/e2e/github-trigger-staging.mjs',
+      '--phase=send',
+    ],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        SMOKE_TEST_API_URL: 'https://api.sammy.party',
+        GH_WEBHOOK_SECRET: 'SIGNING_KEY_CANARY',
+        GH_APP_ID: '123',
+        GH_APP_PRIVATE_KEY: ephemeralKey,
+        GITHUB_TRIGGER_AUDIT_FIXTURE: JSON.stringify(fixture),
+        ...overrides,
+      },
+    }
+  );
+}
+function assertRedacted(output: string) {
+  expect(output).not.toContain('SIGNING_KEY_CANARY');
+  expect(output).not.toContain('PRIVATE_METADATA_CANARY');
+  expect(output).not.toContain('PRIVATE KEY');
+  expect(output).not.toContain('sha256=');
+  expect(output).not.toContain('Bearer ');
+}
+describe('bounded GitHub audit signer', () => {
+  it('signs two fixed realistic deliveries and emits allowlisted App metadata without credentials', () => {
+    const output = run();
+    expect(output).toContain('githubAppMetadata');
+    expect(output).toContain('syntheticSignedDelivery');
+    assertRedacted(output);
+  });
+  it('uses the bot actor only on the approved production origin', () => {
+    const output = run({
+      GITHUB_TRIGGER_AUDIT_ENVIRONMENT: 'production',
+      SMOKE_TEST_API_URL: 'https://api.example.test',
+      BASE_DOMAIN: 'example.test',
+    });
+    assertRedacted(output);
+  });
+  it.each(['metadata-failure', 'send-failure', 'hook-content', 'hook-tls', 'hook-destination'])(
+    'suppresses sensitive errors for %s and fails',
+    (variant) => {
+      try {
+        run({ TEST_VARIANT: variant });
+        expect.fail('Expected failure');
+      } catch (error) {
+        const failure = error as { stdout: string; stderr: string; status: number };
+        expect(failure.status).toBe(1);
+        assertRedacted(`${failure.stdout}${failure.stderr}`);
+      }
+    }
+  );
+  it('rejects fixture content outside the minimal marker contract before signing', () => {
+    expect(() =>
+      run({
+        GITHUB_TRIGGER_AUDIT_FIXTURE: JSON.stringify({
+          ...fixture,
+          marker: 'arbitrary private content',
+        }),
+      })
+    ).toThrow();
+  });
+  it('rejects a destination outside the trusted staging origin', () => {
+    expect(() => run({ SMOKE_TEST_API_URL: 'https://attacker.example.test' })).toThrow();
+  });
+});
+
+describe('audit workflow isolation', () => {
+  for (const path of ['deploy.yml', 'deploy-staging.yml']) {
+    it(`${path} keeps key exposure step-local and audit opt-in`, () => {
+      const workflow = parse(readFileSync(resolve(root, '.github/workflows', path), 'utf8'));
+      expect(workflow.on.workflow_dispatch.inputs.github_trigger_audit_send_only.default).toBe(
+        false
+      );
+      expect(workflow.jobs.deploy.if).toContain('!inputs.github_trigger_audit_send_only');
+      const job =
+        path === 'deploy.yml'
+          ? workflow.jobs['github-trigger-audit']
+          : workflow.jobs['smoke-tests'];
+      expect(job.env?.GH_WEBHOOK_SECRET).toBeUndefined();
+      expect(job.env?.GH_APP_PRIVATE_KEY).toBeUndefined();
+      const secretSteps = job.steps.filter(
+        (step: { env?: Record<string, unknown> }) => step.env?.GH_WEBHOOK_SECRET
+      );
+      expect(secretSteps).toHaveLength(1);
+      expect(secretSteps[0].run).toBe('node scripts/e2e/github-trigger-staging.mjs --phase=send');
+      if (path === 'deploy.yml') {
+        expect(job.if).toContain("github.ref == 'refs/heads/main'");
+        expect(job.if).toContain("needs.validate-manual-dispatch.result == 'success'");
+        expect(job.environment).toBe('production');
+      } else expect(secretSteps[0].if).toContain('inputs.github_trigger_audit_send_only');
+    });
+  }
+});
+
+describe('audit cleanup ownership', () => {
+  const trigger = {
+    id: fixture.triggerId,
+    name: fixture.marker,
+    sourceType: 'github',
+    promptTemplate: auditPrompt(fixture.marker),
+    githubConfig: {
+      eventType: 'issues',
+      filters: { actions: ['opened'], labels: [fixture.marker], bodyContains: fixture.marker },
+    },
+  };
+  it('recovers an actual form-created trigger by its unique marker', () => {
+    expect(findOwnedAuditTrigger({ marker: fixture.marker }, [trigger])).toBe(fixture.triggerId);
+  });
+  it('rejects unrelated or stale IDs before reading their executions', () => {
+    expect(() => findOwnedAuditTrigger({ ...fixture, triggerId: 'other' }, [trigger])).toThrow();
+    expect(() => findOwnedAuditTrigger(fixture, [{ ...trigger, name: 'Other trigger' }])).toThrow();
+  });
+  it.each(['source', 'actions', 'labels', 'body', 'prompt'])(
+    'rejects changed fixture %s configuration for cleanup',
+    (variant) => {
+      const changed = structuredClone(trigger);
+      if (variant === 'source') changed.sourceType = 'cron';
+      if (variant === 'actions') changed.githubConfig.filters.actions = ['closed'];
+      if (variant === 'labels') changed.githubConfig.filters.labels = ['other'];
+      if (variant === 'body') changed.githubConfig.filters.bodyContains = 'other';
+      if (variant === 'prompt') changed.promptTemplate = 'Do unrelated work';
+      expect(() => findOwnedAuditTrigger(fixture, [changed])).toThrow();
+    }
+  );
+});

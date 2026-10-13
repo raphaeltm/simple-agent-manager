@@ -197,7 +197,7 @@ Agent profile and skill create/update surfaces accept `resourceRequirements` as 
 - `POST /api/projects/:projectId/triggers` — Create a cron, GitHub, generic webhook, or private incident trigger. Webhook creation requires `agentProfileId` and `webhookConfig`; its response includes a one-time `webhookCredential`. Incident triggers are intended for the configured private feedback project and fire from the scheduled incident backlog sweep.
 - `GET /api/projects/:projectId/triggers` — List triggers with safe source configuration. Webhook tokens are redacted to `tokenLastFour`.
 - `GET /api/projects/:projectId/triggers/:triggerId` — Get trigger details and recent execution history.
-- `PATCH /api/projects/:projectId/triggers/:triggerId` — Update common trigger settings or source-specific webhook configuration.
+- `PATCH /api/projects/:projectId/triggers/:triggerId` — Update common trigger settings or source-specific GitHub/webhook configuration. Resuming starts a fresh auto-pause failure window while retaining execution history.
 - `DELETE /api/projects/:projectId/triggers/:triggerId` — Delete a trigger and cascading source configuration, delivery audit, and execution history.
 - `POST /api/projects/:projectId/triggers/:triggerId/test` — Preview the cron template context.
 - `POST /api/projects/:projectId/triggers/:triggerId/run` — Submit a manual trigger execution. Webhook triggers accept optional `{ payload, headers }` preview context.

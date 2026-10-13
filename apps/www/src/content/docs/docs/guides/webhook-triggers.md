@@ -118,3 +118,11 @@ This implements webhook delivery; a general sensitive-input or ACP framework rem
 ## Runtime Configuration
 
 Self-hosted deployments can tune the ingress body limit, filter limits, rate windows, and audit retention. See the [Configuration Reference](/docs/reference/configuration/#generic-webhook-triggers).
+
+## GitHub event triggers
+
+Choose **GitHub event** when creating a repository automation. New issues and pull requests default to `opened`; issue comments default to `created`. Push events have no action filter. Empty actions match every action of the selected event. The form and REST/MCP configuration endpoints reject actions that do not belong to that event. See [GitHub webhook events and payloads](https://docs.github.com/en/webhooks/webhook-events-and-payloads) for available actions.
+
+You can edit an existing GitHub trigger's event and filters. Changing the event resets its action default, retains compatible labels/text/branches, and removes filters that do not apply. Required labels match all configured labels; text matching is case-insensitive; source branch matching is case-sensitive. Pull request branches refer to the source branch. Push branch filters also accept full tag refs such as `refs/tags/v1`. Clearing the draft checkbox includes draft pull requests.
+
+Resuming a paused trigger starts a new failure window while keeping execution history. Skipped deliveries do not erase consecutive failures. GitHub deliveries are deduplicated by delivery ID; GitHub does not automatically retry failed webhook deliveries. SAM currently acknowledges GitHub webhooks before asynchronous routing completes, so an acknowledged delivery that fails after being claimed cannot be recovered by simply redelivering its same ID.

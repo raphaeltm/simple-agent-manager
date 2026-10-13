@@ -282,16 +282,24 @@ describe('GitHub App installation sharing', () => {
       typeof row === 'object' && row !== null && 'accountNameNormalized' in row
     );
 
-  const postInstallationWebhook = (payload: string) =>
-    app.request('/api/github/webhook', {
+  const postInstallationWebhook = async (payload: string) => {
+    const routing: Promise<unknown>[] = [];
+    const response = await app.request('/api/github/webhook', {
       method: 'POST',
       headers: {
         'x-hub-signature-256': 'sha256=test',
         'x-github-event': 'installation',
+        'x-github-delivery': '12345678-1234-1234-1234-123456789abc',
         'content-type': 'application/json',
       },
       body: payload,
-    }, mockEnv);
+    }, mockEnv, {
+      waitUntil: (promise: Promise<unknown>) => { routing.push(promise); },
+      passThroughOnException: vi.fn(),
+    } as ExecutionContext);
+    await Promise.all(routing);
+    return response;
+  };
 
   it('stores callback installation only when the GitHub user can access it', async () => {
     limitResponses.push([]);

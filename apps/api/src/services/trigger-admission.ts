@@ -87,8 +87,10 @@ async function consecutiveFailureCount(
     `SELECT e.status, t.status AS taskStatus
        FROM trigger_executions e
        LEFT JOIN tasks t ON t.id = e.task_id
-      WHERE e.trigger_id = ?
-      ORDER BY e.created_at DESC LIMIT ?`
+      JOIN triggers tr ON tr.id = e.trigger_id
+      WHERE e.trigger_id = ? AND e.status != 'skipped'
+        AND (tr.auto_pause_reset_sequence IS NULL OR e.sequence_number >= tr.auto_pause_reset_sequence)
+      ORDER BY e.sequence_number DESC, e.created_at DESC LIMIT ?`
   )
     .bind(triggerId, threshold)
     .all<{ status: string; taskStatus: string | null }>();

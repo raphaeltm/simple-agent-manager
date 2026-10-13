@@ -52,4 +52,5 @@ export * from './runtime-validation';
 export * from './resource-requirements';
 
 // Chat message pagination cursors (web client ↔ API contract)
+export * from './github-trigger-contract';
 export * from './message-cursor';

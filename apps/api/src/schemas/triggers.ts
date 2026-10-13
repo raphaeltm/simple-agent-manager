@@ -1,3 +1,4 @@
+import { areGitHubTriggerActionsValid } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { ResourceRequirementsSchema } from './resource-requirements';
@@ -21,10 +22,13 @@ const GitHubFiltersSchema = v.optional(
   })
 );
 
-export const GitHubConfigValueSchema = v.strictObject({
-  eventType: GitHubEventTypeSchema,
-  filters: GitHubFiltersSchema,
-});
+export const GitHubConfigValueSchema = v.pipe(
+  v.strictObject({ eventType: GitHubEventTypeSchema, filters: GitHubFiltersSchema }),
+  v.check(
+    (config) => areGitHubTriggerActionsValid(config.eventType, config.filters?.actions),
+    'Actions must be valid for the selected GitHub event; push has no actions'
+  )
+);
 const GitHubConfigSchema = v.optional(GitHubConfigValueSchema);
 
 const WebhookFilterValueSchema = v.union([v.string(), v.number(), v.boolean(), v.null_()]);

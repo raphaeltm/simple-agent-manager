@@ -49,6 +49,8 @@ export async function handleGitHubWebhook(c: GitHubContext): Promise<Response> {
     throw errors.badRequest('Invalid JSON in webhook payload');
   }
 
+  const deliveryId = c.req.header('x-github-delivery');
+  if (!event || !deliveryId) throw errors.badRequest('Missing GitHub event or delivery ID');
   const db = drizzle(c.env.DATABASE, { schema });
   const now = new Date().toISOString();
 
@@ -60,7 +62,6 @@ export async function handleGitHubWebhook(c: GitHubContext): Promise<Response> {
     await handleRepositoryEvent(db, data, now);
   }
 
-  const deliveryId = c.req.header('x-github-delivery');
   if (event && deliveryId) {
     c.executionCtx.waitUntil(
       handleGitHubProjectEventAdmission(c.env, {

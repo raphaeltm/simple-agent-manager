@@ -2694,6 +2694,8 @@ export const triggers = sqliteTable(
     triggerCount: integer('trigger_count').notNull().default(0),
     /** Monotonic sequence for every execution attempt, including skipped attempts. */
     nextExecutionSequence: integer('next_execution_sequence').notNull().default(1),
+    /** First execution sequence eligible for auto-pause after an explicit resume. */
+    autoPauseResetSequence: integer('auto_pause_reset_sequence'),
     nextFireAt: text('next_fire_at'),
     credentialBlockedReason: text('credential_blocked_reason'),
     credentialBlockedAt: text('credential_blocked_at'),

@@ -12,7 +12,7 @@
  * 5. Evaluate filters for each trigger
  * 6. For matching triggers, create execution records and submit tasks
  */
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -98,70 +98,125 @@ export async function handleGitHubEventForTriggers(
     throw err;
   }
 
-  // Parse event
-  const event = parseWebhookPayload(eventType, payload);
-  const repoFullName = event.repository?.full_name?.toLowerCase();
-  const installationId =
-    typeof payload.installation === 'object' && payload.installation !== null
-      ? String((payload.installation as Record<string, unknown>).id ?? '')
-      : undefined;
+  try {
+    // Parse event
+    const event = parseWebhookPayload(eventType, payload);
+    const repoFullName = event.repository?.full_name?.toLowerCase();
+    const installation = payload.installation as Record<string, unknown> | null;
+    const externalId =
+      installation && typeof installation === 'object' ? installation.id : undefined;
+    const installationId =
+      typeof externalId === 'number' && Number.isSafeInteger(externalId) && externalId > 0
+        ? String(externalId)
+        : undefined;
+    const repository = payload.repository as Record<string, unknown> | null;
+    const repositoryId = repository && typeof repository === 'object' ? repository.id : undefined;
+    if (
+      !installationId ||
+      typeof repositoryId !== 'number' ||
+      !Number.isSafeInteger(repositoryId) ||
+      repositoryId <= 0
+    ) {
+      await updateDeliveryDecision(db, deliveryId, {
+        decision: 'no_match',
+        decisionReason: 'invalid_installation_or_repository_id',
+      });
+      return { processed: false, deliveryId, matchedTriggers: 0, reason: 'invalid_scope' };
+    }
 
-  if (!repoFullName) {
+    if (!repoFullName) {
+      await updateDeliveryDecision(db, deliveryId, {
+        action: event.action,
+        installationId,
+        senderLogin: event.sender?.login,
+        decision: 'no_match',
+        decisionReason: 'no_repository_in_payload',
+      });
+      return { processed: false, deliveryId, matchedTriggers: 0, reason: 'no_repository' };
+    }
+
+    // Find projects linked to this repository
+    const projects = await db
+      .select({ id: schema.projects.id, name: schema.projects.name })
+      .from(schema.projects)
+      .innerJoin(
+        schema.githubInstallations,
+        eq(schema.projects.installationId, schema.githubInstallations.id)
+      )
+      .where(
+        and(
+          eq(schema.projects.status, 'active'),
+          eq(schema.projects.repoProvider, 'github'),
+          eq(
+            sql`COALESCE(NULLIF(${schema.githubInstallations.externalInstallationId}, ''), ${schema.githubInstallations.installationId})`,
+            installationId
+          ),
+          or(
+            eq(schema.projects.githubRepoId, repositoryId),
+            and(
+              isNull(schema.projects.githubRepoId),
+              eq(sql`LOWER(${schema.projects.repository})`, repoFullName)
+            )
+          )
+        )
+      );
+
+    if (projects.length === 0) {
+      await updateDeliveryDecision(db, deliveryId, {
+        action: event.action,
+        installationId,
+        repositoryFullName: repoFullName,
+        senderLogin: event.sender?.login,
+        decision: 'no_match',
+        decisionReason: 'no_project_for_repository',
+      });
+      return { processed: false, deliveryId, matchedTriggers: 0, reason: 'no_project' };
+    }
+
+    let totalMatched = 0;
+
+    for (const project of projects) {
+      const matched = await processTriggersForProject(
+        env,
+        db,
+        project,
+        event,
+        deliveryId,
+        installationId,
+        now
+      );
+      totalMatched += matched;
+    }
+
+    if (totalMatched > 0) {
+      await updateDeliveryDecision(db, deliveryId, {
+        action: event.action,
+        installationId,
+        repositoryFullName: repoFullName,
+        senderLogin: event.sender?.login,
+        decision: 'matched',
+        decisionReason: `matched_triggers:${totalMatched}`,
+      });
+    }
+    if (totalMatched === 0) {
+      await updateDeliveryDecision(db, deliveryId, {
+        action: event.action,
+        installationId,
+        repositoryFullName: repoFullName,
+        senderLogin: event.sender?.login,
+        decision: 'no_match',
+        decisionReason: 'no_triggers_matched',
+      });
+    }
+
+    return { processed: totalMatched > 0, deliveryId, matchedTriggers: totalMatched };
+  } catch (error) {
     await updateDeliveryDecision(db, deliveryId, {
-      action: event.action,
-      installationId,
-      senderLogin: event.sender?.login,
-      decision: 'no_match',
-      decisionReason: 'no_repository_in_payload',
+      decision: 'error',
+      decisionReason: 'trigger_routing_failed',
     });
-    return { processed: false, deliveryId, matchedTriggers: 0, reason: 'no_repository' };
+    throw error;
   }
-
-  // Find projects linked to this repository
-  const projects = await db
-    .select({ id: schema.projects.id, name: schema.projects.name })
-    .from(schema.projects)
-    .where(eq(schema.projects.repository, repoFullName));
-
-  if (projects.length === 0) {
-    await updateDeliveryDecision(db, deliveryId, {
-      action: event.action,
-      installationId,
-      repositoryFullName: repoFullName,
-      senderLogin: event.sender?.login,
-      decision: 'no_match',
-      decisionReason: 'no_project_for_repository',
-    });
-    return { processed: false, deliveryId, matchedTriggers: 0, reason: 'no_project' };
-  }
-
-  let totalMatched = 0;
-
-  for (const project of projects) {
-    const matched = await processTriggersForProject(
-      env,
-      db,
-      project,
-      event,
-      deliveryId,
-      installationId,
-      now
-    );
-    totalMatched += matched;
-  }
-
-  if (totalMatched === 0) {
-    await updateDeliveryDecision(db, deliveryId, {
-      action: event.action,
-      installationId,
-      repositoryFullName: repoFullName,
-      senderLogin: event.sender?.login,
-      decision: 'no_match',
-      decisionReason: 'no_triggers_matched',
-    });
-  }
-
-  return { processed: totalMatched > 0, deliveryId, matchedTriggers: totalMatched };
 }
 
 async function processTriggersForProject(

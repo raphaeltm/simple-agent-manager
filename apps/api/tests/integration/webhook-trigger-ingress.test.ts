@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -148,6 +150,12 @@ describe('generic webhook ingress vertical slice', () => {
   beforeEach(async () => {
     sqlite = new Database(':memory:');
     sqlite.exec(SCHEMA);
+    sqlite.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0194_trigger_auto_pause_reset.sql', import.meta.url),
+        'utf8'
+      )
+    );
     taskRunnerStates = new Map();
     token = generateWebhookToken();
     const now = new Date().toISOString();

@@ -10,7 +10,7 @@ import {
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -250,7 +250,9 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
   }
   await validateReferences(db, projectId, body.agentProfileId, body.skillId);
   const now = new Date().toISOString();
-  const updates: Partial<schema.NewTriggerRow> = { updatedAt: now };
+  const updates: Omit<Partial<schema.NewTriggerRow>, 'autoPauseResetSequence'> & {
+    autoPauseResetSequence?: number | ReturnType<typeof sql>;
+  } = { updatedAt: now };
   if (body.name !== undefined) {
     const name = body.name.trim();
     if (
@@ -308,6 +310,9 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
   }
   if (body.status !== undefined) {
     updates.status = body.status;
+    if (body.status === 'active' && trigger.status !== 'active') {
+      updates.autoPauseResetSequence = sql`${schema.triggers.nextExecutionSequence}`;
+    }
     if (body.status !== 'active') updates.nextFireAt = null;
     if (body.status === 'active' && trigger.sourceType === 'cron' && trigger.cronExpression) {
       updates.nextFireAt = cronToNextFire(trigger.cronExpression, trigger.cronTimezone ?? 'UTC');

@@ -35,6 +35,7 @@ function makeTriggerRow(overrides: Partial<TriggerRow> = {}): TriggerRow {
     lastTriggeredAt: null,
     triggerCount: 0,
     nextExecutionSequence: 2,
+    autoPauseResetSequence: null,
     nextFireAt: null,
     credentialBlockedReason: null,
     credentialBlockedAt: null,
@@ -140,6 +141,59 @@ describe('admitAndSubmitTriggerExecution', () => {
         userId: 'owner-user',
       })
     );
+  });
+
+  it('counts failed attempts across skipped deliveries but explicit resume preserves history and resets by sequence', async () => {
+    const { sqlite, env, trigger } = setup();
+    sqlite
+      .prepare(
+        `INSERT INTO trigger_executions (id, trigger_id, project_id, status, sequence_number, created_at) VALUES ('failed-old', ?, ?, 'failed', 1, ?), ('skip-old', ?, ?, 'skipped', 2, ?)`
+      )
+      .run(trigger.id, PROJECT_ID, BASE_TIME, trigger.id, PROJECT_ID, BASE_TIME);
+    sqlite.prepare('UPDATE triggers SET next_execution_sequence = 3').run();
+    expect(await admit(env, trigger)).toEqual({ outcome: 'inactive', reason: 'paused' });
+    // Same timestamp is intentionally used for both generations; sequence is authoritative.
+    sqlite
+      .prepare(
+        "UPDATE triggers SET status = 'active', auto_pause_reset_sequence = next_execution_sequence"
+      )
+      .run();
+    const submitter = vi.fn(async () => ({
+      taskId: 'task-resumed',
+      sessionId: 'session-resumed',
+      branchName: 'sam/resumed',
+    }));
+    expect(await admit(env, trigger, submitter)).toMatchObject({ outcome: 'submitted' });
+    expect(
+      sqlite
+        .prepare(
+          "SELECT COUNT(*) AS count FROM trigger_executions WHERE id IN ('failed-old', 'skip-old')"
+        )
+        .get()
+    ).toEqual({ count: 2 });
+    sqlite
+      .prepare(
+        "UPDATE trigger_executions SET status = 'failed', task_id = NULL, created_at = ? WHERE sequence_number = 3"
+      )
+      .run(BASE_TIME);
+    expect(await admit(env, trigger)).toEqual({ outcome: 'inactive', reason: 'paused' });
+  });
+
+  it('a cancelled attempt breaks a consecutive failure streak', async () => {
+    const { sqlite, env, trigger } = setup();
+    sqlite
+      .prepare(
+        `INSERT INTO trigger_executions (id, trigger_id, project_id, status, sequence_number, created_at) VALUES ('old-fail', ?, ?, 'failed', 1, ?), ('cancelled', ?, ?, 'cancelled', 2, ?)`
+      )
+      .run(trigger.id, PROJECT_ID, BASE_TIME, trigger.id, PROJECT_ID, BASE_TIME);
+    sqlite.prepare('UPDATE triggers SET next_execution_sequence = 3').run();
+    expect(
+      await admit(
+        env,
+        trigger,
+        vi.fn(async () => ({ taskId: 'new', sessionId: 'new', branchName: 'new' }))
+      )
+    ).toMatchObject({ outcome: 'submitted' });
   });
 
   it('keeps a failed execution with a live linked task active for admission and auto-pause', async () => {

@@ -68,6 +68,73 @@ describe('GitHub REST/MCP configuration parity', () => {
   const parse = (response: Awaited<ReturnType<typeof handleCreateTrigger>>) =>
     JSON.parse((response.result as { content: { text: string }[] }).content[0].text);
 
+  it('rejects incompatible actions through both REST and MCP without changing existing config', async () => {
+    const invalid = {
+      ...input,
+      githubConfig: { eventType: 'issues', filters: { actions: ['created'] } },
+    };
+    expect((await request('', 'POST', invalid)).status).toBe(400);
+    expect((await handleCreateTrigger('invalid', invalid, token, env)).error).toBeDefined();
+    const created = parse(await handleCreateTrigger('valid', input, token, env));
+    expect(
+      (await request(`/${created.id}`, 'PATCH', { githubConfig: invalid.githubConfig })).status
+    ).toBe(400);
+    expect(
+      (
+        await handleUpdateTrigger(
+          'invalid-update',
+          { triggerId: created.id, githubConfig: invalid.githubConfig },
+          token,
+          env
+        )
+      ).error
+    ).toBeDefined();
+    expect(
+      ((await (await request(`/${created.id}`)).json()) as { githubConfig: unknown }).githubConfig
+    ).toEqual(input.githubConfig);
+    expect(
+      (
+        await request(`/${created.id}`, 'PATCH', {
+          githubConfig: { eventType: 'push', filters: { actions: ['opened'] } },
+        })
+      ).status
+    ).toBe(400);
+  });
+
+  it('resets auto-pause boundary only on an actual resume in REST and MCP', async () => {
+    const created = parse(await handleCreateTrigger('valid', input, token, env));
+    sqlite.prepare('UPDATE triggers SET next_execution_sequence = 7').run();
+    await request(`/${created.id}`, 'PATCH', { status: 'paused' });
+    expect((await request(`/${created.id}`, 'PATCH', { status: 'active' })).status).toBe(200);
+    expect(
+      sqlite
+        .prepare('SELECT auto_pause_reset_sequence AS boundary FROM triggers WHERE id = ?')
+        .get(created.id)
+    ).toEqual({ boundary: 7 });
+    sqlite.prepare('UPDATE triggers SET next_execution_sequence = 8').run();
+    await handleUpdateTrigger(
+      'still-active',
+      { triggerId: created.id, status: 'active' },
+      token,
+      env
+    );
+    expect(
+      sqlite
+        .prepare('SELECT auto_pause_reset_sequence AS boundary FROM triggers WHERE id = ?')
+        .get(created.id)
+    ).toEqual({ boundary: 7 });
+    await handleUpdateTrigger('pause', { triggerId: created.id, status: 'paused' }, token, env);
+    expect(
+      (await handleUpdateTrigger('resume', { triggerId: created.id, status: 'active' }, token, env))
+        .error
+    ).toBeUndefined();
+    expect(
+      sqlite
+        .prepare('SELECT auto_pause_reset_sequence AS boundary FROM triggers WHERE id = ?')
+        .get(created.id)
+    ).toEqual({ boundary: 8 });
+  });
+
   it('creates via MCP, reads and updates via REST, reads updated configuration via MCP', async () => {
     const created = parse(await handleCreateTrigger('1', input, token, env));
     const read = await request(`/${created.id}`);

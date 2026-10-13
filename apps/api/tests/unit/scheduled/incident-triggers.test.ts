@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -62,6 +64,12 @@ function setup(options: { withTrigger?: boolean } = {}) {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
     INSERT INTO projects VALUES ('feedback-project', 'owner-1', 'Private Feedback', NULL);
   `);
+  sqlite.exec(
+    readFileSync(
+      new URL('../../../src/db/migrations/0194_trigger_auto_pause_reset.sql', import.meta.url),
+      'utf8'
+    )
+  );
   if (options.withTrigger !== false) {
     sqlite.exec(`
     INSERT INTO triggers (

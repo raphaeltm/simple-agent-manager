@@ -26,6 +26,15 @@ on:
         required: false
         type: boolean
         default: false
+      github_trigger_audit_send_only:
+        description: 'Send a bounded prepared GitHub audit fixture using the current reviewed main; skip deployment'
+        required: false
+        type: boolean
+        default: false
+      github_trigger_audit_fixture:
+        description: 'Nonsecret operator-prepared fixture JSON; no tokens or signatures'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -116,6 +125,7 @@ jobs:
   deploy:
     needs: [validate-manual-dispatch, validate-automatic-dispatch]
     if: >-
+      !inputs.github_trigger_audit_send_only &&
       always() &&
       (
         (
@@ -180,3 +190,29 @@ jobs:
             -f description="Production deployment completed"
 
           echo "Recorded production deployment marker for ${DEPLOY_SHA}."
+
+  github-trigger-audit:
+    name: Send bounded production GitHub audit fixture
+    needs: validate-manual-dispatch
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.github_trigger_audit_send_only && !inputs.dry_run && needs.validate-manual-dispatch.result == 'success' }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout verified production SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate-manual-dispatch.outputs.deploy_sha }}
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: Send prepared signed fixture
+        env:
+          GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
+          GH_APP_ID: ${{ secrets.GH_APP_ID }}
+          GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          GITHUB_TRIGGER_AUDIT_FIXTURE: ${{ inputs.github_trigger_audit_fixture }}
+          GITHUB_TRIGGER_AUDIT_ENVIRONMENT: production
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          SMOKE_TEST_API_URL: https://api.${{ vars.BASE_DOMAIN }}
+        run: node scripts/e2e/github-trigger-staging.mjs --phase=send

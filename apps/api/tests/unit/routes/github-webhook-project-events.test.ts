@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { AppError } from '../../../src/middleware/error';
 
 const mocks = vi.hoisted(() => ({
   verifyWebhookSignature: vi.fn(),
@@ -50,7 +51,11 @@ describe('GitHub webhook ProjectData event admission ingress', () => {
     });
 
     app = new Hono<{ Bindings: Env }>();
-    app.onError((err, c) => c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500));
+    app.onError((err, c) =>
+      err instanceof AppError
+        ? c.json(err.toJSON(), err.statusCode as 400)
+        : c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500)
+    );
     app.post('/api/github/webhook', handleGitHubWebhook);
   });
 
@@ -96,7 +101,7 @@ describe('GitHub webhook ProjectData event admission ingress', () => {
     });
   });
 
-  it('does not run asynchronous ProjectData or trigger routing without a delivery id', async () => {
+  it('rejects a delivery without its ID before asynchronous routing', async () => {
     const response = await app.fetch(
       new Request('https://api.example.com/api/github/webhook', {
         method: 'POST',
@@ -117,7 +122,7 @@ describe('GitHub webhook ProjectData event admission ingress', () => {
       } as unknown as ExecutionContext
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(400);
     expect(waitUntilPromises).toHaveLength(0);
     expect(mocks.handleGitHubProjectEventAdmission).not.toHaveBeenCalled();
     expect(mocks.handleGitHubEventForTriggers).not.toHaveBeenCalled();
