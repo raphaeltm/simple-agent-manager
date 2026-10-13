@@ -23,5 +23,15 @@ export interface SecretExecResult {
     user: string;
     cwd: string;
     environmentMode: 'placeholder' | 'legacy';
+    secretNames?: string[];
+    actorUserId?: string;
+    workspaceId?: string;
+    agentSessionId?: string;
+    projectId?: string;
+    taskId?: string;
+    commandMode?: 'argv' | 'bash' | 'sh';
+    commandFingerprint?: string;
+    startedAt?: string;
+    completedAt?: string;
   };
 }

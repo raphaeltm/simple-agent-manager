@@ -200,7 +200,7 @@ func (h *SessionHost) clearHarnessWork() {
 func (h *SessionHost) harnessWorkSnapshot() harnessWorkStatus {
 	h.harnessWorkMu.Lock()
 	defer h.harnessWorkMu.Unlock()
-	return h.harnessWork
+	return h.secretExecutionWorkSnapshot(h.harnessWork)
 }
 
 func (h *SessionHost) applyClaudeHarnessLifecycle(message claudeSDKLifecycleMessage) bool {

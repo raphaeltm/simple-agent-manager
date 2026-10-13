@@ -41,7 +41,13 @@ export const SecretExecSchema = v.pipe(
     idempotencyKey: v.optional(v.pipe(literal, v.minLength(1))),
   }),
   v.check((r) => (r.argv !== undefined) !== (r.command !== undefined)),
-  v.check((r) => (r.command !== undefined ? r.shell !== undefined : r.shell === undefined))
+  v.check((r) => (r.command !== undefined ? r.shell !== undefined : r.shell === undefined)),
+  v.check(
+    (r) =>
+      ![...r.secretNames, ...Object.keys(r.env ?? {})].some(
+        (name) => name === 'ENV' || name === 'BASH_ENV'
+      )
+  )
 );
 const JobSchema = v.strictObject({ jobId: v.pipe(v.string(), v.regex(/^sx-[a-f0-9]{64}$/)) });
 
@@ -59,6 +65,16 @@ const ResultSchema = v.object({
     user: v.string(),
     cwd: v.string(),
     environmentMode: v.picklist(['placeholder', 'legacy']),
+    secretNames: v.optional(v.array(envKey)),
+    actorUserId: v.optional(v.string()),
+    workspaceId: v.optional(v.string()),
+    agentSessionId: v.optional(v.string()),
+    projectId: v.optional(v.string()),
+    taskId: v.optional(v.string()),
+    commandMode: v.optional(v.picklist(['argv', 'bash', 'sh'])),
+    commandFingerprint: v.optional(v.string()),
+    startedAt: v.optional(v.string()),
+    completedAt: v.optional(v.string()),
   }),
 }) satisfies v.GenericSchema<SecretExecResult>;
 
@@ -131,6 +147,9 @@ export async function handleSecretExec(
       result = await proxySecretExecOnVm(env, token, 'start', jobId, {
         jobId,
         agentSessionId: token.agentSessionId,
+        userId: token.userId,
+        projectId: token.projectId,
+        taskId: token.taskId,
         fingerprint,
         argv: request.argv,
         command: request.command,

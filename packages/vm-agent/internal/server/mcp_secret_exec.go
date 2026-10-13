@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -37,6 +38,9 @@ var secretExecJobID = regexp.MustCompile(`^sx-[a-f0-9]{64}$`)
 type secretExecRequest struct {
 	JobID       string            `json:"jobId"`
 	SessionID   string            `json:"agentSessionId"`
+	UserID      string            `json:"userId"`
+	ProjectID   string            `json:"projectId"`
+	TaskID      string            `json:"taskId"`
 	Fingerprint string            `json:"fingerprint"`
 	Argv        []string          `json:"argv"`
 	Command     *string           `json:"command"`
@@ -53,10 +57,20 @@ type secretExecEnv struct {
 	IsSecret bool   `json:"isSecret"`
 }
 type secretExecMetadata struct {
-	ContainerID     string `json:"containerId"`
-	User            string `json:"user"`
-	Cwd             string `json:"cwd"`
-	EnvironmentMode string `json:"environmentMode"`
+	ContainerID        string   `json:"containerId"`
+	User               string   `json:"user"`
+	Cwd                string   `json:"cwd"`
+	EnvironmentMode    string   `json:"environmentMode"`
+	SecretNames        []string `json:"secretNames,omitempty"`
+	ActorUserID        string   `json:"actorUserId,omitempty"`
+	WorkspaceID        string   `json:"workspaceId"`
+	AgentSessionID     string   `json:"agentSessionId"`
+	ProjectID          string   `json:"projectId,omitempty"`
+	TaskID             string   `json:"taskId,omitempty"`
+	CommandMode        string   `json:"commandMode"`
+	CommandFingerprint string   `json:"commandFingerprint"`
+	StartedAt          string   `json:"startedAt"`
+	CompletedAt        string   `json:"completedAt,omitempty"`
 }
 type secretExecSnapshot struct {
 	JobID  string `json:"jobId"`
@@ -72,6 +86,7 @@ type secretExecState struct {
 	Cancel             context.CancelFunc
 	Done               chan struct{}
 	PersistencePending bool
+	ReleaseActivity    func()
 }
 
 func secretExecLimit(name string, fallback int) int {
@@ -90,6 +105,12 @@ func (s *Server) handleMcpSecretExecStart(w http.ResponseWriter, r *http.Request
 	if !s.requireNodeManagementAuth(w, r, workspaceID) {
 		return
 	}
+	// Audit caller identity comes from the verified management token, not the body.
+	claims, claimErr := s.jwtValidator.ValidateNodeManagementToken(strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")), workspaceID)
+	if claimErr != nil {
+		writeError(w, 401, "Invalid management identity")
+		return
+	}
 	if s.store == nil {
 		writeError(w, 503, "Job persistence unavailable")
 		return
@@ -99,6 +120,11 @@ func (s *Server) handleMcpSecretExecStart(w http.ResponseWriter, r *http.Request
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		writeError(w, 400, "Invalid execution request")
+		return
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		writeError(w, 400, "Execution request must contain one JSON object")
 		return
 	}
 	if err := validateSecretExecRequest(&req); err != nil {
@@ -198,16 +224,38 @@ func (s *Server) handleMcpSecretExecStart(w http.ResponseWriter, r *http.Request
 		writeError(w, 429, "Execution capacity reached")
 		return
 	}
-	snapshot := secretExecSnapshot{JobID: req.JobID, Status: "running", Result: secretexec.Result{ExitCode: -1}, Execution: secretExecMetadata{ContainerID: containerID, User: user, Cwd: cwd, EnvironmentMode: mode}}
+	commandMode := "argv"
+	if req.Command != nil {
+		commandMode = req.Shell
+	}
+	snapshot := secretExecSnapshot{JobID: req.JobID, Status: "running", Result: secretexec.Result{ExitCode: -1}, Execution: secretExecMetadata{ContainerID: containerID, User: user, Cwd: cwd, EnvironmentMode: mode, SecretNames: append([]string(nil), req.SecretNames...), ActorUserID: claims.Subject, WorkspaceID: workspaceID, AgentSessionID: req.SessionID, ProjectID: req.ProjectID, TaskID: req.TaskID, CommandMode: commandMode, CommandFingerprint: req.Fingerprint, StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
+	// Register job-owned activity while fenced by the job mutex; explicit stop
+	// removes/stops the host and then cancels any inserted job.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(req.TimeoutMs)*time.Millisecond)
+	deadline, _ := ctx.Deadline()
+	releaseActivity := func() {}
+	s.sessionHostMu.Lock()
+	owner := s.sessionHosts[workspaceID+":"+req.SessionID]
+	if owner != nil && owner.TrackSecretExecution(req.JobID, deadline, cancel) {
+		releaseActivity = func() { owner.EndSecretExecution(req.JobID) }
+	} else if s.secretExecContextResolver == nil {
+		s.sessionHostMu.Unlock()
+		cancel()
+		s.secretExecMu.Unlock()
+		writeError(w, 409, "Agent session stopped before job acceptance")
+		return
+	}
+	s.sessionHostMu.Unlock()
 	raw, _ := json.Marshal(snapshot)
 	if err := s.store.UpsertJob(persistence.JobRecord{ID: req.JobID, Kind: secretExecKind, ScopeID: scope, Status: "running", CurrentStep: req.Fingerprint, ResultJSON: string(raw)}); err != nil {
+		cancel()
+		releaseActivity()
 		s.secretExecMu.Unlock()
 		writeError(w, 503, "Job persistence unavailable")
 		return
 	}
 	// This bounded job owns its lifetime after acceptance; never use r.Context().
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(req.TimeoutMs)*time.Millisecond)
-	state := &secretExecState{Snapshot: snapshot, Fingerprint: req.Fingerprint, SessionID: req.SessionID, WorkspaceID: workspaceID, Cancel: cancel, Done: make(chan struct{})}
+	state := &secretExecState{Snapshot: snapshot, Fingerprint: req.Fingerprint, SessionID: req.SessionID, WorkspaceID: workspaceID, Cancel: cancel, Done: make(chan struct{}), ReleaseActivity: releaseActivity}
 	s.secretExecJobs[req.JobID] = state
 	s.secretExecMu.Unlock()
 	go s.runSecretExec(ctx, state, argv, values, secrets)
@@ -235,8 +283,16 @@ func validateSecretExecRequest(req *secretExecRequest) error {
 		return fmt.Errorf("Command cannot contain NUL")
 	}
 	for key, value := range req.Env {
+		if key == "ENV" || key == "BASH_ENV" {
+			return fmt.Errorf("Shell startup control environment is reserved")
+		}
 		if !secretExecEnvKey.MatchString(key) || strings.ContainsRune(value, 0) {
 			return fmt.Errorf("Invalid environment override")
+		}
+	}
+	for _, name := range req.SecretNames {
+		if name == "ENV" || name == "BASH_ENV" {
+			return fmt.Errorf("Shell startup control environment is reserved")
 		}
 	}
 	if req.TimeoutMs == 0 {
@@ -249,6 +305,9 @@ func validateSecretExecRequest(req *secretExecRequest) error {
 }
 func (s *Server) runSecretExec(ctx context.Context, state *secretExecState, argv []string, values map[string]string, secrets []string) {
 	defer close(state.Done)
+	if state.ReleaseActivity != nil {
+		defer state.ReleaseActivity()
+	}
 	grace := time.Duration(secretExecLimit("SECRET_EXEC_GRACE_MS", defaultSecretExecGraceMs)) * time.Millisecond
 	metadata := state.Snapshot.Execution
 	args := secretexec.SupervisorArgs(grace)
@@ -256,7 +315,11 @@ func (s *Server) runSecretExec(ctx context.Context, state *secretExecState, argv
 	if metadata.ContainerID == "" {
 		cmd = exec.Command(args[0], args[1:]...)
 		cmd.Dir = metadata.Cwd
-		cmd.Env = standaloneWorkspaceExecEnv(state.WorkspaceID, os.Environ(), nil)
+		if s.secretExecBaseEnv != nil {
+			cmd.Env = standaloneWorkspaceExecEnv(state.WorkspaceID, s.secretExecBaseEnv, nil)
+		} else {
+			cmd.Env = standaloneWorkspaceExecEnv(state.WorkspaceID, os.Environ(), nil)
+		}
 	} else {
 		dockerArgs := []string{"exec", "-i"}
 		if metadata.User != "" {
@@ -282,6 +345,7 @@ func (s *Server) runSecretExec(ctx context.Context, state *secretExecState, argv
 	defer s.secretExecMu.Unlock()
 	state.Snapshot.Result = result
 	state.Snapshot.Status = status
+	state.Snapshot.Execution.CompletedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	raw, _ := json.Marshal(state.Snapshot)
 	// Preserve fingerprint in CurrentStep for durable retry conflict detection.
 	if err := s.store.CompleteJob(state.Snapshot.JobID, status, state.Fingerprint, "", string(raw)); err == nil {
@@ -383,4 +447,14 @@ func (s *Server) resolveSecretExecContext(ctx context.Context, workspaceID, sess
 		return "", "", "", fmt.Errorf("Session container is missing or changed")
 	}
 	return current, user, cwd, nil
+}
+
+func (s *Server) cancelSecretExecutionsForOwner(workspace, session string) {
+	s.secretExecMu.Lock()
+	defer s.secretExecMu.Unlock()
+	for _, job := range s.secretExecJobs {
+		if job.WorkspaceID == workspace && (session == "" || job.SessionID == session) {
+			job.Cancel()
+		}
+	}
 }

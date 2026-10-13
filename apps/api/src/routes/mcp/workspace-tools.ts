@@ -117,7 +117,8 @@ async function fetchVmAgentJson(
   method: 'GET' | 'POST',
   headers: Record<string, string>,
   body: unknown,
-  timeoutMs: number
+  timeoutMs: number,
+  controls?: { noWakeContainer: boolean; recoverContainerOnTimeout: boolean }
 ): Promise<unknown> {
   if (body) {
     headers['Content-Type'] = 'application/json';
@@ -132,7 +133,9 @@ async function fetchVmAgentJson(
     fetchOpts.body = JSON.stringify(body);
   }
 
-  const res = await fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs);
+  const res = controls
+    ? await fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs, controls)
+    : await fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs);
 
   if (!res.ok) {
     const errText = await res.text().catch(() => 'unknown error');
@@ -446,6 +449,7 @@ export async function proxySecretExecOnVm(
       'X-SAM-Workspace-Id': workspace.id,
     },
     body,
-    getWorkspaceToolTimeout(env)
+    getWorkspaceToolTimeout(env),
+    { noWakeContainer: true, recoverContainerOnTimeout: false }
   );
 }

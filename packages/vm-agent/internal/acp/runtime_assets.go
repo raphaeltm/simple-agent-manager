@@ -148,3 +148,37 @@ func writeRuntimeFile(targetPath string, content []byte, mode os.FileMode) error
 func sanitizedRuntimePath(path string) string {
 	return strings.TrimSpace(path)
 }
+
+func managedSecretPlaceholder(key string) string {
+	return "__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__" + key + "__"
+}
+func hasManagedSecretPlaceholder(env []string, key string) bool {
+	for _, entry := range env {
+		if entry == key+"="+managedSecretPlaceholder(key) {
+			return true
+		}
+	}
+	return false
+}
+
+// Run after harness injection: separate auth files remain usable, but an env
+// credential must never silently replace a managed protected name.
+func protectManagedSecretEnv(env []string, keys map[string]bool) ([]string, error) {
+	for key := range keys {
+		expected := managedSecretPlaceholder(key)
+		found := false
+		for _, entry := range env {
+			name, value, ok := strings.Cut(entry, "=")
+			if ok && name == key {
+				if value != expected {
+					return nil, fmt.Errorf("managed secret %s conflicts with harness environment authentication; use a distinct managed name or an auth-file credential", key)
+				}
+				found = true
+			}
+		}
+		if !found {
+			env = append(env, key+"="+expected)
+		}
+	}
+	return env, nil
+}

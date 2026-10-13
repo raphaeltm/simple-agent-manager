@@ -18,10 +18,11 @@ import (
 // command's container-side process group, rather than only the host docker CLI.
 const SupervisorScript = `set +m
 IFS= read -r -d '' count || exit 125
+env_entries=()
 for ((i=0;i<count;i++)); do
  IFS= read -r -d '' key || exit 125
  IFS= read -r -d '' value || exit 125
- export "$key=$value"
+ env_entries+=("$key=$value")
 done
 IFS= read -r -d '' count || exit 125
 argv=()
@@ -33,7 +34,14 @@ unset BASH_ENV ENV
 test -x /usr/bin/setsid || exit 125
 # Preserve the private stdin pipe explicitly: background jobs otherwise get /dev/null.
 exec 3<&0
-/usr/bin/setsid --wait /usr/bin/env -u BASH_ENV -u ENV "${argv[@]}" </dev/null 3<&- &
+apply_env() {
+ for item in "$@"; do unset "${item%%=*}" || return 125; done
+ if (( $# > 0 )); then export "$@" || return 125; fi
+}
+( set -- "${argv[@]}"
+  apply_env "${env_entries[@]}" || exit 125
+  exec /usr/bin/setsid --wait /usr/bin/env -u BASH_ENV -u ENV "$@"
+) </dev/null 3<&- &
 child=$!
 cleanup() { if kill -0 -- "-$child" 2>/dev/null; then kill -TERM -- "-$child" 2>/dev/null; /bin/sleep "$1"; kill -KILL -- "-$child" 2>/dev/null; fi; }
 trap 'cleanup "$1"; exit 125' HUP INT TERM

@@ -156,6 +156,11 @@ type SessionHost struct {
 	mu                       sync.RWMutex
 	process                  agentProcess
 	secretExecContainerID    string
+	secretWorkMu             sync.Mutex
+	secretWork               map[string]secretExecutionWork
+	secretWorkObserved       bool
+	secretWorkProgressAt     time.Time
+	secretWorkReporterCancel context.CancelFunc
 	acpConn                  *acpsdk.ClientSideConnection
 	agentType                string
 	codexC2SelectionMu       sync.Mutex // independent: startup can hold mu
@@ -573,6 +578,7 @@ func (h *SessionHost) Stop() {
 		h.mu.Unlock()
 		return
 	}
+	h.cancelSecretExecutionWork()
 	h.closeUsageReportIngress()
 	h.setStatusLocked(HostStopped)
 	h.statusErr = ""
@@ -749,7 +755,7 @@ func (h *SessionHost) IsPrompting() bool {
 func (h *SessionHost) isPromptingOrRecovering() bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.status == HostPrompting || h.status == HostStarting || h.crashRecoveryInProgress
+	return h.status == HostPrompting || h.status == HostStarting || h.crashRecoveryInProgress || h.hasSecretExecutionWork()
 }
 
 // OnPromptCompleteCallback returns the OnPromptComplete callback, if configured.

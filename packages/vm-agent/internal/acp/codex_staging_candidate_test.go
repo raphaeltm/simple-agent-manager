@@ -86,14 +86,18 @@ func TestCodexC2CandidateBoundToSessionRuntimeAssets(t *testing.T) {
 	}
 }
 
-func TestCodexC2CandidateVMProviderDoesNotApplyMergedFiles(t *testing.T) {
-	host := NewSessionHost(SessionHostConfig{RuntimeAssetsProvider: func(context.Context) (RuntimeAssets, error) {
+func TestCodexC2CandidateVMProviderAppliesEnvWithoutChangingMergedFiles(t *testing.T) {
+	workDir := t.TempDir()
+	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{ContainerWorkDir: workDir}, RuntimeAssetsProvider: func(context.Context) (RuntimeAssets, error) {
 		return RuntimeAssets{Files: []RuntimeFile{{Path: "profile-file", Content: "unchanged"}}, EnvVars: []RuntimeEnvVar{{Key: "OTHER", Value: "value"}}}, nil
 	}})
 	defer host.Stop()
 	env, err := host.applyRuntimeAssets(context.Background(), "vm-devcontainer", []string{"EXISTING=value"}, map[string]bool{})
-	if err != nil || len(env) != 1 || env[0] != "EXISTING=value" {
-		t.Fatalf("VM runtime asset behavior changed: %v, %v", env, err)
+	if err != nil || len(env) != 2 || env[0] != "EXISTING=value" || env[1] != "OTHER=value" {
+		t.Fatal("current per-session env overlay missing")
+	}
+	if _, err := os.Stat(filepath.Join(workDir, "profile-file")); err == nil {
+		t.Fatal("container session rewrote merged runtime files")
 	}
 }
 

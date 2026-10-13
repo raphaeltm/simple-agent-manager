@@ -68,6 +68,8 @@ describe('secret execution MCP authorization and contract', () => {
     { argv: ['true'], secretNames: [], containerId: 'other' },
     { argv: ['true'], secretNames: [], cwd: 'relative' },
     { argv: ['true'], secretNames: [], env: { BAD: '\0' } },
+    { argv: ['true'], secretNames: ['BASH_ENV'] },
+    { argv: ['true'], secretNames: [], env: { ENV: 'synthetic' } },
   ])('rejects malformed or caller-selected execution scope', async (args) => {
     const response = await handleSecretExec(1, args, token, env, 'start');
     expect(response.error?.code).toBe(-32602);

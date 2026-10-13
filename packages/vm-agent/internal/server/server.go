@@ -138,14 +138,16 @@ type Server struct {
 	secretExecJobs         map[string]*secretExecState
 	// Optional external runtime observation hook for integration tests.
 	secretExecContextResolver func(context.Context, string, string) (string, string, string, error)
-	publishJobsMu             sync.Mutex
-	publishJobs               map[string]publishJobState
-	buildPublishRunner        func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error)
-	applyWatchdogMu           sync.Mutex
-	applyWatchdogs            map[string]chan struct{}
-	sessionSnapshotMu         sync.Mutex
-	sessionSnapshotLocks      map[string]sessionSnapshotLock
-	sessionSnapshotRunner     func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error)
+	// Explicit base environment for local execution tests; nil uses the runtime environment.
+	secretExecBaseEnv     []string
+	publishJobsMu         sync.Mutex
+	publishJobs           map[string]publishJobState
+	buildPublishRunner    func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error)
+	applyWatchdogMu       sync.Mutex
+	applyWatchdogs        map[string]chan struct{}
+	sessionSnapshotMu     sync.Mutex
+	sessionSnapshotLocks  map[string]sessionSnapshotLock
+	sessionSnapshotRunner func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error)
 
 	workspaceLifecycleMu    sync.Mutex
 	workspaceLifecycleLocks map[string]*workspaceLifecycleEntry

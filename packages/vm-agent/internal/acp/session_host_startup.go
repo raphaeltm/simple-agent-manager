@@ -142,6 +142,10 @@ func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string,
 	}
 	h.storeOpencodeUsageProbeKey(agentType, cred, settings)
 	envVars, settings = h.applyModelAndExtraEnv(agentType, settings, envVars)
+	envVars, err = protectManagedSecretEnv(envVars, secretEnvKeys)
+	if err != nil {
+		return nil, err
+	}
 	h.applyPermissionMode(settings)
 
 	return &agentStartup{
@@ -154,18 +158,19 @@ func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string,
 }
 
 func (h *SessionHost) applyRuntimeAssets(ctx context.Context, containerID string, envVars []string, secretEnvKeys map[string]bool) ([]string, error) {
-	// VM devcontainers already receive project assets through their bootstrap.
-	// Their provider is used only for the per-session Codex selector; applying
-	// merged runtime files here would change existing VM behavior.
-	if h.config.RuntimeAssetsProvider == nil || containerID != "" {
+	// Fresh processes receive the current per-session ENV overlay, including on
+	// an existing container. VM runtime FILES retain their bootstrap-only behavior.
+	if h.config.RuntimeAssetsProvider == nil {
 		return envVars, nil
 	}
 	assets, err := h.config.RuntimeAssetsProvider(ctx)
 	if err != nil {
 		return envVars, fmt.Errorf("failed to fetch runtime assets: %w", err)
 	}
-	if err := applyStandaloneRuntimeFiles(h.config.ContainerWorkDir, assets.Files); err != nil {
-		return envVars, fmt.Errorf("failed to apply runtime files: %w", err)
+	if containerID == "" {
+		if err := applyStandaloneRuntimeFiles(h.config.ContainerWorkDir, assets.Files); err != nil {
+			return envVars, fmt.Errorf("failed to apply runtime files: %w", err)
+		}
 	}
 	envVars, err = appendRuntimeEnvVars(envVars, secretEnvKeys, assets.EnvVars)
 	if err != nil {
@@ -186,7 +191,7 @@ func (h *SessionHost) resolveAgentEnvVars(ctx context.Context, containerID strin
 		}
 	}
 
-	if h.config.GitTokenFetcher != nil {
+	if h.config.GitTokenFetcher != nil && !hasManagedSecretPlaceholder(envVars, "GH_TOKEN") {
 		envVars = removeEnvVar(envVars, "GH_TOKEN")
 		if token, err := h.config.GitTokenFetcher(ctx); err == nil && token != "" {
 			envVars = append(envVars, "GH_TOKEN="+token)
