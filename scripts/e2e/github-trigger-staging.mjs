@@ -263,22 +263,41 @@ if (phase === 'send') {
       result.checks.push(
         'normal smoke OAuth principal and fixture have access; no other fixture GitHub triggers'
       );
-      step = 'actual form';
+      step = 'form navigation';
       await page.goto(`${appUrl}/projects/${fixture.projectId}/triggers`);
+      await page
+        .getByRole('heading', { name: 'Triggers', exact: true })
+        .waitFor({ state: 'visible' });
+      const accountSetup = page.getByRole('dialog', { name: 'Account setup', exact: true });
+      if (await accountSetup.isVisible()) {
+        step = 'form dismiss account setup';
+        await accountSetup.getByRole('button', { name: 'Exit setup', exact: true }).click();
+        await accountSetup.waitFor({ state: 'hidden' });
+        result.checks.push(
+          'observed Account setup dialog; dismissed through normal Exit setup control'
+        );
+      }
+      step = 'form open';
       await page
         .getByRole('button', { name: /New Trigger|Create your first trigger/ })
         .first()
         .click();
+      step = 'form GitHub source';
       await page.getByRole('button', { name: /GitHub event/ }).click();
+      step = 'form name';
       await page.getByLabel('Name', { exact: true }).fill(fixture.marker);
+      step = 'form event type';
       await page.getByLabel('GitHub event', { exact: true }).selectOption('issues');
       assert(
         (await page.getByLabel('Actions', { exact: true }).inputValue()) === 'opened',
         'Issue default is not opened'
       );
+      step = 'form filters';
       await page.getByLabel('Required labels').fill(fixture.marker);
       await page.getByLabel('Text contains').fill(fixture.marker);
+      step = 'form prompt';
       await page.getByLabel('Prompt template', { exact: true }).fill(auditPrompt(fixture.marker));
+      step = 'form screenshots';
       await page.screenshot({ path: `${output}/form-desktop.png` });
       await page.setViewportSize({ width: 375, height: 667 });
       assert(
@@ -286,6 +305,7 @@ if (phase === 'send') {
         'Mobile overflow'
       );
       await page.screenshot({ path: `${output}/form-mobile.png` });
+      step = 'form submission';
       await page.getByRole('button', { name: 'Create Trigger', exact: true }).click();
       await page.getByRole('dialog').waitFor({ state: 'hidden' });
       await recoverTrigger();
@@ -364,6 +384,46 @@ if (phase === 'send') {
   } catch {
     result.pass = false;
     result.failedStep = step;
+    if (phase === 'prepare' && step.startsWith('form ')) {
+      try {
+        const path = new URL(page.url()).pathname;
+        result.browserDiagnostics = {
+          pathKind: /sign.?in|login/.test(path)
+            ? 'signin'
+            : /onboarding|setup/.test(path)
+              ? 'onboarding'
+              : /projects\//.test(path)
+                ? 'project'
+                : 'other',
+          newTriggerButtons: await page
+            .getByRole('button', { name: /New Trigger|Create your first trigger/ })
+            .count(),
+          githubSourceButtons: await page.getByRole('button', { name: /GitHub event/ }).count(),
+          nameFields: await page.getByLabel('Name', { exact: true }).count(),
+          eventFields: await page.getByLabel('GitHub event', { exact: true }).count(),
+          dialogs: await page.getByRole('dialog').count(),
+          accountSetupDialogs: await page
+            .getByRole('dialog', { name: 'Account setup', exact: true })
+            .count(),
+          createTriggerDialogs: await page
+            .getByRole('dialog', { name: 'Create trigger', exact: true })
+            .count(),
+          exitSetupButtons: await page
+            .getByRole('button', { name: 'Exit setup', exact: true })
+            .count(),
+          newTriggerVisible: await page
+            .getByRole('button', { name: 'New Trigger', exact: true })
+            .first()
+            .isVisible(),
+          newTriggerEnabled: await page
+            .getByRole('button', { name: 'New Trigger', exact: true })
+            .first()
+            .isEnabled(),
+        };
+      } catch {
+        result.browserDiagnostics = { diagnosticFailed: true };
+      }
+    }
   } finally {
     if (!retain) {
       try {
