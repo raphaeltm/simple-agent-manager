@@ -365,6 +365,8 @@ To wait on a pull request without polling, subscribe and end the turn: use sourc
 
 To coordinate several agents on one feature, publish a short kickoff to a project channel and pass it as `coordinationChannel` to `dispatch_task`. Children and their descendants inherit it and are told to publish findings, decisions, blockers and completion evidence with `publish_channel_event`, and to read it with `get_channel_history` or follow it with `follow_event_channel`. A publication never wakes its own author.
 
+To see who subscribes to a project channel, use `list_channel_subscribers` with its name. It returns owner and target identities, subscription state and expiry. Follow `nextCursor` for more results; use `state: "any"` to include cancelled or expired subscriptions. A subscription means its filter matches that channel's messages—it does not prove the agent read or acknowledged them.
+
 Claude Code and Codex get these tools on both the VM and [Instant](/docs/guides/instant-sessions/) runtimes. If a Codex session is handed an MCP server without a usable token, it fails to start with an explicit error rather than launching a tool-less agent.
 
 If a chat reports that its **agent connection is missing or rejected**, the session creator can open **Settings → Connections**. Claude Code and Codex offer guided sign-in; other agents may require a supported key method. A provider error saying the **model is unsupported or unavailable for the account** is different: a working sign-in does not grant model access. Check that model's availability with the provider.

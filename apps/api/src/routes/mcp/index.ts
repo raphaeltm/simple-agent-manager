@@ -346,6 +346,7 @@ mcpRoutes.post('/', async (c) => {
             );
           case 'publish_channel_event':
           case 'list_event_channels':
+          case 'list_channel_subscribers':
           case 'get_channel_history':
           case 'follow_event_channel':
           case 'catch_up_event_channel':

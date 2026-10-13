@@ -1,4 +1,5 @@
 import type {
+  ListProjectEventChannelSubscribersInput,
   ProjectEventRequestedDeliveryMode,
   ProjectEventSubscriptionAgentCaller,
 } from '@simple-agent-manager/shared';
@@ -126,4 +127,20 @@ export async function catchUpChannelForCaller(
     ...result,
     wakeInstructions: getProjectEventWakeInstructions(result.subscription.deliveryPreference),
   };
+}
+
+/** Existing member read authority, with revalidation after the project-scoped DO read. */
+export async function listChannelSubscribersForCaller(
+  env: Env,
+  caller: ProjectEventSubscriptionAgentCaller,
+  request: Omit<ListProjectEventChannelSubscribersInput, 'projectId'>
+) {
+  const context = await channelCallerContext(env, caller);
+  const result = await projectData.listProjectEventChannelSubscribers(
+    env,
+    context.projectId,
+    request
+  );
+  await channelCallerContext(env, caller);
+  return result;
 }
