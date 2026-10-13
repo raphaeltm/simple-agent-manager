@@ -1,6 +1,7 @@
 /**
- * Documentation screenshots for two chat states the docs teach a reader to recognise:
- * a sleeping chat whose wake failed, and an agent reply containing a Mermaid diagram.
+ * Documentation screenshots for chat states the docs teach a reader to recognise: a sleeping
+ * chat whose wake failed, an agent reply containing a Mermaid diagram, and a chat whose saved
+ * workspace expired, with the fork it offers.
  *
  * Every capture drives the REAL production components with mocked API data, and asserts
  * on what rendered rather than on the fixture, so a component that stops rendering fails
@@ -29,6 +30,7 @@ const PROJECT_ID = 'proj-docs-states';
 const NOW = Date.now();
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 
 const MOCK_USER = makeMockUser({
   email: 'docs@example.com',
@@ -62,11 +64,12 @@ interface SessionFixture {
   id: string;
   topic: string;
   status: 'active' | 'sleeping' | 'stopped';
-  taskStatus: 'in_progress' | 'completed' | 'failed';
+  taskStatus: 'in_progress' | 'completed' | 'failed' | 'cancelled';
   taskMode: 'task' | 'conversation';
   lastMessageAt: number;
   attention?: { kind: 'wake_failed'; reason: string };
   errorMessage?: string;
+  terminalReason?: string;
 }
 
 const WAKE_FAILED: SessionFixture = {
@@ -86,6 +89,20 @@ const DIAGRAM: SessionFixture = {
   taskStatus: 'in_progress',
   taskMode: 'conversation',
   lastMessageAt: NOW - 4 * MINUTE,
+};
+
+/**
+ * A conversation that slept past the seven-day retention: SAM cancels its task with this
+ * terminal reason (`SNAPSHOT_EXPIRED_REASON`), and the chat offers a fork instead of a wake.
+ */
+const EXPIRED: SessionFixture = {
+  id: 'sess-expired',
+  topic: 'Add a CSV export to the orders page',
+  status: 'stopped',
+  taskStatus: 'cancelled',
+  taskMode: 'conversation',
+  lastMessageAt: NOW - 8 * DAY,
+  terminalReason: 'snapshot_expired',
 };
 
 /** Neighbouring rows so the list shows Wake failed among the states it is compared with. */
@@ -130,6 +147,7 @@ function sessionPayload(fixture: SessionFixture) {
       outputBranch: `sam/${fixture.id}`,
       outputPrUrl: null,
       errorMessage: fixture.errorMessage ?? null,
+      terminalReason: fixture.terminalReason ?? null,
       outputSummary: null,
       finalizedAt: null,
       taskMode: fixture.taskMode,
@@ -208,9 +226,30 @@ function diagramMessages() {
   ];
 }
 
+function expiredMessages() {
+  const id = EXPIRED.id;
+  const start = EXPIRED.lastMessageAt - 20 * MINUTE;
+  return [
+    message(id, 'ex-1', 'user', 'Add a CSV export button to the orders page.', start),
+    message(
+      id,
+      'ex-2',
+      'assistant',
+      'Added `ExportOrdersButton` and an `/orders/export.csv` route that streams the filtered orders. I have not pushed yet; tell me when to open a pull request.',
+      EXPIRED.lastMessageAt
+    ),
+  ];
+}
+
 const MESSAGES: Record<string, ReturnType<typeof message>[]> = {
   [WAKE_FAILED.id]: wakeFailedMessages(),
   [DIAGRAM.id]: diagramMessages(),
+  [EXPIRED.id]: expiredMessages(),
+};
+
+/** One VM profile, so the fork opens the ordinary composer rather than the profile wizard. */
+const AGENT_PROFILES = {
+  items: [{ id: 'profile-build', name: 'Build and test', agentType: 'claude-code', runtime: 'vm' }],
 };
 
 function sessionState() {
@@ -231,18 +270,25 @@ function sessionState() {
  * every session route, and this capture needs several sessions in different states in the
  * list, each with its own transcript.
  */
-async function setupMocks(page: Page) {
+/** Scene-specific responses by path, consulted before the shared ones. */
+type RouteOverrides = Record<string, unknown>;
+
+async function setupMocks(page: Page, fixtures: SessionFixture[], overrides: RouteOverrides) {
   await page.addInitScript((userId) => {
     window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
   }, MOCK_USER.user.id);
 
-  const sessions = ALL_SESSIONS.map(sessionPayload);
+  const sessions = fixtures.map(sessionPayload);
 
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
     const { pathname } = new URL(url);
 
     if (pathname.endsWith('/ws') || url.includes('websocket')) return route.abort();
+    if (pathname === `/api/projects/${PROJECT_ID}/agent-profiles`) {
+      return route.fulfill({ status: 200, json: AGENT_PROFILES });
+    }
+    if (pathname in overrides) return route.fulfill({ status: 200, json: overrides[pathname] });
 
     return fulfillDocsChatRoute(route, {
       project: MOCK_PROJECT,
@@ -254,9 +300,14 @@ async function setupMocks(page: Page) {
   });
 }
 
-async function openChat(page: Page, sessionId: string) {
+async function openChat(
+  page: Page,
+  sessionId: string,
+  fixtures = ALL_SESSIONS,
+  overrides: RouteOverrides = {}
+) {
   await seedTheme(page, 'dark');
-  await setupMocks(page);
+  await setupMocks(page, fixtures, overrides);
   await page.goto(`/projects/${PROJECT_ID}/chat/${sessionId}`);
   // Liveness: without this, every capture below would happily screenshot a crash page.
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
@@ -354,4 +405,86 @@ test('docs: mermaid diagram in chat', async ({ page }) => {
     .last();
   await expect(reply).toContainText('never reaches the ledger');
   await docsShot(page, 'chat-mermaid-diagram', reply);
+});
+
+// ---------------------------------------------------------------------------
+// 3. A chat whose saved workspace expired, and the fork it offers
+// ---------------------------------------------------------------------------
+
+/** Its own list, so the other scenes' session lists and committed images stay unchanged. */
+const EXPIRED_LIST = [EXPIRED, ...OTHER_SESSIONS];
+
+async function openExpiredChat(page: Page, overrides: RouteOverrides = {}) {
+  await openChat(page, EXPIRED.id, EXPIRED_LIST, overrides);
+  const footer = page.getByText(/The saved workspace has expired/);
+  await expect(footer).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Fork conversation' })).toBeVisible();
+  // Liveness for the absence below: the transcript itself rendered.
+  await expect(page.getByText(/ExportOrdersButton/)).toBeVisible();
+  // The message box is replaced, not merely disabled.
+  await expect(page.getByPlaceholder(/Send a message/)).toHaveCount(0);
+}
+
+test('docs: expired chat', async ({ page }) => {
+  test.skip(isMobile(page), 'desktop capture');
+  await page.setViewportSize({ width: 1060, height: 720 });
+  await openExpiredChat(page);
+  const log = await page.getByRole('log', { name: 'Conversation' }).boundingBox();
+  const viewport = page.viewportSize();
+  if (!log || !viewport) throw new Error('conversation or viewport has no geometry');
+  // The chat column only: an eight-day-old chat sits in the collapsed Older group of the list.
+  await docsShot(page, 'chat-expired', {
+    clip: { x: log.x, y: 0, width: viewport.width - log.x, height: viewport.height },
+  });
+});
+
+test('docs: expired chat on a phone', async ({ page }) => {
+  test.skip(!isMobile(page), 'phone capture');
+  await openExpiredChat(page);
+  await docsShot(page, 'chat-expired-mobile');
+});
+
+async function forkExpiredChat(page: Page) {
+  // A configured agent, or the new-chat composer is disabled and asks you to add one.
+  await openExpiredChat(page, {
+    '/api/agents': {
+      agents: [{ id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true }],
+    },
+  });
+  await page.getByRole('button', { name: 'Fork conversation' }).click();
+  await expect(page.getByText(`Forking from: ${EXPIRED.topic}`)).toBeVisible();
+  const composer = page
+    .getByRole('combobox')
+    .filter({ has: page.locator('textarea') })
+    .or(page.locator('textarea'));
+  await expect(composer.first()).toBeEnabled();
+  await expect(composer.first()).toHaveValue(
+    /Previous session: "Add a CSV export to the orders page"/
+  );
+  await expect(composer.first()).toHaveValue(new RegExp(`Parent session ID: ${EXPIRED.id}`));
+  // The fork text is inserted once; a doubled insertion would tell the agent twice.
+  const prefill = await composer.first().inputValue();
+  expect(prefill.split('Previous session:')).toHaveLength(2);
+  return composer.first();
+}
+
+test('docs: fork composer', async ({ page }) => {
+  test.skip(isMobile(page), 'desktop capture');
+  await page.setViewportSize({ width: 1060, height: 720 });
+  await forkExpiredChat(page);
+  // From the Forking banner to the send hint: the chat column only, narrow enough to read on a
+  // phone, so there is no separate phone image. The message box shows its first lines; the
+  // guide lists the IDs that follow them.
+  const banner = await page
+    .getByRole('button', { name: 'Cancel fork/retry' })
+    .locator('..')
+    .boundingBox();
+  const hint = await page.getByText('Press Ctrl+Enter to send').boundingBox();
+  const viewport = page.viewportSize();
+  if (!banner || !hint || !viewport) throw new Error('fork composer has no geometry');
+  const x = banner.x - 16;
+  const y = banner.y - 16;
+  await docsShot(page, 'chat-fork-composer', {
+    clip: { x, y, width: viewport.width - x, height: hint.y + hint.height + 16 - y },
+  });
 });

@@ -319,6 +319,14 @@ _"The saved workspace has expired. Your transcript is still available. Choose Fo
 new conversation."_ This is a normal end, not a failure, and the chat leaves the dashboard's
 **Active Tasks**.
 
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/chat-expired-mobile.png 2x" />
+  <img
+    src="/images/docs/chat-expired.png"
+    alt="A chat titled &quot;Add a CSV export to the orders page&quot; whose header reads &quot;Expired&quot;. The transcript is still there: the user asked for a CSV export button, and the agent replied that it added the button and an export route but had not pushed yet. Where the message box would be, a footer reads &quot;The saved workspace has expired. Your transcript is still available. Choose Fork to continue in a new conversation.&quot;, above a green &quot;Fork conversation&quot; button."
+  />
+</picture>
+
 To carry on, select **Fork conversation**. The new chat's agent can read this conversation, but the
 expired workspace's files can't be restored: anything the agent pushed is still on GitHub,
 uncommitted changes are gone. **Retry** isn't offered for an expired chat.

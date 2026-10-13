@@ -405,6 +405,12 @@ Forking applies to task-backed chat sessions broadly, including instant-containe
 3. The new-chat screen opens straight away with the message box filled in: a short instruction for the agent plus the previous session's title and its project, session, and task IDs
 4. Edit the message to say what to do next, then send it
 
+<img
+  src="/images/docs/chat-fork-composer.png"
+  alt="The new-chat screen after Fork. A banner reads &quot;Forking from: Add a CSV export to the orders page&quot; with the branch sam/sess-expired and a close button. Below it the selected profile, &quot;Build and test&quot; on a VM, and the message box already filled in with &quot;Use the SAM MCP tools (get_session_messages, search_messages) to review the previous session for full context about what was done and what needs to happen next.&quot;, with a Send button beside it."
+  width="552"
+/>
+
 The new agent does not get a copy of the old conversation. It reads what it needs with the SAM MCP tools (`get_session_messages`, `search_messages`), using the IDs in the message.
 
 ### Retrying a Session
