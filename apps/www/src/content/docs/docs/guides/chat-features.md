@@ -195,7 +195,7 @@ the conversation you are in rather than opening something beside it.)
 | **Resources** | CPU, memory, I/O, and OOM history — [Session Resource History](/docs/guides/session-resources/)                                                                    | Always                                                   |
 | **Events**    | This session's subscriptions, schedules, and watches — [Scheduled actions](/docs/guides/scheduled-actions/)                                                        | Always                                                   |
 | **Comments**  | Comment threads on this session. Unresolved threads show as a dot in icons mode and a count in labels mode; the marker turns amber when a thread is waiting on you | Always                                                   |
-| **Retry**     | Start a new chat with the original task prompt — [Retrying a Session](#retrying-a-session)                                                                         | When the session has a task                              |
+| **Retry**     | Start a new chat with the original task prompt — [Retrying a Session](#retrying-a-session)                                                                         | When the session has a task, unless the chat has expired |
 | **Fork**      | Start a new task from this session — [Conversation Forking](#conversation-forking)                                                                                 | When the session has a task                              |
 | **Report**    | File a problem report — [Reporting Issues](/docs/guides/reporting-issues/)                                                                                         | When the deployment has reporting configured             |
 | **Complete**  | Mark the task complete                                                                                                                                             | When the session has a task that is not already finished |
@@ -409,11 +409,13 @@ The new agent does not get a copy of the old conversation. It reads what it need
 
 ### Retrying a Session
 
-**Retry** opens the new-chat screen with the original task prompt filled in, and the banner shows the previous error if there was one. The new session is linked to the original as its parent. If SAM cannot load the original prompt, the message box says so and you can type the prompt yourself.
+**Retry** opens the new-chat screen with the original task prompt filled in, and the banner shows the previous error if there was one. The new session is linked to the original as its parent. If SAM cannot load the original prompt, the message box says so and you can type the prompt yourself. Retry isn't offered for a chat whose saved workspace has [expired](/docs/guides/session-troubleshooting/#expired-saved-workspace); fork it instead.
+
+Fork and Retry both open instantly. Before you send, you can edit the message and pick a different agent profile, for example to retry with another model; select the **✕** on the **Forking from** or **Retrying** banner to cancel. In the session list and the chat header, the new chat is labelled **⑂ from** and the original's title, or **↩ attempt 2**, **3**, and so on once the same chat has more than one.
 
 ### Fork Limits
 
-- Maximum fork depth: 10 levels (configurable via `ACP_SESSION_MAX_FORK_DEPTH`)
+- Maximum fork depth: 10 levels, counting retries too (configurable via `ACP_SESSION_MAX_FORK_DEPTH`)
 - Each fork starts a new chat; on a VM it gets its own branch and workspace
 
 ## Finding Past Conversations

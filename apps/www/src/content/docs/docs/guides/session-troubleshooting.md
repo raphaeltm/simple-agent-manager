@@ -33,6 +33,11 @@ your work is safe and what to do next. Everything here applies to both
   so SAM slept the chat on a Git recovery point. → [See what was kept](#sam-could-not-save-a-complete-snapshot)
 - **"SAM could not put this session to sleep."** Snapshots kept failing and there was no safe
   recovery point, so the workspace keeps running. → [Decide what to do](#sam-could-not-save-a-complete-snapshot)
+- **"SAM could not finish putting this session to sleep."**, or an error reading **"Sleep
+  blocked: …"**. SAM saved the session but couldn't confirm its workspace stopped, so it can't
+  promise a wake. → [Check the workspace](#sam-could-not-finish-putting-the-session-to-sleep)
+- **Expired** in the session list, and a **Fork conversation** button where the message box was.
+  The chat slept for longer than its saved workspace is kept. → [Fork it](#expired-saved-workspace)
 - **A system message starting "Wake failed:"**, and **Wake failed** in the session list. SAM could
   not wake the sleeping chat. → [Read the reason, then act on it](#wake-failed)
 - **A failure card whose error says "SAM detected a stalled agent turn…"** (VM). SAM ended
@@ -284,6 +289,28 @@ keeps running. You can:
 An Instant session always takes this path when its snapshots keep failing, because it can only
 sleep with a complete snapshot.
 
+## SAM could not finish putting the session to sleep
+
+Going to sleep has two steps: SAM saves a snapshot of the workspace, then stops the workspace. If it
+can't confirm the second step in time, it stops retrying and ends the session instead of promising
+a wake it can't guarantee. The chat says **"SAM could not finish putting this session to sleep."**,
+and the session ends with the error **"Sleep blocked: workspace stop or recovery point could not be
+confirmed. Check the workspace before restarting."**
+
+The conversation and the saved snapshot are kept, but this session can't be woken. To carry on:
+
+1. Open the workspace from the **Workspaces** page. If it's still there, commit and push anything
+   you want to keep.
+2. Start a new chat, or [fork](/docs/guides/chat-features/#conversation-forking) this one so the
+   new agent can read it.
+3. If the workspace is gone or won't open, [report it](/docs/guides/reporting-issues/) (on a
+   self-hosted instance, tell your administrator).
+
+A related notice, **"SAM blocked the old sleep attempt because this workspace runtime changed."**,
+means the session had already moved to a new workspace (after a restart, for example) while an
+older sleep attempt was finishing. SAM left the new workspace alone and kept the previous
+checkpoint. Check the current workspace before you put the session to sleep or restart it.
+
 ## Expired saved workspace
 
 A sleeping chat can be woken for seven days. After that its saved workspace is deleted and the chat
@@ -314,8 +341,10 @@ received it.
   />
 </picture>
 
-Every message you send starts a new wake attempt, so what matters is whether the cause is something
-you can fix first:
+A failed wake doesn't end the chat. As long as its saved workspace can still be restored, the chat
+goes back to sleep on the same task, nothing is marked failed, and an agent that started it as a
+subtask isn't told it failed. Every message you send starts a new wake attempt, so what matters is
+whether the cause is something you can fix first:
 
 - **Cloud provider credentials are missing for this wake.** No cloud credential is available to pay
   for a replacement machine — for example, the one the session used was removed. Connect one (yours
@@ -451,6 +480,11 @@ If the agent simply stopped mid-sentence with no banner and this is a **VM** ses
 common cause, and it is the one the chat itself cannot tell you about. See
 [Session Resource History](/docs/guides/session-resources/). (Instant sessions have no resource
 history — there is nothing to check there.)
+
+When a VM runs short of memory, SAM may move a session off it instead: the chat shows **Sleeping**
+for a moment, then wakes on another machine with its files. A **Task**'s agent is told to carry on
+from where it stopped; a **Chat** waits for your next message, so check what the agent was doing
+and tell it how to continue.
 
 If a session is stuck in a state this page doesn't describe, or recovery repeatedly fails on work you
 need, [report it](/docs/guides/reporting-issues/) from the session tool rail — the report can attach
