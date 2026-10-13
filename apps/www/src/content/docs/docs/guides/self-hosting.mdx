@@ -670,6 +670,6 @@ Compact SQLite/R2 archive writes are opt-in (`PROJECT_DATA_ARCHIVE_COMPACT_ENABL
 
 ## AI app Connector
 
-The user-level SAM Connector is enabled by default. Connect Claude, ChatGPT, or a command-line client from **Settings → Access**; manage installation policy in **Admin → Integrations → Connector**. See [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/).
+The user-level SAM Connector is enabled by default, including after you update to v2026.10.10 or later. People connect Claude, ChatGPT, or a command-line client from their account's **Settings → Access**; superadmins manage installation policy in **Admin → Integrations → Connector**. To turn it off, switch off **Enable Connector** there, or set the `CONNECTOR_ENABLED` GitHub Environment variable to `false` before you deploy. See [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/) and the [Connector settings](/docs/reference/configuration/#sam-connector).
 
 Each installation has its own OAuth issuer and audience. Pulumi provisions the `OAUTH_KV` namespace and Worker binding. Vendor servers must reach the API host's discovery endpoints, `/oauth/*`, and `/connect/mcp`; Cloudflare Access login walls or WAF challenges on these paths can block connection and refresh. Keep SAM's OAuth authentication enforced when adjusting those network policies. Users also need the web host for sign-in and consent.

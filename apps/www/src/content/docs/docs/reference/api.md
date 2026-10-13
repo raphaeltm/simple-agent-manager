@@ -111,6 +111,44 @@ candidate still owes a wake. Failed sends report `outcome` as `recipient_unavail
 wake remains deliverable while a replacement handles new messages. The drained old
 subscription is retired after delivery.
 
+## SAM Connector
+
+The user-level MCP server that external AI apps use to act as a person; see
+[Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/). Paths are on the API host
+(`https://api.<your-domain>`).
+
+| Method         | Path                                                | Purpose                                                                     |
+| -------------- | --------------------------------------------------- | --------------------------------------------------------------------------- |
+| any            | `/connect/mcp`                                      | MCP endpoint. Accepts an OAuth access token or a SAM API token as a bearer  |
+| `GET`          | `/.well-known/oauth-protected-resource/connect/mcp` | Protected-resource metadata                                                 |
+| `GET`          | `/.well-known/oauth-authorization-server`           | Authorization-server metadata                                               |
+| `POST`         | `/oauth/register`                                   | Dynamic client registration                                                 |
+| `GET`          | `/oauth/authorize`                                  | Starts authorization and sends the person to the web app's `/oauth/consent` |
+| `POST`         | `/oauth/token`                                      | Code exchange and refresh                                                   |
+| `POST`         | `/oauth/revoke`                                     | Token revocation                                                            |
+| `GET`, `POST`  | `/api/connector/consent`                            | Consent preview and decision, used by the consent page                      |
+| `GET`          | `/api/connector/settings`                           | `{ enabled, writeEnabled, url }` for the signed-in person                   |
+| `GET`          | `/api/connector/connections`                        | The person's connected apps: `{ connections, nextCursor }`                  |
+| `DELETE`       | `/api/connector/connections/:id`                    | Revoke one of the person's connections                                      |
+| `GET`, `PATCH` | `/api/admin/connector/settings`                     | Superadmin settings; `PATCH` takes changed keys, and `null` resets a key    |
+| `GET`          | `/api/admin/connector/connections`                  | Every person's connections                                                  |
+| `DELETE`       | `/api/admin/connector/connections/:id`              | Revoke any connection                                                       |
+| `GET`          | `/api/admin/connector/clients`                      | Registered clients: `{ clients, nextCursor }`                               |
+| `PATCH`        | `/api/admin/connector/clients/:id`                  | `{ "blocked": true }` or `false`                                            |
+
+Notes for client developers:
+
+- Write tools take a `requestKey`. Reuse it when you retry, so a retry can't start work twice.
+- Chat results show the newest message groups first. Pages count stored streaming rows; follow
+  `nextCursor` for older content. A group split across pages carries `partialBefore` or
+  `mayContinueInNewerPage`, and shortened summaries carry `truncated`.
+- A task's final-message summary combines adjacent assistant fragments from a bounded recent window.
+  During a long tool run that window can hold no assistant text, so the summary is `null`; read the
+  chat for older progress.
+- To answer an agent, send its `interactionId` with an `optionId`, `formContent`, or
+  `decline: true`. A link request is accepted with `optionId: "accept"`. SAM generates the receipt
+  metadata.
+
 ## Authentication
 
 ### `POST /api/auth/sign-in/social`

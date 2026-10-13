@@ -77,3 +77,4 @@ For detailed step-by-step instructions, see the [Self-Hosting Guide](/docs/guide
 - [AI Agents](/docs/guides/agents/) — choose and configure your coding agent
 - [Idea Execution](/docs/guides/idea-execution/) — how chatting turns into finished pull requests
 - [Core Concepts](/docs/concepts/) — the vocabulary behind projects, agents, and workspaces
+- [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/) — check on your work and start chats from the AI app you already use

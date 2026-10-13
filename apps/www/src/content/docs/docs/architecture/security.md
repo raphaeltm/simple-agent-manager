@@ -98,6 +98,22 @@ SAM uses **BetterAuth** with configured OAuth login providers for user authentic
 | Bootstrap token | 5 minutes            | One-time VM credential injection | API Worker              |
 | Callback token  | 24 hours (renewable) | VM Agent → API callbacks         | API Worker              |
 
+### SAM Connector tokens
+
+The [SAM Connector](/docs/guides/sam-connector/) lets an external AI app act as a person through
+OAuth, with each installation as its own authorization server (dynamic client registration). The
+person approves the requested scopes on SAM's consent page, which names the app and the host it
+returns to and warns when that host is a local program.
+
+- Tokens are stored hashed, and their authorization properties are encrypted.
+- Refresh tokens rotate on every refresh. Reusing a spent refresh token revokes the whole
+  connection, including its access tokens, and the app has to reconnect.
+- A revoked connection is rejected at once by an authorization check in D1, and its tokens are also
+  deleted from KV.
+- Every operation runs as the person, with their current project membership, and only on chats they
+  started when it replies to, answers, or stops work. Personal API tokens used as Connector bearers
+  get full read and write access.
+
 ### Callback Tokens
 
 VM agents call the API Worker with RS256 callback tokens signed by the Worker (`apps/api/src/services/jwt.ts`). There are two scopes, and neither can stand in for the other:
