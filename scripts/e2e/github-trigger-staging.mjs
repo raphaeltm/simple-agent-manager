@@ -8,6 +8,7 @@ import {
   auditPrompt,
   findOwnedAuditTrigger,
   resolveAuditRepository,
+  smokeSessionCookie,
 } from './github-trigger-audit-fixture.mjs';
 
 const required = (name) => {
@@ -235,10 +236,14 @@ if (phase === 'send') {
   }
 
   try {
-    const login = await request('/api/auth/token-login', 'POST', {
-      token: required('SMOKE_TEST_TOKEN'),
+    const loginResponse = await context.request.post(`${apiUrl}/api/auth/token-login`, {
+      data: { token: required('SMOKE_TEST_TOKEN') },
+      timeout: requestTimeoutMs,
     });
+    assert(loginResponse.ok(), `Token login HTTP ${loginResponse.status()}`);
+    const login = await loginResponse.json();
     assert(login.success, 'Token login failed');
+    await context.addCookies([smokeSessionCookie(loginResponse.headers()['set-cookie'] || '')]);
     if (phase === 'prepare') {
       step = 'fixture access';
       const project = await request(prefix);

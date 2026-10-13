@@ -1328,3 +1328,25 @@ test.describe('GitHub trigger contract form', () => {
     await assertNoOverflow(page);
   });
 });
+
+test('audit signed session cookie shares approved API and app hosts only', async ({ context }) => {
+  const { smokeSessionCookie } =
+    await import('../../../../scripts/e2e/github-trigger-audit-fixture.mjs');
+  const signedValue = `${crypto.randomUUID()}.${crypto.randomUUID()}=`;
+  await context.addCookies([
+    smokeSessionCookie(
+      `__Secure-better-auth.session_token=${encodeURIComponent(signedValue)}; Path=/; HttpOnly; Secure`
+    ),
+  ]);
+  for (const host of ['https://api.sammy.party', 'https://app.sammy.party']) {
+    const cookies = await context.cookies(host);
+    expect(cookies).toHaveLength(1);
+    expect(cookies[0]).toMatchObject({
+      value: signedValue,
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None',
+    });
+  }
+  expect(await context.cookies('https://unrelated.example')).toHaveLength(0);
+});

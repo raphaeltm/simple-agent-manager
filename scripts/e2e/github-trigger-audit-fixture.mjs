@@ -58,3 +58,24 @@ export function resolveAuditRepository(
   assert(Number.isSafeInteger(repository.id) && repository.id > 0, 'Invalid repository ID');
   return { repository: repository.fullName, repositoryId: repository.id };
 }
+
+/** Same signed-cookie sharing contract as tests/smoke/helpers/auth.ts; never log header/value. */
+export function smokeSessionCookie(setCookieHeader) {
+  const match = setCookieHeader.match(/(__Secure-)?better-auth\.session_token=([^;]+)/);
+  assert(match, 'Token login succeeded without signed session cookie');
+  let signedValue;
+  try {
+    signedValue = decodeURIComponent(match[2]);
+  } catch {
+    throw new Error('Malformed signed session cookie');
+  }
+  return {
+    name: `${match[1] || ''}better-auth.session_token`,
+    value: signedValue,
+    domain: '.sammy.party',
+    path: '/',
+    httpOnly: true,
+    secure: true,
+    sameSite: 'None',
+  };
+}

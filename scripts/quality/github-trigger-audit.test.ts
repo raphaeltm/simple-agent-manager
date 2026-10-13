@@ -10,6 +10,7 @@ import {
   auditPrompt,
   findOwnedAuditTrigger,
   resolveAuditRepository,
+  smokeSessionCookie,
 } from '../e2e/github-trigger-audit-fixture.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -232,5 +233,36 @@ describe('actual project detail fixture contract', () => {
         12345
       )
     ).toThrow();
+  });
+});
+
+describe('normal smoke signed-cookie browser contract', () => {
+  it('preserves signed value and established secure staging-domain attributes', () => {
+    expect(
+      smokeSessionCookie(
+        [
+          '__Secure-better-auth.session_token',
+          'opaque.signature%3D; Path=/; HttpOnly; Secure',
+        ].join('=')
+      )
+    ).toEqual({
+      name: '__Secure-better-auth.session_token',
+      value: 'opaque.signature=',
+      domain: '.sammy.party',
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None',
+    });
+  });
+  it('rejects malformed encoding without disclosing cookie contents', () => {
+    expect(() =>
+      smokeSessionCookie(['better-auth.session_token', 'private-canary%ZZ'].join('='))
+    ).toThrow('Malformed signed session cookie');
+  });
+  it('fails missing cookie without disclosing header content', () => {
+    expect(() => smokeSessionCookie('private-header-canary')).toThrow(
+      'Token login succeeded without signed session cookie'
+    );
   });
 });
