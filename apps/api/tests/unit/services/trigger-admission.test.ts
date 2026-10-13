@@ -179,6 +179,49 @@ describe('admitAndSubmitTriggerExecution', () => {
     expect(await admit(env, trigger)).toEqual({ outcome: 'inactive', reason: 'paused' });
   });
 
+  it.each([null, 1])(
+    'does not re-pause a concurrent resume from failure boundary %s',
+    async (boundary) => {
+      const { sqlite, env, trigger } = setup();
+      sqlite
+        .prepare('UPDATE triggers SET auto_pause_reset_sequence = ?, next_execution_sequence = 2')
+        .run(boundary);
+      sqlite
+        .prepare(
+          `INSERT INTO trigger_executions (id, trigger_id, project_id, status, sequence_number, created_at) VALUES ('old-failure', ?, ?, 'failed', 1, ?)`
+        )
+        .run(trigger.id, PROJECT_ID, BASE_TIME);
+      const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+      let resumed = false;
+      vi.spyOn(env.DATABASE, 'prepare').mockImplementation((sql) => {
+        if (sql.includes("UPDATE triggers SET status = 'paused'") && !resumed) {
+          // The real resume SQL commits after the failure SELECT but before its pause CAS.
+          sqlite
+            .prepare(
+              "UPDATE triggers SET status = 'active', auto_pause_reset_sequence = next_execution_sequence"
+            )
+            .run();
+          resumed = true;
+        }
+        return prepare(sql);
+      });
+      const submitter = vi.fn(async () => ({
+        taskId: 'resumed-task',
+        sessionId: 'resumed-session',
+        branchName: 'resumed',
+      }));
+      expect(await admit(env, trigger, submitter)).toMatchObject({ outcome: 'submitted' });
+      expect(resumed).toBe(true);
+      expect(submitter).toHaveBeenCalledTimes(1);
+      expect(
+        sqlite.prepare('SELECT status, auto_pause_reset_sequence AS boundary FROM triggers').get()
+      ).toEqual({ status: 'active', boundary: 2 });
+      expect(
+        sqlite.prepare("SELECT status FROM trigger_executions WHERE id = 'old-failure'").get()
+      ).toEqual({ status: 'failed' });
+    }
+  );
+
   it('a cancelled attempt breaks a consecutive failure streak', async () => {
     const { sqlite, env, trigger } = setup();
     sqlite

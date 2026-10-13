@@ -82,9 +82,9 @@ async function consecutiveFailureCount(
   env: Env,
   triggerId: string,
   threshold: number
-): Promise<number> {
+): Promise<{ count: number; resetSequence: number | null }> {
   const rows = await env.DATABASE.prepare(
-    `SELECT e.status, t.status AS taskStatus
+    `SELECT e.status, t.status AS taskStatus, tr.auto_pause_reset_sequence AS resetSequence
        FROM trigger_executions e
        LEFT JOIN tasks t ON t.id = e.task_id
       JOIN triggers tr ON tr.id = e.trigger_id
@@ -93,7 +93,7 @@ async function consecutiveFailureCount(
       ORDER BY e.sequence_number DESC, e.created_at DESC LIMIT ?`
   )
     .bind(triggerId, threshold)
-    .all<{ status: string; taskStatus: string | null }>();
+    .all<{ status: string; taskStatus: string | null; resetSequence: number | null }>();
   let count = 0;
   for (const row of rows.results) {
     const linkedTaskStillLive =
@@ -101,7 +101,7 @@ async function consecutiveFailureCount(
     if (row.status !== 'failed' || linkedTaskStillLive) break;
     count += 1;
   }
-  return count;
+  return { count, resetSequence: rows.results[0]?.resetSequence ?? null };
 }
 
 async function recordSkippedExecution(
@@ -199,18 +199,25 @@ export async function admitAndSubmitTriggerExecution(
     env.TRIGGER_AUTO_PAUSE_AFTER_FAILURES,
     DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES
   );
-  if (
-    !input.allowPaused &&
-    (await consecutiveFailureCount(env, trigger.id, autoPauseThreshold)) >= autoPauseThreshold
-  ) {
-    const now = new Date().toISOString();
-    await env.DATABASE.prepare(
+  while (!input.allowPaused) {
+    const failures = await consecutiveFailureCount(env, trigger.id, autoPauseThreshold);
+    if (failures.count < autoPauseThreshold) break;
+    const paused = await env.DATABASE.prepare(
       `UPDATE triggers SET status = 'paused', next_fire_at = NULL, updated_at = ?
-       WHERE id = ? AND project_id = ? AND status = 'active'`
+       WHERE id = ? AND project_id = ? AND status = 'active'
+         AND auto_pause_reset_sequence IS ?`
     )
-      .bind(now, trigger.id, trigger.projectId)
+      .bind(new Date().toISOString(), trigger.id, trigger.projectId, failures.resetSequence)
       .run();
-    return { outcome: 'inactive', reason: 'paused' };
+    if (paused.meta.changes) return { outcome: 'inactive', reason: 'paused' };
+    // Resume may have replaced the failure window while it was being counted.
+    // Recount that window; reservation below independently checks current status.
+    const state = await env.DATABASE.prepare(
+      'SELECT status FROM triggers WHERE id = ? AND project_id = ?'
+    )
+      .bind(trigger.id, trigger.projectId)
+      .first<{ status: string }>();
+    if (state?.status !== 'active') break;
   }
 
   const executionId = ulid();
