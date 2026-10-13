@@ -198,10 +198,23 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Checkout verified production SHA
+      - name: Checkout trusted production main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.validate-manual-dispatch.outputs.deploy_sha }}
+          ref: refs/heads/main
+      - name: Verify checked-out production SHA
+        env:
+          EXPECTED_DEPLOY_SHA: ${{ needs.validate-manual-dispatch.outputs.deploy_sha }}
+        run: |
+          if [[ ! "$EXPECTED_DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Production audit requires a valid approved commit SHA" >&2
+            exit 1
+          fi
+          checked_out_sha=$(git rev-parse HEAD)
+          if [[ "$checked_out_sha" != "$EXPECTED_DEPLOY_SHA" ]]; then
+            echo "Production audit checkout does not match the validated SHA" >&2
+            exit 1
+          fi
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:

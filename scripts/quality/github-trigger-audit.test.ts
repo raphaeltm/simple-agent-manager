@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
@@ -158,6 +159,14 @@ describe('audit workflow isolation', () => {
         expect(job.if).toContain("github.ref == 'refs/heads/main'");
         expect(job.if).toContain("needs.validate-manual-dispatch.result == 'success'");
         expect(job.environment).toBe('production');
+        expect(job.steps[0].with.ref).toBe('refs/heads/main');
+        const guard = job.steps.find(
+          (step: { name: string }) => step.name === 'Verify checked-out production SHA'
+        );
+        expect(job.steps.indexOf(guard)).toBeLessThan(job.steps.indexOf(secretSteps[0]));
+        expect(guard.env.EXPECTED_DEPLOY_SHA).toBe(
+          '${{ needs.validate-manual-dispatch.outputs.deploy_sha }}'
+        );
       } else expect(secretSteps[0].if).toContain('inputs.github_trigger_audit_send_only');
     });
   }
@@ -350,4 +359,38 @@ it('rejects truncated or stalled message pagination', async () => {
   await expect(readAuditMessages(async () => ({ messages: [], hasMore: true }))).rejects.toThrow(
     'Missing exact message cursor'
   );
+});
+
+it('production checkout guard rejects main drift before signing', () => {
+  const workflow = parse(readFileSync(resolve(root, '.github/workflows/deploy.yml'), 'utf8'));
+  const guard = workflow.jobs['github-trigger-audit'].steps.find(
+    (step: { name: string }) => step.name === 'Verify checked-out production SHA'
+  );
+  const directory = mkdtempSync(join(tmpdir(), 'sam-audit-checkout-'));
+  try {
+    writeFileSync(join(directory, 'git'), '#!/bin/sh\nprintf "%s\\n" "$TEST_CHECKOUT_SHA"\n', {
+      mode: 0o700,
+    });
+    const env = {
+      ...process.env,
+      PATH: `${directory}:${process.env.PATH}`,
+      EXPECTED_DEPLOY_SHA: 'a'.repeat(40),
+      TEST_CHECKOUT_SHA: 'a'.repeat(40),
+    };
+    expect(() => execFileSync('bash', ['-c', guard.run], { env, stdio: 'pipe' })).not.toThrow();
+    expect(() =>
+      execFileSync('bash', ['-c', guard.run], {
+        env: { ...env, TEST_CHECKOUT_SHA: 'b'.repeat(40) },
+        stdio: 'pipe',
+      })
+    ).toThrow();
+    expect(() =>
+      execFileSync('bash', ['-c', guard.run], {
+        env: { ...env, EXPECTED_DEPLOY_SHA: 'malformed', TEST_CHECKOUT_SHA: 'malformed' },
+        stdio: 'pipe',
+      })
+    ).toThrow();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
