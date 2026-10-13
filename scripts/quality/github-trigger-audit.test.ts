@@ -6,7 +6,11 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
-import { auditPrompt, findOwnedAuditTrigger } from '../e2e/github-trigger-audit-fixture.mjs';
+import {
+  auditPrompt,
+  findOwnedAuditTrigger,
+  resolveAuditRepository,
+} from '../e2e/github-trigger-audit-fixture.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const fixture = {
@@ -186,4 +190,47 @@ describe('audit cleanup ownership', () => {
       expect(() => findOwnedAuditTrigger(fixture, [changed])).toThrow();
     }
   );
+});
+
+describe('actual project detail fixture contract', () => {
+  const project = {
+    id: fixture.projectId,
+    status: 'active',
+    repoProvider: 'github',
+    repository: 'Test/Repo',
+    installationId: 'internal-installation',
+  };
+  const installations = [{ id: 'internal-installation', installationId: 12345 }];
+  const repository = { id: 9876, fullName: 'test/repo', installationId: 'internal-installation' };
+  it('resolves immutable ID from normal OAuth repository response when detail omits githubRepoId', () => {
+    expect(
+      resolveAuditRepository(project, installations, { repositories: [repository] }, 12345)
+    ).toEqual({ repository: 'test/repo', repositoryId: 9876 });
+  });
+  it.each([
+    [],
+    [{ ...repository, installationId: 'another-installation' }],
+    [repository, repository],
+    [{ ...repository, id: 0 }],
+  ])(
+    'rejects absent, cross-installation, ambiguous or invalid repository evidence',
+    (repositories) => {
+      expect(() =>
+        resolveAuditRepository(project, installations, { repositories }, 12345)
+      ).toThrow();
+    }
+  );
+  it('rejects mismatched external installation and detached project', () => {
+    expect(() =>
+      resolveAuditRepository(project, installations, { repositories: [repository] }, 555)
+    ).toThrow();
+    expect(() =>
+      resolveAuditRepository(
+        { ...project, status: 'detached' },
+        installations,
+        { repositories: [repository] },
+        12345
+      )
+    ).toThrow();
+  });
 });

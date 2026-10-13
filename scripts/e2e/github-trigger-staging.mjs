@@ -4,7 +4,11 @@ import assert from 'node:assert/strict';
 import { createHmac, randomUUID, sign } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
-import { auditPrompt, findOwnedAuditTrigger } from './github-trigger-audit-fixture.mjs';
+import {
+  auditPrompt,
+  findOwnedAuditTrigger,
+  resolveAuditRepository,
+} from './github-trigger-audit-fixture.mjs';
 
 const required = (name) => {
   const value = process.env[name];
@@ -238,28 +242,13 @@ if (phase === 'send') {
     if (phase === 'prepare') {
       step = 'fixture access';
       const project = await request(prefix);
-      assert(
-        project.status === 'active' && project.repoProvider === 'github',
-        'Active GitHub project required'
-      );
-      fixture.repository = project.repository;
-      fixture.repositoryId = project.githubRepoId;
       const installations = await request('/api/github/installations');
-      const installation = installations.find((item) => item.id === project.installationId);
-      assert(
-        installation && Number(installation.installationId) === fixture.installationId,
-        'Fixture installation mismatch'
-      );
       const repositories = await request(
         `/api/github/repositories?installation_id=${encodeURIComponent(project.installationId)}`
       );
-      assert(
-        repositories.repositories.some(
-          (item) =>
-            item.id === fixture.repositoryId &&
-            item.fullName.toLowerCase() === fixture.repository.toLowerCase()
-        ),
-        'Existing smoke OAuth principal lacks fixture access'
+      Object.assign(
+        fixture,
+        resolveAuditRepository(project, installations, repositories, fixture.installationId)
       );
       const before = await request(`${prefix}/triggers`);
       assert(

@@ -31,3 +31,30 @@ export function findOwnedAuditTrigger(fixture, triggers) {
   );
   return candidate.id;
 }
+
+/** Project detail intentionally omits githubRepoId; use the OAuth-scoped repository response. */
+export function resolveAuditRepository(
+  project,
+  installations,
+  repositories,
+  externalInstallationId
+) {
+  assert(
+    project.status === 'active' && project.repoProvider === 'github',
+    'Active GitHub project required'
+  );
+  const installation = installations.find((item) => item.id === project.installationId);
+  assert(
+    installation && Number(installation.installationId) === externalInstallationId,
+    'Fixture installation mismatch'
+  );
+  const matches = repositories.repositories.filter(
+    (item) =>
+      item.installationId === project.installationId &&
+      item.fullName.toLowerCase() === project.repository.toLowerCase()
+  );
+  assert(matches.length === 1, 'Existing smoke OAuth principal lacks unique fixture access');
+  const repository = matches[0];
+  assert(Number.isSafeInteger(repository.id) && repository.id > 0, 'Invalid repository ID');
+  return { repository: repository.fullName, repositoryId: repository.id };
+}
