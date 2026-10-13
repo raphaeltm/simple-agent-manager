@@ -29,6 +29,12 @@ export function findOwnedAuditTrigger(fixture, triggers) {
     candidate.promptTemplate === auditPrompt(fixture.marker),
     'Fixture prompt ownership mismatch'
   );
+  if (fixture.agentProfileId) {
+    assert(
+      candidate.agentProfileId === fixture.agentProfileId && candidate.taskMode === 'conversation',
+      'Fixture execution configuration mismatch'
+    );
+  }
   return candidate.id;
 }
 
@@ -78,4 +84,17 @@ export function smokeSessionCookie(setCookieHeader) {
     secure: true,
     sameSite: 'None',
   };
+}
+
+export function hasAuditReply(task, messages, marker) {
+  return (
+    task.status === 'in_progress' &&
+    task.executionStep === 'awaiting_followup' &&
+    messages.some(
+      (item) =>
+        item.role === 'assistant' &&
+        typeof item.content === 'string' &&
+        item.content.includes(marker)
+    )
+  );
 }

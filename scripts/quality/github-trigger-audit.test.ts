@@ -8,6 +8,7 @@ import { parse } from 'yaml';
 
 import {
   auditPrompt,
+  hasAuditReply,
   findOwnedAuditTrigger,
   resolveAuditRepository,
   smokeSessionCookie,
@@ -264,5 +265,46 @@ describe('normal smoke signed-cookie browser contract', () => {
     expect(() => smokeSessionCookie('private-header-canary')).toThrow(
       'Token login succeeded without signed session cookie'
     );
+  });
+});
+
+describe('successful audit reply requirement', () => {
+  const message = { role: 'assistant', content: fixture.marker };
+  it('requires awaiting-followup and an actual matching assistant reply', () => {
+    expect(
+      hasAuditReply(
+        { status: 'in_progress', executionStep: 'awaiting_followup' },
+        [message],
+        fixture.marker
+      )
+    ).toBe(true);
+    expect(
+      hasAuditReply(
+        { status: 'in_progress', executionStep: 'executing' },
+        [message],
+        fixture.marker
+      )
+    ).toBe(false);
+    expect(
+      hasAuditReply(
+        { status: 'failed', executionStep: 'awaiting_followup' },
+        [message],
+        fixture.marker
+      )
+    ).toBe(false);
+    expect(
+      hasAuditReply(
+        { status: 'in_progress', executionStep: 'awaiting_followup' },
+        [{ role: 'user', content: fixture.marker }],
+        fixture.marker
+      )
+    ).toBe(false);
+    expect(
+      hasAuditReply(
+        { status: 'in_progress', executionStep: 'awaiting_followup' },
+        [],
+        fixture.marker
+      )
+    ).toBe(false);
   });
 });

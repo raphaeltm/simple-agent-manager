@@ -6,6 +6,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 import {
   auditPrompt,
+  hasAuditReply,
   findOwnedAuditTrigger,
   resolveAuditRepository,
   smokeSessionCookie,
@@ -206,6 +207,7 @@ if (phase === 'send') {
           deliveryId: randomUUID(),
           projectId: required('GITHUB_TRIGGER_AUDIT_PROJECT_ID'),
           installationId: Number(required('GITHUB_TRIGGER_AUDIT_INSTALLATION_ID')),
+          agentProfileId: required('GITHUB_TRIGGER_AUDIT_PROFILE_ID'),
         };
   if (phase === 'verify') validateFixture(fixture);
   const prefix = `/api/projects/${fixture.projectId}`;
@@ -255,6 +257,20 @@ if (phase === 'send') {
         fixture,
         resolveAuditRepository(project, installations, repositories, fixture.installationId)
       );
+      const profiles = await request(`${prefix}/agent-profiles`);
+      const profile = profiles.items.find((item) => item.id === fixture.agentProfileId);
+      assert(
+        profile?.agentType === 'openai-codex' &&
+          (!profile.workspaceProfile || profile.workspaceProfile === 'full'),
+        'Existing full Codex profile required'
+      );
+      const credentials = await request('/api/credentials/agent');
+      assert(
+        credentials.credentials.some(
+          (item) => item.agentType === 'openai-codex' && item.provider === 'openai' && item.isActive
+        ),
+        'Existing active Codex credential required'
+      );
       const before = await request(`${prefix}/triggers`);
       assert(
         !before.triggers.some((item) => item.sourceType === 'github'),
@@ -297,6 +313,10 @@ if (phase === 'send') {
       await page.getByLabel('Text contains').fill(fixture.marker);
       step = 'form prompt';
       await page.getByLabel('Prompt template', { exact: true }).fill(auditPrompt(fixture.marker));
+      step = 'form explicit execution';
+      await page.getByRole('button', { name: 'Advanced Options', exact: true }).click();
+      await page.getByLabel('Agent Profile', { exact: true }).selectOption(fixture.agentProfileId);
+      await page.getByLabel('Task mode', { exact: true }).selectOption('conversation');
       step = 'form screenshots';
       await page.screenshot({ path: `${output}/form-desktop.png` });
       await page.setViewportSize({ width: 375, height: 667 });
@@ -314,6 +334,10 @@ if (phase === 'send') {
       const after = await request(`${prefix}/triggers`);
       const created = after.triggers.find((item) => item.id === fixture.triggerId);
       assert.deepEqual(created.githubConfig.filters.actions, ['opened']);
+      assert(
+        created.agentProfileId === fixture.agentProfileId && created.taskMode === 'conversation',
+        'Explicit conversation profile lost'
+      );
       assert(
         after.triggers.filter((item) => item.sourceType === 'github').length === 1,
         'Concurrent GitHub trigger detected'
@@ -357,6 +381,7 @@ if (phase === 'send') {
       const deadline = Date.now() + Number(process.env.GITHUB_TRIGGER_AUDIT_TIMEOUT_MS || '120000');
       let execution;
       let task;
+      let agentResponded = false;
       do {
         const executions = await request(`${prefix}/triggers/${fixture.triggerId}/executions`);
         assert(executions.executions.length <= 1, 'Duplicate execution for one delivery ID');
@@ -365,19 +390,37 @@ if (phase === 'send') {
         if (execution?.taskId) {
           task = await request(`${prefix}/tasks/${execution.taskId}`);
           assert(!['failed', 'cancelled'].includes(task.status), 'Admitted task failed');
-          if (['in_progress', 'completed'].includes(task.status)) break;
+          if (
+            task.status === 'in_progress' &&
+            task.executionStep === 'awaiting_followup' &&
+            task.workspaceId
+          ) {
+            const workspace = await request(`/api/workspaces/${task.workspaceId}`);
+            if (workspace.chatSessionId) {
+              const messages = await request(
+                `${prefix}/sessions/${workspace.chatSessionId}/messages?role=assistant&limit=20`
+              );
+              if (hasAuditReply(task, messages.messages, fixture.marker)) {
+                agentResponded = true;
+                break;
+              }
+            }
+          }
         }
         await new Promise((resolve) => setTimeout(resolve, 1000));
       } while (Date.now() < deadline);
       assert(
-        execution?.taskId && ['in_progress', 'completed'].includes(task?.status),
-        'Task did not start before deadline'
+        agentResponded &&
+          execution?.taskId &&
+          task?.status === 'in_progress' &&
+          task.executionStep === 'awaiting_followup',
+        'Agent did not respond before deadline'
       );
       assert(execution.renderedPrompt.includes(fixture.marker), 'Payload template lost marker');
       result.taskId = execution.taskId;
       result.deliveryId = fixture.deliveryId;
       result.checks.push(
-        'signed Unicode issue admitted once; task reached normal running/completed state'
+        'signed Unicode issue admitted once; conversation reached awaiting_followup with marker reply'
       );
       result.pass = true;
     }
