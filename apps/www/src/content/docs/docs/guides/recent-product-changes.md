@@ -75,13 +75,19 @@ Also changed this week:
 
 ### For self-hosters & admins
 
-Before you update, know about two regressions. Releases v2026.10.09 to v2026.10.12 can't move a
-session off a VM that runs short of memory; the release after v2026.10.12 fixes that, and is also
-the first in which a
+Before you update, check two regressions against the release you pick. Each release on
+[SAM's releases page](https://github.com/raphaeltm/simple-agent-manager/releases) lists the pull
+requests it contains.
+
+- **Memory-pressure moves:** from v2026.10.09, SAM can't move a session off a VM that runs short of
+  memory. Pull request #2319 fixes it.
+- **`@` messages:** from v2026.10.10, messages with `@` and a word fail (the known issue above). No
+  release fixes it yet.
+
+A release that lists pull request #2317 also ends a
 [sleep that can't finish](/docs/guides/session-troubleshooting/#sam-could-not-finish-putting-the-session-to-sleep)
-ends visibly. Every release from v2026.10.10 has the `@` known issue above, which no release fixes
-yet. There are no new secrets or Cloudflare token permissions; the new database migrations run in
-the deploy pipeline, and the deploy creates the Connector's storage.
+visibly. There are no new secrets or Cloudflare token permissions; the new database migrations run
+in the deploy pipeline, and the deploy creates the Connector's storage.
 
 - **The SAM Connector is on after you update** (from v2026.10.10). To keep it off, switch off
   **Enable Connector** in **Admin → Integrations → Connector**, or set the `CONNECTOR_ENABLED`
