@@ -44,6 +44,8 @@ gaps are stale leftovers, user-goal framing, discoverability, and the changelog 
 | #2239/#2241/#2303/#2302/#2272/#2268 | pool-limit drain, resource totals, Worker var cleanup, dispatch sessionId, backoff, first user start exempt from build queue | changelog lines only |
 
 Product bugs found (filed as SAM ideas, not docs work):
+- `01M4SP5Z89S6V8SV858K6XZK06`: SAM-delivered prompts (agent-message notices, scheduled actions,
+  parent wake-ups) persist with `origin` NULL and render as the user's own chat bubbles.
 - `01M4SN1TA0YTFK8QWQEFWR4K83` (priority 9): since #2291 any message with an unmatched `@word`
   (`bob@example.com`, `@types/node`) fails with 404 "Agent profile not found". Proven with a
   throwaway real-SQLite probe of `enrichMessageWithMentions`; five callers don't catch.
@@ -53,19 +55,19 @@ Product bugs found (filed as SAM ideas, not docs work):
 ## Implementation checklist
 
 - [x] Research complete; table of user-facing changes with code citations
-- [ ] Stale fixes: fork "summary" (7, done), wake remnants (agents.md:135, self-hosting:128 & 596,
+- [x] Stale fixes: fork "summary" (7, done), wake remnants (agents.md:135, self-hosting:128 & 596,
       mcp-servers:81, chat-features caution box, agents.md:230), agents.md:198 isolation claim,
       agents.md:115 chip timing, concepts:106/134, configuration.md:820/1363/1707
-- [ ] Troubleshooting: Expired (done), #2317 sleep notices, failed wake stays Sleeping (#2276),
+- [x] Troubleshooting: Expired (done), #2317 sleep notices, failed wake stays Sleeping (#2276),
       eviction relocation (#2319), index entries
-- [ ] `sam-connector.md` rewritten for users (+ admin/self-host part); links from quickstart,
+- [x] `sam-connector.md` rewritten for users (+ admin/self-host part); links from quickstart,
       overview, concepts, mcp-servers; account vs project "Settings → Access"
-- [ ] `configuration.md`: SAM Connector section (`CONNECTOR_*`, `OAUTH_KV`)
-- [ ] Triggers: agents can create GitHub/webhook triggers; Claude Code redemption gap + Rotate
+- [x] `configuration.md`: SAM Connector section (`CONNECTOR_*`, `OAUTH_KV`)
+- [x] Triggers: agents can create GitHub/webhook triggers; Claude Code redemption gap + Rotate
       workaround; webhook-triggers:19; move GitHub MCP section out of mcp-servers
-- [ ] Agent messages (#2213): what the recipient chat shows; MCP tools table rows
-- [ ] CLI guide (install, sign in, project, work loop) + sidebar entries
-- [ ] Small: chat-features Retry hidden when expired; app-deployments `use_api_socket`; security
+- [x] Agent messages (#2213): what the recipient chat shows; MCP tools table rows
+- [x] CLI guide (install, sign in, project, work loop) + sidebar entries
+- [x] Small: chat-features Retry hidden when expired; app-deployments `use_api_socket`; security
       isolation links; agents.md MCP table
 - [ ] Screenshots via Playwright spec (real components, mock data): Connector Settings → Access and
       consent; Fork pre-filled composer; Expired chat. Optional: repair Resources drawer docs spec
