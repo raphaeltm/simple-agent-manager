@@ -21,7 +21,7 @@ import { makeMockUser, seedTheme } from './audit-helpers';
 import { fulfillDocsChatRoute, neighboringDocsSessions } from './docs-chat-fixtures';
 import { docsShot } from './docs-shot';
 
-const PROJECT_ID = 'proj-docs-states';
+const PROJECT_ID = '01KGW3FTJ8R5N2M7X4Q9B6C0VD';
 
 /**
  * Anchored to the real clock, not a fixed date: the UI renders relative times ("2m ago"),
@@ -70,6 +70,9 @@ interface SessionFixture {
   attention?: { kind: 'wake_failed'; reason: string };
   errorMessage?: string;
   terminalReason?: string;
+  /** Realistic IDs and branch for scenes whose image shows them; defaults derive from `id`. */
+  taskId?: string;
+  outputBranch?: string;
 }
 
 const WAKE_FAILED: SessionFixture = {
@@ -96,7 +99,10 @@ const DIAGRAM: SessionFixture = {
  * terminal reason (`SNAPSHOT_EXPIRED_REASON`), and the chat offers a fork instead of a wake.
  */
 const EXPIRED: SessionFixture = {
-  id: 'sess-expired',
+  // The fork scene shows these IDs and the branch, so they look like the real thing.
+  id: '6f2c9e14-8b3d-4a7e-9c51-2d0e7f4a8b36',
+  taskId: '01KH8ZQ4TR6M2N9V3X7B5C1D0E',
+  outputBranch: 'sam/add-csv-export-orders-page',
   topic: 'Add a CSV export to the orders page',
   status: 'stopped',
   taskStatus: 'cancelled',
@@ -109,7 +115,7 @@ const EXPIRED: SessionFixture = {
 const OTHER_SESSIONS: SessionFixture[] = neighboringDocsSessions(NOW);
 
 function sessionPayload(fixture: SessionFixture) {
-  const taskId = `task-${fixture.id}`;
+  const taskId = fixture.taskId ?? `task-${fixture.id}`;
   return {
     id: fixture.id,
     projectId: PROJECT_ID,
@@ -144,7 +150,7 @@ function sessionPayload(fixture: SessionFixture) {
       // An asleep or live conversation is past provisioning; any earlier step would
       // (correctly) put the "Starting…" provisioning banner over the chat.
       executionStep: fixture.taskStatus === 'in_progress' ? 'running' : null,
-      outputBranch: `sam/${fixture.id}`,
+      outputBranch: fixture.outputBranch ?? `sam/${fixture.id}`,
       outputPrUrl: null,
       errorMessage: fixture.errorMessage ?? null,
       terminalReason: fixture.terminalReason ?? null,
@@ -468,13 +474,16 @@ async function forkExpiredChat(page: Page) {
   return composer.first();
 }
 
-test('docs: fork composer', async ({ page }) => {
-  test.skip(isMobile(page), 'desktop capture');
-  await page.setViewportSize({ width: 1060, height: 720 });
-  await forkExpiredChat(page);
-  // From the Forking banner to the send hint: the chat column only, narrow enough to read on a
-  // phone, so there is no separate phone image. The message box shows its first lines; the
-  // guide lists the IDs that follow them.
+async function captureForkComposer(page: Page, width: number, name: string) {
+  await page.setViewportSize({ width, height: 760 });
+  const composer = await forkExpiredChat(page);
+  // Type the next instruction at the end, as the guide says; the box scrolls to the caret,
+  // which brings the IDs into view above it.
+  await composer.click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('Now add the same CSV export to the invoices page.');
+  await expect(composer).toHaveValue(/invoices page\.$/);
+  // From the Forking banner to the send hint: the chat column only.
   const banner = await page
     .getByRole('button', { name: 'Cancel fork/retry' })
     .locator('..')
@@ -484,7 +493,22 @@ test('docs: fork composer', async ({ page }) => {
   if (!banner || !hint || !viewport) throw new Error('fork composer has no geometry');
   const x = banner.x - 16;
   const y = banner.y - 16;
-  await docsShot(page, 'chat-fork-composer', {
+  await docsShot(page, name, {
     clip: { x, y, width: viewport.width - x, height: hint.y + hint.height + 16 - y },
   });
+}
+
+/** Wide enough that the message box shows all three IDs above the added instruction. */
+test('docs: fork composer', async ({ page }) => {
+  test.skip(isMobile(page), 'desktop capture');
+  await captureForkComposer(page, 1440, 'chat-fork-composer');
+});
+
+/**
+ * The phone variant: a narrower desktop crop stays legible when a phone scales it down, which
+ * the phone layout (composer below the starter prompts, two lines visible) does not.
+ */
+test('docs: fork composer, narrow', async ({ page }) => {
+  test.skip(isMobile(page), 'desktop capture');
+  await captureForkComposer(page, 1060, 'chat-fork-composer-mobile');
 });
