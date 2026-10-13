@@ -301,12 +301,12 @@ _needs_. SAM resolves them, then keeps only the offerings and nodes that satisfy
 
 ### The fields
 
-| Field              | Meaning                                                                                                   | Platform default |
-| ------------------ | --------------------------------------------------------------------------------------------------------- | ---------------- |
-| **vCPU**           | Minimum vCPU                                                                                              | 2                |
-| **Memory (GB)**    | Minimum RAM                                                                                               | 4                |
-| **Disk (GB)**      | Minimum disk                                                                                              | 40               |
-| **Exclusive node** | The work must have the machine to itself                                                                  | Off              |
+| Field              | Meaning                                  | Platform default |
+| ------------------ | ---------------------------------------- | ---------------- |
+| **vCPU**           | Minimum vCPU                             | 2                |
+| **Memory (GB)**    | Minimum RAM                              | 4                |
+| **Disk (GB)**      | Minimum disk                             | 40               |
+| **Exclusive node** | The work must have the machine to itself | Off              |
 
 Every field is optional. Leave a field blank and it **inherits** — it is resolved from the next
 level down, field by field. Setting vCPU without setting memory is fine and normal.
@@ -392,7 +392,7 @@ SAM refuses it rather than guessing. A machine SAM cannot measure is never given
 Node Scheduling**. Legacy workspace-count and memory-threshold values remain readable for
 compatibility, but do not gate placement. The disk-pressure threshold is deployment-controlled.
 
-Managed workspace nodes are user-isolated, so **Spread** opens a separate node per workspace for
+Managed workspace nodes are [user-isolated](/docs/architecture/security/#one-node-belongs-to-one-user), so **Spread** opens a separate node per workspace for
 that user until their node count in the pool reaches [**Maximum nodes per
 user**](#maximum-nodes-per-user), then packs further sessions onto those nodes. **Pack** takes the
 largest allowed offering and fills it densely; **Smallest fit** takes the smallest, then cheapest,

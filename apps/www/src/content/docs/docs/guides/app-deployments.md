@@ -84,6 +84,13 @@ volumes:
     x-sam-size-hint-mb: 2048
 ```
 
+Deployment machines run a restricted subset of Compose. Settings that would give a container power
+over the machine itself, such as `privileged`, `cap_add`, `network_mode`, `devices`, and
+`use_api_socket` (access to the Docker Engine API), aren't allowed: a release that includes one is
+refused with a message naming the setting, and `build_and_publish` removes them from the services it
+publishes. A deployment machine can host several of your environments, so this keeps one app from
+reaching another.
+
 Use `mode: host` for service ports such as databases, queues, and workers that should be reachable only inside the deployed Compose stack/private network. Public web/API entrypoints should use normal `ports:` entries or explicit public `x-sam-routes`.
 
 If an app needs to know its public hostname before it starts, agents should preview routes before publishing and then write the returned URLs into deployment configuration. Common examples are Django `ALLOWED_HOSTS` / CSRF trusted origins, CORS origins, OAuth callback URLs, webhook callback URLs, and canonical app URL variables.

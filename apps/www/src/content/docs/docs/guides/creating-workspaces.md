@@ -26,6 +26,11 @@ A workspace runs either as an **Instant** container on Cloudflare's network or a
 
 Submitted tasks always use a VM, so a project that mainly runs tasks needs cloud compute regardless.
 
+A VM belongs to you alone: SAM never places another person's workspace on it, though several of your
+own workspaces can share one. That machine, not the devcontainer, is the security boundary, which
+is why your repository's devcontainer settings, including Docker-in-Docker, are applied as written.
+See the [workspace isolation model](/docs/architecture/security/#workspace-isolation-model).
+
 Everything below — providers, VM sizes, the terminal, stop/restart/delete — describes the **VM** path. If your sessions are starting in seconds and the agent can't run your build tooling, you're on Instant; see [Instant Sessions](/docs/guides/instant-sessions/) for its behavior, limits, and how to pin a runtime explicitly.
 
 ## Where your workspaces run: Bring Your Own Cloud
