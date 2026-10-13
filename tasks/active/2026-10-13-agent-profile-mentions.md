@@ -14,8 +14,8 @@ Mention enrichment calls the strict profile resolver and propagates unknown-name
 - [x] Real SQLite enrichment tests: known/unknown names, ordinary text, email/npm scopes, scoping, explicit invalid selections, database failures.
 - [x] Authenticated task-submit and prompt route tests through real enrichment/database helpers; inspect Instant/chat-start callers.
 - [x] Composer behavioral and desktop/mobile browser evidence.
-- [ ] Relevant lint/typecheck/test/build; regression discrimination.
-- [ ] Local specialist reviews; coordinated staging verification.
+- [x] Relevant lint/typecheck/test/build; regression discrimination.
+- [x] Local specialist reviews; coordinated staging verification.
 - [ ] Create tested draft PR; CI and best-effort CodeRabbit; update canonical Idea.
 
 ## Scope exclusions
@@ -28,14 +28,17 @@ Global-profile editing is unrelated and remains in canonical Idea. Retry stored 
 
 ## Verification and review evidence
 
-- Real SQLite enrichment: 26/26 pass. Disabling optional NOT_FOUND guard: 3 fail, 23 pass; restored.
-- Real authenticated task-submit/prompt handlers: 37/37 pass. BetterAuth getSession and runtime/DO boundaries are fixtures; real auth/access guards, resolver/enrichment/SQL run. Disabling optional guard: 8 fail, 29 pass; restored.
-- Cloudflare and constitution local specialist reviews PASS; all five shared callers inspected. Doc sync recommendation addressed with short agents-guide note.
-- Task-completion audit A–E finds no code/test gaps; runtime/browser/CI/publication gates still pending.
-- Staging prior owner explicitly relinquished; active blog owner confirms no staging use.
-- Initial unrestricted concurrent full test run timed out 3 unrelated cloud-init cases; bounded-concurrency rerun underway.
+- Real SQLite enrichment: 26/26 pass. Disabling optional NOT_FOUND guard produces 3 failures; restored.
+- Authenticated task-submit/prompt: 37/37 pass; real guards/resolver/enrichment/SQL, fixture auth-provider/runtime boundaries. Disabling the guard produces 8 HTTP failures; restored.
+- Direct shared syntax tests instrument source: full shared suite 808/42 pass; helper lines/functions 100%, branches 83.33%; package coverage thresholds pass.
+- Full lint/typecheck/build pass (13/19/9 tasks). Final ACP/web builds include wrapping. Formatting/file-size/source-contract/runtime-state checks pass.
+- Full suite executed: web 4049 pass; API 12307 pass/2 skip with one unrelated 5s archive-sharding timeout. Unchanged isolated file rerun passes 42/42. Initial concurrent cloud-init timeouts clear in bounded rerun (181 pass). No timeout/assertion/coverage changes; unified API run is not claimed clean.
+- All local Cloudflare/constitution/doc-sync/test/task-completion reviews pass or recommendations addressed. UI audit 4/4 passes at 375×667/1280×800; long-name clipping fixed with wrapping, measured name/control bounds pass. Four refreshed mock screenshots reviewed; rubric 4/4/4/4/5. Evidence-only branch commit aefb67f6fefbb9a5309228356e0f55698a1ae07b.
+- Coordinated staging deploy 38425474319 green on c0fd65a4c, Worker 4c36f126-e1f6-4901-8a2d-df2e25b381f7. Actual Instant composer /sessions/start202 and follow-up /prompt202 with real gpt-6.1-sol ACK replies to both; five complete profile names enrich, unknown/email/npm text sends, mobile dotted-name picker works. Invalid explicit tasks/submit and profile resolve remain404.
+- Successful live fixture 01M4V1C7Y2J7430WW7NS47S5K7: stop200/projectDELETE200; CF confirms nodes0 and original sleeping2/stopping1 workspace baseline restored. Earlier harness waited for wrong endpoint; exact first fixture was independently identified by repository/owner and cleaned before bounded retry. No application failure claimed from that harness error.
+- Final changes after staged c0 are test/evidence records only; production code identical. No production deployment/merge/ready action authorized.
+- Task stays on output branch (no main task push/production trigger); existing SAM workspace provides branch isolation without redundant worktree.
 
-- Final UI audit: 4/4 Playwright cases pass (new/follow-up × 375×667/1280×800). Long-name clipping found and fixed by wrapping. Measured text widths and Send/textarea bounds pass. All four refreshed screenshots reviewed by UI reviewer and root. Rubric 4/4/4/4/5.
-- Full lint/typecheck/build pass; final ACP and web builds include wrapping. File-size, source-contract and runtime-state checks pass.
-- Local full test suite remains running without reported failures; staged deployment will overlap this independent validation. No claim of completed full test validation until it exits.
-- Task record stays on output branch (no main task-only push) to honor no production deployment. Existing SAM workspace already isolates output branch, so no redundant worktree needed.
+## Remaining handoff
+
+Create DRAFT PR, finish CI/CodeRabbit, update canonical Idea. Keep the PR draft and unmerged.
