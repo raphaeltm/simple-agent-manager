@@ -65,6 +65,16 @@ func TestLiteralArgvHasNoShellExpansion(t *testing.T) {
 		t.Fatalf("literal argv failed: exit=%d stdoutBytes=%d", result.ExitCode, len(result.Stdout))
 	}
 }
+
+func TestEmptyInjectionDoesNotPrintInheritedEnvironment(t *testing.T) {
+	cmd := localCommand(t, nil)
+	// Deliberately synthetic: never inherit the test runner's environment.
+	cmd.Env = append(cmd.Env, "SYNTHETIC_EXPORT_CANARY=synthetic-export-regression")
+	result := Run(context.Background(), cmd, Input{Argv: []string{"true"}, OutputLimit: 1000, GracePeriod: time.Second})
+	if result.ExitCode != 0 || result.Stdout != "" || result.Stderr != "" {
+		t.Fatalf("empty injection emitted output: exit=%d stdoutBytes=%d stderrBytes=%d", result.ExitCode, len(result.Stdout), len(result.Stderr))
+	}
+}
 func TestCancellationKillsChildren(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "child-survived")
 	ctx, cancel := context.WithCancel(context.Background())

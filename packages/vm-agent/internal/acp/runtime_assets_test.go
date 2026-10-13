@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -93,6 +94,20 @@ func TestManagedSecretOverridesFallbackWithPlaceholder(t *testing.T) {
 	}
 	if len(env) != 1 || env[0] != "SENTINEL=__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__SENTINEL__" {
 		t.Fatalf("unexpected env %v", env)
+	}
+}
+
+func TestOrdinaryEnvironmentListingContainsOnlyManagedPlaceholders(t *testing.T) {
+	const sentinel = "synthetic-default-value-must-not-reach-child"
+	env, err := appendRuntimeEnvVars([]string{"PATH=/usr/bin:/bin", "SENTINEL=" + sentinel}, map[string]bool{}, []RuntimeEnvVar{{Key: "SENTINEL", Value: sentinel, IsSecret: true}})
+	if err != nil {
+		t.Fatal("could not construct synthetic managed environment")
+	}
+	cmd := exec.Command("/usr/bin/env")
+	cmd.Env = env // Explicitly synthetic-only; no inherited runner environment.
+	output, err := cmd.Output()
+	if err != nil || strings.Contains(string(output), sentinel) || !strings.Contains(string(output), "SENTINEL="+managedSecretPlaceholder("SENTINEL")+"\n") {
+		t.Fatalf("ordinary child did not receive only the placeholder: failed=%v outputBytes=%d", err != nil, len(output))
 	}
 }
 
