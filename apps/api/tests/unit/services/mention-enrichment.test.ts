@@ -1,65 +1,147 @@
-import { describe, expect, it } from 'vitest';
+import { extractMentions, formatMentionName, getMentionQuery } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { extractMentions } from '../../../src/services/mention-enrichment';
+import * as schema from '../../../src/db/schema';
+import { resolveAgentProfile } from '../../../src/services/agent-profiles';
+import { enrichMessageWithMentions } from '../../../src/services/mention-enrichment';
+import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
-describe('extractMentions', () => {
-  it('extracts a single @word mention', () => {
-    const result = extractMentions('Hey @reviewer check this');
-    expect(result).toEqual([{ raw: '@reviewer', name: 'reviewer' }]);
+const names = [
+  'reviewer',
+  'gcp-deployer',
+  'release.bot',
+  'Code Reviewer',
+  'agent_123',
+  '123',
+  'déployeur',
+  '部署',
+  'e\u0301quipe',
+  'A "quoted" \\ agent',
+];
+const env = { DEFAULT_TASK_AGENT_TYPE: 'openai-codex' };
+let sqlite: Database.Database;
+let db: ReturnType<typeof drizzle<typeof schema>>;
+beforeEach(() => {
+  sqlite = new Database(':memory:');
+  createAllSchemaTables(sqlite, schema);
+  db = drizzle(createSqliteD1(sqlite), { schema });
+  names.forEach((name, i) =>
+    sqlite
+      .prepare(
+        'INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(`profile-${i}`, 'project', 'user', name, 'openai-codex')
+  );
+  for (const name of ['gcp', 'release', 'types', 'example', 'Reviewer']) {
+    sqlite
+      .prepare(
+        'INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(name, 'project', 'user', name, 'openai-codex');
+  }
+});
+afterEach(() => sqlite.close());
+
+describe('mention syntax and real SQLite enrichment', () => {
+  it.each(names)('round trips and enriches the full name %s', async (name) => {
+    const raw = formatMentionName(name);
+    expect(extractMentions(`Ask ${raw} to help`)).toEqual([{ raw, name }]);
+    const result = await enrichMessageWithMentions(
+      `Ask ${raw} to help`,
+      db,
+      'project',
+      'user',
+      env
+    );
+    expect(result.cleanMessage).toBe(`Ask ${raw} to help`);
+    expect(result.resolvedMentions.map((m) => m.profile.profileName)).toEqual([name]);
+    expect(result.enrichedMessage).toContain(`- ${raw}: openai-codex`);
   });
 
-  it('extracts a quoted @"Multi Word" mention', () => {
-    const result = extractMentions('Ask @"Code Reviewer" to look');
-    expect(result).toEqual([{ raw: '@"Code Reviewer"', name: 'Code Reviewer' }]);
+  it.each([
+    'plain message',
+    'ask @unknown',
+    'email bob@example.com',
+    'bump @types/node',
+    '@reviewer/extra',
+    '@reviewer+extra',
+    '@reviewer@example.com',
+    '@"reviewer"suffix',
+    '@"bad\\q"',
+    '@"unterminated',
+  ])('leaves ordinary/unknown text unchanged: %s', async (message) => {
+    const result = await enrichMessageWithMentions(message, db, 'project', 'user', env);
+    expect(result).toEqual({
+      cleanMessage: message,
+      enrichedMessage: message,
+      resolvedMentions: [],
+    });
   });
 
-  it('extracts multiple mentions', () => {
-    const result = extractMentions('@planner decompose this, then @implementer build it');
-    expect(result).toHaveLength(2);
-    expect(result[0]).toEqual({ raw: '@planner', name: 'planner' });
-    expect(result[1]).toEqual({ raw: '@implementer', name: 'implementer' });
+  it('continues after an unknown mention and respects case-sensitive names', async () => {
+    const result = await enrichMessageWithMentions(
+      '@missing @reviewer @Reviewer @reviewer',
+      db,
+      'project',
+      'user',
+      env
+    );
+    expect(result.resolvedMentions.map((m) => m.profile.profileName)).toEqual([
+      'reviewer',
+      'Reviewer',
+    ]);
   });
 
-  it('deduplicates mentions (case-insensitive)', () => {
-    const result = extractMentions('@reviewer and @Reviewer should check');
-    expect(result).toHaveLength(1);
-    expect(result[0].name).toBe('reviewer');
+  it('handles delimiters without resolving punctuated names as prefixes', () => {
+    expect(extractMentions('@gcp-deployer, @release.bot!')).toEqual([
+      { raw: '@gcp-deployer', name: 'gcp-deployer' },
+      { raw: '@release.bot', name: 'release.bot' },
+    ]);
+    expect(extractMentions('@release.bot.extra')).toEqual([
+      { raw: '@release.bot.extra', name: 'release.bot.extra' },
+    ]);
   });
 
-  it('returns empty array when no mentions', () => {
-    const result = extractMentions('Just a regular message with email@example.com');
-    // email@example would match as @example — this is acceptable behavior
-    // as the backend will not resolve it to a profile
-    expect(result.length).toBeGreaterThanOrEqual(0);
+  it('autocomplete uses full Unicode/punctuated query and excludes emails/npm scopes', () => {
+    expect(getMentionQuery('ask @déploy-e.123')).toEqual({ index: 4, filter: 'déploy-e.123' });
+    expect(getMentionQuery('bob@example')).toBeNull();
+    expect(getMentionQuery('@types/node')).toBeNull();
   });
 
-  it('handles mentions at start and end of text', () => {
-    const result = extractMentions('@planner do it');
-    expect(result).toEqual([{ raw: '@planner', name: 'planner' }]);
+  it('keeps explicit invalid profile selection strict', async () => {
+    await expect(resolveAgentProfile(db, 'project', 'unknown', 'user', env)).rejects.toMatchObject({
+      statusCode: 404,
+      error: 'NOT_FOUND',
+    });
   });
 
-  it('handles mention at end of text', () => {
-    const result = extractMentions('send to @reviewer');
-    expect(result).toEqual([{ raw: '@reviewer', name: 'reviewer' }]);
+  it('keeps other project and other user global profiles out of scope', async () => {
+    sqlite
+      .prepare(
+        'INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run('private', 'other-project', 'other-user', 'private', 'openai-codex');
+    sqlite
+      .prepare(
+        'INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type) VALUES (?, NULL, ?, ?, ?)'
+      )
+      .run('global-private', 'other-user', 'global-private', 'openai-codex');
+    const result = await enrichMessageWithMentions(
+      '@private @global-private',
+      db,
+      'project',
+      'user',
+      env
+    );
+    expect(result.resolvedMentions).toEqual([]);
   });
 
-  it('handles empty string', () => {
-    const result = extractMentions('');
-    expect(result).toEqual([]);
-  });
-
-  it('handles @ alone without a following word', () => {
-    const result = extractMentions('Just an @ symbol');
-    expect(result).toEqual([]);
-  });
-
-  it('handles quoted mention with special characters in name', () => {
-    const result = extractMentions('@"My Custom Agent" please help');
-    expect(result).toEqual([{ raw: '@"My Custom Agent"', name: 'My Custom Agent' }]);
-  });
-
-  it('handles adjacent mentions', () => {
-    const result = extractMentions('@planner @reviewer');
-    expect(result).toHaveLength(2);
+  it('propagates real database lookup errors', async () => {
+    sqlite.exec('DROP TABLE agent_profiles');
+    await expect(
+      enrichMessageWithMentions('@reviewer', db, 'project', 'user', env)
+    ).rejects.toThrow(/agent_profiles/);
   });
 });

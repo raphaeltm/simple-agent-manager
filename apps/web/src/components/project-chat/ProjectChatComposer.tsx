@@ -10,6 +10,7 @@ import {
   VoiceButton,
 } from '@simple-agent-manager/acp-client';
 import type { AgentProfile, AgentSkill } from '@simple-agent-manager/shared';
+import { formatMentionName, getMentionQuery } from '@simple-agent-manager/shared';
 import { Paperclip, X } from 'lucide-react';
 import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -53,10 +54,6 @@ interface ProjectChatComposerProps {
 
 const TEXTAREA_MAX_HEIGHT_PX = 120;
 
-function formatMentionName(name: string) {
-  return name.includes(' ') ? `@"${name}" ` : `@${name} `;
-}
-
 export function ProjectChatComposer({
   value,
   onChange,
@@ -95,8 +92,8 @@ export function ProjectChatComposer({
     !!slashMatch && slashCommands.length > 0 && dismissedSlashFilterRef.current !== slashFilter;
 
   const textBeforeCursor = value.slice(0, cursorPos);
-  const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
-  const mentionFilter = mentionMatch?.[1] ?? '';
+  const mentionMatch = getMentionQuery(textBeforeCursor);
+  const mentionFilter = mentionMatch?.filter ?? '';
   const mentionTriggerIndex = mentionMatch?.index ?? -1;
   if (!mentionMatch && dismissedMentionFilterRef.current !== null) {
     dismissedMentionFilterRef.current = null;
@@ -149,7 +146,7 @@ export function ProjectChatComposer({
 
   const handleMentionSelect = useCallback(
     (profile: { name: string }) => {
-      const mention = formatMentionName(profile.name);
+      const mention = `${formatMentionName(profile.name)} `;
       const before = value.slice(0, mentionTriggerIndex);
       const after = value.slice(cursorPos);
       const nextValue = before + mention + after;
