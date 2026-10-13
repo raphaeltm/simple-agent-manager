@@ -146,6 +146,12 @@ describe('audit workflow isolation', () => {
         );
         expect(workflow.jobs.deploy.if).toContain('!inputs.github_trigger_audit_send_only');
       } else {
+        expect(workflow.permissions).toEqual({});
+        expect(workflow.jobs['validate-manual-dispatch'].permissions).toEqual({
+          contents: 'read',
+          actions: 'read',
+        });
+        expect(workflow.jobs['github-trigger-audit'].permissions).toEqual({ contents: 'read' });
         expect(Object.keys(workflow.on)).toEqual(['workflow_dispatch']);
         expect(workflow.on.workflow_dispatch.inputs.target_commit_sha.required).toBe(true);
         expect(workflow.on.workflow_dispatch.inputs.emergency_override_reason).toBeUndefined();
