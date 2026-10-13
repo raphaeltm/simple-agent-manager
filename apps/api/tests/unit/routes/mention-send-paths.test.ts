@@ -222,19 +222,23 @@ for (const path of ['submit', 'prompt'] as const) {
         );
       }
     });
-    it('enriches the exact known hyphenated profile while keeping display text clean', async () => {
-      const message = 'Please ask @gcp-deployer and @missing';
-      const response = await request(path, message);
-      expect(response.status, JSON.stringify(await response.clone().json())).toBe(
-        path === 'submit' ? 202 : 200
-      );
-      const enriched =
-        path === 'submit' ? taskDescription() : boundary.sendPromptToAgentOnNode.mock.calls[0]![3];
-      expect(enriched).toContain(message);
-      expect(enriched).toContain('profileId: profile-full');
-      expect(enriched).not.toContain('profileId: profile-prefix');
-      expect(enriched).toContain('Profile context canary');
-    });
+    it.each(['Please ask @gcp-deployer and @missing', 'Please ask @gcp-deployer.'])(
+      'enriches the exact known profile in %s while keeping display text clean',
+      async (message) => {
+        const response = await request(path, message);
+        expect(response.status, JSON.stringify(await response.clone().json())).toBe(
+          path === 'submit' ? 202 : 200
+        );
+        const enriched =
+          path === 'submit'
+            ? taskDescription()
+            : boundary.sendPromptToAgentOnNode.mock.calls[0]![3];
+        expect(enriched).toContain(message);
+        expect(enriched).toContain('profileId: profile-full');
+        expect(enriched).not.toContain('profileId: profile-prefix');
+        expect(enriched).toContain('Profile context canary');
+      }
+    );
     it.each([
       'release.bot',
       'two words',

@@ -27,6 +27,9 @@ describe('profile mention syntax', () => {
     'plain text',
     'person@release.bot',
     '@types/node',
+    '@release.bot..',
+    '@\"reviewer\".suffix',
+    '@\"reviewer\"..',
     '@reviewer+suffix',
     '@reviewer@example.com',
     '@"reviewer"suffix',
@@ -35,6 +38,16 @@ describe('profile mention syntax', () => {
     '@""',
   ])('never extracts a partial profile from %s', (text) => {
     expect(extractMentions(text)).toEqual([]);
+  });
+
+  it('accepts one sentence period without truncating dotted names', () => {
+    expect(extractMentions('Ask @release.bot. Then @\"Code Reviewer\".')).toEqual([
+      { raw: '@release.bot', name: 'release.bot' },
+      { raw: '@\"Code Reviewer\"', name: 'Code Reviewer' },
+    ]);
+    expect(extractMentions('@release.bot.extra.')).toEqual([
+      { raw: '@release.bot.extra', name: 'release.bot.extra' },
+    ]);
   });
 
   it('preserves distinct case-sensitive names while deduplicating exact names', () => {

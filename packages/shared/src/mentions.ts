@@ -22,7 +22,11 @@ export function extractMentions(text: string): MentionMatch[] {
     if (raw.startsWith('@"')) {
       // A closing quote must end the token, rather than resolve a prefix.
       const next = text[(match.index ?? 0) + match[0].length];
-      if (next && !/[\s,;:!?)]/.test(next)) continue;
+      if (next && !/[\s,;:!?)]/.test(next)) {
+        // A sentence period is safe only at the end of the whole token.
+        const suffix = text.slice((match.index ?? 0) + match[0].length).split(/\s/, 1)[0];
+        if (!/^\.[,;:!?)]*$/.test(suffix ?? '')) continue;
+      }
       try {
         const parsed: unknown = JSON.parse(raw.slice(1));
         if (typeof parsed !== 'string') continue;
@@ -31,7 +35,7 @@ export function extractMentions(text: string): MentionMatch[] {
         continue;
       }
     } else {
-      raw = raw.replace(/[,;:!?)]*$/, '');
+      raw = raw.replace(/[,;:!?)]*$/, '').replace(/\.$/, '');
       name = raw.slice(1);
       if (!bareName.test(name)) continue;
     }

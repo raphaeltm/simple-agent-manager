@@ -66,6 +66,8 @@ describe('mention syntax and real SQLite enrichment', () => {
     'email bob@example.com',
     'bump @types/node',
     '@reviewer/extra',
+    '@release.bot..',
+    '@\"reviewer\".suffix',
     '@reviewer+extra',
     '@reviewer@example.com',
     '@"reviewer"suffix',
@@ -78,6 +80,20 @@ describe('mention syntax and real SQLite enrichment', () => {
       enrichedMessage: message,
       resolvedMentions: [],
     });
+  });
+
+  it('enriches sentence-final bare and quoted names through SQLite', async () => {
+    const result = await enrichMessageWithMentions(
+      'Ask @release.bot. Then @\"Code Reviewer\".',
+      db,
+      'project',
+      'user',
+      env
+    );
+    expect(result.resolvedMentions.map((m) => m.profile.profileName)).toEqual([
+      'release.bot',
+      'Code Reviewer',
+    ]);
   });
 
   it('continues after an unknown mention and respects case-sensitive names', async () => {
