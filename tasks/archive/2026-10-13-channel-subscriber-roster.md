@@ -30,7 +30,7 @@ Authorized current-project agents can page all subscriptions whose filters match
 ## Independent review
 
 - Security + constitution: PASS, no findings; rechecked service extraction and guarded continuation.
-- Cloudflare + docs + test design + task completion: ADDRESSED. Found default list limit could exceed configured maximum; fixed with local maximum clamp and added omitted-limit regression. No remaining implementation findings. Normal tests/CI/release operationally pending.
+- Cloudflare + docs + test design + task completion: ADDRESSED. Found default list limit could exceed configured maximum; fixed with local maximum clamp and added omitted-limit regression. No remaining implementation findings. Normal tests passed; CI/release operationally pending.
 - Peer confirmed trigger-tools.ts and trigger tests/schema are their scope; no index/channel-file overlap. Waiting for their release sequencing before merge.
 
 ## Verification so far
