@@ -16,9 +16,9 @@ For the VM path, see [Creating Workspaces](/docs/guides/creating-workspaces/).
 
 ## Am I on an Instant session?
 
-You're on Instant when the **agent profile** (or skill) you picked has its runtime set to **Instant container**. That's the rule — it is an opt-in setting, not something SAM infers from your account.
+You're on Instant when the **agent profile** (or skill) you picked has its runtime set to **Instant container**. That's the rule for work you start in SAM or with the CLI — it is an opt-in setting, not something SAM infers from your account. Work an AI app starts through the [SAM Connector](/docs/guides/sam-connector/) with an **Auto** profile, or none, is the exception: it runs on Instant when neither you nor the project has a cloud credential connected.
 
-Set it under a project's **Profiles** page: create or edit a profile and choose **Instant container** as the runtime. Any chat you start with that profile selected runs Instant. Everything else runs as a task on a cloud VM. (One exception: if the deployment has containers switched off entirely, an Instant profile can't override that — see [For self-hosters](#for-self-hosters).)
+Set it under a project's **Profiles** page: create or edit a profile and choose **Instant container** as the runtime. Any chat you start with that profile selected runs Instant. Everything else you start in SAM or with the CLI runs as a task on a cloud VM. (One exception: if the deployment has containers switched off entirely, an Instant profile can't override that — see [For self-hosters](#for-self-hosters).)
 
 Choosing Instant on a profile also fixes some of its other settings, because they don't apply: the workspace profile becomes lightweight, VM size and devcontainer options are disabled, and the task mode becomes `conversation` — which is what determines whether SAM commits and pushes the agent's work for you. See [What happens to your work](#what-happens-to-your-work).
 
@@ -54,7 +54,7 @@ session has been running for hours.
 
 An Instant container is a slim Node image plus the agent CLIs. It does **not** carry your project's toolchain, and it doesn't build your `.devcontainer` to get one. So an agent asked to run your build or test suite can fail with `command not found` for anything that isn't in the row above — no system `python3`, no compilers or `build-essential`, no Go, Rust, Java, or Ruby, and no `docker`. (A Python 3.12 runtime and `uv` are present for SAM's own agent tooling, but Python is not on `PATH` and nothing is preinstalled for your project.)
 
-SAM does not silently fall back to a VM when this happens — the agent just hits the error. The fix is to run the work on a VM instead: pick an [agent profile](/docs/guides/agents/#agent-profiles) whose runtime is **not** Instant, which submits the work as a task on a VM workspace with your `.devcontainer` built. That needs cloud compute — your own credential, the project's, or the platform's. See [Bring Your Own Cloud](/docs/guides/creating-workspaces/#where-your-workspaces-run-bring-your-own-cloud).
+SAM does not silently fall back to a VM when this happens — the agent just hits the error. The fix is to run the work on a VM instead: pick an [agent profile](/docs/guides/agents/#agent-profiles) whose runtime is **Cloud VM**, which submits the work as a task on a VM workspace with your `.devcontainer` built. That needs cloud compute — your own credential, the project's, or the platform's. See [Bring Your Own Cloud](/docs/guides/creating-workspaces/#where-your-workspaces-run-bring-your-own-cloud).
 
 Keep an Instant profile around for quick conversational work and switch profiles when you need a real environment.
 

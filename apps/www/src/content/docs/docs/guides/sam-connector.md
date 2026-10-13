@@ -82,9 +82,11 @@ your projects, chats, tasks, and ideas), `sam.write` (start, steer, and stop wor
 
 ## Starting work uses compute
 
-Starting work from your app works like starting it in SAM: it can create a VM or an
-[Instant](/docs/guides/instant-sessions/) workspace, which costs what it would anywhere else. The app chooses an agent profile (it can list
-yours), or your project's default is used. To stop runaway use, each person can start 10 pieces of
+Starting work from your app creates a VM or an [Instant](/docs/guides/instant-sessions/)
+workspace, which costs what it would anywhere else. The app chooses an agent profile (it can list
+yours), or your project's default agent settings apply. A profile set to **Cloud VM** or **Instant
+container** decides where the work runs; with an **Auto** profile, or none, it runs on a VM when you
+or the project has a cloud credential connected, and on Instant otherwise. To stop runaway use, each person can start 10 pieces of
 work an hour and 50 a day through the Connector unless your administrator changed the limits.
 
 Work your app starts is labelled **via ChatGPT** (or the app's name) on the dashboard, in the session

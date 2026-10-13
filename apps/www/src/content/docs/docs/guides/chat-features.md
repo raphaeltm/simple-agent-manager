@@ -431,8 +431,9 @@ from an idea, a task, or a quick question, and SAM records the new chat's parent
 ### Retrying a Session
 
 **Retry** opens the new-chat screen with the original request filled in. If that request mentioned
-a profile, the box also contains a note SAM added for the agent, from a `---` line starting
-`[SAM: The user mentioned` down to `[End of mention context]`; delete it before you send. If SAM
+a profile, the box also contains a note SAM added for the agent: a `---` line, then a line
+starting `[SAM: The user mentioned`, down to `[End of mention context]`. Delete all of it before
+you send. If SAM
 can't load the original request, the message box says so and you can type it yourself. Retry isn't offered for a chat whose saved workspace has
 [expired](/docs/guides/session-troubleshooting/#expired-saved-workspace); fork it instead.
 
