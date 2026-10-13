@@ -20,9 +20,8 @@ Agents can inspect only their own subscriptions today. Add channel-scoped subscr
 - [x] MCP dispatch and authorization reusing channel context
 - [x] Public/reference docs
 - [x] Worker tests: auth, isolation, matching, expiry/state, pagination, metadata allowlist, own-only mutation unchanged
-- [ ] Normal lint/typecheck/test/build and CI
+- [x] Normal lint/typecheck/test/build
 - [x] Independent specialist review and task-completion validation
-- [ ] Draft PR first, then normal review/merge/release workflow, coordinated with peer
 
 ## Acceptance
 
@@ -35,7 +34,14 @@ Authorized current-project agents can page all subscriptions whose filters match
 - Peer confirmed trigger-tools.ts and trigger tests/schema are their scope; no index/channel-file overlap. Waiting for their release sequencing before merge.
 
 ## Verification so far
+
 - New MCP/D1/DO roster Worker suite: 7 tests passed.
 - Existing channel Worker suite: 16 tests passed.
 - Root lint and typecheck passed; context surface budget and file size checks passed.
-- Root normal tests/build continue; draft PR/CI/release still pending.
+- Full root normal tests/build passed. API: 870 passed files, 12,232 passed tests, 2 skipped. Web: 337 passed files, 4,042 passed tests. All 21 normal test task targets succeeded.
+- Final strict-Valibot cursor Worker suite 7/7 passed; final API typecheck and changed-file lint passed.
+- Local PR preflight/specialist evidence checks passed.
+
+## Release tracking
+
+Implementation is complete and archived under the normal pre-PR workflow. Draft PR, CI, CodeRabbit and production remain tracked in the PR and SAM task; the SAM task is not complete. Staging is explicitly skipped. Compatibility owner confirmed trigger release first; this roster must wait for its explicit release-window handoff before merge, preserve peer changes on main integration, and never infer handoff from session/task/workspace status.
