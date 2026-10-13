@@ -137,15 +137,25 @@ describe('bounded GitHub audit signer', () => {
 });
 
 describe('audit workflow isolation', () => {
-  for (const path of ['deploy.yml', 'deploy-staging.yml']) {
+  for (const path of ['github-trigger-production-audit.yml', 'deploy-staging.yml']) {
     it(`${path} keeps key exposure step-local and audit opt-in`, () => {
       const workflow = parse(readFileSync(resolve(root, '.github/workflows', path), 'utf8'));
-      expect(workflow.on.workflow_dispatch.inputs.github_trigger_audit_send_only.default).toBe(
-        false
-      );
-      expect(workflow.jobs.deploy.if).toContain('!inputs.github_trigger_audit_send_only');
+      if (path === 'deploy-staging.yml') {
+        expect(workflow.on.workflow_dispatch.inputs.github_trigger_audit_send_only.default).toBe(
+          false
+        );
+        expect(workflow.jobs.deploy.if).toContain('!inputs.github_trigger_audit_send_only');
+      } else {
+        expect(Object.keys(workflow.on)).toEqual(['workflow_dispatch']);
+        expect(workflow.on.workflow_dispatch.inputs.target_commit_sha.required).toBe(true);
+        expect(workflow.on.workflow_dispatch.inputs.emergency_override_reason).toBeUndefined();
+        expect(workflow.concurrency.group).toContain("'deploy-production'");
+        expect(workflow.jobs['validate-manual-dispatch'].if).toContain(
+          "github.repository == 'raphaeltm/simple-agent-manager'"
+        );
+      }
       const job =
-        path === 'deploy.yml'
+        path === 'github-trigger-production-audit.yml'
           ? workflow.jobs['github-trigger-audit']
           : workflow.jobs['smoke-tests'];
       expect(job.env?.GH_WEBHOOK_SECRET).toBeUndefined();
@@ -155,7 +165,7 @@ describe('audit workflow isolation', () => {
       );
       expect(secretSteps).toHaveLength(1);
       expect(secretSteps[0].run).toBe('node scripts/e2e/github-trigger-staging.mjs --phase=send');
-      if (path === 'deploy.yml') {
+      if (path === 'github-trigger-production-audit.yml') {
         expect(job.if).toContain("github.ref == 'refs/heads/main'");
         expect(job.if).toContain("needs.validate-manual-dispatch.result == 'success'");
         expect(job.environment).toBe('production');
@@ -169,6 +179,41 @@ describe('audit workflow isolation', () => {
         );
       } else expect(secretSteps[0].if).toContain('inputs.github_trigger_audit_send_only');
     });
+  }
+});
+
+it('keeps production deployment separate from the manual audit and rejects untrusted dispatch contexts', () => {
+  const deployment = parse(readFileSync(resolve(root, '.github/workflows/deploy.yml'), 'utf8'));
+  expect(deployment.jobs['github-trigger-audit']).toBeUndefined();
+  expect(deployment.on.workflow_dispatch.inputs.github_trigger_audit_send_only).toBeUndefined();
+  const workflow = parse(
+    readFileSync(resolve(root, '.github/workflows/github-trigger-production-audit.yml'), 'utf8')
+  );
+  for (const job of Object.values(workflow.jobs) as Array<{ if: string }>) {
+    // Execute the actual workflow condition with GitHub's scalar comparison semantics.
+    const condition = job.if.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+    function admits(event: string, ref: string, repository: string, result = 'success') {
+      const expression = condition
+        .replaceAll('github.event_name', JSON.stringify(event))
+        .replaceAll('github.ref', JSON.stringify(ref))
+        .replaceAll('github.repository', JSON.stringify(repository))
+        .replaceAll('needs.validate-manual-dispatch.result', JSON.stringify(result));
+      return expression.split('&&').every((comparison: string) => {
+        const [actual, expected] = comparison.trim().split(' == ');
+        return JSON.parse(actual) === expected.slice(1, -1);
+      });
+    }
+    expect(admits('workflow_dispatch', 'refs/heads/main', 'raphaeltm/simple-agent-manager')).toBe(
+      true
+    );
+    expect(admits('workflow_run', 'refs/heads/main', 'raphaeltm/simple-agent-manager')).toBe(false);
+    expect(admits('pull_request_target', 'refs/heads/main', 'raphaeltm/simple-agent-manager')).toBe(
+      false
+    );
+    expect(
+      admits('workflow_dispatch', 'refs/heads/feature', 'raphaeltm/simple-agent-manager')
+    ).toBe(false);
+    expect(admits('workflow_dispatch', 'refs/heads/main', 'attacker/fork')).toBe(false);
   }
 });
 
@@ -362,7 +407,9 @@ it('rejects truncated or stalled message pagination', async () => {
 });
 
 it('production checkout guard rejects main drift before signing', () => {
-  const workflow = parse(readFileSync(resolve(root, '.github/workflows/deploy.yml'), 'utf8'));
+  const workflow = parse(
+    readFileSync(resolve(root, '.github/workflows/github-trigger-production-audit.yml'), 'utf8')
+  );
   const guard = workflow.jobs['github-trigger-audit'].steps.find(
     (step: { name: string }) => step.name === 'Verify checked-out production SHA'
   );

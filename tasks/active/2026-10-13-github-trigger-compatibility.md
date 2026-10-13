@@ -1,15 +1,18 @@
 # GitHub trigger compatibility and issue admission
 
 ## Problem
+
 Issue #2320 was rejected because Review GitHub Issue required created rather than opened. Owner authorized live filter repair, full existing surface audit and deployment. Unify draft 01M4SRSG31V5SJNC8KCHP0KMH4; preserve unrelated configuration and blocked original coordinator.
 
 ## Research
+
 - TriggerForm retains created on changing event and does not send githubConfig on edit; empty filters gain defaults.
 - Hidden filters survive event switches; ignoreDrafts false is dropped.
 - Admission counts skipped rows and resume has no reset boundary.
 - Audit matrix: docs/audits/2026-10-13-github-trigger-compatibility.md.
 
 ## Checklist
+
 - [x] Official-contract action catalog and API/MCP action validation.
 - [x] Actual form defaults/reset/edit/preservation regressions.
 - [x] Preserve false draft option; clarify PR source branches; case-sensitive branch matching and SHA context.
@@ -20,6 +23,7 @@ Issue #2320 was rejected because Review GitHub Issue required created rather tha
 - [ ] T3-coordinated staging end-to-end, merge/deploy and production health/trigger verification.
 
 ## Acceptance
+
 New issues use opened; event switches never submit hidden incompatible filters; edit preserves intentional empty filters. REST/MCP reject incompatible action names. No permissions/credential/security exception expansion. Explicit matrix distinguishes supported/tested gaps; normal release gates and verified production result required.
 
 ## Implementation and validation evidence
@@ -70,3 +74,5 @@ PR2327 exists; exact-head CI/review/merge/deploy/production verification remain 
 Exact-head PR analysis reported one new GitHub Actions checkout vulnerability (S7631), making new security rating C and blocking the gate. Production signer now checks out static refs/heads/main, validates approved SHA syntax as40lowercase hex and compares actual gitHEAD with the normally validated exact-CI SHA before any signing/App key step. A main-advance race fails closed.31 helper tests include actual shell success, mismatch and malformed-output rejection; lint, diff check and normal Gitleaks50reviewed/0new passed. No trust/permission/suppression/baseline exception; API/UI/helper behavior unchanged.
 
 Eleven other new findings are maintainability CODE_SMELL items; actual quality gate maintainability/reliability ratings remained A. They remain disclosed for cohesive follow-up, not silently waived or described as zero issues. No broad runtime/UI refactor, staging VM, redeploy or full-suite repeat introduced for this workflow-only correction. Exact CI/Sonar and normal independent review must confirm the new head before merge. Production fixture remains uncreated.
+
+The static-main checkout correction did not clear matching-head Sonar S7631 on ac77a7e7; CI38398141084 succeeded but security rating remained C. The production audit is now isolated in `github-trigger-production-audit.yml`, which accepts only manual dispatches on canonical main, reuses the existing exact-main push-CI validator without an emergency override, checks static checkout SHA before step-local keys, and shares normal production serialization. Ordinary deploy.yml no longer contains audit inputs or an audit job. This separates manual verification from the privileged workflow_run trigger instead of relying on a scanner suppression.69 focused tests passed (32 audit and37 deployment safety), including actual job predicates rejecting fork/non-main/privileged-event contexts and shell checkout race/malformed SHA rejection. ESLint and normal Gitleaks50reviewed/0new passed. No API/UI/staging runtime changes or new resources; matching-head Sonar must still verify the correction. Production fixture remains blocked pending existing owner cleanup access and complete canonical subscription non-wake proof.
