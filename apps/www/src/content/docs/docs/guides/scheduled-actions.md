@@ -6,6 +6,9 @@ description: Schedule a message or a new session and manage project event automa
 Open **Events** in a project to schedule work, watch for events, and see what automation is
 already running. Every chat session carries a scoped version of the same thing.
 
+Recurring automation that starts new work, such as a nightly schedule, a reaction to GitHub issues,
+or a webhook from another service, is set up as a [trigger](/docs/guides/triggers/) instead.
+
 ## Where to find it
 
 ### Everything in the project
