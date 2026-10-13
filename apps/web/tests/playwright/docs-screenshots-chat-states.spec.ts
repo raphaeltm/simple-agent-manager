@@ -450,9 +450,26 @@ test('docs: expired chat on a phone', async ({ page }) => {
   await docsShot(page, 'chat-expired-mobile');
 });
 
+/**
+ * The session list as the real list route returns it: its task carries only identity and status
+ * (`apps/api/src/routes/chat-session-list.ts`), so Fork takes no branch from it and its banner
+ * shows none. Serving the richer detail shape here would put a branch on the banner that users
+ * never see.
+ */
+function listPayload(fixtures: SessionFixture[]) {
+  return fixtures.map(sessionPayload).map(({ task, ...session }) => ({
+    ...session,
+    task: { id: task.id, status: task.status, terminalReason: task.terminalReason },
+  }));
+}
+
 async function forkExpiredChat(page: Page) {
-  // A configured agent, or the new-chat composer is disabled and asks you to add one.
   await openExpiredChat(page, {
+    [`/api/projects/${PROJECT_ID}/sessions`]: {
+      sessions: listPayload(EXPIRED_LIST),
+      total: EXPIRED_LIST.length,
+    },
+    // A configured agent, or the new-chat composer is disabled and asks you to add one.
     '/api/agents': {
       agents: [{ id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true }],
     },
