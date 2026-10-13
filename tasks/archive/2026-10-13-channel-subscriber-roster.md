@@ -45,3 +45,5 @@ Authorized current-project agents can page all subscriptions whose filters match
 ## Release tracking
 
 Implementation is complete and archived under the normal pre-PR workflow. Draft PR, CI, CodeRabbit and production remain tracked in the PR and SAM task; the SAM task is not complete. Staging is explicitly skipped. Compatibility owner confirmed trigger release first; this roster must wait for its explicit release-window handoff before merge, preserve peer changes on main integration, and never infer handoff from session/task/workspace status.
+
+SonarCloud current-head quality gate passed and reported minor S7765 in state validation. Replaced some() with includes() plus an explicit string guard; independent security re-review PASS and focused Worker suite 7/7 PASS. No behavior, credential scope or permission changes.

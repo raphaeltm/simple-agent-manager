@@ -131,8 +131,8 @@ export async function handleChannelTool(
       case 'list_channel_subscribers': {
         const state = params.state ?? 'active';
         if (
-          state !== 'any' &&
-          !PROJECT_EVENT_SUBSCRIPTION_STATES.some((value) => value === state)
+          typeof state !== 'string' ||
+          ![...PROJECT_EVENT_SUBSCRIPTION_STATES, 'any'].includes(state)
         ) {
           throw errors.badRequest('state must be active, cancelled, expired, or any');
         }
