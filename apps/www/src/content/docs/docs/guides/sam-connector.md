@@ -18,8 +18,9 @@ sees only what you can see in SAM, and its answers link back to the pages in SAM
 - **Start work.** _"In acme/checkout-service, start a chat to find out why the tests are failing."_
   This starts work in that project, which you can open in SAM like any other. It's a **Chat** or a
   **Task** (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)) depending on what the app
-  asks for and on the agent profile's **Task Mode**. If neither says, work on a VM starts as a
-  **Task** and Instant work as a **Chat**, so ask for a chat if you want to keep steering it.
+  asks for and on the **Task Mode** of the profile or skill it picks. If neither says, work on a VM starts as a
+  **Task** (a **Chat** if its workspace profile is **Lightweight**) and Instant work as a **Chat**,
+  so ask for a chat if you want to keep steering it.
   Anything that needs the repository's code goes this way: the Connector doesn't read files itself,
   the agent in that chat does.
 - **Steer or stop it.** _"Tell that chat to leave the database migration alone"_, or _"Stop it."_
@@ -141,7 +142,7 @@ remove SAM from the app's own list of connectors.
 | "Previous outcome is uncertain; do not submit a new start."                    | A request your app retried, such as a start or a reply, may or may not have gone through             | Check SAM before asking again, so you don't do it twice          |
 | "Result exceeds the Connector response limit."                                 | The answer was too big to send back                                                                  | Ask for less: fewer items, or a narrower question                |
 | "Redirect host is not allowed by the administrator"                            | Your installation only allows certain apps                                                           | Ask your administrator                                           |
-| "Reconnect with sam.write permission."                                         | You connected while your installation only allowed reading, so this connection can't start work      | Connect again                                                    |
+| "Reconnect with sam.write permission."                                         | You connected while your installation only allowed reading, so this connection can only read         | Connect again                                                    |
 | The app asks you to connect again                                              | The connection was revoked or expired, or SAM cut it off because the app reused an old sign-in token | Connect again                                                    |
 
 ## For administrators

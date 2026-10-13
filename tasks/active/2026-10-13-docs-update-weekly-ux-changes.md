@@ -168,3 +168,21 @@ Product bugs found (filed as SAM ideas, not docs work):
     inbox limit per kind, attention answers, urgent messages skip channels, provider mode read
     live, fork depth vs dispatch depth, first wake records settings, Codex never asks, credential
     limits scope, CLI help/IDs/sign-in details).
+
+### Round 3
+
+- **User journeys:** 1 HIGH, 2 MEDIUM, 6 LOW, all verified and adopted: release notes list only PRs
+  since the previous release (`release.yml` `previous_tag_name`), so "first release that lists it,
+  and every later one"; profiles pick OpenCode models from SAM's built-in list (only
+  **Settings → Agents** is live), and only OpenCode Go renamed Space Bunny Free; the `@` picker
+  inserts `@code-reviewer` unquoted, which SAM reads as `@code`, and quoted profile names work;
+  Edit shows defaults in every empty GitHub filter; Lightweight VM starts default to Chat; a
+  read-only connection can only read; `sam chat answer` only picks a `request_human_input`
+  choice; `creating-workspaces.md` no longer says submitted tasks always use a VM; the
+  troubleshooting approval section uses dates instead of "the current version".
+- **Code fact-check:** 1 MEDIUM (OpenCode list source, already fixed by the journey round) and 5
+  LOW, all adopted: skill **Task Mode** also decides Connector starts; Instant chats have no
+  branch for a fork to look up; picker punctuation (already fixed); `ACP_SESSION_HEARTBEAT_
+  INTERVAL_MS` / `ACP_SESSION_RECONCILIATION_TIMEOUT_MS` are read by nothing, so their
+  configuration rows and the `.env.example` note are gone (constants noted on idea
+  `01M4SW6CX2P87ZA760FT6J9DS6`); `sam chat --help` lists subcommands, not `sam chat new`.

@@ -41,7 +41,8 @@ You can create triggers yourself, or ask an agent in the project to create them 
      clear it. Otherwise the trigger never runs.
 
      You can't fix this later with **Edit**: it locks a GitHub trigger's event and filters, and
-     shows `created` in an empty **Actions** box. Check the real values under **Configuration** on
+     shows the form's defaults where a filter is empty (`created` in **Actions**,
+     `dependabot[bot]` in **Ignore actors**, `/sam` in **Command prefix**). Check the real values under **Configuration** on
      the trigger's page (**View history**); to change them, delete and recreate the trigger, or ask
      an agent to update it.
      :::

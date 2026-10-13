@@ -812,12 +812,10 @@ tune how SAM stores and delivers requests internally and rarely need changing; t
 
 ## ACP Session Lifecycle
 
-| Variable                                | Default          | Description                                                                                                                                                                                                    |
-| --------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ACP_SESSION_DETECTION_WINDOW_MS`       | `300000` (5 min) | Stale ProjectData ACP heartbeat detection window. VM sessions are not interrupted solely from stale/missing ProjectData heartbeat rows; the timeout must be paired with conclusive runtime/workspace evidence. |
-| `ACP_SESSION_HEARTBEAT_INTERVAL_MS`     | `60000` (60s)    | How often VM agent sends heartbeats                                                                                                                                                                            |
-| `ACP_SESSION_RECONCILIATION_TIMEOUT_MS` | `30000` (30s)    | VM agent startup reconciliation timeout                                                                                                                                                                        |
-| `ACP_SESSION_MAX_FORK_DEPTH`            | `10`             | Maximum session fork chain depth                                                                                                                                                                               |
+| Variable                          | Default          | Description                                                                                                                                                                                                    |
+| --------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ACP_SESSION_DETECTION_WINDOW_MS` | `300000` (5 min) | Stale ProjectData ACP heartbeat detection window. VM sessions are not interrupted solely from stale/missing ProjectData heartbeat rows; the timeout must be paired with conclusive runtime/workspace evidence. |
+| `ACP_SESSION_MAX_FORK_DEPTH`      | `10`             | Maximum session fork chain depth                                                                                                                                                                               |
 
 ## ACP Protocol (VM Agent)
 

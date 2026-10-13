@@ -415,8 +415,9 @@ from an idea, a task, or a quick question, and SAM records the new chat's parent
    the previous chat with SAM's tools (`get_session_messages`, `search_messages`), then the previous
    chat's title and its project, session, and task IDs.
 4. Add what to do next at the end of the message, keeping the IDs, and send it. To build on what
-   the original agent pushed, say so, for example "continue from the original chat's branch": the
-   new agent can look the branch up from the parent task ID.
+   the original agent pushed, say so, for example "continue from the original chat's branch". If
+   the original ran on a VM, the new agent can look the branch up from the parent task ID; a chat
+   started on an Instant profile has no branch of its own, so name the branch its agent pushed to.
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/chat-fork-composer-mobile.png 2x" />

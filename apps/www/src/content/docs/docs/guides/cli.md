@@ -88,9 +88,11 @@ task. Add `--json` to any command for output a script can read.
 
 ## More commands
 
-`sam --help` lists the commands, and `sam chat --help` or `sam tasks --help` lists what a group
-can do. Beyond starting work, the CLI can export a whole chat, answer an agent's question, put a
-chat to sleep, fork or retry a session, and read ideas, profiles, skills, files, library documents,
-events, triggers, and deployments. It can't change permissions, credentials, billing, or deployments.
+`sam --help` lists every command, and `sam chat --help` or `sam tasks --help` lists a group's
+subcommands and flags (`sam chat new` is only in `sam --help`). Beyond starting work, the CLI can export a whole chat, put a chat to sleep, fork or retry a
+session, and read ideas, profiles, skills, files, library documents, events, triggers, and
+deployments. It can answer a question an agent asked with `request_human_input` by picking one of
+its choices; permission requests and question cards need SAM itself or the Connector. It can't
+change permissions, credentials, billing, or deployments.
 [CLI project workflows](/docs/reference/cli-project-workflows/) is the full reference, including how
 retries avoid starting the same work twice.

@@ -41,7 +41,7 @@ the `@` so a word doesn't directly follow it, for example `bob at example.com` o
   **Sleeping** for a moment and wakes on another machine with its files. These moves had been
   failing since 9 October.
   → [SAM moved the session to another machine](/docs/guides/session-troubleshooting/#sam-moved-the-session-to-another-machine)
-- **New models.** Claude Haiku 5.5 for Claude Code. → [New models](#new-models)
+- **New models.** Claude Haiku 5.5, and more OpenCode models. → [New models](#new-models)
 - **A guide to the command line.** Install the `sam` CLI, sign in, and start, follow, and reply to
   work from a terminal or a script. → [SAM CLI](/docs/guides/cli/)
 
@@ -75,16 +75,17 @@ Also changed this week:
 
 ### For self-hosters & admins
 
-Before you update, check two regressions against the release you pick. Each release on
-[SAM's releases page](https://github.com/raphaeltm/simple-agent-manager/releases) lists the pull
-requests it contains.
+Before you update, check two regressions against the release you pick. Each release's notes on
+[SAM's releases page](https://github.com/raphaeltm/simple-agent-manager/releases) list the pull
+requests merged since the release before it, so a fix is in the first release that lists it and in
+every release after that.
 
 - **Memory-pressure moves:** from v2026.10.09, SAM can't move a session off a VM that runs short of
   memory. Pull request #2319 fixes it.
 - **`@` messages:** from v2026.10.10, messages with `@` and a word fail (the known issue above). No
   release fixes it yet.
 
-A release that lists pull request #2317 also ends a
+The first release that lists pull request #2317, and every later one, also ends a
 [sleep that can't finish](/docs/guides/session-troubleshooting/#sam-could-not-finish-putting-the-session-to-sleep)
 visibly. There are no new secrets or Cloudflare token permissions; the new database migrations run
 in the deploy pipeline, and the deploy creates the Connector's storage.
@@ -126,14 +127,15 @@ in the deploy pipeline, and the deploy creates the Connector's storage.
 
 ### New models
 
-Profiles can now use **Claude Haiku 5.5 (1M context)** with Claude Code, and Gemini CLI's
-**Gemini 3.7 Flash** is marked deprecated (Google routes it to 3.8). OpenCode's model list comes live
-from models.dev; SAM's built-in copy, used when that can't be reached, now matches it: Claude Haiku
-5.5 on OpenCode Zen and OpenCode Go, **Exo Free**, **Step 5 Preview Free**, and **Mistral Large 4**
-on Zen, **Step 5 Preview Free** on Go, **Space Bunny Free** renamed **Space Bunny**, and **Fledge
-Alpha Free** gone. A profile already set to a model that left the list keeps it, shown as a custom
-model, so if a profile uses **Fledge Alpha Free** or **Space Bunny Free**, choose its model again:
-OpenCode no longer lists those IDs. See [Choosing a model](/docs/guides/agents/#choosing-a-model).
+Profiles can now use **Claude Haiku 5.5 (1M context)** with Claude Code, and with OpenCode Zen and
+OpenCode Go. The OpenCode list profiles pick from, which is built into SAM, also adds **Exo Free**,
+**Step 5 Preview Free**, and **Mistral Large 4** on Zen and **Step 5 Preview Free** on Go; on Go,
+**Space Bunny Free** is now **Space Bunny**, and Zen's **Fledge Alpha Free** is gone. (**Settings →
+Agents** loads OpenCode's list live from models.dev.) Gemini CLI's **Gemini 3.7 Flash** is marked
+deprecated: Google routes it to 3.8. A profile already set to a model that left the list keeps it,
+shown as a custom model, so if a profile uses **Fledge Alpha Free**, or **Space Bunny Free** on
+OpenCode Go, choose its model again: OpenCode no longer lists those IDs. See
+[Choosing a model](/docs/guides/agents/#choosing-a-model).
 
 ## Previous cycle: 29 September – 6 October 2026
 

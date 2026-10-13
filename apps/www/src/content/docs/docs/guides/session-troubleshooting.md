@@ -171,8 +171,9 @@ keeps the interaction settings it had when it started; turning requests on appli
 sessions, so start or [fork](/docs/guides/chat-features/#conversation-forking) a chat after enabling
 them. Turning requests off refuses new requests immediately, including in running sessions.
 
-Sleep and wake preserve permission mode and requests for sessions started on the current version.
-Older sessions without recorded settings use Manual permissions; see
+Sleep and wake preserve permission mode and requests for chats started since 7 October 2026
+(v2026.10.08 or later on a self-hosted instance). Older chats have no recorded settings: they wake
+in Manual, with the request switches in force at their first wake; see
 [After a chat wakes from sleep](/docs/guides/agents/#after-a-chat-wakes-from-sleep).
 
 ## Recovery is in progress
@@ -343,8 +344,9 @@ To carry on, select **Fork conversation**. The new chat's agent can read this co
 expired workspace's files can't be restored: anything the agent pushed is still on GitHub, and
 anything it didn't push, including commits it made only in the workspace, is gone. The new chat
 starts from your default branch, not the original's, so to build on what was pushed, tell it to
-continue from the original chat's branch; its agent can look the branch up from the parent task ID
-in the message. **Retry** isn't offered for an expired chat.
+continue from the original chat's branch. If the original ran on a VM, the new agent can look the
+branch up from the parent task ID in the message; for a chat started on an Instant profile, name
+the branch its agent pushed to. **Retry** isn't offered for an expired chat.
 
 ## Wake failed
 
@@ -502,13 +504,16 @@ re-explain it. Neither brings this chat's files. Or start a new chat from scratc
 Typing `@` and the name of one of your [agent profiles](/docs/guides/agents/#agent-profiles)
 mentions that profile: SAM tells the agent the profile exists, so it can hand work to it. Pick the
 profile from the list that opens when you type `@`; a mention has to match the profile's name
-exactly, capitals included.
+exactly, capitals included. If a name has punctuation but no spaces, such as `code-reviewer`, the
+list inserts `@code-reviewer`, which SAM reads as `@code`, so sending fails: type
+`@"code-reviewer"` instead.
 
 :::caution[Known issue]
 Since 9 October 2026 (v2026.10.10 and later on a self-hosted instance), a message with `@` directly
 followed by any other word is refused with **Agent profile not found**, so it never reaches the
 agent. That includes email addresses (`bob@example.com`), package names (`@types/node`), code with
-decorators or annotations (`@dataclass`, `@Override`), and `@` followed by a double quote (`@"…"`).
+decorators or annotations (`@dataclass`, `@Override`), and `@` followed by quoted text that isn't
+one of your profile names (`@"…"`).
 It also includes text SAM fills in for you: Fork quotes the original chat's title, and Retry the
 original request, so check those too. Until a fix ships, write the `@` so a word or quote doesn't
 directly follow it, for example `bob at example.com` or `@ dataclass`, and send again.
