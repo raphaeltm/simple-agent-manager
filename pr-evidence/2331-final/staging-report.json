@@ -1,0 +1,82 @@
+[
+  {
+    "method": "POST",
+    "path": "/api/auth/token-login",
+    "status": 200
+  },
+  {
+    "method": "POST",
+    "path": "/api/projects",
+    "status": 201
+  },
+  {
+    "method": "POST",
+    "path": "/api/projects/01M4WQXEHRF2P1TVPXK9WDYYV5/agent-profiles",
+    "status": 201
+  },
+  {
+    "method": "POST",
+    "path": "/api/projects/01M4WQXEHRF2P1TVPXK9WDYYV5/agent-profiles",
+    "status": 201
+  },
+  {
+    "method": "POST",
+    "path": "/api/projects/01M4WQXEHRF2P1TVPXK9WDYYV5/agent-profiles",
+    "status": 201
+  },
+  {
+    "method": "POST",
+    "path": "/api/projects/01M4WQXEHRF2P1TVPXK9WDYYV5/agent-profiles",
+    "status": 201
+  },
+  {
+    "method": "POST",
+    "path": "/api/projects/01M4WQXEHRF2P1TVPXK9WDYYV5/agent-profiles",
+    "status": 201
+  },
+  {
+    "method": "POST",
+    "path": "/api/projects/01M4WQXEHRF2P1TVPXK9WDYYV5/agent-profiles",
+    "status": 201
+  },
+  {
+    "method": "POST",
+    "path": "/api/projects/01M4WQXEHRF2P1TVPXK9WDYYV5/sessions/start",
+    "status": 202
+  },
+  {
+    "method": "GET",
+    "path": "/api/projects/01M4WQXEHRF2P1TVPXK9WDYYV5/tasks/01M4WQXKW3F16W709CMX24X60N",
+    "status": 200
+  },
+  {
+    "startReply": true,
+    "completeNames": 6
+  },
+  {
+    "promptStatus": 202
+  },
+  {
+    "followupProfileIdsVerified": true
+  },
+  {
+    "method": "POST",
+    "path": "/api/projects/01M4WQXEHRF2P1TVPXK9WDYYV5/agent-profiles/resolve",
+    "status": 404
+  },
+  {
+    "followupReply": true,
+    "desktopMobile": true,
+    "strictInvalid": true
+  },
+  {
+    "method": "POST",
+    "path": "/api/projects/01M4WQXEHRF2P1TVPXK9WDYYV5/sessions/21f321f3-eecb-45b4-8675-f46364ffe902/stop",
+    "status": 200
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/projects/01M4WQXEHRF2P1TVPXK9WDYYV5",
+    "status": 200
+  }
+]
