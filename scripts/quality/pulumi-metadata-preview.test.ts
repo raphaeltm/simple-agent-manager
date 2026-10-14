@@ -216,6 +216,11 @@ describe('Pulumi metadata-only preview', () => {
     expect(workflow.permissions).toEqual({ contents: 'read' });
     expect(workflow.jobs.repair.if).toContain("inputs.action != 'secret-metadata-preview'");
     const job = workflow.jobs['metadata-preview'];
+    expect(
+      job.steps.find((step: { uses?: string }) => step.uses?.startsWith('actions/checkout@')).with[
+        'persist-credentials'
+      ]
+    ).toBe(false);
     expect(job.if).toContain("inputs.action == 'secret-metadata-preview'");
     expect(job.environment).toBe('${{ inputs.environment }}');
     const commands = job.steps.map((step: { run?: string }) => step.run ?? '').join('\n');
