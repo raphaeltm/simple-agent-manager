@@ -12,17 +12,35 @@ import { groupTokensIntoMessages, type TokenRow } from './message-groups';
 import * as projectData from './project-data';
 import { redactSecretPatterns } from './secret-redaction';
 
+/** Match label starts once; benign values remain searchable for nested secrets. */
+function redactLabelledAssignments(text: string): string {
+  const labels = /(?<![\w.-])(["']?[\w.-]+["']?\s*[:=]\s*)/g;
+  const values = /(?:"[^"\n]*"|'[^'\n]*'|[^\s,;<>]+)/y;
+  const parts: string[] = [];
+  let copiedThrough = 0;
+  let label;
+  while ((label = labels.exec(text)) !== null) {
+    if (!/token|secret|password|api[_-]?key|authorization|cookie/i.test(label[0])) continue;
+    values.lastIndex = labels.lastIndex;
+    const value = values.exec(text);
+    if (!value) continue;
+    parts.push(text.slice(copiedThrough, value.index), '[REDACTED]');
+    copiedThrough = values.lastIndex;
+    labels.lastIndex = copiedThrough;
+  }
+  parts.push(text.slice(copiedThrough));
+  return parts.join('');
+}
+
 export function redactForkHistory(text: string): string {
-  return redactSecretPatterns(text)
-    .replace(
-      /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g,
-      '[REDACTED]'
-    )
-    .replace(/\b((?:authorization|cookie|set-cookie)\s*:\s*)[^\r\n]+/gi, '$1[REDACTED]')
-    .replace(
-      /(["']?[\w.-]*(?:token|secret|password|api[_-]?key|authorization|cookie)[\w.-]*["']?\s*[:=]\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s,;<>]+)/gi,
-      '$1[REDACTED]'
-    );
+  return redactLabelledAssignments(
+    redactSecretPatterns(text)
+      .replace(
+        /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g,
+        '[REDACTED]'
+      )
+      .replace(/\b((?:authorization|cookie|set-cookie)\s*:\s*)[^\r\n]+/gi, '$1[REDACTED]')
+  );
 }
 
 export async function requireArchivedForkSource(
