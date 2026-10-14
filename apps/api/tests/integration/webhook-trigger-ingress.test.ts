@@ -156,6 +156,12 @@ describe('generic webhook ingress vertical slice', () => {
         'utf8'
       )
     );
+    sqlite.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0195_github_trigger_recovery.sql', import.meta.url),
+        'utf8'
+      )
+    );
     taskRunnerStates = new Map();
     token = generateWebhookToken();
     const now = new Date().toISOString();

@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parseJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import {
@@ -102,9 +103,19 @@ export async function recoverGitHubTriggerDelivery(env: Env, deliveryId: string)
       {
         deliveryId: row.id,
         eventType: row.event_type,
-        payload: JSON.parse(row.payload_json),
+        payload: parseJsonRecord(row.payload_json, 'github.trigger.intake'),
       },
-      { scheduledAt: row.created_at }
+      {
+        scheduledAt: row.created_at,
+        beforeSubmit: async () => {
+          const owner = await env.DATABASE.prepare(
+            "SELECT id FROM github_trigger_inbox WHERE id = ? AND state = 'processing' AND lease_token = ? AND lease_until > ?"
+          )
+            .bind(row.id, token, new Date().toISOString())
+            .first();
+          if (!owner) throw new Error('GitHub intake lease lost');
+        },
+      }
     );
     const finished = await env.DATABASE.prepare(
       `UPDATE github_trigger_inbox SET state = 'completed', payload_json = NULL,

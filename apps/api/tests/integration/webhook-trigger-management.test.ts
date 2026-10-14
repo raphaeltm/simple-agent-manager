@@ -146,6 +146,12 @@ describe('webhook trigger management vertical slice', () => {
         'utf8'
       )
     );
+    sqlite.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0195_github_trigger_recovery.sql', import.meta.url),
+        'utf8'
+      )
+    );
     sqlite.pragma('foreign_keys = ON');
     authState.userId = 'user-1';
     admissionState.renderedPrompt = '';

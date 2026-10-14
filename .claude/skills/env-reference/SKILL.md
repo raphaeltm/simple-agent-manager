@@ -941,7 +941,9 @@ Optional Worker variables (forwarded GitHub Environment overrides follow the exi
 | `GITHUB_TRIGGER_RECOVERY_MAX_ATTEMPTS`         | `12`         | Automatic attempt budget including crashed claims         |
 | `GITHUB_TRIGGER_RECOVERY_BATCH_SIZE`           | `25`         | Maximum recovery/expiry/retention rows per sweep          |
 | `GITHUB_TRIGGER_RECOVERY_PAYLOAD_MAX_BYTES`    | `262144`     | Maximum verified trigger intake payload bytes             |
-| `GITHUB_TRIGGER_RECOVERY_PAYLOAD_RETENTION_MS` | `86400000`   | Maximum retained pending payload age                      |
+| `GITHUB_TRIGGER_RECOVERY_PAYLOAD_RETENTION_MS` | `86400000`   | Pending payload expiry threshold (cleanup may lag)        |
 | `GITHUB_TRIGGER_RECOVERY_DEDUP_RETENTION_MS`   | `7776000000` | Dedup tombstone/audit age; at least payload retention     |
 
-Signed supported GitHub trigger events are stored before ACK. Intake storage failure returns non-success. Existing cron retries with exponential backoff and execution-derived task identities; kill switches continue to apply. Payloads are erased on completion/exhaustion and after the payload age budget. Tombstones protect against same-ID replay during the configured dedup window; events replayed after retention are outside that guarantee. Old pre-upgrade audit IDs are never automatically replayed. Recovery cannot restore historical payloads that were never retained.
+Signed supported GitHub trigger events are stored before ACK. Intake storage failure returns non-success. Existing cron retries with exponential backoff and execution-derived task identities; kill switches continue to apply. Payloads are erased on completion/exhaustion and when the payload age budget is reached and bounded cleanup processes the row. Tombstones protect against same-ID replay during the configured dedup window; events replayed after retention are outside that guarantee. Old pre-upgrade audit IDs are never automatically replayed. Recovery cannot restore historical payloads that were never retained.
+
+Payload expiry and tombstone purge run in bounded batches on enabled cron ticks; backlog or a disabled operational loop can delay actual deletion beyond the configured age threshold.

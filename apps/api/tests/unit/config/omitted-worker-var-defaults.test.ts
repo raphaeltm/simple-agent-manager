@@ -79,6 +79,7 @@ import { resolveCredentialLimitConfig } from '../../../src/services/credential-l
 import { getCacheConfig as getDevcontainerCacheConfig } from '../../../src/services/devcontainer-cache';
 import { resolveDiagnosisCompletedStepDelayMs } from '../../../src/services/diagnosis-runner-policy';
 import { resolveDiagnosticIncidentConfig } from '../../../src/services/diagnostic-incident-config';
+import { githubTriggerRecoveryConfig } from '../../../src/services/github-trigger-recovery-config';
 import { getRuntimeLimits } from '../../../src/services/limits';
 import {
   resolveDisabledAlarmRetryMs,
@@ -328,6 +329,11 @@ const READ_PATHS: readonly ReadPath[] = [
       buildAcpInteractionRuntimeConfig(asEnv(env), 'task'),
       buildAcpInteractionRuntimeConfig(asEnv(env), 'conversation'),
     ],
+  },
+  {
+    label: 'GitHub trigger recovery config',
+    sources: [`${API}/services/github-trigger-recovery-config.ts`],
+    read: (env) => githubTriggerRecoveryConfig(asEnv(env)),
   },
   {
     label: 'webhook trigger config',

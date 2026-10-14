@@ -52,7 +52,7 @@ export interface HandleGitHubEventResult {
 export async function handleGitHubEventForTriggers(
   env: Env,
   input: HandleGitHubEventInput,
-  recovery: { scheduledAt?: string } = {}
+  recovery: { scheduledAt?: string; beforeSubmit?: (executionId: string) => Promise<void> } = {}
 ): Promise<HandleGitHubEventResult> {
   const { deliveryId, eventType, payload } = input;
 
@@ -161,7 +161,8 @@ export async function handleGitHubEventForTriggers(
         event,
         deliveryId,
         installationId,
-        now
+        now,
+        recovery.beforeSubmit
       );
       totalMatched += matched;
     }
@@ -204,7 +205,8 @@ async function processTriggersForProject(
   event: GitHubWebhookEvent,
   deliveryId: string,
   installationId: string | undefined,
-  now: string
+  now: string,
+  beforeSubmit?: (executionId: string) => Promise<void>
 ): Promise<number> {
   // Find active GitHub triggers for this project
   const triggers = await db
@@ -283,6 +285,7 @@ async function processTriggersForProject(
     const result = await admitAndSubmitTriggerExecution(env, {
       trigger,
       githubDeliveryId: deliveryId,
+      beforeSubmit,
       eventType: `github.${event.event}.${event.action ?? 'unknown'}`,
       triggeredBy: 'github',
       scheduledAt: now,

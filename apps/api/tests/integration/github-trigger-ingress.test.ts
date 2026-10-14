@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
@@ -116,7 +116,10 @@ describe('signed GitHub webhook → scoped trigger → actual admission', () => 
       )
       .run(JSON.stringify({ actions: ['opened'], labels: ['bug'] }));
   });
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    vi.useRealTimers();
+    sqlite.close();
+  });
   async function deliver(
     body: unknown,
     event = 'issues',
@@ -229,6 +232,9 @@ describe('signed GitHub webhook → scoped trigger → actual admission', () => 
     await runGitHubTriggerRecovery(env);
     const retry = vi.mocked(submitTriggeredTask).mock.calls[1]![1];
     expect(retry).toEqual(first);
+    expect(sqlite.prepare('SELECT status FROM trigger_executions').get()).toEqual({
+      status: 'running',
+    });
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM trigger_executions').get()).toEqual({ n: 1 });
     expect(
       sqlite.prepare('SELECT next_execution_sequence,trigger_count FROM triggers').get()
@@ -269,6 +275,39 @@ describe('signed GitHub webhook → scoped trigger → actual admission', () => 
       state: 'completed',
       payload_json: null,
     });
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM trigger_executions').get()).toEqual({ n: 1 });
+  });
+  it('does not let a stale failing claimant overwrite the winner execution', async () => {
+    await persistGitHubTriggerIntake(env, {
+      deliveryId: 'race',
+      eventType: 'issues',
+      payload: payload(),
+    });
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered!: () => void;
+    const entry = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    vi.mocked(submitTriggeredTask).mockImplementationOnce(async () => {
+      entered();
+      await barrier;
+      throw new Error('late synthetic failure');
+    });
+    const oldWorker = recoverGitHubTriggerDelivery(env, 'race');
+    await entry;
+    sqlite.prepare("UPDATE github_trigger_inbox SET lease_until='2000-01-01'").run();
+    await recoverGitHubTriggerDelivery(env, 'race');
+    release();
+    await oldWorker;
+    expect(sqlite.prepare('SELECT state FROM github_trigger_inbox').get()).toEqual({
+      state: 'completed',
+    });
+    expect(
+      sqlite.prepare('SELECT status,task_id,completed_at FROM trigger_executions').get()
+    ).toEqual({ status: 'running', task_id: 'task-new', completed_at: null });
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM trigger_executions').get()).toEqual({ n: 1 });
   });
   it('keeps unconfirmed startup pending and retries the same execution', async () => {
@@ -372,6 +411,128 @@ describe('signed GitHub webhook → scoped trigger → actual admission', () => 
       'trigger2',
     ]);
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM trigger_executions').get()).toEqual({ n: 2 });
+  });
+  it('preserves the concurrency slot while failed intake remains recoverable', async () => {
+    vi.mocked(submitTriggeredTask).mockRejectedValueOnce(new Error('synthetic failure'));
+    await deliver(payload(), 'issues', 'A');
+    await deliver(payload(), 'issues', 'B');
+    expect(submitTriggeredTask).toHaveBeenCalledTimes(1);
+    expect(
+      sqlite
+        .prepare("SELECT status,skip_reason FROM trigger_executions WHERE github_delivery_id='B'")
+        .get()
+    ).toEqual({ status: 'skipped', skip_reason: 'still_running' });
+    sqlite.prepare("UPDATE github_trigger_inbox SET available_at='2000-01-01' WHERE id='A'").run();
+    await runGitHubTriggerRecovery(env);
+    expect(submitTriggeredTask).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(submitTriggeredTask).mock.calls[0]![1].triggerExecutionId).toBe(
+      vi.mocked(submitTriggeredTask).mock.calls[1]![1].triggerExecutionId
+    );
+  });
+  it('retries task boundary persistence after a submitted task without starting another task', async () => {
+    const batch = env.DATABASE.batch.bind(env.DATABASE);
+    const fault = vi
+      .spyOn(env.DATABASE, 'batch')
+      .mockImplementation(batch)
+      .mockImplementationOnce(batch)
+      .mockRejectedValueOnce(new Error('synthetic boundary write failure'));
+    vi.mocked(submitTriggeredTask).mockImplementationOnce(async (_env, input) => {
+      sqlite
+        .prepare(
+          "INSERT INTO tasks(id,status,trigger_execution_id,chat_session_id,output_branch) VALUES('task-live','in_progress',?,'session','sam/live')"
+        )
+        .run(input.triggerExecutionId);
+      return { taskId: 'task-live', sessionId: 'session', branchName: 'sam/live' };
+    });
+    await deliver(payload());
+    expect(sqlite.prepare('SELECT state FROM github_trigger_inbox').get()).toEqual({
+      state: 'pending',
+    });
+    sqlite.prepare("UPDATE github_trigger_inbox SET available_at='2000-01-01'").run();
+    await runGitHubTriggerRecovery(env);
+    expect(submitTriggeredTask).toHaveBeenCalledTimes(1);
+    expect(
+      sqlite.prepare('SELECT task_id,submission_recorded_at FROM trigger_executions').get()
+    ).toEqual({ task_id: 'task-live', submission_recorded_at: expect.any(String) });
+    expect(sqlite.prepare('SELECT trigger_count FROM triggers').get()).toEqual({
+      trigger_count: 1,
+    });
+    fault.mockRestore();
+  });
+  it('obeys the GitHub kill switch after durable intake', async () => {
+    await persistGitHubTriggerIntake(env, {
+      deliveryId: 'switch',
+      eventType: 'issues',
+      payload: payload(),
+    });
+    env.GITHUB_TRIGGERS_ENABLED = 'false';
+    await runGitHubTriggerRecovery(env);
+    expect(submitTriggeredTask).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT state,attempts FROM github_trigger_inbox').get()).toEqual({
+      state: 'pending',
+      attempts: 0,
+    });
+    env.GITHUB_TRIGGERS_ENABLED = 'true';
+    await runGitHubTriggerRecovery(env);
+    expect(submitTriggeredTask).toHaveBeenCalledTimes(1);
+  });
+  it('exhausts a crashed final attempt after its lease expires', async () => {
+    env.GITHUB_TRIGGER_RECOVERY_MAX_ATTEMPTS = '1';
+    await persistGitHubTriggerIntake(env, {
+      deliveryId: 'last',
+      eventType: 'issues',
+      payload: payload(),
+    });
+    sqlite
+      .prepare(
+        "UPDATE github_trigger_inbox SET state='processing',attempts=1,lease_token='dead',lease_until='2000-01-01'"
+      )
+      .run();
+    await runGitHubTriggerRecovery(env);
+    expect(sqlite.prepare('SELECT state,payload_json FROM github_trigger_inbox').get()).toEqual({
+      state: 'exhausted',
+      payload_json: null,
+    });
+    expect(submitTriggeredTask).not.toHaveBeenCalled();
+  });
+  it('backs off exponentially to the configured cap', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-14T00:00:00Z'));
+    env.GITHUB_TRIGGER_RECOVERY_RETRY_BASE_MS = '1000';
+    env.GITHUB_TRIGGER_RECOVERY_RETRY_MAX_MS = '2000';
+    sqlite.prepare('ALTER TABLE projects RENAME TO projects_unavailable').run();
+    await deliver(payload());
+    for (const delay of [1000, 2000, 2000]) {
+      const row = sqlite.prepare('SELECT available_at FROM github_trigger_inbox').get() as {
+        available_at: string;
+      };
+      expect(Date.parse(row.available_at) - Date.now()).toBe(delay);
+      vi.setSystemTime(new Date(row.available_at));
+      await runGitHubTriggerRecovery(env);
+    }
+  });
+  it('bounds recovery, expiry and purge with more rows than the configured batch', async () => {
+    env.GITHUB_TRIGGER_RECOVERY_BATCH_SIZE = '1';
+    for (const id of ['one', 'two', 'three'])
+      await persistGitHubTriggerIntake(env, {
+        deliveryId: id,
+        eventType: 'issues',
+        payload: payload(),
+      });
+    const recovered = await runGitHubTriggerRecovery(env);
+    expect(recovered.selected).toBe(1);
+    expect(
+      sqlite.prepare("SELECT COUNT(*) AS n FROM github_trigger_inbox WHERE state='pending'").get()
+    ).toEqual({ n: 2 });
+    sqlite.prepare("UPDATE github_trigger_inbox SET created_at='2000-01-01'").run();
+    const expired = await runGitHubTriggerRecovery(env);
+    expect(expired.exhausted).toBe(1);
+    sqlite.prepare("UPDATE github_trigger_inbox SET expires_at='2000-01-01'").run();
+    const purged = await runGitHubTriggerRecovery(env);
+    expect(purged.purged).toBe(1);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM github_trigger_inbox').get()).toEqual({
+      n: 2,
+    });
   });
   it('admits Unicode issues.opened and redelivery creates exactly one execution', async () => {
     expect((await deliver(payload())).status).toBe(200);

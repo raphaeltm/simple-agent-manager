@@ -15,6 +15,7 @@ import {
   taskStatusIsNonTerminalSql,
   TERMINAL_STATUS_VALUES,
 } from './task-status';
+import { readTriggerAdmissionSnapshot } from './trigger-admission-snapshot';
 import { resolveTriggerExecutionUserId } from './trigger-execution-principal';
 import { type SubmittedTriggerTask, TriggerTaskSubmissionPendingError } from './trigger-submission';
 import { submitTriggeredTask } from './trigger-submit';
@@ -43,6 +44,7 @@ const EXECUTION_HOLDS_RUN_SLOT_SQL = `(
   (
     e.status IN ('queued', 'running')
     OR (e.task_id IS NOT NULL AND ${taskStatusIsNonTerminalSql('t.status')})
+    OR EXISTS (SELECT 1 FROM github_trigger_inbox g WHERE g.id = e.github_delivery_id AND g.state IN ('pending', 'processing'))
   )
   AND (t.status IS NULL OR t.status NOT IN (${SLEEPING_TASK_STATUSES.map(() => '?').join(', ')}))
 )`;
@@ -162,7 +164,7 @@ async function recordTaskBoundary(
   executionId: string,
   submitted: SubmittedTriggerTask,
   now: string
-): Promise<void> {
+): Promise<boolean> {
   try {
     await env.DATABASE.batch([
       env.DATABASE.prepare(
@@ -172,10 +174,21 @@ async function recordTaskBoundary(
       ).bind(now, now, trigger.id, trigger.projectId, executionId),
       env.DATABASE.prepare(
         `UPDATE trigger_executions SET task_id = COALESCE(task_id, ?),
-            status = CASE WHEN status = 'queued' THEN 'running' ELSE status END, submission_recorded_at = ?
+            status = CASE WHEN status IN ('queued', 'failed') AND NOT EXISTS
+              (SELECT 1 FROM tasks WHERE id = ? AND status IN (${TERMINAL_STATUS_VALUES.map(() => '?').join(', ')}))
+              THEN 'running' ELSE status END, submission_recorded_at = ?
          WHERE id = ? AND trigger_id = ? AND project_id = ? AND submission_recorded_at IS NULL`
-      ).bind(submitted.taskId, now, executionId, trigger.id, trigger.projectId),
+      ).bind(
+        submitted.taskId,
+        submitted.taskId,
+        ...TERMINAL_STATUS_VALUES,
+        now,
+        executionId,
+        trigger.id,
+        trigger.projectId
+      ),
     ]);
+    return true;
   } catch (error) {
     // The task boundary already succeeded. Preserve that fact so callers do not
     // retry and double-submit; task lifecycle sync can reconcile the execution.
@@ -186,6 +199,7 @@ async function recordTaskBoundary(
       projectId: trigger.projectId,
       error: error instanceof Error ? error.message : String(error),
     });
+    return false;
   }
 }
 
@@ -233,15 +247,17 @@ export async function admitAndSubmitTriggerExecution(
           admission_snapshot_json: string | null;
         }>()
     : null;
-  if (previous?.status === 'skipped')
-    return { outcome: 'skipped', executionId: previous.id, reason: previous.skip_reason! };
+  if (previous?.status === 'skipped') {
+    if (!previous.skip_reason) throw new Error('Skipped execution lacks a reason');
+    return { outcome: 'skipped', executionId: previous.id, reason: previous.skip_reason };
+  }
   if (
     input.trigger.status === 'disabled' ||
     (input.trigger.status === 'paused' && !input.allowPaused)
   )
     return { outcome: 'inactive', reason: input.trigger.status };
   if (previous?.admission_snapshot_json)
-    trigger = JSON.parse(previous.admission_snapshot_json) as schema.TriggerRow;
+    trigger = readTriggerAdmissionSnapshot(previous.admission_snapshot_json, trigger);
 
   if (trigger.status === 'disabled' || (trigger.status === 'paused' && !input.allowPaused)) {
     return { outcome: 'inactive', reason: trigger.status };
@@ -370,7 +386,7 @@ export async function admitAndSubmitTriggerExecution(
           status: string;
         }>();
       if (task && task.status !== 'queued' && task.status !== 'pending') {
-        await recordTaskBoundary(
+        const reconciled = await recordTaskBoundary(
           env,
           trigger,
           executionId,
@@ -381,6 +397,8 @@ export async function admitAndSubmitTriggerExecution(
           },
           now
         );
+        if (!reconciled && input.githubDeliveryId)
+          throw new Error('Task boundary reconciliation pending');
         return {
           outcome: 'submitted',
           executionId,
@@ -389,6 +407,15 @@ export async function admitAndSubmitTriggerExecution(
           branchName: task.output_branch ?? '',
         };
       }
+    }
+    if (previous && input.githubDeliveryId) {
+      await env.DATABASE.prepare(
+        `UPDATE trigger_executions SET status = 'queued', completed_at = NULL
+         WHERE id = ? AND status = 'failed' AND task_id IS NULL
+           AND EXISTS (SELECT 1 FROM github_trigger_inbox g WHERE g.id = ? AND g.state IN ('pending','processing'))`
+      )
+        .bind(executionId, input.githubDeliveryId)
+        .run();
     }
     await input.beforeSubmit?.(executionId);
 
@@ -408,7 +435,9 @@ export async function admitAndSubmitTriggerExecution(
       triggerName: trigger.name,
     });
 
-    await recordTaskBoundary(env, trigger, executionId, submitted, now);
+    const reconciled = await recordTaskBoundary(env, trigger, executionId, submitted, now);
+    if (!reconciled && input.githubDeliveryId)
+      throw new Error('Task boundary reconciliation pending');
     return { outcome: 'submitted', executionId, ...submitted };
   } catch (error) {
     if (error instanceof TriggerTaskSubmissionPendingError) {

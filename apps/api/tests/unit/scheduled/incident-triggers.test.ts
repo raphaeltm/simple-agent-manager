@@ -70,6 +70,12 @@ function setup(options: { withTrigger?: boolean } = {}) {
       'utf8'
     )
   );
+  sqlite.exec(
+    readFileSync(
+      new URL('../../../src/db/migrations/0195_github_trigger_recovery.sql', import.meta.url),
+      'utf8'
+    )
+  );
   if (options.withTrigger !== false) {
     sqlite.exec(`
     INSERT INTO triggers (
