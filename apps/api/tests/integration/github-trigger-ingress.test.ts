@@ -10,12 +10,12 @@ import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { handleGitHubWebhook } from '../../src/routes/github-webhook';
 import { notifyFailedSweeps } from '../../src/scheduled/failed-sweep-notifications';
+import { handleGitHubProjectEventAdmission } from '../../src/services/github-project-event-producer';
 import {
   persistGitHubTriggerIntake,
   recoverGitHubTriggerDelivery,
   runGitHubTriggerRecovery,
 } from '../../src/services/github-trigger-recovery';
-import { handleGitHubProjectEventAdmission } from '../../src/services/github-project-event-producer';
 import { TriggerTaskSubmissionPendingError } from '../../src/services/trigger-submission';
 import { submitTriggeredTask } from '../../src/services/trigger-submit';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../helpers/sqlite-d1';
