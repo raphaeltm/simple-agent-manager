@@ -446,7 +446,7 @@ jobs:
 
       - name: Upload workspace browser evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: workspace-browser-evidence
           path: .codex/tmp/playwright-screenshots/
@@ -490,7 +490,7 @@ jobs:
 
       - name: Upload marketing browser evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: marketing-browser-evidence
           path: .codex/tmp/playwright-screenshots/
@@ -550,7 +550,7 @@ jobs:
 
       - name: Upload screenshots on failure
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-screenshots
           path: .codex/tmp/playwright-screenshots/
@@ -737,7 +737,7 @@ jobs:
 
       - name: Upload per-file Workers timings
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: workers-timings-${{ matrix.shard }}
           path: apps/api/test-results/workers-timing.json
@@ -858,7 +858,7 @@ jobs:
         run: go tool cover -func=coverage.out
 
       - name: Upload CLI coverage report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cli-go-coverage
           path: packages/cli/coverage.out
