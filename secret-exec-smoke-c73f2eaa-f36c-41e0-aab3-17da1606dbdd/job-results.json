@@ -1,0 +1,114 @@
+[
+  {
+    "jobId": "sx-7472692e7bd082efc257768bab8af1270f06be63983bfd0de7cff4e9072f7631",
+    "status": "completed",
+    "stdout": "{\"checks\": {\"explicitCwd\": true, \"explicitNonsecretEnv\": true, \"liveUncommittedFile\": true, \"otherPlaceholder\": true, \"sameContainer\": true, \"sameGid\": true, \"sameUid\": true, \"selectedInjected\": true}, \"marker\": \"secret-exec-smoke-c73f2eaa-f36c-41e0-aab3-17da1606dbdd\", \"mode\": \"injected\"}\n",
+    "stderr": "",
+    "exitCode": 0,
+    "timedOut": false,
+    "redacted": false,
+    "truncated": false,
+    "execution": {
+      "containerId": "6c22ec642333",
+      "user": "node",
+      "cwd": "/workspaces/simple-agent-manager/secret-exec-smoke-c73f2eaa-f36c-41e0-aab3-17da1606dbdd",
+      "environmentMode": "placeholder",
+      "secretNames": [
+        "SECRET_EXEC_SMOKE_SELECTED"
+      ],
+      "actorUserId": "4bw1FJlXCOgSGq0TsQgpiMAhQKjGOSXx",
+      "workspaceId": "01M4WKJHGW7M8HVFJDGBF1DKCW",
+      "agentSessionId": "01M4WKMK2ZYYF5ZB2C2PCNFBWD",
+      "projectId": "01KHRJGANBBWGDY1NZ0KVF0D4J",
+      "taskId": "01M4WKJBXS0D7RWBRVCZH7M7QS",
+      "commandMode": "argv",
+      "commandFingerprint": "cc5a553a22bae278867bd0ee8de19b21f77fd4f4f483a1e246d195e1db2480d1",
+      "startedAt": "2026-10-14T07:06:02.974107607Z",
+      "completedAt": "2026-10-14T07:06:03.086640447Z"
+    }
+  },
+  {
+    "jobId": "sx-76e831b12e243c55896192c3afba582adab4d65b936081eed39801becfde0af2",
+    "status": "completed",
+    "stdout": "[REDACTED]\n",
+    "stderr": "[REDACTED]\n",
+    "exitCode": 0,
+    "timedOut": false,
+    "redacted": true,
+    "truncated": false,
+    "execution": {
+      "containerId": "6c22ec642333",
+      "user": "node",
+      "cwd": "/workspaces/simple-agent-manager/secret-exec-smoke-c73f2eaa-f36c-41e0-aab3-17da1606dbdd",
+      "environmentMode": "placeholder",
+      "secretNames": [
+        "SECRET_EXEC_SMOKE_SELECTED"
+      ],
+      "actorUserId": "4bw1FJlXCOgSGq0TsQgpiMAhQKjGOSXx",
+      "workspaceId": "01M4WKJHGW7M8HVFJDGBF1DKCW",
+      "agentSessionId": "01M4WKMK2ZYYF5ZB2C2PCNFBWD",
+      "projectId": "01KHRJGANBBWGDY1NZ0KVF0D4J",
+      "taskId": "01M4WKJBXS0D7RWBRVCZH7M7QS",
+      "commandMode": "argv",
+      "commandFingerprint": "a0ce62e75ccd0b452f4715ffbc845e6239de66ff203faafac652d8208af9d286",
+      "startedAt": "2026-10-14T07:06:12.847941908Z",
+      "completedAt": "2026-10-14T07:06:12.959914234Z"
+    }
+  },
+  {
+    "jobId": "sx-528ac13ae5d1ab158abb5e524705e270d0af3115f8d1d4a811c13e7a7174ffd6",
+    "status": "completed",
+    "stdout": "",
+    "stderr": "",
+    "exitCode": 0,
+    "timedOut": false,
+    "redacted": false,
+    "truncated": false,
+    "execution": {
+      "containerId": "6c22ec642333",
+      "user": "node",
+      "cwd": "/workspaces/simple-agent-manager/secret-exec-smoke-c73f2eaa-f36c-41e0-aab3-17da1606dbdd",
+      "environmentMode": "placeholder",
+      "secretNames": [
+        "SECRET_EXEC_SMOKE_SELECTED"
+      ],
+      "actorUserId": "4bw1FJlXCOgSGq0TsQgpiMAhQKjGOSXx",
+      "workspaceId": "01M4WKJHGW7M8HVFJDGBF1DKCW",
+      "agentSessionId": "01M4WKMK2ZYYF5ZB2C2PCNFBWD",
+      "projectId": "01KHRJGANBBWGDY1NZ0KVF0D4J",
+      "taskId": "01M4WKJBXS0D7RWBRVCZH7M7QS",
+      "commandMode": "sh",
+      "commandFingerprint": "6ac9ca8e87cfeb20db2debe83b50bcb03721c00280918eae938d923035ed54c1",
+      "startedAt": "2026-10-14T07:06:18.46935692Z",
+      "completedAt": "2026-10-14T07:06:18.530499128Z"
+    }
+  },
+  {
+    "jobId": "sx-2ca448d936af4440efce02109c3a5f9ccbd9b43dc8a28c86ca1d6b48b40f99df",
+    "status": "timed_out",
+    "stdout": "",
+    "stderr": "",
+    "exitCode": 143,
+    "timedOut": true,
+    "redacted": false,
+    "truncated": false,
+    "execution": {
+      "containerId": "6c22ec642333",
+      "user": "node",
+      "cwd": "/workspaces/simple-agent-manager/secret-exec-smoke-c73f2eaa-f36c-41e0-aab3-17da1606dbdd",
+      "environmentMode": "placeholder",
+      "secretNames": [
+        "SECRET_EXEC_SMOKE_SELECTED"
+      ],
+      "actorUserId": "4bw1FJlXCOgSGq0TsQgpiMAhQKjGOSXx",
+      "workspaceId": "01M4WKJHGW7M8HVFJDGBF1DKCW",
+      "agentSessionId": "01M4WKMK2ZYYF5ZB2C2PCNFBWD",
+      "projectId": "01KHRJGANBBWGDY1NZ0KVF0D4J",
+      "taskId": "01M4WKJBXS0D7RWBRVCZH7M7QS",
+      "commandMode": "argv",
+      "commandFingerprint": "87d481183b062523cd4fc98e084a7f2907af7b903b0c361c645ec013251bb786",
+      "startedAt": "2026-10-14T07:06:27.695610517Z",
+      "completedAt": "2026-10-14T07:06:29.704069687Z"
+    }
+  }
+]
