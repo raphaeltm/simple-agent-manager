@@ -36,7 +36,7 @@
     "@axe-core/playwright": "4.12.1",
     "@playwright/test": "1.62.1",
     "@storybook/addon-a11y": "10.6.0",
-    "@storybook/addon-docs": "10.6.0",
+    "@storybook/addon-docs": "10.6.1",
     "@storybook/react": "10.6.0",
     "@storybook/react-vite": "10.6.0",
     "@tailwindcss/vite": "4.3.3",
