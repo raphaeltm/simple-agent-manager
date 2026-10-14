@@ -160,6 +160,36 @@ describe('trigger run slot by previous-run state', () => {
     expect(submitter).not.toHaveBeenCalled();
   });
 
+  it.each(['pending', 'processing'])(
+    'only recoverable failed reservations hold slots while intake is %s',
+    async (state) => {
+      for (const executionStatus of ['skipped', 'completed', 'failed']) {
+        for (const taskStatus of [null, 'completed'] as const) {
+          const { sqlite, env, trigger } = setup(true);
+          previousRun(sqlite, {
+            executionStatus,
+            taskId: taskStatus ? 'previous-task' : null,
+            ...(taskStatus ? { taskStatus } : {}),
+          });
+          sqlite
+            .prepare(
+              "UPDATE trigger_executions SET github_delivery_id='unfinished-delivery' WHERE id='previous'"
+            )
+            .run();
+          sqlite
+            .prepare(
+              "INSERT INTO github_trigger_inbox (id,event_type,state,available_at,created_at,expires_at) VALUES ('unfinished-delivery','issues',?,?,?,?)"
+            )
+            .run(state, NOW, NOW, NOW);
+          const { result } = await nextFire(env, trigger);
+          expect(result.outcome).toBe(
+            executionStatus === 'failed' && taskStatus === null ? 'skipped' : 'submitted'
+          );
+        }
+      }
+    }
+  );
+
   it('releases the slot for a running execution whose task went to sleep', async () => {
     const { sqlite, env, trigger } = setup(true);
     previousRun(sqlite, {

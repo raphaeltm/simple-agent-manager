@@ -44,7 +44,8 @@ const EXECUTION_HOLDS_RUN_SLOT_SQL = `(
   (
     e.status IN ('queued', 'running')
     OR (e.task_id IS NOT NULL AND ${taskStatusIsNonTerminalSql('t.status')})
-    OR EXISTS (SELECT 1 FROM github_trigger_inbox g WHERE g.id = e.github_delivery_id AND g.state IN ('pending', 'processing'))
+    OR (e.status = 'failed' AND e.task_id IS NULL
+      AND EXISTS (SELECT 1 FROM github_trigger_inbox g WHERE g.id = e.github_delivery_id AND g.state IN ('pending', 'processing')))
   )
   AND (t.status IS NULL OR t.status NOT IN (${SLEEPING_TASK_STATUSES.map(() => '?').join(', ')}))
 )`;

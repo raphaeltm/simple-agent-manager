@@ -15,6 +15,7 @@ import {
   recoverGitHubTriggerDelivery,
   runGitHubTriggerRecovery,
 } from '../../src/services/github-trigger-recovery';
+import { handleGitHubProjectEventAdmission } from '../../src/services/github-project-event-producer';
 import { TriggerTaskSubmissionPendingError } from '../../src/services/trigger-submission';
 import { submitTriggeredTask } from '../../src/services/trigger-submit';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../helpers/sqlite-d1';
@@ -179,6 +180,7 @@ describe('signed GitHub webhook → scoped trigger → actual admission', () => 
   it('returns non-success when durable intake storage fails before ACK', async () => {
     sqlite.prepare('ALTER TABLE github_trigger_inbox RENAME TO intake_unavailable').run();
     expect((await deliver(payload())).status).toBe(500);
+    expect(handleGitHubProjectEventAdmission).toHaveBeenCalledOnce();
     expect(submitTriggeredTask).not.toHaveBeenCalled();
   });
   it('does not resurrect pre-upgrade claimed deliveries', async () => {
@@ -429,6 +431,7 @@ describe('signed GitHub webhook → scoped trigger → actual admission', () => 
   it('rejects oversized intake without storing an event or running a task', async () => {
     env.GITHUB_TRIGGER_RECOVERY_PAYLOAD_MAX_BYTES = '1';
     expect((await deliver(payload())).status).toBe(400);
+    expect(handleGitHubProjectEventAdmission).toHaveBeenCalledOnce();
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM github_trigger_inbox').get()).toEqual({
       n: 0,
     });

@@ -65,22 +65,21 @@ export async function handleGitHubWebhook(c: GitHubContext): Promise<Response> {
     await handleRepositoryEvent(db, data, now);
   }
 
+  // Project event admission has its own delivery-ID deduplication and must survive
+  // a failure to durably admit the independent trigger input.
+  c.executionCtx.waitUntil(
+    handleGitHubProjectEventAdmission(c.env, {
+      deliveryId,
+      eventType: event,
+      payload: data,
+    })
+  );
   const triggerIntake = await persistGitHubTriggerIntake(c.env, {
     deliveryId,
     eventType: event,
     payload: data,
   });
-
-  if (event && deliveryId) {
-    c.executionCtx.waitUntil(
-      handleGitHubProjectEventAdmission(c.env, {
-        deliveryId,
-        eventType: event,
-        payload: data,
-      })
-    );
-    if (triggerIntake) c.executionCtx.waitUntil(recoverGitHubTriggerDelivery(c.env, deliveryId));
-  }
+  if (triggerIntake) c.executionCtx.waitUntil(recoverGitHubTriggerDelivery(c.env, deliveryId));
 
   return c.json({ received: true });
 }
