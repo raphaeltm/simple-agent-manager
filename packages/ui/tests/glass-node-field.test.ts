@@ -29,6 +29,14 @@ class FakeObserver {
   }
 }
 
+const resizeCallbacks: (() => void)[] = [];
+class FakeResizeObserver extends FakeObserver {
+  constructor(callback: () => void) {
+    super();
+    resizeCallbacks.push(callback);
+  }
+}
+
 let root: HTMLDivElement;
 let raf: ReturnType<typeof vi.fn>;
 let caf: ReturnType<typeof vi.fn>;
@@ -43,6 +51,7 @@ function setMotion(reduce: boolean) {
 
 beforeEach(() => {
   observers.length = 0;
+  resizeCallbacks.length = 0;
   root = document.createElement('div');
   vi.spyOn(root, 'getBoundingClientRect').mockReturnValue({ width: 1440, height: 900 } as DOMRect);
   document.body.appendChild(root);
@@ -51,7 +60,7 @@ beforeEach(() => {
   vi.stubGlobal('requestAnimationFrame', raf);
   vi.stubGlobal('cancelAnimationFrame', caf);
   vi.stubGlobal('IntersectionObserver', FakeObserver);
-  vi.stubGlobal('ResizeObserver', FakeObserver);
+  vi.stubGlobal('ResizeObserver', FakeResizeObserver);
   vi.stubGlobal('MutationObserver', FakeObserver);
   setMotion(false);
 });
@@ -118,6 +127,34 @@ describe('createGlassNodeField with a 2D context', () => {
     const field = createGlassNodeField(root, { pitch: undefined, horizonY: undefined, mode: undefined });
     expect(field.horizon).toBeCloseTo(900 * 0.44);
     expect(field.nodeNear(1440 * 0.6, 900 * 0.9)).not.toBeNull();
+    field.destroy();
+  });
+
+  it('repaints lit nodes after a resize while paused, instead of leaving them dark', () => {
+    const queued: FrameRequestCallback[] = [];
+    raf.mockImplementation((callback: FrameRequestCallback) => queued.push(callback));
+    const contexts: CanvasRenderingContext2D[] = [];
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockImplementation(() => {
+      const context = fakeContext();
+      contexts.push(context);
+      return context as never;
+    });
+    const field = createGlassNodeField(root);
+    field.start();
+    field.pause();
+    const dynamic = contexts[1]!;
+    const drawnTiles = () => vi.mocked(dynamic.drawImage).mock.calls.length + vi.mocked(dynamic.fill).mock.calls.length;
+    vi.mocked(dynamic.clearRect).mockClear();
+    vi.mocked(dynamic.drawImage).mockClear();
+    vi.mocked(dynamic.fill).mockClear();
+
+    vi.spyOn(root, 'getBoundingClientRect').mockReturnValue({ width: 1280, height: 800 } as DOMRect);
+    for (const resized of resizeCallbacks) resized();
+    for (const callback of queued.splice(0)) callback(performance.now());
+
+    // The resize cleared the canvas; the settled frame must be drawn back onto it.
+    expect(dynamic.clearRect).toHaveBeenCalled();
+    expect(drawnTiles()).toBeGreaterThan(0);
     field.destroy();
   });
 

@@ -14,6 +14,10 @@
  *   .sam-glass-rim        1px gradient rim light (uses ::before; element must be positioned)
  *   .sam-glass-sheen      one light sweep over the rim when `.is-sheened` is added (uses ::after)
  *   .sam-glass-live       real backdrop blur, only where the backdrop is unknown (e.g. sticky nav)
+ *
+ * The material rules use :where() so they carry no specificity: a consumer's own layout and
+ * surface rules (position, background, shadow) always win, whatever order stylesheets load in.
+ * The rim and sheen pseudo-elements keep class specificity so CSS resets cannot strip them.
  */
 
 :root {
@@ -55,7 +59,7 @@ html[data-theme='light'],
   --sam-glass-v2-focus: #15803d;
 }
 
-.sam-glass {
+:where(.sam-glass) {
   position: relative;
   isolation: isolate;
   background:
@@ -67,7 +71,7 @@ html[data-theme='light'],
     var(--sam-glass-v2-depth);
 }
 
-.sam-glass--chrome {
+:where(.sam-glass--chrome) {
   background:
     linear-gradient(160deg, var(--sam-glass-v2-sheen), transparent 45%),
     var(--sam-glass-v2-fill-chrome);
@@ -120,7 +124,7 @@ html[data-theme='light'],
 }
 
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-  .sam-glass-live {
+  :where(.sam-glass-live) {
     -webkit-backdrop-filter: blur(var(--sam-glass-v2-blur)) saturate(var(--sam-glass-v2-saturate));
     backdrop-filter: blur(var(--sam-glass-v2-blur)) saturate(var(--sam-glass-v2-saturate));
   }
@@ -134,12 +138,11 @@ html[data-theme='light'],
 
 /* Safari has no prefers-reduced-transparency: the fills above already keep text legible. */
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  .sam-glass,
-  .sam-glass--chrome {
+  :where(.sam-glass, .sam-glass--chrome) {
     background: var(--sam-glass-v2-fill-solid);
   }
 
-  .sam-glass-live {
+  :where(.sam-glass-live) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }

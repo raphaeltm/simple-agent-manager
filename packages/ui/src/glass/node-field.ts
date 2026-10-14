@@ -359,7 +359,8 @@ export function createGlassNodeField(root: HTMLElement, options: GlassNodeFieldO
     project = createProjection(geometry);
     model = new FieldModel(buildNodes(geometry, project), { width, height, pitch: o.pitch, density: o.density, seed: o.seed });
     drawStatic();
-    if (started && reduced()) paintStill();
+    // A rebuilt model starts dark; when nothing will animate it in, show the settled frame.
+    if (started && !running()) paintStill();
   }
 
   function paintStill() {
