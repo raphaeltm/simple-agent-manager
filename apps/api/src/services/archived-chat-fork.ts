@@ -189,7 +189,8 @@ export async function buildArchivedForkContext(
   let context = makeContext();
   let bytes = encoder.encode(context).length;
   while (bytes > MAX_CONTEXT_SUMMARY_BYTES && records.length > 0) {
-    const oldest = records[records.length - 1]!;
+    const oldest = records.at(-1);
+    if (!oldest) break;
     const removeChars = Math.max(1, bytes - MAX_CONTEXT_SUMMARY_BYTES);
     if (oldest.content.length <= removeChars) records.pop();
     else oldest.content = oldest.content.slice(removeChars);

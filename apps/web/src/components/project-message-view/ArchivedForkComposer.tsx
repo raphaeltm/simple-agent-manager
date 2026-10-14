@@ -1,11 +1,11 @@
 import type { AgentProfile } from '@simple-agent-manager/shared';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import * as v from 'valibot';
 
 import { ApiClientError } from '../../lib/api/client';
 import { submitTask, type SubmitTaskRequest } from '../../lib/api/tasks';
-import { registerTerminalCleanup } from '../../lib/terminal-cleanup';
+import { getAuthEpoch, registerTerminalCleanup } from '../../lib/terminal-cleanup';
 import { useAuth } from '../AuthProvider';
 import { ProjectChatComposer } from '../project-chat/ProjectChatComposer';
 
@@ -66,6 +66,13 @@ export function ArchivedForkComposer({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const send = async () => {
     if (inFlight.current || !value.trim() || !user) return;
@@ -82,7 +89,10 @@ export function ArchivedForkComposer({
           ? { agentProfileId: profileId || agentProfiles[0]?.id }
           : {}),
       };
-    const nextIntent: Intent = intent ?? { key: crypto.randomUUID(), body };
+    const authEpoch = getAuthEpoch();
+    // Canonicalize once before the first POST: persisted-schema parsing must
+    // not change JSON key order and invalidate the receipt's exact-body hash.
+    const nextIntent: Intent = intent ?? v.parse(IntentSchema, { key: crypto.randomUUID(), body });
     // Persist before network effects; if unavailable we cannot promise safe reload retry.
     try {
       sessionStorage.setItem(storageKey, JSON.stringify(nextIntent));
@@ -96,15 +106,19 @@ export function ArchivedForkComposer({
     setError(null);
     try {
       const result = await submitTask(projectId, nextIntent.body, nextIntent.key);
+      if (getAuthEpoch() !== authEpoch) return;
       const completed = { ...nextIntent, sessionId: result.sessionId };
       try {
         sessionStorage.setItem(storageKey, JSON.stringify(completed));
       } catch {
         /* Known success still navigates; the original keyed intent can replay on reload. */
       }
-      setIntent(completed);
-      navigate(`/projects/${projectId}/chat/${result.sessionId}`);
+      if (mounted.current) {
+        setIntent(completed);
+        navigate(`/projects/${projectId}/chat/${result.sessionId}`);
+      }
     } catch (err) {
+      if (!mounted.current || getAuthEpoch() !== authEpoch) return;
       if (err instanceof ApiClientError && err.rejectedBeforeEffects) {
         sessionStorage.removeItem(storageKey);
         setIntent(null);
@@ -118,7 +132,7 @@ export function ArchivedForkComposer({
       );
     } finally {
       inFlight.current = false;
-      setSending(false);
+      if (mounted.current) setSending(false);
     }
   };
 

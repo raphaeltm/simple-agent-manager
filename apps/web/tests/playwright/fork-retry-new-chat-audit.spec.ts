@@ -120,10 +120,16 @@ interface Recorded {
   summaryRequests: string[];
   submitBodies: Record<string, unknown>[];
   submitKeys: Array<string | undefined>;
+  submitRawBodies: string[];
 }
 
 async function setupApiMocks(page: Page, scenario: Scenario): Promise<Recorded> {
-  const recorded: Recorded = { summaryRequests: [], submitBodies: [], submitKeys: [] };
+  const recorded: Recorded = {
+    summaryRequests: [],
+    submitBodies: [],
+    submitKeys: [],
+    submitRawBodies: [],
+  };
   const task = makeTask(scenario);
   const session = makeSession(scenario);
 
@@ -183,6 +189,7 @@ async function setupApiMocks(page: Page, scenario: Scenario): Promise<Recorded> 
     if (subPath === '/tasks/submit' && route.request().method() === 'POST') {
       recorded.submitBodies.push(route.request().postDataJSON() as Record<string, unknown>);
       recorded.submitKeys.push(route.request().headers()['idempotency-key']);
+      recorded.submitRawBodies.push(route.request().postData() ?? '');
       if (scenario.archivedForkError && recorded.submitBodies.length === 1)
         return respond(500, {
           error: 'INTERNAL_ERROR',
@@ -205,6 +212,45 @@ async function setupApiMocks(page: Page, scenario: Scenario): Promise<Recorded> 
       return respond(200, { session, messages: MOCK_MESSAGES, hasMore: false });
     }
     if (subPath === '/sessions/session-1/messages') return respond(200, MOCK_MESSAGES);
+    if (subPath === '/sessions/session-2') {
+      return respond(200, {
+        session: {
+          ...session,
+          id: 'session-2',
+          taskId: 'task-2',
+          workspaceId: null,
+          topic: 'Fresh fork',
+          status: 'active',
+          isMine: true,
+          task: {
+            ...session.task,
+            id: 'task-2',
+            status: 'queued',
+            errorMessage: null,
+            taskMode: 'conversation',
+          },
+        },
+        messages: [
+          {
+            id: 'fork-context',
+            sessionId: 'session-2',
+            role: 'system',
+            content: 'Forked from source chat session-1. Prior workspace files were not restored.',
+            toolMetadata: null,
+            createdAt: Date.now() - 1000,
+          },
+          {
+            id: 'fork-prompt',
+            sessionId: 'session-2',
+            role: 'user',
+            content: recorded.submitBodies.at(-1)?.message ?? '',
+            toolMetadata: null,
+            createdAt: Date.now(),
+          },
+        ],
+        hasMore: false,
+      });
+    }
 
     return respond(200, {});
   });
@@ -357,7 +403,9 @@ test.describe('Archived chat Fork composer audit', () => {
     await page.goto('/projects/proj-test-1/chat/session-1');
     const composer = page.getByPlaceholder('Write a prompt to fork this archived chat...');
     await expect(composer).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Fork', exact: true })).toBeDisabled();
+    const forkButton = page.getByRole('button', { name: 'Fork', exact: true });
+    await expect(forkButton).toBeDisabled();
+    expect((await forkButton.boundingBox())?.height).toBeGreaterThanOrEqual(56);
     await composer.fill('Continue from the retained history — verify the current checkout first.');
     await expectLaidOutCleanly(page);
     await screenshot(page, 'archived-fork-composer');
@@ -373,6 +421,18 @@ test.describe('Archived chat Fork composer audit', () => {
     ]);
     expect(recorded.submitKeys[0]).toBeTruthy();
     expect(recorded.summaryRequests).toEqual([]);
+    await expect(
+      page.getByText('Continue from the retained history — verify the current checkout first.', {
+        exact: true,
+      })
+    ).toBeVisible();
+    await page.reload();
+    await expect(
+      page.getByText('Continue from the retained history — verify the current checkout first.', {
+        exact: true,
+      })
+    ).toHaveCount(1);
+    expect(recorded.submitBodies).toHaveLength(1);
   });
 
   test('retry after an uncertain response and reload uses the same saved prompt and key', async ({
@@ -394,6 +454,7 @@ test.describe('Archived chat Fork composer audit', () => {
     expect(recorded.submitBodies).toHaveLength(2);
     expect(recorded.submitBodies[1]).toEqual(recorded.submitBodies[0]);
     expect(recorded.submitKeys[1]).toBe(recorded.submitKeys[0]);
+    expect(recorded.submitRawBodies[1]).toBe(recorded.submitRawBodies[0]);
     await page.goto('/projects/proj-test-1/chat/session-1');
     await expect(page.getByText('Fork created. Open it with Fork below.')).toBeVisible();
     await page.getByRole('button', { name: 'Fork', exact: true }).click();
