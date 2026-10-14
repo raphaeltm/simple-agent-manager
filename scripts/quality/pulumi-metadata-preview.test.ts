@@ -56,7 +56,8 @@ function run(value: unknown, failure = '', overrides: Record<string, string> = {
       encoding: 'utf8',
       env: {
         ...process.env,
-        PATH: `${dir}:${process.env.PATH}`,
+        PATH: process.env.PATH,
+        PULUMI_METADATA_PREVIEW_BINARY: executable,
         CAPTURE: join(dir, 'calls'),
         FIXTURE: join(dir, 'fixture.json'),
         CANARY: canary,
@@ -198,6 +199,7 @@ describe('Pulumi metadata-only preview', () => {
       { PULUMI_METADATA_PREVIEW_MAX_BYTES: '64' },
       { PULUMI_METADATA_PREVIEW_TIMEOUT_MS: '1' },
       { MALFORMED: 'true' },
+      { PULUMI_METADATA_PREVIEW_BINARY: 'pulumi' },
     ]) {
       const { result, evidence } = run(digest(), '', overrides);
       expect(result.status).toBe(1);
@@ -218,12 +220,19 @@ describe('Pulumi metadata-only preview', () => {
     expect(job.environment).toBe('${{ inputs.environment }}');
     const commands = job.steps.map((step: { run?: string }) => step.run ?? '').join('\n');
     expect(commands).toContain('node scripts/deploy/pulumi-metadata-preview.mjs');
+    expect(commands).toContain('pnpm install --frozen-lockfile --ignore-scripts');
     expect(commands).not.toMatch(
       /pulumi (?:up|refresh|config|stack)|--diff|--show-secrets|tee|--save-plan/
     );
     const step = job.steps.find(
       (step: { name: string }) => step.name === 'Preview secret metadata only'
     );
+    expect(step.env.PULUMI_METADATA_PREVIEW_BINARY).toBe('${{ steps.metadata_cli.outputs.path }}');
+    expect(
+      job.steps.find((step: { name: string }) => step.name === 'Resolve installed Pulumi CLI').env
+    ).toBeUndefined();
+    expect(commands).toContain('realpath');
+    expect(commands).toContain('$GITHUB_WORKSPACE');
     expect(step.env.AWS_ACCESS_KEY_ID).toBe('${{ secrets.R2_ACCESS_KEY_ID }}');
     expect(step.env.PULUMI_CONFIG_PASSPHRASE).toBe('${{ secrets.PULUMI_CONFIG_PASSPHRASE }}');
   });

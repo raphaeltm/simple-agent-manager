@@ -51,12 +51,27 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Install Pulumi CLI
         uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
+      - name: Resolve installed Pulumi CLI
+        id: metadata_cli
+        run: |
+          # Resolve only after the pinned installer, before credentials are mapped.
+          cli_path="$(realpath "$(command -v pulumi)")"
+          test -x "$cli_path"
+          case "$cli_path" in
+            /*) ;;
+            *) exit 1 ;;
+          esac
+          case "$cli_path" in
+            "$GITHUB_WORKSPACE"/*) exit 1 ;;
+          esac
+          echo "path=$cli_path" >> "$GITHUB_OUTPUT"
       - name: Preview secret metadata only
         run: node scripts/deploy/pulumi-metadata-preview.mjs
         env:
+          PULUMI_METADATA_PREVIEW_BINARY: ${{ steps.metadata_cli.outputs.path }}
           DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
           RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
@@ -86,7 +101,7 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Install Pulumi CLI
         uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
