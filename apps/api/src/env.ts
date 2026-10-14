@@ -1378,6 +1378,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CRON_MAX_FIRE_PER_SWEEP?: string; // Max triggers to fire per 5-min sweep (default: 5)
   CRON_TEMPLATE_MAX_LENGTH?: string; // Max prompt template length (default: 8000)
   CRON_TEMPLATE_MAX_FIELD_LENGTH?: string; // Max per-field interpolated value length (default: 2000)
+  GITHUB_TRIGGER_RECOVERY_MAX_WALL_TIME_MS?: string;
   GITHUB_TRIGGER_RECOVERY_LEASE_MS?: string;
   GITHUB_TRIGGER_RECOVERY_RETRY_BASE_MS?: string;
   GITHUB_TRIGGER_RECOVERY_RETRY_MAX_MS?: string;

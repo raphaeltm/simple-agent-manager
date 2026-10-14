@@ -20,6 +20,7 @@ Signed GitHub ingress ACKs asynchronously; handler permanently claims ID before 
 - [x] Recover intake through existing scheduled sweep with token leases, bounded retry/backoff and crash recovery.
 - [x] Per-trigger stable execution admission/recovery prevents duplicate consequential tasks across races, expired leases, partial multi-trigger success and post-submit crashes.
 - [x] Preserve scope/filter/kill switch/authorization/admission semantics; no new credentials or permissions.
+- [x] Nonblocking serial background recovery with a between-candidate wall budget; bounded failing/null-lease candidates converge and existing throttled operator alerts report exhaustion.
 - [x] Bounded payload retention and dedup retention; exhausted/expired outcomes observable with safe metadata.
 - [x] Real SQLite integration tests for retries/races/crashes and additive migration fresh/upgrade paths.
 - [ ] Update docs/config references, run lint/typecheck/test/build and relevant quality checks.
@@ -34,15 +35,14 @@ No real external user event replay. No production synthetic canary without exist
 
 ## Implementation evidence
 
-- Old main synthetic regression: 19/19 tests reproduced permanent same-ID loss; no production-loss claim.
-- New signed ingress tests: 38/38 pass, including pending-start retries, stale-owner failure fencing, partial multi-trigger success, marker-write recovery, concurrency slots, exact backoff/cap, bounded expiry/purge and kill switch.
-- Actual signed route → real trigger-submit → D1 task/checkpoint → stateful external ProjectData/Runner boundaries: one task/execution/checkpoint/start under expired-lease overlap. Reserved submission suite 33/33 pass.
-- Relevant real migration-chain fresh/populated target schemas preserve linked task/execution/audit and foreign keys; 0195 canonical states and unique source identity exercised.
-- Existing generic webhook/incident integration fixtures updated to apply 0195; 55/55 pass.
-- Initial review findings addressed: pending-start not terminal intake; stale failure cannot overwrite linked task; durable submission-recorded counter and link repair; recoverable failed execution retains admission slot; pre-submit intake lease fence. Final re-review pending.
-- Workflow vars forwarded through both existing environment blocks; no new secrets/bindings. Payload expiry/purge timing explicitly includes bounded cleanup lag.
-- Migration safety/order and agent-context budget pass. Full suite still running; earlier handcrafted fixture failures corrected and retested.
-
-- Final kill-switch race: disabling after claim keeps intake retryable; 41/41 targeted tests (38 ingress, 2 migration, 1 snapshot) pass.
-- Reviewed new inbox terminal-retention churning selector uses existing migration percentage cap and subset-only validation; independent31/31 migration-gate tests pass. No gate bypass.
-- Full typecheck19/19, lint13/13, build9/9 passed. Format ratchet passed. First full root test20/21 tasks failed only on6 handcrafted API schema fixtures (66 cases); all6 now corrected and focused92/92 cases pass; full root rerun pending. Worker runtime test emits workerd cross-DO timeout/fixture DNS errors; final result pending and no pass claim.
+- Old main synthetic regression: 19/19 tests reproduced permanent same-ID loss; no confirmed production loss.
+- Latest focused suite: 7 files, 119 tests passed, including 41 signed-ingress cases and 33 real reserved-submission cases. It covers retry/backoff, expired claims, stale owners, multi-trigger progress, admission slots, crash checkpoints, kill switches, payload retention and bounded sweeps.
+- Mutation proof: removing the processing-token failure fence makes the precommit overlap test fail; restoring it passes.
+- Actual Workers signed ingress: 8/8 passed with the full D1 migration chain. Real TaskRunner duplicate/overlap/lost-ack cases: 3/3 passed.
+- Full root previous candidate: 21/21 tasks passed, 19,012 tests including API 12,317. Final candidate full rerun is in progress; no final full-suite claim yet.
+- Root lint 13/13, typecheck 19/19 and build 9/9 passed before final delta; final API typecheck and focused ESLint passed. Format ratchet, migration safety/order, context budget, file-size, runtime-state and type-boundary checks passed.
+- Quality scripts: 51 files, 710 tests passed. Independent D1 migration-gate tests: 31/31 passed.
+- Three independent specialist review groups passed implementation and final control-loop changes. Final commit-pinned confirmation pending. Acceptance remains incomplete until staging, PR gates and coordinated production verification.
+- A mistakenly broad Workers invocation encountered cross-DO timeout/DNS fixture errors. Targeted relevant Workers cases subsequently passed; broad Workers pass is not claimed.
+- Recovery uses one serial background loop with a configurable 20-second between-candidate budget and existing throttled operator alerts. One in-flight submission may exceed that budget.
+- GitHub configuration uses GH_TRIGGER_RECOVERY_* variables mapped to Worker GITHUB_TRIGGER_RECOVERY_* settings; no new secrets or permissions. Migration 0195 is additive; bounded terminal inbox churn uses the existing migration safety percentage cap.

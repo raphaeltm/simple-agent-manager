@@ -9,6 +9,7 @@ import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { handleGitHubWebhook } from '../../src/routes/github-webhook';
+import { notifyFailedSweeps } from '../../src/scheduled/failed-sweep-notifications';
 import {
   persistGitHubTriggerIntake,
   recoverGitHubTriggerDelivery,
@@ -27,6 +28,9 @@ vi.mock('../../src/services/trigger-submit', () => ({
 }));
 vi.mock('../../src/services/github-project-event-producer', () => ({
   handleGitHubProjectEventAdmission: vi.fn().mockResolvedValue({}),
+}));
+vi.mock('../../src/scheduled/failed-sweep-notifications', () => ({
+  notifyFailedSweeps: vi.fn().mockResolvedValue({ notifiedSweeps: 1, notificationsSent: 1 }),
 }));
 const SECRET = 'ephemeral-test-webhook-secret';
 const payload = (event: 'issues' | 'issue_comment' | 'pull_request' | 'push' = 'issues') => ({
@@ -310,6 +314,56 @@ describe('signed GitHub webhook → scoped trigger → actual admission', () => 
     ).toEqual({ status: 'running', task_id: 'task-new', completed_at: null });
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM trigger_executions').get()).toEqual({ n: 1 });
   });
+  it('fences old failure before the new claimant commits its task boundary', async () => {
+    await persistGitHubTriggerIntake(env, {
+      deliveryId: 'race-before-commit',
+      eventType: 'issues',
+      payload: payload(),
+    });
+    let releaseOld!: () => void,
+      releaseNew!: () => void,
+      enteredOld!: () => void,
+      enteredNew!: () => void;
+    const oldGate = new Promise<void>((r) => {
+        releaseOld = r;
+      }),
+      newGate = new Promise<void>((r) => {
+        releaseNew = r;
+      });
+    const oldEntered = new Promise<void>((r) => {
+        enteredOld = r;
+      }),
+      newEntered = new Promise<void>((r) => {
+        enteredNew = r;
+      });
+    vi.mocked(submitTriggeredTask)
+      .mockImplementationOnce(async () => {
+        enteredOld();
+        await oldGate;
+        throw new Error('old failure before winner task commit');
+      })
+      .mockImplementationOnce(async () => {
+        enteredNew();
+        await newGate;
+        return { taskId: 'winner', sessionId: 'session', branchName: 'sam/winner' };
+      });
+    const oldWork = recoverGitHubTriggerDelivery(env, 'race-before-commit');
+    await oldEntered;
+    sqlite.prepare("UPDATE github_trigger_inbox SET lease_until='2000-01-01'").run();
+    const newWork = recoverGitHubTriggerDelivery(env, 'race-before-commit');
+    await newEntered;
+    releaseOld();
+    await oldWork;
+    expect(
+      sqlite.prepare('SELECT status,completed_at,error_message FROM trigger_executions').get()
+    ).toEqual({ status: 'queued', completed_at: null, error_message: null });
+    releaseNew();
+    await newWork;
+    expect(
+      sqlite.prepare('SELECT status,task_id,completed_at FROM trigger_executions').get()
+    ).toEqual({ status: 'running', task_id: 'winner', completed_at: null });
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM trigger_executions').get()).toEqual({ n: 1 });
+  });
   it('keeps unconfirmed startup pending and retries the same execution', async () => {
     vi.mocked(submitTriggeredTask).mockRejectedValueOnce(
       new TriggerTaskSubmissionPendingError({
@@ -552,6 +606,90 @@ describe('signed GitHub webhook → scoped trigger → actual admission', () => 
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM github_trigger_inbox').get()).toEqual({
       n: 2,
     });
+  });
+  it('defers remaining background candidates at the wall budget without blocking cron', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-14T00:00:00Z'));
+    env.GITHUB_TRIGGER_RECOVERY_MAX_WALL_TIME_MS = '10';
+    await persistGitHubTriggerIntake(env, {
+      deliveryId: 'one',
+      eventType: 'issues',
+      payload: payload(),
+    });
+    await persistGitHubTriggerIntake(env, {
+      deliveryId: 'two',
+      eventType: 'issues',
+      payload: payload(),
+    });
+    let release!: () => void;
+    const suspended = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered!: () => void;
+    const entry = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    vi.mocked(submitTriggeredTask).mockImplementationOnce(async () => {
+      entered();
+      await suspended;
+      vi.setSystemTime(new Date(Date.now() + 11));
+      return { taskId: 'first', sessionId: 'session', branchName: 'sam/first' };
+    });
+    const work: Promise<unknown>[] = [];
+    const queued = await runGitHubTriggerRecovery(env, (p) => {
+      work.push(p);
+    });
+    expect('recoveryQueued' in queued && queued.recoveryQueued).toBe(2);
+    await entry;
+    expect(sqlite.prepare("SELECT state FROM github_trigger_inbox WHERE id='one'").get()).toEqual({
+      state: 'processing',
+    });
+    release();
+    await Promise.all(work);
+    expect(sqlite.prepare("SELECT state FROM github_trigger_inbox WHERE id='two'").get()).toEqual({
+      state: 'pending',
+    });
+    expect(submitTriggeredTask).toHaveBeenCalledTimes(1);
+  });
+  it('reaches valid work behind a saturated failing batch and expires null leases', async () => {
+    env.GITHUB_TRIGGER_RECOVERY_BATCH_SIZE = '2';
+    for (const id of ['bad1', 'bad2', 'good', 'null1', 'null2'])
+      await persistGitHubTriggerIntake(env, {
+        deliveryId: id,
+        eventType: 'issues',
+        payload: payload(),
+      });
+    sqlite
+      .prepare(
+        "UPDATE github_trigger_inbox SET payload_json='not-json' WHERE id IN ('bad1','bad2')"
+      )
+      .run();
+    sqlite
+      .prepare(
+        "UPDATE github_trigger_inbox SET state='processing',lease_until=NULL WHERE id IN ('null1','null2')"
+      )
+      .run();
+    await runGitHubTriggerRecovery(env);
+    expect(submitTriggeredTask).not.toHaveBeenCalled();
+    await runGitHubTriggerRecovery(env);
+    expect(submitTriggeredTask).toHaveBeenCalledTimes(1);
+    expect(sqlite.prepare("SELECT state FROM github_trigger_inbox WHERE id='good'").get()).toEqual({
+      state: 'completed',
+    });
+    sqlite
+      .prepare(
+        "UPDATE github_trigger_inbox SET created_at='2000-01-01' WHERE id IN ('null1','null2')"
+      )
+      .run();
+    await runGitHubTriggerRecovery(env);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT COUNT(*) AS n FROM github_trigger_inbox WHERE id IN ('null1','null2') AND state='exhausted' AND payload_json IS NULL"
+        )
+        .get()
+    ).toEqual({ n: 2 });
+    expect(notifyFailedSweeps).toHaveBeenCalledWith(env, ['github_trigger_recovery_exhausted']);
   });
   it('admits Unicode issues.opened and redelivery creates exactly one execution', async () => {
     expect((await deliver(payload())).status).toBe(200);

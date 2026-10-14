@@ -1,9 +1,15 @@
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 
+export const DEFAULT_GITHUB_TRIGGER_RECOVERY_MAX_WALL_TIME_MS = 20_000;
+
 /** Bounded recovery defaults; configurable without creating new infrastructure. */
 export function githubTriggerRecoveryConfig(env: Env) {
   const config = {
+    maxWallTimeMs: parsePositiveInt(
+      env.GITHUB_TRIGGER_RECOVERY_MAX_WALL_TIME_MS,
+      DEFAULT_GITHUB_TRIGGER_RECOVERY_MAX_WALL_TIME_MS
+    ),
     leaseMs: parsePositiveInt(env.GITHUB_TRIGGER_RECOVERY_LEASE_MS, 60_000),
     retryBaseMs: parsePositiveInt(env.GITHUB_TRIGGER_RECOVERY_RETRY_BASE_MS, 30_000),
     retryMaxMs: parsePositiveInt(env.GITHUB_TRIGGER_RECOVERY_RETRY_MAX_MS, 900_000),

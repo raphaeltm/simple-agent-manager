@@ -76,6 +76,7 @@ export interface TriggerAdmissionInput {
   scheduledAt?: string;
   allowPaused?: boolean;
   githubDeliveryId?: string;
+  githubProcessingToken?: string;
   renderPrompt: (
     executionId: string,
     sequenceNumber: number,
@@ -454,9 +455,20 @@ export async function admitAndSubmitTriggerExecution(
     const message = error instanceof Error ? error.message : String(error);
     await env.DATABASE.prepare(
       `UPDATE trigger_executions SET status = 'failed', error_message = ?, completed_at = ?
-       WHERE id = ? AND trigger_id = ? AND project_id = ? AND task_id IS NULL`
+       WHERE id = ? AND trigger_id = ? AND project_id = ? AND task_id IS NULL
+         AND (? IS NULL OR EXISTS (SELECT 1 FROM github_trigger_inbox g
+           WHERE g.id = ? AND g.state = 'processing' AND g.lease_token = ?))`
     )
-      .bind(message, new Date().toISOString(), executionId, trigger.id, trigger.projectId)
+      .bind(
+        message,
+        new Date().toISOString(),
+        executionId,
+        trigger.id,
+        trigger.projectId,
+        input.githubProcessingToken ?? null,
+        input.githubDeliveryId ?? null,
+        input.githubProcessingToken ?? null
+      )
       .run();
     log.error('trigger_admission.submission_failed', {
       triggerId: trigger.id,

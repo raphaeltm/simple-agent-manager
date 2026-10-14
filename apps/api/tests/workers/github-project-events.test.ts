@@ -131,7 +131,12 @@ describe('GitHub ProjectData event producer', () => {
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({ received: true });
       expect(waitUntilPromises).toHaveLength(2);
-      await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined, undefined]);
+      await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined, true]);
+      await expect(
+        env.DATABASE.prepare('SELECT state, payload_json FROM github_trigger_inbox WHERE id = ?')
+          .bind('delivery-signed-route')
+          .first()
+      ).resolves.toEqual({ state: 'completed', payload_json: null });
 
       const status = await projectDataService.getProjectEventRecentStatus(testEnv, projectId);
       expect(status.events).toEqual([

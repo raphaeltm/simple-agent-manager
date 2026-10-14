@@ -617,6 +617,7 @@ export function getApiWorkerVars(
     VM_INCIDENT_R2_PREFIX: outputs.diagnosticIncidentPrefix,
     VM_INCIDENT_RETENTION_DAYS: String(outputs.diagnosticIncidentTtlDays),
     ...getOptionalProcessEnvVars(topLevel.vars, [
+      'GITHUB_TRIGGER_RECOVERY_MAX_WALL_TIME_MS',
       'GITHUB_TRIGGER_RECOVERY_LEASE_MS',
       'GITHUB_TRIGGER_RECOVERY_RETRY_BASE_MS',
       'GITHUB_TRIGGER_RECOVERY_RETRY_MAX_MS',

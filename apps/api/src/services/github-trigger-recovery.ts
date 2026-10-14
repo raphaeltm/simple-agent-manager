@@ -3,6 +3,7 @@ import { log } from '../lib/logger';
 import { parseJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
+import { notifyFailedSweeps } from '../scheduled/failed-sweep-notifications';
 import {
   handleGitHubEventForTriggers,
   type HandleGitHubEventInput,
@@ -107,6 +108,7 @@ export async function recoverGitHubTriggerDelivery(env: Env, deliveryId: string)
       },
       {
         scheduledAt: row.created_at,
+        processingToken: token,
         beforeSubmit: async () => {
           const owner = await env.DATABASE.prepare(
             "SELECT id FROM github_trigger_inbox WHERE id = ? AND state = 'processing' AND lease_token = ? AND lease_until > ?"
@@ -138,7 +140,7 @@ export async function recoverGitHubTriggerDelivery(env: Env, deliveryId: string)
       config.retryMaxMs,
       config.retryBaseMs * 2 ** Math.min(row.attempts - 1, 30)
     );
-    await env.DATABASE.prepare(
+    const retried = await env.DATABASE.prepare(
       `UPDATE github_trigger_inbox SET state = ?, available_at = ?,
           payload_json = CASE WHEN ? = 1 THEN NULL ELSE payload_json END,
           lease_token = NULL, lease_until = NULL
@@ -152,6 +154,7 @@ export async function recoverGitHubTriggerDelivery(env: Env, deliveryId: string)
         token
       )
       .run();
+    if (exhausted && retried.meta.changes) await alertExhaustion(env);
     // Do not persist/log payloads or arbitrary exception strings from untrusted events.
     log.warn('github_triggers.recovery_retry', {
       deliveryId: row.id,
@@ -163,8 +166,19 @@ export async function recoverGitHubTriggerDelivery(env: Env, deliveryId: string)
   }
 }
 
+async function alertExhaustion(env: Env): Promise<void> {
+  try {
+    await notifyFailedSweeps(env, ['github_trigger_recovery_exhausted']);
+  } catch {
+    log.error('github_triggers.exhaustion_alert_failed', {});
+  }
+}
+
 /** Existing operational cron supplies bounded automatic retries, expiry and retention. */
-export async function runGitHubTriggerRecovery(env: Env) {
+export async function runGitHubTriggerRecovery(
+  env: Env,
+  waitUntil?: (work: Promise<unknown>) => void
+) {
   const config = githubTriggerRecoveryConfig(env);
   const now = new Date().toISOString();
   const expiry = await env.DATABASE.prepare(
@@ -189,14 +203,6 @@ export async function runGitHubTriggerRecovery(env: Env) {
   )
     .bind(now, now, config.batchSize)
     .all<{ id: string }>();
-  let recovered = 0;
-  for (const row of due.results) {
-    try {
-      if (await recoverGitHubTriggerDelivery(env, row.id)) recovered++;
-    } catch {
-      log.warn('github_triggers.recovery_storage_error', { deliveryId: row.id });
-    }
-  }
   const purged = await env.DATABASE.prepare(
     `DELETE FROM github_trigger_inbox WHERE id IN (SELECT id FROM github_trigger_inbox
       WHERE expires_at <= ? AND state IN ('completed', 'exhausted') ORDER BY expires_at LIMIT ?)`
@@ -211,11 +217,34 @@ export async function runGitHubTriggerRecovery(env: Env) {
     .run();
   const stats = {
     selected: due.results.length,
-    recovered,
+    recovered: 0,
     exhausted: expiry.meta.changes,
     purged: purged.meta.changes,
     auditsPurged: auditsPurged.meta.changes,
+    budgetDeferred: 0,
   };
-  log.info('github_triggers.recovery_sweep', stats);
-  return stats;
+  const process = async () => {
+    const started = Date.now();
+    if (expiry.meta.changes) await alertExhaustion(env);
+    for (const [index, row] of due.results.entries()) {
+      if (Date.now() - started >= config.maxWallTimeMs) {
+        stats.budgetDeferred = due.results.length - index;
+        break;
+      }
+      try {
+        if (await recoverGitHubTriggerDelivery(env, row.id)) stats.recovered++;
+      } catch {
+        log.warn('github_triggers.recovery_storage_error', { deliveryId: row.id });
+      }
+    }
+    log.info('github_triggers.recovery_sweep', stats);
+    return stats;
+  };
+  if (waitUntil) {
+    // Intake is already durable. Do not put task submission network waits in front
+    // of other lifecycle sweeps; one serial background loop avoids a dispatch burst.
+    waitUntil(process());
+    return { ...stats, recoveryQueued: due.results.length };
+  }
+  return process();
 }
