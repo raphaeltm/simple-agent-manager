@@ -23,8 +23,8 @@ Signed GitHub ingress ACKs asynchronously; handler permanently claims ID before 
 - [x] Nonblocking serial background recovery with a between-candidate wall budget; bounded failing/null-lease candidates converge and existing throttled operator alerts report exhaustion.
 - [x] Bounded payload retention and dedup retention; exhausted/expired outcomes observable with safe metadata.
 - [x] Real SQLite integration tests for retries/races/crashes and additive migration fresh/upgrade paths.
-- [ ] Update docs/config references, run lint/typecheck/test/build and relevant quality checks.
-- [ ] Local independent specialist reviews incl task-completion/security/Cloudflare/test/config/docs.
+- [x] Update docs/config references, run lint/typecheck/test/build and relevant quality checks.
+- [x] Local independent specialist reviews incl task-completion/security/Cloudflare/test/config/docs.
 - [ ] Coordinate and verify pinned staging using synthetic fixtures, cleanup.
 - [ ] PR exact SHA CI/Sonar/security and best-effort CodeRabbit evidence reported BEFORE merge.
 - [ ] Wait for coordinator merge clearance; then merge/deploy/readonly production migration/health/config verification.
@@ -39,10 +39,13 @@ No real external user event replay. No production synthetic canary without exist
 - Latest focused suite: 7 files, 119 tests passed, including 41 signed-ingress cases and 33 real reserved-submission cases. It covers retry/backoff, expired claims, stale owners, multi-trigger progress, admission slots, crash checkpoints, kill switches, payload retention and bounded sweeps.
 - Mutation proof: removing the processing-token failure fence makes the precommit overlap test fail; restoring it passes.
 - Actual Workers signed ingress: 8/8 passed with the full D1 migration chain. Real TaskRunner duplicate/overlap/lost-ack cases: 3/3 passed.
-- Full root previous candidate: 21/21 tasks passed, 19,012 tests including API 12,317. Final candidate full rerun is in progress; no final full-suite claim yet.
-- Root lint 13/13, typecheck 19/19 and build 9/9 passed before final delta; final API typecheck and focused ESLint passed. Format ratchet, migration safety/order, context budget, file-size, runtime-state and type-boundary checks passed.
+- Runtime candidate bf8ced6f3: full root 21/21 tasks passed, 19,015 tests including API 12,320 (2 API tests skipped). Lint 13/13, typecheck 19/19 and build 9/9 passed.
+- Format ratchet, migration safety/order, context budget, file-size, runtime-state, type-boundary and runtime-boundary semantics checks passed; AST checks had zero errors and existing warnings.
 - Quality scripts: 51 files, 710 tests passed. Independent D1 migration-gate tests: 31/31 passed.
-- Three independent specialist review groups passed implementation and final control-loop changes. Final commit-pinned confirmation pending. Acceptance remains incomplete until staging, PR gates and coordinated production verification.
-- A mistakenly broad Workers invocation encountered cross-DO timeout/DNS fixture errors. Targeted relevant Workers cases subsequently passed; broad Workers pass is not claimed.
+- Three independent specialist review groups PASS pinned runtime candidate bf8ced6f325ca1803bd28e5ebf927253f8dd4989. Acceptance remains incomplete until staging, PR gates and coordinated production verification.
+- Earlier broad Workers invocation finished 135 files passed / 1 failed, 1,620 tests passed / 1 failed (old signed-route return expectation); corrected fixture and final pinned targeted signed ingress 8/8 pass. No final broad Workers pass claim.
 - Recovery uses one serial background loop with a configurable 20-second between-candidate budget and existing throttled operator alerts. One in-flight submission may exceed that budget.
 - GitHub configuration uses GH_TRIGGER_RECOVERY_* variables mapped to Worker GITHUB_TRIGGER_RECOVERY_* settings; no new secrets or permissions. Migration 0195 is additive; bounded terminal inbox churn uses the existing migration safety percentage cap.
+
+- Migration test now uses the established SQL asset import pattern, executes migrations and asserts database behavior; no scanner exception.
+- Read-only staging observability baseline passed persisted D1 noise checks; Workers telemetry unavailable with403, no credential expansion. Staging hold awaits Pulumi preview completion/explicit coordinator release.

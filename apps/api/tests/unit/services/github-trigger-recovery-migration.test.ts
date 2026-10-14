@@ -1,10 +1,9 @@
-import { readFileSync } from 'node:fs';
-
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
-const migration = (name: string) =>
-  readFileSync(new URL(`../../../src/db/migrations/${name}`, import.meta.url), 'utf8');
+import triggersMigration from '../../../src/db/migrations/0036_triggers.sql?raw';
+import githubMigration from '../../../src/db/migrations/0057_github_trigger_configs.sql?raw';
+import recoveryMigration from '../../../src/db/migrations/0195_github_trigger_recovery.sql?raw';
 
 describe('GitHub trigger recovery additive migration', () => {
   it.each([false, true])(
@@ -14,14 +13,14 @@ describe('GitHub trigger recovery additive migration', () => {
       db.exec(
         'PRAGMA foreign_keys=ON; CREATE TABLE projects(id TEXT PRIMARY KEY); CREATE TABLE users(id TEXT PRIMARY KEY); CREATE TABLE agent_profiles(id TEXT PRIMARY KEY); CREATE TABLE tasks(id TEXT PRIMARY KEY);'
       );
-      db.exec(migration('0036_triggers.sql'));
-      db.exec(migration('0057_github_trigger_configs.sql'));
+      db.exec(triggersMigration);
+      db.exec(githubMigration);
       if (populated) {
         db.exec(
           "INSERT INTO projects VALUES('p'); INSERT INTO users VALUES('u'); INSERT INTO triggers(id,project_id,user_id,name,source_type,prompt_template) VALUES('t','p','u','legacy','github','legacy prompt'); INSERT INTO trigger_executions(id,trigger_id,project_id,status,task_id) VALUES('e','t','p','running','task'); INSERT INTO tasks(id,trigger_execution_id) VALUES('task','e'); INSERT INTO github_webhook_deliveries(id,event_type,decision) VALUES('old','issues','error');"
         );
       }
-      db.exec(migration('0195_github_trigger_recovery.sql'));
+      db.exec(recoveryMigration);
       if (populated) {
         expect(
           db

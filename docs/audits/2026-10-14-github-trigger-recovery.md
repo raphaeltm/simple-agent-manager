@@ -10,7 +10,7 @@ Limits: same-ID prevention is bounded by dedup retention. Recovery cannot recove
 
 ## Release evidence
 
-Pending local validation, independent final reviews, coordinated staging, exact-head CI/Sonar/security, CodeRabbit, coordinator merge clearance, production deployment/migration/health evidence. See task `01M4WJGQK1DNSSRW6HM6A2XQQY` and its task file.
+Runtime candidate `bf8ced6f325ca1803bd28e5ebf927253f8dd4989`: full root 21/21 tasks (19,015 tests), lint 13/13, typecheck 19/19 and build 9/9 passed. Focused 119 tests, actual Workers signed ingress 8/8 and real TaskRunner critical duplicate/overlap/lost-ack 3/3 passed. Three independent specialist review groups passed the runtime candidate. Coordinated staging, exact-head CI/Sonar/security, CodeRabbit, coordinator merge clearance and production deployment/migration/health evidence remain pending. See task `01M4WJGQK1DNSSRW6HM6A2XQQY` and its task file.
 
 Payload expiry and tombstone purge run in bounded batches on enabled cron ticks; backlog or a disabled operational loop can delay actual deletion beyond the configured age threshold.
 
