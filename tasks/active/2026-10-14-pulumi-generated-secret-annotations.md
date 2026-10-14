@@ -11,9 +11,9 @@ Four secret RandomId resources annotate stack exports but not provider outputs. 
 - #2219 removed unsafe raw state summaries; never inspect/export plaintext state or use --show-secrets in verification.
 
 ## Checklist
-- [ ] Annotate all four regular encodings on all four generated secret resources.
-- [ ] Preserve exact names, inputs, protection, exports and public installation ID.
-- [ ] Test registration metadata and secret propagation using synthetic mocks only.
+- [x] Annotate all four regular encodings on all four generated secret resources.
+- [x] Preserve exact names, inputs, protection, exports and public installation ID.
+- [x] Test registration metadata and secret propagation using synthetic mocks only.
 - [ ] Run lint/typecheck/tests/build and specialist reviews.
 - [ ] Obtain safe redacted preview with no create/delete/replace of existing key resources.
 - [ ] Open draft PR; satisfy exact-head CI and best-effort CodeRabbit.
