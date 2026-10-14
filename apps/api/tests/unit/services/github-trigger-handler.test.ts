@@ -2,7 +2,7 @@
  * Integration tests for handleGitHubEventForTriggers.
  *
  * These tests mock D1 and trigger admission at the boundary to verify:
- * - Delivery deduplication
+ * - Routing decisions (durable intake/dedup is covered by signed ingress integration)
  * - Feature flag gating
  * - Non-matching events do not start tasks
  * - Matching events reach the submission boundary with correct payloads
@@ -149,22 +149,6 @@ describe('handleGitHubEventForTriggers', () => {
     });
     expect(result.processed).toBe(false);
     expect(result.reason).toBe('unsupported_event_type:star');
-    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
-  });
-
-  // --- Delivery deduplication ---
-  it('deduplicates deliveries when INSERT OR IGNORE returns 0 changes', async () => {
-    const { env, mockStmt } = createMockEnv();
-    // Simulate the INSERT OR IGNORE returning 0 changes (duplicate)
-    mockStmt.run.mockResolvedValueOnce({ meta: { changes: 0 } });
-
-    const result = await handleGitHubEventForTriggers(env, {
-      deliveryId: 'already-processed',
-      eventType: 'issues',
-      payload: makeIssuesPayload(),
-    });
-    expect(result.processed).toBe(false);
-    expect(result.reason).toBe('duplicate');
     expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
   });
 

@@ -1378,6 +1378,14 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CRON_MAX_FIRE_PER_SWEEP?: string; // Max triggers to fire per 5-min sweep (default: 5)
   CRON_TEMPLATE_MAX_LENGTH?: string; // Max prompt template length (default: 8000)
   CRON_TEMPLATE_MAX_FIELD_LENGTH?: string; // Max per-field interpolated value length (default: 2000)
+  GITHUB_TRIGGER_RECOVERY_LEASE_MS?: string;
+  GITHUB_TRIGGER_RECOVERY_RETRY_BASE_MS?: string;
+  GITHUB_TRIGGER_RECOVERY_RETRY_MAX_MS?: string;
+  GITHUB_TRIGGER_RECOVERY_MAX_ATTEMPTS?: string;
+  GITHUB_TRIGGER_RECOVERY_BATCH_SIZE?: string;
+  GITHUB_TRIGGER_RECOVERY_PAYLOAD_MAX_BYTES?: string;
+  GITHUB_TRIGGER_RECOVERY_PAYLOAD_RETENTION_MS?: string;
+  GITHUB_TRIGGER_RECOVERY_DEDUP_RETENTION_MS?: string;
   TRIGGER_AUTO_PAUSE_AFTER_FAILURES?: string; // Auto-pause after N consecutive failures (default: 3)
   CRON_SWEEP_ENABLED?: string; // Kill switch: "false" to disable cron sweep (default: enabled)
   GITHUB_TRIGGERS_ENABLED?: string; // Optional override: "false" disables, "true" enables; GH webhook secret enables by default

@@ -3,6 +3,9 @@ import { drizzle } from 'drizzle-orm/d1';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import { eq } from 'drizzle-orm';
+import { admitAndSubmitTriggerExecution } from '../../../src/services/trigger-admission';
+import { TriggerTaskSubmissionPendingError } from '../../../src/services/trigger-submission';
 import type { Env } from '../../../src/env';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import type { startTaskRunnerDO } from '../../../src/services/task-runner-do';
@@ -834,6 +837,90 @@ From that information, derive the repository change request and append a short n
     });
     expectOneSubmission(fixture);
   });
+
+  it.each(['afterD1Commit', 'afterProjectDataCommit', 'afterRunnerStartConfirmed'] as const)(
+    'GitHub keyed admission reuses actual task/checkpoint after %s crash',
+    async (hook) => {
+      const fixture = seedReservedFixture(`github-${hook}`);
+      fixture.sqlite.prepare('DELETE FROM trigger_executions WHERE id=?').run(fixture.executionId);
+      fixture.sqlite
+        .prepare(
+          'CREATE UNIQUE INDEX github_execution_identity ON trigger_executions(github_delivery_id,trigger_id) WHERE github_delivery_id IS NOT NULL'
+        )
+        .run();
+      fixture.sqlite
+        .prepare(
+          'UPDATE triggers SET next_execution_sequence=1,max_concurrent=1,skip_if_running=1,trigger_count=0 WHERE id=?'
+        )
+        .run(fixture.triggerId);
+      const [trigger] = await drizzle(fixture.env.DATABASE, { schema })
+        .select()
+        .from(schema.triggers)
+        .where(eq(schema.triggers.id, fixture.triggerId));
+      const base = createSubmissionDependencies();
+      let failOnce = true;
+      const deps = {
+        ...base.deps,
+        [hook]: () => {
+          if (failOnce) {
+            failOnce = false;
+            throw new Error('synthetic crash');
+          }
+        },
+      };
+      const submitter: Parameters<typeof admitAndSubmitTriggerExecution>[2] = async (
+        _env,
+        input
+      ) => {
+        const result = await submitReservedTask(
+          fixture.env,
+          {
+            ...fixture.input,
+            identities: reservedIdentitiesForTriggerExecution(input.triggerExecutionId),
+            prompt: input.renderedPrompt,
+            source: {
+              ...fixture.input.source,
+              sourceExecutionId: input.triggerExecutionId,
+              triggerExecutionId: input.triggerExecutionId,
+            },
+          },
+          deps
+        );
+        if (result.outcome === 'admitted')
+          return {
+            taskId: result.taskId,
+            sessionId: result.sessionId,
+            branchName: result.branchName,
+          };
+        if (result.outcome === 'pending')
+          throw new TriggerTaskSubmissionPendingError({
+            taskId: result.taskId,
+            sessionId: result.sessionId,
+            branchName: result.branchName,
+          });
+        throw new Error(result.outcome);
+      };
+      const input = {
+        trigger: trigger!,
+        githubDeliveryId: 'synthetic-delivery',
+        eventType: 'github.issues.opened',
+        triggeredBy: 'github' as const,
+        renderPrompt: () => fixture.input.prompt,
+      };
+      const first = await admitAndSubmitTriggerExecution(fixture.env, input, submitter);
+      expect(first.outcome).toBe('failed');
+      const retry = await admitAndSubmitTriggerExecution(fixture.env, input, submitter);
+      expect(retry.outcome).toBe('submitted');
+      expect(scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM trigger_executions')).toBe(1);
+      expect(scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM tasks')).toBe(1);
+      expect(
+        scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM task_submission_checkpoints')
+      ).toBe(1);
+      expect(base.startInputs).toHaveLength(1);
+      expect(scalar(fixture.sqlite, 'SELECT trigger_count AS value FROM triggers')).toBe(1);
+      fixture.sqlite.close();
+    }
+  );
 
   it.each([
     ['D1 commit', 'afterD1Commit'],

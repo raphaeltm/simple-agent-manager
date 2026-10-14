@@ -928,3 +928,20 @@ The `exec_with_secrets` job supervisor reads these VM-agent process environment 
 | `SECRET_EXEC_GRACE_MS`           | `1000`    | TERM-to-KILL grace for the in-container process group              |
 
 Positive integer values override defaults. These are local VM-agent service/container configuration; generated cloud-init does not forward additional Worker variables for them. Existing `WORKSPACE_TOOL_TIMEOUT_MS` bounds start/status/cancel transport calls, not the accepted job lifetime. Project/profile/skill managed `isSecret` env values are placeholders in fresh ordinary delivery. Harness credentials and runtime secret files retain existing paths.
+
+## Durable GitHub trigger recovery
+
+Optional Worker variables (forwarded GitHub Environment overrides follow the existing Worker-var mechanism; no secrets are added):
+
+| Variable                                       | Default      | Purpose                                                   |
+| ---------------------------------------------- | ------------ | --------------------------------------------------------- |
+| `GITHUB_TRIGGER_RECOVERY_LEASE_MS`             | `60000`      | Processing lease; overlapping retries reuse one execution |
+| `GITHUB_TRIGGER_RECOVERY_RETRY_BASE_MS`        | `30000`      | Initial retry backoff                                     |
+| `GITHUB_TRIGGER_RECOVERY_RETRY_MAX_MS`         | `900000`     | Maximum exponential backoff (at least base)               |
+| `GITHUB_TRIGGER_RECOVERY_MAX_ATTEMPTS`         | `12`         | Automatic attempt budget including crashed claims         |
+| `GITHUB_TRIGGER_RECOVERY_BATCH_SIZE`           | `25`         | Maximum recovery/expiry/retention rows per sweep          |
+| `GITHUB_TRIGGER_RECOVERY_PAYLOAD_MAX_BYTES`    | `262144`     | Maximum verified trigger intake payload bytes             |
+| `GITHUB_TRIGGER_RECOVERY_PAYLOAD_RETENTION_MS` | `86400000`   | Maximum retained pending payload age                      |
+| `GITHUB_TRIGGER_RECOVERY_DEDUP_RETENTION_MS`   | `7776000000` | Dedup tombstone/audit age; at least payload retention     |
+
+Signed supported GitHub trigger events are stored before ACK. Intake storage failure returns non-success. Existing cron retries with exponential backoff and execution-derived task identities; kill switches continue to apply. Payloads are erased on completion/exhaustion and after the payload age budget. Tombstones protect against same-ID replay during the configured dedup window; events replayed after retention are outside that guarantee. Old pre-upgrade audit IDs are never automatically replayed. Recovery cannot restore historical payloads that were never retained.

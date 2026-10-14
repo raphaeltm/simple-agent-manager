@@ -350,7 +350,9 @@ async function purgeOldTriggerExecutions(
       .prepare(
         `DELETE FROM trigger_executions
          WHERE status IN ('completed', 'failed', 'skipped')
-           AND created_at <= ?`
+           AND created_at <= ?
+           AND NOT EXISTS (SELECT 1 FROM github_trigger_inbox g
+             WHERE g.id = trigger_executions.github_delivery_id AND g.state IN ('pending','processing'))`
       )
       .bind(cutoff)
       .run();

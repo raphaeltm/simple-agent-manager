@@ -6,7 +6,7 @@
  *
  * Flow:
  * 1. Check GitHub trigger enablement
- * 2. Deduplicate by X-GitHub-Delivery ID
+ * 2. Reuse a reserved execution per delivery/trigger (intake owns delivery dedup)
  * 3. Find the project linked to the webhook's repository
  * 4. Find active GitHub triggers for that project matching the event type
  * 5. Evaluate filters for each trigger
@@ -46,11 +46,13 @@ export interface HandleGitHubEventResult {
  * Handle a verified GitHub webhook event for trigger matching.
  *
  * This is called after webhook signature verification succeeds.
- * It's a best-effort operation — errors are logged but don't fail the webhook response.
+ * Intake/lease ownership and retry live in github-trigger-recovery.ts.
+ * Errors propagate so its durable attempt remains retryable.
  */
 export async function handleGitHubEventForTriggers(
   env: Env,
-  input: HandleGitHubEventInput
+  input: HandleGitHubEventInput,
+  recovery: { scheduledAt?: string } = {}
 ): Promise<HandleGitHubEventResult> {
   const { deliveryId, eventType, payload } = input;
 
@@ -72,31 +74,7 @@ export async function handleGitHubEventForTriggers(
   }
 
   const db = drizzle(env.DATABASE, { schema });
-  const now = new Date().toISOString();
-
-  // Atomic deduplication: INSERT OR IGNORE the delivery record immediately.
-  // If the row already exists (duplicate delivery), the insert is silently ignored
-  // and we detect it via the returned row count. This prevents race conditions
-  // where concurrent Workers both pass a SELECT-based dedup check.
-  try {
-    const dedupResult = await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO github_webhook_deliveries (id, event_type, decision, decision_reason, created_at)
-       VALUES (?, ?, 'processing', 'pending', ?)`
-    )
-      .bind(deliveryId, eventType, now)
-      .run();
-
-    if (!dedupResult.meta.changes || dedupResult.meta.changes === 0) {
-      log.info('github_triggers.duplicate_delivery', { deliveryId, eventType });
-      return { processed: false, deliveryId, matchedTriggers: 0, reason: 'duplicate' };
-    }
-  } catch (err) {
-    log.warn('github_triggers.dedup_check_failed', {
-      deliveryId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    throw err;
-  }
+  const now = recovery.scheduledAt ?? new Date().toISOString();
 
   try {
     // Parse event
@@ -304,17 +282,21 @@ async function processTriggersForProject(
 
     const result = await admitAndSubmitTriggerExecution(env, {
       trigger,
+      githubDeliveryId: deliveryId,
       eventType: `github.${event.event}.${event.action ?? 'unknown'}`,
       triggeredBy: 'github',
       scheduledAt: now,
-      renderPrompt: (executionId, sequenceNumber) =>
+      renderPrompt: (executionId, sequenceNumber, reservedTrigger = trigger) =>
         renderTemplate(
-          trigger.promptTemplate,
-          buildGitHubContext(event, trigger, project, executionId, sequenceNumber)
+          reservedTrigger.promptTemplate,
+          buildGitHubContext(event, reservedTrigger, project, executionId, sequenceNumber)
         ).rendered,
     });
 
-    if (result.outcome === 'submitted' || result.outcome === 'pending') {
+    if (result.outcome === 'pending') throw new Error('GitHub trigger startup requires recovery');
+    if (result.outcome === 'failed') throw new Error('GitHub trigger submission requires recovery');
+
+    if (result.outcome === 'submitted') {
       await recordDelivery(db, {
         id: `${deliveryId}:${trigger.id}`,
         eventType: event.event,
@@ -324,8 +306,7 @@ async function processTriggersForProject(
         senderLogin: event.sender?.login,
         matchedTriggerId: trigger.id,
         decision: 'matched',
-        decisionReason:
-          result.outcome === 'pending' ? `task:${result.taskId}:pending` : `task:${result.taskId}`,
+        decisionReason: `task:${result.taskId}`,
         createdAt: now,
       });
 
@@ -334,14 +315,14 @@ async function processTriggersForProject(
         deliveryId,
         executionId: result.executionId,
         taskId: result.taskId,
-        submissionPending: result.outcome === 'pending',
+        submissionPending: false,
         eventType: event.event,
         action: event.action,
       });
 
       matched++;
     } else {
-      const reason = result.outcome === 'failed' ? result.error : result.reason;
+      const reason = result.reason;
       await recordDelivery(db, {
         id: `${deliveryId}:${trigger.id}`,
         eventType: event.event,
@@ -350,7 +331,7 @@ async function processTriggersForProject(
         repositoryFullName: event.repository?.full_name,
         senderLogin: event.sender?.login,
         matchedTriggerId: trigger.id,
-        decision: result.outcome === 'failed' ? 'error' : 'skipped',
+        decision: 'skipped',
         decisionReason: reason,
         createdAt: now,
       });

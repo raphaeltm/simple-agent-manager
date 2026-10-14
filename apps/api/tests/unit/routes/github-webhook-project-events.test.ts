@@ -8,7 +8,8 @@ const mocks = vi.hoisted(() => ({
   verifyWebhookSignature: vi.fn(),
   getGitHubWebhookSecret: vi.fn(),
   handleGitHubProjectEventAdmission: vi.fn(),
-  handleGitHubEventForTriggers: vi.fn(),
+  persistGitHubTriggerIntake: vi.fn(),
+  recoverGitHubTriggerDelivery: vi.fn(),
   log: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -26,8 +27,9 @@ vi.mock('../../../src/services/platform-config', () => ({
 vi.mock('../../../src/services/github-project-event-producer', () => ({
   handleGitHubProjectEventAdmission: mocks.handleGitHubProjectEventAdmission,
 }));
-vi.mock('../../../src/services/github-trigger-handler', () => ({
-  handleGitHubEventForTriggers: mocks.handleGitHubEventForTriggers,
+vi.mock('../../../src/services/github-trigger-recovery', () => ({
+  persistGitHubTriggerIntake: mocks.persistGitHubTriggerIntake,
+  recoverGitHubTriggerDelivery: mocks.recoverGitHubTriggerDelivery,
 }));
 
 import { handleGitHubWebhook } from '../../../src/routes/github-webhook';
@@ -43,12 +45,8 @@ describe('GitHub webhook ProjectData event admission ingress', () => {
     mocks.verifyWebhookSignature.mockResolvedValue(true);
     mocks.getGitHubWebhookSecret.mockResolvedValue('secret');
     mocks.handleGitHubProjectEventAdmission.mockResolvedValue(undefined);
-    mocks.handleGitHubEventForTriggers.mockResolvedValue({
-      processed: false,
-      deliveryId: 'delivery-1',
-      matchedTriggers: 0,
-      reason: 'no_project',
-    });
+    mocks.persistGitHubTriggerIntake.mockResolvedValue(true);
+    mocks.recoverGitHubTriggerDelivery.mockResolvedValue(undefined);
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) =>
@@ -94,11 +92,12 @@ describe('GitHub webhook ProjectData event admission ingress', () => {
       eventType: 'pull_request',
       payload,
     });
-    expect(mocks.handleGitHubEventForTriggers).toHaveBeenCalledWith(env, {
+    expect(mocks.persistGitHubTriggerIntake).toHaveBeenCalledWith(env, {
       deliveryId: 'delivery-1',
       eventType: 'pull_request',
       payload,
     });
+    expect(mocks.recoverGitHubTriggerDelivery).toHaveBeenCalledWith(env, 'delivery-1');
   });
 
   it('rejects a delivery without its ID before asynchronous routing', async () => {
@@ -125,6 +124,6 @@ describe('GitHub webhook ProjectData event admission ingress', () => {
     expect(response.status).toBe(400);
     expect(waitUntilPromises).toHaveLength(0);
     expect(mocks.handleGitHubProjectEventAdmission).not.toHaveBeenCalled();
-    expect(mocks.handleGitHubEventForTriggers).not.toHaveBeenCalled();
+    expect(mocks.persistGitHubTriggerIntake).not.toHaveBeenCalled();
   });
 });

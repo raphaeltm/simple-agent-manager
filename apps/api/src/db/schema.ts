@@ -2737,6 +2737,9 @@ export const triggerExecutions = sqliteTable(
     taskId: text('task_id'),
     eventType: text('event_type'),
     renderedPrompt: text('rendered_prompt'),
+    githubDeliveryId: text('github_delivery_id'),
+    submissionRecordedAt: text('submission_recorded_at'),
+    admissionSnapshotJson: text('admission_snapshot_json'),
     errorMessage: text('error_message'),
     scheduledAt: text('scheduled_at'),
     startedAt: text('started_at'),
@@ -2751,6 +2754,9 @@ export const triggerExecutions = sqliteTable(
       .on(table.triggerId, table.status)
       .where(sql`status IN ('queued', 'running')`),
     triggerIdIdx: index('idx_trigger_executions_trigger_id').on(table.triggerId),
+    githubDeliveryUnique: uniqueIndex('idx_trigger_execution_github_delivery')
+      .on(table.githubDeliveryId, table.triggerId)
+      .where(sql`github_delivery_id IS NOT NULL`),
   })
 );
 
@@ -2812,6 +2818,26 @@ export const githubWebhookDeliveries = sqliteTable(
 
 export type GitHubWebhookDeliveryRow = typeof githubWebhookDeliveries.$inferSelect;
 export type NewGitHubWebhookDeliveryRow = typeof githubWebhookDeliveries.$inferInsert;
+
+export const githubTriggerInbox = sqliteTable(
+  'github_trigger_inbox',
+  {
+    id: text('id').primaryKey(),
+    eventType: text('event_type').notNull(),
+    payloadJson: text('payload_json'),
+    state: text('state').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    availableAt: text('available_at').notNull(),
+    leaseToken: text('lease_token'),
+    leaseUntil: text('lease_until'),
+    createdAt: text('created_at').notNull(),
+    expiresAt: text('expires_at').notNull(),
+  },
+  (table) => ({
+    dueIdx: index('idx_github_trigger_inbox_due').on(table.state, table.availableAt),
+    expiryIdx: index('idx_github_trigger_inbox_expiry').on(table.expiresAt),
+  })
+);
 
 // =============================================================================
 // Generic Webhook Trigger Configs
