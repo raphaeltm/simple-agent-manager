@@ -533,6 +533,9 @@ importers:
       '@astrojs/starlight':
         specifier: 0.40.0
         version: 0.40.0(astro@6.4.8(@types/node@26.5.0)(aws4fetch@1.0.20)(idb-keyval@6.3.0)(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.56.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))(typescript@5.9.3)
+      '@simple-agent-manager/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       astro:
         specifier: 6.4.8
         version: 6.4.8(@types/node@26.5.0)(aws4fetch@1.0.20)(idb-keyval@6.3.0)(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.56.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0)

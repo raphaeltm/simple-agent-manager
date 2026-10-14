@@ -14,44 +14,43 @@ const navLinks = [
 ];
 ---
 
-<header class="header">
-  <div class="header-inner container">
-    <a href="/" class="logo" aria-label="SAM Home">
-      <img src="/favicon.png" width="32" height="32" alt="" aria-hidden="true" class="logo-icon" />
-      <span class="logo-text">SAM</span>
+<!-- A floating glass bar. It stays inside the 64px `--header-height` band that pages offset by. -->
+<header class="header sam-glass sam-glass--chrome sam-glass-rim sam-glass-live">
+  <a href="/" class="logo" aria-label="SAM Home">
+    <img src="/favicon.png" width="30" height="30" alt="" aria-hidden="true" class="logo-icon" />
+    <span class="logo-text">SAM</span>
+  </a>
+
+  <nav class="nav" aria-label="Main navigation">
+    {navLinks.map(({ label, href }) => (
+      <a href={href} class="nav-link">{label}</a>
+    ))}
+  </nav>
+
+  <div class="header-actions">
+    <ThemeToggle />
+    <a href="https://github.com/raphaeltm/simple-agent-manager" class="icon-link" target="_blank" rel="noopener noreferrer" aria-label="GitHub repository">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+      </svg>
     </a>
-
-    <nav class="nav" aria-label="Main navigation">
-      {navLinks.map(({ label, href }) => (
-        <a href={href} class="nav-link">{label}</a>
-      ))}
-    </nav>
-
-    <div class="header-actions">
-      <ThemeToggle />
-      <a href="https://github.com/raphaeltm/simple-agent-manager" class="nav-link github-link" target="_blank" rel="noopener noreferrer" aria-label="GitHub repository">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-        </svg>
-      </a>
-      <a href={getStartedUrl} class="btn btn-primary">Get Started</a>
-    </div>
-
-    <button class="mobile-toggle" aria-label="Toggle menu" aria-expanded="false">
-      <span></span>
-      <span></span>
-      <span></span>
-    </button>
+    <a href={getStartedUrl} class="sam-btn sam-btn--primary sam-btn--sm">Get Started</a>
   </div>
+
+  <button class="mobile-toggle" type="button" aria-label="Toggle menu" aria-expanded="false" aria-controls="mobile-nav">
+    <span></span>
+    <span></span>
+    <span></span>
+  </button>
 </header>
 
-<!-- Mobile nav overlay -->
-<div class="mobile-nav" id="mobile-nav">
-  <nav>
+<!-- Mobile menu: a glass sheet under the bar -->
+<div class="mobile-nav sam-glass sam-glass-rim sam-glass-live" id="mobile-nav">
+  <nav aria-label="Main navigation">
     {navLinks.map(({ label, href }) => (
       <a href={href} class="mobile-nav-link">{label}</a>
     ))}
-    <a href={getStartedUrl} class="btn btn-primary mobile-cta">Get Started</a>
+    <a href={getStartedUrl} class="sam-btn sam-btn--primary mobile-cta">Get Started</a>
     <div class="mobile-theme">
       <span class="mobile-theme-label">Theme</span>
       <ThemeToggle />
@@ -60,52 +59,47 @@ const navLinks = [
 </div>
 
 <script>
-  const toggle = document.querySelector('.mobile-toggle');
+  const toggle = document.querySelector<HTMLButtonElement>('.mobile-toggle');
   const mobileNav = document.getElementById('mobile-nav');
 
-  toggle?.addEventListener('click', () => {
-    const isOpen = mobileNav?.classList.toggle('is-open');
-    toggle.setAttribute('aria-expanded', String(isOpen));
-    toggle.classList.toggle('is-active');
-  });
+  const setOpen = (open: boolean) => {
+    mobileNav?.classList.toggle('is-open', open);
+    toggle?.classList.toggle('is-active', open);
+    toggle?.setAttribute('aria-expanded', String(open));
+  };
 
-  // Close on link click
-  mobileNav?.querySelectorAll('a').forEach((link) => {
-    link.addEventListener('click', () => {
-      mobileNav.classList.remove('is-open');
-      toggle?.classList.remove('is-active');
-      toggle?.setAttribute('aria-expanded', 'false');
-    });
+  toggle?.addEventListener('click', () => setOpen(!mobileNav?.classList.contains('is-open')));
+  mobileNav?.querySelectorAll('a').forEach((link) => link.addEventListener('click', () => setOpen(false)));
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && mobileNav?.classList.contains('is-open')) {
+      setOpen(false);
+      toggle?.focus();
+    }
   });
 </script>
 
 <style>
   .header {
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
+    top: 8px;
+    left: 50%;
     z-index: 100;
-    height: var(--header-height);
-    background: var(--color-header-bg);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--color-border-subtle);
-  }
-
-  .header-inner {
     display: flex;
     align-items: center;
-    height: 100%;
-    gap: 32px;
+    gap: 20px;
+    width: min(1200px, calc(100% - 24px));
+    height: calc(var(--header-height) - 14px);
+    padding: 0 8px 0 14px;
+    border-radius: 16px;
+    transform: translateX(-50%);
   }
 
   .logo {
     display: flex;
     align-items: center;
     gap: 10px;
-    color: var(--color-fg-primary);
     flex-shrink: 0;
+    color: var(--color-fg-primary);
   }
 
   .logo:hover {
@@ -113,82 +107,59 @@ const navLinks = [
   }
 
   .logo-icon {
-    border-radius: var(--radius-sm);
+    border-radius: 8px;
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.08);
   }
 
   .logo-text {
     font-family: var(--font-display);
-    font-weight: 600;
     font-size: 1.25rem;
+    font-weight: 600;
     letter-spacing: -0.02em;
   }
 
   .nav {
     display: none;
     align-items: center;
-    gap: 8px;
-  }
-
-  @media (min-width: 768px) {
-    .nav { display: flex; }
+    gap: 2px;
   }
 
   .nav-link {
+    padding: 7px 10px;
+    border-radius: 10px;
     font-size: 0.875rem;
     color: var(--color-fg-muted);
-    padding: 6px 12px;
-    border-radius: var(--radius-sm);
-    transition: color 0.2s, background 0.2s;
+    white-space: nowrap;
+    transition: color 0.2s, background-color 0.2s;
   }
 
   .nav-link:hover {
     color: var(--color-fg-primary);
-    background: var(--color-bg-surface-hover);
+    background: rgb(255 255 255 / 0.06);
+  }
+
+  :global(html[data-theme='light']) .nav-link:hover {
+    background: rgb(17 39 29 / 0.06);
   }
 
   .header-actions {
     display: none;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     margin-left: auto;
   }
 
-  @media (min-width: 768px) {
-    .header-actions { display: flex; }
+  .icon-link {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
+    color: var(--color-fg-muted);
   }
 
-  .github-link {
-    display: flex;
-    align-items: center;
-    padding: 8px;
-    border-radius: var(--radius-sm);
-  }
-
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-family: var(--font-body);
-    font-size: 0.875rem;
-    font-weight: 500;
-    padding: 8px 20px;
-    border-radius: var(--radius-md);
-    transition: all 0.2s;
-    cursor: pointer;
-    border: none;
-    white-space: nowrap;
-  }
-
-  .btn-primary {
-    background: var(--color-accent);
-    color: white;
-    box-shadow: 0 0 12px var(--shadow-accent-soft);
-  }
-
-  .btn-primary:hover {
-    background: var(--color-accent-hover);
-    color: white;
-    box-shadow: 0 0 20px var(--shadow-accent-strong);
+  .icon-link:hover {
+    color: var(--color-fg-primary);
   }
 
   /* Mobile toggle */
@@ -197,25 +168,22 @@ const navLinks = [
     flex-direction: column;
     justify-content: center;
     gap: 5px;
-    width: 32px;
-    height: 32px;
-    background: none;
-    border: none;
-    cursor: pointer;
+    width: 44px;
+    height: 44px;
     margin-left: auto;
-    padding: 4px;
-  }
-
-  @media (min-width: 768px) {
-    .mobile-toggle { display: none; }
+    padding: 11px;
+    border: none;
+    border-radius: 12px;
+    background: none;
+    cursor: pointer;
   }
 
   .mobile-toggle span {
     display: block;
     width: 100%;
     height: 2px;
-    background: var(--color-fg-muted);
     border-radius: 2px;
+    background: var(--color-fg-muted);
     transition: transform 0.3s, opacity 0.3s;
   }
 
@@ -231,41 +199,41 @@ const navLinks = [
     transform: translateY(-7px) rotate(-45deg);
   }
 
-  /* Mobile nav */
+  /* Mobile menu sheet */
   .mobile-nav {
     position: fixed;
-    top: var(--header-height);
-    left: 0;
-    right: 0;
-    bottom: 0;
+    top: calc(var(--header-height) + 2px);
+    left: 12px;
+    right: 12px;
     z-index: 99;
-    background: var(--color-bg-canvas);
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    transform: translateX(100%);
-    transition: transform 0.3s ease;
+    max-height: calc(100dvh - var(--header-height) - 14px);
+    overflow-y: auto;
+    padding: 12px 20px 20px;
+    border-radius: 18px;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-8px) scale(0.98);
+    transform-origin: top center;
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
   }
 
   .mobile-nav.is-open {
-    transform: translateX(0);
-  }
-
-  @media (min-width: 768px) {
-    .mobile-nav { display: none; }
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s;
   }
 
   .mobile-nav nav {
     display: flex;
     flex-direction: column;
-    gap: 8px;
   }
 
   .mobile-nav-link {
-    font-size: 1.125rem;
-    color: var(--color-fg-muted);
-    padding: 12px 0;
+    padding: 13px 4px;
     border-bottom: 1px solid var(--color-border-subtle);
+    font-size: 1.0625rem;
+    color: var(--color-fg-muted);
   }
 
   .mobile-nav-link:hover {
@@ -273,21 +241,41 @@ const navLinks = [
   }
 
   .mobile-cta {
-    margin-top: 24px;
-    text-align: center;
+    margin-top: 20px;
   }
 
   .mobile-theme {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-top: 24px;
-    padding-top: 24px;
+    margin-top: 20px;
+    padding-top: 16px;
     border-top: 1px solid var(--color-border-subtle);
   }
 
   .mobile-theme-label {
     font-size: 0.875rem;
     color: var(--color-fg-muted);
+  }
+
+  /* Seven links plus actions need about 1,050px; below that the menu takes over. */
+  @media (min-width: 1120px) {
+    .nav,
+    .header-actions {
+      display: flex;
+    }
+
+    .mobile-toggle,
+    .mobile-nav {
+      display: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mobile-nav,
+    .mobile-nav.is-open,
+    .mobile-toggle span {
+      transition: none;
+    }
   }
 </style>
