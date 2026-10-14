@@ -234,6 +234,14 @@
       "reviewedAt": "2026-10-07T17:38:00.000Z",
       "expiresAt": "2026-11-06T00:00:00.000Z",
       "digests": ["78c85a43bd94bd7a35bccfd006f9e2a07e64180c5fb750742fd6545db14a2349"]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "User-approved exact historical synthetic PEM wrapper in commit e43d2ab1b5ba5a4f76d32e866138fde1c54fc0e0; private-key rule, apps/api/tests/integration/secret-exec.test.ts line 67. Contains no embedded credential; current source uses jose.exportPKCS8. Exact fingerprint only, including identical matches at this location until expiry. Separate from the local test-output incident.",
+      "owner": "security",
+      "reviewedAt": "2026-10-14T05:38:00.000Z",
+      "expiresAt": "2026-11-12T21:00:00.000Z",
+      "digests": ["419191fd312e7f253561b139ecd663e03707e788def54ec6ac2ff5911379c268"]
     }
   ]
 }
