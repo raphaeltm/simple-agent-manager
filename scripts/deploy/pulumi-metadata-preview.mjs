@@ -40,7 +40,19 @@ function summarize(digest, stack) {
     operationCounts: {},
     resourceTypes: [],
     existingKeyCount: 0,
+    untargetedSameCount: 0,
+    persistedSecretMetadataVerified: false,
     identitiesUnchanged: true,
+    metadata: {
+      oldIdsPresent: true,
+      newIdsPresent: true,
+      idsEqual: true,
+      urnsEqual: true,
+      typesEqual: true,
+      providersEqual: true,
+      annotationsPresent: true,
+      outputsRedacted: true,
+    },
     inputsUnchanged: true,
     protectionUnchanged: true,
     secretOutputs: Object.fromEntries(secretOutputs.map((key) => [key, true])),
@@ -71,27 +83,37 @@ function summarize(digest, stack) {
     )
       safe = false;
     const type = step.newState?.type ?? step.oldState?.type;
-    if (!allowedTypes.has(type)) {
-      safe = false;
-      continue;
-    }
+    if (!allowedTypes.has(type)) continue;
     types.add(type);
     if (type !== keyType) continue;
     const name = keyNames.find(
       (candidate) => step.urn === `urn:pulumi:${stack}::sam-infra::${keyType}::${candidate}`
     );
-    if (!name || seen.has(name)) {
+    if (!name) {
+      result.untargetedSameCount += 1;
+      continue;
+    }
+    if (seen.has(name)) {
       safe = false;
       continue;
     }
     seen.add(name);
     const old = step.oldState;
     const next = step.newState;
+    result.metadata.oldIdsPresent &&= typeof old?.id === 'string' && old.id.length > 0;
+    result.metadata.newIdsPresent &&= typeof next?.id === 'string' && next.id.length > 0;
+    result.metadata.idsEqual &&= old?.id === next?.id;
+    result.metadata.urnsEqual &&= old?.urn === step.urn && next?.urn === step.urn;
+    result.metadata.typesEqual &&= old?.type === keyType && next?.type === keyType;
+    result.metadata.providersEqual &&= old?.provider === next?.provider;
+    // The digest is pre-step metadata. SameStep.Apply copies the old ID and
+    // outputs later, so new ID/outputs may be absent. Same/no-diff preserves the
+    // existing identity; reject a different new ID when one is supplied.
     // Compare inside the trusted runner; return booleans only, never the IDs.
     result.identitiesUnchanged &&=
       typeof old?.id === 'string' &&
       old.id.length > 0 &&
-      old.id === next?.id &&
+      (next?.id == null || next.id === '' || (typeof next.id === 'string' && old.id === next.id)) &&
       old.urn === step.urn &&
       next?.urn === step.urn &&
       old.type === keyType &&
@@ -102,10 +124,12 @@ function summarize(digest, stack) {
       next?.inputs?.byteLength === 32;
     result.protectionUnchanged &&= old?.protect === true && next?.protect === true;
     for (const key of secretOutputs) {
-      // Pulumi's preview digest renders annotated output properties as [secret].
+      // Verify annotation intent. Pre-step outputs cannot prove persistence.
+      result.metadata.annotationsPresent &&=
+        Array.isArray(next?.additionalSecretOutputs) && next.additionalSecretOutputs.includes(key);
+      result.metadata.outputsRedacted &&= next?.outputs?.[key] === '[secret]';
       result.secretOutputs[key] &&=
-        next?.additionalSecretOutputs?.includes(key) === true &&
-        next?.outputs?.[key] === '[secret]';
+        Array.isArray(next?.additionalSecretOutputs) && next.additionalSecretOutputs.includes(key);
     }
   }
   // Check the engine summary too, so a step omitted from display cannot hide a

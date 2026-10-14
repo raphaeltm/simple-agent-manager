@@ -106,6 +106,28 @@ describe('Pulumi metadata-only preview', () => {
     expect(evidence.resourceTypes).toEqual(['random:index/randomId:RandomId']);
     expect(JSON.stringify(evidence)).not.toContain('urn:');
   });
+  it('handles pre-step metadata and untargeted same resources without claiming persistence', () => {
+    const value = digest();
+    for (const step of value.steps) {
+      step.newState.id = '';
+      step.newState.outputs = {};
+    }
+    value.steps.push({
+      ...value.steps[0],
+      urn: 'urn:pulumi:staging::sam-infra::random:index/randomId:RandomId::installation-id',
+    });
+    value.changeSummary.same = 5;
+    const { result, evidence } = run(value);
+    expect(result.status).toBe(0);
+    expect(evidence.verified).toBe(true);
+    expect(evidence.existingKeyCount).toBe(4);
+    expect(evidence.untargetedSameCount).toBe(1);
+    expect(evidence.identitiesUnchanged).toBe(true);
+    expect(evidence.metadata.newIdsPresent).toBe(false);
+    expect(evidence.metadata.outputsRedacted).toBe(false);
+    expect(evidence.persistedSecretMetadataVerified).toBe(false);
+    expect(evidence.secretOutputs).toEqual(Object.fromEntries(outputs.map((key) => [key, true])));
+  });
   it.each(['create', 'delete', 'replace', 'create-replacement', 'update'])(
     'fails closed for %s without diagnostic output',
     (op) => {
@@ -144,6 +166,16 @@ describe('Pulumi metadata-only preview', () => {
     variants[5].steps[0].newState.provider = 'different-provider';
     variants[6].diagnostics = [{ severity: 'error', message: canary }];
     for (const value of variants) expect(run(value).evidence.verified).toBe(false);
+  });
+  it('rejects non-string supplied IDs and non-array secret declarations', () => {
+    for (const id of [123, {}, false]) {
+      const value: any = digest();
+      value.steps[0].newState.id = id;
+      expect(run(value).evidence.verified).toBe(false);
+    }
+    const value: any = digest();
+    value.steps[0].newState.additionalSecretOutputs = outputs.join(',');
+    expect(run(value).evidence.verified).toBe(false);
   });
   it('uses defaults for empty limits and fails safely for malformed JSON or processing limits', () => {
     expect(run(digest()).evidence.verified).toBe(true);
