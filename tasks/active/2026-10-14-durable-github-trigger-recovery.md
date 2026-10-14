@@ -25,9 +25,9 @@ Signed GitHub ingress ACKs asynchronously; handler permanently claims ID before 
 - [x] Real SQLite integration tests for retries/races/crashes and additive migration fresh/upgrade paths.
 - [x] Update docs/config references, run lint/typecheck/test/build and relevant quality checks.
 - [x] Local independent specialist reviews incl task-completion/security/Cloudflare/test/config/docs.
-- [ ] Coordinate and verify pinned staging using synthetic fixtures, cleanup.
-- [ ] PR exact SHA CI/Sonar/security and best-effort CodeRabbit evidence reported BEFORE merge.
-- [ ] Wait for coordinator merge clearance; then merge/deploy/readonly production migration/health/config verification.
+- [x] Coordinate and verify pinned staging using synthetic fixtures, cleanup.
+- [x] PR exact SHA CI/Sonar/security and best-effort CodeRabbit evidence reported BEFORE merge.
+- [x] Wait for coordinator merge clearance; then merge/deploy/readonly production migration/health/config verification.
 
 ## Release constraints
 
@@ -49,3 +49,15 @@ No real external user event replay. No production synthetic canary without exist
 
 - Migration test now uses the established SQL asset import pattern, executes migrations and asserts database behavior; no scanner exception.
 - Read-only staging observability baseline passed persisted D1 noise checks; Workers telemetry unavailable with403, no credential expansion. Staging hold awaits Pulumi preview completion/explicit coordinator release.
+
+## Final release acceptance
+
+Reviewed final head81d193b798c43ddd1a699b6e3955b9667e2150bc passed21/21 root tasks/19,017 tests (API12,322+2skipped), types/lint/build and actualWorkers8. All three specialist groups passed. Exact-head CI38551778475 and Sonar115818498598 passed. CodeRabbit review5516635152 findings were fixed, evidence replied, and threads resolved; automatic follow-up bot review skipped. Ready evidence was published before merge, including Sonar out-of-order older-report reconciliation.
+
+Final staging38553413721/38555135543 passed:12smoke, browser4pages/health200/zeroerrors, signed same-ID2x200/onecompleted intake/payloaderased/zeroexecutions/nodes. Migration0195/readback/API02efcd74-406c-4023-895c-2e9969dc640f verified. Slot released11:16UTC; all own fixtures/jobs cleaned. Earlier matched SolVM staging proof was cleaned up.
+
+Root cleared production after parser verification at11:34UTC. PR2335 normally merged11:35:07UTC as a6866fafaf016d958b35d2a36a7090c0c39c95d6 without protection overrides or review dismissal. MainCI38557611473 and mainSonar115836991191 passed. Automatic production38559400967 succeeded12:12:30UTC. Migration0195 applied remotely to sam-prod11:58:29UTC; postmigration integrity passed12:02:27UTC; observability database had no migrations. Pipeline reported production API versiondb6c1e38-23ce-45c9-9bfe-b0f037bac9e0 at12:11:16UTC and healthy API12:12:21UTC.
+
+Independent production read-only checks passed12:13:09UTC: health200/healthy, login configuration200, unauthenticated trigger route401, production browser/login surface loaded. No auth session, webhook replay, task, trigger, profile or VM was created. Existing Cloudflare connection could not read production Worker (404/10007), so migration/version evidence is the trusted deployment log rather than independent control-plane readback; no credentials/permissions expanded. Production failure injection/canary remains unverified/paused; local synthetic crash/race tests and staging establish recovery behavior. No natural event-loss claim.
+
+Completion validator passed production acceptance on release evidence. This file remains active pending user completion confirmation under task-tracking rule09; no additional runtime release is needed.
