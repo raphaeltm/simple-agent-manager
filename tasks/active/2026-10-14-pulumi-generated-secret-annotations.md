@@ -42,3 +42,15 @@ The annotation fix achieves its **code scope**: all four regular encodings on al
 4. **Whole-checkpoint envelope encryption:** an approved backend/storage layer that encrypts the entire checkpoint can protect physical IDs in stored objects, unlike Pulumi property annotations. It needs separate security-design/account-setting approval and compatibility/recovery validation; storage-at-rest encryption alone does not hide key material from authorized raw-state readers.
 
 Do **not** substitute RandomBytes as an ID fix: the pinned [Pulumi bridge computeRandomBytesID](https://github.com/pulumi/pulumi-random/blob/v4.21.0/provider/resources.go#L120) deliberately derives its physical ID from base64 key material. Adding id to additionalSecretOutputs or wrapping stack exports also cannot fix the special field. Rotation is not proposed absent confirmed exposure and explicit approval.
+
+## Approved metadata-only preview mode
+Root explicitly authorized a minimal mode in the existing credential-backed workflow on2026-10-14. `secret-metadata-preview` is a separate job in `pulumi-state-repair.yml`; repair steps cannot execute for this action. It retains contents:read, existing GitHub environment approvals/secrets, and environment-scoped serialization. Credentials stay on the Actions runner.
+
+The script targets exactly the four existing RandomIds, passes refresh=false, suppresses stack outputs, never exports state/saves a plan, and discards raw child stdout/stderr on failure. Preview JSON is parsed only inside the trusted runner; IDs/inputs are compared in memory and only equality/protection/secret booleans, operation counts and fixed resource types are emitted. Four keys must exist; any non-same operation, replacement reason, unexpected type, changed identity/input/protection or absent secret property fails closed. No key/resource mutation occurs. Temporary local config is deleted and no config-set/stack-init/select occurs.
+
+Runtime limits are existing-environment variables `PULUMI_METADATA_PREVIEW_TIMEOUT_MS` (default600000) and `PULUMI_METADATA_PREVIEW_MAX_BYTES` (default16777216). No variable setup is required; empty values use defaults. The15-minute job limit bounds setup and execution. These limits affect local runner processing, not cloud resource provisioning.
+
+- [ ] Security/code review new workflow and failure/redaction behavior.
+- [ ] Run synthetic regression tests and relevant quality checks.
+- [ ] Run exact-head trusted metadata preview using existing staging environment and approvals.
+- [ ] Update CI and CodeRabbit evidence for expanded final diff.

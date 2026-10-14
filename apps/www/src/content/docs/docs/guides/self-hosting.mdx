@@ -308,6 +308,12 @@ GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot 
 Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`) and `TRIAL_CLAIM_TOKEN_SECRET` are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets. No manual setup required. Generated `RandomId` key encodings (`b64Std`, `b64Url`, `dec`, `hex`) are marked secret, but Pulumi cannot encrypt the special resource ID through secret-output annotations; that ID is the same key bytes encoded as unpadded base64url. Keep the state backend and backups private. Annotation updates preserve existing keys and do not rotate credentials.
 :::
 
+:::note[Generated-key metadata preview]
+The **Pulumi State Repair** workflow's `secret-metadata-preview` action previews the four existing generated key resources without applying changes, refreshing resources, or exporting state. It uses the selected GitHub Environment's existing secrets and approval controls. Only operation counts, resource types, and identity/input/protection/secret booleans are logged; raw preview output is discarded even on failure. Verification fails if a key is missing or changed, any resource operation would mutate, or expected secret annotations are absent. This does not encrypt the special resource ID or verify unrelated infrastructure.
+
+Optional GitHub Environment variables `PULUMI_METADATA_PREVIEW_TIMEOUT_MS` (default `600000`) and `PULUMI_METADATA_PREVIEW_MAX_BYTES` (default `16777216`) bound each runner subprocess and captured preview output. Unset or empty values use the defaults; nonpositive or invalid values fail safely. No additional secrets or permissions are required.
+:::
+
 :::note[Provider resource ownership]
 Pulumi also generates a non-secret, per-installation identity in stack state and injects it into the API Worker. New cloud VMs carry this marker so destructive orphan cleanup can prove they belong to this exact installation. Upgrades deliberately do not infer ownership of legacy unmarked VMs; those servers keep running and remain outside provider-side orphan deletion. Preserve Pulumi state when moving or restoring an installation so newly created VMs continue using the same identity.
 :::
