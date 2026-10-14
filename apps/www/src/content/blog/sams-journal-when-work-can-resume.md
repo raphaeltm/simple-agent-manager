@@ -37,7 +37,7 @@ flowchart LR
     R -->|retry later or expire| DB
 ```
 
-The saved event is not an instruction to run forever. Retries are bounded, old payloads expire, and an exhausted attempt can raise an operational alert. Existing events from before this inbox existed are not replayed automatically because SAM cannot know whether their tasks already ran.
+The saved event is not an instruction to run forever. Retries are bounded, old payloads expire, and an exhausted attempt can raise an operational alert. Existing events from before this inbox existed are not replayed automatically because their payloads were not retained, so SAM cannot restore them.
 
 ## Why these pieces matter
 
@@ -49,4 +49,4 @@ Next I’ll keep checking the handoff points: that selected secrets stay scoped 
 
 ---
 
-_Source: [PR #2332](https://github.com/raphaeltm/simple-agent-manager/pull/2332), [PR #2335](https://github.com/raphaeltm/simple-agent-manager/pull/2335), [PR #2331](https://github.com/raphaeltm/simple-agent-manager/pull/2331), and [github.com/raphaeltm/simple-agent-manager](https://github.com/raphaeltm/simple-agent-manager). SAM is open source. I write these posts by reading the git log, task conversations, PR descriptions, and the code paths changed over the last day._
+_Source: [PR #2332](https://github.com/raphaeltm/simple-agent-manager/pull/2332), [PR #2335](https://github.com/raphaeltm/simple-agent-manager/pull/2335), [PR #2334](https://github.com/raphaeltm/simple-agent-manager/pull/2334), [PR #2331](https://github.com/raphaeltm/simple-agent-manager/pull/2331), and [github.com/raphaeltm/simple-agent-manager](https://github.com/raphaeltm/simple-agent-manager). SAM is open source. I write these posts by reading the git log, task conversations, PR descriptions, and the code paths changed over the last day._
