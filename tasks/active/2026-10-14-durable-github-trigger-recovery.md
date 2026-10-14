@@ -35,10 +35,14 @@ No real external user event replay. No production synthetic canary without exist
 ## Implementation evidence
 
 - Old main synthetic regression: 19/19 tests reproduced permanent same-ID loss; no production-loss claim.
-- New signed ingress tests: 37/37 pass, including pending-start retries, stale-owner failure fencing, partial multi-trigger success, marker-write recovery, concurrency slots, exact backoff/cap, bounded expiry/purge and kill switch.
+- New signed ingress tests: 38/38 pass, including pending-start retries, stale-owner failure fencing, partial multi-trigger success, marker-write recovery, concurrency slots, exact backoff/cap, bounded expiry/purge and kill switch.
 - Actual signed route → real trigger-submit → D1 task/checkpoint → stateful external ProjectData/Runner boundaries: one task/execution/checkpoint/start under expired-lease overlap. Reserved submission suite 33/33 pass.
 - Relevant real migration-chain fresh/populated target schemas preserve linked task/execution/audit and foreign keys; 0195 canonical states and unique source identity exercised.
 - Existing generic webhook/incident integration fixtures updated to apply 0195; 55/55 pass.
 - Initial review findings addressed: pending-start not terminal intake; stale failure cannot overwrite linked task; durable submission-recorded counter and link repair; recoverable failed execution retains admission slot; pre-submit intake lease fence. Final re-review pending.
 - Workflow vars forwarded through both existing environment blocks; no new secrets/bindings. Payload expiry/purge timing explicitly includes bounded cleanup lag.
 - Migration safety/order and agent-context budget pass. Full suite still running; earlier handcrafted fixture failures corrected and retested.
+
+- Final kill-switch race: disabling after claim keeps intake retryable; 41/41 targeted tests (38 ingress, 2 migration, 1 snapshot) pass.
+- Reviewed new inbox terminal-retention churning selector uses existing migration percentage cap and subset-only validation; independent31/31 migration-gate tests pass. No gate bypass.
+- Full typecheck19/19, lint13/13, build9/9 passed. Format ratchet passed. First full root test20/21 tasks failed only on6 handcrafted API schema fixtures (66 cases); all6 now corrected and focused92/92 cases pass; full root rerun pending. Worker runtime test emits workerd cross-DO timeout/fixture DNS errors; final result pending and no pass claim.

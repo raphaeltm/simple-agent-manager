@@ -8,7 +8,13 @@ import { TASK_STATUSES, type TaskStatus } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { tasks, triggerExecutions, type TriggerRow, triggers } from '../../../src/db/schema';
+import {
+  githubTriggerInbox,
+  tasks,
+  triggerExecutions,
+  type TriggerRow,
+  triggers,
+} from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { admitAndSubmitTriggerExecution } from '../../../src/services/trigger-admission';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -43,7 +49,7 @@ afterEach(() => {
 function setup(skipIfRunning: boolean) {
   const sqlite = new Database(':memory:');
   databases.push(sqlite);
-  createSchemaTables(sqlite, [tasks, triggers, triggerExecutions]);
+  createSchemaTables(sqlite, [tasks, triggers, triggerExecutions, githubTriggerInbox]);
   sqlite
     .prepare(
       `INSERT INTO triggers

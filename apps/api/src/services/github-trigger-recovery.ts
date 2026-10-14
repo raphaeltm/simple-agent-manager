@@ -98,7 +98,7 @@ export async function recoverGitHubTriggerDelivery(env: Env, deliveryId: string)
     )
       .bind(row.id, row.event_type, row.created_at)
       .run();
-    await handleGitHubEventForTriggers(
+    const routed = await handleGitHubEventForTriggers(
       env,
       {
         deliveryId: row.id,
@@ -117,6 +117,8 @@ export async function recoverGitHubTriggerDelivery(env: Env, deliveryId: string)
         },
       }
     );
+    if (routed.reason === 'feature_disabled')
+      throw new Error('GitHub triggers disabled during recovery');
     const finished = await env.DATABASE.prepare(
       `UPDATE github_trigger_inbox SET state = 'completed', payload_json = NULL,
           lease_token = NULL, lease_until = NULL

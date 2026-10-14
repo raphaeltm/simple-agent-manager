@@ -1,7 +1,13 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
-import { tasks, triggerExecutions, type TriggerRow, triggers } from '../../../src/db/schema';
+import {
+  githubTriggerInbox,
+  tasks,
+  triggerExecutions,
+  type TriggerRow,
+  triggers,
+} from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { admitAndSubmitTriggerExecution } from '../../../src/services/trigger-admission';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -48,7 +54,7 @@ function makeTriggerRow(overrides: Partial<TriggerRow> = {}): TriggerRow {
 
 function setup(overrides: Partial<TriggerRow> = {}) {
   const sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [tasks, triggers, triggerExecutions]);
+  createSchemaTables(sqlite, [tasks, triggers, triggerExecutions, githubTriggerInbox]);
   const trigger = makeTriggerRow(overrides);
   sqlite
     .prepare(

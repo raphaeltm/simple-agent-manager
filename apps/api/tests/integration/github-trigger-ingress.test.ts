@@ -459,6 +459,25 @@ describe('signed GitHub webhook → scoped trigger → actual admission', () => 
     });
     fault.mockRestore();
   });
+  it('keeps intake retryable if the kill switch changes after its claim', async () => {
+    const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+    const flag = vi.spyOn(env.DATABASE, 'prepare').mockImplementation((sql) => {
+      if (sql.includes('INSERT OR IGNORE INTO github_webhook_deliveries'))
+        env.GITHUB_TRIGGERS_ENABLED = 'false';
+      return prepare(sql);
+    });
+    await deliver(payload());
+    expect(submitTriggeredTask).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT state,payload_json FROM github_trigger_inbox').get()).toEqual({
+      state: 'pending',
+      payload_json: expect.any(String),
+    });
+    flag.mockRestore();
+    env.GITHUB_TRIGGERS_ENABLED = 'true';
+    sqlite.prepare("UPDATE github_trigger_inbox SET available_at='2000-01-01'").run();
+    await runGitHubTriggerRecovery(env);
+    expect(submitTriggeredTask).toHaveBeenCalledTimes(1);
+  });
   it('obeys the GitHub kill switch after durable intake', async () => {
     await persistGitHubTriggerIntake(env, {
       deliveryId: 'switch',
