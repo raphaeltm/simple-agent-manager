@@ -305,7 +305,7 @@ GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot 
 :::
 
 :::note
-Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`) and `TRIAL_CLAIM_TOKEN_SECRET` are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets. No manual setup required.
+Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`) and `TRIAL_CLAIM_TOKEN_SECRET` are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets. No manual setup required. Generated `RandomId` key encodings (`b64Std`, `b64Url`, `dec`, `hex`) are marked secret, but Pulumi cannot encrypt the special resource ID through secret-output annotations; that ID can also encode key bytes. Keep the state backend and backups private. Annotation updates preserve existing keys and do not rotate credentials.
 :::
 
 :::note[Provider resource ownership]

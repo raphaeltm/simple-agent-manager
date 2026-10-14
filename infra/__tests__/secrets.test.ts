@@ -31,6 +31,19 @@ describe('Security Key Resources', () => {
     expect(deploySigningKey.options.protect).toBe(true);
   });
 
+  it.each([
+    'encryption-key',
+    'trial-claim-token-secret',
+    'deploy-signing-private-key',
+    'preview-signing-key',
+  ])('marks every regular encoding secret without changing %s inputs', (name) => {
+    const resource = findRegisteredResource(name, 'random:index/randomId:RandomId');
+    expect(resource.inputs).toEqual({ byteLength: 32 });
+    expect(resource.options.protect).toBe(true);
+    expect(resource.options.additionalSecretOutputs).toEqual(['b64Std', 'b64Url', 'dec', 'hex']);
+    expect(resource.options).not.toHaveProperty('aliases');
+  });
+
   it('protects a stable 128-bit non-secret installation identity', async () => {
     const installationIdentity = findRegisteredResource(
       'installation-id',
@@ -38,6 +51,7 @@ describe('Security Key Resources', () => {
     );
     expect(installationIdentity.inputs).toMatchObject({ byteLength: 16 });
     expect(installationIdentity.options.protect).toBe(true);
+    expect(installationIdentity.options.additionalSecretOutputs).toBeUndefined();
     await expect(getSecretStatus(secretsModule.installationId)).resolves.toBe(false);
     await expect(getOutputValue(secretsModule.installationId)).resolves.toMatch(/^[0-9a-f]{32}$/);
   });
@@ -64,6 +78,7 @@ describe('Security Key Resources', () => {
     await expect(getSecretStatus(secretsModule.jwtPublicKey)).resolves.toBe(true);
     await expect(getSecretStatus(secretsModule.trialClaimTokenSecret)).resolves.toBe(true);
     await expect(getSecretStatus(secretsModule.deploySigningPrivateKey)).resolves.toBe(true);
+    await expect(getSecretStatus(secretsModule.previewSigningKey)).resolves.toBe(true);
     await expect(getSecretStatus(secretsModule.vapidPrivateKeyPem)).resolves.toBe(true);
   });
 
