@@ -33,7 +33,9 @@ Signed GitHub ingress ACKs asynchronously; handler permanently claims ID before 
 
 No real external user event replay. No production synthetic canary without existing separate clearance. No new credentials/security exceptions or bypass gates. Main task-file push deferred by explicit sequencing hold; task on supplied isolated output branch. Archive only after requested acceptance complete and completion validator.
 
-## Implementation evidence
+## Historical implementation evidence
+
+The following pre-release checkpoints are superseded by final release acceptance below.
 
 - Old main synthetic regression: 19/19 tests reproduced permanent same-ID loss; no confirmed production loss.
 - Latest focused suite: 7 files, 119 tests passed, including 41 signed-ingress cases and 33 real reserved-submission cases. It covers retry/backoff, expired claims, stale owners, multi-trigger progress, admission slots, crash checkpoints, kill switches, payload retention and bounded sweeps.
