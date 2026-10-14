@@ -48,6 +48,7 @@ const SPECIAL_TITLE = `Fix "quotes" & <script>alert('xss')</script> 🚀 ünïc�
 
 type Scenario = {
   long?: boolean;
+  many?: boolean;
   special?: boolean;
   failTaskLoad?: boolean;
   archivedForkError?: boolean;
@@ -81,7 +82,7 @@ function makeSession(scenario: Scenario) {
     taskId: 'task-1',
     topic: task.title,
     status: 'stopped',
-    messageCount: 2,
+    messageCount: scenario.many ? 32 : 2,
     startedAt: Date.now() - 120000,
     endedAt: Date.now() - 60000,
     createdAt: Date.now() - 120000,
@@ -184,7 +185,18 @@ async function setupApiMocks(page: Page, scenario: Scenario): Promise<Recorded> 
           },
         ],
       });
-    if (subPath === '/sessions') return respond(200, { sessions: [session], total: 1 });
+    if (subPath === '/sessions') {
+      const older = scenario.many
+        ? Array.from({ length: 31 }, (_, index) => ({
+            ...session,
+            id: `older-${index}`,
+            taskId: null,
+            task: null,
+            topic: `Earlier archived context ${index} — long repository work`,
+          }))
+        : [];
+      return respond(200, { sessions: [session, ...older], total: 1 + older.length });
+    }
     if (subPath === '/tasks') return respond(200, { tasks: [task], nextCursor: null });
     if (subPath === '/tasks/submit' && route.request().method() === 'POST') {
       recorded.submitBodies.push(route.request().postDataJSON() as Record<string, unknown>);
@@ -209,7 +221,17 @@ async function setupApiMocks(page: Page, scenario: Scenario): Promise<Recorded> 
       return respond(200, task);
     }
     if (subPath === '/sessions/session-1') {
-      return respond(200, { session, messages: MOCK_MESSAGES, hasMore: false });
+      const earlier = scenario.many
+        ? Array.from({ length: 30 }, (_, index) => ({
+            id: `earlier-message-${index}`,
+            sessionId: 'session-1',
+            role: index % 2 ? 'assistant' : 'user',
+            content: `Historical context item ${index} — retained work and findings`,
+            toolMetadata: null,
+            createdAt: Date.now() - 200_000 + index * 1000,
+          }))
+        : [];
+      return respond(200, { session, messages: [...earlier, ...MOCK_MESSAGES], hasMore: false });
     }
     if (subPath === '/sessions/session-1/messages') return respond(200, MOCK_MESSAGES);
     if (subPath === '/sessions/session-2') {
@@ -399,7 +421,7 @@ test.describe('Archived chat Fork composer audit', () => {
   test('retains the input, submits one new prompt with automatic source context and navigates', async ({
     page,
   }) => {
-    const recorded = await setupApiMocks(page, { long: true });
+    const recorded = await setupApiMocks(page, { long: true, many: true });
     await page.goto('/projects/proj-test-1/chat/session-1');
     const composer = page.getByPlaceholder('Write a prompt to fork this archived chat...');
     await expect(composer).toBeVisible();
