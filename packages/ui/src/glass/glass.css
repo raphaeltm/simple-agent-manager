@@ -1,0 +1,152 @@
+/*
+ * Glass v2 material — shared by the marketing site (apps/www) and the app (apps/web).
+ *
+ * Light needs a source: these surfaces read as glass because they carry a rim light
+ * (bright edge facing the light, green bounce on the lower edge), a soft sheen and real
+ * depth. Text-bearing surfaces stay nearly opaque; `prefers-reduced-transparency` and
+ * `prefers-contrast: more` switch to solid fills.
+ *
+ * Theme hooks: `html[data-theme='light']` (site) and `[data-ui-theme='sam-light']` (app).
+ *
+ * Usage:
+ *   .sam-glass            text-safe glass surface (fill + sheen + bevel + depth)
+ *   .sam-glass--chrome    lighter fill for chrome (nav pills, chips, docks)
+ *   .sam-glass-rim        1px gradient rim light (uses ::before; element must be positioned)
+ *   .sam-glass-sheen      one light sweep over the rim when `.is-sheened` is added (uses ::after)
+ *   .sam-glass-live       real backdrop blur, only where the backdrop is unknown (e.g. sticky nav)
+ */
+
+:root {
+  --sam-glass-v2-fill: rgb(8 15 12 / 0.74);
+  --sam-glass-v2-fill-chrome: rgb(8 15 12 / 0.55);
+  --sam-glass-v2-fill-solid: rgb(13 24 20);
+  --sam-glass-v2-sheen: rgb(255 255 255 / 0.075);
+  --sam-glass-v2-bevel: rgb(255 255 255 / 0.09);
+  --sam-glass-v2-bounce: rgb(34 197 94 / 0.12);
+  --sam-glass-v2-rim-top: rgb(255 255 255 / 0.24);
+  --sam-glass-v2-rim-mid: rgb(255 255 255 / 0.05);
+  --sam-glass-v2-rim-bottom: rgb(34 197 94 / 0.38);
+  --sam-glass-v2-sweep: rgb(255 255 255 / 0.75);
+  --sam-glass-v2-depth:
+    0 1px 1px rgb(0 0 0 / 0.25),
+    0 14px 28px -10px rgb(0 0 0 / 0.5),
+    0 44px 90px -30px rgb(0 0 0 / 0.65);
+  --sam-glass-v2-blur: 22px;
+  --sam-glass-v2-saturate: 1.35;
+  --sam-glass-v2-focus: #34d399;
+}
+
+html[data-theme='light'],
+[data-ui-theme='sam-light'] {
+  --sam-glass-v2-fill: rgb(248 252 249 / 0.78);
+  --sam-glass-v2-fill-chrome: rgb(248 252 249 / 0.62);
+  --sam-glass-v2-fill-solid: rgb(248 251 248);
+  --sam-glass-v2-sheen: rgb(255 255 255 / 0.55);
+  --sam-glass-v2-bevel: rgb(255 255 255 / 0.9);
+  --sam-glass-v2-bounce: rgb(21 128 61 / 0.14);
+  --sam-glass-v2-rim-top: rgb(255 255 255 / 0.95);
+  --sam-glass-v2-rim-mid: rgb(17 39 29 / 0.08);
+  --sam-glass-v2-rim-bottom: rgb(21 128 61 / 0.32);
+  --sam-glass-v2-sweep: rgb(255 255 255 / 1);
+  --sam-glass-v2-depth:
+    0 1px 1px rgb(16 40 28 / 0.06),
+    0 14px 28px -12px rgb(16 40 28 / 0.16),
+    0 44px 90px -34px rgb(16 40 28 / 0.22);
+  --sam-glass-v2-focus: #15803d;
+}
+
+.sam-glass {
+  position: relative;
+  isolation: isolate;
+  background:
+    linear-gradient(160deg, var(--sam-glass-v2-sheen), transparent 40%),
+    var(--sam-glass-v2-fill);
+  box-shadow:
+    inset 0 1px 0 var(--sam-glass-v2-bevel),
+    inset 0 -1px 0 var(--sam-glass-v2-bounce),
+    var(--sam-glass-v2-depth);
+}
+
+.sam-glass--chrome {
+  background:
+    linear-gradient(160deg, var(--sam-glass-v2-sheen), transparent 45%),
+    var(--sam-glass-v2-fill-chrome);
+}
+
+.sam-glass-rim::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  padding: 1px;
+  border-radius: inherit;
+  background: linear-gradient(
+    165deg,
+    var(--sam-glass-v2-rim-top),
+    var(--sam-glass-v2-rim-mid) 30%,
+    transparent 55%,
+    var(--sam-glass-v2-rim-bottom)
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.sam-glass-sheen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  padding: 1px;
+  border-radius: inherit;
+  background: linear-gradient(105deg, transparent 42%, var(--sam-glass-v2-sweep) 50%, transparent 58%) 220% 0 / 260% 100% no-repeat;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.sam-glass-sheen.is-sheened::after {
+  animation: sam-glass-sweep 1.8s cubic-bezier(0.2, 0.8, 0.2, 1) 1 both;
+}
+
+@keyframes sam-glass-sweep {
+  to {
+    background-position: -120% 0;
+  }
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .sam-glass-live {
+    -webkit-backdrop-filter: blur(var(--sam-glass-v2-blur)) saturate(var(--sam-glass-v2-saturate));
+    backdrop-filter: blur(var(--sam-glass-v2-blur)) saturate(var(--sam-glass-v2-saturate));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sam-glass-sheen.is-sheened::after {
+    animation: none;
+  }
+}
+
+/* Safari has no prefers-reduced-transparency: the fills above already keep text legible. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .sam-glass,
+  .sam-glass--chrome {
+    background: var(--sam-glass-v2-fill-solid);
+  }
+
+  .sam-glass-live {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .sam-glass-rim::before {
+    background: var(--sam-glass-v2-focus);
+  }
+}

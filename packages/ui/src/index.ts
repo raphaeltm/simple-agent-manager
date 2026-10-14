@@ -1,4 +1,5 @@
 export * from './components';
+export * from './glass/node-field';
 export * from './hooks/useClickOutside';
 export * from './hooks/useEscapeKey';
 export * from './hooks/useModalInteraction';
