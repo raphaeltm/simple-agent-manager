@@ -70,3 +70,11 @@ Latest user authorization supersedes original draft-only limits. Preserve PR #23
 
 - Final live screenshot/report evidence commit: 3e29b3f53 on existing evidence branch. Root inspected both live desktop/mobile captures; they show the real follow-up stream and dotted-name picker without horizontal overflow. Fresh mock desktop/mobile audits provide completed layout stress evidence.
 - Task-completion validator implementation A–F PASS, runtime evidence now closes final parser staging gap. No application code changed during shipping continuation. Merge/deploy remains queued behind release clearance and final normal review/CI gates.
+
+## Sonar runtime finding follow-up
+
+Final review identified real quadratic suffix-regex backtracking on malformed punctuation tokens; authenticated follow-ups have no message-length guard. Replace suffix removal with a linear backward scan, preserving one terminal period and complete-token semantics. No scanner suppressions or gate changes.
+
+Direct parser31 and real SQLite/HTTP68 tests pass. Independent parser/test/task/constitution review PASS. Fresh adversarial security review PASS across111111 exhaustive suffix comparisons and bounded30k–120k malformed/quoted/escaped inputs. A120k malformed token now completes in fractions of a millisecond; terminal stripping remains linear. Cognitive-complexity and sequential-await code smells are maintainability advisories, separately assessed; the actual CPU-risk finding is fixed.
+
+The final security delta requires fresh normal CI and coordinated live staging evidence in PR #2331 before merge. Production sequencing clearance remains required. Previous live evidence is preserved at its exact executable commit, not presented as covering this later change.

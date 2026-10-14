@@ -6,6 +6,14 @@ export interface MentionMatch {
 
 const bareName = /^[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)*$/u;
 
+/** Strip terminal punctuation in linear time, including on malformed long tokens. */
+function stripBareMentionPunctuation(raw: string): string {
+  let end = raw.length;
+  while (end > 0 && ',;:!?)'.includes(raw.charAt(end - 1))) end--;
+  if (end > 0 && raw.charAt(end - 1) === '.') end--;
+  return raw.slice(0, end);
+}
+
 export function formatMentionName(name: string): string {
   return `@${bareName.test(name) ? name : JSON.stringify(name)}`;
 }
@@ -35,7 +43,7 @@ export function extractMentions(text: string): MentionMatch[] {
         continue;
       }
     } else {
-      raw = raw.replace(/[,;:!?)]*$/, '').replace(/\.$/, '');
+      raw = stripBareMentionPunctuation(raw);
       name = raw.slice(1);
       if (!bareName.test(name)) continue;
     }

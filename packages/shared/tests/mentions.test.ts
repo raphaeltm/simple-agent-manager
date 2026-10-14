@@ -57,6 +57,15 @@ describe('profile mention syntax', () => {
     ]);
   });
 
+  it('handles long malformed and terminal punctuation tokens without partial resolution', () => {
+    const punctuation = ',;:!?)'.repeat(20_000);
+    expect(extractMentions(`@${punctuation}x`)).toEqual([]);
+    expect(extractMentions(`@release.bot.${punctuation}`)).toEqual([
+      { raw: '@release.bot', name: 'release.bot' },
+    ]);
+    expect(extractMentions(`@release.bot..${punctuation}`)).toEqual([]);
+  });
+
   it('supports token delimiters and retains a full dotted suffix', () => {
     expect(extractMentions('@"Code Reviewer", @release.bot! @release.bot.extra')).toEqual([
       { raw: '@"Code Reviewer"', name: 'Code Reviewer' },
