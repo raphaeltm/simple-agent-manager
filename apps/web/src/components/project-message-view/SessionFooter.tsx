@@ -161,6 +161,7 @@ export function SessionFooter({
       {lc.sessionState === 'terminated' && lc.session?.status === 'stopped' && canWriteSession && (
         <ArchivedForkComposer
           key={lc.session.id}
+          workspaceExpired={isExpiredTask(lc.taskEmbed)}
           projectId={projectId}
           sessionId={lc.session.id}
           transcribeApiUrl={lc.transcribeApiUrl}

@@ -49,11 +49,13 @@ export function ArchivedForkComposer({
   sessionId,
   transcribeApiUrl,
   agentProfiles,
+  workspaceExpired = false,
 }: {
   projectId: string;
   sessionId: string;
   transcribeApiUrl: string;
   agentProfiles: AgentProfile[];
+  workspaceExpired?: boolean;
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -139,6 +141,8 @@ export function ArchivedForkComposer({
   return (
     <div className="shrink-0 glass-chrome px-4 py-3 border-t border-border-default">
       <p className="sam-type-caption text-fg-muted mb-2 mt-0">
+        {workspaceExpired &&
+          'The saved workspace has expired. Your transcript is still available. '}
         Fork into a new chat with retained history. The archived chat stays unchanged. Prior
         workspace files are not restored.
       </p>

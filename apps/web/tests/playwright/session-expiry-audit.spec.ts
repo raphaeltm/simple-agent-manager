@@ -285,8 +285,10 @@ function respondJson(route: Route, body: unknown, status = 200) {
 }
 
 test('expired transcript, neutral label, and Fork remain usable', async ({ page }, testInfo) => {
-  page.on('pageerror', error => console.log('PAGE ERROR', error.message));
-  page.on('console', message => { if (message.type() === 'error') console.log('BROWSER ERROR', message.text()); });
+  page.on('pageerror', (error) => console.log('PAGE ERROR', error.message));
+  page.on('console', (message) => {
+    if (message.type() === 'error') console.log('BROWSER ERROR', message.text());
+  });
   const longTitle =
     'Saved workspace expired — readable transcript Ω ' + 'long conversation title '.repeat(12);
   const expiredTask = makeTask({
@@ -339,7 +341,9 @@ test('expired transcript, neutral label, and Fork remain usable', async ({ page 
   await page.screenshot({
     path: `../../.codex/tmp/playwright-screenshots/expired-header-${suffix}.png`,
   });
-  await page.getByRole('button', { name: 'Fork conversation', exact: true }).click();
+  await expect(page.getByPlaceholder('Write a prompt to fork this archived chat...')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Fork', exact: true })).toBeDisabled();
+  await page.getByTestId('session-tool-fork').first().click();
   await expect(page.getByText(/Forking from:/)).toBeVisible();
   // No agent is configured in this fixture, so the composer shows its add-an-agent placeholder.
   await expect(page.getByRole('combobox')).toHaveValue(/Parent session ID: chat-session-1/);
