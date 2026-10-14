@@ -165,9 +165,11 @@ export async function handleGitHubEventForTriggers(
         event,
         deliveryId,
         installationId,
-        now,
-        recovery.beforeSubmit,
-        recovery.processingToken
+        {
+          scheduledAt: now,
+          beforeSubmit: recovery.beforeSubmit,
+          processingToken: recovery.processingToken,
+        }
       );
       totalMatched += matched;
     }
@@ -210,10 +212,13 @@ async function processTriggersForProject(
   event: GitHubWebhookEvent,
   deliveryId: string,
   installationId: string | undefined,
-  now: string,
-  beforeSubmit?: (executionId: string) => Promise<void>,
-  processingToken?: string
+  recovery: {
+    scheduledAt: string;
+    beforeSubmit?: (executionId: string) => Promise<void>;
+    processingToken?: string;
+  }
 ): Promise<number> {
+  const { scheduledAt: now, beforeSubmit, processingToken } = recovery;
   // Find active GitHub triggers for this project
   const triggers = await db
     .select()
