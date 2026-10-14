@@ -5,9 +5,10 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { markTaskSubmitOperation } from '../../lib/task-submit-diagnostics';
 import { getAuth, requireApproved, requireAuth } from '../../middleware/auth';
-import { errors } from '../../middleware/error';
+import { AppError, errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { jsonValidator, SubmitTaskSchema } from '../../schemas';
+import { requireArchivedForkSource } from '../../services/archived-chat-fork';
 import { cliOperationReceipt } from '../../services/cli-operation-receipts';
 import { submitTask } from '../../services/submit-task';
 import { requireRepositoryUserAccess } from '../projects/_helpers';
@@ -30,6 +31,21 @@ submitRoutes.post(
     } catch (error) {
       markTaskSubmitOperation(error, 'route_project_authorization');
       throw error;
+    }
+    const body = c.req.valid('json');
+    if (body.sourceSessionId) {
+      try {
+        if (!c.req.header('Idempotency-Key'))
+          throw errors.badRequest('Archived Fork requires Idempotency-Key');
+        await requireArchivedForkSource(c.env, projectId, getAuth(c).user.id, body.sourceSessionId);
+      } catch (error) {
+        if (error instanceof AppError)
+          return c.json(
+            { ...error.toJSON(), rejectedBeforeEffects: true },
+            error.statusCode as 400
+          );
+        throw error;
+      }
     }
     return cliOperationReceipt(c, next);
   },

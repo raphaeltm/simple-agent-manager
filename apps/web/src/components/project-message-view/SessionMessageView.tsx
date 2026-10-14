@@ -413,6 +413,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
       />
 
       <SessionFooter
+        projectId={projectId}
         onFork={onFork}
         lc={lc}
         canWriteSession={canWriteSession}

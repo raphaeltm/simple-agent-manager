@@ -58,6 +58,7 @@ import { markTaskFailedIfNonTerminal } from '../services/task-failure';
 import { startTaskRunnerDO } from '../services/task-runner-do';
 import { getTaskTitleConfig } from '../services/task-title';
 import { resolveWorkspaceRuntime } from '../services/workspace-runtime';
+import { buildArchivedForkContext } from './archived-chat-fork';
 import { getInitialTaskTitle, schedulePostSubmitWork } from './task-submit-title';
 
 /** Default max task message length. Override via MAX_TASK_MESSAGE_LENGTH env var. */
@@ -100,7 +101,11 @@ export async function submitTask(
     markTaskSubmitOperation(error, operation);
     // Admission may initialize idempotent placement metadata, but has not created
     // task/session work. Only a known rejection in this phase proves safe retry.
-    if (!taskEffectsStarted && (via === 'connector' || via === 'pat') && error instanceof AppError)
+    if (
+      !taskEffectsStarted &&
+      (via === 'connector' || via === 'pat' || body.sourceSessionId) &&
+      error instanceof AppError
+    )
       markRejectedBeforeEffects(error);
     throw error;
   }
@@ -210,6 +215,15 @@ async function submitTaskImplementation(
   let inheritedAttributionSource: import('@simple-agent-manager/shared').CredentialSource | null =
     null;
 
+  const fork = body.sourceSessionId
+    ? await buildArchivedForkContext(env, project, userId, body.sourceSessionId)
+    : null;
+  if (fork) {
+    if (body.parentTaskId && body.parentTaskId !== fork.parentTaskId)
+      throw errors.badRequest('Fork parent task must match the source chat');
+    body = { ...body, parentTaskId: fork.parentTaskId, contextSummary: fork.context };
+  }
+
   // Validate parentTaskId if provided — must belong to the same project
   if (body.parentTaskId) {
     setOperation('parent_task_lookup');
@@ -282,7 +296,7 @@ async function submitTaskImplementation(
     }
   }
 
-  const message = body.message.trim();
+  const message = fork ? body.message : body.message.trim();
   const taskId = ulid();
   const now = new Date().toISOString();
 
@@ -340,6 +354,7 @@ async function submitTaskImplementation(
       taskId,
       branchName,
       message,
+      historicalContext: fork?.context,
       profile: resolvedProfile,
       parentTaskId: body.parentTaskId,
       contextSummary: body.contextSummary,
@@ -520,7 +535,7 @@ async function submitTaskImplementation(
     userId,
     parentTaskId: body.parentTaskId ?? null,
     title: taskTitle,
-    description: enrichedMessage,
+    description: fork ? `${fork.context}\n\nNew user prompt:\n${enrichedMessage}` : enrichedMessage,
     status: 'queued',
     executionStep: 'node_selection',
     priority: 0,
@@ -670,7 +685,7 @@ async function submitTaskImplementation(
       userEmail: user.email,
       githubId: userRow?.githubId ?? null,
       taskTitle,
-      taskDescription: message,
+      taskDescription: fork ? `${fork.context}\n\nNew user prompt:\n${enrichedMessage}` : message,
       repository: project.repository,
       installationId: project.installationId,
       outputBranch: branchName,

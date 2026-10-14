@@ -46,7 +46,13 @@ const LONG_ERROR =
   'Agent crashed unexpectedly after the workspace ran out of memory while installing dependencies for the third time in a row';
 const SPECIAL_TITLE = `Fix "quotes" & <script>alert('xss')</script> 🚀 ünïcødé — 日本語`;
 
-type Scenario = { long?: boolean; special?: boolean; failTaskLoad?: boolean };
+type Scenario = {
+  long?: boolean;
+  special?: boolean;
+  failTaskLoad?: boolean;
+  archivedForkError?: boolean;
+  foreignOwner?: boolean;
+};
 
 function makeTask({ long, special }: Scenario) {
   return {
@@ -79,6 +85,8 @@ function makeSession(scenario: Scenario) {
     startedAt: Date.now() - 120000,
     endedAt: Date.now() - 60000,
     createdAt: Date.now() - 120000,
+    isMine: !scenario.foreignOwner,
+    createdBy: { id: scenario.foreignOwner ? 'other-user' : 'user-test-1', name: 'Test User' },
     task: {
       id: 'task-1',
       status: 'failed',
@@ -111,10 +119,11 @@ interface Recorded {
   /** Paths of any request to the removed summarization endpoints. */
   summaryRequests: string[];
   submitBodies: Record<string, unknown>[];
+  submitKeys: Array<string | undefined>;
 }
 
 async function setupApiMocks(page: Page, scenario: Scenario): Promise<Recorded> {
-  const recorded: Recorded = { summaryRequests: [], submitBodies: [] };
+  const recorded: Recorded = { summaryRequests: [], submitBodies: [], submitKeys: [] };
   const task = makeTask(scenario);
   const session = makeSession(scenario);
 
@@ -173,6 +182,12 @@ async function setupApiMocks(page: Page, scenario: Scenario): Promise<Recorded> 
     if (subPath === '/tasks') return respond(200, { tasks: [task], nextCursor: null });
     if (subPath === '/tasks/submit' && route.request().method() === 'POST') {
       recorded.submitBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+      recorded.submitKeys.push(route.request().headers()['idempotency-key']);
+      if (scenario.archivedForkError && recorded.submitBodies.length === 1)
+        return respond(500, {
+          error: 'INTERNAL_ERROR',
+          message: 'Response interrupted. Retry the saved Fork request.',
+        });
       return respond(202, {
         taskId: 'task-2',
         sessionId: 'session-2',
@@ -331,5 +346,87 @@ test.describe('Fork/retry new chat screen audit', () => {
     await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
     await expectLaidOutCleanly(page);
     await screenshot(page, 'retry-new-chat-load-error');
+  });
+});
+
+test.describe('Archived chat Fork composer audit', () => {
+  test('retains the input, submits one new prompt with automatic source context and navigates', async ({
+    page,
+  }) => {
+    const recorded = await setupApiMocks(page, { long: true });
+    await page.goto('/projects/proj-test-1/chat/session-1');
+    const composer = page.getByPlaceholder('Write a prompt to fork this archived chat...');
+    await expect(composer).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Fork', exact: true })).toBeDisabled();
+    await composer.fill('Continue from the retained history — verify the current checkout first.');
+    await expectLaidOutCleanly(page);
+    await screenshot(page, 'archived-fork-composer');
+    await page.getByRole('button', { name: 'Fork', exact: true }).click();
+    await expect(page).toHaveURL(/chat\/session-2$/);
+    expect(recorded.submitBodies).toEqual([
+      {
+        message: 'Continue from the retained history — verify the current checkout first.',
+        sourceSessionId: 'session-1',
+        agentProfileId: 'profile-claude',
+        taskMode: 'conversation',
+      },
+    ]);
+    expect(recorded.submitKeys[0]).toBeTruthy();
+    expect(recorded.summaryRequests).toEqual([]);
+  });
+
+  test('retry after an uncertain response and reload uses the same saved prompt and key', async ({
+    page,
+  }) => {
+    const recorded = await setupApiMocks(page, { special: true, archivedForkError: true });
+    await page.goto('/projects/proj-test-1/chat/session-1');
+    const composer = page.getByPlaceholder('Write a prompt to fork this archived chat...');
+    await composer.fill('New prompt exactly once');
+    await page.getByRole('button', { name: 'Fork', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('Response interrupted');
+    await expect(composer).toHaveAttribute('readonly', '');
+    await expectLaidOutCleanly(page);
+    await screenshot(page, 'archived-fork-retry-error');
+    await page.reload();
+    await expect(composer).toHaveValue('New prompt exactly once');
+    await page.getByRole('button', { name: 'Fork', exact: true }).click();
+    await expect(page).toHaveURL(/chat\/session-2$/);
+    expect(recorded.submitBodies).toHaveLength(2);
+    expect(recorded.submitBodies[1]).toEqual(recorded.submitBodies[0]);
+    expect(recorded.submitKeys[1]).toBe(recorded.submitKeys[0]);
+    await page.goto('/projects/proj-test-1/chat/session-1');
+    await expect(page.getByText('Fork created. Open it with Fork below.')).toBeVisible();
+    await page.getByRole('button', { name: 'Fork', exact: true }).click();
+    await expect(page).toHaveURL(/chat\/session-2$/);
+    expect(recorded.submitBodies).toHaveLength(2);
+  });
+
+  test('known successful Fork navigates even when completion storage fails', async ({ page }) => {
+    const recorded = await setupApiMocks(page, {});
+    await page.addInitScript(() => {
+      const original = Storage.prototype.setItem;
+      let forkWrites = 0;
+      Storage.prototype.setItem = function (key, value) {
+        if (key.startsWith('sam-archived-fork:') && ++forkWrites === 2)
+          throw new Error('Quota exceeded');
+        return original.call(this, key, value);
+      };
+    });
+    await page.goto('/projects/proj-test-1/chat/session-1');
+    await page
+      .getByPlaceholder('Write a prompt to fork this archived chat...')
+      .fill('Storage failure still opens the new chat');
+    await page.getByRole('button', { name: 'Fork', exact: true }).click();
+    await expect(page).toHaveURL(/chat\/session-2$/);
+    expect(recorded.submitBodies).toHaveLength(1);
+  });
+
+  test('other owner archived history stays read-only', async ({ page }) => {
+    await setupApiMocks(page, { foreignOwner: true });
+    await page.goto('/projects/proj-test-1/chat/session-1');
+    await expect(page.getByPlaceholder('Write a prompt to fork this archived chat...')).toHaveCount(
+      0
+    );
+    await expect(page.getByText('Read-only session')).toBeVisible();
   });
 });

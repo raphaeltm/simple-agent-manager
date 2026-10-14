@@ -38,6 +38,8 @@ const mocks = vi.hoisted(() => ({
   requireRepositoryUserAccess: vi.fn(),
   acceptInstantSession: vi.fn(),
   continueInstantSessionLaunch: vi.fn(),
+  getSession: vi.fn(),
+  getMessages: vi.fn(),
   createSession: vi.fn(),
   persistMessage: vi.fn(),
   recordActivityEvent: vi.fn(),
@@ -78,6 +80,8 @@ vi.mock('../../../src/routes/projects/_helpers', async (importOriginal) => ({
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
+  getSession: mocks.getSession,
+  getMessages: mocks.getMessages,
   createSession: mocks.createSession,
   persistMessage: mocks.persistMessage,
   recordActivityEvent: mocks.recordActivityEvent,
@@ -236,6 +240,295 @@ describe('task submit capacity-pool placement', () => {
     mocks.enrichMessageWithMentions.mockResolvedValue({
       enrichedMessage: 'Run in project pool',
     });
+  });
+
+  async function forkFixture() {
+    const fixture = createEnv();
+    fixture.sqlite.exec(
+      readFileSync(join(process.cwd(), 'src/db/migrations/0189_cli_operation_receipts.sql'), 'utf8')
+    );
+    seedTaskSubmitRows(fixture.sqlite);
+    fixture.sqlite.exec(
+      "INSERT INTO tasks (id, project_id, user_id, title, status, output_branch) VALUES ('source-task', 'project-1', 'user-1', 'Source', 'completed', 'sam/prior')"
+    );
+    mocks.getSession.mockResolvedValue({
+      id: 'source-chat',
+      createdByUserId: 'user-1',
+      status: 'stopped',
+      taskId: 'source-task',
+      workspaceId: 'missing-workspace',
+      topic: 'Archived source',
+    });
+    mocks.getMessages.mockResolvedValue({
+      messages: [
+        {
+          role: 'assistant',
+          content: 'Finished prior work; API_KEY="canary-secret-value" ghp_' + 'a'.repeat(36),
+        },
+        { role: 'user', content: 'Old request' },
+        { role: 'tool', content: 'NEVER_REPLAY_TOOL' },
+        { role: 'system', content: 'NEVER_REPLAY_APPROVAL' },
+      ],
+      hasMore: true,
+    });
+    mocks.enrichMessageWithMentions.mockImplementation(async (message) => ({
+      enrichedMessage: message,
+    }));
+    return fixture;
+  }
+
+  function forkRequest(
+    app: ReturnType<typeof createApp>,
+    env: Env,
+    key = 'fork-intent',
+    message = 'New exact prompt'
+  ) {
+    return app.request(
+      '/api/projects/project-1/tasks/submit',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+        body: JSON.stringify({ message, sourceSessionId: 'source-chat', taskMode: 'conversation' }),
+      },
+      env,
+      executionCtx
+    );
+  }
+
+  it('forks to a fresh linked chat, injects bounded redacted history into the VM prompt once and never changes source', async () => {
+    const { sqlite, env } = await forkFixture();
+    try {
+      const response = await forkRequest(createApp(), env);
+      expect(response.status, await response.clone().text()).toBe(202);
+      const result = await response.json<{ taskId: string; sessionId: string }>();
+      const task = sqlite.prepare('SELECT * FROM tasks WHERE id = ?').get(result.taskId) as {
+        parent_task_id: string;
+        output_branch: string;
+      };
+      expect(task.parent_task_id).toBe('source-task');
+      expect(task.output_branch).not.toBe('sam/prior');
+      const runner = mocks.startTaskRunnerDO.mock.calls[0]![1];
+      expect(runner.taskDescription.split('New exact prompt')).toHaveLength(2);
+      expect(runner.taskDescription).toContain('Old request');
+      expect(runner.taskDescription).toContain('TRUNCATED');
+      expect(runner.taskDescription).toContain('source-chat');
+      expect(runner.taskDescription).toContain('unavailable');
+      expect(runner.taskDescription).toContain('verify the current repository');
+      for (const secret of [
+        'canary-secret-value',
+        'ghp_' + 'a'.repeat(36),
+        'NEVER_REPLAY_TOOL',
+        'NEVER_REPLAY_APPROVAL',
+      ])
+        expect(runner.taskDescription).not.toContain(secret);
+      expect(mocks.persistMessage.mock.calls.filter((call) => call[3] === 'user')).toEqual([
+        [env, 'project-1', 'session-1', 'user', 'New exact prompt', null],
+      ]);
+      expect(mocks.stopSession).not.toHaveBeenCalled();
+      expect(
+        sqlite.prepare("SELECT status, output_branch FROM tasks WHERE id = 'source-task'").get()
+      ).toEqual({ status: 'completed', output_branch: 'sam/prior' });
+      expect(mocks.getSession.mock.results).toHaveLength(2);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('replays repeated and concurrent Fork submissions without a second runtime or user prompt', async () => {
+    const { sqlite, env } = await forkFixture();
+    try {
+      const app = createApp();
+      const responses = await Promise.all([forkRequest(app, env), forkRequest(app, env)]);
+      expect(responses.map((r) => r.status).sort()).toEqual([202, 409]);
+      const first = await responses.find((r) => r.status === 202)!.json();
+      const replay = await forkRequest(app, env);
+      expect(replay.status).toBe(202);
+      expect(await replay.json()).toEqual(first);
+      expect(mocks.startTaskRunnerDO).toHaveBeenCalledOnce();
+      expect(mocks.persistMessage.mock.calls.filter((c) => c[3] === 'user')).toHaveLength(1);
+      expect((await forkRequest(app, env, 'fork-intent', 'Changed intent')).status).toBe(409);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('retains newest text in chronological order and redacts before the history bound', async () => {
+    const { sqlite, env } = await forkFixture();
+    try {
+      env.ARCHIVED_FORK_HISTORY_MAX_CHARS = '40';
+      mocks.getMessages.mockResolvedValue({
+        messages: [
+          { role: 'user', content: 'OLDEST_MUST_BE_DROPPED'.repeat(5) },
+          { role: 'assistant', content: 'middle' },
+          { role: 'user', content: 'latest ghp_' + 'a'.repeat(36) },
+        ],
+        hasMore: false,
+      });
+      expect((await forkRequest(createApp(), env)).status).toBe(202);
+      const prompt = mocks.startTaskRunnerDO.mock.calls[0]![1].taskDescription as string;
+      expect(prompt).not.toContain('OLDEST_MUST_BE_DROPPED');
+      expect(prompt).toContain('latest [REDACTED]');
+      expect(prompt.indexOf('middle')).toBeLessThan(prompt.indexOf('latest [REDACTED]'));
+      expect(prompt).toContain('TRUNCATED');
+      expect(prompt).not.toContain('ghp_');
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('also truncates the serialized UTF-8 context byte budget without dropping the new prompt', async () => {
+    const { sqlite, env } = await forkFixture();
+    try {
+      mocks.getMessages.mockResolvedValue({
+        messages: [{ role: 'user', content: '日本語'.repeat(8000) }],
+        hasMore: false,
+      });
+      expect((await forkRequest(createApp(), env)).status).toBe(202);
+      const context = mocks.persistMessage.mock.calls.find((c) => c[3] === 'system')![4] as string;
+      expect(new TextEncoder().encode(context).length).toBeLessThanOrEqual(65536);
+      expect(context).toContain('TRUNCATED');
+      expect(
+        mocks.startTaskRunnerDO.mock.calls[0]![1].taskDescription.split('New exact prompt')
+      ).toHaveLength(2);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('redacts secrets split across streamed assistant tokens and omits an incomplete oldest group', async () => {
+    const { sqlite, env } = await forkFixture();
+    try {
+      mocks.getMessages.mockResolvedValue({
+        messages: [
+          { role: 'assistant', content: 'UNCERTAIN_TOKEN_SUFFIX' },
+          { role: 'user', content: 'Prior user request' },
+          { role: 'assistant', content: 'Output ghp_' },
+          {
+            role: 'assistant',
+            content: 'a'.repeat(36) + '\nCookie: session=small-secret; other=second-secret',
+          },
+        ],
+        hasMore: true,
+      });
+      expect((await forkRequest(createApp(), env)).status).toBe(202);
+      const prompt = mocks.startTaskRunnerDO.mock.calls[0]![1].taskDescription as string;
+      for (const secret of [
+        'UNCERTAIN_TOKEN_SUFFIX',
+        'ghp_',
+        'a'.repeat(36),
+        'small-secret',
+        'second-secret',
+      ])
+        expect(prompt).not.toContain(secret);
+      expect(prompt).toContain('Output [REDACTED]');
+      expect(prompt).toContain('Prior user request');
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('supplies the same historical context and one new prompt to an Instant agent', async () => {
+    const { sqlite, env } = await forkFixture();
+    try {
+      env.CF_CONTAINER_ENABLED = 'true';
+      sqlite.exec(
+        "INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, runtime) VALUES ('instant', 'project-1', 'user-1', 'Instant', 'openai-codex', 'cf-container')"
+      );
+      mocks.acceptInstantSession.mockResolvedValue({ chatSessionId: 'instant-chat' });
+      mocks.continueInstantSessionLaunch.mockResolvedValue(undefined);
+      const response = await createApp().request(
+        '/api/projects/project-1/tasks/submit',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'instant-fork' },
+          body: JSON.stringify({
+            message: '  Instant new prompt  ',
+            sourceSessionId: 'source-chat',
+            agentProfileId: 'instant',
+            taskMode: 'conversation',
+          }),
+        },
+        env,
+        executionCtx
+      );
+      expect(response.status, await response.clone().text()).toBe(202);
+      const launch = mocks.acceptInstantSession.mock.calls[0]![2];
+      expect(launch.initialPrompt).toContain('Old request');
+      expect(launch.initialPrompt.split('  Instant new prompt  ')).toHaveLength(2);
+      expect(launch.displayMessage).toBe('  Instant new prompt  ');
+      expect(launch.contextSummary).toContain('source-chat');
+      expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('forks legacy source without a task and retains explicit source chat lineage', async () => {
+    const { sqlite, env } = await forkFixture();
+    try {
+      mocks.getSession.mockResolvedValue({
+        id: 'source-chat',
+        createdByUserId: 'user-1',
+        status: 'stopped',
+        taskId: null,
+      });
+      expect((await forkRequest(createApp(), env)).status).toBe(202);
+      expect(mocks.startTaskRunnerDO.mock.calls[0]![1].taskDescription).toContain(
+        '"sourceSessionId":"source-chat"'
+      );
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it.each(['other-owner', 'active', 'foreign-task'])(
+    'rejects %s before reading transcript or creating work',
+    async (kind) => {
+      const { sqlite, env } = await forkFixture();
+      try {
+        mocks.getSession.mockResolvedValue({
+          createdByUserId: kind === 'other-owner' ? 'user-2' : 'user-1',
+          status: kind === 'active' ? 'active' : 'stopped',
+          taskId: kind === 'foreign-task' ? 'foreign-task' : 'source-task',
+        });
+        expect((await forkRequest(createApp(), env)).status).toBe(kind === 'active' ? 409 : 403);
+        expect(mocks.getMessages).not.toHaveBeenCalled();
+        expect(mocks.createSession).not.toHaveBeenCalled();
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it('releases only a proven pre-effects rejection, allowing corrected retry', async () => {
+    const { sqlite, env } = await forkFixture();
+    try {
+      env.MAX_TASK_MESSAGE_LENGTH = '2';
+      const app = createApp();
+      const response = await forkRequest(app, env);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ rejectedBeforeEffects: true });
+      expect(sqlite.prepare('SELECT count(*) AS n FROM cli_operation_receipts').get()).toEqual({
+        n: 0,
+      });
+      env.MAX_TASK_MESSAGE_LENGTH = '100';
+      expect((await forkRequest(app, env)).status).toBe(202);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('retains an uncertain receipt and never starts a duplicate after runner failure', async () => {
+    const { sqlite, env } = await forkFixture();
+    try {
+      mocks.startTaskRunnerDO.mockRejectedValueOnce(new Error('Transport lost'));
+      const app = createApp();
+      expect((await forkRequest(app, env)).status).toBe(500);
+      expect((await forkRequest(app, env)).status).toBe(409);
+      expect(mocks.startTaskRunnerDO).toHaveBeenCalledOnce();
+    } finally {
+      sqlite.close();
+    }
   });
 
   it.each([

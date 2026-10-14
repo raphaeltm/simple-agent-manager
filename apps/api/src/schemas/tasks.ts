@@ -74,6 +74,7 @@ export const SubmitTaskSchema = v.object({
   provider: v.optional(CredentialProviderSchema),
   parentTaskId: v.optional(v.string()),
   contextSummary: v.optional(v.string()),
+  sourceSessionId: v.optional(v.string()),
   taskMode: v.optional(TaskModeSchema),
   agentProfileId: v.optional(v.string()),
   skillId: v.optional(v.string()),

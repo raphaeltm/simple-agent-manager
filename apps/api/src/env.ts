@@ -1534,6 +1534,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SAM_IDEA_SEARCH_MAX_LIMIT?: string; // Max results from find_related_ideas (default: 50)
   SAM_CI_RUNS_LIMIT?: string; // Max GitHub Actions runs to fetch (default: 5)
   SAM_GITHUB_TIMEOUT_MS?: string; // GitHub API timeout in ms (default: 10000)
+  ARCHIVED_FORK_HISTORY_MAX_CHARS?: string; // Archived fork historical text budget (default: 24000)
   SAM_SESSION_MESSAGES_LIMIT?: string; // Default messages per get_session_messages (default: 50)
   SAM_SESSION_MESSAGES_MAX_LIMIT?: string; // Max messages per get_session_messages (default: 200)
   SAM_SESSION_LIST_LIMIT?: string; // Default sessions per list_sessions (default: 20)

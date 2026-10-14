@@ -26,6 +26,7 @@ const sessionCors = cors({
     'Content-Type',
     'Authorization',
     'x-api-key',
+    'Idempotency-Key',
     'anthropic-version',
     'anthropic-beta',
   ],

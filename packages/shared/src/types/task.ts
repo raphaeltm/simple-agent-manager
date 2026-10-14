@@ -606,6 +606,9 @@ export interface SubmitTaskRequest {
    * lineage, inherits the parent's credential attribution, and counts toward the fork-depth
    * limit; it still starts on its own output branch. */
   parentTaskId?: string;
+  /** Owned archived source chat. Requires Idempotency-Key; the server supplies historical
+   * context and derives task lineage without restoring or waking the source runtime. */
+  sourceSessionId?: string;
   /** Caller-supplied note persisted as the first system message in the new chat session. It is
    * shown in the chat only; the agent's prompt is `message`. Max 64KB. */
   contextSummary?: string;

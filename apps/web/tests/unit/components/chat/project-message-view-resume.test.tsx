@@ -726,7 +726,7 @@ describe('ProjectMessageView — delivery/resume failure UX', () => {
     });
   });
 
-  it('UX3: a terminal RUNTIME_STOPPED failure terminates the session and disables the composer', async () => {
+  it('UX3: a terminal RUNTIME_STOPPED failure archives the chat and offers Fork instead of Send', async () => {
     mockSendFollowUpPrompt.mockRejectedValue(
       new ApiClientError('RUNTIME_STOPPED', 'The Instant runtime has stopped.', 410)
     );
@@ -735,9 +735,10 @@ describe('ProjectMessageView — delivery/resume failure UX', () => {
     await waitFor(() => expect(mockGetChatSession).toHaveBeenCalled());
     await sendMessage('are you still there?');
 
-    // The existing terminated presentation takes over…
-    await screen.findByText('This session has ended.');
-    // …the composer is gone (disabled)…
+    // The archived presentation offers a fresh Fork; the old runtime stays stopped.
+    await screen.findByPlaceholderText('Write a prompt to fork this archived chat...');
+    expect(screen.getByRole('button', { name: 'Fork', exact: true })).toBeDisabled();
+    // Sending to the stopped runtime remains unavailable.
     expect(screen.queryByPlaceholderText(/send a message/i)).not.toBeInTheDocument();
     // …and there is no dismissible retry banner inviting futile retries.
     expect(screen.queryByRole('button', { name: /^dismiss$/i })).not.toBeInTheDocument();

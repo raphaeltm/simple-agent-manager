@@ -15,7 +15,8 @@ export class ApiClientError extends Error {
   constructor(
     public readonly code: string,
     message: string,
-    public readonly status: number
+    public readonly status: number,
+    public readonly rejectedBeforeEffects = false
   ) {
     super(message);
     this.name = 'ApiClientError';
@@ -26,9 +27,11 @@ function notifyGitHubReauthRequired(message: string) {
   if (typeof window === 'undefined') {
     return;
   }
-  window.dispatchEvent(new CustomEvent(GITHUB_REAUTH_REQUIRED_EVENT, {
-    detail: { message },
-  }));
+  window.dispatchEvent(
+    new CustomEvent(GITHUB_REAUTH_REQUIRED_EVENT, {
+      detail: { message },
+    })
+  );
 }
 
 export async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -69,7 +72,12 @@ export async function request<T>(endpoint: string, options: RequestInit = {}): P
     if (error.error === 'GITHUB_REAUTH_REQUIRED') {
       notifyGitHubReauthRequired(error.message);
     }
-    throw new ApiClientError(error.error, error.message, response.status);
+    throw new ApiClientError(
+      error.error,
+      error.message,
+      response.status,
+      typeof data === 'object' && data !== null && data.rejectedBeforeEffects === true
+    );
   }
 
   return data as T;

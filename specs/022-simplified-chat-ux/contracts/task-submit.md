@@ -129,3 +129,11 @@ Algorithm:
 - The existing 3-call task creation flow (tasks + status + run) remains available for programmatic/advanced usage. This endpoint is the simplified path for the chat UI.
 - The submit endpoint DOES NOT wait for task execution. It returns as soon as the task is queued. The frontend uses WebSocket/polling to track progress.
 - If chat session creation fails (DO unavailable), the task still runs. Session creation is best-effort with retry.
+
+## Archived-chat Fork
+
+`sourceSessionId` optionally names an owned, stopped chat in this project. It requires an `Idempotency-Key` header; reuse the exact key/body after a lost reply. Source session and task ownership are checked before reading history. The server derives `parentTaskId` from the source, creates a fresh generated branch/chat/runtime, and supplies bounded redacted historical user/assistant text plus available repository/branch/snapshot commit/workspace metadata to both VM and Instant agent prompts. The displayed new user prompt is persisted once. Historical tools, system instructions, and approvals are excluded. The source remains stopped and unchanged.
+
+Fork does not restore prior files or attach the source workspace. Prior SHA is historical evidence; the agent is instructed to verify current remote/branch/HEAD/status and disclose missing dirty, untracked or unpushed work. Context disclosure is persisted as a system notice with the source IDs.
+
+Completed keyed requests replay the same task/session response. Concurrent/pending uncertain intents return `409 OUTCOME_UNKNOWN`; retrying never creates another task. Inspect existing chats or the receipt before any new submission. Proven pre-effects admission rejections release the receipt and return `rejectedBeforeEffects: true`, allowing a corrected prompt/profile. The browser saves the exact intent in per-user/project/source session storage for navigation/reload retry and clears it through auth-revocation cleanup. A completed Fork can be opened again or explicitly replaced by another Fork intent.

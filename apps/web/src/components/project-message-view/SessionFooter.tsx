@@ -5,6 +5,7 @@ import { isExpiredTask } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 
+import { ArchivedForkComposer } from './ArchivedForkComposer';
 import { CompletionDock } from './CompletionDock';
 import { FollowUpInput, ReadOnlyFollowUp } from './FollowUpInput';
 import { currentPlanToPlanItem, ElapsedTime } from './session-view-utils';
@@ -12,6 +13,7 @@ import { StaleActivityNotice } from './StaleActivityNotice';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
 
 interface SessionFooterProps {
+  projectId: string;
   lc: UseSessionLifecycleResult;
   canWriteSession: boolean;
   /** Mobile selected-text comment composer, overlaid above the chat input. */
@@ -33,6 +35,7 @@ interface SessionFooterProps {
  * activity notice, and the composer — or the reason there is none.
  */
 export function SessionFooter({
+  projectId,
   lc,
   canWriteSession,
   selectedTextComposer,
@@ -155,14 +158,26 @@ export function SessionFooter({
       {isActive && !canWriteSession && (
         <ReadOnlyFollowUp ownerLabel={sessionOwnerLabel} onNewChat={onNewChat} />
       )}
-      {lc.sessionState === 'terminated' && (
+      {lc.sessionState === 'terminated' && lc.session?.status === 'stopped' && canWriteSession && (
+        <ArchivedForkComposer
+          key={lc.session.id}
+          projectId={projectId}
+          sessionId={lc.session.id}
+          transcribeApiUrl={lc.transcribeApiUrl}
+          agentProfiles={agentProfiles}
+        />
+      )}
+      {lc.sessionState === 'terminated' && !canWriteSession && (
+        <ReadOnlyFollowUp ownerLabel={sessionOwnerLabel} onNewChat={onNewChat} />
+      )}
+      {lc.sessionState === 'terminated' && lc.session?.status !== 'stopped' && (
         <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface text-center">
           <p className="m-0 sam-type-secondary text-fg-muted">
             {isExpiredTask(lc.taskEmbed)
-              ? 'The saved workspace has expired. Your transcript is still available. Choose Fork to continue in a new conversation.'
+              ? 'The saved workspace has expired. Your transcript is still available.'
               : 'This session has ended.'}
           </p>
-          {isExpiredTask(lc.taskEmbed) && onFork && (
+          {canWriteSession && isExpiredTask(lc.taskEmbed) && onFork && (
             <Button onClick={onFork} size="lg" className="mt-2">
               Fork conversation
             </Button>

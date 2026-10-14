@@ -45,6 +45,7 @@ export interface SubmitTaskRequest {
   workspaceProfile?: 'full' | 'lightweight';
   devcontainerConfigName?: string | null;
   parentTaskId?: string;
+  sourceSessionId?: string;
   taskMode?: 'task' | 'conversation';
   agentProfileId?: string;
   skillId?: string;
@@ -60,11 +61,13 @@ export interface SubmitTaskResponse {
 
 export async function submitTask(
   projectId: string,
-  data: SubmitTaskRequest
+  data: SubmitTaskRequest,
+  idempotencyKey?: string
 ): Promise<SubmitTaskResponse> {
   return request<SubmitTaskResponse>(`/api/projects/${projectId}/tasks/submit`, {
     method: 'POST',
     body: JSON.stringify(data),
+    headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
   });
 }
 
@@ -85,14 +88,14 @@ export async function requestAttachmentUpload(
   projectId: string,
   filename: string,
   size: number,
-  contentType: string,
+  contentType: string
 ): Promise<RequestAttachmentUploadResponse> {
   return request<RequestAttachmentUploadResponse>(
     `/api/projects/${projectId}/tasks/request-upload`,
     {
       method: 'POST',
       body: JSON.stringify({ filename, size, contentType }),
-    },
+    }
   );
 }
 
@@ -104,7 +107,7 @@ export async function requestAttachmentUpload(
 export function uploadAttachmentToR2(
   uploadUrl: string,
   file: File,
-  onProgress?: (loaded: number, total: number) => void,
+  onProgress?: (loaded: number, total: number) => void
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -136,11 +139,14 @@ export function uploadAttachmentToR2(
 
 export async function closeConversationTask(
   projectId: string,
-  taskId: string,
+  taskId: string
 ): Promise<{ status: string; closedAt: string }> {
-  return request<{ status: string; closedAt: string }>(`/api/projects/${projectId}/tasks/${taskId}/close`, {
-    method: 'POST',
-  });
+  return request<{ status: string; closedAt: string }>(
+    `/api/projects/${projectId}/tasks/${taskId}/close`,
+    {
+      method: 'POST',
+    }
+  );
 }
 
 // =============================================================================
@@ -175,10 +181,7 @@ export async function listProjectTasks(
   return request<ListTasksResponse>(endpoint);
 }
 
-export async function createProjectTask(
-  projectId: string,
-  data: CreateTaskRequest
-): Promise<Task> {
+export async function createProjectTask(projectId: string, data: CreateTaskRequest): Promise<Task> {
   return request<Task>(`/api/projects/${projectId}/tasks`, {
     method: 'POST',
     body: JSON.stringify(data),
@@ -311,7 +314,7 @@ export async function linkSessionIdea(
   projectId: string,
   sessionId: string,
   taskId: string,
-  context?: string,
+  context?: string
 ): Promise<{ linked: boolean }> {
   return request<{ linked: boolean }>(`/api/projects/${projectId}/sessions/${sessionId}/ideas`, {
     method: 'POST',
