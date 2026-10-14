@@ -17,7 +17,7 @@ Mention enrichment calls the strict profile resolver and propagates unknown-name
 - [x] Relevant lint/typecheck/test/build; regression discrimination.
 - [x] Local specialist reviews; coordinated staging verification.
 - [x] Create tested draft PR and finish CI; update canonical Idea.
-- [ ] Finish in-progress best-effort CodeRabbit review (status recorded in PR).
+- [x] Finish best-effort CodeRabbit review: both findings reviewed and threads resolved; terminal-period fix tested, quoted autocomplete explicitly deferred.
 
 ## Scope exclusions
 
@@ -47,3 +47,13 @@ DRAFT PR: https://github.com/raphaeltm/simple-agent-manager/pull/2331 . CI run38
 CodeRabbit requested once via opt-in label and trusted main workflow38441420126 at17:46UTC; request workflow succeeded and review started. Final review outcome belongs in the PR CodeRabbit evidence and canonical Idea before SAM task completion. Keep this task record active pending user confirmation; deliverable is a tested draft, not a merged or production-shipped fix. Keep the PR draft and unmerged.
 
 CodeRabbit review5507783751 arrived with two minor findings. Terminal-period regression addressed with safe single-period handling and direct/SQLite/HTTP tests; quoted autocomplete reviewed as optional UX expansion (existing @Code picker inserts escaped multiword names) and deferred with rationale. No global-profile editing changes. Incremental review and exact-head CI remain pending; PR evidence will record final outcome.
+
+## Draft gate follow-up — 2026-10-14
+
+PR: https://github.com/raphaeltm/simple-agent-manager/pull/2331 . The historical handoff above is superseded by this follow-up for the remaining gates.
+
+- CI 38446137601 on f8bc33db5d626b9645a87a1642a8376b0d1cf1a7 passed all 13 ESLint tasks and type-boundary checks, then failed `quality:runtime-state-files` because `.do-state.md` had been committed. Remove it from git tracking while retaining workspace-local workflow state. No application code or gate configuration changes.
+- Rechecked CodeRabbit review 5507783751 against current source: single terminal periods work for dotted and quoted names, covered by `packages/shared/tests/mentions.test.ts`; repeated dots and quoted suffixes remain rejected. Both threads are resolved. Quoted autocomplete remains an explicit optional UX deferral: `@Code` palette selection inserts the complete escaped name, and complete manually quoted tokens parse. The static command-injection annotation is inapplicable: `getMentionQuery` runs a regex and no child process.
+- GitHub's historical `CHANGES_REQUESTED` aggregate persists despite resolved threads; do not describe it as approval or dismiss the review merely to clear a status. Request a fresh trusted review once after pushing and record the observed outcome in the PR.
+- Relevant local checks and exact-head CI outcomes will be recorded in the PR follow-up evidence before completion. Prior staging and screenshot evidence remains pinned to its original commits. This follow-up changes tracked runtime metadata and task documentation only.
+- Keep this record active as previously requested. PR remains DRAFT ONLY / DO NOT MERGE / DO NOT MARK READY / NO PRODUCTION DEPLOY.
