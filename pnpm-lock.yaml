@@ -580,8 +580,8 @@ importers:
         specifier: 4.21.0
         version: 4.21.0(typescript@5.9.3)
       '@pulumi/tls':
-        specifier: 5.5.0
-        version: 5.5.0(typescript@5.9.3)
+        specifier: 5.6.1
+        version: 5.6.1(typescript@5.9.3)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -3554,8 +3554,8 @@ packages:
   '@pulumi/random@4.21.0':
     resolution: {integrity: sha512-k4JHqQFOKXWkbSLZtX37xBlRsurfgZbLd1Zib0cLSDP4Dt3uTllR3CBWfMLSnXJGAoTr9MlwyHCer/5tmSaF0Q==}
 
-  '@pulumi/tls@5.5.0':
-    resolution: {integrity: sha512-OTGxp4sgDEuXlXrd7NtxrhhciPgcn9rqDIZlGOTmTaeGo+tlVMwv73FFqiVrzAmBiILdU8tLXHfxhjc+bTLdrQ==}
+  '@pulumi/tls@5.6.1':
+    resolution: {integrity: sha512-Uijxsh1TfNpr52a307WA3kUTYLOu/jU/nApuz5ovYRZseZkLTLrrF/PiYpIwudum0AXt04XiBHPCHqleM7YX2Q==}
 
   '@reduxjs/toolkit@2.12.0':
     resolution: {integrity: sha512-KiT+RzZbp6mQET+Mg+h2c97+9j1sNflUxQkIHI7Yuzf6Peu+OYpmkn6nbHWmLLWj+1ZODUJFwGZ7gx3L9R9EOw==}
@@ -12792,7 +12792,7 @@ snapshots:
       - ts-node
       - typescript
 
-  '@pulumi/tls@5.5.0(typescript@5.9.3)':
+  '@pulumi/tls@5.6.1(typescript@5.9.3)':
     dependencies:
       '@pulumi/pulumi': 3.217.1(typescript@5.9.3)
     transitivePeerDependencies:
