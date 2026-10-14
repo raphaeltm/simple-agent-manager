@@ -71,6 +71,7 @@ function summarize(digest, stack) {
   const seen = new Set();
   const types = new Set();
   let safe = true;
+  let persisted = true;
   for (const step of digest.steps) {
     const op = allowedOps.has(step.op) ? step.op : 'other';
     result.operationCounts[op] = (result.operationCounts[op] ?? 0) + 1;
@@ -124,6 +125,12 @@ function summarize(digest, stack) {
       next?.inputs?.byteLength === 32;
     result.protectionUnchanged &&= old?.protect === true && next?.protect === true;
     for (const key of secretOutputs) {
+      // New pre-step outputs describe intent; only old persisted state can
+      // establish that the prior update stored secret markers for these fields.
+      persisted &&=
+        Array.isArray(old?.additionalSecretOutputs) &&
+        old.additionalSecretOutputs.includes(key) &&
+        old?.outputs?.[key] === '[secret]';
       // Verify annotation intent. Pre-step outputs cannot prove persistence.
       result.metadata.annotationsPresent &&=
         Array.isArray(next?.additionalSecretOutputs) && next.additionalSecretOutputs.includes(key);
@@ -145,6 +152,7 @@ function summarize(digest, stack) {
   }
   if (digest.diagnostics?.some((entry) => entry.severity === 'error')) safe = false;
   result.existingKeyCount = seen.size;
+  result.persistedSecretMetadataVerified = seen.size === keyNames.length && persisted;
   result.resourceTypes = [...types].sort();
   result.verified =
     safe &&

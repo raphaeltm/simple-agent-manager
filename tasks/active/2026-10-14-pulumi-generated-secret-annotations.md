@@ -50,10 +50,15 @@ The script targets exactly the four existing RandomIds, passes refresh=false, su
 
 Runtime limits are existing-environment variables `PULUMI_METADATA_PREVIEW_TIMEOUT_MS` (default600000) and `PULUMI_METADATA_PREVIEW_MAX_BYTES` (default16777216). No variable setup is required; empty values use defaults. The15-minute job limit bounds setup and execution. These limits affect local runner processing, not cloud resource provisioning.
 
-- [ ] Security/code review new workflow and failure/redaction behavior.
-- [ ] Run synthetic regression tests and relevant quality checks.
-- [ ] Run exact-head trusted metadata preview using existing staging environment and approvals.
+- [x] Security/code review new workflow and failure/redaction behavior.
+- [x] Run synthetic regression tests and relevant quality checks.
+- [x] Run exact-head trusted metadata preview using existing staging environment and approvals.
 - [ ] Update CI and CodeRabbit evidence for expanded final diff.
 
 ### Live preview contract correction
 First run38537591671 emitted only safe metadata:24same/fourkeys/unchangedinputs&protection, but verifier failed on new IDs/outputs. Public [preview digest source](https://github.com/pulumi/pulumi/blob/master/pkg/backend/display/json.go#L198) captures pre-step state and only substitutes completed outputs for refresh; [SameStep.Apply](https://github.com/pulumi/pulumi/blob/master/pkg/resource/deploy/step.go#L168) copies old ID/outputs later. Missing new identity/output fields do not imply rotation. Updated verifier accepts unknown pre-step IDs only when every operation is same/no-diff, old identity exists and target type/URN/provider/inputs/protection match. A supplied different new ID still fails. AdditionalSecretOutputs booleans prove declaration intent; persistedSecretMetadataVerified remainsfalse until authorized apply and post-deploy verification. Untargeted same resources, including installation-id, cannot count toward the four targets and are not misclassified as secret keys. Regression test covers this observed contract shape using synthetic IDs only.
+
+### Post-apply verification prepared
+The same Actions-only mode computes persistedSecretMetadataVerified from the old/prior-update resource metadata only: all four targets must have every additionalSecretOutputs declaration plus all four old regular outputs rendered as [secret]. New preview outputs never satisfy persistence. A synthetic test proves true for old encrypted markers and false if one regular output is unmarked. This verifies only regular properties and retains the documented special-ID limitation. No value output or mutation added. It can be used after separately cleared production deployment without importing production credentials into the agent.
+
+Post-deployment acceptance requires both verified:true and persistedSecretMetadataVerified:true from the same safe run. Safe preapply preview38538524409 on649ac64fa passed; only the subsequent old-metadata persistence boolean/test/docs were added afterward, with unchanged preview arguments/keyresourcecode and freshsecurity/codereviewPASS. Final-headCI/review still required.

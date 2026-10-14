@@ -128,6 +128,19 @@ describe('Pulumi metadata-only preview', () => {
     expect(evidence.persistedSecretMetadataVerified).toBe(false);
     expect(evidence.secretOutputs).toEqual(Object.fromEntries(outputs.map((key) => [key, true])));
   });
+  it('verifies previously persisted regular secret markers only from old metadata', () => {
+    const value: any = digest();
+    for (const step of value.steps) {
+      step.oldState = {
+        ...step.oldState,
+        additionalSecretOutputs: outputs,
+        outputs: Object.fromEntries(outputs.map((key) => [key, '[secret]'])),
+      };
+    }
+    expect(run(value).evidence.persistedSecretMetadataVerified).toBe(true);
+    value.steps[0].oldState.outputs.hex = canary;
+    expect(run(value).evidence.persistedSecretMetadataVerified).toBe(false);
+  });
   it.each(['create', 'delete', 'replace', 'create-replacement', 'update'])(
     'fails closed for %s without diagnostic output',
     (op) => {
