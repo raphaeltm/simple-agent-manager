@@ -1,6 +1,6 @@
 # Fix agent-profile mentions rejecting chat messages (#2329)
 
-DRAFT ONLY / DO NOT MERGE / DO NOT MARK READY / NO PRODUCTION DEPLOY.
+Historical draft-only limits are superseded by the 2026-10-14 user authorization to finish and ship PR #2331. Production merge/deploy remains held until release coordination clearance.
 Canonical SAM Idea: https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01M4SN1TA0YTFK8QWQEFWR4K83
 
 ## Problem and research
@@ -57,3 +57,16 @@ PR: https://github.com/raphaeltm/simple-agent-manager/pull/2331 . The historical
 - GitHub's historical `CHANGES_REQUESTED` aggregate persists despite resolved threads; do not describe it as approval or dismiss the review merely to clear a status. Request a fresh trusted review once after pushing and record the observed outcome in the PR.
 - Relevant local checks and exact-head CI outcomes will be recorded in the PR follow-up evidence before completion. Prior staging and screenshot evidence remains pinned to its original commits. This follow-up changes tracked runtime metadata and task documentation only.
 - Keep this record active as previously requested. PR remains DRAFT ONLY / DO NOT MERGE / DO NOT MARK READY / NO PRODUCTION DEPLOY.
+
+## Shipping continuation — 2026-10-14
+
+Latest user authorization supersedes original draft-only limits. Preserve PR #2331 and its original branch. Ordinary validation runs with low concurrency; no infrastructure intervention. Shared staging priority is granted after verifying no active test. Production merge/deploy awaits explicit release sequencing clearance.
+
+- Low-concurrency full build 9/9 and lint/typecheck 32/32 pass at executable head 71cbac1c7.
+- Real SQLite enrichment/authenticated HTTP 68/68 and desktop/mobile composer audit 4/4 pass.
+- Fresh task-completion A–F, parser, test, constitution, UI and documentation review PASS. Root and UI reviewer inspected all four captures; rubric 4/4/4/4/5. Fresh evidence: https://github.com/raphaeltm/simple-agent-manager/pull/2331#issuecomment-6163718829 .
+- Exact-head staging deployment and pipeline smoke PASS: https://github.com/raphaeltm/simple-agent-manager/actions/runs/38531588078 . Final parser live send-path smoke PASS: real Instant start and browser follow-up both 202 with actual Sol replies; all six full profile IDs enrich initially, and both sentence-final period profile IDs reach follow-up. Explicit invalid selector stays 404. Fixture stop/delete 200; Cloudflare confirms zero active nodes. Earlier harness streaming-fragment mismatch was corrected and its first fixture cleaned before a bounded retry.
+- Historical CodeRabbit changes-requested aggregate is not approval. Both original threads are resolved; period handling implemented and quoted autocomplete optional expansion deferred with rationale. Fresh trusted review will be requested at final readiness.
+
+- Final live screenshot/report evidence commit: 3e29b3f53 on existing evidence branch. Root inspected both live desktop/mobile captures; they show the real follow-up stream and dotted-name picker without horizontal overflow. Fresh mock desktop/mobile audits provide completed layout stress evidence.
+- Task-completion validator implementation A–F PASS, runtime evidence now closes final parser staging gap. No application code changed during shipping continuation. Merge/deploy remains queued behind release clearance and final normal review/CI gates.
