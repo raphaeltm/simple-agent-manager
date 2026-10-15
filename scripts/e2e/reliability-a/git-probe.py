@@ -21,7 +21,14 @@ def git(*args):
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            process.communicate()
+            try:
+                process.communicate(timeout=0.25)
+            except subprocess.TimeoutExpired:
+                # Detached descendants may retain pipes: close without waiting for EOF.
+                for stream in [process.stdin, process.stdout, process.stderr]:
+                    if stream is not None:
+                        stream.close()
+                process.wait(timeout=0.25)
             raise RuntimeError('suppressed')
     except OSError:
         raise RuntimeError('suppressed')

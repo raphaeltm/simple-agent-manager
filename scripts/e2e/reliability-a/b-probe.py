@@ -30,7 +30,14 @@ class Probe:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-                process.communicate()  # Drain privately; never render captured streams.
+                try:
+                    process.communicate(timeout=0.25)
+                except subprocess.TimeoutExpired:
+                    # Detached descendants may retain pipes: close without waiting for EOF.
+                    for stream in [process.stdin, process.stdout, process.stderr]:
+                        if stream is not None:
+                            stream.close()
+                    process.wait(timeout=0.25)
                 self.statuses[label] = 124
                 return 124, b''
             self.statuses[label] = process.returncode
