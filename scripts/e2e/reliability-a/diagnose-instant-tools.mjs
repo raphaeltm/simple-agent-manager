@@ -70,10 +70,19 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
    try{httpStatuses[stage]=status(response.status());if(response.status()!==200||!accept(await response.json()))throw new Error();}finally{try{await response.dispose();}catch{}}
   };
   const bind=async()=>{
+   let expected;
+   await request(`/api/projects/${project}/agent-profiles/${profile}`,v=>{
+    expected=v;return v?.id===profile&&(v.projectId===project||v.projectId===null)
+     &&typeof v.userId==='string'&&v.userId.length>0&&typeof v.name==='string'&&v.name.length>0&&v.name.length<=256
+     &&v.agentType==='claude-code'&&v.runtime==='cf-container';
+   });
+   await request(`/api/projects/${project}/agent-profiles`,v=>Array.isArray(v?.items)
+    &&v.items.filter(x=>x?.name===expected.name).length===1
+    &&v.items.some(x=>x?.id===profile&&x.name===expected.name&&x.userId===expected.userId));
    await request(`/api/projects/${project}/tasks/${task}`,v=>v?.id===task&&v.projectId===project&&v.workspaceId===workspace
-    &&v.outputBranch===branch&&v.taskMode==='task'&&v.agentProfileHint===profile&&v.status==='in_progress');
+    &&v.outputBranch===branch&&v.taskMode==='task'&&v.userId===expected.userId&&v.agentProfileHint===expected.name&&v.status==='in_progress');
    await fixedRead('binding',v=>v?.session?.id===session&&v.session.taskId===task&&v.session.workspaceId===workspace
-    &&v.session.task?.id===task&&v.session.task.outputBranch===branch);
+    &&v.session.task?.id===task&&v.session.task.outputBranch===branch&&v.session.task.agentProfileHint===expected.name);
   };
   stage='canonical-before';await bind();checkpoints[stage]=true;const readAt=Date.now();let messages,interactions;
   stage='messages';
