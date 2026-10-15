@@ -52,8 +52,17 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
   await request('/api/auth/token-login',{method:'POST',data:{token}});delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
   let task,workspace,state;
   const bind=async(allowAbsent=false)=>{
+   let expected;
+   await request(`/api/projects/${project}/agent-profiles/${own.agentProfileId}`,{},v=>{
+    expected=v;return v?.id===own.agentProfileId&&(v.projectId===project||v.projectId===null)
+     &&typeof v.userId==='string'&&v.userId.length>0&&typeof v.name==='string'&&v.name.length>0&&v.name.length<=256
+     &&v.agentType===own.agentType&&v.runtime==='cf-container';
+   });
+   await request(`/api/projects/${project}/agent-profiles`,{},v=>Array.isArray(v?.items)
+    &&v.items.filter(x=>x?.name===expected.name).length===1
+    &&v.items.some(x=>x?.id===own.agentProfileId&&x.name===expected.name&&x.userId===expected.userId));
    await request(ownPath,{},v=>{task=v;return v?.id===own.taskId&&v.projectId===project&&v.outputBranch===own.branch
-    &&v.taskMode==='task'&&v.agentProfileHint===own.agentProfileId&&(v.workspaceId===own.workspaceId||(v.workspaceId===null&&['completed','sleeping','cancelled'].includes(v.status)));});
+    &&v.taskMode==='task'&&v.userId===expected.userId&&v.agentProfileHint===expected.name&&(v.workspaceId===own.workspaceId||(v.workspaceId===null&&['completed','sleeping','cancelled'].includes(v.status)));});
    const w=await requestSafe(context,api,{path:'/api/workspaces/'+own.workspaceId,timeoutMs:10_000},v=>{
     workspace=v;return v?.id===own.workspaceId&&v.projectId===project&&v.chatSessionId===own.sessionId&&v.nodeId===own.nodeId
      &&v.branch===own.branch&&v.repository===repository&&v.workspaceProfile==='lightweight';});

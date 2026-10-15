@@ -32,7 +32,7 @@ test('actual supervised exact-context lifecycle preserves ownership, completion 
   execute('git',['push','--quiet','origin','main:refs/heads/sam/future-vm'],repo);
   const bad=JSON.parse(execute('python3',checkArgs,repo,1,probeEnv));
   assert.equal(good.checks.remoteRefsUnchanged,true);assert.equal(bad.checks.remoteRefsUnchanged,false,'next startup branch invalidates old protected baseline');
-  for(const mode of ['ok','changed-refs','foreign-project','foreign-session','wrong-runtime','wrong-profile','wrong-branch','no-reopen-proof','reopen','pending-delete','cleanup','sleep','expired','expired-cleanup','prepare','check-record','wake-check','complete','missing-phase','null-state','late-phase','source-pr','wrong-source-pr']){
+  for(const mode of ['ok','changed-refs','foreign-project','foreign-session','wrong-runtime','wrong-profile','wrong-branch','no-reopen-proof','reopen','pending-delete','cleanup','sleep','expired','expired-cleanup','prepare','check-record','wake-check','complete','missing-phase','null-state','late-phase','source-pr','wrong-source-pr','profile-missing','profile-wrong-id','profile-wrong-owner','profile-wrong-scope','profile-wrong-runtime','profile-collision','raw-id-hint']){
    const dir=join(root,mode);mkdirSync(dir,{mode:0o700});
    const contexts=[0,1].map(i=>({taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,workspaceId:uid(20+i),nodeId:uid(30+i),branch:i?'sam/final':'sam/first',agentProfileId:uid(40+i),agentType:i?'claude-code':'openai-codex',submittedAt:Date.now()-2000,evidencePrUrl:`https://github.com/${repository}/pull/1`,receipt:{taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,branchName:i?'sam/final':'sam/first',status:'queued'}}));
    if(['source-pr','wrong-source-pr'].includes(mode))contexts.forEach(x=>x.evidencePrUrl='https://github.com/raphaeltm/simple-agent-manager/pull/'+(mode==='source-pr'?'2355':'2356'));
@@ -51,12 +51,14 @@ test('actual supervised exact-context lifecycle preserves ownership, completion 
     export const chromium={launch:async()=>({newContext:async()=>({request:{fetch:async(url,options)=>{
      console.log(canary);console.error(canary);
      if(options.headers.Origin!=='https://api.sammy.party'||options.maxRedirects!==0)throw new Error(canary);
-     const path=new URL(url).pathname;let status=200,body={};
+     const path=new URL(url).pathname;let status=200,body={};const prof={id:mode==='profile-wrong-id'?'foreign':own.agentProfileId,userId:'owner',projectId:mode==='profile-wrong-scope'?'foreign':${JSON.stringify(project)},name:'Reviewed Display Name',agentType:own.agentType,runtime:mode==='profile-wrong-runtime'?'vm':'cf-container'};
      if(path==='/api/auth/token-login')loggedIn=true;
      else if(path==='/api/auth/sign-out')loggedIn=false;
      else if(path==='/api/auth/get-session')body=null;
      else if(path==='/api/nodes'){if(!loggedIn)status=403;else body=[{id:own.nodeId,cloudProvider:mode==='wrong-runtime'?'hetzner':'cloudflare',providerInstanceType:'cf-container'}];}
-     else if(path==='/api/projects/${project}/tasks/'+own.taskId)body={id:own.taskId,projectId:mode==='foreign-project'?'foreign':${JSON.stringify(project)},outputBranch:mode==='wrong-branch'?'sam/foreign':own.branch,agentProfileHint:mode==='wrong-profile'?'foreign':own.agentProfileId,taskMode:'task',workspaceId:deleted?null:own.workspaceId,status:deleted?'cancelled':['complete','source-pr'].includes(mode)&&prompted?'completed':['reopen','no-reopen-proof'].includes(mode)&&!prompted?'completed':'in_progress',completedAt:['complete','source-pr'].includes(mode)&&prompted?new Date().toISOString():completedAt};
+     else if(path==='/api/projects/${project}/agent-profiles/'+own.agentProfileId){body=prof;if(mode==='profile-missing')status=404;}
+     else if(path==='/api/projects/${project}/agent-profiles')body={items:mode==='profile-collision'?[prof,{...prof,id:'foreign'}]:[prof]};
+     else if(path==='/api/projects/${project}/tasks/'+own.taskId)body={id:own.taskId,projectId:mode==='foreign-project'?'foreign':${JSON.stringify(project)},outputBranch:mode==='wrong-branch'?'sam/foreign':own.branch,userId:mode==='profile-wrong-owner'?'foreign':'owner',agentProfileHint:mode==='wrong-profile'?'foreign':mode==='raw-id-hint'?own.agentProfileId:'Reviewed Display Name',taskMode:'task',workspaceId:deleted?null:own.workspaceId,status:deleted?'cancelled':['complete','source-pr'].includes(mode)&&prompted?'completed':['reopen','no-reopen-proof'].includes(mode)&&!prompted?'completed':'in_progress',completedAt:['complete','source-pr'].includes(mode)&&prompted?new Date().toISOString():completedAt};
      else if(path==='/api/projects/${project}/tasks/'+target.taskId)body={id:target.taskId,projectId:${JSON.stringify(project)},outputBranch:target.branch,status:'completed',completedAt,completionEvidence:{notes:canary}};
      else if(path==='/api/workspaces/'+own.workspaceId){
       if(options.method==='DELETE'){if(mode==='pending-delete'){status=202;body={success:true,deletionStatus:'pending'};}else{deleted=true;body={success:true,deletionStatus:'confirmed'};}}

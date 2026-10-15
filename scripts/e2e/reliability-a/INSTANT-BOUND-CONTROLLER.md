@@ -139,3 +139,13 @@ refs before baseline PASS, a later new VM ref makes the unchanged comparator FAI
 Playwright import is the sole synthetic dependency seam. No live/network/provider
 behavior is claimed by this test. B independent exact review and runtime GO remain
 required.
+
+Public task `agentProfileHint` is a display name, not the stored profile ID.
+Each binding read fetches the configured exact profile ID through the existing
+project profile endpoint, checks project/global scope, harness and Instant runtime,
+and requires exactly one visible profile with that name. The task owner must match
+the profile owner and its displayed hint must equal that freshly read private name.
+Missing, ambiguous, foreign or raw-ID display responses fail closed. Names and
+profile bodies are never persisted in evidence. This public display check alone
+cannot prove the task's stored profile ID; preserve the accepted dispatch binding
+and independent exact-ID observation rather than claiming name equality proves it.
