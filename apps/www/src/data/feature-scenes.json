@@ -173,8 +173,8 @@
         "dark": "/images/scenes/compute-pools-window.webp",
         "light": "/images/scenes/compute-pools-window-light.webp"
       },
-      "width": 1200,
-      "height": 628,
+      "width": 884,
+      "height": 786,
       "tiles": [
         {
           "files": {
@@ -182,10 +182,10 @@
             "light": "/images/scenes/compute-pools-window-tile0-light.webp"
           },
           "box": {
-            "left": 1,
-            "top": 10.0318,
-            "width": 97.5833,
-            "height": 25.4777
+            "left": 1.81,
+            "top": 10.1781,
+            "width": 98.19,
+            "height": 25.1908
           }
         },
         {
@@ -194,10 +194,10 @@
             "light": "/images/scenes/compute-pools-window-tile1-light.webp"
           },
           "box": {
-            "left": 1,
-            "top": 35.3503,
-            "width": 97.5833,
-            "height": 25.3185
+            "left": 1.81,
+            "top": 35.369,
+            "width": 98.19,
+            "height": 25.1908
           }
         },
         {
@@ -206,10 +206,10 @@
             "light": "/images/scenes/compute-pools-window-tile2-light.webp"
           },
           "box": {
-            "left": 1,
-            "top": 60.5096,
-            "width": 97.5833,
-            "height": 25.3185
+            "left": 1.81,
+            "top": 60.5598,
+            "width": 98.19,
+            "height": 25.1908
           }
         },
         {
@@ -218,10 +218,10 @@
             "light": "/images/scenes/compute-pools-window-tile3-light.webp"
           },
           "box": {
-            "left": 1,
-            "top": 85.6688,
-            "width": 97.5833,
-            "height": 12.8981
+            "left": 1.81,
+            "top": 85.7506,
+            "width": 98.19,
+            "height": 12.7226
           }
         }
       ]

@@ -1,27 +1,26 @@
 {
   "slug": "compute-pools",
-  "caption": "Add an instance type from the catalog; SAM places work on a real node",
   "description": "Animated preview of SAM's real compute pool screens with a sample project: catalog offerings appear with their real states, an instance type is added, then the placement decision and the Hetzner node it chose rise into view. Timing is simulated.",
-  "aspect": { "wide": 1.2, "narrow": 0.85 },
+  "aspect": { "wide": 1.2, "narrow": 0.75 },
   "beats": [0, 700, 1500, 2300, 3200],
   "layers": [
     {
       "id": "window",
       "source": "sam-compute-offerings-manager",
-      "box": { "x": 356, "y": 306, "w": 1502, "h": 786 },
-      "outWidth": 1200,
-      "place": { "wide": { "x": 3, "y": 6, "w": 74 }, "narrow": { "x": 1, "y": 1, "w": 98 } },
+      "box": { "x": 356, "y": 306, "w": 884, "h": 786 },
+      "outWidth": 884,
+      "place": { "wide": { "x": 2, "y": 2, "w": 60 }, "narrow": { "x": 1, "y": 1, "w": 98 } },
       "depth": 0,
       "tiles": [
-        { "box": { "x": 372, "y": 386, "w": 1464, "h": 198 }, "at": 2 },
-        { "box": { "x": 372, "y": 584, "w": 1464, "h": 198 }, "at": 2 },
-        { "box": { "x": 372, "y": 782, "w": 1464, "h": 198 }, "at": 2 },
-        { "box": { "x": 372, "y": 980, "w": 1464, "h": 100 }, "at": 2 }
+        { "box": { "x": 372, "y": 386, "w": 868, "h": 198 }, "at": 2 },
+        { "box": { "x": 372, "y": 584, "w": 868, "h": 198 }, "at": 2 },
+        { "box": { "x": 372, "y": 782, "w": 868, "h": 198 }, "at": 2 },
+        { "box": { "x": 372, "y": 980, "w": 868, "h": 100 }, "at": 2 }
       ],
       "rings": [
         {
           "tone": "mint",
-          "stops": [{ "at": 3, "box": { "x": 1744, "y": 802, "w": 78, "h": 55 } }],
+          "stops": [{ "at": 3, "box": { "x": 451, "y": 803, "w": 111, "h": 31 } }],
           "until": 4
         }
       ]
@@ -31,7 +30,7 @@
       "source": "sam-compute-placement-decision",
       "box": { "x": 690, "y": 566, "w": 560, "h": 296 },
       "outWidth": 560,
-      "place": { "wide": { "x": 50, "y": 40, "w": 44 }, "narrow": { "x": 26, "y": 40, "w": 70 } },
+      "place": { "wide": { "x": 50, "y": 30, "w": 44 }, "narrow": { "x": 26, "y": 42, "w": 70 } },
       "depth": 70,
       "at": 4,
       "glow": "green"
@@ -41,7 +40,7 @@
       "source": "sam-nodes-multi-provider",
       "box": { "x": 316, "y": 663, "w": 780, "h": 340 },
       "outWidth": 780,
-      "place": { "wide": { "x": 4, "y": 63, "w": 45 }, "narrow": { "x": 2, "y": 70, "w": 66 } },
+      "place": { "wide": { "x": 6, "y": 62, "w": 46 }, "narrow": { "x": 2, "y": 72, "w": 66 } },
       "depth": 110,
       "at": 5,
       "glow": "green"

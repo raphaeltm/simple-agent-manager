@@ -11,14 +11,19 @@ import {
   type GlassNodeFieldOptions,
 } from '@simple-agent-manager/ui/glass/node-field';
 
-import { createPointerFollower, setMotionPaused } from '../motion';
+import {
+  type Beat,
+  createPointerFollower,
+  FINE_POINTER_QUERY,
+  parseNumbers,
+  REDUCED_MOTION_QUERY,
+  setMotionPaused,
+  Timeline,
+} from '../../lib/motion';
 
 type Layout = 'desktop' | 'phone';
-type Beat = readonly [atMs: number, run: () => void];
 
 const DESKTOP_QUERY = '(min-width: 700px)';
-const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
-const FINE_POINTER_QUERY = '(hover: hover) and (pointer: fine)';
 /** Share of the hero that must be on screen before the intro starts. */
 const START_THRESHOLD = 0.25;
 
@@ -42,16 +47,6 @@ const FIELD_STORY: Record<Layout, FieldStory> = {
   phone: { anchor: [0.5, 0.9], peer: [0.78, 0.8], wake: [260, 10] },
 };
 
-/** Reads a StreamingWindow's strip offsets (percent of the strip's height, one per beat). */
-function parseOffsets(raw: string | undefined): number[] {
-  try {
-    const value: unknown = JSON.parse(raw ?? '[]');
-    return Array.isArray(value) ? value.filter((item): item is number => typeof item === 'number') : [];
-  } catch {
-    return [];
-  }
-}
-
 /** Slides a StreamingWindow's strip through its beats. */
 class StreamController {
   private index = 0;
@@ -60,7 +55,8 @@ class StreamController {
 
   constructor(root: HTMLElement | null) {
     this.strip = root?.querySelector<HTMLElement>('[data-sw-strip]') ?? null;
-    this.offsets = parseOffsets(root?.dataset.offsets);
+    // The strip's offsets: percent of the strip's height, one per beat.
+    this.offsets = parseNumbers(root?.dataset.offsets);
   }
 
   private place(animate: boolean) {
@@ -87,20 +83,6 @@ class StreamController {
   finish() {
     this.index = Math.max(0, this.offsets.length - 1);
     this.place(false);
-  }
-}
-
-class Timeline {
-  private timers: number[] = [];
-
-  play(beats: readonly Beat[]) {
-    this.stop();
-    for (const [at, run] of beats) this.timers.push(window.setTimeout(run, at));
-  }
-
-  stop() {
-    for (const timer of this.timers) window.clearTimeout(timer);
-    this.timers = [];
   }
 }
 

@@ -19,6 +19,8 @@ interface Props {
   /** The feature page the preview links to, and the link's accessible name. */
   href: string;
   label: string;
+  /** Visible caption: the section's existing screenshot caption (src/data/features). */
+  caption: string;
 }
 
 interface LayerImages {
@@ -29,7 +31,7 @@ interface LayerImages {
   swap?: { files: { dark: string; light: string } };
 }
 
-const { slug, side, href, label } = Astro.props;
+const { slug, side, href, label, caption } = Astro.props;
 const scene = sceneFor(slug);
 const images = (manifest as Record<string, Record<string, LayerImages>>)[slug];
 if (!scene || !images) throw new Error(`No feature scene "${slug}" (src/data/scenes, src/data/feature-scenes.json)`);
@@ -75,17 +77,19 @@ const layers = scene.layers.map((layer, index) => {
     rank.set(tile.at, order + 1);
     return { at: tile.at, order, style: tileStyle(size.tiles[i] ?? { files: size.files, box: { left: 0, top: 0, width: 0, height: 0 } }) };
   });
-  const rings = (layer.rings ?? []).map((ring) => {
-    const stops = ring.stops.map((stop) => ({ at: stop.at, box: within(layer, stop.box).map((v) => Math.round(v * 1000) / 1000) }));
-    const [left, top, width, height] = stops[0]?.box ?? [0, 0, 0, 0];
-    return {
-      tone: ring.tone,
-      at: ring.stops[0]?.at ?? 1,
-      until: ring.until,
-      stops: JSON.stringify(stops),
-      style: `--ring-left:${pct(left)};--ring-top:${pct(top)};--ring-width:${pct(width)};--ring-height:${pct(height)}`,
-    };
-  });
+  // A highlight that moves is one element per stop, each shown until the next one takes over,
+  // so moving it only fades and scales (no layout per frame).
+  const rings = (layer.rings ?? []).flatMap((ring) =>
+    ring.stops.map((stop, i) => {
+      const [left, top, width, height] = within(layer, stop.box);
+      return {
+        tone: ring.tone,
+        at: stop.at,
+        until: ring.stops[i + 1]?.at ?? ring.until,
+        style: `left:${pct(left)};top:${pct(top)};width:${pct(width)};height:${pct(height)}`,
+      };
+    })
+  );
   return { layer, index, size, tiles, rings };
 });
 ---
@@ -128,13 +132,7 @@ const layers = scene.layers.map((layer, index) => {
               {index === 0 && <div class="scene-hotspot" />}
             </div>
             {rings.map((ring) => (
-              <div
-                class={`scene-ring tone-${ring.tone}`}
-                style={ring.style}
-                data-at={ring.at}
-                data-until={ring.until}
-                data-stops={ring.stops}
-              />
+              <div class={`scene-ring tone-${ring.tone}`} style={ring.style} data-at={ring.at} data-until={ring.until} />
             ))}
           </div>
         ))}
@@ -142,7 +140,7 @@ const layers = scene.layers.map((layer, index) => {
     </div>
   </a>
   <figcaption class="scene-caption">
-    {scene.caption}<span class="sr-only"> ({scene.description})</span>
+    {caption}<span class="sr-only"> ({scene.description})</span>
   </figcaption>
 </figure>
 
@@ -212,12 +210,11 @@ const layers = scene.layers.map((layer, index) => {
   .scene-floor,
   .scene-light {
     position: absolute;
-    left: 6%;
-    right: 6%;
-    bottom: -10%;
-    height: 46%;
+    left: 2%;
+    right: 2%;
+    bottom: -14%;
+    height: 54%;
     pointer-events: none;
-    filter: blur(14px);
   }
 
   /* Light is softer on the light theme; strength scales the colour, so opacity stays free for
@@ -226,12 +223,23 @@ const layers = scene.layers.map((layer, index) => {
     --light-strength: 0.55;
   }
 
+  /* Soft falloff in the gradient itself, so the lights need no blur filter. */
   .scene-floor {
-    background: radial-gradient(closest-side, rgb(34 197 94 / calc(0.2 * var(--light-strength))), transparent 76%);
+    background: radial-gradient(
+      closest-side,
+      rgb(34 197 94 / calc(0.2 * var(--light-strength))),
+      rgb(34 197 94 / calc(0.08 * var(--light-strength))) 50%,
+      transparent
+    );
   }
 
   .scene-light {
-    background: radial-gradient(closest-side, rgb(var(--tone) / calc(0.3 * var(--light-strength))), transparent 74%);
+    background: radial-gradient(
+      closest-side,
+      rgb(var(--tone) / calc(0.3 * var(--light-strength))),
+      rgb(var(--tone) / calc(0.12 * var(--light-strength))) 50%,
+      transparent
+    );
     transition: opacity 700ms ease;
   }
 
@@ -244,8 +252,11 @@ const layers = scene.layers.map((layer, index) => {
     border-radius: var(--radius);
     transform-style: preserve-3d;
     transform: translate3d(0, var(--lift, 0px), calc(var(--depth) * var(--spread) * var(--depth-scale, 1)));
+    /* Step transitions stay within STEP_SETTLE_MS (src/lib/motion.ts): layers 900 ms, tiles
+       520 ms plus stagger, lights and crossfade 700 ms, highlights 360 ms. Only the stack's
+       pose (1300 ms) runs longer, and only at the first step. */
     transition:
-      transform 1300ms var(--ease-pose),
+      transform 900ms var(--ease-pose),
       opacity 500ms ease;
   }
 
@@ -303,11 +314,6 @@ const layers = scene.layers.map((layer, index) => {
     mask-image: linear-gradient(to right, #000 80%, transparent);
   }
 
-  .fade-bottom {
-    -webkit-mask-image: linear-gradient(to bottom, #000 80%, transparent);
-    mask-image: linear-gradient(to bottom, #000 80%, transparent);
-  }
-
   /* Specular light that follows the pointer across the window (dark theme only). */
   .scene-hotspot {
     position: absolute;
@@ -321,13 +327,9 @@ const layers = scene.layers.map((layer, index) => {
     display: none;
   }
 
-  /* ---- Rings: a highlight around a real control, moving with the story ---- */
+  /* ---- Rings: a highlight around a real control; it moves by handing over to the next stop ---- */
   .scene-ring {
     position: absolute;
-    left: var(--ring-left);
-    top: var(--ring-top);
-    width: var(--ring-width);
-    height: var(--ring-height);
     border-radius: 10px;
     background: rgb(var(--tone) / 0.1);
     box-shadow:
@@ -335,11 +337,12 @@ const layers = scene.layers.map((layer, index) => {
       0 0 22px 2px rgb(var(--tone) / 0.5);
     pointer-events: none;
     transition:
-      opacity 300ms ease,
-      left 480ms var(--ease-rise),
-      top 480ms var(--ease-rise),
-      width 480ms var(--ease-rise),
-      height 480ms var(--ease-rise);
+      opacity 260ms ease,
+      transform 360ms var(--ease-rise);
+  }
+
+  .scene[data-playing] .scene-ring:not(.is-on) {
+    transform: scale(1.12);
   }
 
   /* ---- The story: while playing, things wait for their step ---- */
@@ -450,7 +453,7 @@ const layers = scene.layers.map((layer, index) => {
 </style>
 
 <script>
-  import { initScene } from './scene-motion';
+  import { initScenes } from './scene-motion';
 
-  for (const scene of document.querySelectorAll<HTMLElement>('[data-scene]')) initScene(scene);
+  initScenes(Array.from(document.querySelectorAll<HTMLElement>('[data-scene]')));
 </script>

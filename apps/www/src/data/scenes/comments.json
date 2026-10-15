@@ -1,9 +1,8 @@
 {
   "slug": "comments",
-  "caption": "Select a line, comment on it, reply, resolve",
   "description": "Animated preview of SAM's real library file viewer with a sample project: a line of a migration plan is selected, an open comment thread quoting that line rises from the comments panel, a reply appears, and the thread is ready to resolve. Timing is simulated.",
   "aspect": { "wide": 1.45, "narrow": 0.95 },
-  "beats": [0, 700, 1500, 2400, 3300, 4100],
+  "beats": [0, 700, 1400, 2300, 3100, 3900],
   "layers": [
     {
       "id": "window",

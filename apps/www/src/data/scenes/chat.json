@@ -1,6 +1,5 @@
 {
   "slug": "chat",
-  "caption": "Pick the agent for the job from the profiles under the chat",
   "description": "Animated preview of SAM's real new-chat screen with a sample project: the starter prompts appear, then the agent profile picker rises and a highlight moves from Claude Code to Codex and Gemini CLI and back. Timing is simulated.",
   "aspect": { "wide": 1.3, "narrow": 1.05 },
   "beats": [0, 600, 1200, 1900, 2600, 3300, 4000],

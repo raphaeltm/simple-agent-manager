@@ -1,8 +1,7 @@
 {
   "slug": "agent-context",
-  "caption": "Observations carry confidence, source and date; policies reach every session",
   "description": "Animated preview of SAM's real Agent Context screens with a sample project: memory observations appear under their entities with confidence, source and confirmation date, then a project policy rises above them. Timing is simulated.",
-  "aspect": { "wide": 1.3, "narrow": 0.95 },
+  "aspect": { "wide": 1.2, "narrow": 0.95 },
   "beats": [0, 700, 1400, 2200, 3000, 3800],
   "layers": [
     {

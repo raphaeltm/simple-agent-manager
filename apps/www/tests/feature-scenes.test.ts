@@ -7,7 +7,17 @@ import { describe, expect, it } from 'vitest';
 
 import manifest from '../src/data/feature-scenes.json';
 import { featureSections } from '../src/data/features';
-import { asSceneSpec, MAX_BOTTOM, MAX_STORY_MS, scenes, type SceneSpec } from '../src/data/scenes';
+import {
+  asSceneSpec,
+  assertLayerFits,
+  layerBottom,
+  MAX_BOTTOM,
+  MAX_STORY_MS,
+  MAX_TILES_PER_STEP,
+  scenes,
+  type SceneSpec,
+  STEP_SETTLE_MS,
+} from '../src/data/scenes';
 import chat from '../src/data/scenes/chat.json';
 
 /**
@@ -94,12 +104,12 @@ describe('feature scenes', () => {
     '%s: every layer fits its stage in both compositions',
     (_slug, scene) => {
       for (const layer of scene.layers) {
-        const { width, height } = images[scene.slug]?.[layer.id] ?? { width: 1, height: 1 };
+        const image = images[scene.slug]?.[layer.id] ?? { width: 1, height: 1 };
         for (const layout of ['wide', 'narrow'] as const) {
-          const place = layer.place[layout];
-          const bottom = place.y + (place.w * scene.aspect[layout] * height) / width;
+          const bottom = layerBottom(layer.place[layout], scene.aspect[layout], image);
           expect(bottom, `${layer.id} (${layout})`).toBeLessThanOrEqual(MAX_BOTTOM);
         }
+        expect(() => assertLayerFits(scene, layer, image)).not.toThrow();
       }
     }
   );
@@ -108,7 +118,7 @@ describe('feature scenes', () => {
     '%s: the story rests on real UI only and ends within the motion budget',
     (_slug, scene) => {
       const last = scene.beats.length;
-      expect(scene.beats.at(-1) ?? 0).toBeLessThan(MAX_STORY_MS);
+      expect((scene.beats.at(-1) ?? 0) + STEP_SETTLE_MS).toBeLessThanOrEqual(MAX_STORY_MS);
       for (const layer of scene.layers) {
         for (const ring of layer.rings ?? []) expect(ring.until).toBeLessThanOrEqual(last);
         for (const tile of layer.tiles ?? []) expect(tile.at).toBeLessThanOrEqual(last);
@@ -174,5 +184,24 @@ describe('scene validation', () => {
     if (!window) throw new Error('chat scene has no window');
     window.swap = { source: 'sam-chat-tool-stream', at: 1 };
     expect(() => asSceneSpec(spec)).toThrow(/swaps before all its tiles appear/);
+  });
+
+  it('rejects more tiles in one step than its stagger can show within a step', () => {
+    const spec = clone();
+    const window = spec.layers[0];
+    const tile = window?.tiles?.[1];
+    if (!window || !tile) throw new Error('chat scene has no tiles');
+    window.tiles = Array.from({ length: MAX_TILES_PER_STEP + 1 }, () => ({ ...tile }));
+    expect(() => asSceneSpec(spec)).toThrow(/more than 5 tiles in step/);
+  });
+
+  it('rejects a layer that would hang below its stage', () => {
+    const spec = clone();
+    const chip = spec.layers[1];
+    if (!chip) throw new Error('chat scene has no chip');
+    const image = images.chat?.[chip.id] ?? { width: 1, height: 1 };
+    expect(() => assertLayerFits(spec, chip, image)).not.toThrow();
+    chip.place.wide = { ...chip.place.wide, y: MAX_BOTTOM - 1 };
+    expect(() => assertLayerFits(spec, chip, image)).toThrow(/reaches .*% of the wide stage/);
   });
 });

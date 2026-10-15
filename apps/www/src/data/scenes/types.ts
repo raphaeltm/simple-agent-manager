@@ -60,8 +60,8 @@ export interface SceneLayer {
   swap?: { source: string; at: number };
   /** Light cast behind the layer once it is in place. */
   glow?: SceneTone;
-  /** Fades the layer out toward one edge where the crop cuts through wider UI. */
-  fade?: 'right' | 'bottom';
+  /** Fades the layer out toward its right edge, where the crop cuts through wider UI. */
+  fade?: 'right';
 }
 
 /** Light on the stage's floor while a state holds; without `until` it stays in the resting frame. */
@@ -73,9 +73,10 @@ export interface SceneLight {
 
 export interface SceneSpec {
   slug: string;
-  /** Visible caption under the stage. */
-  caption: string;
-  /** What the animation shows, for screen readers. */
+  /**
+   * What the animation shows, for screen readers. (The visible caption is the section's existing
+   * screenshot caption in src/data/features.)
+   */
   description: string;
   /** Stage width ÷ height for the wide and narrow (phone) compositions. */
   aspect: { wide: number; narrow: number };

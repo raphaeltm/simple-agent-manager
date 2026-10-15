@@ -1,6 +1,5 @@
 {
   "slug": "durable-sessions",
-  "caption": "A sleeping session wakes when you send it a message",
   "description": "Animated preview of SAM's real chat with a sample project: a finished session is sleeping with its transcript intact, a message is sent from the composer, and the session wakes while SAM recreates its workspace. Timing is simulated.",
   "aspect": { "wide": 1.25, "narrow": 0.95 },
   "beats": [0, 800, 1700, 2600, 3500],

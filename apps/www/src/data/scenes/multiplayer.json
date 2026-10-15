@@ -1,16 +1,15 @@
 {
   "slug": "multiplayer",
-  "caption": "Share the invite link, review the request, approve the member",
   "description": "Animated preview of SAM's real project access screens with a sample project: an owner copies the invite link, the recipient requests access, the request appears under pending requests, and the owner approves it. Timing is simulated.",
   "aspect": { "wide": 1.3, "narrow": 0.88 },
-  "beats": [0, 700, 1500, 2300, 3200, 4100],
+  "beats": [0, 700, 1400, 2200, 3100, 3900],
   "layers": [
     {
       "id": "window",
       "source": "sam-collab-members-access",
       "box": { "x": 14, "y": 120, "w": 1048, "h": 940 },
       "outWidth": 1048,
-      "place": { "wide": { "x": 3, "y": 3, "w": 60 }, "narrow": { "x": 1, "y": 1, "w": 82 } },
+      "place": { "wide": { "x": 3, "y": 3, "w": 60 }, "narrow": { "x": 1, "y": 1, "w": 96 } },
       "depth": 0,
       "tiles": [
         { "box": { "x": 30, "y": 686, "w": 1016, "h": 159 }, "at": 4 },

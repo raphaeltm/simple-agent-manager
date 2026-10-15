@@ -2,7 +2,8 @@
 // (content, not code). Validated at module load so a mistyped step or a box outside its
 // crop fails the build instead of shipping a broken animation. Images are generated from
 // these specs by scripts/build-feature-scenes.ts.
-import type { SceneBox, SceneLayer, SceneSpec } from './types';
+import { MAX_STORY_MS, STEP_SETTLE_MS } from '../../lib/motion';
+import type { SceneBox, SceneLayer, ScenePlace, SceneSpec } from './types';
 
 import agentContext from './agent-context.json';
 import chat from './chat.json';
@@ -23,13 +24,8 @@ export type {
   SceneTone,
 } from './types';
 
-/**
- * WCAG 2.2.2: motion that starts on its own and runs longer than 5 s needs a pause control.
- * Every story finishes (last step plus its transitions) within this budget instead.
- */
-export const MAX_STORY_MS = 5000;
-/** Longest transition a step starts (layer rise, see FeatureScene.astro). */
-export const STEP_TRANSITION_MS = 700;
+export { MAX_STORY_MS, STEP_SETTLE_MS };
+
 /**
  * Furthest right a layer may reach, in percent of the stage. Perspective magnifies layers that
  * float in front of the window, so chips keep more margin than the window itself.
@@ -37,6 +33,11 @@ export const STEP_TRANSITION_MS = 700;
 export const MAX_RIGHT = { window: 99, chip: 96 };
 /** Lowest a layer may reach, in percent of the stage (checked where image sizes are known). */
 export const MAX_BOTTOM = 96;
+/**
+ * Tiles that appear in the same step rise one after another (FeatureScene.astro staggers them
+ * 110 ms apart, each rising over 520 ms); more than this would outlast STEP_SETTLE_MS.
+ */
+export const MAX_TILES_PER_STEP = 5;
 
 const TONES = new Set(['green', 'amber', 'mint', 'blue']);
 
@@ -75,6 +76,9 @@ function checkLayer(slug: string, layer: SceneLayer, index: number, last: number
   for (const tile of tiles) {
     checkStep(slug, `${label} tile`, tile.at, last);
     if (!inside(layer.box, tile.box)) fail(slug, `${label} has a tile outside its box`);
+    if (tiles.filter((other) => other.at === tile.at).length > MAX_TILES_PER_STEP) {
+      fail(slug, `${label} has more than ${MAX_TILES_PER_STEP} tiles in step ${tile.at}`);
+    }
   }
   for (const ring of layer.rings ?? []) {
     if (!TONES.has(ring.tone)) fail(slug, `${label} ring has an unknown tone`);
@@ -108,11 +112,8 @@ export function asSceneSpec(candidate: unknown): SceneSpec {
       fail(slug, 'beats must start at 0 or later and increase');
   });
   const lastBeat = beats.at(-1) ?? 0;
-  if (lastBeat + STEP_TRANSITION_MS > MAX_STORY_MS) {
-    fail(
-      slug,
-      `the story runs ${lastBeat + STEP_TRANSITION_MS} ms; keep it within ${MAX_STORY_MS} ms`
-    );
+  if (lastBeat + STEP_SETTLE_MS > MAX_STORY_MS) {
+    fail(slug, `the story runs ${lastBeat + STEP_SETTLE_MS} ms; keep it within ${MAX_STORY_MS} ms`);
   }
   const last = beats.length;
   if (spec.layers.length === 0) fail(slug, 'needs a main window layer');
@@ -145,3 +146,29 @@ export const scenes: SceneSpec[] = [
 
 export const sceneFor = (slug: string): SceneSpec | undefined =>
   scenes.find((scene) => scene.slug === slug);
+
+/** Where a placed layer ends on its stage, in percent of the stage height. */
+export function layerBottom(
+  place: ScenePlace,
+  stageAspect: number,
+  image: { width: number; height: number }
+): number {
+  return place.y + (place.w * stageAspect * image.height) / image.width;
+}
+
+/** Throws if a layer, at its generated size, would hang below its stage in either composition. */
+export function assertLayerFits(
+  scene: SceneSpec,
+  layer: SceneLayer,
+  image: { width: number; height: number }
+) {
+  for (const layout of ['wide', 'narrow'] as const) {
+    const bottom = layerBottom(layer.place[layout], scene.aspect[layout], image);
+    if (bottom > MAX_BOTTOM) {
+      fail(
+        scene.slug,
+        `layer "${layer.id}" reaches ${bottom.toFixed(1)}% of the ${layout} stage (max ${MAX_BOTTOM}%)`
+      );
+    }
+  }
+}

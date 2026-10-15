@@ -20,7 +20,7 @@ import path from 'node:path';
 
 import sharp from 'sharp';
 
-import { MAX_BOTTOM, scenes, type SceneLayer, type SceneSpec } from '../src/data/scenes';
+import { assertLayerFits, scenes, type SceneLayer, type SceneSpec } from '../src/data/scenes';
 import {
   assertInside,
   type Box,
@@ -197,19 +197,6 @@ const percent = (rect: Rect, out: Size) => ({
   height: round((rect.height / out.height) * 100),
 });
 
-/** Throws if the layer, at its generated size, would hang below the stage in either composition. */
-function assertFits(scene: SceneSpec, layer: SceneLayer, size: Size) {
-  for (const layout of ['wide', 'narrow'] as const) {
-    const place = layer.place[layout];
-    const bottom = place.y + (place.w * scene.aspect[layout] * size.height) / size.width;
-    if (bottom > MAX_BOTTOM) {
-      throw new Error(
-        `${scene.slug}.${layer.id}: reaches ${bottom.toFixed(1)}% of the ${layout} stage (max ${MAX_BOTTOM}%)`
-      );
-    }
-  }
-}
-
 async function buildLayer(scene: SceneSpec, layer: SceneLayer) {
   const name = `${scene.slug}-${layer.id}`;
   const label = `${scene.slug}.${layer.id}`;
@@ -230,7 +217,7 @@ async function buildLayer(scene: SceneSpec, layer: SceneLayer) {
     await encode(tiles.length > 0 ? blank(full, tileRects) : full, name, theme);
     if (layer.swap) await encode(await cut(layer.swap.source, theme, layer), `${name}-swap`, theme);
   }
-  assertFits(scene, layer, base);
+  assertLayerFits(scene, layer, base);
 
   return {
     files: files(name),

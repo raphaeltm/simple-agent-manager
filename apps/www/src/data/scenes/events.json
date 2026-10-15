@@ -1,9 +1,8 @@
 {
   "slug": "events",
-  "caption": "A schedule, a GitHub event or a webhook starts the work, and you see the result",
   "description": "Animated preview of SAM's real triggers page with a sample project: trigger cards appear, a highlight moves from a cron schedule to a GitHub issues trigger to a Datadog webhook trigger and back to the schedule, as a task-completed notification for the nightly dependency audit rises. Timing is simulated.",
   "aspect": { "wide": 1.15, "narrow": 0.95 },
-  "beats": [0, 700, 1400, 2000, 2600, 3300, 4100],
+  "beats": [0, 600, 1300, 1900, 2500, 3200, 3900],
   "layers": [
     {
       "id": "window",

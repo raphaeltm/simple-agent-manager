@@ -1,46 +1,49 @@
 import { readdirSync, readFileSync } from 'node:fs';
 
+import { STEP_SETTLE_MS } from '../../src/lib/motion';
 import { captureScreenshot } from './capture-screenshot';
 import { expect, type Locator, type Page, test } from './fixtures';
 
 /**
  * Homepage feature scenes: animated real-UI previews beside each feature section.
  * Every case reaches a scene the way a visitor does — scrolling it into the middle of the
- * screen, the reduced-motion preference, the hero's pause control, the theme, JavaScript off —
- * and never sets a scene's state directly. A paused fake clock makes each story step on demand.
+ * screen, the reduced-motion preference, the hero's pause control, the theme toggle, resizing,
+ * JavaScript off — and never sets a scene's state directly. A paused fake clock makes each
+ * story step on demand.
  */
 
 const SCENE_IMAGES = '/images/scenes/';
-const SCENE_DATA = new URL('../../src/data/scenes/', import.meta.url);
+const DATA = new URL('../../src/data/', import.meta.url);
+
+interface SceneFile {
+  slug: string;
+  description: string;
+}
 
 /** Scene specs on disk (src/data/scenes/*.json): what the homepage must render. */
-const sceneSpecs = readdirSync(SCENE_DATA)
+const sceneSpecs = readdirSync(new URL('scenes/', DATA))
   .filter((file) => file.endsWith('.json'))
-  .map(
-    (file) =>
-      JSON.parse(readFileSync(new URL(file, SCENE_DATA), 'utf8')) as {
-        slug: string;
-        description: string;
-      }
-  );
+  .map((file) => JSON.parse(readFileSync(new URL(`scenes/${file}`, DATA), 'utf8')) as SceneFile);
 
-interface RenderedScene {
-  slug: string;
-  beats: number[];
-}
-
-/** The scenes as the page renders them, in page order, with their step timings. */
-async function renderedScenes(page: Page): Promise<RenderedScene[]> {
-  return page.locator('[data-scene]').evaluateAll((elements) =>
-    elements.map((el) => ({
-      slug: (el as HTMLElement).dataset.scene ?? '',
-      beats: JSON.parse((el as HTMLElement).dataset.beats ?? '[]') as number[],
-    }))
-  );
-}
+/** The section's existing screenshot caption, which the scene shows unchanged. */
+const sectionCaption = (slug: string) =>
+  (
+    JSON.parse(readFileSync(new URL(`features/${slug}.json`, DATA), 'utf8')) as {
+      details: { screenshot: { caption: string } }[];
+    }
+  ).details[0]?.screenshot.caption ?? '';
 
 const sceneLocator = (page: Page, slug: string) => page.locator(`[data-scene="${slug}"]`);
-const lastScene = async (page: Page) => (await renderedScenes(page)).at(-1)?.slug ?? '';
+
+async function renderedSlugs(page: Page) {
+  return page
+    .locator('[data-scene]')
+    .evaluateAll((elements) => elements.map((el) => (el as HTMLElement).dataset.scene ?? ''));
+}
+
+async function sceneBeats(scene: Locator): Promise<number[]> {
+  return JSON.parse((await scene.getAttribute('data-beats')) ?? '[]') as number[];
+}
 
 /**
  * Scrolls a scene into the middle of the viewport, where its story starts, and waits for the
@@ -52,12 +55,10 @@ async function bringIntoView(scene: Locator) {
   await expect(scene).toHaveAttribute('data-near', '');
 }
 
-/** Holds the page's clock still so story steps fire only when the test advances time. */
-async function holdClock(page: Page) {
+/** Installs a fake clock and holds it still, so story steps fire only when the test says so. */
+async function gotoWithHeldClock(page: Page) {
   await page.clock.install();
-}
-
-async function pauseClock(page: Page) {
+  await page.goto('/');
   await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000);
 }
 
@@ -99,6 +100,30 @@ async function expectFinalFrame(scene: Locator) {
   expect(new Set(transient)).toEqual(new Set(transient.length > 0 ? ['0'] : []));
 }
 
+/**
+ * Mid-story: once transitions settle, each element that takes part in the story is visible
+ * exactly while its own step window ([data-at], [data-until]) contains the current step.
+ */
+async function expectStepFrame(scene: Locator, step: number) {
+  await expect
+    .poll(
+      () =>
+        scene.evaluate((root, current) => {
+          const wrong: string[] = [];
+          for (const el of root.querySelectorAll<HTMLElement>('[data-at]')) {
+            const at = Number(el.dataset.at);
+            const until = el.dataset.until === undefined ? Infinity : Number(el.dataset.until);
+            const opacity = getComputedStyle(el).opacity;
+            const expected = current >= at && current < until ? '1' : '0';
+            if (opacity !== expected) wrong.push(`${el.className} [${at}, ${until}) is ${opacity}`);
+          }
+          return wrong;
+        }, step),
+      { message: `step ${step}`, timeout: 4000 }
+    )
+    .toEqual([]);
+}
+
 /** The window's own image is drawn (liveness: the scene is not an empty frame). */
 async function expectWindowImage(scene: Locator) {
   const image = scene.locator('.is-window .scene-img').first();
@@ -108,73 +133,133 @@ async function expectWindowImage(scene: Locator) {
 }
 
 test.describe('homepage feature scenes', () => {
-  test('each scene waits in its intro, plays when it reaches the middle of the screen, and rests', async ({
-    page,
-  }) => {
-    await holdClock(page);
+  test('the homepage renders one scene per scene spec', async ({ page }) => {
     await page.goto('/');
-    await pauseClock(page);
-    const scenes = await renderedScenes(page);
-    expect(scenes.map((scene) => scene.slug).sort()).toEqual(
-      sceneSpecs.map((spec) => spec.slug).sort()
-    );
+    expect((await renderedSlugs(page)).sort()).toEqual(sceneSpecs.map((spec) => spec.slug).sort());
+  });
 
-    for (const { slug, beats } of scenes) {
+  for (const { slug } of sceneSpecs) {
+    test(`${slug}: waits in its intro, plays step by step from the middle of the screen, then rests`, async ({
+      page,
+    }) => {
+      await gotoWithHeldClock(page);
       const scene = sceneLocator(page, slug);
+      const beats = await sceneBeats(scene);
+
       // Before it is seen: the intro frame, with everything that arrives later hidden.
       await expect(scene).toHaveAttribute('data-playing', '');
       await expect(scene).toHaveAttribute('data-pose', 'exploded');
       await expect(scene).toHaveAttribute('data-step', '0');
-      const { lasting } = await storyOpacities(scene);
-      expect(lasting, slug).toContain('0');
+      await expectStepFrame(scene, 0);
 
       await startStory(scene);
       await expectWindowImage(scene);
       await expect(scene).not.toHaveAttribute('data-pose');
-      let now = beats[0] ?? 0;
-      for (const [index, at] of beats.entries()) {
-        if (index === 0) continue;
-        await page.clock.runFor(at - now);
-        now = at;
-        await expect(scene, `${slug} step ${index + 1}`).toHaveAttribute(
-          'data-step',
-          String(index + 1)
-        );
+      await expectStepFrame(scene, 1);
+      for (let step = 2; step <= beats.length; step++) {
+        await page.clock.runFor((beats[step - 1] ?? 0) - (beats[step - 2] ?? 0));
+        await expect(scene).toHaveAttribute('data-step', String(step));
+        await expectStepFrame(scene, step);
       }
-      await page.clock.runFor(1000);
+      await page.clock.runFor(STEP_SETTLE_MS);
       await expectFinalFrame(scene);
-    }
-  });
+    });
+  }
 
-  test('a moving highlight visits each real control in turn and is gone at rest', async ({
+  test('a moving highlight hands over from one real control to the next and is gone at rest', async ({
     page,
   }) => {
-    await holdClock(page);
-    await page.goto('/');
-    await pauseClock(page);
+    await gotoWithHeldClock(page);
     const scene = sceneLocator(page, 'chat');
-    const ring = scene.locator('.scene-ring').first();
-    const stops = await ring.evaluate(
-      (el) => JSON.parse(el.dataset.stops ?? '[]') as { at: number; box: number[] }[]
+    const rings = scene.locator('.is-chip .scene-ring');
+    const stops = await rings.evaluateAll((elements) =>
+      elements.map((el) => ({
+        at: Number((el as HTMLElement).dataset.at),
+        left: (el as HTMLElement).style.left,
+      }))
     );
+    // One highlight that visits several controls, each stop at its own place.
     expect(stops.length).toBeGreaterThan(1);
-    const beats =
-      (await renderedScenes(page)).find((candidate) => candidate.slug === 'chat')?.beats ?? [];
+    expect(new Set(stops.map((stop) => stop.left)).size).toBeGreaterThan(1);
+    const beats = await sceneBeats(scene);
 
     await startStory(scene);
-    let now = 0;
-    for (const stop of stops) {
+    let now = beats[0] ?? 0;
+    for (const [index, stop] of stops.entries()) {
       const at = beats[stop.at - 1] ?? 0;
       await page.clock.runFor(at - now);
       now = at;
-      await expect(ring).toHaveClass(/is-on/);
-      expect(
-        await ring.evaluate((el) => getComputedStyle(el).getPropertyValue('--ring-left').trim())
-      ).toBe(`${stop.box[0]}%`);
+      // Exactly this stop's highlight is up.
+      await expect(rings.nth(index)).toHaveClass(/is-on/);
+      await expect(scene.locator('.is-chip .scene-ring.is-on')).toHaveCount(1);
     }
     await page.clock.runFor(5000);
-    await expect(ring).not.toHaveClass(/is-on/);
-    await expect(ring).toHaveCSS('opacity', '0');
+    await expect(scene.locator('.scene-ring.is-on')).toHaveCount(0);
+    await expect(rings.first()).toHaveCSS('opacity', '0');
+  });
+
+  test('the sleeping session crossfades to its real waking capture at its step', async ({
+    page,
+  }) => {
+    await gotoWithHeldClock(page);
+    const scene = sceneLocator(page, 'durable-sessions');
+    const swap = scene.locator('.scene-swap');
+    const base = scene.locator('.is-window .scene-img').first();
+    const swapStep = Number(await swap.getAttribute('data-at'));
+    const beats = await sceneBeats(scene);
+    expect(swapStep).toBeGreaterThan(1);
+
+    await startStory(scene);
+    await page.clock.runFor((beats[swapStep - 2] ?? 0) - (beats[0] ?? 0));
+    await expect(scene).toHaveAttribute('data-step', String(swapStep - 1));
+    await expect(swap).toHaveCSS('opacity', '0');
+
+    await page.clock.runFor((beats[swapStep - 1] ?? 0) - (beats[swapStep - 2] ?? 0));
+    await expect(scene).toHaveAttribute('data-step', String(swapStep));
+    await expect(swap).toHaveCSS('opacity', '1');
+    const [swapImage, baseImage] = await Promise.all([
+      swap.evaluate((el) => getComputedStyle(el).backgroundImage),
+      base.evaluate((el) => getComputedStyle(el).backgroundImage),
+    ]);
+    expect(swapImage).toContain('durable-sessions-window-swap');
+    expect(baseImage).not.toContain('-swap');
+  });
+
+  test('a scene taller than the screen still starts its story', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 220 });
+    await gotoWithHeldClock(page);
+    const scene = sceneLocator(page, 'chat');
+    const height = (await scene.boundingBox())?.height ?? 0;
+    // Taller than twice the screen: a visibility ratio of 45% or more could never be reached.
+    expect(height).toBeGreaterThan(2 * 220);
+    await startStory(scene);
+  });
+
+  test('a story that leaves the screen rests at once instead of playing out unseen', async ({
+    page,
+  }) => {
+    await gotoWithHeldClock(page);
+    const scene = sceneLocator(page, 'events');
+    const beats = await sceneBeats(scene);
+    await startStory(scene);
+    await page.clock.runFor((beats[1] ?? 0) - (beats[0] ?? 0));
+    await expect(scene).toHaveAttribute('data-step', '2');
+
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+    // No clock time passes: leaving the screen alone ends the story.
+    await expectFinalFrame(scene);
+  });
+
+  test('hiding the tab rests a playing story', async ({ page }) => {
+    await gotoWithHeldClock(page);
+    const scene = sceneLocator(page, 'comments');
+    await startStory(scene);
+    // Playwright cannot background a tab, so report the page hidden the way the browser does.
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expectFinalFrame(scene);
   });
 
   test('reduced motion shows every final frame and never plays a story', async ({
@@ -193,7 +278,7 @@ test.describe('homepage feature scenes', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/');
 
-    for (const { slug } of await renderedScenes(page)) {
+    for (const slug of await renderedSlugs(page)) {
       const scene = sceneLocator(page, slug);
       await bringIntoView(scene);
       await expectWindowImage(scene);
@@ -213,35 +298,48 @@ test.describe('homepage feature scenes', () => {
     ).toBe(0);
   });
 
-  test("the hero's pause control rests the scenes, and play lets unseen scenes play again", async ({
+  test('turning reduced motion off lets an unseen scene play', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await gotoWithHeldClock(page);
+    const scene = sceneLocator(page, 'agent-context');
+    await expectFinalFrame(scene);
+
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect(scene).toHaveAttribute('data-pose', 'exploded');
+    await startStory(scene);
+  });
+
+  test("the hero's pause control rests the scenes, and play resumes the ones not yet watched", async ({
     page,
   }) => {
-    await holdClock(page);
-    await page.goto('/');
-    await pauseClock(page);
-    const scenes = await renderedScenes(page);
+    await gotoWithHeldClock(page);
 
     // Pausing mid-story jumps that scene to its final frame.
     const playing = sceneLocator(page, 'multiplayer');
+    const beats = await sceneBeats(playing);
     await startStory(playing);
-    await page.clock.runFor(scenes.find((scene) => scene.slug === 'multiplayer')?.beats[1] ?? 0);
+    await page.clock.runFor((beats[1] ?? 0) - (beats[0] ?? 0));
     await expect(playing).toHaveAttribute('data-step', '2');
     await page.getByRole('button', { name: 'Pause animation' }).click();
     await expectFinalFrame(playing);
 
-    // While paused, a scene that has not been seen shows its final frame when it arrives.
+    // Paused pauses everything, so a scene arriving now shows its final frame and stays there.
     const unseen = sceneLocator(page, 'events');
-    await expectFinalFrame(unseen);
     await bringIntoView(unseen);
     await page.clock.runFor(1000);
     await expectFinalFrame(unseen);
 
-    // Playing again only re-arms scenes nobody has watched yet.
-    await page.getByRole('button', { name: 'Play animation' }).click();
+    // Play from where the visitor is (a keyboard press does not scroll): the scene in view, never
+    // watched, plays from its intro; the one already watched stays at rest.
+    await page.getByRole('button', { name: 'Play animation' }).dispatchEvent('click');
+    await expect(page.getByRole('button', { name: 'Pause animation' })).toBeAttached();
+    await expect
+      .poll(async () => {
+        await page.clock.runFor(0);
+        return unseen.getAttribute('data-step');
+      })
+      .toBe('1');
     await expectFinalFrame(playing);
-    const later = sceneLocator(page, scenes.at(-1)?.slug ?? '');
-    await expect(later).toHaveAttribute('data-playing', '');
-    await startStory(later);
   });
 
   for (const theme of ['dark', 'light'] as const) {
@@ -259,12 +357,12 @@ test.describe('homepage feature scenes', () => {
       );
       await page.goto('/');
       await page.waitForLoadState('networkidle');
-      const scenes = await renderedScenes(page);
+      const slugs = await renderedSlugs(page);
       // The last scene is several screens below the first: nothing of it loads up front.
-      const last = scenes.at(-1)?.slug ?? '';
+      const last = slugs.at(-1) ?? '';
       expect(requested.filter((file) => file.startsWith(`${SCENE_IMAGES}${last}-`))).toEqual([]);
 
-      for (const { slug } of scenes) {
+      for (const slug of slugs) {
         await bringIntoView(sceneLocator(page, slug));
         await expect
           .poll(() => requested.some((file) => file.startsWith(`${SCENE_IMAGES}${slug}-window`)), {
@@ -284,7 +382,7 @@ test.describe('homepage feature scenes', () => {
     const context = await browser.newContext({ javaScriptEnabled: false });
     const page = await context.newPage();
     await page.goto('/');
-    for (const { slug } of await renderedScenes(page)) {
+    for (const slug of await renderedSlugs(page)) {
       const scene = sceneLocator(page, slug);
       await scene.scrollIntoViewIfNeeded();
       await expectWindowImage(scene);
@@ -317,12 +415,16 @@ test.describe('homepage feature scenes', () => {
     expect(await stack.evaluate((el) => el.style.getPropertyValue('--tilt-y'))).toBe('');
   });
 
-  test('each scene links to its feature page and describes its animation', async ({ page }) => {
+  test('each scene links to its feature page, keeps its caption and describes its animation', async ({
+    page,
+  }) => {
     await page.goto('/');
     for (const { slug, description } of sceneSpecs) {
       const scene = sceneLocator(page, slug);
       await expect(scene.getByRole('link')).toHaveAttribute('href', `/features/${slug}/`);
-      await expect(scene.locator('figcaption')).toContainText(description);
+      const caption = scene.locator('figcaption');
+      await expect(caption).toContainText(sectionCaption(slug));
+      await expect(caption).toContainText(description);
     }
   });
 });
@@ -353,6 +455,19 @@ async function cutOffLayers(page: Page) {
   });
 }
 
+/** The stage's drawn width ÷ height, beside the wide and phone aspect ratios it may use. */
+async function stageAspects(scene: Locator) {
+  return scene.evaluate((root) => {
+    const stage = root.querySelector<HTMLElement>('.scene-stage')?.getBoundingClientRect();
+    const style = getComputedStyle(root);
+    return {
+      drawn: stage ? stage.width / stage.height : 0,
+      wide: Number(style.getPropertyValue('--aspect')),
+      narrow: Number(style.getPropertyValue('--aspect-narrow')),
+    };
+  });
+}
+
 test.describe('homepage feature scene layout', () => {
   test.skip(({ isMobile }) => isMobile, 'viewports are set explicitly; one project is enough');
 
@@ -360,7 +475,7 @@ test.describe('homepage feature scene layout', () => {
     test(`no scene layer is cut off at ${width}px, in the intro or at rest`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 });
       await page.goto('/');
-      const last = sceneLocator(page, await lastScene(page));
+      const last = sceneLocator(page, (await renderedSlugs(page)).at(-1) ?? '');
       // Scenes below the fold wait in their exploded intro pose.
       await expect(last).toHaveAttribute('data-pose', 'exploded');
       expect(await cutOffLayers(page)).toEqual({ cut: [], documentOverflow: false });
@@ -371,4 +486,45 @@ test.describe('homepage feature scene layout', () => {
       expect(await cutOffLayers(page)).toEqual({ cut: [], documentOverflow: false });
     });
   }
+
+  test("resizing across a scene's own width breakpoint switches between its compositions", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/');
+    const scene = sceneLocator(page, 'chat');
+    await bringIntoView(scene);
+    let aspects = await stageAspects(scene);
+    expect(aspects.drawn).toBeCloseTo(aspects.wide, 1);
+
+    // The preview column narrows below the scene's 560px container breakpoint.
+    await page.setViewportSize({ width: 1000, height: 900 });
+    await expect.poll(async () => (await stageAspects(scene)).drawn).toBeCloseTo(aspects.narrow, 1);
+    expect(await cutOffLayers(page)).toEqual({ cut: [], documentOverflow: false });
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    aspects = await stageAspects(scene);
+    await expect.poll(async () => (await stageAspects(scene)).drawn).toBeCloseTo(aspects.wide, 1);
+  });
+
+  test('switching theme on the page swaps scene images to the other theme', async ({ page }) => {
+    await page.addInitScript(() => window.localStorage.setItem('starlight-theme', 'dark'));
+    await page.goto('/');
+    const scene = sceneLocator(page, 'chat');
+    const image = scene.locator('.is-window .scene-img').first();
+    await bringIntoView(scene);
+    await expect
+      .poll(() => image.evaluate((el) => getComputedStyle(el).backgroundImage))
+      .toContain('/images/scenes/chat-window.webp');
+
+    const light = page.waitForRequest((request) =>
+      request.url().includes('/images/scenes/chat-window-light.webp')
+    );
+    await page.locator('.header').getByRole('button', { name: 'Light theme' }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    await expect
+      .poll(() => image.evaluate((el) => getComputedStyle(el).backgroundImage))
+      .toContain('/images/scenes/chat-window-light.webp');
+    await light;
+  });
 });
