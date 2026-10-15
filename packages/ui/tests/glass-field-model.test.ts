@@ -16,19 +16,21 @@ const FLOOR: FieldGeometryOptions = {
   vanishX: 0.6, horizonY: 0.44, zmax: 2600, focal: 820, seed: 11,
 };
 const FLAT: FieldGeometryOptions = { ...FLOOR, mode: 'flat', pitch: 88 };
+/** Lifecycle tests simulate up to a minute; a smaller floor keeps them fast under coverage on CI. */
+const SMALL: FieldGeometryOptions = { ...FLOOR, width: 640, height: 400 };
 
 function floorModel(density = 0.2) {
-  const project = createProjection(FLOOR);
-  const nodes = buildNodes(FLOOR, project);
-  return new FieldModel(nodes, { width: FLOOR.width, height: FLOOR.height, pitch: FLOOR.pitch, density, seed: FLOOR.seed });
+  const project = createProjection(SMALL);
+  const nodes = buildNodes(SMALL, project);
+  return new FieldModel(nodes, { width: SMALL.width, height: SMALL.height, pitch: SMALL.pitch, density, seed: SMALL.seed });
 }
 
-/** Advances the lifecycle in 33 ms frames, the way the renderer's loop does. */
+/** Advances the lifecycle in 100 ms steps (the renderer clamps a frame's step to 120 ms). */
 function run(model: FieldModel, fromMs: number, durationMs: number) {
   let now = fromMs;
-  for (let t = 0; t < durationMs; t += 33) {
-    now += 33;
-    model.update(33, now);
+  for (let t = 0; t < durationMs; t += 100) {
+    now += 100;
+    model.update(100, now);
   }
   return now;
 }
@@ -79,15 +81,11 @@ describe('buildNodes', () => {
     const nodes = buildNodes(FLOOR, createProjection(FLOOR));
     expect(nodes.length).toBeGreaterThan(200);
     expect(nodes.length).toBeLessThan(5000);
-    for (let i = 1; i < nodes.length; i++) {
-      expect(nodes[i]!.depth).toBeGreaterThanOrEqual(nodes[i - 1]!.depth);
-    }
-    for (const n of nodes) {
-      expect(n.depth).toBeGreaterThanOrEqual(0);
-      expect(n.depth).toBeLessThanOrEqual(1);
-      expect(n.slots).toHaveLength(4);
-      expect(AGENT_COUNTS).toContain(n.agents);
-    }
+    // One assertion per property (not per node) keeps this cheap under coverage.
+    expect(nodes.every((n, i) => i === 0 || n.depth >= (nodes[i - 1]?.depth ?? 0))).toBe(true);
+    expect(nodes.every((n) => n.depth >= 0 && n.depth <= 1)).toBe(true);
+    expect(nodes.every((n) => n.slots.length === 4)).toBe(true);
+    expect(nodes.every((n) => (AGENT_COUNTS as readonly number[]).includes(n.agents))).toBe(true);
   });
 
   it('covers the viewport in flat mode with brick-offset rows', () => {
@@ -102,7 +100,8 @@ describe('buildNodes', () => {
   });
 });
 
-describe('FieldModel lifecycle', () => {
+// Simulates tens of seconds of lifecycle; allow for coverage instrumentation on shared CI runners.
+describe('FieldModel lifecycle', { timeout: 15_000 }, () => {
   it('starts dark and ramps up to roughly the target density', () => {
     const model = floorModel(0.2);
     expect(active(model)).toHaveLength(0);
@@ -117,17 +116,25 @@ describe('FieldModel lifecycle', () => {
     const model = floorModel(0.2);
     const now = run(model, 0, 8_000);
     const firstWave = new Set(active(model).map((n) => n.id));
-    run(model, now, 40_000);
+    // Active nodes run 9-21 s, then wind down over 2.6 s.
+    run(model, now, 24_000);
     const stillLit = active(model).filter((n) => firstWave.has(n.id));
     expect(stillLit.length).toBeLessThan(firstWave.size);
   });
 
   it('keeps a pinned node lit in its colour indefinitely', () => {
     const model = floorModel(0.2);
-    const node = model.nodeNear(FLOOR.width * 0.6, FLOOR.height * 0.9)!;
+    const node = model.nodeNear(SMALL.width * 0.6, SMALL.height * 0.9)!;
     model.pin(node, 'amber', 0);
-    run(model, 0, 60_000);
-    expect(node.state).toBe('active');
+    // Sample every second for longer than any unpinned node stays lit (21 s active + 2.6 s
+    // winding): a pinned node must never leave the active state, not merely end up active.
+    const states: string[] = [];
+    let now = 0;
+    for (let second = 0; second < 30; second++) {
+      now = run(model, now, 1000);
+      states.push(node.state);
+    }
+    expect(states.every((state) => state === 'active')).toBe(true);
     expect(node.light).toBe('amber');
     expect(node.agents).toBe(4);
     expect(Math.min(...node.slotAlpha)).toBeGreaterThan(0.95);
@@ -136,7 +143,7 @@ describe('FieldModel lifecycle', () => {
   it('sends pulses only to running neighbours, nearest first', () => {
     const model = floorModel(0.25);
     const now = run(model, 0, 10_000);
-    const from = model.nodeNear(FLOOR.width * 0.6, FLOOR.height * 0.9)!;
+    const from = model.nodeNear(SMALL.width * 0.6, SMALL.height * 0.9)!;
     model.pulses = [];
     model.burst(from, 3, 'green', now);
     expect(model.pulses.length).toBeGreaterThan(0);
@@ -161,8 +168,8 @@ describe('FieldModel lifecycle', () => {
 
   it('nodeNear ignores far, faint rows', () => {
     const model = floorModel();
-    const horizon = FLOOR.height * FLOOR.horizonY;
-    const node = model.nodeNear(FLOOR.width * 0.6, horizon + 2);
+    const horizon = SMALL.height * SMALL.horizonY;
+    const node = model.nodeNear(SMALL.width * 0.6, horizon + 2);
     expect(node?.depth).toBeGreaterThanOrEqual(0.5);
   });
 });
