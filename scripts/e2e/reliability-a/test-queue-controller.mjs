@@ -143,8 +143,9 @@ test('mutation scope is bound before fetch to accepted submit and canonical task
  }
  const unrelatedStop={...stopSession,path:stopSession.path.replace(UUID,'22222222-2222-4222-8222-222222222222')};
  let v=fixture('normal',[submit,unrelatedStop,{op:'stop'}]);assert.ok(!v.events.some(e=>e.path===unrelatedStop.path));
- v=fixture('normal',[submit,task,workspace,sleep,stopSession,deleteWorkspace,deleteNode,{op:'stop'}]);
- for(const index of [4,5,6,7])assert.equal(v.outputs[`out/${String(index).padStart(4,'0')}.json`].category,'ok');
+ v=fixture('normal',[submit,task,workspace,sleep,stopSession,deleteWorkspace,{op:'stop'}]);
+ for(const index of [4,5,6])assert.equal(v.outputs[`out/${String(index).padStart(4,'0')}.json`].category,'ok');
+ v=fixture('normal',[submit,task,workspace,deleteNode,{op:'stop'}]);assert.notEqual(v.outputs['out/0004.json'].category,'ok');assert.ok(!v.events.some(e=>e.path===deleteNode.path));
  v=fixture('task-mismatch',[submit,task,deleteWorkspace,{op:'stop'}]);assert.notEqual(v.outputs['out/0002.json'].category,'ok');assert.ok(!v.events.some(e=>e.path===deleteWorkspace.path));
  v=fixture('workspace-mismatch',[submit,task,workspace,deleteNode,{op:'stop'}]);
  assert.notEqual(v.outputs['out/0003.json'].category,'ok');assert.ok(!v.events.some(e=>e.path===deleteNode.path));
