@@ -18,12 +18,10 @@ import {
   pointAlong,
   type Pulse,
   type Quad,
-  type ScreenPoint,
 } from './field-model';
 
 export type { GlassLight, GlassNodeFieldMode } from './field-model';
 export type GlassNodeFieldTheme = 'dark' | 'light';
-type Edge = readonly [ScreenPoint, ScreenPoint];
 
 export interface FrostRect {
   x: number;
@@ -173,6 +171,16 @@ export function createGlassNodeField(root: HTMLElement, options: GlassNodeFieldO
   let themeSetting: GlassNodeFieldTheme | 'auto' = o.theme ?? 'auto';
   let palette = PALETTES[themeSetting === 'auto' ? detectTheme() : themeSetting];
   let sprites = { green: sprite(palette.green), amber: sprite(palette.amber) };
+  // The frame loop draws with these opaque colours and puts each draw's alpha in globalAlpha,
+  // so it allocates no colour strings or gradients per frame (gradients are cached per node).
+  const solidColours = () => ({
+    green: rgba(palette.green, 1),
+    amber: rgba(palette.amber, 1),
+    spec: rgba(palette.spec, 1),
+    core: rgba(palette.core, 1),
+  });
+  let colours = solidColours();
+  let tileFills = new WeakMap<FieldNode, Partial<Record<GlassLight, CanvasGradient>>>();
   let width = 0, height = 0, dpr = 1;
   let model = new FieldModel([], { width: 0, height: 0, pitch: o.pitch, density: o.density, seed: o.seed });
   let project = createProjection({ ...o, width: 1, height: 1 });
@@ -201,9 +209,34 @@ export function createGlassNodeField(root: HTMLElement, options: GlassNodeFieldO
     dctx.drawImage(sprites[light], x * dpr - w / 2, y * dpr - h / 2, w, h);
   };
   const visible = (n: FieldNode) => n.x > -n.size && n.x < width + n.size && n.y > -n.size && n.y < height + n.size;
-  // Edges catching the light: the far edge on the floor; the top and left edges when flat.
-  const lit = (n: { quad: Quad }): Edge => (o.mode === 'flat' ? [n.quad[0], n.quad[1]] : [n.quad[3], n.quad[2]]);
-  const lower = (n: { quad: Quad }): Edge => (o.mode === 'flat' ? [n.quad[3], n.quad[2]] : [n.quad[0], n.quad[1]]);
+  // Edges catching the light: the far edge on the floor; the top edge when flat.
+  const litEdge = (ctx: CanvasRenderingContext2D, q: Quad) => (o.mode === 'flat' ? line(ctx, q[0], q[1]) : line(ctx, q[3], q[2]));
+  const lowerEdge = (ctx: CanvasRenderingContext2D, q: Quad) => (o.mode === 'flat' ? line(ctx, q[3], q[2]) : line(ctx, q[0], q[1]));
+  /** A tile's vertical fill, cached until the field is rebuilt or the theme changes. */
+  const tileFill = (n: FieldNode, light: GlassLight): CanvasGradient => {
+    let byLight = tileFills.get(n);
+    if (!byLight) {
+      byLight = {};
+      tileFills.set(n, byLight);
+    }
+    let fill = byLight[light];
+    if (!fill) {
+      let top = Infinity;
+      let bottom = -Infinity;
+      for (const p of n.quad) {
+        top = Math.min(top, p[1]);
+        bottom = Math.max(bottom, p[1]);
+      }
+      const rgb = light === 'amber' ? palette.amber : palette.green;
+      fill = dctx.createLinearGradient(0, top * dpr, 0, bottom * dpr);
+      // Drawn at globalAlpha 0.16·a, so these stops give 0.03·a at the top and 0.16·a at the bottom.
+      fill.addColorStop(0, rgba(rgb, 0.03 / 0.16));
+      fill.addColorStop(1, rgba(rgb, 1));
+      byLight[light] = fill;
+    }
+    return fill;
+  };
+  const alpha = (value: number) => Math.min(1, Math.max(0, value));
 
   function drawStatic() {
     sctx.clearRect(0, 0, staticCanvas.width, staticCanvas.height);
@@ -220,10 +253,10 @@ export function createGlassNodeField(root: HTMLElement, options: GlassNodeFieldO
       sctx.strokeStyle = rgba(palette.rim, palette.rimAlpha * a);
       sctx.stroke();
       sctx.strokeStyle = rgba(palette.edge, palette.edgeAlpha * a);
-      line(sctx, ...lit(n));
+      litEdge(sctx, n.quad);
       if (o.mode === 'flat') line(sctx, n.quad[0], n.quad[3]);
       sctx.strokeStyle = rgba(palette.green, palette.bounceAlpha * a);
-      line(sctx, ...lower(n));
+      lowerEdge(sctx, n.quad);
       if (n.size <= 18) continue;
       n.slots.forEach((slot, k) => {
         path(sctx, slot.quad);
@@ -267,27 +300,25 @@ export function createGlassNodeField(root: HTMLElement, options: GlassNodeFieldO
   }
 
   function drawNode(n: FieldNode, now: number) {
-    const rgb = n.light === 'amber' ? palette.amber : palette.green;
+    const colour = n.light === 'amber' ? colours.amber : colours.green;
     const flash = Math.max(0, 1 - (now - n.flashAt) / 700);
     const a = n.depth * n.wake * (1 + flash * 0.8);
     const squash = o.mode === 'floor' ? 0.42 : 1;
     dctx.globalCompositeOperation = palette.composite;
     glow(n.light, n.x, n.y, n.size * (n.frosted ? 3.4 : 2.8), (n.frosted ? 0.32 : 0.2) * a, squash);
     dctx.globalCompositeOperation = 'source-over';
-    dctx.globalAlpha = 1;
     if (!n.frosted) {
       path(dctx, n.quad);
-      const ys = n.quad.map((p) => p[1] * dpr);
-      const fill = dctx.createLinearGradient(0, Math.min(...ys), 0, Math.max(...ys));
-      fill.addColorStop(0, rgba(rgb, 0.03 * a));
-      fill.addColorStop(1, rgba(rgb, 0.16 * a));
-      dctx.fillStyle = fill;
+      dctx.fillStyle = tileFill(n, n.light);
+      dctx.globalAlpha = alpha(0.16 * a);
       dctx.fill();
       dctx.lineWidth = 1.1 * dpr;
-      dctx.strokeStyle = rgba(rgb, 0.42 * a);
+      dctx.strokeStyle = colour;
+      dctx.globalAlpha = alpha(0.42 * a);
       dctx.stroke();
-      dctx.strokeStyle = rgba(palette.spec, 0.28 * a);
-      line(dctx, ...lit(n));
+      dctx.strokeStyle = colours.spec;
+      dctx.globalAlpha = alpha(0.28 * a);
+      litEdge(dctx, n.quad);
     }
     for (let k = 0; k < n.agents; k++) {
       const slot = n.slots[k];
@@ -297,22 +328,26 @@ export function createGlassNodeField(root: HTMLElement, options: GlassNodeFieldO
       if (s < 0.01) continue;
       if (!n.frosted && n.size > 10) {
         path(dctx, slot.quad);
-        dctx.fillStyle = rgba(rgb, (o.mode === 'flat' ? 0.38 : 0.5) * s);
+        dctx.fillStyle = colour;
+        dctx.globalAlpha = alpha((o.mode === 'flat' ? 0.38 : 0.5) * s);
         dctx.fill();
-        const [cx, cy] = slot.centre;
+        const cx = slot.centre[0];
+        const cy = slot.centre[1];
         const hw = Math.abs(slot.quad[1][0] - slot.quad[0][0]) * 0.22;
         const hh = hw * squash;
-        dctx.fillStyle = rgba(palette.core, (o.mode === 'flat' ? 0.4 : 0.55) * s);
+        dctx.fillStyle = colours.core;
+        dctx.globalAlpha = alpha((o.mode === 'flat' ? 0.4 : 0.55) * s);
         dctx.fillRect((cx - hw) * dpr, (cy - hh) * dpr, hw * 2 * dpr, hh * 2 * dpr);
         dctx.lineWidth = dpr;
-        dctx.strokeStyle = rgba(palette.spec, 0.45 * s);
-        line(dctx, ...lit(slot));
+        dctx.strokeStyle = colours.spec;
+        dctx.globalAlpha = alpha(0.45 * s);
+        litEdge(dctx, slot.quad);
       }
       dctx.globalCompositeOperation = palette.composite;
       glow(n.light, slot.centre[0], slot.centre[1], n.size * (n.frosted ? 0.9 : 0.75), (n.frosted ? 0.42 : 0.35) * s, squash);
       dctx.globalCompositeOperation = 'source-over';
-      dctx.globalAlpha = 1;
     }
+    dctx.globalAlpha = 1;
   }
 
   function drawPulse(p: Pulse, now: number) {
@@ -392,6 +427,8 @@ export function createGlassNodeField(root: HTMLElement, options: GlassNodeFieldO
   function applyTheme() {
     palette = PALETTES[themeSetting === 'auto' ? detectTheme() : themeSetting];
     sprites = { green: sprite(palette.green), amber: sprite(palette.amber) };
+    colours = solidColours();
+    tileFills = new WeakMap();
     drawStatic();
     drawDynamic(performance.now());
   }
