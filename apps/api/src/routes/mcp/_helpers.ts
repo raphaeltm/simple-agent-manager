@@ -351,7 +351,9 @@ export async function checkMcpRateLimit(
   const cutover = storageCutover(env.MCP_RATE_COUNTER_CUTOVER_AT);
   if (cutover !== null && windowStart >= cutover) {
     if (!env.MCP_RATE_COUNTER) throw new Error('MCP_RATE_COUNTER binding required after cutover');
-    const stub = env.MCP_RATE_COUNTER.get(env.MCP_RATE_COUNTER.idFromName(taskId)) as DurableObjectStub<McpRateCounter>;
+    const stub = env.MCP_RATE_COUNTER.get(
+      env.MCP_RATE_COUNTER.idFromName(taskId)
+    ) as DurableObjectStub<McpRateCounter>;
     return stub.consume(windowStart, resetAt, limit);
   }
   const key = `ratelimit:mcp:${taskId}:${windowStart}`;

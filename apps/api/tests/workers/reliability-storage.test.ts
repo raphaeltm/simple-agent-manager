@@ -1,11 +1,14 @@
 import { env, runInDurableObject } from 'cloudflare:test';
+import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 
 import type { McpRateCounter } from '../../src/durable-objects/mcp-rate-counter';
 import type { WorkspaceBootLog } from '../../src/durable-objects/workspace-boot-log';
 import type { Env } from '../../src/env';
+import { mcpRoutes } from '../../src/routes/mcp';
 import { checkMcpRateLimit } from '../../src/routes/mcp/_helpers';
 import { appendBootLog, getBootLogs, writeBootLogs } from '../../src/services/boot-log';
+import { generateMcpToken, storeMcpToken } from '../../src/services/mcp-token';
 
 const api = env as unknown as Env;
 const entry = {
@@ -19,6 +22,55 @@ function activated(): Env {
 }
 
 describe('Reliability C real SQLite storage', () => {
+  it.each(['task', 'agentSession', 'workspace'] as const)(
+    'preserves activated HTTP auth, %s identity and 429 headers',
+    async (identityKind) => {
+      const identity = crypto.randomUUID();
+      const token = generateMcpToken();
+      const config = { ...activated(), MCP_RATE_LIMIT: '1' };
+      await storeMcpToken(api.KV, token, {
+        taskId: identityKind === 'task' ? identity : '',
+        agentSessionId: identityKind === 'agentSession' ? identity : undefined,
+        workspaceId: identityKind === 'workspace' ? identity : crypto.randomUUID(),
+        projectId: crypto.randomUUID(),
+        userId: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+      });
+      const app = new Hono<{ Bindings: Env }>();
+      app.route('/mcp', mcpRoutes);
+      const request = (bearer: string) =>
+        app.request(
+          '/mcp',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bearer}` },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
+          },
+          config
+        );
+      expect((await request('invalid')).status).toBe(401);
+      const allowed = await request(token);
+      expect(allowed.status).toBe(200);
+      expect(allowed.headers.get('X-RateLimit-Limit')).toBe('1');
+      expect(allowed.headers.get('X-RateLimit-Remaining')).toBe('0');
+      const denied = await request(token);
+      expect(denied.status).toBe(429);
+      expect(Number(denied.headers.get('Retry-After'))).toBeGreaterThan(0);
+      expect(denied.headers.get('X-RateLimit-Reset')).toBe(
+        allowed.headers.get('X-RateLimit-Reset')
+      );
+      const ns = api.MCP_RATE_COUNTER!;
+      await runInDurableObject(
+        ns.get(ns.idFromName(identity)) as DurableObjectStub<McpRateCounter>,
+        async (_instance, state) => {
+          expect(state.storage.sql.exec('SELECT count FROM counters').toArray()).toEqual([
+            { count: 1 },
+          ]);
+        }
+      );
+    }
+  );
+
   it('admits exactly the limit under concurrent requests, persists across reconstructed instances', async () => {
     const identity = crypto.randomUUID();
     const config = { ...activated(), MCP_RATE_LIMIT: '7' };
