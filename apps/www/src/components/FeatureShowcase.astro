@@ -1,23 +1,17 @@
 ---
-import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
+import FeatureScene from './scenes/FeatureScene.astro';
 import { featureSections } from '../data/features';
+import { scenes } from '../data/scenes';
 
 // The homepage showcase is a curated tour, not the full feature catalog — see
-// /features/ for every section. Each entry below renders only its first
-// detail row, in the order that tells the clearest product story.
-const CURATED_SLUGS = [
-  'chat',
-  'multiplayer',
-  'comments',
-  'compute-pools',
-  'events',
-  'durable-sessions',
-  'agent-context',
-];
-
-const curatedSections = CURATED_SLUGS.map((slug) =>
-  featureSections.find((section) => section.slug === slug)
-).filter((section): section is (typeof featureSections)[number] => Boolean(section));
+// /features/ for every section. The tour is the sections that have an animated
+// real-UI preview (src/data/scenes, in story order); each renders only its
+// first detail row beside that preview.
+const curatedSections = scenes.map((scene) => {
+  const section = featureSections.find((candidate) => candidate.slug === scene.slug);
+  if (!section) throw new Error(`Feature scene "${scene.slug}" has no section in src/data/features`);
+  return section;
+});
 ---
 
 <div class="showcase-index animate-on-scroll">
@@ -29,7 +23,6 @@ const curatedSections = CURATED_SLUGS.map((slug) =>
 {curatedSections.map((section, sectionIdx) => {
   const detail = section.details[0];
   const flip = sectionIdx % 2 === 1;
-  const eager = sectionIdx === 0;
   return (
     <section class="showcase-section" id={`feature-${section.slug}`}>
       <div class="container">
@@ -50,19 +43,14 @@ const curatedSections = CURATED_SLUGS.map((slug) =>
               </a>
             </div>
 
-            <a href={`/features/${section.slug}/`} class="spotlight" aria-label={detail.headline}>
-              <span class="spotlight-glow" aria-hidden="true"></span>
-              <span class="spotlight-frame sam-glass sam-glass-rim">
-                <span class="spotlight-shot">
-                  <OptimizedFeatureImage
-                    src={detail.screenshot.src}
-                    alt={detail.screenshot.alt}
-                    loading={eager ? 'eager' : 'lazy'}
-                  />
-                  <span class="spotlight-caption">{detail.screenshot.caption}</span>
-                </span>
-              </span>
-            </a>
+            <div class="editorial-preview">
+              <FeatureScene
+                slug={section.slug}
+                side={flip ? 'left' : 'right'}
+                href={`/features/${section.slug}/`}
+                label={detail.headline}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -190,7 +178,7 @@ const curatedSections = CURATED_SLUGS.map((slug) =>
       order: 2;
     }
 
-    .editorial-row.is-flipped .spotlight {
+    .editorial-row.is-flipped .editorial-preview {
       order: 1;
     }
   }
@@ -242,110 +230,12 @@ const curatedSections = CURATED_SLUGS.map((slug) =>
     transform: translateX(2px);
   }
 
-  /* ---- Spotlight: the real screenshot in a glass bezel, lit from below ---- */
-
-  .spotlight {
-    position: relative;
-    display: block;
-    isolation: isolate;
-  }
-
-  .spotlight-glow {
-    position: absolute;
-    left: 8%;
-    right: 8%;
-    bottom: -40px;
-    z-index: -1;
-    height: 120px;
-    background: radial-gradient(closest-side, rgb(34 197 94 / 0.22), transparent 75%);
-    filter: blur(10px);
-    opacity: 0.8;
-    transition: opacity 0.4s ease;
-    pointer-events: none;
-  }
-
-  :global(html[data-theme='light']) .spotlight-glow {
-    opacity: 0.45;
-  }
-
-  .spotlight:hover .spotlight-glow {
-    opacity: 1;
-  }
-
-  .spotlight-frame {
-    display: block;
-    padding: 8px;
-    border-radius: 18px;
-    transition: transform 0.3s ease;
-  }
-
-  .spotlight:hover .spotlight-frame {
-    transform: translateY(-3px);
-  }
-
-  .spotlight-shot {
-    position: relative;
-    display: block;
-    overflow: hidden;
-    border-radius: 11px;
-  }
-
-  .spotlight-shot :global(picture),
-  .spotlight-shot :global(img) {
-    display: block;
-  }
-
-  .spotlight-shot :global(img) {
-    width: 100%;
-    height: auto;
-    transition: transform 0.5s ease;
-  }
-
-  .spotlight:hover .spotlight-shot :global(img) {
-    transform: scale(1.02);
-  }
-
-  .spotlight-caption {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    padding: 48px 20px 18px;
-    font-size: 0.875rem;
-    line-height: 1.4;
-    /* Sits over a screenshot beneath a dark scrim — keep text light in both themes */
-    color: #eef5f2;
-    background: linear-gradient(to top, rgb(8 14 12 / 0.92) 0%, rgb(8 14 12 / 0.7) 45%, transparent 100%);
-    opacity: 0;
-    transform: translateY(8px);
-    transition: opacity 0.3s ease, transform 0.3s ease;
-  }
-
-  .spotlight:hover .spotlight-caption,
-  .spotlight:focus-visible .spotlight-caption {
-    opacity: 1;
-    transform: translateY(0);
-  }
-
-  /* On touch / small screens the caption is always visible since there's no hover */
-  @media (max-width: 899px) {
-    .spotlight-caption {
-      opacity: 1;
-      transform: none;
-      padding: 40px 16px 14px;
-    }
-  }
-
   @media (prefers-reduced-motion: reduce) {
-    .showcase-pill,
-    .spotlight-frame,
-    .spotlight-shot :global(img) {
+    .showcase-pill {
       transition: none;
     }
 
-    .showcase-pill:hover,
-    .spotlight:hover .spotlight-frame,
-    .spotlight:hover .spotlight-shot :global(img) {
+    .showcase-pill:hover {
       transform: none;
     }
   }

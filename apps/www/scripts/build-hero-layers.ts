@@ -16,25 +16,26 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import sharp, { type Sharp } from 'sharp';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SOURCE_DIR = path.join(ROOT, 'public/images/features');
+import {
+  assertInside,
+  type Box,
+  layerFile,
+  ROOT,
+  round,
+  sourcePath,
+  sourceSize,
+  THEME_NAMES,
+  themedFiles,
+  writeWebp as writeLayer,
+} from './lib/real-ui-layers';
+
 const OUT_DIR = path.join(ROOT, 'public/images/hero');
 const MANIFEST_PATH = path.join(ROOT, 'src/data/hero-layers.json');
 const PUBLIC_PREFIX = '/images/hero';
 const WEBP_QUALITY = Number(process.env.HERO_LAYER_WEBP_QUALITY ?? 80);
-const THEMES = { dark: '', light: '-light' } as const;
-type Theme = keyof typeof THEMES;
-
-interface Box {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
 
 /** A screenshot whose transcript streams in. All values are source pixels. */
 interface WindowSpec {
@@ -100,44 +101,9 @@ const CROPS: Record<string, CropSpec> = {
   notifyDone: { source: 'sam-notifications-feed', box: { x: 317, y: 199, w: 864, h: 108 }, outWidth: 864 },
 };
 
-const round = (value: number) => Math.round(value * 10_000) / 10_000;
-const sourcePath = (name: string, theme: Theme) => path.join(SOURCE_DIR, `${name}${THEMES[theme]}.png`);
-const layerFile = (name: string, theme: Theme) => `${name}${THEMES[theme]}.webp`;
-
-async function writeWebp(image: Sharp, file: string, width: number) {
-  const info = await image
-    .resize({ width, kernel: 'lanczos3' })
-    .webp({ quality: WEBP_QUALITY, effort: 6 })
-    .toFile(path.join(OUT_DIR, file));
-  return { width: info.width, height: info.height };
-}
-
-function files(name: string) {
-  return {
-    dark: `${PUBLIC_PREFIX}/${layerFile(name, 'dark')}`,
-    light: `${PUBLIC_PREFIX}/${layerFile(name, 'light')}`,
-  };
-}
-
-async function sourceSize(name: string) {
-  const sizes = await Promise.all(
-    (Object.keys(THEMES) as Theme[]).map(async (theme) => {
-      const { width = 0, height = 0 } = await sharp(sourcePath(name, theme)).metadata();
-      return { width, height };
-    }),
-  );
-  const [dark, light] = sizes;
-  if (!dark || !light || dark.width !== light.width || dark.height !== light.height) {
-    throw new Error(`${name}: dark and light sources must have the same size`);
-  }
-  return dark;
-}
-
-function assertInside(label: string, box: Box, size: { width: number; height: number }) {
-  if (box.x < 0 || box.y < 0 || box.x + box.w > size.width || box.y + box.h > size.height) {
-    throw new Error(`${label}: box ${JSON.stringify(box)} falls outside ${size.width}x${size.height}`);
-  }
-}
+const writeWebp = (image: Sharp, file: string, width: number) =>
+  writeLayer(image, path.join(OUT_DIR, file), width, WEBP_QUALITY);
+const files = (name: string) => themedFiles(PUBLIC_PREFIX, name);
 
 /** One source row (RGB) across the view's width. */
 async function sourceRow(src: string, x: number, y: number, width: number) {
@@ -179,7 +145,7 @@ async function buildWindow(name: string, spec: WindowSpec) {
   const stripHeight = ext + view.h - capRows;
   let base = { width: 0, height: 0 };
   let strip = { width: 0, height: 0 };
-  for (const theme of Object.keys(THEMES) as Theme[]) {
+  for (const theme of THEME_NAMES) {
     const src = sourcePath(spec.source, theme);
     base = await writeWebp(sharp(src), layerFile(name, theme), spec.outWidth);
 
@@ -234,7 +200,7 @@ async function buildCrop(name: string, spec: CropSpec) {
   const size = await sourceSize(spec.source);
   assertInside(name, spec.box, size);
   let out = { width: 0, height: 0 };
-  for (const theme of Object.keys(THEMES) as Theme[]) {
+  for (const theme of THEME_NAMES) {
     const { box } = spec;
     out = await writeWebp(
       sharp(sourcePath(spec.source, theme)).extract({ left: box.x, top: box.y, width: box.w, height: box.h }),

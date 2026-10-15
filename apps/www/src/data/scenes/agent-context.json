@@ -1,0 +1,42 @@
+{
+  "slug": "agent-context",
+  "caption": "Observations carry confidence, source and date; policies reach every session",
+  "description": "Animated preview of SAM's real Agent Context screens with a sample project: memory observations appear under their entities with confidence, source and confirmation date, then a project policy rises above them. Timing is simulated.",
+  "aspect": { "wide": 1.3, "narrow": 0.95 },
+  "beats": [0, 700, 1400, 2200, 3000, 3800],
+  "layers": [
+    {
+      "id": "window",
+      "source": "sam-context-memory",
+      "box": { "x": 348, "y": 134, "w": 1520, "h": 1100 },
+      "outWidth": 1200,
+      "place": { "wide": { "x": 2, "y": 2, "w": 86 }, "narrow": { "x": 1, "y": 1, "w": 98 } },
+      "depth": 0,
+      "tiles": [
+        { "box": { "x": 364, "y": 378, "w": 1486, "h": 144 }, "at": 2 },
+        { "box": { "x": 364, "y": 522, "w": 1486, "h": 144 }, "at": 2 },
+        { "box": { "x": 364, "y": 938, "w": 1486, "h": 144 }, "at": 3 },
+        { "box": { "x": 364, "y": 1082, "w": 1486, "h": 144 }, "at": 3 }
+      ],
+      "rings": [
+        {
+          "tone": "mint",
+          "stops": [{ "at": 4, "box": { "x": 376, "y": 465, "w": 322, "h": 38 } }],
+          "until": 5
+        }
+      ]
+    },
+    {
+      "id": "policy",
+      "source": "sam-context-policies",
+      "box": { "x": 348, "y": 328, "w": 760, "h": 196 },
+      "outWidth": 760,
+      "place": { "wide": { "x": 38, "y": 76, "w": 56 }, "narrow": { "x": 5, "y": 70, "w": 90 } },
+      "depth": 90,
+      "at": 5,
+      "glow": "green",
+      "fade": "right"
+    }
+  ],
+  "lights": [{ "tone": "green", "at": 5 }]
+}

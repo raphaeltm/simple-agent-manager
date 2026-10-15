@@ -1,0 +1,43 @@
+{
+  "slug": "comments",
+  "caption": "Select a line, comment on it, reply, resolve",
+  "description": "Animated preview of SAM's real library file viewer with a sample project: a line of a migration plan is selected, an open comment thread quoting that line rises from the comments panel, a reply appears, and the thread is ready to resolve. Timing is simulated.",
+  "aspect": { "wide": 1.45, "narrow": 0.95 },
+  "beats": [0, 700, 1500, 2400, 3300, 4100],
+  "layers": [
+    {
+      "id": "window",
+      "source": "sam-comments-library-file",
+      "box": { "x": 0, "y": 0, "w": 1300, "h": 640 },
+      "outWidth": 1200,
+      "place": { "wide": { "x": 2, "y": 4, "w": 78 }, "narrow": { "x": 1, "y": 2, "w": 98 } },
+      "depth": 0,
+      "rings": [
+        {
+          "tone": "mint",
+          "stops": [{ "at": 2, "box": { "x": 120, "y": 349, "w": 566, "h": 35 } }],
+          "until": 4
+        }
+      ]
+    },
+    {
+      "id": "thread",
+      "source": "sam-comments-library-file",
+      "box": { "x": 1428, "y": 164, "w": 476, "h": 366 },
+      "outWidth": 476,
+      "place": { "wide": { "x": 57, "y": 28, "w": 38 }, "narrow": { "x": 22, "y": 40, "w": 74 } },
+      "depth": 80,
+      "at": 3,
+      "glow": "amber",
+      "tiles": [{ "box": { "x": 1440, "y": 356, "w": 456, "h": 166 }, "at": 4 }],
+      "rings": [
+        {
+          "tone": "mint",
+          "stops": [{ "at": 5, "box": { "x": 1538, "y": 462, "w": 112, "h": 52 } }],
+          "until": 6
+        }
+      ]
+    }
+  ],
+  "lights": [{ "tone": "amber", "at": 3, "until": 4 }]
+}

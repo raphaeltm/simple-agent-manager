@@ -73,10 +73,12 @@ const apiUrl = `https://api.${baseDomain}`;
     <!-- Preload font -->
     <link rel="preload" href="/fonts/Chillax-Variable.woff2" as="font" type="font/woff2" crossorigin />
 
-    <!-- Scroll-reveal content must stay readable without JavaScript -->
+    <!-- Scroll-reveal content and feature scene images (loaded near the viewport by
+         scenes/scene-motion.ts) must stay visible without JavaScript -->
     <noscript>
       <style>
         .animate-on-scroll { opacity: 1; transform: none; }
+        .scene .scene-img { background-image: var(--img-dark); }
       </style>
     </noscript>
 

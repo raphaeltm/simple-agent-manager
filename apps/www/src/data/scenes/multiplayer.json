@@ -1,0 +1,65 @@
+{
+  "slug": "multiplayer",
+  "caption": "Share the invite link, review the request, approve the member",
+  "description": "Animated preview of SAM's real project access screens with a sample project: an owner copies the invite link, the recipient requests access, the request appears under pending requests, and the owner approves it. Timing is simulated.",
+  "aspect": { "wide": 1.3, "narrow": 0.88 },
+  "beats": [0, 700, 1500, 2300, 3200, 4100],
+  "layers": [
+    {
+      "id": "window",
+      "source": "sam-collab-members-access",
+      "box": { "x": 14, "y": 120, "w": 1048, "h": 940 },
+      "outWidth": 1048,
+      "place": { "wide": { "x": 3, "y": 3, "w": 60 }, "narrow": { "x": 1, "y": 1, "w": 82 } },
+      "depth": 0,
+      "tiles": [
+        { "box": { "x": 30, "y": 686, "w": 1016, "h": 159 }, "at": 4 },
+        { "box": { "x": 30, "y": 845, "w": 1016, "h": 199 }, "at": 4 }
+      ],
+      "rings": [
+        {
+          "tone": "green",
+          "stops": [{ "at": 5, "box": { "x": 856, "y": 771, "w": 174, "h": 62 } }],
+          "until": 6
+        }
+      ]
+    },
+    {
+      "id": "invite",
+      "source": "sam-collab-members-access",
+      "box": { "x": 1078, "y": 128, "w": 812, "h": 292 },
+      "outWidth": 812,
+      "place": { "wide": { "x": 46, "y": 2, "w": 48 }, "narrow": { "x": 34, "y": 0, "w": 62 } },
+      "depth": 60,
+      "at": 2,
+      "rings": [
+        {
+          "tone": "mint",
+          "stops": [{ "at": 2, "box": { "x": 1736, "y": 274, "w": 136, "h": 60 } }],
+          "until": 3
+        }
+      ]
+    },
+    {
+      "id": "request",
+      "source": "sam-collab-invite-request",
+      "box": { "x": 0, "y": 0, "w": 888, "h": 516 },
+      "outWidth": 888,
+      "place": { "wide": { "x": 52, "y": 60, "w": 42 }, "narrow": { "x": 38, "y": 64, "w": 58 } },
+      "depth": 90,
+      "at": 3,
+      "glow": "mint",
+      "rings": [
+        {
+          "tone": "mint",
+          "stops": [{ "at": 3, "box": { "x": 582, "y": 408, "w": 272, "h": 76 } }],
+          "until": 4
+        }
+      ]
+    }
+  ],
+  "lights": [
+    { "tone": "amber", "at": 4, "until": 5 },
+    { "tone": "green", "at": 5 }
+  ]
+}

@@ -291,8 +291,9 @@ test.describe('header menu', () => {
   });
 });
 
+// The homepage's feature previews are themed scene layers (see homepage-scenes.spec.ts).
 test.describe('themed screenshots', () => {
-  for (const path of ['/', '/features/', '/enterprise/cost-control/']) {
+  for (const path of ['/features/', '/enterprise/cost-control/']) {
     for (const theme of ['dark', 'light'] as const) {
       test(`${path} shows exactly one screenshot per pair in ${theme}`, async ({ page }) => {
         await useTheme(page, theme);

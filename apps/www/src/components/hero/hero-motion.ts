@@ -11,6 +11,8 @@ import {
   type GlassNodeFieldOptions,
 } from '@simple-agent-manager/ui/glass/node-field';
 
+import { createPointerFollower, setMotionPaused } from '../motion';
+
 type Layout = 'desktop' | 'phone';
 type Beat = readonly [atMs: number, run: () => void];
 
@@ -105,27 +107,14 @@ class Timeline {
 /** Pointer tilt for the stack and parallax for the floor; settles itself, so it is free at rest. */
 function attachTilt(hero: HTMLElement, stack: HTMLElement | null, active: () => boolean) {
   if (!window.matchMedia(FINE_POINTER_QUERY).matches) return () => undefined;
-  let targetX = 0;
-  let targetY = 0;
-  let x = 0;
-  let y = 0;
-  let raf = 0;
-  const step = () => {
-    x += (targetX - x) * 0.1;
-    y += (targetY - y) * 0.1;
+  const aim = createPointerFollower((x, y) => {
     stack?.style.setProperty('--rx', `${(-y * 5).toFixed(2)}deg`);
     stack?.style.setProperty('--ry', `${(x * 7).toFixed(2)}deg`);
     stack?.style.setProperty('--mx', `${(x * 60 + 50).toFixed(1)}%`);
     stack?.style.setProperty('--my', `${(y * 60 + 40).toFixed(1)}%`);
     hero.style.setProperty('--px', x.toFixed(3));
     hero.style.setProperty('--py', y.toFixed(3));
-    raf = Math.abs(targetX - x) + Math.abs(targetY - y) > 0.0005 ? requestAnimationFrame(step) : 0;
-  };
-  const aim = (nextX: number, nextY: number) => {
-    targetX = nextX;
-    targetY = nextY;
-    raf ||= requestAnimationFrame(step);
-  };
+  });
   window.addEventListener(
     'pointermove',
     (event) => {
@@ -271,6 +260,7 @@ export function initHero(hero: HTMLElement) {
 
   function setPaused(next: boolean) {
     paused = next;
+    setMotionPaused(next);
     toggle?.setAttribute('data-paused', String(next));
     const label = toggle?.querySelector('[data-hero-toggle-label]');
     if (label) label.textContent = next ? 'Play animation' : 'Pause animation';
