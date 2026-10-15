@@ -58,52 +58,73 @@ Also fold in the live bugs from idea `01M4XZQRYJ38CMN7R2PKMS370N`:
 ## Implementation checklist
 
 ### Shared (packages/ui)
-- [ ] `src/glass/node-field.ts`: framework-agnostic glass node field (floor + flat modes), typed;
+- [x] `src/glass/node-field.ts`: framework-agnostic glass node field (floor + flat modes), typed;
       own canvases; dark/light/auto theme (www `data-theme`, app `data-ui-theme`); 30 fps cap;
       pause offscreen/hidden; ResizeObserver; reduced motion = static frame; safe no-op when canvas
       2D context is unavailable; story API (`nodeNear`, `wakeNear`, `pin`, `burst`, `pause/resume`,
       `destroy`); pure helpers exported for tests (projection, node build, PRNG)
-- [ ] `src/glass/glass.css`: Glass v2 material (`.sam-glass`, `--chrome`, `.sam-glass-rim`,
+- [x] `src/glass/glass.css`: Glass v2 material (`.sam-glass`, `--chrome`, `.sam-glass-rim`,
       `.sam-glass-sheen`, `.sam-glass-live`) with light variants for both theme attributes and
       reduced-transparency / contrast fallbacks
-- [ ] `src/components/GlassNodeField.tsx` React wrapper (primitive deps only, rule 64) + export
-- [ ] `package.json` subpath exports `./glass.css`, `./glass/node-field`
-- [ ] Tests: node-field pure logic + lifecycle + destroy + no-canvas safety; React wrapper mount/unmount
-- [ ] Storybook story for GlassNodeField (floor + flat)
+- [x] `src/components/GlassNodeField.tsx` React wrapper (primitive deps only, rule 64) + export
+- [x] `package.json` subpath exports `./glass.css`, `./glass/node-field`
+- [x] Tests: node-field pure logic + lifecycle + destroy + no-canvas safety; React wrapper mount/unmount
+- [x] Storybook story for GlassNodeField (floor + flat)
 
 ### Marketing site (apps/www)
-- [ ] Depend on `@simple-agent-manager/ui` (workspace) and import `glass.css`
-- [ ] New phone capture `sam-hero-phone(-light).png` via `marketing-shots-platform.spec.ts`
-- [ ] `scripts/build-hero-layers.ts` (sharp): deterministic layer crops (dark + light) + manifest
+- [x] Depend on `@simple-agent-manager/ui` (workspace) and import `glass.css`
+- [x] New phone capture `sam-hero-phone(-light).png` via `marketing-shots-platform.spec.ts`
+- [x] `scripts/build-hero-layers.ts` (sharp): deterministic layer crops (dark + light) + manifest
       `src/data/hero-layers.json`; outputs in `public/images/hero/`
-- [ ] Hero: exploded stack (nodes plane, streaming chat window, comment + placement chips,
+- [x] Hero: exploded stack (nodes plane, streaming chat window, comment + placement chips,
       amber→green notification), glass node floor background, phone on mobile, pointer tilt,
       pause/replay control, reduced-motion final frame, caption "real SAM interface · sample project"
-- [ ] Remove `NodeGrid.astro`
-- [ ] Header → floating glass pill (keeps 64px total for `--header-height` users), mobile sheet
-- [ ] SocialProof → agent dock (text chips; no invented logos)
-- [ ] FeatureShowcase glass frames + light; fix doubled screenshots globally (`global.css` rule)
-- [ ] HowItWorks, Comparison (raised SAM column, non-green body text), Roadmap, CtaFooter restyled
-- [ ] `OptimizedFeatureImage.astro` emits width/height
-- [ ] Both themes reviewed
-- [ ] `apps/www/AGENTS.md` updated (hero components + layer script)
+- [x] Remove `NodeGrid.astro`
+- [x] Header → floating glass pill (keeps 64px total for `--header-height` users), mobile sheet
+- [x] SocialProof → agent dock (text chips; no invented logos)
+- [x] FeatureShowcase glass frames + light; fix doubled screenshots globally (`global.css` rule)
+- [x] HowItWorks, Comparison (raised SAM column, non-green body text), Roadmap, CtaFooter restyled
+- [x] `OptimizedFeatureImage.astro` emits width/height
+- [x] Both themes reviewed
+- [x] `apps/www/AGENTS.md` updated (hero components + layer script)
 
 ### App (apps/web)
-- [ ] Sign-in page uses `GlassNodeField` floor background + glass card (behavior unchanged)
-- [ ] `index.css` imports shared `glass.css`; unit-test mock updated; Playwright landing audit run
+- [x] Sign-in page uses `GlassNodeField` floor background + glass card (behavior unchanged)
+- [x] `index.css` imports shared `glass.css`; unit-test mock updated; Playwright landing audit run
 
 ### CI / deploy
-- [ ] `ci.yml` marketing-site filter + `deploy-www.yml` paths include `packages/ui/src/glass/**`
+- [x] `ci.yml` marketing-site filter + `deploy-www.yml` paths include `packages/ui/src/glass/**`
       and `packages/ui/package.json`
 
 ### Tests & evidence
-- [ ] www Playwright `homepage-hero.spec.ts`: hero renders layers + canvas; animated path reaches
+- [x] www Playwright `homepage-hero.spec.ts`: hero renders layers + canvas; animated path reaches
       rest state; reduced motion = final frame + no rAF loop; pause stops animation; mobile shows
       phone, no overflow; light theme shows light layers; one visible screenshot per frame on `/`,
       `/features/`, `/enterprise/cost-control/` in both themes
-- [ ] www unit test: hero manifest geometry valid (bounds, monotonic steps, files exist)
-- [ ] Before/after metrics (transfer, DOM, backdrop-filter count) recorded
+- [x] www unit test: hero manifest geometry valid (bounds, monotonic steps, files exist)
+- [x] Before/after metrics (transfer, DOM, backdrop-filter count) recorded
 - [ ] Desktop + mobile screenshots (both themes) posted to the PR via Library links
+
+## Implementation notes
+
+- Phone source: new `sam-hero-phone(-light).png` capture (390x844, Northwind hero session) in
+  `marketing-shots-platform.spec.ts`; the hero session routes are now a shared helper.
+- The desktop capture spec `sam-hero-live-session` is stale (tool calls are grouped now); the hero
+  keeps using the committed image. Filed `tasks/backlog/2026-10-15-refresh-desktop-hero-capture.md`.
+- Layers are themed CSS backgrounds gated by theme and breakpoint, so one theme's set for one
+  layout downloads. Strip seams are removed by blending the band into the first transcript row and
+  masking the top `capRows` so the real header shadow stays fixed.
+- Astro scopes component CSS with `:where()`, so glass base rules are `:where()` too (consumer
+  layout always wins); the app imports glass.css into `@layer components`.
+- Renderer fix: a resize while paused/offscreen repainted nothing; now paints the settled frame
+  (regression test proven red without the fix).
+- Metrics (Playwright, `/`, analytics blocked; production vs branch build):
+  DOM 2,044 → 692; elements with backdrop-filter 20 → 2; after scrolling the hero away, rAF/s
+  60 → 0 and running CSS animations 36 → 0–2; transfer desktop 1,143 → 1,265 KB (hero layers),
+  phone 1,143 → 984 KB.
+- Discrimination checks: removing `field.pause()` fails the pause test; forcing animation under
+  reduced motion fails the reduced-motion test; reverting the screenshot fix fails the dark-mode
+  pair tests on all three pages; loading both themes fails the light download test.
 
 ## Acceptance criteria
 
