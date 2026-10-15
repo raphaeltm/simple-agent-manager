@@ -103,7 +103,7 @@ Also fold in the live bugs from idea `01M4XZQRYJ38CMN7R2PKMS370N`:
       `/features/`, `/enterprise/cost-control/` in both themes
 - [x] www unit test: hero manifest geometry valid (bounds, monotonic steps, files exist)
 - [x] Before/after metrics (transfer, DOM, backdrop-filter count) recorded
-- [ ] Desktop + mobile screenshots (both themes) posted to the PR via Library links
+- [x] Desktop + mobile screenshots (both themes) posted to the PR via Library links (SAM Library `/marketing/glasshouse-homepage-a2/pr-evidence/`)
 
 ## Implementation notes
 
@@ -133,6 +133,10 @@ Also fold in the live bugs from idea `01M4XZQRYJ38CMN7R2PKMS370N`:
   reduced motion fails the reduced-motion test; reverting the screenshot fix fails the dark-mode
   pair tests on all three pages; loading both themes fails the light download test.
 
+- Staging: `Deploy Staging` run 38663976096 green; Playwright on `app.sammy.party` showed the glass
+  sign-in page (2 canvases, both themes, desktop and mobile, zero console errors) and signed-in
+  dashboard, projects and settings with zero console errors.
+
 ## Acceptance criteria
 
 - [x] Homepage hero matches A2 (real UI, glass node floor, motion story) on desktop; phone variant on mobile
@@ -143,7 +147,7 @@ Also fold in the live bugs from idea `01M4XZQRYJ38CMN7R2PKMS370N`:
 - [x] No horizontal overflow at 375/390 and 1280/1440; no serious axe violations on `/`
 - [x] Homepage DOM < 1,000 elements; no decorative JS running offscreen
 - [x] Shared glass CSS + node field live in `packages/ui` and are used by both www and the app sign-in page
-- [ ] CI green; production `Deploy Marketing Site` and `Deploy Production` succeed; live site verified
+- [ ] CI green; production `Deploy Marketing Site` and `Deploy Production` succeed; live site verified (merge-time and post-merge: tracked in the PR, which records CI, both deploys and the live check)
 
 ## References
 - SAM idea `01M4XZVMKCCAK7C21Z8V55K18K` (research + prototype rounds), idea `01M4XZQRYJ38CMN7R2PKMS370N` (bugs)

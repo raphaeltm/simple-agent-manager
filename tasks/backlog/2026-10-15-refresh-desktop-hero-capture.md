@@ -11,7 +11,7 @@ older, ungrouped tool rows, while the phone capture (`sam-hero-phone`) shows the
 ## Context
 
 Found 2026-10-15 while capturing the phone source for the glasshouse homepage hero
-(`tasks/active/2026-10-14-glasshouse-homepage-a2.md`). The marketing capture specs are not part
+(`tasks/archive/2026-10-14-glasshouse-homepage-a2.md`). The marketing capture specs are not part
 of CI (only `*audit.spec.ts` runs), so the stale assertion went unnoticed.
 
 The homepage hero layers are cropped from this capture by `apps/www/scripts/build-hero-layers.ts`

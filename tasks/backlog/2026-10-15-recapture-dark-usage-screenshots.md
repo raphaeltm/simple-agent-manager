@@ -10,7 +10,7 @@ dark mode, next to dark screenshots elsewhere on the site.
 ## Context
 
 Found 2026-10-15 while verifying the doubled-screenshot fix in
-`tasks/active/2026-10-14-glasshouse-homepage-a2.md`: the page now correctly shows only the
+`tasks/archive/2026-10-14-glasshouse-homepage-a2.md`: the page now correctly shows only the
 `.shot-dark` picture in dark mode, which made the light content of that "dark" file visible. The
 files came from `apps/web/tests/playwright/marketing-shots-compute.spec.ts` (`sam-usage-tokens`,
 `sam-usage-compute`, captured via `marketingSpanShot`) in PR #2082.
