@@ -32,13 +32,13 @@ test('actual supervised exact-context lifecycle preserves ownership, completion 
   execute('git',['push','--quiet','origin','main:refs/heads/sam/future-vm'],repo);
   const bad=JSON.parse(execute('python3',checkArgs,repo,1,probeEnv));
   assert.equal(good.checks.remoteRefsUnchanged,true);assert.equal(bad.checks.remoteRefsUnchanged,false,'next startup branch invalidates old protected baseline');
-  for(const mode of ['ok','changed-refs','foreign-project','foreign-session','wrong-runtime','wrong-profile','wrong-branch','no-reopen-proof','reopen','pending-delete','cleanup','sleep','expired','expired-cleanup','prepare','check-record','wake-check','complete','missing-phase','null-state','late-phase','source-pr','wrong-source-pr','profile-missing','profile-wrong-id','profile-wrong-owner','profile-wrong-scope','profile-wrong-runtime','profile-collision','raw-id-hint']){
+  for(const mode of ['ok','changed-refs','foreign-project','foreign-session','wrong-runtime','wrong-profile','wrong-branch','no-reopen-proof','reopen','pending-delete','cleanup','sleep','expired','expired-cleanup','prepare','check-record','wake-check','complete','missing-phase','null-state','late-phase','source-pr','wrong-source-pr','profile-missing','profile-wrong-id','profile-wrong-owner','profile-wrong-scope','profile-wrong-runtime','profile-collision','raw-id-hint','bootstrap-assets']){
    const dir=join(root,mode);mkdirSync(dir,{mode:0o700});
    const contexts=[0,1].map(i=>({taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,workspaceId:uid(20+i),nodeId:uid(30+i),branch:i?'sam/final':'sam/first',agentProfileId:uid(40+i),agentType:i?'claude-code':'openai-codex',submittedAt:Date.now()-2000,evidencePrUrl:`https://github.com/${repository}/pull/1`,receipt:{taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,branchName:i?'sam/final':'sam/first',status:'queued'}}));
    if(['source-pr','wrong-source-pr'].includes(mode))contexts.forEach(x=>x.evidencePrUrl='https://github.com/raphaeltm/simple-agent-manager/pull/'+(mode==='source-pr'?'2355':'2356'));
    const c={createdAt:Date.now()-3000,expiresAt:Date.now()+7_000_000,contexts,cleanupAuthorized:true};
    if(['expired','expired-cleanup'].includes(mode))c.expiresAt=Date.now()-1;
-   const kind=mode==='source-pr'?'complete':['cleanup','pending-delete','expired-cleanup'].includes(mode)?'cleanup':mode==='sleep'?'sleep':['prepare','check-record','wake-check','complete'].includes(mode)?mode:['missing-phase','late-phase'].includes(mode)?'wake-check':'observe';
+   const kind=mode==='source-pr'?'complete':['cleanup','pending-delete','expired-cleanup'].includes(mode)?'cleanup':mode==='sleep'?'sleep':['prepare','check-record','wake-check','complete','bootstrap-assets'].includes(mode)?mode:['missing-phase','late-phase'].includes(mode)?'wake-check':'observe';
    const op={kind,contextSlot:1,...(kind==='observe'?{target:{taskId:contexts[0].taskId,branch:'sam/first',baseline,expectations}}:{})};
    writeFileSync(join(dir,'config.json'),JSON.stringify(c),{mode:0o600});writeFileSync(join(dir,'operation.json'),JSON.stringify(op),{mode:0o600});
    if(['check-record','wake-check','complete','late-phase','source-pr'].includes(mode))writeFileSync(join(dir,contexts[1].taskId+'-phase-start.json'),JSON.stringify({startedAt:Date.now()-(mode==='late-phase'?781000:500)}),{mode:0o600});
@@ -66,7 +66,7 @@ test('actual supervised exact-context lifecycle preserves ownership, completion 
       else body={id:own.workspaceId,projectId:${JSON.stringify(project)},chatSessionId:mode==='foreign-session'?target.sessionId:own.sessionId,nodeId:own.nodeId,branch:own.branch,repository:${JSON.stringify(repository)},workspaceProfile:'lightweight',status:'running',errorMessage:canary};
      }else if(path==='/api/projects/${project}/sessions/'+own.sessionId+'/state')body={agentSessionId:mode==='null-state'?null:'33333333-3333-4333-8333-333333333333',agentType:own.agentType,state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,activityAt:Date.now(),runtimeWorkUpdatedAt:Date.now()}};
      else if(path==='/api/projects/${project}/sessions/'+own.sessionId+'/prompt'){
-      if(options.method!=='POST'||!(kind==='observe'?options.data.content.includes('/terminal-observer.py check')&&options.data.content.includes('sam/first'):options.data.content.includes('Reliability acceptance '+kind))||options.data.content.includes('git push'))throw new Error(canary);
+      if(options.method!=='POST'||!(kind==='observe'?options.data.content.includes('/terminal-observer.py check')&&options.data.content.includes('sam/first'):(kind==='bootstrap-assets'?options.data.content.includes('targeted bootstrap finish')&&options.data.content.includes('mcp__sam_mcp__upload_to_library')&&options.data.content.includes('/opt/uv-python/'):options.data.content.includes('Reliability acceptance '+kind)))||options.data.content.includes('git push'))throw new Error(canary);
       if(['foreign-project','foreign-session','wrong-runtime','wrong-profile','wrong-branch','no-reopen-proof','expired'].includes(mode))throw new Error(canary);
       prompted=true;body={accepted:true,status:'queued'};
      }else if(path==='/api/projects/${project}/sessions/'+own.sessionId+'/stop')body={status:'stopped',workspaceDeleted:true};
@@ -80,10 +80,31 @@ test('actual supervised exact-context lifecycle preserves ownership, completion 
    const entry=join(dir,'entry.mjs');writeFileSync(entry,source);
    const r=spawnSync(process.execPath,[join(here,'safe-controller.mjs'),entry,'5000'],{encoding:'utf8',timeout:7000,env:{...process.env,SAM_INSTANT_BOUND_ROOT:dir,SAM_PLAYWRIGHT_PRIMARY_USER:canary}});
    assert.equal(r.status,0,'supervised status');assert.equal(r.stderr,'','private stderr');assert.ok(!r.stdout.includes(canary),'private stdout');
-   const pass=['ok','reopen','cleanup','sleep','expired-cleanup','prepare','check-record','wake-check','complete','source-pr'].includes(mode);assert.equal(JSON.parse(r.stdout).category,pass?'ok':'controller','mode '+mode);
+   const pass=['ok','reopen','cleanup','sleep','expired-cleanup','prepare','check-record','wake-check','complete','source-pr','bootstrap-assets'].includes(mode);assert.equal(JSON.parse(r.stdout).category,pass?'ok':'controller','mode '+mode);
    if(pass){const file=join(dir,'result.json');assert.ok(!readFileSync(file,'utf8').includes(canary),'safe sidecar');assert.equal(statSync(file).mode&0o777,0o600);}
    else assert.equal(existsSync(join(dir,'result.json')),false,'no failed sidecar');
    if(mode==='reopen')assert.equal(JSON.parse(readFileSync(join(dir,contexts[1].taskId+'-before-reopen.json'),'utf8')).completedAt,completedAt,'preserved original completion');
+  }
+ }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('actual bootstrap capsule yields only fixed steps and booleans on success and injected network failure',async()=>{
+ const {bootstrapAssetsScript}=await import('./instant-bound-controller.mjs');
+ const root=mkdtempSync(join(tmpdir(),'sam-bootstrap-capsule-'));
+ try{
+  for(const fail of [false,true]){
+   const folder=join(root,fail?'failed':'ok');
+   const script=bootstrapAssetsScript(folder);
+   const prefix=`import pathlib,urllib.request,io,json\noriginal=pathlib.Path.read_text;originalBytes=pathlib.Path.read_bytes\ndef text(self,*a,**kw):\n if str(self)=='/etc/sam/vm-agent-version.json':return json.dumps({'version':'b467f389811eadeaf973960bb30f9fa7b9cb4678'})\n return original(self,*a,**kw)\ndef binary(self,*a,**kw):\n if str(self)=='/usr/local/bin/vm-agent':return b'synthetic-installed-binary'\n return originalBytes(self,*a,**kw)\npathlib.Path.read_text=text;pathlib.Path.read_bytes=binary\ndef fetch(url,timeout):\n ${fail?"raise OSError('private-canary-must-not-escape')":"return io.BytesIO(originalBytes(pathlib.Path("+JSON.stringify(here)+")/url.rsplit('/',1)[1]))"}\nurllib.request.urlopen=fetch\n`;
+   const {createHash}=await import('node:crypto');
+   const actual=script.replace('a59a4850337fe7af588267c481dee046db5baba4d3f705c85f19f85ded09e06f',createHash('sha256').update('synthetic-installed-binary').digest('hex'));
+   const r=spawnSync('python3',['-c',prefix+actual],{encoding:'utf8',timeout:5000});
+   assert.equal(r.status,0);assert.equal(r.stdout,'');assert.equal(r.stderr,'');
+   const proof=JSON.parse(readFileSync(join(folder,'asset-hashes.json'),'utf8'));
+   assert.equal(proof.checks.assetHashesMatch,!fail);
+   const step=JSON.parse(readFileSync(join(folder,'bootstrap-step.json'),'utf8'));
+   assert.equal(step.step,fail?'download-b-probe':'complete');assert.equal(step.ok,!fail);
+   assert.equal(statSync(join(folder,'bootstrap-step.json')).mode&0o777,0o600);
   }
  }finally{rmSync(root,{recursive:true,force:true});}
 });
