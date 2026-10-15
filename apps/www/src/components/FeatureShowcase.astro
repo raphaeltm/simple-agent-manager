@@ -22,7 +22,7 @@ const curatedSections = CURATED_SLUGS.map((slug) =>
 
 <div class="showcase-index animate-on-scroll">
   {curatedSections.map((section) => (
-    <a href={`#feature-${section.slug}`} class="showcase-pill">{section.label}</a>
+    <a href={`#feature-${section.slug}`} class="showcase-pill sam-glass sam-glass--chrome sam-glass-rim">{section.label}</a>
   ))}
 </div>
 
@@ -52,13 +52,15 @@ const curatedSections = CURATED_SLUGS.map((slug) =>
 
             <a href={`/features/${section.slug}/`} class="spotlight" aria-label={detail.headline}>
               <span class="spotlight-glow" aria-hidden="true"></span>
-              <span class="spotlight-frame">
-                <OptimizedFeatureImage
-                  src={detail.screenshot.src}
-                  alt={detail.screenshot.alt}
-                  loading={eager ? 'eager' : 'lazy'}
-                />
-                <span class="spotlight-caption">{detail.screenshot.caption}</span>
+              <span class="spotlight-frame sam-glass sam-glass-rim">
+                <span class="spotlight-shot">
+                  <OptimizedFeatureImage
+                    src={detail.screenshot.src}
+                    alt={detail.screenshot.alt}
+                    loading={eager ? 'eager' : 'lazy'}
+                  />
+                  <span class="spotlight-caption">{detail.screenshot.caption}</span>
+                </span>
               </span>
             </a>
           </div>
@@ -87,23 +89,18 @@ const curatedSections = CURATED_SLUGS.map((slug) =>
   }
 
   .showcase-pill {
+    padding: 6px 14px;
+    border-radius: 100px;
     font-family: var(--font-mono);
     font-size: 0.8125rem;
     color: var(--color-fg-muted);
-    padding: 6px 14px;
-    border-radius: 100px;
-    border: 1px solid var(--glass-border);
-    background: var(--glass-bg-subtle);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
     white-space: nowrap;
+    transition: color 0.2s ease, transform 0.2s ease;
   }
 
   .showcase-pill:hover {
     color: var(--color-fg-primary);
-    border-color: var(--glass-border-hover);
-    background: var(--color-bg-surface-hover);
+    transform: translateY(-1px);
   }
 
   .showcase-more {
@@ -245,7 +242,7 @@ const curatedSections = CURATED_SLUGS.map((slug) =>
     transform: translateX(2px);
   }
 
-  /* ---- Spotlight screenshot (no added browser frame) ---- */
+  /* ---- Spotlight: the real screenshot in a glass bezel, lit from below ---- */
 
   .spotlight {
     position: relative;
@@ -255,18 +252,20 @@ const curatedSections = CURATED_SLUGS.map((slug) =>
 
   .spotlight-glow {
     position: absolute;
-    inset: -8% -6%;
+    left: 8%;
+    right: 8%;
+    bottom: -40px;
     z-index: -1;
-    background: radial-gradient(
-      ellipse at center,
-      rgba(22, 163, 74, 0.22) 0%,
-      rgba(22, 163, 74, 0.08) 45%,
-      transparent 72%
-    );
-    opacity: 0.65;
-    filter: blur(8px);
+    height: 120px;
+    background: radial-gradient(closest-side, rgb(34 197 94 / 0.22), transparent 75%);
+    filter: blur(10px);
+    opacity: 0.8;
     transition: opacity 0.4s ease;
     pointer-events: none;
+  }
+
+  :global(html[data-theme='light']) .spotlight-glow {
+    opacity: 0.45;
   }
 
   .spotlight:hover .spotlight-glow {
@@ -274,39 +273,35 @@ const curatedSections = CURATED_SLUGS.map((slug) =>
   }
 
   .spotlight-frame {
-    position: relative;
     display: block;
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      var(--glass-shadow),
-      0 0 60px rgba(22, 163, 74, 0.1),
-      0 0 120px rgba(22, 163, 74, 0.05);
-    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+    padding: 8px;
+    border-radius: 18px;
+    transition: transform 0.3s ease;
   }
 
   .spotlight:hover .spotlight-frame {
-    border-color: var(--glass-border-hover);
-    box-shadow:
-      var(--glass-shadow),
-      0 0 80px rgba(22, 163, 74, 0.18),
-      0 0 160px rgba(22, 163, 74, 0.08);
     transform: translateY(-3px);
   }
 
-  .spotlight-frame :global(picture),
-  .spotlight-frame :global(img) {
+  .spotlight-shot {
+    position: relative;
+    display: block;
+    overflow: hidden;
+    border-radius: 11px;
+  }
+
+  .spotlight-shot :global(picture),
+  .spotlight-shot :global(img) {
     display: block;
   }
 
-  .spotlight-frame :global(img) {
+  .spotlight-shot :global(img) {
     width: 100%;
     height: auto;
     transition: transform 0.5s ease;
   }
 
-  .spotlight:hover .spotlight-frame :global(img) {
+  .spotlight:hover .spotlight-shot :global(img) {
     transform: scale(1.02);
   }
 
@@ -320,12 +315,7 @@ const curatedSections = CURATED_SLUGS.map((slug) =>
     line-height: 1.4;
     /* Sits over a screenshot beneath a dark scrim — keep text light in both themes */
     color: #eef5f2;
-    background: linear-gradient(
-      to top,
-      rgba(8, 14, 12, 0.92) 0%,
-      rgba(8, 14, 12, 0.7) 45%,
-      transparent 100%
-    );
+    background: linear-gradient(to top, rgb(8 14 12 / 0.92) 0%, rgb(8 14 12 / 0.7) 45%, transparent 100%);
     opacity: 0;
     transform: translateY(8px);
     transition: opacity 0.3s ease, transform 0.3s ease;
@@ -346,26 +336,17 @@ const curatedSections = CURATED_SLUGS.map((slug) =>
     }
   }
 
-  :global(html[data-theme='light']) .spotlight-glow {
-    background: radial-gradient(
-      ellipse at center,
-      rgba(21, 128, 61, 0.14) 0%,
-      rgba(21, 128, 61, 0.05) 45%,
-      transparent 72%
-    );
-  }
+  @media (prefers-reduced-motion: reduce) {
+    .showcase-pill,
+    .spotlight-frame,
+    .spotlight-shot :global(img) {
+      transition: none;
+    }
 
-  :global(html[data-theme='light']) .spotlight-frame {
-    box-shadow:
-      var(--glass-shadow),
-      0 0 40px rgba(21, 128, 61, 0.06),
-      0 0 90px rgba(21, 128, 61, 0.03);
-  }
-
-  :global(html[data-theme='light']) .spotlight:hover .spotlight-frame {
-    box-shadow:
-      var(--glass-shadow),
-      0 0 60px rgba(21, 128, 61, 0.1),
-      0 0 120px rgba(21, 128, 61, 0.05);
+    .showcase-pill:hover,
+    .spotlight:hover .spotlight-frame,
+    .spotlight:hover .spotlight-shot :global(img) {
+      transform: none;
+    }
   }
 </style>

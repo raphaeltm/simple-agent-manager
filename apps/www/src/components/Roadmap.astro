@@ -141,39 +141,45 @@ const phases = [
     width: 20px;
   }
 
+  /* Status markers are node tiles: lit green when shipped, amber in progress, outlined when planned. */
   .timeline-dot {
     width: 14px;
     height: 14px;
-    border-radius: 50%;
+    border-radius: 4px;
     flex-shrink: 0;
     margin-top: 4px;
   }
 
   .timeline-dot.complete {
-    background: var(--color-accent);
-    box-shadow: 0 0 8px rgba(22, 163, 74, 0.4), 0 0 16px rgba(22, 163, 74, 0.15);
+    background: linear-gradient(160deg, #4ade80, #16a34a);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.4),
+      0 0 10px rgb(34 197 94 / 0.4);
   }
 
   .timeline-dot.in-progress {
-    background: var(--color-warning);
-    box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
-    animation: glow-pulse 2s ease-in-out infinite;
+    background: linear-gradient(160deg, #fbbf24, #d97706);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.4),
+      0 0 10px rgb(245 158 11 / 0.35);
   }
 
   .timeline-dot.planned {
     background: transparent;
-    border: 2px solid var(--color-fg-dim);
+    border: 1.5px solid var(--color-fg-dim);
   }
 
   :global(html[data-theme='light']) .timeline-dot.complete {
-    box-shadow: 0 0 8px var(--shadow-accent-soft), 0 0 16px var(--color-accent-glow);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.4),
+      0 0 8px var(--shadow-accent-soft);
   }
 
   .timeline-line {
     width: 1px;
     flex: 1;
     min-height: 20px;
-    background: var(--color-border-subtle);
+    background: linear-gradient(to bottom, rgb(34 197 94 / 0.35), var(--color-border-subtle));
   }
 
   .timeline-content {

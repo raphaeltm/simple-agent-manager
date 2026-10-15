@@ -159,6 +159,11 @@ img, svg {
   max-width: 100%;
 }
 
+/* Images carry intrinsic width/height (no layout shift); keep them in proportion when narrowed. */
+img {
+  height: auto;
+}
+
 /* Themed screenshot pairs (see OptimizedFeatureImage.astro): show only the
    variant that matches the active site theme. `!important` because component
    rules such as `.frame :global(picture) { display: block }` outrank a single
