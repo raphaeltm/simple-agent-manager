@@ -41,9 +41,15 @@ function fixture() {
 }
 
 describe('Reliability storage ownership', () => {
-  it.each([null, {}, {publishedAt: 60, rateCutoverAt: 60, bootLogCutoverAt: 60, windowSeconds: 60}, {publishedAt: 0, rateCutoverAt: 61, bootLogCutoverAt: 60, windowSeconds: 60}, {publishedAt: 0, rateCutoverAt: 60, bootLogCutoverAt: 60, windowSeconds: 0}])('rejects invalid shared activation %#', async (record) => {
+  it.each([
+    null,
+    {},
+    { publishedAt: 60, rateCutoverAt: 60, bootLogCutoverAt: 60, windowSeconds: 60 },
+    { publishedAt: 0, rateCutoverAt: 61, bootLogCutoverAt: 60, windowSeconds: 60 },
+    { publishedAt: 0, rateCutoverAt: 60, bootLogCutoverAt: 60, windowSeconds: 0 },
+  ])('rejects invalid shared activation %#', async (record) => {
     const { database, first } = fixture();
-    first.mockResolvedValueOnce({value: JSON.stringify(record)});
+    first.mockResolvedValueOnce({ value: JSON.stringify(record) });
     await expect(readStorageActivation(database as unknown as D1Database)).rejects.toThrow();
   });
   it('never falls back to KV when the authoritative counter fails', async () => {

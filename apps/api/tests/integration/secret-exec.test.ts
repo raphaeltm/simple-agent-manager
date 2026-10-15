@@ -25,6 +25,7 @@ afterEach(() => {
 
 async function fixture() {
   sqlite = new Database(':memory:');
+  sqlite.exec('CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
   sqlite.exec(`
     CREATE TABLE workspaces(id TEXT PRIMARY KEY,user_id TEXT,project_id TEXT,agent_profile_hint TEXT,status TEXT,node_id TEXT);
     CREATE TABLE agent_sessions(id TEXT PRIMARY KEY,workspace_id TEXT,user_id TEXT,agent_profile_id TEXT,skill_id TEXT);

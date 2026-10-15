@@ -74,6 +74,7 @@ describe('list_project_agents pull request owner filter', () => {
   beforeEach(async () => {
     sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
+      schema.platformSettings,
       schema.projects,
       schema.tasks,
       schema.workspaces,

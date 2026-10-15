@@ -21,12 +21,15 @@ export async function readStorageActivation(
     .first<{ value: string }>();
   if (!row) return null;
   const seconds = v.pipe(v.number(), v.safeInteger(), v.minValue(0));
-  const record = v.parse(v.object({
-    publishedAt: seconds,
-    rateCutoverAt: seconds,
-    bootLogCutoverAt: seconds,
-    windowSeconds: seconds,
-  }), JSON.parse(row.value));
+  const record = v.parse(
+    v.object({
+      publishedAt: seconds,
+      rateCutoverAt: seconds,
+      bootLogCutoverAt: seconds,
+      windowSeconds: seconds,
+    }),
+    JSON.parse(row.value)
+  );
   if (
     !record ||
     ![

@@ -173,7 +173,11 @@ export class WorkspaceBootLog extends DurableObject<Env> {
       // bridge appends in the same durable view rather than reimporting stale KV.
       if (this.state()?.allow_legacy === 0) {
         await this.appendUnlocked(entry, ttl, maxEntries);
-        await this.env.KV.put(`bootlog:${workspaceId}`, JSON.stringify(await this.readUnlocked(workspaceId, maxEntries)), {expirationTtl: ttl});
+        await this.env.KV.put(
+          `bootlog:${workspaceId}`,
+          JSON.stringify(await this.readUnlocked(workspaceId, maxEntries)),
+          { expirationTtl: ttl }
+        );
         return;
       }
       const existing =

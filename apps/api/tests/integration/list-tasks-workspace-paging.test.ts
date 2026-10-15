@@ -42,7 +42,7 @@ describe('list_tasks and search_tasks for workspace agents', () => {
 
   beforeEach(async () => {
     sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [schema.tasks, schema.projects, schema.projectMembers]);
+    createSchemaTables(sqlite, [schema.platformSettings, schema.tasks, schema.projects, schema.projectMembers]);
     // The shared operation authorizes the caller as an active project member.
     sqlite
       .prepare("INSERT INTO projects (id, name, user_id) VALUES (?, 'Project', 'user-1')")

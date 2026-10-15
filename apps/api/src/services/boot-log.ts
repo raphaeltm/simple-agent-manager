@@ -3,12 +3,7 @@ import type { BootLogEntry } from '@simple-agent-manager/shared';
 import type { WorkspaceBootLog } from '../durable-objects/workspace-boot-log';
 import type { Env } from '../env';
 
-type BootLogEnv = Pick<
-  Env,
-  | 'BOOT_LOG_TTL_SECONDS'
-  | 'BOOT_LOG_MAX_ENTRIES'
-  | 'WORKSPACE_BOOT_LOG'
->;
+type BootLogEnv = Pick<Env, 'BOOT_LOG_TTL_SECONDS' | 'BOOT_LOG_MAX_ENTRIES' | 'WORKSPACE_BOOT_LOG'>;
 
 function durableLog(
   env: BootLogEnv | undefined,

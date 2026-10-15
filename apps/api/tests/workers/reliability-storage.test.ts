@@ -22,15 +22,33 @@ async function publish(rateCutoverAt = 60, bootLogCutoverAt = 60) {
 beforeEach(async (context) => {
   // This Worker test environment persists D1 across cases. Reset only the test
   // fixture, then restore the exact production guards before every assertion.
-  const migration = JSON.parse(inject<string>('D1_MIGRATIONS_JSON')) as {name: string; queries: string[]}[];
-  const activationMigration = migration.find(item => item.name.includes('0196_reliability_storage_activation'))!;
+  const migration = JSON.parse(inject<string>('D1_MIGRATIONS_JSON')) as {
+    name: string;
+    queries: string[];
+  }[];
+  const activationMigration = migration.find((item) =>
+    item.name.includes('0196_reliability_storage_activation')
+  )!;
   await api.DATABASE.batch([
-    ...['no_update', 'no_delete', 'no_replace'].map(suffix => api.DATABASE.prepare(`DROP TRIGGER IF EXISTS reliability_activation_${suffix}`)),
-    api.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(RELIABILITY_STORAGE_ACTIVATION_KEY),
-    ...activationMigration.queries.map(sql => api.DATABASE.prepare(sql)),
+    ...['no_update', 'no_delete', 'no_replace'].map((suffix) =>
+      api.DATABASE.prepare(`DROP TRIGGER IF EXISTS reliability_activation_${suffix}`)
+    ),
+    api.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(
+      RELIABILITY_STORAGE_ACTIVATION_KEY
+    ),
+    ...activationMigration.queries.map((sql) => api.DATABASE.prepare(sql)),
   ]);
   const name = context.task.name;
-  if (['held-body', 'held legacy', 'preactivation clear', 'cutover-straddling', 'immutable activation'].some(part => name.includes(part))) return;
+  if (
+    [
+      'held-body',
+      'held legacy',
+      'preactivation clear',
+      'cutover-straddling',
+      'immutable activation',
+    ].some((part) => name.includes(part))
+  )
+    return;
   return publish();
 });
 const entry = {
@@ -244,11 +262,20 @@ describe('Reliability C real SQLite storage', () => {
     app.route('/mcp', mcpRoutes);
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     let bodyRead!: () => void;
-    const reading = new Promise<void>(resolve => {bodyRead = resolve;});
-    const body = new ReadableStream<Uint8Array>({
-      start(c) {controller = c;},
-      pull() {bodyRead();},
-    }, {highWaterMark: 0});
+    const reading = new Promise<void>((resolve) => {
+      bodyRead = resolve;
+    });
+    const body = new ReadableStream<Uint8Array>(
+      {
+        start(c) {
+          controller = c;
+        },
+        pull() {
+          bodyRead();
+        },
+      },
+      { highWaterMark: 0 }
+    );
     const config = { ...api, MCP_RATE_LIMIT: '1' }; // Original bridge env has no activation timestamps.
     const held = app.request(
       '/mcp',
@@ -315,21 +342,26 @@ describe('Reliability C real SQLite storage', () => {
     });
   });
   it('keeps a preactivation clear and later append across stale KV visibility, activation and restart', async () => {
-    await api.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(RELIABILITY_STORAGE_ACTIVATION_KEY).run();
+    await api.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?')
+      .bind(RELIABILITY_STORAGE_ACTIVATION_KEY)
+      .run();
     const workspace = crypto.randomUUID();
     await api.KV.put(`bootlog:${workspace}`, JSON.stringify([entry]));
     await writeBootLogs(api.KV, workspace, [], api);
     // An edge still observes the preclear tail while another bridge append arrives.
     await api.KV.put(`bootlog:${workspace}`, JSON.stringify([entry]));
-    const later = {...entry, message: 'valid after clear'};
+    const later = { ...entry, message: 'valid after clear' };
     await appendBootLog(api.KV, workspace, later, api);
     await publish();
     await api.KV.put(`bootlog:${workspace}`, JSON.stringify([entry]));
     const ns = api.WORKSPACE_BOOT_LOG!;
-    await runInDurableObject(ns.get(ns.idFromName(workspace)) as DurableObjectStub<WorkspaceBootLog>, async (instance, state) => {
-      const fresh = new (instance.constructor as typeof WorkspaceBootLog)(state, api);
-      expect(await fresh.readBridge(workspace, 50)).toEqual([later]);
-    });
+    await runInDurableObject(
+      ns.get(ns.idFromName(workspace)) as DurableObjectStub<WorkspaceBootLog>,
+      async (instance, state) => {
+        const fresh = new (instance.constructor as typeof WorkspaceBootLog)(state, api);
+        expect(await fresh.readBridge(workspace, 50)).toEqual([later]);
+      }
+    );
     expect(await getBootLogs(api.KV, workspace, api)).toEqual([later]);
   });
 
@@ -340,10 +372,35 @@ describe('Reliability C real SQLite storage', () => {
       'INSERT OR REPLACE INTO platform_settings(value, key) VALUES (?, ?)',
       'INSERT INTO platform_settings(value, key) VALUES (?, ?)',
     ]) {
-      await expect(api.DATABASE.prepare(sql).bind('{}', RELIABILITY_STORAGE_ACTIVATION_KEY).run()).rejects.toThrow('immutable');
+      await expect(
+        api.DATABASE.prepare(sql).bind('{}', RELIABILITY_STORAGE_ACTIVATION_KEY).run()
+      ).rejects.toThrow('immutable');
     }
-    await expect(api.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(RELIABILITY_STORAGE_ACTIVATION_KEY).run()).rejects.toThrow('immutable');
-    expect((await api.DATABASE.prepare('SELECT value FROM platform_settings WHERE key = ?').bind(RELIABILITY_STORAGE_ACTIVATION_KEY).first<{value: string}>())?.value).toContain('rateCutoverAt');
+    await expect(
+      api.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?')
+        .bind(RELIABILITY_STORAGE_ACTIVATION_KEY)
+        .run()
+    ).rejects.toThrow('immutable');
+    await expect(
+      api.DATABASE.prepare('UPDATE platform_settings SET key = ? WHERE key = ?')
+        .bind('renamed.activation', RELIABILITY_STORAGE_ACTIVATION_KEY)
+        .run()
+    ).rejects.toThrow('immutable');
+    const ordinaryKey = crypto.randomUUID();
+    await api.DATABASE.prepare('INSERT INTO platform_settings(key, value) VALUES (?, ?)')
+      .bind(ordinaryKey, '{}')
+      .run();
+    await expect(
+      api.DATABASE.prepare('UPDATE platform_settings SET key = ? WHERE key = ?')
+        .bind(RELIABILITY_STORAGE_ACTIVATION_KEY, ordinaryKey)
+        .run()
+    ).rejects.toThrow('immutable');
+    expect(
+      (
+        await api.DATABASE.prepare('SELECT value FROM platform_settings WHERE key = ?')
+          .bind(RELIABILITY_STORAGE_ACTIVATION_KEY)
+          .first<{ value: string }>()
+      )?.value
+    ).toContain('rateCutoverAt');
   });
-
 });
