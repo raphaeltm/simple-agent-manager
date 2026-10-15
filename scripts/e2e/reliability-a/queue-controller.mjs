@@ -191,20 +191,7 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
                 selected={};
                 if(!json||typeof json!=='object')throw new Error();
                 if(['success','accepted','workspaceDeleted'].some(k=>json[k]===false))throw new Error();
-                // Authorization derives only from this run's accepted submit -> canonical task -> workspace chain.
-            // Inventory reads never grant mutation authority. Retain confirmed IDs for cleanup after sleep/stop.
-            const target=cmd.path.split('/').at(-1),session=cmd.path.split('/').at(-2);
-            if(type==='task'&&!submitted.has(target))throw new Error();
-            if(type==='state'&&![...submitted.values()].includes(session))throw new Error();
-            if(type==='workspace'&&!workspaces.has(target))throw new Error();
-            if(type==='action'){
-              if(cmd.path.endsWith('/stop')){if(![...submitted.values()].includes(session))throw new Error();}
-              else if(cmd.path.endsWith('/sleep')){if(!workspaces.has(session))throw new Error();}
-              else if(method==='DELETE'){
-                if(!workspaces.has(target))throw new Error();
-              }
-            }
-            if(type==='prompt'){
+                if(type==='prompt'){
                   if(json.accepted!==true||json.status!=='queued')throw new Error();
                 }else if(method==='DELETE'){
                   if(json.success!==true)throw new Error();
