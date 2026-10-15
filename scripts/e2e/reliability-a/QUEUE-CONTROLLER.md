@@ -43,3 +43,5 @@ Node DELETE is unconditionally unsupported, including a node canonically linked 
 Canonical startup state may exist before an ACP agent-session ID is assigned; a null ID is retained only as absent typed identity and never grants idle/prompt permission. Source-defined recovering/error activities are valid observations, never idle authorization. Unknown non-null identities and unknown activity values fail closed.
 
 The pinned source acceptance audit is recorded in SOURCE-CONTRACTS.md. Source-defined resource recovery/evicted/deleted statuses remain typed observations; they grant no mutation authority.
+
+Only the state endpoint agent identity permits canonical UUID or ULID. Real idle authorization requires positive activity/work report clocks observed since this controller submitted the session, not source fallback zeros. Workspace DELETE requires deletionStatus confirmed; success true with pending202 remains incomplete.

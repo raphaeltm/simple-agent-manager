@@ -25,7 +25,7 @@ if(mode==='state-network'&&stateCalls===2&&url.endsWith('/state'))throw new Erro
 note({path:new URL(url).pathname,method:options.method,logout:url.endsWith('/sign-out'),normalOrigin:options.headers.Origin==='https://api.example.invalid',redirectsDisabled:options.maxRedirects===0});
 if(!url.endsWith('/sign-out')&&!url.endsWith('/token-login')){if(mode==='network')throw new Error(secret);if(mode==='timeout'){const e=new Error(secret);e.name='TimeoutError';throw e;}if(mode==='hung')await new Promise(()=>{});}
 if(url.endsWith('/sign-out'))loggedOut=true;
-return {status:()=>loggedOut&&url.endsWith('/nodes')?401:200,dispose:async()=>{},json:async()=>{
+return {status:()=>loggedOut&&url.endsWith('/nodes')?401:mode==='delete-pending'&&options.method==='DELETE'?202:200,dispose:async()=>{},json:async()=>{
 if(mode==='nonjson')throw new Error(secret);
 if(url.endsWith('/get-session'))return loggedOut?null:{session:{token:secret}};
 if(url.endsWith('/state')&&stateCalls===2&&['state-null','sleep-state-null'].includes(mode))return {state:null};
@@ -33,13 +33,14 @@ if(url.endsWith('/state')&&stateCalls===2&&mode==='state-missing')return {};
 // Exact e2 route: resolveChatAgentState may merge a persisted plan before an ACP exists.
 if(url.endsWith('/state')&&mode==='pending-agent')return {state:{activity:'idle',activityAt:0,statusError:null,promptStartedAt:null,agentType:null,lastStopReason:null,runtimeWorkState:null,runtimeWorkCount:null,runtimeWorkSource:null,runtimeWorkUpdatedAt:null,runtimeWorkProgressAt:null,currentPlan:[],planUpdatedAt:0},agentSessionId:null,agentType:null};
 if(url.endsWith('/state')&&mode==='source-idle-no-agent')return {state:{activity:'idle',activityAt:0,runtimeWorkState:'inactive',runtimeWorkCount:0,statusError:null,currentPlan:null,planUpdatedAt:null,promptStartedAt:null,lastStopReason:null,agentType:null,runtimeWorkUpdatedAt:null,runtimeWorkProgressAt:null,runtimeWorkSource:null},agentSessionId:null,agentType:null};
+if(url.endsWith('/state')&&mode==='null-to-uuid'&&stateCalls===1)return {state:{activity:'idle',activityAt:0,runtimeWorkState:null,runtimeWorkCount:null},agentSessionId:null};
 if(url.endsWith('/state')&&mode==='bad-agent')return {state:{activity:'idle'},agentSessionId:secret};
-if(url.endsWith('/state'))return {state:{activity:['recovering','error'].includes(mode)?mode:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,runtimeWorkUpdatedAt:123,secret},agentSessionId:'${ID}',agentType:'openai-codex'};
+if(url.endsWith('/state'))return {state:{activity:['recovering','error'].includes(mode)?mode:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,activityAt:mode==='fallback-clock'?0:Date.now(),runtimeWorkUpdatedAt:mode==='fallback-clock'?0:Date.now(),secret},agentSessionId:['uuid-agent','null-to-uuid','fallback-clock'].includes(mode)?'${UUID}':'${ID}',agentType:'openai-codex'};
 if(url.endsWith('/submit'))return {taskId:'${ID}',sessionId:'${UUID}',status:'queued',branchName:'sam/cell',secret};
 if(url.endsWith('/prompt'))return {accepted:mode!=='accepted-false',status:mode==='prompt-failed'?'failed':'queued',secret};
 if(url.endsWith('/stop'))return {status:'stopped',workspaceDeleted:mode!=='deleted-false'};
 if(url.endsWith('/sleep'))return {status:mode==='sleep-failed'?'failed':'sleeping',workspaceId:'${ID}',chatSessionId:'${UUID}',snapshotExpiresAt:'2026-10-16T00:00:00.000Z',success:mode!=='sleep-false'};
-if(options.method==='DELETE')return {success:mode!=='success-false'};
+if(options.method==='DELETE')return {success:mode!=='success-false',deletionStatus:mode==='delete-pending'?'pending':'confirmed',...(mode==='delete-pending'?{workspaceStatus:'stopping',reason:secret}:{})};
 if(url.includes('/library/'))return JSON.parse(readFileSync(url.includes('/${PROBE}/')?process.env.QUEUE_PROBE:url.includes('/${OTHER}/')?process.env.QUEUE_EXPECTATIONS:process.env.QUEUE_BASELINE,'utf8'));
 if(url.endsWith('/tasks/${ID}'))return {id:mode==='task-mismatch'?'${OTHER}':'${ID}',status:'completed',workspaceId:'${ID}',completionEvidence:{notes:secret},outputPrUrl:secret,secret};
 if(url.endsWith('/workspaces/${ID}'))return {id:mode==='workspace-mismatch'?'${OTHER}':'${ID}',nodeId:'${ID}',status:'running'};
@@ -167,4 +168,14 @@ test('canonical startup state accepts null agent identity and recovering/error w
 
 test('pinned source node/workspace response statuses remain typed through list acceptance',()=>{
  for(const mode of ['recovery','evicted','deleted']){const v=fixture(mode,[getNodes,{op:'stop'}]);assert.equal(v.outputs['out/0001.json'].category,'ok');assert.equal(v.outputs['private/state/0001.json'][0].status,mode);}
+});
+
+test('state-only UUID identity and null-to-UUID startup require fresh real activity evidence before prompt',()=>{
+ for(const mode of ['normal','uuid-agent']){const v=fixture(mode,[submit,state,prompt,{op:'stop'}]);assert.equal(v.outputs['out/0003.json'].category,'ok');}
+ let v=fixture('null-to-uuid',[submit,state,state,prompt,{op:'stop'}]);assert.equal(v.outputs['out/0002.json'].category,'ok');assert.equal(v.outputs['out/0004.json'].category,'ok');
+ v=fixture('fallback-clock',[submit,state,prompt,{op:'stop'}]);assert.equal(v.outputs['out/0002.json'].category,'ok');assert.notEqual(v.outputs['out/0003.json'].category,'ok');assert.ok(!v.events.some(e=>e.path===prompt.path));
+});
+test('source workspace deletion pending202 is incomplete; only confirmed deletion is accepted',()=>{
+ let v=fixture('delete-pending',[submit,task,deleteWorkspace,{op:'stop'}]);assert.notEqual(v.outputs['out/0003.json'].category,'ok');assert.equal(v.outputs['out/0003.json'].status,202);assert.ok(!v.outputs['private/state/0003.json']);
+ v=fixture('normal',[submit,task,deleteWorkspace,{op:'stop'}]);assert.equal(v.outputs['out/0003.json'].category,'ok');assert.equal(v.outputs['private/state/0003.json'].deletionConfirmed,true);
 });
