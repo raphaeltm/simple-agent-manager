@@ -15,7 +15,7 @@
     "@pulumi/cloudflare": "6.15.0",
     "@pulumi/pulumi": "3.217.1",
     "@pulumi/random": "4.21.0",
-    "@pulumi/tls": "5.5.0"
+    "@pulumi/tls": "5.6.1"
   },
   "devDependencies": {
     "@types/node": "catalog:",
