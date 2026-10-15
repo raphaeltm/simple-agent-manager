@@ -39,7 +39,9 @@ service bindings and deployment/version overrides. Record the exact operation,
 scope, completion acknowledgement, residual-work semantics and failure behavior.
 An unavailable primitive means this proposal cannot execute safely.
 
-The coordinator can then prepare this reviewable sequence:
+First complete the isolated termination/activation experiment described below,
+with independent review. Only after that evidence and maintenance approval can
+the coordinator execute this production sequence:
 
 1. Inventory all ingress, producers, active deployments and rollback artifacts.
    Pin one corrected bridge and preserve deployment/configuration manifests.
@@ -54,8 +56,8 @@ The coordinator can then prepare this reviewable sequence:
    immutable activation record remains absent and all callback/issuer paths are
    the pinned corrected version. Retain existing credentials and principals.
 5. Publish the existing insert-once record with a future aligned MCP window;
-   read back exact contents. Run the isolated activation regressions and then
-   coordinator-approved runtime checks. Resume ingress and session work only
+   read back exact contents. Run coordinator-approved runtime checks using the
+   already reviewed validation procedure. Resume ingress and session work only
    after the owner/readiness assertions pass.
 
 Current sessions experience a real interruption and reconnection/resume. Pending
