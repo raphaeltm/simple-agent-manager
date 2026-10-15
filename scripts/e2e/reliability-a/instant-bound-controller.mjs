@@ -182,7 +182,7 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
       &&v.completionEvidence!==null&&typeof v.completionEvidence==='object';
     });
     await privateJson(target.taskId+'-canonical-completed.json',{taskId:target.taskId,branch:target.branch,completedAt});
-   }else if(!['bootstrap-assets','readonly-state','resume-incomplete'].includes(op.kind)){
+   }else if(!['bootstrap-assets','readonly-state'].includes(op.kind)){
     const marker=join(root,own.taskId+'-phase-start.json');
     if(['prepare','resume-incomplete'].includes(op.kind))await privateJson(own.taskId+'-phase-start.json',{startedAt:now});
     if(op.kind==='resume-incomplete')await privateJson('acceptance-attempt.json',{attempt:'first-guarded-resume-1',priorOutcome:'failed',startedAt:now});
@@ -236,7 +236,7 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
     await bind();await readState();if(!idle())throw new Error();
     await request('/api/workspaces/'+own.workspaceId+'/sleep',{method:'POST',data:{}},v=>v?.status==='sleeping'&&v.workspaceId===own.workspaceId&&v.chatSessionId===own.sessionId&&when(v.snapshotExpiresAt));
    }else{
-    if(['bootstrap-assets','readonly-state','resume-incomplete'].includes(op.kind)){
+    if(['bootstrap-assets','readonly-state'].includes(op.kind)){
      await bind();await readState();if(!idle())throw new Error();
      await request('/api/workspaces/'+own.workspaceId+'/sleep',{method:'POST',data:{}},v=>v?.status==='sleeping'&&v.workspaceId===own.workspaceId&&v.chatSessionId===own.sessionId&&when(v.snapshotExpiresAt));
     }
