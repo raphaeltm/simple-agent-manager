@@ -31,7 +31,7 @@
       "source": "sam-session-sleeping",
       "box": { "x": 296, "y": 205, "w": 380, "h": 218 },
       "outWidth": 380,
-      "place": { "wide": { "x": 3, "y": 22, "w": 24 }, "narrow": { "x": 1, "y": 70, "w": 40 } },
+      "place": { "wide": { "x": 3, "y": 22, "w": 24 }, "narrow": { "x": 1, "y": 34, "w": 40 } },
       "depth": 70,
       "rings": [
         {
