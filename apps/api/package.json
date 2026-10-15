@@ -23,6 +23,7 @@
     "deploy:staging": "wrangler deploy --env staging"
   },
   "dependencies": {
+    "@ai-sdk/provider": "4.0.26",
     "@aws-sdk/client-s3": "3.1141.0",
     "@aws-sdk/s3-request-presigner": "3.1141.0",
     "@cloudflare/containers": "0.3.7",
@@ -30,7 +31,7 @@
     "@cloudflare/workers-oauth-provider": "1.2.3",
     "@hono/node-server": "1.19.9",
     "@hono/valibot-validator": "0.6.1",
-    "@mastra/core": "1.9.0",
+    "@mastra/core": "1.77.0",
     "@modelcontextprotocol/server": "2.3.1",
     "@simple-agent-manager/cloud-init": "workspace:*",
     "@simple-agent-manager/providers": "workspace:*",
@@ -46,7 +47,7 @@
     "jose": "6.2.3",
     "tsx": "catalog:",
     "valibot": "1.5.0",
-    "workers-ai-provider": "3.1.11",
+    "workers-ai-provider": "4.0.0",
     "yaml": "2.9.0"
   },
   "devDependencies": {
