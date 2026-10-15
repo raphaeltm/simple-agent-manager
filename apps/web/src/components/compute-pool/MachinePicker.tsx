@@ -22,8 +22,7 @@ function rowMatches(row: MachineTypeRow, query: string): boolean {
 function chipClasses(on: boolean, disabled: boolean, warn: boolean): string {
   if (on && warn) return 'border-warning/40 bg-warning-tint text-fg-primary';
   if (on) return 'border-accent bg-accent-tint text-fg-primary';
-  if (disabled)
-    return 'cursor-not-allowed border-dashed border-border-default text-fg-muted opacity-60';
+  if (disabled) return 'cursor-not-allowed border-dashed border-border-default text-fg-muted';
   return 'border-border-default bg-transparent text-fg-muted hover:border-accent hover:text-fg-primary';
 }
 
@@ -47,7 +46,7 @@ function RegionChip({
       aria-pressed={on}
       disabled={disabled}
       aria-label={`${row.sku} in ${cell.locationLabel}${cell.issue ? ` (${issue})` : ''}`}
-      title={cell.issue ?? cell.priceLabel ?? undefined}
+      title={[cell.locationLabel, cell.issue ?? cell.priceLabel].filter(Boolean).join(' · ')}
       onClick={() => onToggle(cell)}
       className={`inline-flex min-h-8 max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${chipClasses(on, disabled, Boolean(cell.issue))}`}
     >
@@ -57,7 +56,7 @@ function RegionChip({
         ) : (
           <Check size={12} aria-hidden className="shrink-0" />
         ))}
-      <span className="min-w-0 [overflow-wrap:anywhere]">
+      <span className="line-clamp-1 min-w-0 [overflow-wrap:anywhere]">
         {cell.locationLabel}
         {issue && <span className="font-normal"> · {issue}</span>}
       </span>
@@ -133,7 +132,7 @@ export function MachinePicker({ groups, draft, onToggle }: MachinePickerProps) {
           Allowed machines
         </h3>
         <p className="m-0 mt-1 text-xs text-fg-muted">
-          Tap a region to let SAM use that machine there. Tap it again to stop.
+          Select the regions where SAM may start each machine type.
         </p>
       </div>
       <Input

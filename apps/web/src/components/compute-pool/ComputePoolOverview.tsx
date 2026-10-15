@@ -27,8 +27,7 @@ import {
   sourceSettingsHref,
   sourceSettingsLabel,
 } from './machine-labels';
-
-const LINK_CLASS = 'text-accent underline-offset-2 hover:underline';
+import { TEXT_LINK_CLASS } from './styles';
 
 function allowedCells(row: MachineTypeRow) {
   return row.cells.filter((cell) => cell.allowed);
@@ -93,6 +92,15 @@ function AllowedList({ rows }: { rows: MachineTypeRow[] }) {
   );
 }
 
+function GroupTitle({ title, href }: { title: string; href: string | null }) {
+  if (!href) return <>{title}</>;
+  return (
+    <Link to={href} className={TEXT_LINK_CLASS}>
+      {title}
+    </Link>
+  );
+}
+
 function ConnectionsLine({
   groups,
   owner,
@@ -102,48 +110,23 @@ function ConnectionsLine({
   owner: string;
   projectId: string | null;
 }) {
-  const [only] = groups;
-  if (!only) return null;
-  if (groups.length === 1) {
-    const group = only;
-    const href = sourceSettingsHref(group, projectId);
-    return (
-      <p className="m-0 text-xs text-fg-muted">
-        Uses {owner} {group.providerLabel} account.
-        {href && (
-          <>
-            {' '}
-            Manage it in{' '}
-            <Link to={href} className={LINK_CLASS}>
-              {sourceSettingsLabel(group)}
-            </Link>
-            .
-          </>
-        )}
-      </p>
-    );
-  }
-  const titles = groupTitles(groups);
+  // With several connections, each section title links to where it is managed instead.
+  const [group] = groups;
+  if (!group || groups.length > 1) return null;
+  const href = sourceSettingsHref(group, projectId);
   return (
     <p className="m-0 text-xs text-fg-muted">
-      Uses {groups.length} connections:{' '}
-      {groups.map((group, index) => {
-        const href = sourceSettingsHref(group, projectId);
-        const title = titles.get(group.key) ?? group.providerLabel;
-        return (
-          <span key={group.key}>
-            {index > 0 && ', '}
-            {href ? (
-              <Link to={href} className={LINK_CLASS}>
-                {title}
-              </Link>
-            ) : (
-              title
-            )}
-          </span>
-        );
-      })}
-      .
+      Uses {owner} {group.providerLabel} account.
+      {href && (
+        <>
+          {' '}
+          Manage it in{' '}
+          <Link to={href} className={TEXT_LINK_CLASS}>
+            {sourceSettingsLabel(group)}
+          </Link>
+          .
+        </>
+      )}
     </p>
   );
 }
@@ -217,7 +200,12 @@ export function ComputePoolOverview({
         {groups.length > 1
           ? allowedGroups.map(({ group, rows }) => (
               <div key={group.key} className="grid min-w-0 gap-1.5">
-                <h4 className="m-0 text-xs font-semibold text-fg-muted">{titles.get(group.key)}</h4>
+                <h4 className="m-0 text-xs font-semibold text-fg-muted">
+                  <GroupTitle
+                    title={titles.get(group.key) ?? group.providerLabel}
+                    href={sourceSettingsHref(group, pool.ownerProjectId ?? projectId)}
+                  />
+                </h4>
                 {rows.length > 0 ? (
                   <AllowedList rows={rows} />
                 ) : (

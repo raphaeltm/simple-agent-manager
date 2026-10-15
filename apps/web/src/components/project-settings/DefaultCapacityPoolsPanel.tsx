@@ -24,19 +24,31 @@ import {
   updateProjectDefaultCapacityPools,
   updateUserDefaultCapacityPools,
 } from '../../lib/api/capacity-pools';
+import { ApiClientError } from '../../lib/api/client';
 import { POOL_SCOPE_COPY } from '../../lib/compute-pool-copy';
 import { buildMachineGroups } from '../../lib/compute-pool-machines';
 import { capacityPoolQueryKeys } from '../../lib/query-options/capacity-pools';
 import { ComputePoolEditor } from '../compute-pool/ComputePoolEditor';
 import { ComputePoolEmptyState } from '../compute-pool/ComputePoolEmptyState';
 import { ComputePoolOverview } from '../compute-pool/ComputePoolOverview';
-
-const TEXT_LINK = 'text-accent underline-offset-2 hover:underline';
+import { TEXT_LINK_CLASS } from '../compute-pool/styles';
 
 type DefaultCapacityPoolsPanelProps =
   | { scope?: 'project'; projectId: string }
   | { scope: 'user'; projectId?: never }
   | { scope: 'installation'; projectId?: never };
+
+/** Permission failures get a plain sentence; anything else keeps the server's message. */
+function loadErrorMessage(error: unknown, scope: CapacityPoolScope): string {
+  if (error instanceof ApiClientError && (error.status === 401 || error.status === 403)) {
+    return scope === 'project'
+      ? "You don't have access to this project's compute pool. Ask a project owner or admin."
+      : "You don't have access to this compute pool.";
+  }
+  return error instanceof Error && error.message
+    ? error.message
+    : 'Could not load the compute pool.';
+}
 
 /** Explains that the page shows a pool this scope does not own and cannot edit. */
 function FallbackNotice({
@@ -48,11 +60,11 @@ function FallbackNotice({
 }) {
   const ownPool =
     fallbackScope === 'installation' ? (
-      <Link to="/admin/infrastructure" className={TEXT_LINK}>
+      <Link to="/admin/infrastructure" className={TEXT_LINK_CLASS}>
         Edit the shared pool
       </Link>
     ) : (
-      <Link to="/settings/infrastructure" className={TEXT_LINK}>
+      <Link to="/settings/infrastructure" className={TEXT_LINK_CLASS}>
         Edit your pool
       </Link>
     );
@@ -68,7 +80,7 @@ function FallbackNotice({
       {projectId && (
         <p className="m-0 text-xs text-fg-muted">
           To give this project machines of its own,{' '}
-          <Link to={`/projects/${projectId}/settings/connections`} className={TEXT_LINK}>
+          <Link to={`/projects/${projectId}/settings/connections`} className={TEXT_LINK_CLASS}>
             connect a cloud account to the project
           </Link>
           .
@@ -208,13 +220,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
         </p>
       ) : (
         <>
-          {query.isError && (
-            <Alert variant="error">
-              {query.error instanceof Error
-                ? query.error.message
-                : 'Failed to load the compute pool'}
-            </Alert>
-          )}
+          {query.isError && <Alert variant="error">{loadErrorMessage(query.error, scope)}</Alert>}
           {query.data &&
             (isEditing && ownedDefault ? (
               <ComputePoolEditor

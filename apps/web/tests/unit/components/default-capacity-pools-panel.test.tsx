@@ -12,6 +12,7 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DefaultCapacityPoolsPanel } from '../../../src/components/project-settings/DefaultCapacityPoolsPanel';
+import { ApiClientError } from '../../../src/lib/api/client';
 
 const mocks = vi.hoisted(() => ({
   fetchProjectDefaultCapacityPools: vi.fn(),
@@ -645,7 +646,12 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(
       screen.getByRole('heading', { name: 'Hetzner · Project credentials (2)' })
     ).toBeInTheDocument();
-    expect(screen.getByText(/Uses 2 connections/)).toBeInTheDocument();
+    // Each section title links to where that connection is managed.
+    expect(screen.getAllByRole('link', { name: /^Hetzner · Project credentials/ })).toHaveLength(2);
+    expect(screen.getByRole('link', { name: 'Hetzner · Project credentials' })).toHaveAttribute(
+      'href',
+      '/projects/project-1/settings/connections'
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     const [alphaChip, betaChip] = screen.getAllByRole('button', {
@@ -871,6 +877,21 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(await screen.findByText('Allowed machines (13)')).toBeInTheDocument();
     expect(screen.getByText('provider-sku-with-a-long-name-0')).toBeInTheDocument();
     expect(screen.getByText('provider-sku-with-a-long-name-12')).toBeInTheDocument();
+  });
+
+  it('explains a permission error in plain words', async () => {
+    mocks.fetchProjectDefaultCapacityPools.mockRejectedValue(
+      new ApiClientError('FORBIDDEN', 'Project capability is required', 403)
+    );
+
+    renderPanel();
+
+    expect(
+      await screen.findByText(
+        "You don't have access to this project's compute pool. Ask a project owner or admin."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Project capability is required')).not.toBeInTheDocument();
   });
 
   it('shows a deterministic error state', async () => {

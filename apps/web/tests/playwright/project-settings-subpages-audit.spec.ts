@@ -602,7 +602,11 @@ test.describe('Project settings sub-pages', () => {
       message: 'Project capability is required',
     };
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=error`);
-    await expect(page.getByText('Project capability is required')).toBeVisible();
+    await expect(
+      page.getByText(
+        "You don't have access to this project's compute pool. Ask a project owner or admin."
+      )
+    ).toBeVisible();
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-error');
     await screenshotNearHeading(
       page,

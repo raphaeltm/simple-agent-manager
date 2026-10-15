@@ -146,13 +146,13 @@ region, with real vCPU, RAM, disk, and price. Not `small`/`medium`/`large` — t
 
 When SAM refreshes a pool it discovers your provider's **full** catalog for each source. The
 editor shows one row per machine type (its vCPU, RAM, disk, and price) with a chip for every region
-your provider sells it in. Tap a region to allow that machine there; tap it again to stop. Each chip
-is one of:
+your provider sells it in. Select a region to allow that machine there; select it again to stop.
+Each chip is one of:
 
 | Chip                                     | Meaning                                                                                  |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------- |
 | ✓ **Allowed**                            | SAM may provision this machine type in this region                                       |
-| Plain                                    | Not allowed. SAM will not use it until you tap it                                        |
+| Plain                                    | Not allowed. SAM will not use it until you select it                                     |
 | Dashed, with a reason                    | Your provider does not offer it right now (region sold out, machine retired, not seen in the latest catalog). It cannot be allowed |
 | ⚠ Allowed, with a reason                 | Allowed, but your provider does not offer it right now. You can turn it off              |
 

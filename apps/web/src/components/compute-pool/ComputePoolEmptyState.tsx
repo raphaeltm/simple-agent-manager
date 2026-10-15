@@ -8,10 +8,10 @@ import { Link } from 'react-router';
 
 import { providerDisplayName } from '../../lib/compute-pool-machines';
 import { joinNatural } from './machine-labels';
+import { TEXT_LINK_CLASS } from './styles';
 
 const PRIMARY_LINK =
   'inline-flex min-h-9 items-center justify-center rounded-md border border-transparent bg-accent px-3 text-sm font-semibold text-fg-on-accent';
-const TEXT_LINK = 'text-accent underline-offset-2 hover:underline';
 
 function locationName(provider: string, location: string): string {
   try {
@@ -101,7 +101,7 @@ export function ComputePoolEmptyState({ scope, projectId, shared }: ComputePoolE
           {isProject ? 'Connect a cloud account to this project' : 'Connect a cloud account'}
         </Link>
         {isProject && (
-          <Link to="/settings/infrastructure" className={`text-sm ${TEXT_LINK}`}>
+          <Link to="/settings/infrastructure" className={`text-sm ${TEXT_LINK_CLASS}`}>
             Set up your personal pool
           </Link>
         )}
