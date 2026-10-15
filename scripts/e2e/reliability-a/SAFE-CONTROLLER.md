@@ -12,7 +12,7 @@ Run the trusted controller entrypoint under this supervisor:
 node scripts/e2e/reliability-a/safe-controller.mjs /private/reviewed-controller.mjs 60000
 ```
 
-The entrypoint exports `async run({requestSafe,logoutSafe,screenshotSafe,report})`.
+The entrypoint exports `async run({requestSafe,logoutSafe,screenshotSafe,summary,safeSummary,privateState,report})`.
 It owns ONE existing browser/context and the entire launch/login/queue/close/finally
 lifecycle inside `run`. Existing managed login stays internal; this artifact does
 not add a login flow or extract any credentials. Return the final fixed summary
@@ -66,3 +66,7 @@ console/native/subprocess streams and startup/outer/finally errors, request netw
 timeout/response/malformed/consumer/disposal failures, same-context logout Origin,
 malformed paths/results, and hung launch/fetch/disposal bounded by the parent.
 No live containment/logout/completion/sleep/wake result is claimed.
+
+The supervised worker passes the existing pure summary/state helpers to `run` too.
+Entrypoints must use those arguments rather than importing this supervisor module: its
+CLI top-level await would otherwise create an ESM cycle during dynamic entrypoint load.

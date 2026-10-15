@@ -109,7 +109,7 @@ async function worker(entrypoint) {
   try {
     const controller = await import(pathToFileURL(entrypoint).href);
     // The returned summary is final: startup/login/goto/close/finally all belong inside run.
-    const value = await controller.run({ requestSafe, logoutSafe, screenshotSafe,
+    const value = await controller.run({ requestSafe, logoutSafe, screenshotSafe, summary, safeSummary, privateState,
       report: () => {} }); // No arbitrary progress output crosses the process boundary.
     process.send?.({ kind: 'finished', result: safeSummary(value) });
   } catch { fatal(); } finally { clearInterval(keepAlive); }
