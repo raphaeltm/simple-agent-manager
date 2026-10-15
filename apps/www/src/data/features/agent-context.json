@@ -1,7 +1,7 @@
 {
   "slug": "agent-context",
   "label": "Project Memory",
-  "title": "Write your project rules down once",
+  "title": "One set of project rules for every agent",
   "subtitle": "Keep rules and preferences in one place. New sessions are told to load them first, and you can see and edit what's saved.",
   "summary": "A project knowledge base agents receive as context, plus policies and a full activity log.",
   "highlights": [

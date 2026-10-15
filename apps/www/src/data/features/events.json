@@ -1,8 +1,8 @@
 {
   "slug": "events",
   "label": "Schedules & Triggers",
-  "title": "Let routine work start itself",
-  "subtitle": "Run an agent every night, when a GitHub issue is opened, or when another service calls a webhook. SAM logs every run, so your team can see what ran and when.",
+  "title": "Run agents nightly or on new GitHub issues",
+  "subtitle": "Webhooks from other services can start work too. SAM logs every run, so your team can see what ran and when.",
   "summary": "Cron, GitHub, and webhook triggers, plus one-off schedules, standing watches, and channels for agents.",
   "highlights": [
     "Three trigger sources: cron schedules, GitHub events, and authenticated JSON webhooks",
