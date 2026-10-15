@@ -63,7 +63,7 @@ export function Landing() {
   };
 
   return (
-    <div className="relative isolate min-h-[var(--sam-app-height)] bg-canvas flex items-center justify-center px-3 py-8 sm:px-4 overflow-hidden">
+    <main className="relative isolate min-h-[var(--sam-app-height)] bg-canvas flex items-center justify-center px-3 py-8 sm:px-4 overflow-hidden">
       <GlassNodeField mode="floor" density={0.16} horizonY={0.5} />
       <div className="sam-glass sam-glass-rim w-full max-w-sm text-center rounded-2xl px-6 py-8">
         <Typography variant="display" as="h1" className="mb-2">
@@ -117,7 +117,7 @@ export function Landing() {
           Learn more about SAM
         </a>
       </div>
-    </div>
+    </main>
   );
 }
 

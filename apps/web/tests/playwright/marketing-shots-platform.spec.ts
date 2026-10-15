@@ -12,6 +12,7 @@
  *
  * Covered surfaces:
  *   A. sam-hero-live-session      — busy active project chat session (hero image)
+ *      sam-hero-phone             — same session on a phone (homepage mobile hero source)
  *   B. sam-session-sleeping       — sleeping session, Archive lifecycle control
  *      sam-session-waking         — same session mid-wake, phase progress banner
  *   C. sam-agents-orchestration   — task hierarchy modal (parent + dispatched subtasks)

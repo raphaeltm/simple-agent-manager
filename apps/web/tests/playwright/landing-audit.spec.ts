@@ -31,6 +31,17 @@ async function screenshot(page: Page, name: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Glass node field: the shared renderer (packages/ui) draws behind the card
+// ---------------------------------------------------------------------------
+
+async function expectGlassNodeField(page: Page) {
+  const field = page.getByTestId('glass-node-field');
+  await expect(field).toHaveAttribute('aria-hidden', 'true');
+  // The renderer loads on mount and adds its static and dynamic canvases.
+  await expect(field.locator('canvas')).toHaveCount(2);
+}
+
+// ---------------------------------------------------------------------------
 // Overflow check helper
 // ---------------------------------------------------------------------------
 
@@ -68,6 +79,7 @@ test.describe('Landing — Mobile', () => {
     await expect(page.getByText('Shipped & Planned')).not.toBeVisible();
     await expect(page.getByText('Ready to start building?')).not.toBeVisible();
 
+    await expectGlassNodeField(page);
     await assertNoOverflow(page);
     await screenshot(page, 'landing-sign-in-mobile');
   });
@@ -113,6 +125,7 @@ test.describe('Landing — Desktop', () => {
     // Centered: left offset should be > 400px on a 1280px viewport
     expect(box!.x).toBeGreaterThan(400);
 
+    await expectGlassNodeField(page);
     await assertNoOverflow(page);
     await screenshot(page, 'landing-sign-in-desktop');
   });
