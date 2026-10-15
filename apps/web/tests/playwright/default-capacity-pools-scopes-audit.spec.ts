@@ -512,6 +512,15 @@ async function editStressedPool(page: Page, screenshotName: string) {
   await expect(page.getByRole('heading', { name: 'Allowed machines', exact: true })).toBeVisible();
   await page.getByLabel('Placing agents').selectOption('spread');
   await page.getByLabel(/^Machine limit/).fill('5');
+  // The machine limit's longer help makes its grid row taller; the dropdown beside it
+  // must keep the same height as the other dropdowns instead of stretching.
+  const selectHeights = await Promise.all(
+    ['Placing agents', 'If the provider is out of capacity', 'App deployments'].map(
+      async (label) => (await page.getByLabel(label, { exact: true }).boundingBox())?.height ?? 0
+    )
+  );
+  expect(Math.min(...selectHeights)).toBeGreaterThan(0);
+  expect(Math.max(...selectHeights) - Math.min(...selectHeights)).toBeLessThanOrEqual(1);
   await page.getByRole('button', { name: 'cx33 in Nuremberg', exact: true }).click();
   await page.getByRole('button', { name: 'cx43 in Helsinki', exact: true }).click();
   await screenshotNearHeading(page, 'Allowed machines', screenshotName);
@@ -573,7 +582,12 @@ test.describe('Default capacity pool scope surfaces', () => {
 
     const suffix = getProjectSuffix(testInfo.project.name);
     await expectStressedDefaultPool(page, 'user');
-    await screenshotDefaultPoolScope(page, POOL_HEADINGS.user, 'default-capacity-pools-user', suffix);
+    await screenshotDefaultPoolScope(
+      page,
+      POOL_HEADINGS.user,
+      'default-capacity-pools-user',
+      suffix
+    );
     await editStressedPool(page, `default-capacity-pools-user-edit-${suffix}`);
   });
 

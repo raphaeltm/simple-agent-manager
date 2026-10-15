@@ -79,7 +79,8 @@ function ChoiceField<T extends string>({
 }) {
   const id = useId();
   return (
-    <div className="grid min-w-0 gap-1">
+    // content-start: in a two-column row, a shorter field must not stretch its select.
+    <div className="grid min-w-0 content-start gap-1">
       <label htmlFor={id} className="text-xs font-medium text-fg-muted">
         {label}
       </label>
@@ -153,7 +154,7 @@ export function ComputePoolEditor({
             copy={EXHAUSTION_POLICY_COPY}
             onChange={(value) => update('exhaustionPolicy', value)}
           />
-          <div className="grid min-w-0 gap-1">
+          <div className="grid min-w-0 content-start gap-1">
             <label htmlFor={limitId} className="text-xs font-medium text-fg-muted">
               Machine limit{POOL_SCOPE_COPY[pool.scope].limitPerPerson ? ' per person' : ''}
             </label>
