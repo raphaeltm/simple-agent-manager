@@ -1,0 +1,131 @@
+---
+/**
+ * The hero's backdrop: ambient light, the glass node floor (drawn into `[data-hero-field]` by
+ * hero-motion.ts), haze at the floor's horizon, and the amber light shown while an agent needs
+ * input. Purely decorative.
+ */
+---
+
+<div class="hero-light" aria-hidden="true"></div>
+<div class="hero-field" data-hero-field aria-hidden="true"></div>
+<div class="hero-haze" data-hero-haze aria-hidden="true"></div>
+<div class="hero-alert" aria-hidden="true"></div>
+
+<style>
+  /* ---- Light and background ---- */
+  .hero-light {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background:
+      radial-gradient(42% 38% at 70% 84%, rgb(34 197 94 / 0.2), transparent 72%),
+      radial-gradient(34% 40% at 74% 38%, rgb(34 197 94 / 0.11), transparent 70%),
+      radial-gradient(26% 24% at 92% 26%, rgb(52 211 153 / 0.08), transparent 70%),
+      radial-gradient(48% 60% at 12% 18%, rgb(6 78 59 / 0.38), transparent 72%);
+  }
+
+  :global(html[data-theme='light']) .hero-light {
+    background:
+      radial-gradient(42% 38% at 70% 84%, rgb(34 197 94 / 0.16), transparent 72%),
+      radial-gradient(34% 40% at 74% 38%, rgb(34 197 94 / 0.08), transparent 70%),
+      radial-gradient(48% 60% at 12% 18%, rgb(187 247 208 / 0.5), transparent 72%);
+  }
+
+  .hero-field {
+    position: absolute;
+    inset: -14px;
+    z-index: 1;
+    pointer-events: none;
+    transform: translate3d(calc(var(--px, 0) * -14px), calc(var(--py, 0) * -10px), 0);
+    /* Keep the floor quieter behind the copy. */
+    -webkit-mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.55) 0%, rgb(0 0 0 / 0.6) 30%, #000 50%);
+    mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.55) 0%, rgb(0 0 0 / 0.6) 30%, #000 50%);
+  }
+
+  /* Atmosphere at the horizon, so the floor recedes into haze instead of ending. */
+  .hero-haze {
+    --haze: 5 10 8;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(var(--horizon, 360px) - 134px);
+    z-index: 2;
+    height: 190px;
+    pointer-events: none;
+    background: linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgb(var(--haze) / 0.92) 52%,
+      rgb(var(--haze) / 0.55) 70%,
+      transparent 100%
+    );
+  }
+
+  .hero-haze::after {
+    content: '';
+    position: absolute;
+    left: 30%;
+    right: 0;
+    top: 63%;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgb(52 211 153 / 0.45) 45%,
+      rgb(255 255 255 / 0.35) 70%,
+      rgb(52 211 153 / 0.3) 85%,
+      transparent
+    );
+  }
+
+  :global(html[data-theme='light']) .hero-haze {
+    --haze: 230 237 232;
+  }
+
+  :global(html[data-theme='light']) .hero-haze::after {
+    background: linear-gradient(90deg, transparent, rgb(21 128 61 / 0.3) 45%, rgb(255 255 255 / 0.9) 70%, transparent);
+  }
+
+  /* Amber light while an agent needs input. */
+  .hero-alert {
+    position: absolute;
+    right: 40px;
+    top: 60px;
+    z-index: 2;
+    width: 520px;
+    height: 420px;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgb(245 158 11 / 0.2), transparent 75%);
+    opacity: 0;
+    transition: opacity 900ms ease;
+  }
+
+  :global([data-alert='input']) .hero-alert {
+    opacity: 1;
+  }
+
+  /* Copy above the stage: fade the floor in below it. */
+  @media (max-width: 1199.98px) {
+    .hero-field {
+      -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.35) 0%, rgb(0 0 0 / 0.5) 35%, #000 60%);
+      mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.35) 0%, rgb(0 0 0 / 0.5) 35%, #000 60%);
+    }
+  }
+
+  @media (max-width: 699.98px) {
+    .hero-field {
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0%, transparent 40%, #000 60%);
+      mask-image: linear-gradient(to bottom, transparent 0%, transparent 40%, #000 60%);
+    }
+
+    .hero-haze::after {
+      left: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-alert {
+      transition: none;
+    }
+  }
+</style>

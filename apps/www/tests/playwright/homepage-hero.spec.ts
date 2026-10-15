@@ -180,7 +180,8 @@ async function heroLayout(page: Page) {
     const cutOff: string[] = [];
     for (const selector of layers) {
       for (const element of document.querySelectorAll<HTMLElement>(selector)) {
-        if (!element.offsetParent) continue;
+        // Hidden or fully transparent layers (a notification not yet raised) are not content.
+        if (!element.offsetParent || getComputedStyle(element).opacity === '0') continue;
         const box = element.getBoundingClientRect();
         if (box.width === 0) continue;
         if (box.left < -1 || box.right > width + 1) {

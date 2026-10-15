@@ -18,7 +18,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import sharp from 'sharp';
+import sharp, { type Sharp } from 'sharp';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE_DIR = path.join(ROOT, 'public/images/features');
@@ -104,7 +104,7 @@ const round = (value: number) => Math.round(value * 10_000) / 10_000;
 const sourcePath = (name: string, theme: Theme) => path.join(SOURCE_DIR, `${name}${THEMES[theme]}.png`);
 const layerFile = (name: string, theme: Theme) => `${name}${THEMES[theme]}.webp`;
 
-async function writeWebp(image: sharp.Sharp, file: string, width: number) {
+async function writeWebp(image: Sharp, file: string, width: number) {
   const info = await image
     .resize({ width, kernel: 'lanczos3' })
     .webp({ quality: WEBP_QUALITY, effort: 6 })

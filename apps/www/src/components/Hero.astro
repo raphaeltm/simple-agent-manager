@@ -1,4 +1,5 @@
 ---
+import HeroBackdrop from './hero/HeroBackdrop.astro';
 import HeroPhone from './hero/HeroPhone.astro';
 import HeroStack from './hero/HeroStack.astro';
 import { proofStrip } from '../data/proof-strip';
@@ -14,10 +15,7 @@ const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
       if (hero && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) hero.dataset.motion = 'intro';
     })(document.currentScript && document.currentScript.parentElement);
   </script>
-  <div class="hero-light" aria-hidden="true"></div>
-  <div class="hero-field" data-hero-field aria-hidden="true"></div>
-  <div class="hero-haze" data-hero-haze aria-hidden="true"></div>
-  <div class="hero-alert" aria-hidden="true"></div>
+  <HeroBackdrop />
 
   <div class="hero-copy">
     <span class="hero-badge sam-glass sam-glass--chrome sam-glass-rim">
@@ -26,7 +24,7 @@ const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
     </span>
 
     <h1 id="hero-title" class="hero-title">
-      The open-source platform for <span class="gradient-text">multi-agent workflows</span>
+      The open-source platform for <span class="gradient-text"><span class="nowrap">multi-agent</span> workflows</span>
     </h1>
 
     <p class="hero-subtitle">
@@ -111,98 +109,6 @@ const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
     pointer-events: none;
   }
 
-  /* ---- Light and background ---- */
-  .hero-light {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    background:
-      radial-gradient(42% 38% at 70% 84%, rgb(34 197 94 / 0.2), transparent 72%),
-      radial-gradient(34% 40% at 74% 38%, rgb(34 197 94 / 0.11), transparent 70%),
-      radial-gradient(26% 24% at 92% 26%, rgb(52 211 153 / 0.08), transparent 70%),
-      radial-gradient(48% 60% at 12% 18%, rgb(6 78 59 / 0.38), transparent 72%);
-  }
-
-  :global(html[data-theme='light']) .hero-light {
-    background:
-      radial-gradient(42% 38% at 70% 84%, rgb(34 197 94 / 0.16), transparent 72%),
-      radial-gradient(34% 40% at 74% 38%, rgb(34 197 94 / 0.08), transparent 70%),
-      radial-gradient(48% 60% at 12% 18%, rgb(187 247 208 / 0.5), transparent 72%);
-  }
-
-  .hero-field {
-    position: absolute;
-    inset: -14px;
-    z-index: 1;
-    pointer-events: none;
-    transform: translate3d(calc(var(--px, 0) * -14px), calc(var(--py, 0) * -10px), 0);
-    /* Keep the floor quieter behind the copy. */
-    -webkit-mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.55) 0%, rgb(0 0 0 / 0.6) 30%, #000 50%);
-    mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.55) 0%, rgb(0 0 0 / 0.6) 30%, #000 50%);
-  }
-
-  /* Atmosphere at the horizon, so the floor recedes into haze instead of ending. */
-  .hero-haze {
-    --haze: 5 10 8;
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: calc(var(--horizon, 360px) - 134px);
-    z-index: 2;
-    height: 190px;
-    pointer-events: none;
-    background: linear-gradient(
-      to bottom,
-      transparent 0%,
-      rgb(var(--haze) / 0.92) 52%,
-      rgb(var(--haze) / 0.55) 70%,
-      transparent 100%
-    );
-  }
-
-  .hero-haze::after {
-    content: '';
-    position: absolute;
-    left: 30%;
-    right: 0;
-    top: 63%;
-    height: 1px;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      rgb(52 211 153 / 0.45) 45%,
-      rgb(255 255 255 / 0.35) 70%,
-      rgb(52 211 153 / 0.3) 85%,
-      transparent
-    );
-  }
-
-  :global(html[data-theme='light']) .hero-haze {
-    --haze: 230 237 232;
-  }
-
-  :global(html[data-theme='light']) .hero-haze::after {
-    background: linear-gradient(90deg, transparent, rgb(21 128 61 / 0.3) 45%, rgb(255 255 255 / 0.9) 70%, transparent);
-  }
-
-  /* Amber light while an agent needs input. */
-  .hero-alert {
-    position: absolute;
-    right: 40px;
-    top: 60px;
-    z-index: 2;
-    width: 520px;
-    height: 420px;
-    pointer-events: none;
-    background: radial-gradient(closest-side, rgb(245 158 11 / 0.2), transparent 75%);
-    opacity: 0;
-    transition: opacity 900ms ease;
-  }
-
-  [data-alert='input'] .hero-alert {
-    opacity: 1;
-  }
-
   /* ---- Copy ---- */
   .hero-copy {
     position: relative;
@@ -240,6 +146,11 @@ const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
     line-height: 1.02;
     letter-spacing: -0.035em;
     color: var(--color-fg-primary);
+  }
+
+  /* Never split "multi-agent" at its hyphen. */
+  .nowrap {
+    white-space: nowrap;
   }
 
   .gradient-text {
@@ -412,11 +323,6 @@ const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
       justify-content: center;
     }
 
-    .hero-field {
-      -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.35) 0%, rgb(0 0 0 / 0.5) 35%, #000 60%);
-      mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.35) 0%, rgb(0 0 0 / 0.5) 35%, #000 60%);
-    }
-
     .hero-figure {
       --stage-scale: 0.9;
       --stage-left: calc(50% - 430px * var(--stage-scale));
@@ -472,15 +378,6 @@ const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
       font-size: 1rem;
     }
 
-    .hero-field {
-      -webkit-mask-image: linear-gradient(to bottom, transparent 0%, transparent 40%, #000 60%);
-      mask-image: linear-gradient(to bottom, transparent 0%, transparent 40%, #000 60%);
-    }
-
-    .hero-haze::after {
-      left: 0;
-    }
-
     .hero-figure {
       height: auto;
       margin-top: 34px;
@@ -492,12 +389,6 @@ const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
 
     .hero-figure :global(.hero-phone) {
       display: block;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .hero-alert {
-      transition: none;
     }
   }
 </style>
