@@ -21,7 +21,7 @@
   ],
   "homepage": {
     "headline": "Use the agent that fits the job",
-    "body": "Pick Claude Code, Codex, Gemini CLI, or another agent for each new chat. Use your Claude or ChatGPT plan, or an API key.",
+    "body": "Pick Claude Code, Codex, Gemini CLI, or another agent for each new chat. Bring your Claude or ChatGPT plan, or an API key.",
     "caption": "The new-chat screen, with starter prompts and the agent picker"
   },
   "details": [

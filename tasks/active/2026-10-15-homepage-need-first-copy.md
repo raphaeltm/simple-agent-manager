@@ -41,9 +41,10 @@ Not asked: merging or deploying. Stop at a ready PR for approval.
 
 - [x] Copy skill drafted, reviewed by a local agent (GOOD WITH CHANGES; re-check after v2 → final fixes applied), saved as SAM skill `homepage-copy` (01M4ZYPHAS41V97VNP9XEWM5EH)
 - [x] Button row spacing fixed (48 px above and below; was 0 px)
-- [ ] Claims ledger and copy deck written
+- [x] Claims ledger and copy deck written (PR #2356 body; the ledger was checked by two local fact-check agents, the deck is generated from git)
 - [x] Copy rewritten (hero, agent dock, features, How It Works, comparison, roadmap, CTA, proof strip, hero layer labels, header button, page meta, scene descriptions)
-- [ ] Humanizer pass and cold-reader review
+- [x] Humanizer pass and cold-reader review (first pass and two cold reads in earlier commits; final humanizer pass and a third, text-only cold read applied in `df5a46516`)
+- [x] Pages the homepage links to: the phone menu button says "Deploy SAM"; the feature pages' closing block lists what deploying needs instead of "in minutes… free to self-host"; no em dashes in feature page titles
 - [ ] Tests updated, lint, typecheck, unit and Playwright suites pass
 - [ ] Full-page screenshots (desktop and phone) uploaded to the library
 - [ ] PR with copy deck, evidence, local reviews and CodeRabbit request; held for approval
@@ -59,6 +60,39 @@ Not asked: merging or deploying. Stop at a ready PR for approval.
   - source ranking;
   - 375 px, cold-reader questions, a spelled-out product name, the framing line.
 - Round 2, on v2: all addressed except the field map, which described the branch's new `homepage` field as if `main` had it. It is now worded to hold before and after merge. Also added that Instant work is not committed or pushed, and that the name must be visible in the hero.
+
+## Final review pass (four local agents, read-only)
+
+- Fact-check A (hero, dock, chat, team, comments, How It Works, closing): 15 true, 3 partly true, all fixed:
+  - the requirements now list the GitHub account;
+  - phone notifications are opt-in and fire when an agent flags that it needs you;
+  - a cloud provider is optional in the closing section.
+  - "Start in seconds" was dropped: the docs call it typical, but no published measurement covers clone plus agent start.
+- Fact-check B (cloud, triggers, sessions, memory, comparison, roadmap): 0 false and 7 partly true, all fixed:
+  - Instant workspaces run in your Cloudflare account;
+  - comments reach the agent once sent;
+  - snapshots keep the branch and uncommitted changes;
+  - Instant usage is billed by Cloudflare;
+  - the cost figure is an estimate;
+  - notes have three source types;
+  - comments are on library documents.
+- Humanizer and house style:
+  - one word per thing (machine type vs server);
+  - captions that add a fact;
+  - the trigger list says "what starts it";
+  - the Project Memory subtitle no longer restates its title;
+  - no em dashes in feature page titles.
+- Cold reader, given the text only, no code or context:
+  - "Hand off a task" was read as moving a local session, so it is now "Assign tasks to agents";
+  - the closing title no longer restates the H1;
+  - the closing section no longer contradicts Instant workspaces;
+  - the provider list and the setup requirements no longer repeat.
+- Not changed, so raised in the PR for Raphaël instead:
+  - no comparison with Claude Code on the web, Codex cloud or Cursor background agents;
+  - no cost example for running SAM, because the Workers Paid price needs a dated source;
+  - "self-hosted" and "your own cloud" can read as your own hardware or AWS (the H1 is the locked one-liner);
+  - competitor cells were left unchanged;
+  - `/features/` index summaries still use internal terms and em dashes.
 
 ## Acceptance criteria
 
