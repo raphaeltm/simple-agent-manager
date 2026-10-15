@@ -49,7 +49,7 @@ func initSnapshotRemoteRepoWithHistory(t *testing.T, historyBytes int) (repo, re
 }
 
 // writeLocalTaskWork leaves an unpushed commit, an unstaged edit and an
-// untracked file on a new branch, and returns the local commit.
+// untracked file, staged content and workflow state, and returns the local commit.
 func writeLocalTaskWork(t *testing.T, repo, branch string) string {
 	t.Helper()
 	runGit(t, repo, "checkout", "-b", branch)
@@ -58,6 +58,11 @@ func writeLocalTaskWork(t *testing.T, repo, branch string) string {
 	runGit(t, repo, "commit", "-m", "local only")
 	mustWriteSnapshotFile(t, repo, "README.md", "uncommitted edit")
 	mustWriteSnapshotFile(t, repo, "untracked.txt", "untracked work")
+	mustWriteSnapshotFile(t, repo, "staged.txt", "staged content")
+	runGit(t, repo, "add", "staged.txt")
+	mustWriteSnapshotFile(t, repo, "staged.txt", "staged plus unstaged")
+	mustWriteSnapshotFile(t, repo, ".do-state.md", "local workflow progress")
+	mustWriteSnapshotFile(t, repo, ".workflow-state.md", "local orchestration progress")
 	return gitOutput(t, repo, "rev-parse", "HEAD")
 }
 
@@ -70,14 +75,23 @@ func assertRestoredLocalTaskWork(t *testing.T, restored, wantHead, branch string
 		t.Fatalf("restored branch = %q, want %q", got, branch)
 	}
 	for name, want := range map[string]string{
-		"local-commit.txt": "committed locally, never pushed",
-		"README.md":        "uncommitted edit",
-		"untracked.txt":    "untracked work",
+		"local-commit.txt":   "committed locally, never pushed",
+		"README.md":          "uncommitted edit",
+		"untracked.txt":      "untracked work",
+		"staged.txt":         "staged plus unstaged",
+		".do-state.md":       "local workflow progress",
+		".workflow-state.md": "local orchestration progress",
 	} {
 		got, err := os.ReadFile(filepath.Join(restored, name))
 		if err != nil || string(got) != want {
 			t.Fatalf("restored %s = %q (err %v), want %q", name, got, err, want)
 		}
+	}
+	if got := gitOutput(t, restored, "show", ":staged.txt"); got != "staged content" {
+		t.Fatalf("restored staged content = %q", got)
+	}
+	if got := gitOutput(t, restored, "diff", "--cached", "--name-only"); got != "staged.txt" {
+		t.Fatalf("restored index = %q, want only staged.txt", got)
 	}
 }
 

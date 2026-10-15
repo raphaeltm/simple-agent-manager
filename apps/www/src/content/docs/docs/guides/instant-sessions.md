@@ -64,20 +64,20 @@ Note that the **Full** workspace profile does not override this: workspace profi
 
 **SAM does not commit or push an Instant chat's work for you.** No branch is created, nothing is auto-committed when the agent finishes, and no pull request is opened. The workspace sits on your project's default branch and anything the agent changed stays in that container.
 
-Two independent things decide this, and it's worth knowing which is which:
+How work starts determines its initial branch; publication is always agent-directed:
 
 | How you started it                                    | Branch                        | Auto-commit and push |
 | ----------------------------------------------------- | ----------------------------- | -------------------- |
 | A composer chat on an **Instant** profile             | None — your default branch    | No                   |
-| A submitted task or `dispatch_task`, in **task** mode | Its own `sam/…` output branch | Yes, then a PR       |
+| A submitted task or `dispatch_task`, in **task** mode | Its own `sam/…` output branch | No                   |
 | The same, in **conversation** mode                    | Its own `sam/…` output branch | No                   |
 
 - **The branch depends on how the work was started.** Only a composer chat on an Instant profile skips branch creation — a composer chat on any other profile is submitted as a task, and gets one. Anything submitted as a task — or dispatched with `dispatch_task`, on either runtime — gets an output branch, whichever mode it runs in.
-- **The push depends on task mode.** Conversation mode has no git lifecycle at all. Selecting the Instant runtime on a profile sets conversation mode, and so does choosing the **Lightweight** workspace profile — so a Lightweight submitted task gets a branch with nothing pushed to it.
+- **Commits, pushes and pull requests are agent-directed in every task mode.** Ending a turn or completing a task does not publish repository changes.
 
 Instant clones the requested base branch before checking out a task's output branch. A new output branch starts at that base; an existing output branch keeps its remote commits.
 
-Persistent-session snapshots retain the exact saved Git checkout, including uncommitted work and clean local-only commits, for the seven-day sleep window. If you need a durable record beyond that window, **ask the agent to commit and push it to a branch**, or run the work as a task in task mode. Don't assume a PR is coming.
+Persistent-session snapshots retain the exact saved Git checkout, including uncommitted work and clean local-only commits, for the seven-day sleep window. If you need a durable record beyond that window, **ask the agent to commit and push it to a branch**. Don't assume a PR is coming.
 
 See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands) for the task-mode behavior.
 

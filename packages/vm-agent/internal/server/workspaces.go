@@ -1247,7 +1247,7 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 //
 // The agent starts and runs headlessly — no browser WebSocket is required.
 // When a browser connects later, it receives full message replay.
-// The OnPromptComplete callback handles git push and task status updates.
+// The OnPromptComplete callback reports task status without publishing repository changes.
 func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	sessionID := r.PathValue("sessionId")
@@ -1550,7 +1550,7 @@ func (s *Server) startAgentWithPromptObserved(host *acp.SessionHost, workspaceID
 	syntheticReqID, _ := json.Marshal("server-initiated-1")
 
 	// HandlePrompt blocks until the agent completes. The OnPromptComplete
-	// callback fires automatically, handling git push and task status updates.
+	// callback fires automatically, reporting task status without publishing repository changes.
 	// trustedSource=true: this is the SAM-built initial task prompt, the only
 	// legitimate origin=system producer (the injected instructions block).
 	if observer == nil {

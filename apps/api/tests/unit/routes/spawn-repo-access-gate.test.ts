@@ -306,7 +306,8 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
         flow: 'project-access',
         userId: 'user-1',
         repository: 'acme/allowed-private',
-      })
+      }),
+      expect.objectContaining({ repository: 'acme/allowed-private', onFound: expect.any(Function) })
     );
   }
 

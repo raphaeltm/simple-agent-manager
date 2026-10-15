@@ -767,8 +767,8 @@ async function verifyWorkspaceGitHubOwnerAccess(input: {
   }
 
   // Every git and gh credential exchange lands here, so pass env to use the
-  // short user-access cache (GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS) instead of a
-  // paginated GitHub repository listing per operation.
+  // pagination hint (GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS). Every exchange
+  // still verifies current user access against GitHub; hints never grant access.
   const verifiedRepo = await assertRepositoryAccess(
     accessToken,
     input.externalInstallationId,

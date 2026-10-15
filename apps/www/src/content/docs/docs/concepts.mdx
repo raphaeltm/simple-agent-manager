@@ -123,7 +123,7 @@ When you submit work from the chat:
 4. Your chosen agent runs autonomously with your description — unless its [permission mode](/docs/guides/agents/#permission-mode) tells it to ask you first, in which case it [waits for your answer in the chat](/docs/guides/chat-features/#when-the-agent-needs-you)
 5. When a **Task** is done, the agent commits, pushes, and opens a pull request (a **Chat** pushes only what you ask the agent to push)
 
-SAM refuses to auto-push a completed task while the workspace is still on the project's default branch, so agent work reaches a reviewable branch rather than `main`. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands).
+SAM leaves commits, pushes and pull requests to the agent; turn end and task completion do not publish repository changes. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands).
 
 ### Linking Ideas to Conversations
 

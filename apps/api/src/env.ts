@@ -80,6 +80,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Also session-scoped on the `fetch` path — see the note on DATABASE above.
   OBSERVABILITY_DATABASE: D1Database;
   // Durable Objects
+  MCP_RATE_COUNTER?: DurableObjectNamespace;
+  WORKSPACE_BOOT_LOG?: DurableObjectNamespace;
   PROJECT_DATA: DurableObjectNamespace;
   NODE_LIFECYCLE: DurableObjectNamespace;
   ADMIN_LOGS: DurableObjectNamespace;

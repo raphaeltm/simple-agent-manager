@@ -86,7 +86,13 @@ const (
 
 	// DefaultGitCredentialTimeout bounds credential-helper calls back to the
 	// local VM agent. Override via GIT_CREDENTIAL_TIMEOUT.
-	DefaultGitCredentialTimeout = 5 * time.Second
+	DefaultGitCredentialTimeout              = 30 * time.Second
+	DefaultGitTokenTimeout                   = 25 * time.Second
+	DefaultControlPlaneResponseHeaderTimeout = 10 * time.Second
+	DefaultGitTokenAttemptTimeout            = DefaultControlPlaneResponseHeaderTimeout
+	DefaultGitTokenMaxAttempts               = 3
+	MaxGitTokenAttempts                      = 10
+	DefaultGitTokenRetryDelay                = 500 * time.Millisecond
 
 	// DefaultStandaloneCloneFilter is the git partial-clone filter used by
 	// standalone (container) workspace preparation. Blobless clones skip all
@@ -373,7 +379,11 @@ type Config struct {
 	ResourceHistoryMaxSamples        int           // Max samples per chunk (env: RESOURCE_HISTORY_MAX_SAMPLES, default: 4096)
 
 	// Git integration settings - configurable per constitution principle XI
-	GitCredentialTimeout     time.Duration // Timeout for credential-helper callbacks (env: GIT_CREDENTIAL_TIMEOUT, default: 5s)
+	GitTokenTimeout          time.Duration // Total git-token exchange budget (GIT_TOKEN_TIMEOUT)
+	GitTokenAttemptTimeout   time.Duration // Per-attempt budget (GIT_TOKEN_ATTEMPT_TIMEOUT)
+	GitTokenMaxAttempts      int           // Bounded attempts (GIT_TOKEN_MAX_ATTEMPTS)
+	GitTokenRetryDelay       time.Duration // Initial exponential backoff (GIT_TOKEN_RETRY_DELAY)
+	GitCredentialTimeout     time.Duration // Timeout for credential-helper callbacks (env: GIT_CREDENTIAL_TIMEOUT, default: 30s)
 	GitExecTimeout           time.Duration // Timeout for git commands via docker exec (default: 30s)
 	GitFileMaxSize           int           // Max file size in bytes for /git/file (default: 1MB)
 	GitWorktreeTimeout       time.Duration // Timeout for git worktree commands (default: 30s)

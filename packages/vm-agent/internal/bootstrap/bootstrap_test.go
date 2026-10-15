@@ -3718,3 +3718,51 @@ func TestProjectSecretEnvIsPlaceholderEvenFromLegacyState(t *testing.T) {
 		t.Fatalf("unexpected script %q", script)
 	}
 }
+
+func TestGitCredentialDefaultBudget(t *testing.T) {
+	script, err := renderGitCredentialHelperScript(&config.Config{Port: 8080, CallbackToken: "test", WorkspaceID: "ws-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, "--max-time 30") || config.DefaultGitCredentialTimeout <= config.DefaultGitTokenTimeout {
+		t.Fatal("generated helper deadline must exceed total fetch budget")
+	}
+}
+
+// Execute the generated devcontainer helper against a real HTTP endpoint.
+// Resolve Docker's hostname locally without requiring Docker in this test.
+func TestGeneratedDevcontainerHelperSlowCredentials(t *testing.T) {
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("workspaceId") != "ws-slow" || r.URL.Query().Get("host") != "github.com" {
+			t.Error("helper lost credential binding")
+		}
+		time.Sleep(5100 * time.Millisecond)
+		fmt.Fprint(w, "protocol=https\nhost=github.com\nusername=x-access-token\npassword=slow-result\n\n")
+	}))
+	defer endpoint.Close()
+	portText := strings.TrimPrefix(endpoint.URL, "http://127.0.0.1:")
+	var port int
+	if _, err := fmt.Sscan(portText, &port); err != nil {
+		t.Fatal(err)
+	}
+	script, err := renderGitCredentialHelperScript(&config.Config{Port: port, CallbackToken: "not-in-script", WorkspaceID: "ws-slow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	realCurl, err := exec.LookPath("curl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	wrapper := fmt.Sprintf("#!/bin/sh\nexec '%s' --noproxy '*' --resolve 'host.docker.internal:%d:127.0.0.1' \"$@\"\n", realCurl, port)
+	if err := os.WriteFile(filepath.Join(bin, "curl"), []byte(wrapper), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
+	cmd.Stdin = strings.NewReader("protocol=https\nhost=github.com\n\n")
+	output, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(output), "password=slow-result") {
+		t.Fatalf("helper output=%s err=%v", output, err)
+	}
+}

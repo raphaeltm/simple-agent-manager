@@ -199,7 +199,7 @@ var controlPlaneTransport = &http.Transport{
 	MaxIdleConnsPerHost:   2,
 	IdleConnTimeout:       30 * time.Second,
 	TLSHandshakeTimeout:   10 * time.Second,
-	ResponseHeaderTimeout: 10 * time.Second,
+	ResponseHeaderTimeout: DefaultControlPlaneResponseHeaderTimeout,
 	ExpectContinueTimeout: 1 * time.Second,
 	ForceAttemptHTTP2:     true,
 }
@@ -393,6 +393,33 @@ func (c *Config) Validate() error {
 	}
 	if c.PSIMemoryFullWarningThreshold > c.PSIMemoryFullCriticalThreshold {
 		errs = append(errs, fmt.Errorf("%s must be <= %s", EnvDefaultPSIMemoryFullWarningThreshold, EnvDefaultPSIMemoryFullCriticalThreshold))
+	}
+
+	// Loaded configurations receive explicit defaults; reject invalid operator values.
+	for name, value := range map[string]time.Duration{
+		"GIT_TOKEN_TIMEOUT":         c.GitTokenTimeout,
+		"GIT_TOKEN_ATTEMPT_TIMEOUT": c.GitTokenAttemptTimeout,
+		"GIT_TOKEN_RETRY_DELAY":     c.GitTokenRetryDelay,
+	} {
+		if value <= 0 {
+			errs = append(errs, fmt.Errorf("%s must be > 0", name))
+		}
+	}
+	if c.GitTokenMaxAttempts < 1 || c.GitTokenMaxAttempts > MaxGitTokenAttempts {
+		errs = append(errs, fmt.Errorf("GIT_TOKEN_MAX_ATTEMPTS must be between 1 and %d", MaxGitTokenAttempts))
+	}
+
+	if c.GitTokenAttemptTimeout > DefaultControlPlaneResponseHeaderTimeout {
+		errs = append(errs, fmt.Errorf("GIT_TOKEN_ATTEMPT_TIMEOUT must be <= control-plane response-header timeout %s", DefaultControlPlaneResponseHeaderTimeout))
+	}
+	if c.GitTokenAttemptTimeout > c.GitTokenTimeout {
+		errs = append(errs, fmt.Errorf("GIT_TOKEN_ATTEMPT_TIMEOUT must be <= GIT_TOKEN_TIMEOUT"))
+	}
+	if c.GitTokenRetryDelay >= c.GitTokenTimeout {
+		errs = append(errs, fmt.Errorf("GIT_TOKEN_RETRY_DELAY must be < GIT_TOKEN_TIMEOUT"))
+	}
+	if !c.IsDeploymentMode() && c.GitCredentialTimeout <= c.GitTokenTimeout {
+		errs = append(errs, fmt.Errorf("GIT_CREDENTIAL_TIMEOUT must be > GIT_TOKEN_TIMEOUT"))
 	}
 
 	// Workspace-specific validations (skip in deployment mode)

@@ -11,7 +11,7 @@ You don't start with a workspace — you start with a conversation:
 
 1. From the **Dashboard**, click **Import Project** and connect a GitHub repository.
 2. Open the project and describe what you want in the **chat**.
-3. SAM automatically provisions a workspace, runs your chosen agent, and streams progress back to you. When the agent finishes, it opens a pull request.
+3. SAM automatically provisions a workspace, runs your chosen agent, and streams progress back to you. Ask the agent to commit, push and open a pull request when the work is ready.
 
 Provisioning takes a couple of minutes the first time, or seconds when SAM reuses a recently active ("warm") environment. You never have to pick a server or wait at a terminal — the workspace exists to serve the chat.
 

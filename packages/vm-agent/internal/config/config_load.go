@@ -251,6 +251,10 @@ func Load() (*Config, error) {
 		ResourceHistoryMaxSamples:        getBoundedPositiveEnvInt(EnvResourceHistoryMaxSamples, DefaultResourceHistoryMaxSamples, MaxResourceHistoryMaxSamples),
 
 		// Git integration settings - configurable per constitution principle XI
+		GitTokenTimeout:          getEnvDuration("GIT_TOKEN_TIMEOUT", DefaultGitTokenTimeout),
+		GitTokenAttemptTimeout:   getEnvDuration("GIT_TOKEN_ATTEMPT_TIMEOUT", DefaultGitTokenAttemptTimeout),
+		GitTokenMaxAttempts:      getEnvInt("GIT_TOKEN_MAX_ATTEMPTS", DefaultGitTokenMaxAttempts),
+		GitTokenRetryDelay:       getEnvDuration("GIT_TOKEN_RETRY_DELAY", DefaultGitTokenRetryDelay),
 		GitCredentialTimeout:     getEnvDuration("GIT_CREDENTIAL_TIMEOUT", DefaultGitCredentialTimeout),
 		GitExecTimeout:           getEnvDuration("GIT_EXEC_TIMEOUT", 30*time.Second),
 		GitFileMaxSize:           getEnvInt("GIT_FILE_MAX_SIZE", 1048576), // 1 MB

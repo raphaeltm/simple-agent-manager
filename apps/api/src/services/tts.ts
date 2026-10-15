@@ -18,7 +18,6 @@
  * storage key that callers can derive from their domain (e.g., messageId).
  */
 
-import { Agent } from '@mastra/core/agent';
 import {
   DEFAULT_TTS_CHUNK_SIZE,
   DEFAULT_TTS_CLEANUP_MAX_TOKENS,
@@ -35,7 +34,6 @@ import {
   DEFAULT_TTS_SUMMARY_THRESHOLD,
   DEFAULT_TTS_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
-import { createWorkersAI } from 'workers-ai-provider';
 
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
@@ -179,6 +177,20 @@ Rules:
 - Do not add any commentary like "Here is a summary" — just provide the summary directly
 - Do not add any meta-text or preamble`;
 
+/** Load the model registry only when speech requests need an agent. */
+async function createSpeechAgent(
+  ai: Ai,
+  modelName: string,
+  options: { id: string; name: string; instructions: string }
+) {
+  const [{ Agent }, { createWorkersAI }] = await Promise.all([
+    import('@mastra/core/agent'),
+    import('workers-ai-provider'),
+  ]);
+  const workersAi = createWorkersAI({ binding: ai });
+  return new Agent({ ...options, model: workersAi(modelName as Parameters<typeof workersAi>[0]) });
+}
+
 /**
  * Use an LLM to clean markdown/code from text, producing natural spoken text.
  * Retries on failure before falling back to basic regex stripping.
@@ -200,15 +212,10 @@ export async function cleanTextForSpeech(
   }
 
   try {
-    // Construct the agent once outside the retry loop to avoid
-    // re-instantiating the Workers AI binding wrapper on each attempt
-    const workersAi = createWorkersAI({ binding: ai });
-    const model = workersAi(cleanupModel as Parameters<typeof workersAi>[0]);
-    const agent = new Agent({
+    const agent = await createSpeechAgent(ai, cleanupModel, {
       id: 'tts-text-cleanup',
       name: 'TTS Text Cleanup',
       instructions: CLEANUP_INSTRUCTIONS,
-      model,
     });
 
     const cleaned = await retryWithBackoff(
@@ -266,15 +273,10 @@ export async function summarizeTextForSpeech(
   const retryBaseDelayMs = config.retryBaseDelayMs ?? DEFAULT_TTS_RETRY_BASE_DELAY_MS;
 
   try {
-    // Construct the agent once outside the retry loop to avoid
-    // re-instantiating the Workers AI binding wrapper on each attempt
-    const workersAi = createWorkersAI({ binding: ai });
-    const model = workersAi(cleanupModel as Parameters<typeof workersAi>[0]);
-    const agent = new Agent({
+    const agent = await createSpeechAgent(ai, cleanupModel, {
       id: 'tts-text-summarize',
       name: 'TTS Text Summarize',
       instructions: SUMMARY_INSTRUCTIONS,
-      model,
     });
 
     const summary = await retryWithBackoff(

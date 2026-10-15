@@ -57,7 +57,7 @@ export default defineConfig({
         d1Databases: ['DATABASE', 'OBSERVABILITY_DATABASE'],
         kvNamespaces: ['KV', 'OAUTH_KV'],
         r2Buckets: ['R2', 'PROJECT_DATA_ARCHIVE_R2'],
-        durableObjects: {
+        durableObjects: withReliabilityStorageObjects({
           PROJECT_DATA: {
             className: 'ProjectDataTestDouble',
             useSQLite: true,
@@ -115,7 +115,7 @@ export default defineConfig({
             className: 'VmAgentContainerTestDouble',
             useSQLite: true,
           },
-        },
+        }),
         bindings: {
           BASE_DOMAIN: 'test.example.com',
           VERSION: '0.1.0-test',
@@ -174,3 +174,13 @@ export default defineConfig({
       : 'null',
   },
 });
+
+
+/** Keep Reliability C test registrations together while retaining the base DO fixtures. */
+function withReliabilityStorageObjects<T extends Record<string, unknown>>(existing: T) {
+  return {
+    ...existing,
+    MCP_RATE_COUNTER: { className: 'McpRateCounter', useSQLite: true },
+    WORKSPACE_BOOT_LOG: { className: 'WorkspaceBootLog', useSQLite: true },
+  };
+}

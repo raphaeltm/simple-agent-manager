@@ -137,27 +137,33 @@ describe('project GitHub repository authorization routes', () => {
     whereResponses.push([{ count: 0 }]);
     limitResponses.push(
       [],
-      [{
-        id: 'inst-row-111',
-        userId: 'user-1',
-        installationId: 'user-1:120081765',
-        externalInstallationId: '120081765',
-        accountType: 'organization',
-        accountName: 'acme',
-      }]
+      [
+        {
+          id: 'inst-row-111',
+          userId: 'user-1',
+          installationId: 'user-1:120081765',
+          externalInstallationId: '120081765',
+          accountType: 'organization',
+          accountName: 'acme',
+        },
+      ]
     );
 
-    const res = await app.request('/api/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'Project One',
-        installationId: 'inst-row-111',
-        repository: 'acme/allowed-private',
-        defaultBranch: 'main',
-        githubRepoId: 999,
-      }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/projects',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Project One',
+          installationId: 'inst-row-111',
+          repository: 'acme/allowed-private',
+          defaultBranch: 'main',
+          githubRepoId: 999,
+        }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(403);
     await expect(res.json()).resolves.toEqual({
@@ -171,44 +177,52 @@ describe('project GitHub repository authorization routes', () => {
     whereResponses.push([{ count: 0 }]);
     limitResponses.push(
       [],
-      [{
-        id: 'inst-row-111',
-        userId: 'user-1',
-        installationId: 'user-1:120081765',
-        externalInstallationId: '120081765',
-        accountType: 'organization',
-        accountName: 'acme',
-      }],
+      [
+        {
+          id: 'inst-row-111',
+          userId: 'user-1',
+          installationId: 'user-1:120081765',
+          externalInstallationId: '120081765',
+          accountType: 'organization',
+          accountName: 'acme',
+        },
+      ],
       [],
       [],
-      [{
-        id: 'proj-1',
-        userId: 'user-1',
-        name: 'Project One',
-        normalizedName: 'project one',
-        description: null,
-        installationId: 'inst-row-111',
-        repository: 'acme/allowed-private',
-        defaultBranch: 'main',
-        repoProvider: 'github',
-        githubRepoId: 42,
-        githubRepoNodeId: 'R_kgDOAllowed',
-        createdBy: 'user-1',
-        createdAt: '2026-06-06T00:00:00.000Z',
-        updatedAt: '2026-06-06T00:00:00.000Z',
-      }]
+      [
+        {
+          id: 'proj-1',
+          userId: 'user-1',
+          name: 'Project One',
+          normalizedName: 'project one',
+          description: null,
+          installationId: 'inst-row-111',
+          repository: 'acme/allowed-private',
+          defaultBranch: 'main',
+          repoProvider: 'github',
+          githubRepoId: 42,
+          githubRepoNodeId: 'R_kgDOAllowed',
+          createdBy: 'user-1',
+          createdAt: '2026-06-06T00:00:00.000Z',
+          updatedAt: '2026-06-06T00:00:00.000Z',
+        },
+      ]
     );
 
-    const res = await app.request('/api/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'Project One',
-        installationId: 'inst-row-111',
-        repository: 'acme/allowed-private',
-        defaultBranch: 'main',
-      }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/projects',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Project One',
+          installationId: 'inst-row-111',
+          repository: 'acme/allowed-private',
+          defaultBranch: 'main',
+        }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(201);
     expect(insertedRows[0]).toMatchObject({
@@ -221,14 +235,16 @@ describe('project GitHub repository authorization routes', () => {
   });
 
   it('rejects project updates when the existing repo is no longer visible to the GitHub user', async () => {
-    limitResponses.push([{
-      id: 'inst-row-111',
-      userId: 'user-1',
-      installationId: 'user-1:120081765',
-      externalInstallationId: '120081765',
-      accountType: 'organization',
-      accountName: 'acme',
-    }]);
+    limitResponses.push([
+      {
+        id: 'inst-row-111',
+        userId: 'user-1',
+        installationId: 'user-1:120081765',
+        externalInstallationId: '120081765',
+        accountType: 'organization',
+        accountName: 'acme',
+      },
+    ]);
     mocks.getUserInstallationRepositories.mockResolvedValue([
       {
         id: 7,
@@ -239,19 +255,28 @@ describe('project GitHub repository authorization routes', () => {
       },
     ]);
 
-    const res = await app.request('/api/projects/proj-1', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Renamed Project' }),
-    }, mockEnv);
+    const res = await app.request(
+      '/api/projects/proj-1',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Renamed Project' }),
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(403);
     expect(updateCalls).toHaveLength(0);
-    expect(getUserInstallationRepositories).toHaveBeenCalledWith('github-user-token', '120081765', {
-      flow: 'project-access',
-      userId: 'user-1',
-      installationId: '120081765',
-      repository: 'acme/allowed-private',
-    });
+    expect(getUserInstallationRepositories).toHaveBeenCalledWith(
+      'github-user-token',
+      '120081765',
+      {
+        flow: 'project-access',
+        userId: 'user-1',
+        installationId: '120081765',
+        repository: 'acme/allowed-private',
+      },
+      expect.objectContaining({ repository: 'acme/allowed-private', onFound: expect.any(Function) })
+    );
   });
 });
