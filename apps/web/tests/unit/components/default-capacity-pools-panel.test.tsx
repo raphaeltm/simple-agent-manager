@@ -587,6 +587,38 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(mocks.toast.success).toHaveBeenCalledWith('Compute pool saved');
   });
 
+  it('lets the machine limit be cleared and retyped, and saves only whole numbers', async () => {
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
+      response('project', summary('project'))
+    );
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(
+      response('project', summary('project'))
+    );
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    const limit = screen.getByLabelText('Machine limit per person');
+    fireEvent.change(limit, { target: { value: '' } });
+    // The field stays empty while editing instead of snapping back to the saved value.
+    expect(limit).toHaveValue(null);
+    fireEvent.change(limit, { target: { value: '2.5' } });
+    expect(screen.getByText('No changes yet')).toBeInTheDocument();
+    fireEvent.blur(limit);
+    // Leaving the field shows the value that would be saved.
+    expect(limit).toHaveValue(3);
+    fireEvent.change(limit, { target: { value: '1e3' } });
+    fireEvent.blur(limit);
+    expect(limit).toHaveValue(1000);
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
+        policy: { maxNodes: 1000 },
+      })
+    );
+  });
+
   it('saves the deployment strategy on its own', async () => {
     const current = summary('project');
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', current));

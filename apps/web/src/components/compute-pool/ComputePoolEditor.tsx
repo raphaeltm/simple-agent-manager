@@ -120,6 +120,9 @@ export function ComputePoolEditor({
 }: ComputePoolEditorProps) {
   const limitId = useId();
   const [policy, setPolicy] = useState<PolicyDraft>(() => initialPolicy(pool));
+  // The limit field keeps what the person typed (even empty) while they edit; only a positive
+  // whole number reaches the policy, and leaving the field shows the value that will be saved.
+  const [maxNodesText, setMaxNodesText] = useState(() => String(policy.maxNodes));
   const [draft, setDraft] = useState<MachineDraft>(() => new Map());
   const changedPolicy = policyChanges(pool, policy);
   const changeCount = Object.keys(changedPolicy).length + draft.size;
@@ -165,11 +168,16 @@ export function ComputePoolEditor({
               step={1}
               inputMode="numeric"
               aria-describedby={`${limitId}-help`}
-              value={policy.maxNodes}
+              value={maxNodesText}
               onChange={(event) => {
-                const value = Number.parseInt(event.currentTarget.value, 10);
-                if (Number.isSafeInteger(value) && value > 0) update('maxNodes', value);
+                const text = event.currentTarget.value;
+                setMaxNodesText(text);
+                const value = Number(text);
+                if (text.trim() !== '' && Number.isSafeInteger(value) && value > 0) {
+                  update('maxNodes', value);
+                }
               }}
+              onBlur={() => setMaxNodesText(String(policy.maxNodes))}
             />
             <p id={`${limitId}-help`} className="m-0 text-xs text-fg-muted">
               {MACHINE_LIMIT_HELP}
