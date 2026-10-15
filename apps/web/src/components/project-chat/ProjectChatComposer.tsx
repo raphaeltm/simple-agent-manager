@@ -178,7 +178,7 @@ export function ProjectChatComposer({
   const sendDisabled =
     sending ||
     disabled ||
-    !value.trim() ||
+    (!value.trim() && attachments.length === 0) ||
     uploading ||
     attachments.some((a) => a.status !== 'complete');
 

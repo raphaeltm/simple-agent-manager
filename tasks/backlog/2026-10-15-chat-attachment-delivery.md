@@ -11,11 +11,11 @@ New chats stage attachments in R2, while existing chats upload directly to a liv
 - `ProjectChatComposer.tsx`: shared new/follow-up composer; reuse attachment chips.
 
 ## Plan
-- [ ] Shared stable-identity R2 upload queue for new and follow-up chats; removable attachments, visible failures.
-- [ ] Paste images/files and long text, drop files, consistent submit gating.
-- [ ] Validate owned attachment references at follow-up acceptance and persist them with durable message.
-- [ ] Transfer after runtime readiness and before prompt; retry safely; include explicit per-upload file paths.
-- [ ] Regression tests for queue removal, ingestion, ownership, failed transfer, wake ordering and prompt references.
+- [x] Shared stable-identity R2 upload queue for new and follow-up chats; removable attachments, visible failures.
+- [x] Paste images/files and long text, drop files, consistent submit gating.
+- [x] Validate owned attachment references at follow-up acceptance and persist them with durable message.
+- [x] Transfer after runtime readiness and before prompt; retry safely; include explicit per-upload file paths.
+- [x] Regression tests for queue removal, ingestion, ownership, failed transfer, wake ordering and prompt references.
 - [ ] Documentation, specialist reviews, mobile/desktop screenshot audits.
 - [ ] Staging new/active/sleeping verification, clean up, green CI, CodeRabbit request/wait, merge and production deployment.
 
@@ -29,3 +29,10 @@ Multiple files upload to R2 immediately and remain removable before send. No wor
 
 ## References
 .do-state.md; scoped web/API rules; ui-ux-specialist; /do workflow.
+
+## Local evidence
+- Initial API focused suite 112 tests passed; web focused queue/composer/lifecycle/navigation suite 50 passed.
+- API/web builds passed; full repository lint/typecheck passed before final review edits; recheck final edits.
+- Four Playwright attachment audits passed (new/active × 375×667/1280×800). Screenshots reviewed; fixed new-chat starter area min-height to keep Send visible; bounded chip list height.
+- Local backend/security/Cloudflare/constitution review PASS. UI review 4/4/4/4/5; addressed empty-file text, attachment-only send, retry/scope tests. Completion review identified duplicate plain WS + enriched durable messages; attachment sends now rely solely on durable transcript persistence.
+- Staging, CI, CodeRabbit, merge and production remain pending. No completion claim before those gates.

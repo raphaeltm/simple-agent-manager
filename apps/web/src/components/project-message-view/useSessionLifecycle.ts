@@ -17,6 +17,7 @@ import {
   sendFollowUpPrompt,
 } from '../../lib/api';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
+import { DEFAULT_ATTACHMENT_MESSAGE } from '../../pages/project-chat/useAttachments';
 import { useSessionDraft } from './session-drafts';
 import type { FilePanelState } from './session-lifecycle-helpers';
 import { parsePlanContent } from './session-lifecycle-helpers';
@@ -328,7 +329,7 @@ export function useSessionLifecycle(
 
   // ── Send follow-up via REST API ──
   const handleSendFollowUp = async () => {
-    const trimmed = followUp.trim();
+    const trimmed = followUp.trim() || (attachments.length > 0 ? DEFAULT_ATTACHMENT_MESSAGE : '');
     if (!trimmed || sendingFollowUp || attachments.some((a) => a.status !== 'complete')) return;
     const attachmentRefs = attachments.flatMap((a) => (a.ref ? [a.ref] : []));
 
@@ -369,11 +370,17 @@ export function useSessionLifecycle(
         toolMetadata: null,
         createdAt: Date.now(),
       };
-      appendMessages([optimisticMessage]);
+      // Attachment display includes canonical workspace paths; durable acceptance
+      // persists and broadcasts it once, avoiding a second plain-text WS copy.
+      if (attachmentRefs.length === 0) appendMessages([optimisticMessage]);
       draft.sending(trimmed);
 
       // Persist via DO WebSocket
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      if (
+        attachmentRefs.length === 0 &&
+        wsRef.current &&
+        wsRef.current.readyState === WebSocket.OPEN
+      ) {
         wsRef.current.send(
           JSON.stringify({
             type: 'message.send',

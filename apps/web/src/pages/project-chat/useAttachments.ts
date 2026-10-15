@@ -5,6 +5,8 @@ import type { TaskAttachmentRef } from '../../lib/api';
 import { requestAttachmentUpload, uploadAttachmentToR2 } from '../../lib/api';
 import { formatFileSize } from '../../lib/file-utils';
 
+export const DEFAULT_ATTACHMENT_MESSAGE = 'Please read the attached files.';
+
 export interface AttachmentUploadState {
   id: string;
   file: File;
@@ -103,7 +105,11 @@ export function useAttachments(
           setSubmitError(`Maximum ${maxFiles} files allowed`);
           break;
         }
-        if (file.size <= 0 || file.size > maxBytes) {
+        if (file.size === 0) {
+          setSubmitError(`${file.name} is empty`);
+          continue;
+        }
+        if (file.size > maxBytes) {
           setSubmitError(`${file.name} exceeds ${formatFileSize(maxBytes)} limit`);
           continue;
         }

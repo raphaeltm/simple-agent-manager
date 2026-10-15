@@ -54,4 +54,24 @@ describe('staged attachment identity', () => {
     await act(async () => finish());
     expect(result.current.chatAttachments).toEqual([]);
   });
+  it('does not leak an in-flight upload into another session scope', async () => {
+    let finish!: () => void;
+    mocks.request.mockResolvedValue({ uploadId: 'old', uploadUrl: 'old' });
+    mocks.upload.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+    );
+    const setError = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ scope }) => useAttachments('project', setError, scope),
+      { initialProps: { scope: 'first' } }
+    );
+    act(() => result.current.handleChatFilesSelected([new File(['a'], 'a.txt')]));
+    await waitFor(() => expect(finish).toBeDefined());
+    rerender({ scope: 'second' });
+    await act(async () => finish());
+    expect(result.current.chatAttachments).toEqual([]);
+  });
 });

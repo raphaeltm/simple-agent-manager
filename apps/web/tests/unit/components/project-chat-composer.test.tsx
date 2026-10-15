@@ -311,4 +311,18 @@ describe('attachment ingestion', () => {
     fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter', ctrlKey: true });
     expect(onSend).not.toHaveBeenCalled();
   });
+  it('allows an attachment-only message but keeps an empty composer disabled', () => {
+    const { rerender } = render(<ProjectChatComposer {...base} value="" />);
+    expect(screen.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+    rerender(
+      <ProjectChatComposer
+        {...base}
+        value=""
+        attachments={[
+          { file: new File(['text'], 'pasted.txt'), progress: 100, status: 'complete' },
+        ]}
+      />
+    );
+    expect(screen.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+  });
 });
