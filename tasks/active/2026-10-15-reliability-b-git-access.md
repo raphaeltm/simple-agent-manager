@@ -86,3 +86,5 @@ Independent follow-up review records:
 - `/root/completion_review`, review ID `RB-COMPLETION-CONFIG-20261015-02`: PASS local handoff; shared bounds, fresh authorization, startup budget validation, docs/constitution/task mapping all pass. Final coordinator gates remain pending.
 
 Final simplification keeps bounds in the existing GitHub service and isolates pagination-bound coverage in `apps/api/tests/unit/services/github-repository-pagination.test.ts`. Fresh security review `security-review-reliability-b-bounds-2026-10-15-02` passes authorization. Current-tree scanner is BLOCKED by three existing reviewed matches whose line positions changed (50 total; no new match bytes). Scanner and baseline unchanged; no layout manipulation or waiver. Coordinator must resolve the exact private baseline migration decision before staging/readiness.
+
+Scanner blocker resolved through ordinary declaration placement: pagination constants now sit beside their pagination function, leaving unrelated PEM conversion code unchanged. CI-pinned current-tree scan PASS50reviewed/0new; scanner/baseline untouched.

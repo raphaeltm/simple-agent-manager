@@ -42,13 +42,6 @@ const userInstallationSchema = v.object({
 
 export const DEFAULT_GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS = 50 * 60;
 
-// Existing user-installation scan limits; hints use the same derived page bound.
-export const GITHUB_REPOSITORY_PAGE_SIZE = 100;
-export const GITHUB_REPOSITORY_SCAN_LIMIT = 10_000;
-export const GITHUB_REPOSITORY_MAX_PAGE = Math.ceil(
-  GITHUB_REPOSITORY_SCAN_LIMIT / GITHUB_REPOSITORY_PAGE_SIZE
-);
-
 async function installationTokenCacheKey(
   installationId: string,
   body: string | undefined
@@ -625,6 +618,13 @@ export async function getUserAccessibleInstallations(
 
   return allInstallations;
 }
+
+// Existing user-installation scan limits; hints use the same derived page bound.
+export const GITHUB_REPOSITORY_PAGE_SIZE = 100;
+export const GITHUB_REPOSITORY_SCAN_LIMIT = 10_000;
+export const GITHUB_REPOSITORY_MAX_PAGE = Math.ceil(
+  GITHUB_REPOSITORY_SCAN_LIMIT / GITHUB_REPOSITORY_PAGE_SIZE
+);
 
 /**
  * Get repositories accessible to the authenticated GitHub user for a specific
