@@ -17,7 +17,9 @@ New chats stage attachments in R2, while existing chats upload directly to a liv
 - [x] Transfer after runtime readiness and before prompt; retry safely; include explicit per-upload file paths.
 - [x] Regression tests for queue removal, ingestion, ownership, failed transfer, wake ordering and prompt references.
 - [x] Documentation, specialist reviews, mobile/desktop screenshot audits.
-- [ ] Staging new/active/sleeping verification, clean up, green CI, CodeRabbit request/wait, merge and production deployment.
+- [x] Staging new/active/sleeping verification.
+- [x] Test resource cleanup.
+- [ ] Green CI, CodeRabbit request/wait, merge and production deployment.
 
 ## Acceptance
 Multiple files upload to R2 immediately and remain removable before send. No workspace transfer or agent prompt until send. Sleeping sessions wake before transfer. Agent receives exact readable file paths. Failed upload/transfer never silently drops attachments. Normal short-text paste remains text.
@@ -35,7 +37,15 @@ Multiple files upload to R2 immediately and remain removable before send. No wor
 - API/web builds passed; full repository lint/typecheck passed before final review edits; recheck final edits.
 - Four Playwright attachment audits passed (new/active × 375×667/1280×800). Screenshots reviewed; fixed new-chat starter area min-height to keep Send visible; bounded chip list height.
 - Local backend/security/Cloudflare/constitution review PASS. UI review 4/4/4/4/5; addressed empty-file text, attachment-only send, retry/scope tests. Completion review identified duplicate plain WS + enriched durable messages; attachment sends now rely solely on durable transcript persistence.
-- Staging, CI, CodeRabbit, merge and production remain pending. No completion claim before those gates.
+- Staging passed (details below). CI, CodeRabbit, merge and production remain pending; no completion claim before those gates.
 
 ## Staging deployment blocker
 Initial deployment 38756062202 failed Cloudflare validation10021 (Worker startup CPU). The local startup profile identified eager speech model-registry initialization. Deferred the two speech-only imports inside their existing request-time error handling: active startup CPU fell from1462.8ms to530.2ms locally; all94 speech tests passed, backend reviewer PASS. This narrow adjacent fix is required to deploy the attachment changes. Full API suite12386passed with one boot callback timeout; isolated rerun9/9passed.
+
+## Live staging evidence
+- Deployment38758589017 green on c3e0bb75a; built-in smoke tests passed.
+- Real browser new-chat and active-followup reads each returned two distinct random markers from same-name files; removed third file was excluded.
+- Mobile375×667 sleep/wake passed: R2 upload left session sleeping; Send restored workspace and delivered both files before prompt. Session dabab8ab-4f5d-485c-9f51-b33457b5a1c5; initial workspace01M50395N45JJ28KY96FYP6S47, restored workspace01M503MN1D35WYENWC37HJ80M7.
+- Dashboard/projects/settings navigation passed without page errors. Speech generation/audio retrieval passed200 with17856bytes.
+- Initial live probe selectors and streamed-chunk aggregation were corrected in the local harness; no product patch was needed.
+- Test workspace and VM deleted after verification. Completion reviewer PASS for PR readiness; release gates remain pending.
