@@ -497,6 +497,19 @@ new_sqlite_classes = ["DiagnosisRunner"]
 tag = "v21"
 new_sqlite_classes = ["InteractionStore"]
 
+# Reliability C: independent bounded hot-key storage, not ProjectData.
+[[durable_objects.bindings]]
+name = "MCP_RATE_COUNTER"
+class_name = "McpRateCounter"
+
+[[durable_objects.bindings]]
+name = "WORKSPACE_BOOT_LOG"
+class_name = "WorkspaceBootLog"
+
+[[migrations]]
+tag = "v22"
+new_sqlite_classes = ["McpRateCounter", "WorkspaceBootLog"]
+
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"

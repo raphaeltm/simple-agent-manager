@@ -1,3 +1,5 @@
+export { McpRateCounter } from './durable-objects/mcp-rate-counter';
+export { WorkspaceBootLog } from './durable-objects/workspace-boot-log';
 import { cliOperationReceiptRoutes } from './routes/cli-operation-receipts';
 import { cliProjectMetadataRoutes } from './routes/cli-project-metadata';
 import { projectScheduleRoutes } from './routes/project-schedules';
