@@ -22,7 +22,7 @@ export const chromium={launch:async()=>{if(mode==='startup')throw new Error(secr
 newContext:async()=>({newPage:async()=>({goto:async url=>{currentUrl=mode==='screenshot-redirect'?'https://other.example.invalid/':url;},url:()=>currentUrl,screenshot:async options=>{if(mode==='screenshot-error'){writeFileSync(options.path,secret);throw new Error(secret);}writeFileSync(options.path,'SYNTHETIC_IMAGE_NOT_LIVE');}}),request:{fetch:async(url,options)=>{
 if(url.endsWith('/state'))stateCalls++;
 if(mode==='state-network'&&stateCalls===2&&url.endsWith('/state'))throw new Error(secret);
-note({logout:url.endsWith('/sign-out'),normalOrigin:options.headers.Origin==='https://api.example.invalid',redirectsDisabled:options.maxRedirects===0});
+note({path:new URL(url).pathname,method:options.method,logout:url.endsWith('/sign-out'),normalOrigin:options.headers.Origin==='https://api.example.invalid',redirectsDisabled:options.maxRedirects===0});
 if(!url.endsWith('/sign-out')&&!url.endsWith('/token-login')){if(mode==='network')throw new Error(secret);if(mode==='timeout'){const e=new Error(secret);e.name='TimeoutError';throw e;}if(mode==='hung')await new Promise(()=>{});}
 if(url.endsWith('/sign-out'))loggedOut=true;
 return {status:()=>loggedOut&&url.endsWith('/nodes')?401:200,dispose:async()=>{},json:async()=>{
@@ -37,7 +37,8 @@ if(url.endsWith('/stop'))return {status:'stopped',workspaceDeleted:mode!=='delet
 if(url.endsWith('/sleep'))return {status:mode==='sleep-failed'?'failed':'sleeping',workspaceId:'${ID}',chatSessionId:'${UUID}',snapshotExpiresAt:'2026-10-16T00:00:00.000Z',success:mode!=='sleep-false'};
 if(options.method==='DELETE')return {success:mode!=='success-false'};
 if(url.includes('/library/'))return JSON.parse(readFileSync(url.includes('/${PROBE}/')?process.env.QUEUE_PROBE:url.includes('/${OTHER}/')?process.env.QUEUE_EXPECTATIONS:process.env.QUEUE_BASELINE,'utf8'));
-if(url.endsWith('/tasks/${ID}'))return {id:'${ID}',status:'completed',completionEvidence:{notes:secret},outputPrUrl:secret,secret};
+if(url.endsWith('/tasks/${ID}'))return {id:mode==='task-mismatch'?'${OTHER}':'${ID}',status:'completed',workspaceId:'${ID}',completionEvidence:{notes:secret},outputPrUrl:secret,secret};
+if(url.endsWith('/workspaces/${ID}'))return {id:mode==='workspace-mismatch'?'${OTHER}':'${ID}',nodeId:'${ID}',status:'running'};
 return [{id:'${ID}',status:mode==='malformed'?secret:'running',secret}];}};
 }}}),close:async()=>{note({closed:true});if(mode==='close')throw new Error(secret);if(mode==='hang-close')await new Promise(()=>{});}}}};`;
 function fixture(mode,commands,{deadline=2500,invalidBaseline=false,invalidExpectations=false,screenshots=false,reuse=false,invalidProbe=false}={}){
@@ -101,6 +102,7 @@ test('screenshots require explicit completed-fixture approval and reject a navig
  for(const mode of ['screenshot-redirect','screenshot-error']){v=fixture(mode,[submit,task,capture,{op:'stop'}],{screenshots:true});assert.notEqual(v.outputs['out/0003.json'].category,'ok');assert.ok(!v.outputs[`private/artifacts/${ID}-summary.png`]);}
 });
 
+const workspace={op:'request',path:`/api/workspaces/${ID}`};
 const sleep={op:'request',path:`/api/workspaces/${ID}/sleep`,method:'POST'};
 test('every state read invalidates stale idle authorization, including null/missing/error responses',()=>{
  for(const mode of ['state-null','state-missing','state-network']){const v=fixture(mode,[submit,state,state,prompt,{op:'stop'}]);assert.notEqual(v.outputs['out/0004.json'].category,'ok');assert.ok(!v.outputs['private/state/0004.json']);}
@@ -109,10 +111,10 @@ test('action and prompt results require affirmative route-specific success',()=>
  for(const mode of ['accepted-false','prompt-failed']){const v=fixture(mode,[submit,state,prompt,{op:'stop'}]);assert.notEqual(v.outputs['out/0003.json'].category,'ok');}
  let v=fixture('success-false',[{op:'request',path:`/api/nodes/${ID}`,method:'DELETE'},{op:'stop'}]);assert.notEqual(v.outputs['out/0001.json'].category,'ok');
  v=fixture('deleted-false',[{op:'request',path:`/api/projects/${ID}/sessions/${UUID}/stop`,method:'POST'},{op:'stop'}]);assert.notEqual(v.outputs['out/0001.json'].category,'ok');
- for(const mode of ['sleep-false','sleep-failed']){v=fixture(mode,[submit,sleep,{op:'stop'}]);assert.notEqual(v.outputs['out/0002.json'].category,'ok');}
+ for(const mode of ['sleep-false','sleep-failed']){v=fixture(mode,[submit,task,workspace,sleep,{op:'stop'}]);assert.notEqual(v.outputs['out/0004.json'].category,'ok');}
 });
 test('supported wake is one normal prompt after an affirmative sleep result, not an invented wake route',()=>{
- const v=fixture('sleep-state-null',[submit,state,sleep,state,prompt,{op:'stop'}]);assert.equal(v.outputs['out/0003.json'].category,'ok');assert.equal(v.outputs['out/0005.json'].category,'ok');
+ const v=fixture('sleep-state-null',[submit,task,workspace,state,sleep,state,prompt,{op:'stop'}]);assert.equal(v.outputs['out/0005.json'].category,'ok');assert.equal(v.outputs['out/0007.json'].category,'ok');
  const bad=fixture('normal',[{op:'request',path:`/api/workspaces/${ID}/wake`,method:'POST'},{op:'stop'}]);assert.notEqual(bad.outputs['out/0001.json'].category,'ok');
 });
 
@@ -125,3 +127,25 @@ test('private probe artifacts retain only fixed boolean/status labels, never arb
 });
 
 test('actual private probe sink requires the complete named phase and rejects raw/partial scalar lookalikes',()=>{const cmd={op:'artifact',schema:'probe',probePhase:'a-prepare',artifactId:PROBE,taskId:ID,branch:'sam/cell'};let v=fixture('normal',[cmd,{op:'stop'}]);assert.equal(v.outputs['out/0001.json'].category,'ok');assert.ok(v.outputs[`private/artifacts/${ID}-probe-a-prepare.json`]);v=fixture('normal',[cmd,{op:'stop'}],{invalidProbe:true});assert.notEqual(v.outputs['out/0001.json'].category,'ok');assert.ok(!v.outputs[`private/artifacts/${ID}-probe-a-prepare.json`]);});
+
+const stopSession={op:'request',path:`/api/projects/${ID}/sessions/${UUID}/stop`,method:'POST'};
+const deleteNode={op:'request',path:`/api/nodes/${ID}`,method:'DELETE'};
+const deleteWorkspace={op:'request',path:`/api/workspaces/${ID}`,method:'DELETE'};
+test('mutation scope is bound before fetch to accepted submit and canonical task/workspace associations',()=>{
+ for(const cmd of [stopSession,sleep,deleteNode,deleteWorkspace]){
+  const v=fixture('normal',[getNodes,cmd,{op:'stop'}]);
+  assert.notEqual(v.outputs['out/0002.json'].category,'ok');assert.ok(!v.events.some(e=>e.path===cmd.path));
+ }
+ for(const cmd of [sleep,deleteNode,deleteWorkspace]){
+  const unrelated={...cmd,path:cmd.path.replace(ID,OTHER)};
+  const v=fixture('normal',[submit,task,workspace,unrelated,{op:'stop'}]);
+  assert.notEqual(v.outputs['out/0004.json'].category,'ok');assert.ok(!v.events.some(e=>e.path===unrelated.path));
+ }
+ const unrelatedStop={...stopSession,path:stopSession.path.replace(UUID,'22222222-2222-4222-8222-222222222222')};
+ let v=fixture('normal',[submit,unrelatedStop,{op:'stop'}]);assert.ok(!v.events.some(e=>e.path===unrelatedStop.path));
+ v=fixture('normal',[submit,task,workspace,sleep,stopSession,deleteWorkspace,deleteNode,{op:'stop'}]);
+ for(const index of [4,5,6,7])assert.equal(v.outputs[`out/${String(index).padStart(4,'0')}.json`].category,'ok');
+ v=fixture('task-mismatch',[submit,task,deleteWorkspace,{op:'stop'}]);assert.notEqual(v.outputs['out/0002.json'].category,'ok');assert.ok(!v.events.some(e=>e.path===deleteWorkspace.path));
+ v=fixture('workspace-mismatch',[submit,task,workspace,deleteNode,{op:'stop'}]);
+ assert.notEqual(v.outputs['out/0003.json'].category,'ok');assert.ok(!v.events.some(e=>e.path===deleteNode.path));
+});
