@@ -16,6 +16,8 @@ export async function transferWorkspaceAttachments(input: {
   nodeId: string;
   workspaceId: string;
   attachments: TaskAttachment[];
+  /** Keep staged bytes available for durable delivery retries until R2 lifecycle expiry. */
+  retainStaged?: boolean;
   beforeTransfer?: () => Promise<void>;
 }): Promise<void> {
   const { env, userId, nodeId, workspaceId, attachments } = input;
@@ -34,8 +36,8 @@ export async function transferWorkspaceAttachments(input: {
     const object = await getAttachmentFromR2(env.R2, userId, attachment);
     const bytes = new Uint8Array(await new Response(object.body).arrayBuffer());
     const body = new FormData();
+    body.append('destination', `/workspaces/.private/${attachment.uploadId}`);
     body.append('files', new Blob([bytes], { type: object.contentType }), attachment.filename);
-    // Omitting destination retains the VM-agent's private sibling directory default.
     const response = await fetchNodeAgent(
       nodeId,
       env,
@@ -56,5 +58,5 @@ export async function transferWorkspaceAttachments(input: {
       );
     }
   }
-  await cleanupAttachments(env.R2, userId, attachments);
+  if (!input.retainStaged) await cleanupAttachments(env.R2, userId, attachments);
 }

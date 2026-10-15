@@ -10,6 +10,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   nodeAgentRequest: vi.fn(),
+  transferWorkspaceAttachments: vi.fn(),
   sendPromptToAgentOnNode: vi.fn(),
   ensureSessionRecovery: vi.fn(),
   reportSessionRecoveryRefusal: vi.fn(),
@@ -23,6 +24,10 @@ const mocks = vi.hoisted(() => ({
       super(`Node Agent request failed: ${statusCode} ${responseBody}`);
     }
   },
+}));
+
+vi.mock('../../../src/services/workspace-attachments', () => ({
+  transferWorkspaceAttachments: mocks.transferWorkspaceAttachments,
 }));
 
 vi.mock('../../../src/services/node-agent', () => ({
@@ -213,7 +218,12 @@ describe('VM prompt delivery adapter', () => {
 
   it('forwards no-recovery-on-timeout for a read-only capability probe', async () => {
     await new DefaultVmPromptDeliveryAdapter(envWithTarget()).submit(input(false));
-    expect(mocks.nodeAgentRequest).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ method: 'GET', recoverContainerOnTimeout: false }));
+    expect(mocks.nodeAgentRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ method: 'GET', recoverContainerOnTimeout: false })
+    );
   });
 
   it('fails closed for an old VM unless compatibility is explicitly enabled', async () => {
@@ -1121,5 +1131,58 @@ describe('VM prompt delivery adapter — urgent busy-turn stop hook', () => {
 
     expect(result.kind).toBeOneOf(['accepted', 'ambiguous', 'retry']);
     expect(onBusyTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe('attachment delivery ordering', () => {
+  const attachment = {
+    uploadId: 'upload-1',
+    filename: 'photo.png',
+    size: 4,
+    contentType: 'image/png',
+  };
+  it('copies owned staged files before sending an agent prompt and keeps bytes for retries', async () => {
+    const env = envWithTarget();
+    env.R2 = { head: vi.fn().mockResolvedValue({ size: 4 }) } as unknown as R2Bucket;
+    const request = input(false);
+    request.claim.message.metadata = { attachments: [attachment] };
+    mocks.nodeAgentRequest.mockResolvedValue(promptProtocolCapabilities);
+    mocks.transferWorkspaceAttachments.mockResolvedValue(undefined);
+    mocks.sendPromptToAgentOnNode.mockResolvedValue(protocolFixture.newPrompt);
+    await new DefaultVmPromptDeliveryAdapter(env).submit(request);
+    expect(mocks.transferWorkspaceAttachments).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [attachment],
+        userId: 'user-1',
+        workspaceId: 'workspace-1',
+        retainStaged: true,
+      })
+    );
+    expect(mocks.transferWorkspaceAttachments.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      mocks.sendPromptToAgentOnNode.mock.invocationCallOrder.at(-1)!
+    );
+  });
+  it('does not submit the prompt if the file transfer fails', async () => {
+    vi.clearAllMocks();
+    const env = envWithTarget();
+    env.R2 = { head: vi.fn().mockResolvedValue({ size: 4 }) } as unknown as R2Bucket;
+    const request = input(false);
+    request.claim.message.metadata = { attachments: [attachment] };
+    mocks.nodeAgentRequest.mockResolvedValue(promptProtocolCapabilities);
+    mocks.transferWorkspaceAttachments.mockRejectedValue(new Error('transfer unavailable'));
+    const result = await new DefaultVmPromptDeliveryAdapter(env).submit(request);
+    expect(result.kind).toBe('retry');
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+  it('rejects attachments from a sender other than the workspace owner', async () => {
+    vi.clearAllMocks();
+    const request = input(false);
+    request.claim.message.senderId = 'other-user';
+    request.claim.message.metadata = { attachments: [attachment] };
+    mocks.nodeAgentRequest.mockResolvedValue(promptProtocolCapabilities);
+    const result = await new DefaultVmPromptDeliveryAdapter(envWithTarget()).submit(request);
+    expect(result.kind).toBe('retry');
+    expect(mocks.transferWorkspaceAttachments).not.toHaveBeenCalled();
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 });

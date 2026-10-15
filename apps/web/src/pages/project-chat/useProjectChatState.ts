@@ -73,7 +73,7 @@ import {
   SESSION_RECONCILE_INTERVAL_MS,
   SESSION_SYNC_INTERVAL_MS,
 } from './types';
-import { useAttachments } from './useAttachments';
+import { DEFAULT_ATTACHMENT_MESSAGE, useAttachments } from './useAttachments';
 import { useProjectSkills } from './useProjectSkills';
 import { useProvisioningTracker } from './useProvisioningTracker';
 import { useSessionReducer } from './useSessionReducer';
@@ -595,9 +595,10 @@ export function useProjectChatState() {
   }, [agentProfiles, configuredAgents.length, openProfileWizard, selectedProfileId]);
 
   const handleSubmit = async () => {
-    const trimmed = message.trim();
+    const trimmed =
+      message.trim() || (attachments.chatAttachments.length > 0 ? DEFAULT_ATTACHMENT_MESSAGE : '');
     if (!trimmed) return;
-    if (attachments.chatUploading) {
+    if (attachments.chatAttachments.some((a) => a.status !== 'complete')) {
       setSubmitError('Please wait for file uploads to complete');
       return;
     }

@@ -7,6 +7,14 @@ SAM's project pages are chat-first interfaces where you interact with AI coding 
 
 Recent chat updates make the workspace feel more like a persistent work surface: task-backed chats can be forked consistently, SAM-injected setup context is collapsed out of the main conversation, and desktop sidebars can be collapsed when you need more room.
 
+## Attach Files to a Message
+
+Use the paperclip, paste an image or file, or drag files onto the message input. Long pasted text becomes a text-file attachment; short text stays in the input.
+
+Files upload while you compose. Review the attachment chips and remove any files you do not want to send. If an upload fails, remove it and attach it again before sending.
+
+The agent receives the files only when you send your message, together with their exact workspace paths. You can also attach files to a sleeping conversation: SAM wakes the workspace before delivering your message and files.
+
 ## Real-Time Streaming
 
 Agent output streams directly to your browser via WebSocket. You see code being written, terminal commands executing, and the agent's thought process as it happens — no waiting for a complete response.

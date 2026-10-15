@@ -13,6 +13,8 @@ import { type SendChatMessageSchema } from '../schemas';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
 import * as projectDataService from '../services/project-data';
 import { cancelScheduledSessionSleep } from '../services/session-snapshots';
+import { buildVisibleInitialPrompt } from './agent-bootstrap-prompt';
+import { validateAttachments } from './attachment-upload';
 
 export function validateSendChatContent(body: v.InferOutput<typeof SendChatMessageSchema>): string {
   const content = body.content?.trim();
@@ -34,22 +36,30 @@ export async function sendChat(
 
   const content = validateSendChatContent(body);
 
+  const attachments = body.attachments ?? [];
+  if (attachments.length > 0) {
+    const validation = await validateAttachments(env, userId, attachments);
+    if (!validation.valid) throw errors.badRequest(validation.errors.join('; '));
+  }
   const { enrichedMessage } = await enrichMessageWithMentions(content, db, projectId, userId, env);
   // A follow-up is an immediate keep-awake gesture. Cancel only an unclaimed
   // idle sleep; durable delivery wakes a sleep that has already begun.
   await cancelScheduledSessionSleep(db, sessionId);
   const durableConfig = resolveDurableExecutionConfig(env);
+  if (attachments.length > 0 && !durableConfig.deliveryEnabled) {
+    throw errors.badRequest('Attachment messages require durable prompt delivery to be enabled');
+  }
   if (durableConfig.deliveryEnabled) {
     const accepted = await projectDataService.acceptPromptDelivery(env, projectId, {
       targetSessionId: sessionId,
-      displayContent: content,
-      deliveryContent: enrichedMessage,
+      displayContent: buildVisibleInitialPrompt({ message: content, attachments }),
+      deliveryContent: buildVisibleInitialPrompt({ message: enrichedMessage, attachments }),
       senderType: 'human',
       senderId: userId,
       messageClass: 'deliver',
       sourceKind: 'user_followup',
       ttlMs: durableConfig.ttlMs,
-      metadata: { userId },
+      metadata: { userId, ...(attachments.length > 0 ? { attachments } : {}) },
     });
     return {
       accepted: true,

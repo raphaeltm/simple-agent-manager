@@ -1,4 +1,8 @@
-import type { AgentProfileRuntime, TaskExecutionStep } from '@simple-agent-manager/shared';
+import type {
+  AgentProfileRuntime,
+  TaskAttachment,
+  TaskExecutionStep,
+} from '@simple-agent-manager/shared';
 
 import { request } from './client';
 
@@ -392,13 +396,14 @@ export async function resetIdleTimer(
 export async function sendFollowUpPrompt(
   projectId: string,
   sessionId: string,
-  content: string
+  content: string,
+  attachments?: TaskAttachment[]
 ): Promise<{ status: string; sessionId?: string; message?: string }> {
   return request<{ status: string; sessionId?: string; message?: string }>(
     `/api/projects/${projectId}/sessions/${sessionId}/prompt`,
     {
       method: 'POST',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, attachments }),
     }
   );
 }
