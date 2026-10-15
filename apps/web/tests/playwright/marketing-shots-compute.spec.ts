@@ -584,10 +584,12 @@ test.describe('A. Compute pool editor', () => {
     await section.getByRole('button', { name: 'Edit' }).click();
     const machinesHeading = page.getByRole('heading', { name: 'Allowed machines', exact: true });
     await expect(machinesHeading).toBeVisible();
+    // Each click removes its button, so always expand the first one left.
     const showMoreButtons = page.getByRole('button', { name: /^Show \d+ more machine types?$/ });
-    for (const showMore of await showMoreButtons.all()) {
-      await showMore.click();
+    for (let left = await showMoreButtons.count(); left > 0; left -= 1) {
+      await showMoreButtons.first().click();
     }
+    await expect(showMoreButtons).toHaveCount(0);
     await expect(page.getByText('region sold out', { exact: false }).first()).toBeVisible();
     await assertNoOverflow(page);
 

@@ -525,11 +525,12 @@ async function editStressedPool(page: Page, screenshotName: string) {
   await page.getByRole('button', { name: 'cx43 in Helsinki', exact: true }).click();
   await screenshotNearHeading(page, 'Allowed machines', screenshotName);
 
-  for (const showMore of await page
-    .getByRole('button', { name: /^Show \d+ more machine types?$/ })
-    .all()) {
-    await showMore.click();
+  // Each click removes its button, so always expand the first one left.
+  const showMoreButtons = page.getByRole('button', { name: /^Show \d+ more machine types?$/ });
+  for (let left = await showMoreButtons.count(); left > 0; left -= 1) {
+    await showMoreButtons.first().click();
   }
+  await expect(showMoreButtons).toHaveCount(0);
   await expect(
     page.getByRole('button', { name: 'cpx31 in Ashburn (temporarily unavailable)', exact: true })
   ).toBeDisabled();
