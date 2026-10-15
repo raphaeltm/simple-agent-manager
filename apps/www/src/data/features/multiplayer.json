@@ -1,8 +1,8 @@
 {
   "slug": "multiplayer",
   "label": "Team Projects",
-  "title": "Share the project.\nSee everyone's agents.",
-  "subtitle": "Everyone in the project sees every agent session, uses the same agent setups, and can tell whose key is paying for what.",
+  "title": "Your whole team's agents in one project",
+  "subtitle": "Everyone shares the same agent settings, skills, and secrets, and can follow anyone's session.",
   "summary": "Invite your team into a project, share profiles and skills, and see whose keys pay for shared automation.",
   "highlights": [
     "Any member creates an invite link; an owner or admin approves each request",

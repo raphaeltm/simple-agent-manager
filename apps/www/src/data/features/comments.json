@@ -1,8 +1,8 @@
 {
   "slug": "comments",
   "label": "Comments",
-  "title": "Comment on the exact line.\nThe agent reads it.",
-  "subtitle": "Pick a sentence in the agent's reply or a line in a file it wrote. Send the thread over, and the agent can answer and mark it resolved.",
+  "title": "Comment on what the agent wrote",
+  "subtitle": "Select any sentence in its reply, then send the thread to the agent. It can answer and mark the thread resolved.",
   "summary": "Comment on chat messages or library files, then send the thread to the agent as context.",
   "highlights": [
     "Threads anchor to a quoted sentence in a chat message, or to a library file",
@@ -21,9 +21,9 @@
     }
   ],
   "homepage": {
-    "headline": "Review agent work like a pull request",
-    "body": "Every thread lands in one inbox, sorted by whether it's waiting on you. A review comment can turn into a fix without you pasting anything back into the chat.",
-    "caption": "A comment thread on one line of a file"
+    "headline": "Review the documents agents write",
+    "body": "Agents can save plans and reports to the project library, and your team can comment on any passage. All threads land in one inbox, sorted by whether they're waiting on you.",
+    "caption": "A reply on a passage in a migration plan"
   },
   "details": [
     {

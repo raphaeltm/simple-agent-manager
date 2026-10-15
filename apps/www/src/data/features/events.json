@@ -1,8 +1,8 @@
 {
   "slug": "events",
   "label": "Schedules & Triggers",
-  "title": "Let routine work\nstart itself.",
-  "subtitle": "Run an agent every night, when a GitHub issue is opened, or when another service calls a webhook. Every run is logged, so your team can see what started and why.",
+  "title": "Let routine work start itself",
+  "subtitle": "Run an agent every night, when a GitHub issue is opened, or when another service calls a webhook. SAM logs every run, so your team can see what ran and when.",
   "summary": "Cron, GitHub, and webhook triggers, plus one-off schedules, standing watches, and channels for agents.",
   "highlights": [
     "Three trigger sources: cron schedules, GitHub events, and authenticated JSON webhooks",
@@ -21,8 +21,8 @@
     }
   ],
   "homepage": {
-    "headline": "Every trigger in one list",
-    "body": "Each trigger shows when it last ran and when it runs next, and warns you when it bills someone's personal key instead of a shared one.",
+    "headline": "All your triggers in one list",
+    "body": "Each trigger shows its schedule and recent runs. In shared projects, SAM flags triggers that bill one person's key instead of a shared one.",
     "caption": "A scheduled dependency audit finishes and tells you"
   },
   "details": [

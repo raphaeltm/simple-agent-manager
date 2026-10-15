@@ -1,7 +1,7 @@
 {
   "slug": "durable-sessions",
   "label": "Sessions That Wait",
-  "title": "Leave any time.\nPick up where you left off.",
+  "title": "Come back days later to the same session",
   "subtitle": "Sessions you leave idle go to sleep and keep their work for up to seven days.",
   "summary": "Sessions survive runtime teardown, agents coordinate with each other, and Compose releases deploy straight from the project.",
   "highlights": [
@@ -21,8 +21,8 @@
   ],
   "homepage": {
     "headline": "A message wakes it up",
-    "body": "Reply to a sleeping session and SAM brings back its files, branch, and conversation, so the agent continues where it stopped.",
-    "caption": "SAM rebuilds the workspace, then delivers your message"
+    "body": "Reply to a sleeping session and SAM restores its branch, uncommitted changes, and chat, then delivers your message.",
+    "caption": "A sleeping session, then the same session waking up"
   },
   "details": [
     {

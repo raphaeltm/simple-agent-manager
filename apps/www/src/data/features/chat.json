@@ -1,8 +1,8 @@
 {
   "slug": "chat",
   "label": "Agent Chat",
-  "title": "Describe what you want.\nWatch it happen.",
-  "subtitle": "The agent works in its own copy of your repo and can open a pull request when it's done. Follow each step as it runs, and stop it at any time.",
+  "title": "Hand off a task in a chat message",
+  "subtitle": "The agent works in its own copy of your repo and can push its work to a branch. Follow each step as it runs, and stop it at any time.",
   "summary": "Talk to your agents like teammates — pick a profile, describe the task, and watch every tool call stream live.",
   "highlights": [
     "Switch between Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, and Amp without leaving the chat",
@@ -21,8 +21,8 @@
   ],
   "homepage": {
     "headline": "Use the agent that fits the job",
-    "body": "Switch between Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, and Amp in the same chat. Sign in with your Claude or ChatGPT plan, or use an API key.",
-    "caption": "Pick an agent at the bottom of the chat"
+    "body": "Pick Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, or Amp for each new chat. Sign in with your Claude or ChatGPT plan, or use an API key.",
+    "caption": "Choose the agent when you start a chat"
   },
   "details": [
     {

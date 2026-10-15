@@ -1,8 +1,8 @@
 {
   "slug": "agent-context",
   "label": "Project Memory",
-  "title": "Tell it once.\nEvery agent knows.",
-  "subtitle": "Keep project rules and preferences in one place. Every new session starts with them, and you can see what your agents were told.",
+  "title": "Write your project rules down once",
+  "subtitle": "Keep rules and preferences in one place. New sessions are told to load them first, and you can see and edit what's saved.",
   "summary": "A project knowledge base agents receive as context, plus policies and a full activity log.",
   "highlights": [
     "Project memory entries carry a confidence score, a source, and a confirmation date",
@@ -20,7 +20,7 @@
   ],
   "homepage": {
     "headline": "Memory you can check",
-    "body": "Each note shows how confident SAM is, whether you said it or an agent inferred it, and when someone last confirmed it.",
+    "body": "Each note shows how confident SAM is, whether you said it or an agent inferred it, and when it was last confirmed.",
     "caption": "Saved notes about the project, then a project rule"
   },
   "details": [

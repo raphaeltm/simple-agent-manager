@@ -39,14 +39,26 @@ Not asked: merging or deploying. Stop at a ready PR for approval.
 
 ## Checklist
 
-- [ ] Copy skill drafted, reviewed by a local agent, revised, and saved to SAM skills
-- [ ] Button row spacing fixed
+- [x] Copy skill drafted, reviewed by a local agent (GOOD WITH CHANGES; re-check after v2 → final fixes applied), saved as SAM skill `homepage-copy` (01M4ZYPHAS41V97VNP9XEWM5EH)
+- [x] Button row spacing fixed (48 px above and below; was 0 px)
 - [ ] Claims ledger and copy deck written
-- [ ] Copy rewritten (hero, agent dock, features, How It Works, comparison, roadmap, CTA, proof strip, hero layer labels)
+- [x] Copy rewritten (hero, agent dock, features, How It Works, comparison, roadmap, CTA, proof strip, hero layer labels, header button, page meta, scene descriptions)
 - [ ] Humanizer pass and cold-reader review
 - [ ] Tests updated, lint, typecheck, unit and Playwright suites pass
 - [ ] Full-page screenshots (desktop and phone) uploaded to the library
 - [ ] PR with copy deck, evidence, local reviews and CodeRabbit request; held for approval
+
+## Skill review (local agent)
+
+- Round 1, verdict GOOD WITH CHANGES. The reviewer trialled the skill on the hero, compute pools and durable sessions; a blind A/B cold reader preferred its output. Findings:
+  - know the click: the Get Started buttons lead to an 8-step self-host guide;
+  - shared fields and the slot table;
+  - one need per section;
+  - humanizer conflicts (case, dashes, restated layers);
+  - overpromising examples (7-day limit; Instant has no Docker);
+  - source ranking;
+  - 375 px, cold-reader questions, a spelled-out product name, the framing line.
+- Round 2, on v2: all addressed except the field map, which described the branch's new `homepage` field as if `main` had it. It is now worded to hold before and after merge. Also added that Instant work is not committed or pushed, and that the name must be visible in the hero.
 
 ## Acceptance criteria
 
