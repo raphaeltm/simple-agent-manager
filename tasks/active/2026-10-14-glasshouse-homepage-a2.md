@@ -122,20 +122,27 @@ Also fold in the live bugs from idea `01M4XZQRYJ38CMN7R2PKMS370N`:
   DOM 2,044 → 692; elements with backdrop-filter 20 → 2; after scrolling the hero away, rAF/s
   60 → 0 and running CSS animations 36 → 0–2; transfer desktop 1,143 → 1,265 KB (hero layers),
   phone 1,143 → 984 KB.
+- Review round 1 fixes: renderer moved out of the app's shared chunk (lazy, f42325da6); stage
+  anchored to the copy column with stepped scales so the resting frame fits 360-1920px, and the
+  exploded intro pulled in (explode scale 0.8, placement chip -60px) so it fits too; phone chip
+  clamped from the left edge; homepage layout test measures layers at 9 widths in both states
+  (rule 56) and caps the DOM at 1,000; landing audit asserts the real canvases and left the
+  quarantine (passes in CI mode); renderer tests drive offscreen and hidden-tab triggers; draw loop
+  allocates no colour strings or gradients per frame (still frames pixel-identical within 4/255).
 - Discrimination checks: removing `field.pause()` fails the pause test; forcing animation under
   reduced motion fails the reduced-motion test; reverting the screenshot fix fails the dark-mode
   pair tests on all three pages; loading both themes fails the light download test.
 
 ## Acceptance criteria
 
-- [ ] Homepage hero matches A2 (real UI, glass node floor, motion story) on desktop; phone variant on mobile
-- [ ] Every product image in the hero exists in dark and light; light mode shows light images
-- [ ] No doubled screenshots in either theme on the three affected pages
-- [ ] Reduced motion: no animation loop, final composed frame shown
-- [ ] Pause control stops all hero motion (WCAG 2.2.2)
-- [ ] No horizontal overflow at 375/390 and 1280/1440; no serious axe violations on `/`
-- [ ] Homepage DOM < 1,000 elements; no decorative JS running offscreen
-- [ ] Shared glass CSS + node field live in `packages/ui` and are used by both www and the app sign-in page
+- [x] Homepage hero matches A2 (real UI, glass node floor, motion story) on desktop; phone variant on mobile
+- [x] Every product image in the hero exists in dark and light; light mode shows light images
+- [x] No doubled screenshots in either theme on the three affected pages
+- [x] Reduced motion: no animation loop, final composed frame shown
+- [x] Pause control stops all hero motion (WCAG 2.2.2)
+- [x] No horizontal overflow at 375/390 and 1280/1440; no serious axe violations on `/`
+- [x] Homepage DOM < 1,000 elements; no decorative JS running offscreen
+- [x] Shared glass CSS + node field live in `packages/ui` and are used by both www and the app sign-in page
 - [ ] CI green; production `Deploy Marketing Site` and `Deploy Production` succeed; live site verified
 
 ## References
