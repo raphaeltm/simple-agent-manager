@@ -22,8 +22,8 @@
   ],
   "homepage": {
     "headline": "Choose which machines agents may use",
-    "body": "Pick machine types from Hetzner's live catalog, or standard sizes at the other providers, with estimated prices. SAM can run several agents on one machine, so you don't pay for a server per task.",
-    "caption": "The catalog, then the server SAM picked from it"
+    "body": "Pick machine types from Hetzner's live catalog, or standard sizes at the other providers, with estimated prices. SAM can run several agents on each server, so you don't rent one per task.",
+    "caption": "The catalog you pick from, then the server SAM chose for a task"
   },
   "details": [
     {

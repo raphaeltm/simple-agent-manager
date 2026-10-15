@@ -1,7 +1,7 @@
 {
   "slug": "chat",
   "label": "Agent Chat",
-  "title": "Hand off a task from your browser or phone",
+  "title": "Assign tasks to agents from your browser or phone",
   "subtitle": "The agent works in its own copy of your repo and can push its work to a branch. Follow each step as it runs, and stop it at any time.",
   "summary": "Talk to your agents like teammates — pick a profile, describe the task, and watch every tool call stream live.",
   "highlights": [
@@ -21,8 +21,8 @@
   ],
   "homepage": {
     "headline": "Use the agent that fits the job",
-    "body": "Pick the agent for each new chat, from Claude Code and Codex to Gemini CLI and others. Sign in with your Claude or ChatGPT plan, or use an API key.",
-    "caption": "Choose the agent when you start a chat"
+    "body": "Pick Claude Code, Codex, Gemini CLI, or another agent for each new chat. Use your Claude or ChatGPT plan, or an API key.",
+    "caption": "The new-chat screen, with starter prompts and the agent picker"
   },
   "details": [
     {

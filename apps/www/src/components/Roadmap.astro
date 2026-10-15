@@ -18,7 +18,7 @@ const phases = [
   {
     title: 'Several agents per server',
     status: 'complete',
-    description: 'Isolated workspaces share one machine, so you need fewer servers',
+    description: 'Isolated workspaces share one server, so you need fewer of them',
   },
   {
     title: 'Projects',
@@ -53,12 +53,12 @@ const phases = [
   {
     title: 'Comments',
     status: 'complete',
-    description: 'Comment on agent messages and project files',
+    description: 'Comment on agent replies and documents in the project library',
   },
   {
     title: 'Choose your servers',
     status: 'complete',
-    description: 'Pick machine types across providers and track server costs',
+    description: 'Pick machine types across providers and track server hours',
   },
   {
     title: 'Schedules and triggers',
@@ -99,7 +99,7 @@ const phases = [
             <div class="timeline-meta">
               <h3 class="timeline-title">{phase.title}</h3>
               <span class={`timeline-badge ${phase.status}`}>
-                {phase.status === 'complete' ? 'Complete' : phase.status === 'in-progress' ? 'In Progress' : 'Planned'}
+                {phase.status === 'complete' ? 'Shipped' : phase.status === 'in-progress' ? 'In Progress' : 'Planned'}
               </span>
             </div>
             <p class="timeline-desc">{phase.description}</p>

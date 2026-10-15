@@ -22,7 +22,7 @@
   ],
   "homepage": {
     "headline": "All your triggers in one list",
-    "body": "Each trigger shows its schedule and recent runs. In shared projects, SAM flags triggers that bill one person's key instead of a shared one.",
+    "body": "Each trigger shows what starts it and its recent runs. In shared projects, SAM warns you when a trigger runs on one person's key.",
     "caption": "A scheduled dependency audit finishes and tells you"
   },
   "details": [

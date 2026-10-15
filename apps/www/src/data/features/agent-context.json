@@ -2,7 +2,7 @@
   "slug": "agent-context",
   "label": "Project Memory",
   "title": "One set of project rules for every agent",
-  "subtitle": "Keep rules and preferences in one place. New sessions are told to load them first, and you can see and edit what's saved.",
+  "subtitle": "SAM tells new sessions to load your rules and preferences first, and you can edit what's saved.",
   "summary": "A project knowledge base agents receive as context, plus policies and a full activity log.",
   "highlights": [
     "Project memory entries carry a confidence score, a source, and a confirmation date",
@@ -20,7 +20,7 @@
   ],
   "homepage": {
     "headline": "Memory you can check",
-    "body": "Each note shows how confident SAM is, whether you said it or an agent inferred it, and when it was last confirmed.",
+    "body": "Each note shows how confident SAM is, where it came from, and when it was last confirmed.",
     "caption": "Saved notes about the project, then a project rule"
   },
   "details": [

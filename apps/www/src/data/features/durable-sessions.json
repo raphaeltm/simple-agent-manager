@@ -22,7 +22,7 @@
   "homepage": {
     "headline": "A message wakes it up",
     "body": "Reply to a sleeping session and SAM restores its branch, uncommitted changes, and chat, then delivers your message.",
-    "caption": "A sleeping session, then the same session waking up"
+    "caption": "SAM recreates the workspace as the session wakes"
   },
   "details": [
     {

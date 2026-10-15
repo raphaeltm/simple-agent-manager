@@ -2,7 +2,7 @@
   "slug": "comments",
   "label": "Comments",
   "title": "Comment on what the agent wrote",
-  "subtitle": "Select any sentence in its reply, then send the thread to the agent. It can answer and mark the thread resolved.",
+  "subtitle": "Start a thread on any sentence in an agent's reply, then send it to the agent, which can answer and mark it resolved.",
   "summary": "Comment on chat messages or library files, then send the thread to the agent as context.",
   "highlights": [
     "Threads anchor to a quoted sentence in a chat message, or to a library file",

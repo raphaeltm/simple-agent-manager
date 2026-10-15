@@ -2,7 +2,7 @@
 const rows = [
   {
     label: 'Where your code runs',
-    sam: 'Your own cloud account (Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, GCP), or Instant workspaces with no cloud provider account',
+    sam: 'Your own cloud account (Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, GCP), or Instant workspaces on your Cloudflare account alone',
     managed: 'Their infrastructure',
     selfHosted: 'Your infra (AWS, GCP, K8s)',
     samWins: true,
@@ -30,7 +30,7 @@ const rows = [
   },
   {
     label: 'What you pay for compute',
-    sam: 'Your cloud provider bills you directly for your servers',
+    sam: 'You pay your cloud provider directly for servers, and Cloudflare for Instant workspaces',
     managed: 'From $20/mo (compute + inference)',
     selfHosted: 'Your cloud bill + license fees',
     samWins: true,
@@ -51,7 +51,7 @@ const rows = [
   },
   {
     label: 'Comments the agent reads',
-    sam: 'Comment on agent replies; the agent answers and resolves the thread',
+    sam: 'Comment on agent replies and send the thread to the agent, which can answer and resolve it',
     managed: 'Bundled or unavailable',
     selfHosted: 'No agent-level comments',
     samWins: true,
@@ -64,8 +64,8 @@ const rows = [
     samWins: true,
   },
   {
-    label: 'Usage and budgets',
-    sam: 'Server hours per person and an admin cost summary',
+    label: 'Usage tracking',
+    sam: 'Server hours per person and an estimated cost summary for admins',
     managed: 'Bundled into one bill',
     selfHosted: 'AI usage reporting and licensed AI Gateway budgets',
     samWins: true,
@@ -79,7 +79,7 @@ const rows = [
   },
   {
     label: 'Picking up where you left off',
-    sam: 'Sessions sleep and wake with their files for up to 7 days',
+    sam: 'Sessions sleep and wake with their branch and uncommitted changes for up to 7 days',
     managed: 'Varies by vendor',
     selfHosted: 'Persistent agent chats; workspace storage depends on template',
     samWins: true,
@@ -93,7 +93,7 @@ const rows = [
   },
   {
     label: 'Where your data lives',
-    sam: 'Workspaces run on your servers; chats, session snapshots, and SAM data are stored in your Cloudflare account',
+    sam: 'Workspaces run on your servers or your Cloudflare account, which also stores chats, session snapshots, and SAM data',
     managed: 'Vendor-managed',
     selfHosted: 'Full: your infrastructure',
     samWins: true,
@@ -107,7 +107,7 @@ const rows = [
       <span class="section-label">Comparison</span>
       <h2 class="section-title">How SAM compares</h2>
       <p class="section-subtitle">
-        SAM runs the agent you choose on servers you own, at your cloud provider's prices.
+        SAM runs the agent you choose on accounts you own, at your providers' prices.
       </p>
     </div>
 
