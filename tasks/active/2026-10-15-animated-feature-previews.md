@@ -88,7 +88,12 @@ One generic, data-driven scene per feature section:
 - [x] Docs: `apps/www/AGENTS.md`
 - [x] Visual QA: desktop 1440/1280 + mobile 390/375, dark + light, reduced motion, mid-story frames
       (resting frames, every story step, recordings; reviewed after each round)
-- [ ] Local specialist reviews; PR with evidence; CI green; CodeRabbit request/wait
+- [x] Local specialist reviews (two rounds, all PASS or ADDRESSED); PR #2349 ready with evidence
+      ([comment](https://github.com/raphaeltm/simple-agent-manager/pull/2349#issuecomment-6187935813));
+      CI green apart from the intentional `needs-human-review` hold; CodeRabbit requested, and it
+      skipped the PR (104 files, over its 100-file limit)
+- [ ] Raphaël approves and merges (not done here: no merge, no deploy); then check the live homepage
+      once `deploy-www.yml` finishes
 
 ## Review round 1 (local specialists) and what changed
 
