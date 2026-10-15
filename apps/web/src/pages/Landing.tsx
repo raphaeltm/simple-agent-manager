@@ -1,4 +1,4 @@
-import { Button, Typography } from '@simple-agent-manager/ui';
+import { Button, GlassNodeField, Typography } from '@simple-agent-manager/ui';
 import { useEffect, useRef } from 'react';
 import { useLocation,useNavigate } from 'react-router';
 
@@ -12,7 +12,8 @@ const PUBLIC_WEBSITE_URL =
 const AGENTS = ['Claude Code', 'OpenAI Codex', 'Gemini CLI', 'Mistral Vibe'];
 
 /**
- * App sign-in page — clean, centered layout with GitHub OAuth.
+ * App sign-in page — a centered glass card over SAM's node network, drawn by the shared
+ * glass node field (the same renderer as the marketing site hero).
  */
 export function Landing() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -62,8 +63,9 @@ export function Landing() {
   };
 
   return (
-    <div className="min-h-[var(--sam-app-height)] bg-canvas flex items-center justify-center px-4">
-      <div className="w-full max-w-sm text-center">
+    <div className="relative isolate min-h-[var(--sam-app-height)] bg-canvas flex items-center justify-center px-3 py-8 sm:px-4 overflow-hidden">
+      <GlassNodeField mode="floor" density={0.16} horizonY={0.5} />
+      <div className="sam-glass sam-glass-rim w-full max-w-sm text-center rounded-2xl px-6 py-8">
         <Typography variant="display" as="h1" className="mb-2">
           Simple Agent Manager
         </Typography>

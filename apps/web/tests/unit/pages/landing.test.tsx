@@ -27,6 +27,7 @@ vi.mock('@simple-agent-manager/ui', () => ({
     <Tag className={className}>{children}</Tag>
   ),
   Container: ({ children }: { children: React.ReactNode; maxWidth?: string }) => <div>{children}</div>,
+  GlassNodeField: () => <div data-testid="glass-node-field" aria-hidden="true" />,
 }));
 
 function renderLanding() {
@@ -44,6 +45,12 @@ function renderLanding() {
 describe('Landing page content', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('draws the shared glass node field behind the sign-in card', () => {
+    renderLanding();
+    expect(screen.getByTestId('glass-node-field')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Simple Agent Manager' })).toBeInTheDocument();
   });
 
   it('shows BYOC messaging', () => {
