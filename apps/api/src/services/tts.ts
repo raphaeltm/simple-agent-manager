@@ -198,9 +198,7 @@ export async function cleanTextForSpeech(
   }
 
   try {
-    // Construct the agent once outside the retry loop to avoid
-    // re-instantiating the Workers AI binding wrapper on each attempt
-    // Initialize the model registry only for speech requests, not Worker startup.
+    // Load speech dependencies on demand; construct the agent once before retrying.
     const [{ Agent }, { createWorkersAI }] = await Promise.all([
       import('@mastra/core/agent'),
       import('workers-ai-provider'),
@@ -269,9 +267,7 @@ export async function summarizeTextForSpeech(
   const retryBaseDelayMs = config.retryBaseDelayMs ?? DEFAULT_TTS_RETRY_BASE_DELAY_MS;
 
   try {
-    // Construct the agent once outside the retry loop to avoid
-    // re-instantiating the Workers AI binding wrapper on each attempt
-    // Initialize the model registry only for speech requests, not Worker startup.
+    // Load speech dependencies on demand; construct the agent once before retrying.
     const [{ Agent }, { createWorkersAI }] = await Promise.all([
       import('@mastra/core/agent'),
       import('workers-ai-provider'),
