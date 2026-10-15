@@ -1,11 +1,6 @@
 import { type CSSProperties, useEffect, useRef } from 'react';
 
-import {
-  createGlassNodeField,
-  type GlassNodeFieldHandle,
-  type GlassNodeFieldMode,
-  type GlassNodeFieldTheme,
-} from '../glass/node-field';
+import type { GlassNodeFieldHandle, GlassNodeFieldMode, GlassNodeFieldTheme } from '../glass/node-field';
 
 export interface GlassNodeFieldProps {
   mode?: GlassNodeFieldMode;
@@ -24,6 +19,7 @@ export interface GlassNodeFieldProps {
 /**
  * Decorative background: SAM's square node/workspace network as lit glass.
  * Fills its positioned parent; purely visual (`aria-hidden`), so it never takes focus.
+ * The canvas renderer is imported on mount, so pages without the field never download it.
  */
 export function GlassNodeField({
   mode = 'floor',
@@ -46,10 +42,17 @@ export function GlassNodeField({
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return undefined;
-    const handle = createGlassNodeField(root, { mode, theme, seed, pitch, density, vanishX, horizonY });
-    handle.start();
-    onReadyRef.current?.(handle);
+    let handle: GlassNodeFieldHandle | null = null;
+    let cancelled = false;
+    void import('../glass/node-field').then(({ createGlassNodeField }) => {
+      if (cancelled) return;
+      handle = createGlassNodeField(root, { mode, theme, seed, pitch, density, vanishX, horizonY });
+      handle.start();
+      onReadyRef.current?.(handle);
+    });
     return () => {
+      cancelled = true;
+      if (!handle) return;
       onReadyRef.current?.(null);
       handle.destroy();
     };
