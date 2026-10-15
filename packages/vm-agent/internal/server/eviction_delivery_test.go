@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/resourcemon"
 )
@@ -360,5 +361,46 @@ func TestEvictionOutboxPersistsOnlyAllowlistedResultFields(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), secret) || strings.Contains(string(encoded), prompt) || strings.Contains(string(encoded), "workspace-callback-token") {
 		t.Fatal("sensitive values reached the durable outbox")
+	}
+}
+
+// Drive the real pre-stop capture, journal, completion and HTTP writer. A false
+// value must survive omitempty and the post-stop completion's unknown state.
+func TestEvictionIdleOwnershipReachesCallbackAfterStop(t *testing.T) {
+	s := newEvictionTestServer()
+	initializeEvictionTestStore(t, s)
+	session, _, err := s.agentSessions.Create("workspace-1", "agent-1", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.sessionHosts["workspace-1:"+session.ID] = acp.NewSessionHost(acp.SessionHostConfig{})
+	target := evictionTargetFixture(s)
+	if err := s.prepareWorkspaceEvictionStop(context.Background(), target); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the runtime disappearing after capture.
+	delete(s.sessionHosts, "workspace-1:"+session.ID)
+	d := s.workspaceEvictionDelivery(resourcemon.EvictionResult{Target: target, SnapshotCaptured: true, ContainerStopped: true})
+	if _, err := s.store.RecordWorkspaceEviction(context.Background(), d); err != nil {
+		t.Fatal(err)
+	}
+	var received *bool
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			InterruptedWork *bool `json:"interruptedWork"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		received = body.InterruptedWork
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer api.Close()
+	s.config.ControlPlaneURL = api.URL
+	if err := s.deliverPendingWorkspaceEvictionAt(context.Background(), "", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if received == nil || *received {
+		t.Fatal("callback lost captured idle ownership")
 	}
 }

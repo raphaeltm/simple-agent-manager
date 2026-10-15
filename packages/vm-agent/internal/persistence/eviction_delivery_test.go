@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -22,6 +23,8 @@ func TestEvictionIntentSurvivesRestartAndFinalizationIsAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := evictionDeliveryFixture()
+	interrupted := true
+	d.InterruptedWork = &interrupted
 	if applied, err := store.RecordWorkspaceEviction(context.Background(), d); err != nil || !applied {
 		t.Fatalf("prepare=%v,%v", applied, err)
 	}
@@ -41,6 +44,12 @@ func TestEvictionIntentSurvivesRestartAndFinalizationIsAtomic(t *testing.T) {
 	if err != nil || claimed == nil || claimed.ContainerStopped {
 		t.Fatalf("intent=%#v err=%v", claimed, err)
 	}
+	if claimed.InterruptedWork == nil || !*claimed.InterruptedWork {
+		t.Fatal("lost pre-stop ownership on restart")
+	}
+	// Stop/error reporting has cleared activity; completion must not rewrite it.
+	idle := false
+	d.InterruptedWork = &idle
 	d.ContainerStopped, d.SnapshotCaptured = true, true
 	if applied, err := store.RecordWorkspaceEviction(context.Background(), d); err != nil || !applied {
 		t.Fatalf("finalize=%v,%v", applied, err)
@@ -48,6 +57,9 @@ func TestEvictionIntentSurvivesRestartAndFinalizationIsAtomic(t *testing.T) {
 	ready, err := store.ClaimEvictionDelivery(context.Background(), "", time.Now().Add(time.Minute), time.Second, time.Minute, time.Second)
 	if err != nil || ready == nil || !ready.ContainerStopped || !ready.SnapshotCaptured {
 		t.Fatalf("ready=%#v err=%v", ready, err)
+	}
+	if ready.InterruptedWork == nil || !*ready.InterruptedWork {
+		t.Fatal("completion overwrote captured ownership")
 	}
 	if err := store.CompleteEvictionDelivery(context.Background(), ready.ID, ready.Attempts, ready.PayloadRevision); err != nil {
 		t.Fatal(err)
@@ -149,5 +161,43 @@ func TestEvictionDeliveryCompletionIsFencedByPayloadRevision(t *testing.T) {
 	}
 	if !upgraded.ContainerStopped || !upgraded.SnapshotCaptured || upgraded.PayloadRevision != 1 {
 		t.Fatalf("stale completion deleted upgraded payload: %#v", upgraded)
+	}
+}
+
+func TestEvictionIdleEvidenceAndLegacyUnknown(t *testing.T) {
+	for _, known := range []bool{false, true} {
+		t.Run(fmt.Sprint(known), func(t *testing.T) {
+			store, err := Open(filepath.Join(t.TempDir(), "eviction.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			if err := store.UpsertWorkspaceMetadata(WorkspaceMetadata{WorkspaceID: "workspace-1", EvictionGeneration: "run-1"}); err != nil {
+				t.Fatal(err)
+			}
+			d := evictionDeliveryFixture()
+			idle := false
+			if known {
+				d.InterruptedWork = &idle
+			}
+			if _, err := store.RecordWorkspaceEviction(context.Background(), d); err != nil {
+				t.Fatal(err)
+			}
+			d.InterruptedWork = nil
+			d.ContainerStopped = true
+			if _, err := store.RecordWorkspaceEviction(context.Background(), d); err != nil {
+				t.Fatal(err)
+			}
+			got, err := store.ClaimEvictionDelivery(context.Background(), "", time.Now(), time.Second, time.Minute, time.Second)
+			if err != nil || got == nil {
+				t.Fatalf("claim %v %v", got, err)
+			}
+			if known && (got.InterruptedWork == nil || *got.InterruptedWork) {
+				t.Fatal("idle evidence lost")
+			}
+			if !known && got.InterruptedWork != nil {
+				t.Fatal("invented idle evidence for legacy intent")
+			}
+		})
 	}
 }

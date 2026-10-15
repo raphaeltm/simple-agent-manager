@@ -11,11 +11,20 @@ Production chat 5d4e32b6-4831-4f98-84d9-292e32330d95 was evicted for memory pres
 - Rules: 49 capture prerequisites, 53 liveness/idleness, VM 54 rollout compatibility, 23/35 cross-boundary coverage.
 
 ## Checklist and acceptance
-- [ ] Capture pre-stop agent work state without taskMode and persist with eviction intent.
-- [ ] Carry state through authenticated callback and recovery; active conversational/task sessions receive durable continuation, known idle sessions do not.
-- [ ] Define legacy/missing evidence behavior explicitly; preserve queued-message wakes.
-- [ ] Test active/idle/background work, persistence restart and retries, fresh and restored recovery, generation fencing and ordinary follow-up.
-- [ ] Update affected architecture documentation.
+- [x] Capture pre-stop agent work state without taskMode and persist with eviction intent.
+- [x] Carry state through authenticated callback and recovery; active conversational/task sessions receive durable continuation, known idle sessions do not.
+- [x] Define legacy/missing evidence behavior explicitly; preserve queued-message wakes.
+- [x] Test active/idle/background work, persistence restart and retries, fresh and restored recovery, generation fencing and ordinary follow-up.
+- [x] Update affected architecture documentation.
 - [ ] Run appropriate lint/typecheck/tests/build and local specialist reviews.
 - [ ] Deploy staging; verify real VM heartbeat/access and recovery behavior; clean up resources.
 - [ ] PR, green CI, CodeRabbit request/wait, merge and production deployment verification.
+
+## Verification and review
+- TDD before fix: active conversation and idle task controls failed (2 failed, 7 passed).
+- Targeted API suite: 40 passed. Real Workers/DO suite: 19 passed, including both modes restored/fresh and idle controls.
+- Go eviction suites pass with race detector for ACP, persistence and HTTP callback server.
+- Root lint 13/13, typecheck 19/19, build 9/9 tasks passed. Full repository test suite still running.
+- Go/security review found and resolved lock inversion and prompt-after-capture race: capture takes mu then promptMu and closes admission; precommit failure rolls it back, preserving a prior fence. Re-review PASS.
+- Cloudflare/constitution PASS; completion/test/docs PASS. Newer human directions take priority in continuation wording.
+- Task-only push to main was rejected by required Workers check; task travels in this feature PR without bypass.

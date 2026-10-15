@@ -47,6 +47,23 @@ func (s *Server) prepareWorkspaceEvictionStop(ctx context.Context, target resour
 		return err
 	}
 	delivery := s.workspaceEvictionDelivery(resourcemon.EvictionResult{Target: target})
+	// Capture before Docker stop and before finishLocalWorkspaceEviction clears activity.
+	// Retain the admission fence once the durable intent owns this runtime.
+	committed := false
+	rollbackAdmission := func() {}
+	defer func() {
+		if !committed {
+			rollbackAdmission()
+		}
+	}()
+	if session, err := s.evictionAgentSession(target.WorkspaceID); err == nil {
+		s.sessionHostMu.Lock()
+		host := s.sessionHosts[target.WorkspaceID+":"+session.ID]
+		s.sessionHostMu.Unlock()
+		if host != nil {
+			delivery.InterruptedWork, rollbackAdmission = host.PrepareEviction()
+		}
+	}
 	if delivery.ProjectID == "" {
 		return fmt.Errorf("workspace project identity unavailable; refusing eviction without a recoverable callback")
 	}
@@ -59,6 +76,7 @@ func (s *Server) prepareWorkspaceEvictionStop(ctx context.Context, target resour
 	if !applied {
 		return fmt.Errorf("eviction generation changed before stop intent")
 	}
+	committed = true
 	return nil
 }
 
@@ -200,7 +218,8 @@ func (s *Server) sendWorkspaceEvictionDelivery(ctx context.Context, delivery per
 		SnapshotCaptured   bool   `json:"snapshotCaptured"`
 		ContainerStopped   bool   `json:"containerStopped"`
 		EvictionGeneration string `json:"evictionGeneration,omitempty"`
-	}{delivery.NodeID, delivery.WorkspaceID, delivery.Reason, delivery.SnapshotCaptured, delivery.ContainerStopped, delivery.Generation}
+		InterruptedWork    *bool  `json:"interruptedWork,omitempty"`
+	}{delivery.NodeID, delivery.WorkspaceID, delivery.Reason, delivery.SnapshotCaptured, delivery.ContainerStopped, delivery.Generation, delivery.InterruptedWork}
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return false, err
