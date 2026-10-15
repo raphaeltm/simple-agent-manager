@@ -128,7 +128,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 export function privateState(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
   const ids = new Set(['id', 'taskId', 'workspaceId', 'nodeId', 'agentSessionId', 'chatSessionId', 'evidenceId']);
-  const states = new Set(['pending','queued','running','in_progress','completed','failed','cancelled','stopped','creating','ready','sleeping','waking','idle','prompting','settling','inactive','active','awaiting_followup']);
+  const states = new Set(['pending','queued','running','in_progress','completed','failed','cancelled','stopped','creating','ready','sleeping','waking','idle','prompting','recovering','error','settling','inactive','active','awaiting_followup']);
   const output = {};
   for (const key of ids) {
     if (payload[key] === undefined || payload[key] === null) continue;

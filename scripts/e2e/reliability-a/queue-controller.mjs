@@ -185,8 +185,8 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
                 if(!json||typeof json!=='object')throw new Error();
                 const session=cmd.path.split('/').at(-2);
                 selected={stateAvailable:json.state!==null&&json.state!==undefined};
-                if(selected.stateAvailable){selected.state=entity(json.state,'state',privateState);if(!ulid(json.agentSessionId))throw new Error();selected.agentSessionId=json.agentSessionId;
-                  if(selected.state.activity==='idle'&&selected.state.runtimeWorkState==='inactive'&&selected.state.runtimeWorkCount===0)idle.add(session);else{idle.delete(session);sleeping.delete(session);}}
+                if(selected.stateAvailable){selected.state=entity(json.state,'state',privateState);if(json.agentSessionId!==null&&!ulid(json.agentSessionId))throw new Error();if(json.agentSessionId!==null)selected.agentSessionId=json.agentSessionId;
+                  if(ulid(json.agentSessionId)&&selected.state.activity==='idle'&&selected.state.runtimeWorkState==='inactive'&&selected.state.runtimeWorkCount===0)idle.add(session);else{idle.delete(session);sleeping.delete(session);}}
               }else if(type==='action'||type==='prompt'){
                 selected={};
                 if(!json||typeof json!=='object')throw new Error();

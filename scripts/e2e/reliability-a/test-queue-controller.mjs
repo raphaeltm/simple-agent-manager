@@ -30,7 +30,9 @@ if(mode==='nonjson')throw new Error(secret);
 if(url.endsWith('/get-session'))return loggedOut?null:{session:{token:secret}};
 if(url.endsWith('/state')&&stateCalls===2&&['state-null','sleep-state-null'].includes(mode))return {state:null};
 if(url.endsWith('/state')&&stateCalls===2&&mode==='state-missing')return {};
-if(url.endsWith('/state'))return {state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,runtimeWorkUpdatedAt:123,secret},agentSessionId:'${ID}',agentType:'openai-codex'};
+if(url.endsWith('/state')&&mode==='pending-agent')return {state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0},agentSessionId:null};
+if(url.endsWith('/state')&&mode==='bad-agent')return {state:{activity:'idle'},agentSessionId:secret};
+if(url.endsWith('/state'))return {state:{activity:['recovering','error'].includes(mode)?mode:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,runtimeWorkUpdatedAt:123,secret},agentSessionId:'${ID}',agentType:'openai-codex'};
 if(url.endsWith('/submit'))return {taskId:'${ID}',sessionId:'${UUID}',status:'queued',branchName:'sam/cell',secret};
 if(url.endsWith('/prompt'))return {accepted:mode!=='accepted-false',status:mode==='prompt-failed'?'failed':'queued',secret};
 if(url.endsWith('/stop'))return {status:'stopped',workspaceDeleted:mode!=='deleted-false'};
@@ -149,4 +151,14 @@ test('mutation scope is bound before fetch to accepted submit and canonical task
  v=fixture('task-mismatch',[submit,task,deleteWorkspace,{op:'stop'}]);assert.notEqual(v.outputs['out/0002.json'].category,'ok');assert.ok(!v.events.some(e=>e.path===deleteWorkspace.path));
  v=fixture('workspace-mismatch',[submit,task,workspace,deleteNode,{op:'stop'}]);
  assert.notEqual(v.outputs['out/0003.json'].category,'ok');assert.ok(!v.events.some(e=>e.path===deleteNode.path));
+});
+
+test('canonical startup state accepts null agent identity and recovering/error without authorizing a prompt',()=>{
+ for(const mode of ['pending-agent','recovering','error']){
+  const v=fixture(mode,[submit,state,prompt,{op:'stop'}]);
+  assert.equal(v.outputs['out/0002.json'].category,'ok',mode);
+  assert.notEqual(v.outputs['out/0003.json'].category,'ok',mode);
+  assert.ok(!v.events.some(e=>e.path===prompt.path),mode);
+ }
+ const v=fixture('bad-agent',[submit,state,{op:'stop'}]);assert.notEqual(v.outputs['out/0002.json'].category,'ok');
 });
