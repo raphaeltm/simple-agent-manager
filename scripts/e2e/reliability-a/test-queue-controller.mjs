@@ -30,7 +30,9 @@ if(mode==='nonjson')throw new Error(secret);
 if(url.endsWith('/get-session'))return loggedOut?null:{session:{token:secret}};
 if(url.endsWith('/state')&&stateCalls===2&&['state-null','sleep-state-null'].includes(mode))return {state:null};
 if(url.endsWith('/state')&&stateCalls===2&&mode==='state-missing')return {};
-if(url.endsWith('/state')&&mode==='pending-agent')return {state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0},agentSessionId:null};
+// Exact e2 route: resolveChatAgentState may merge a persisted plan before an ACP exists.
+if(url.endsWith('/state')&&mode==='pending-agent')return {state:{activity:'idle',activityAt:0,statusError:null,promptStartedAt:null,agentType:null,lastStopReason:null,runtimeWorkState:null,runtimeWorkCount:null,runtimeWorkSource:null,runtimeWorkUpdatedAt:null,runtimeWorkProgressAt:null,currentPlan:[],planUpdatedAt:0},agentSessionId:null,agentType:null};
+if(url.endsWith('/state')&&mode==='source-idle-no-agent')return {state:{activity:'idle',activityAt:0,runtimeWorkState:'inactive',runtimeWorkCount:0,statusError:null,currentPlan:null,planUpdatedAt:null,promptStartedAt:null,lastStopReason:null,agentType:null,runtimeWorkUpdatedAt:null,runtimeWorkProgressAt:null,runtimeWorkSource:null},agentSessionId:null,agentType:null};
 if(url.endsWith('/state')&&mode==='bad-agent')return {state:{activity:'idle'},agentSessionId:secret};
 if(url.endsWith('/state'))return {state:{activity:['recovering','error'].includes(mode)?mode:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,runtimeWorkUpdatedAt:123,secret},agentSessionId:'${ID}',agentType:'openai-codex'};
 if(url.endsWith('/submit'))return {taskId:'${ID}',sessionId:'${UUID}',status:'queued',branchName:'sam/cell',secret};
@@ -41,7 +43,7 @@ if(options.method==='DELETE')return {success:mode!=='success-false'};
 if(url.includes('/library/'))return JSON.parse(readFileSync(url.includes('/${PROBE}/')?process.env.QUEUE_PROBE:url.includes('/${OTHER}/')?process.env.QUEUE_EXPECTATIONS:process.env.QUEUE_BASELINE,'utf8'));
 if(url.endsWith('/tasks/${ID}'))return {id:mode==='task-mismatch'?'${OTHER}':'${ID}',status:'completed',workspaceId:'${ID}',completionEvidence:{notes:secret},outputPrUrl:secret,secret};
 if(url.endsWith('/workspaces/${ID}'))return {id:mode==='workspace-mismatch'?'${OTHER}':'${ID}',nodeId:'${ID}',status:'running'};
-return [{id:'${ID}',status:mode==='malformed'?secret:'running',secret}];}};
+return [{id:'${ID}',status:mode==='malformed'?secret:['recovery','evicted','deleted'].includes(mode)?mode:'running',nodeId:null,createdAt:'2026-10-15T00:00:00.000Z',updatedAt:'2026-10-15T00:00:00.000Z',secret}];}};
 }}}),close:async()=>{note({closed:true});if(mode==='close')throw new Error(secret);if(mode==='hang-close')await new Promise(()=>{});}}}};`;
 function fixture(mode,commands,{deadline=2500,invalidBaseline=false,invalidExpectations=false,screenshots=false,reuse=false,invalidProbe=false}={}){
  const root=mkdtempSync(join(tmpdir(),'sam-safe-queue-'));
@@ -154,11 +156,15 @@ test('mutation scope is bound before fetch to accepted submit and canonical task
 });
 
 test('canonical startup state accepts null agent identity and recovering/error without authorizing a prompt',()=>{
- for(const mode of ['pending-agent','recovering','error']){
+ for(const mode of ['pending-agent','source-idle-no-agent','recovering','error']){
   const v=fixture(mode,[submit,state,prompt,{op:'stop'}]);
   assert.equal(v.outputs['out/0002.json'].category,'ok',mode);
   assert.notEqual(v.outputs['out/0003.json'].category,'ok',mode);
   assert.ok(!v.events.some(e=>e.path===prompt.path),mode);
  }
  const v=fixture('bad-agent',[submit,state,{op:'stop'}]);assert.notEqual(v.outputs['out/0002.json'].category,'ok');
+});
+
+test('pinned source node/workspace response statuses remain typed through list acceptance',()=>{
+ for(const mode of ['recovery','evicted','deleted']){const v=fixture(mode,[getNodes,{op:'stop'}]);assert.equal(v.outputs['out/0001.json'].category,'ok');assert.equal(v.outputs['private/state/0001.json'][0].status,mode);}
 });
