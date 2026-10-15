@@ -18,9 +18,9 @@ MCP per-agent fixed-window counters and workspace boot callback appends rewrite 
 - [x] Deterministic fixed-window ownership, fail closed on invalid activation or DO errors, preserve headers/auth/identity.
 - [x] Dedicated bounded boot log with legacy read merging, retry dedupe, TTL and clear semantics. Legacy KV drains on its original TTL; new appends refresh SQLite-native retention.
 - [x] Enumerate and wire every reader/writer; bindings, export, migration, deployment configuration and docs.
-- [ ] Tests: concurrency, restart, retention, retry dedupe, failures, mixed versions, rollback, clean install/existing migration.
-- [ ] Full validation and independent Cloudflare/security/adversarial reviews.
-- [ ] Draft PR with evidence and consolidated pinned staging plan; coordinator performs staging/final release gates.
+- [x] Automated tests: concurrency, restart, retention, retry dedupe, failures, compatible mixed versions/rollback, activated HTTP fallback/auth/headers and clean/existing migration configuration. Actual deployed migration proof remains coordinator-owned below.
+- [x] Full local validation and independent Cloudflare/security/adversarial reviews.
+- [x] Draft PR #2357 with evidence and consolidated pinned staging plan; coordinator performs staging/final release gates.
 
 ## Acceptance
 
@@ -43,3 +43,15 @@ Do not archive before the task-completion validator reconciles final evidence. C
 ## Workflow exception evidence
 
 Task-only main push rejected by repository GH013 required Durable Object Workers check. No bypass attempted; task included in feature PR. SAM-provided isolated output checkout reused; recovery preserved source but removed dependencies and temporary logs, so broad check outcomes were discarded and rerun.
+
+## Final local validation
+
+- `pnpm lint`: PASS, 13 tasks; existing UI warnings only.
+- `pnpm typecheck`: PASS, 19 tasks; existing Astro baseline unchanged.
+- `pnpm test`: PASS, 21 tasks. API 12,389 passed / 2 skipped; web 4,057 passed; remaining shared/package suites passed.
+- `pnpm build`: PASS, 9 tasks.
+- Real Worker storage suite: 12 PASS, including authenticated activated HTTP routes for all fallback identities.
+- Generated config suite: 60 PASS, staging and production activation/binding/migration assertions.
+- DO migration safety and Wrangler binding checks PASS; formatting and diff checks PASS.
+
+Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2357. Implementation head 3a90b30c92b082637cb8c152f56960dee0eece8f; final evidence commit contains only this task update. No independent staging deployment or merge. Actual runtime migration/rollout and release gates remain pending under coordinator ownership; task remains active rather than archived.
