@@ -22,7 +22,12 @@ export interface MachineCell {
   location: string;
   locationLabel: string;
   country: string | null;
-  candidates: Array<{ id: string; status: CapacityPoolStatus }>;
+  /**
+   * Every pool row behind this machine and region. A legacy size row (`small`, `medium`, …)
+   * can share a cell with its provider-native row; `addable` says whether the server will
+   * accept setting that row to active.
+   */
+  candidates: Array<{ id: string; status: CapacityPoolStatus; addable: boolean }>;
   /** Set when the provider offers this machine but the pool has no row for it yet. */
   catalogAddition: DefaultCapacityPoolCandidateCatalogAddition | null;
   allowed: boolean;
@@ -79,9 +84,27 @@ function sourceKind(source: CapacitySourceIdentity | undefined): MachineSourceKi
   return 'cloud-provider-key';
 }
 
-function issueFor(offering: ComputePoolOffering): string | null {
-  if (canAddComputePoolOffering(offering)) return null;
-  if (offering.stale) return 'Not currently offered';
+/**
+ * Mirrors `currentlyAddable` in `default-capacity-pool-updates.ts`: the server refuses to
+ * activate a row whose own catalog state is not `available`. Payloads without those fields
+ * fall back to the catalog this page loaded.
+ */
+function candidateAddable(
+  candidate: CapacityPoolCandidate | undefined,
+  offering: ComputePoolOffering
+): boolean {
+  if (!canAddComputePoolOffering(offering)) return false;
+  if (candidate?.catalogAvailability === undefined) return true;
+  return (
+    candidate.catalogAvailability === 'available' && candidate.providerInstanceCatalogSource != null
+  );
+}
+
+/** Why a row cannot be allowed. Only called for rows that are not addable. */
+function issueFor(offering: ComputePoolOffering): string {
+  // Stale here, or offered by the loaded catalog while the row's own catalog state says the
+  // provider did not return it on the last read: both mean "not currently offered".
+  if (offering.stale || canAddComputePoolOffering(offering)) return 'Not currently offered';
   const label = offering.statusLabel?.trim();
   if (!label) return 'Unavailable';
   return label.charAt(0).toUpperCase() + label.slice(1);
@@ -143,6 +166,7 @@ export function buildMachineGroups(
 ): MachineGroup[] {
   const model = buildComputePoolOfferingsModel(candidates, catalogs, sources);
   const sourcesById = new Map(sources.map((source) => [source.id, source]));
+  const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
   const cells = new Map<
     string,
     { cell: MachineCell; groupKey: string; offering: ComputePoolOffering }
@@ -152,9 +176,14 @@ export function buildMachineGroups(
     const groupKey = offering.sourceId ?? `provider:${offering.provider}`;
     const key = cellKeyFor(groupKey, offering);
     const entry = cells.get(key) ?? { cell: newCell(key, offering), groupKey, offering };
-    entry.cell.candidates.push({ id: offering.candidateId, status: offering.candidateStatus });
+    const addable = candidateAddable(candidatesById.get(offering.candidateId), offering);
+    entry.cell.candidates.push({
+      id: offering.candidateId,
+      status: offering.candidateStatus,
+      addable,
+    });
     if (offering.candidateStatus === 'active') entry.cell.allowed = true;
-    if (canAddComputePoolOffering(offering)) entry.cell.canAllow = true;
+    if (addable) entry.cell.canAllow = true;
     else entry.cell.issue ??= issueFor(offering);
     cells.set(key, entry);
   }
@@ -172,7 +201,7 @@ export function buildMachineGroups(
       providerInstanceSku: offering.providerInstanceSku,
     };
     cell.canAllow = canAddComputePoolOffering(offering);
-    cell.issue = issueFor(offering);
+    cell.issue = cell.canAllow ? null : issueFor(offering);
     cells.set(key, { cell, groupKey: offering.sourceId, offering });
   }
 
@@ -255,8 +284,9 @@ export function buildMachineChanges(groups: MachineGroup[], draft: MachineDraft)
         const desired = draft.get(cell.key);
         if (desired === undefined || desired === cell.allowed) continue;
         if (desired) {
+          // Only rows the server accepts: one refused row fails the whole save.
           for (const candidate of cell.candidates) {
-            if (candidate.status !== 'active') {
+            if (candidate.status !== 'active' && candidate.addable) {
               changes.candidates.push({ id: candidate.id, status: 'active' });
             }
           }

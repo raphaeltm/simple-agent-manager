@@ -312,6 +312,42 @@ describe('draft and update request', () => {
     });
   });
 
+  it('re-allowing a region only sends rows the server accepts', () => {
+    // Seen on staging: a legacy size row ("small") shares the cx23/fsn1 cell with the native
+    // row. The server refuses to activate it, and one refused row fails the whole save.
+    const native: CapacityPoolCandidate = {
+      ...candidate('cx23-fsn1', 'cx23', 'fsn1', 'deleted'),
+      machineSize: 'small',
+      catalogAvailability: 'available',
+      providerInstanceCatalogSource: 'api',
+    };
+    const legacy: CapacityPoolCandidate = {
+      ...candidate('small-fsn1', 'cx23', 'fsn1', 'disabled'),
+      providerInstanceType: null,
+      machineSize: 'small',
+      catalogAvailability: 'last-known-unavailable',
+      providerInstanceCatalogSource: null,
+    };
+    const groups = buildMachineGroups(
+      [native, legacy],
+      [
+        catalog({ credentialId: 'cred-legacy' }, [
+          offering('cx23', 'fsn1', { machineSize: 'small' }),
+        ]),
+      ],
+      [source()]
+    );
+    const target = cell(groups, 'cx23', 'fsn1');
+    expect(Object.fromEntries(target.candidates.map((row) => [row.id, row.addable]))).toEqual({
+      'cx23-fsn1': true,
+      'small-fsn1': false,
+    });
+    expect(target).toMatchObject({ allowed: false, canAllow: true, issue: null });
+    expect(buildMachineChanges(groups, toggleCell(new Map(), target)).candidates).toEqual([
+      { id: 'cx23-fsn1', status: 'active' },
+    ]);
+  });
+
   it('blocking a region turns off every active row in it, and nothing else', () => {
     const groups = buildMachineGroups(
       [candidate('dup-a', 'cx23', 'fsn1', 'active'), candidate('dup-b', 'cx23', 'fsn1', 'deleted')],

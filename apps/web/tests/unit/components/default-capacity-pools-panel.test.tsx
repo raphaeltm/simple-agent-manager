@@ -587,6 +587,61 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(mocks.toast.success).toHaveBeenCalledWith('Compute pool saved');
   });
 
+  it('turns a region off and back on when a legacy size row shares it', async () => {
+    // Staging pools keep a legacy "small" row beside the native cx22 row in the same region.
+    // The server refuses to activate the legacy row, so re-allowing must leave it out.
+    const pool = summary('project');
+    pool.candidates = [
+      candidate({
+        id: 'candidate-project-cx22',
+        machineSize: 'small',
+        providerInstanceType: 'cx22',
+        catalogAvailability: 'available',
+        providerInstanceCatalogSource: 'api',
+      }),
+      candidate({
+        id: 'candidate-project-small',
+        machineSize: 'small',
+        providerInstanceType: null,
+        status: 'disabled',
+        catalogAvailability: 'last-known-unavailable',
+        providerInstanceCatalogSource: null,
+      }),
+    ];
+    const blocked = structuredClone(pool);
+    blocked.candidates[0] = { ...blocked.candidates[0]!, status: 'deleted' };
+    mocks.providerCatalogs = [providerCatalog()];
+    mocks.providerCatalogs[0]!.offerings![0] = {
+      ...mocks.providerCatalogs[0]!.offerings![0]!,
+      machineSize: 'small',
+    };
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', pool));
+    mocks.updateProjectDefaultCapacityPools
+      .mockResolvedValueOnce(response('project', blocked))
+      .mockResolvedValueOnce(response('project', pool));
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(chip('cx22 in Nuremberg'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenNthCalledWith(1, 'project-1', {
+        candidates: [{ id: 'candidate-project-cx22', status: 'deleted' }],
+      })
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    expect(chip('cx22 in Nuremberg')).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(chip('cx22 in Nuremberg'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenNthCalledWith(2, 'project-1', {
+        candidates: [{ id: 'candidate-project-cx22', status: 'active' }],
+      })
+    );
+  });
+
   it('lets the machine limit be cleared and retyped, and saves only whole numbers', async () => {
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
       response('project', summary('project'))
