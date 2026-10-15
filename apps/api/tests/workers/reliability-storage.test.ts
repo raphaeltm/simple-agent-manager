@@ -1,6 +1,6 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, inject, it } from 'vitest';
 
 import type { McpRateCounter } from '../../src/durable-objects/mcp-rate-counter';
 import type { WorkspaceBootLog } from '../../src/durable-objects/workspace-boot-log';
@@ -12,14 +12,27 @@ import { generateMcpToken, storeMcpToken } from '../../src/services/mcp-token';
 import { RELIABILITY_STORAGE_ACTIVATION_KEY } from '../../src/services/reliability-storage';
 const api = env as unknown as Env;
 async function publish(rateCutoverAt = 60, bootLogCutoverAt = 60) {
-  await api.DATABASE.prepare('INSERT OR REPLACE INTO platform_settings(key, value) VALUES (?, ?)')
+  await api.DATABASE.prepare('INSERT INTO platform_settings(key, value) VALUES (?, ?)')
     .bind(
       RELIABILITY_STORAGE_ACTIVATION_KEY,
       JSON.stringify({ publishedAt: 0, rateCutoverAt, bootLogCutoverAt, windowSeconds: 60 })
     )
     .run();
 }
-beforeEach(() => publish());
+beforeEach(async (context) => {
+  // This Worker test environment persists D1 across cases. Reset only the test
+  // fixture, then restore the exact production guards before every assertion.
+  const migration = JSON.parse(inject<string>('D1_MIGRATIONS_JSON')) as {name: string; queries: string[]}[];
+  const activationMigration = migration.find(item => item.name.includes('0196_reliability_storage_activation'))!;
+  await api.DATABASE.batch([
+    ...['no_update', 'no_delete', 'no_replace'].map(suffix => api.DATABASE.prepare(`DROP TRIGGER IF EXISTS reliability_activation_${suffix}`)),
+    api.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(RELIABILITY_STORAGE_ACTIVATION_KEY),
+    ...activationMigration.queries.map(sql => api.DATABASE.prepare(sql)),
+  ]);
+  const name = context.task.name;
+  if (['held-body', 'held legacy', 'preactivation clear', 'cutover-straddling', 'immutable activation'].some(part => name.includes(part))) return;
+  return publish();
+});
 const entry = {
   step: 'clone',
   status: 'started' as const,
@@ -318,6 +331,19 @@ describe('Reliability C real SQLite storage', () => {
       expect(await fresh.readBridge(workspace, 50)).toEqual([later]);
     });
     expect(await getBootLogs(api.KV, workspace, api)).toEqual([later]);
+  });
+
+  it('enforces immutable activation against updates, deletes, conflicting inserts and replacements', async () => {
+    await publish();
+    for (const sql of [
+      'UPDATE platform_settings SET value = ? WHERE key = ?',
+      'INSERT OR REPLACE INTO platform_settings(value, key) VALUES (?, ?)',
+      'INSERT INTO platform_settings(value, key) VALUES (?, ?)',
+    ]) {
+      await expect(api.DATABASE.prepare(sql).bind('{}', RELIABILITY_STORAGE_ACTIVATION_KEY).run()).rejects.toThrow('immutable');
+    }
+    await expect(api.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(RELIABILITY_STORAGE_ACTIVATION_KEY).run()).rejects.toThrow('immutable');
+    expect((await api.DATABASE.prepare('SELECT value FROM platform_settings WHERE key = ?').bind(RELIABILITY_STORAGE_ACTIVATION_KEY).first<{value: string}>())?.value).toContain('rateCutoverAt');
   });
 
 });

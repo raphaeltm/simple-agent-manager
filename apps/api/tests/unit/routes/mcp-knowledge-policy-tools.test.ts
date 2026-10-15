@@ -59,6 +59,18 @@ function createMockD1() {
     first: vi.fn().mockResolvedValue({ chat_session_id: 'session-1' }),
   };
   return {
+    // Tool-unit fixtures model the shared primary record as not yet published.
+    // Real activation, failure and ownership behavior is covered by Worker tests.
+    withSession: vi.fn((constraint: string) => {
+      expect(constraint).toBe('first-primary');
+      return {prepare: (sql: string) => {
+        expect(sql).toBe('SELECT value FROM platform_settings WHERE key = ?');
+        return {bind: (key: string) => {
+          expect(key).toBe('reliability.storage.activation.v1');
+          return {first: async () => null};
+        }};
+      }};
+    }),
     prepare: vi.fn().mockReturnValue(stmt),
     _stmt: stmt,
   };
