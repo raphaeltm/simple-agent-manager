@@ -15,11 +15,12 @@ INSERT INTO platform_settings (key, value)
 SELECT 'reliability.storage.activation.v1', json_object(
   'publishedAt', unixepoch(), 'rateCutoverAt', ?1,
   'bootLogCutoverAt', ?2, 'windowSeconds', ?3)
-WHERE ?1 > unixepoch() AND ?2 > unixepoch() AND ?3 > 0 AND ?1 % ?3 = 0
-;
+WHERE typeof(?1) = 'integer' AND typeof(?2) = 'integer' AND typeof(?3) = 'integer'
+  AND ?1 > unixepoch() AND ?2 > unixepoch() AND ?3 > 0 AND ?1 % ?3 = 0
+  AND NOT EXISTS (SELECT 1 FROM platform_settings WHERE key = 'reliability.storage.activation.v1');
 ```
 
-Read back and verify the exact immutable record before proceeding. A zero-row insert is not evidence of successful publication. Migration0196 rejects updates, deletes, conflicting inserts, and INSERT OR REPLACE for this key, including generic settings helpers; an existing record must be read and verified rather than overwritten. Never update, delete, reschedule, or replace a published record; freeze rate-window size and identity derivation. The SQL examples in tests replace records solely to isolate fixtures, not as an operational procedure.
+Read back and verify the exact immutable record before proceeding. A zero-row insert is not evidence of successful publication. For an idempotent replay, read back the original record and compare the requested cutovers/window exactly; a conflicting record aborts the operation. The supported statement selects no row when a record exists; raw duplicate inserts (even identical), OR IGNORE and OR REPLACE are rejected by guards. Migration0196 rejects updates, deletes, conflicting inserts, and INSERT OR REPLACE for this key, including generic settings helpers; an existing record must be read and verified rather than overwritten. Never update, delete, reschedule, or replace a published record; freeze rate-window size and identity derivation. The SQL examples in tests replace records solely to isolate fixtures, not as an operational procedure.
 
 MCP pins `now`, window start, and reset before awaiting shared configuration. An old env-unset bridge held at the request body therefore consults the same record when it eventually reaches admission. A lookup that began before publication keeps its prepublication window even if it resumes after activation. The current window remains KV-owned until its reset; new windows are DO-only, without seeding or fallback.
 

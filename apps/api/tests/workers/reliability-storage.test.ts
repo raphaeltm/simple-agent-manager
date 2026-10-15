@@ -370,6 +370,7 @@ describe('Reliability C real SQLite storage', () => {
     for (const sql of [
       'UPDATE platform_settings SET value = ? WHERE key = ?',
       'INSERT OR REPLACE INTO platform_settings(value, key) VALUES (?, ?)',
+      'INSERT OR IGNORE INTO platform_settings(value, key) VALUES (?, ?)',
       'INSERT INTO platform_settings(value, key) VALUES (?, ?)',
     ]) {
       await expect(
@@ -386,6 +387,27 @@ describe('Reliability C real SQLite storage', () => {
         .bind('renamed.activation', RELIABILITY_STORAGE_ACTIVATION_KEY)
         .run()
     ).rejects.toThrow('immutable');
+    const original = await api.DATABASE.prepare('SELECT value FROM platform_settings WHERE key = ?')
+      .bind(RELIABILITY_STORAGE_ACTIVATION_KEY)
+      .first<{ value: string }>();
+    await expect(
+      api.DATABASE.prepare('INSERT INTO platform_settings(key, value) VALUES (?, ?)')
+        .bind(RELIABILITY_STORAGE_ACTIVATION_KEY, original!.value)
+        .run()
+    ).rejects.toThrow('immutable');
+    // Supported publication replay selects no row and verifies the stored value,
+    // instead of attempting to overwrite even an identical immutable record.
+    const replay = await api.DATABASE.prepare(
+      'INSERT INTO platform_settings(key, value) SELECT ?1, ?2 WHERE NOT EXISTS (SELECT 1 FROM platform_settings WHERE key = ?1)'
+    )
+      .bind(RELIABILITY_STORAGE_ACTIVATION_KEY, original!.value)
+      .run();
+    expect(replay.meta.changes).toBe(0);
+    expect(
+      await api.DATABASE.prepare('SELECT value FROM platform_settings WHERE key = ?')
+        .bind(RELIABILITY_STORAGE_ACTIVATION_KEY)
+        .first()
+    ).toEqual(original);
     const ordinaryKey = crypto.randomUUID();
     await api.DATABASE.prepare('INSERT INTO platform_settings(key, value) VALUES (?, ?)')
       .bind(ordinaryKey, '{}')
