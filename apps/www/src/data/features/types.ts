@@ -20,6 +20,17 @@ export interface FeatureSection {
   group: FeatureGroup;
   /** Hero image for the detail page and the /features/ index card; only the first entry is rendered. */
   screenshots: FeatureScreenshot[];
+  /**
+   * The homepage pitch beside the section's animated scene (sections in the homepage tour
+   * only). It speaks to the visitor's need; the detail rows below keep the specifics for the
+   * feature page.
+   */
+  homepage?: {
+    headline: string;
+    body: string;
+    /** What the scene shows, in plain words. */
+    caption: string;
+  };
   details: {
     headline: string;
     body: string;

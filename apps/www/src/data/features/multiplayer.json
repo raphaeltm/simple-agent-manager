@@ -1,8 +1,8 @@
 {
   "slug": "multiplayer",
-  "label": "Multiplayer Projects",
-  "title": "Work on projects.\nNot alone.",
-  "subtitle": "Invite teammates with a link, approve access requests, and share agent profiles, skills, and project files. See who is running what, and whose keys are paying for it.",
+  "label": "Team Projects",
+  "title": "Share the project.\nSee everyone's agents.",
+  "subtitle": "Everyone in the project sees every agent session, uses the same agent setups, and can tell whose key is paying for what.",
   "summary": "Invite your team into a project, share profiles and skills, and see whose keys pay for shared automation.",
   "highlights": [
     "Any member creates an invite link; an owner or admin approves each request",
@@ -20,6 +20,11 @@
       "caption": "One project, every member’s sessions — switch between my sessions and all sessions"
     }
   ],
+  "homepage": {
+    "headline": "Invite with a link, approve who joins",
+    "body": "Anyone in the project can create an invite link. Nobody joins until an owner or admin approves, and SAM shows whether they can already see the GitHub repo.",
+    "caption": "Members, requests, and the invite link in project settings"
+  },
   "details": [
     {
       "headline": "Invite, request, approve",

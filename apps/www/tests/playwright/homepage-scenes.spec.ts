@@ -25,13 +25,13 @@ const sceneSpecs = readdirSync(new URL('scenes/', DATA))
   .filter((file) => file.endsWith('.json'))
   .map((file) => JSON.parse(readFileSync(new URL(`scenes/${file}`, DATA), 'utf8')) as SceneFile);
 
-/** The section's existing screenshot caption, which the scene shows unchanged. */
+/** The caption from the section's homepage pitch, which the scene shows unchanged. */
 const sectionCaption = (slug: string) =>
   (
     JSON.parse(readFileSync(new URL(`features/${slug}.json`, DATA), 'utf8')) as {
-      details: { screenshot: { caption: string } }[];
+      homepage?: { caption: string };
     }
-  ).details[0]?.screenshot.caption ?? '';
+  ).homepage?.caption ?? '';
 
 const sceneLocator = (page: Page, slug: string) => page.locator(`[data-scene="${slug}"]`);
 

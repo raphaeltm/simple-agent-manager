@@ -20,22 +20,21 @@ const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
   <div class="hero-copy">
     <span class="hero-badge sam-glass sam-glass--chrome sam-glass-rim">
       <span class="badge-dot" aria-hidden="true"></span>
-      Open Source & Self-Hosted
+      Open source and self-hosted
     </span>
 
     <h1 id="hero-title" class="hero-title">
-      The open-source platform for <span class="gradient-text"><span class="nowrap">multi-agent</span> workflows</span>
+      Run AI coding agents <span class="gradient-text">in parallel</span> on your own cloud
     </h1>
 
     <p class="hero-subtitle">
-      Use coding agents as a team, with shared context, and collaborative tools and controls.
-      Agents run in isolated Instant containers or VM workspaces, with hosted compute and BYOC
-      options. SAM handles provisioning, scheduling, and cleanup.
+      Simple Agent Manager gives every task its own workspace with the agent you already use, like
+      Claude Code or Codex. Close your laptop and answer the agent's questions from your phone.
     </p>
 
     <div class="hero-actions">
       <a href={getStartedUrl} class="sam-btn sam-btn--primary">
-        Get Started
+        Set up SAM
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
       </a>
       <a href={githubUrl} class="sam-btn sam-btn--glass" target="_blank" rel="noopener noreferrer">
@@ -69,8 +68,8 @@ const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
     <figcaption class="sr-only">
       Animated preview of SAM's real interface with a sample project: a project chat streams an
       agent's plan and tool calls while it adds idempotency keys to a refund webhook, beside a comment
-      thread, a placement decision, and the nodes running the workspaces. Notifications show one agent
-      needing input and the task completing. Timing is simulated.
+      thread, the server SAM picked for the work, and the servers running the workspaces.
+      Notifications show one agent needing input and the task completing. Timing is simulated.
     </figcaption>
   </figure>
 </section>
@@ -146,11 +145,6 @@ const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
     line-height: 1.02;
     letter-spacing: -0.035em;
     color: var(--color-fg-primary);
-  }
-
-  /* Never split "multi-agent" at its hyphen. */
-  .nowrap {
-    white-space: nowrap;
   }
 
   .gradient-text {

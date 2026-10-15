@@ -1,6 +1,6 @@
 {
   "slug": "agent-context",
-  "description": "Animated preview of SAM's real Agent Context screens with a sample project: memory observations appear under their entities with confidence, source and confirmation date, then a project policy rises above them. Timing is simulated.",
+  "description": "Animated preview of SAM's real Agent Context screens with a sample project: saved notes about the project appear with how confident SAM is in each, where it came from, and when it was last confirmed, then a project rule rises above them. Timing is simulated.",
   "aspect": { "wide": 1.2, "narrow": 0.95 },
   "beats": [0, 700, 1400, 2200, 3000, 3800],
   "layers": [

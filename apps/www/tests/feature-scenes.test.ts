@@ -57,11 +57,13 @@ async function expectThemedPair(files: Files, size?: { width: number; height: nu
 }
 
 describe('feature scenes', () => {
-  it('give every homepage scene a feature section with a detail row', () => {
+  it('give every homepage scene a feature section with a homepage pitch', () => {
     expect(scenes.length).toBeGreaterThan(0);
     for (const scene of scenes) {
-      const section = featureSections.find((candidate) => candidate.slug === scene.slug);
-      expect(section?.details.length, scene.slug).toBeGreaterThan(0);
+      const pitch = featureSections.find((candidate) => candidate.slug === scene.slug)?.homepage;
+      expect(pitch?.headline.trim(), scene.slug).toBeTruthy();
+      expect(pitch?.body.trim(), scene.slug).toBeTruthy();
+      expect(pitch?.caption.trim(), scene.slug).toBeTruthy();
     }
     expect(new Set(scenes.map((scene) => scene.slug)).size).toBe(scenes.length);
   });

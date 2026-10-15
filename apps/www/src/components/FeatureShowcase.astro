@@ -5,12 +5,14 @@ import { scenes } from '../data/scenes';
 
 // The homepage showcase is a curated tour, not the full feature catalog — see
 // /features/ for every section. The tour is the sections that have an animated
-// real-UI preview (src/data/scenes, in story order); each renders only its
-// first detail row beside that preview.
+// real-UI preview (src/data/scenes, in story order); each renders its homepage
+// pitch beside that preview.
 const curatedSections = scenes.map((scene) => {
   const section = featureSections.find((candidate) => candidate.slug === scene.slug);
   if (!section) throw new Error(`Feature scene "${scene.slug}" has no section in src/data/features`);
-  return section;
+  const pitch = section.homepage;
+  if (!pitch) throw new Error(`Feature section "${scene.slug}" has a scene but no homepage pitch`);
+  return { ...section, pitch };
 });
 ---
 
@@ -21,7 +23,7 @@ const curatedSections = scenes.map((scene) => {
 </div>
 
 {curatedSections.map((section, sectionIdx) => {
-  const detail = section.details[0];
+  const { pitch } = section;
   const flip = sectionIdx % 2 === 1;
   return (
     <section class="showcase-section" id={`feature-${section.slug}`}>
@@ -35,8 +37,8 @@ const curatedSections = scenes.map((scene) => {
         <div class="editorial-rows">
           <div class={`editorial-row animate-on-scroll${flip ? ' is-flipped' : ''}`}>
             <div class="editorial-copy">
-              <h3 class="editorial-headline">{detail.headline}</h3>
-              <p class="editorial-body">{detail.body}</p>
+              <h3 class="editorial-headline">{pitch.headline}</h3>
+              <p class="editorial-body">{pitch.body}</p>
               <a href={`/features/${section.slug}/`} class="editorial-link">
                 Explore {section.label}
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
@@ -48,8 +50,8 @@ const curatedSections = scenes.map((scene) => {
                 slug={section.slug}
                 side={flip ? 'left' : 'right'}
                 href={`/features/${section.slug}/`}
-                label={detail.headline}
-                caption={detail.screenshot.caption}
+                label={pitch.headline}
+                caption={pitch.caption}
               />
             </div>
           </div>

@@ -1,14 +1,14 @@
 ---
 const rows = [
   {
-    label: 'Your code runs on',
-    sam: 'Instant containers or your cloud (Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, GCP)',
+    label: 'Where your code runs',
+    sam: 'Your own cloud account (Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, GCP), or Instant workspaces with no cloud account',
     managed: 'Their infrastructure',
     selfHosted: 'Your infra (AWS, GCP, K8s)',
     samWins: true,
   },
   {
-    label: 'Agent choice',
+    label: 'Which agents you can use',
     sam: 'Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp',
     managed: 'Their proprietary agent',
     selfHosted: 'Native agent with configurable LLM providers; third-party agents in workspaces',
@@ -16,86 +16,86 @@ const rows = [
   },
   {
     label: 'Open source',
-    sam: 'AGPL-3.0 license',
+    sam: 'Yes, AGPL-3.0',
     managed: 'Proprietary',
     selfHosted: 'Open-source core',
     samWins: true,
   },
   {
-    label: 'Control plane',
-    sam: 'Workers Paid base plan',
+    label: 'Running SAM itself',
+    sam: 'A Cloudflare Workers Paid plan',
     managed: 'Bundled into pricing',
     selfHosted: 'You host it (K8s / Docker)',
     samWins: true,
   },
   {
-    label: 'Infrastructure cost',
-    sam: 'Your cloud bill for BYOC VMs; hosted compute where available',
+    label: 'What you pay for compute',
+    sam: 'Your cloud provider bills you directly for your servers',
     managed: 'From $20/mo (compute + inference)',
     selfHosted: 'Your cloud bill + license fees',
     samWins: true,
   },
   {
-    label: 'Self-hostable',
-    sam: 'Fully — control plane + VMs',
+    label: 'Can you host it yourself?',
+    sam: 'Yes, all of it: SAM and the servers it uses',
     managed: 'Managed service; enterprise VPC deployment available',
-    selfHosted: 'Yes — standalone server, Docker, or K8s; Terraform workspaces',
+    selfHosted: 'Yes: standalone server, Docker, or K8s; Terraform workspaces',
     samWins: true,
   },
   {
-    label: 'Shared projects & roles',
-    sam: 'Invite link, approval, owner/admin roles, credential attribution',
+    label: 'Team projects',
+    sam: 'Invite links, approval, owner and admin roles, and who-pays tracking',
     managed: 'Seat-based team plans',
     selfHosted: 'Workspace access control and read-only agent chat sharing',
     samWins: true,
   },
   {
-    label: 'Comments that become agent context',
-    sam: 'Comment on chat or files, send to agent, agent replies and resolves',
+    label: 'Comments the agent reads',
+    sam: 'Comment on chat or files; the agent replies and resolves the thread',
     managed: 'Bundled or unavailable',
     selfHosted: 'No agent-level comments',
     samWins: true,
   },
   {
-    label: 'Compute pools across clouds',
-    sam: '7 providers, real SKUs, strategy + exhaustion policy per pool',
+    label: 'Mixing cloud providers',
+    sam: '7 providers; you pick the exact machine types and how work is spread',
     managed: 'Single vendor, opaque sizing',
     selfHosted: 'You wire it yourself',
     samWins: true,
   },
   {
-    label: 'Token & compute usage reporting',
-    sam: 'Per-user usage by model/day + monthly budget, node-hours, admin cost summary',
+    label: 'Usage and budgets',
+    sam: 'Per-person usage by model and day, monthly budgets, server hours, admin cost summary',
     managed: 'Bundled into one bill',
     selfHosted: 'AI usage reporting and licensed AI Gateway budgets',
     samWins: true,
   },
   {
-    label: 'Event triggers & webhooks',
-    sam: 'Cron, GitHub events, authenticated webhooks, standing watches',
+    label: 'Work that starts on its own',
+    sam: 'Schedules, GitHub events, and authenticated webhooks',
     managed: 'Schedules, GitHub/integration events, and custom webhooks',
     selfHosted: 'Agent API for custom webhook and scheduled automation',
     samWins: true,
   },
   {
-    label: 'Durable sleep/wake sessions',
-    sam: '7-day snapshots; labelled transcript + Git fallback for idle VMs',
+    label: 'Picking up where you left off',
+    sam: 'Sessions sleep and wake with their files for up to 7 days',
     managed: 'Varies, usually opaque',
     selfHosted: 'Persistent agent chats; workspace storage depends on template',
     samWins: true,
   },
   {
     label: 'Setup effort',
-    sam: 'Deploy to Cloudflare; connect a cloud for BYOC VMs',
+    sam: 'Deploy to your Cloudflare account; connect a cloud provider for your own servers',
     managed: 'Zero config',
     selfHosted: 'Server deployment + Terraform workspace templates',
     samWins: false,
   },
   {
-    label: 'Data sovereignty',
-    sam: 'VM code runs on your cloud; Instant and control plane data use Cloudflare',
+    label: 'Where your data lives',
+    sam: 'Code on your own servers stays in your cloud; Instant workspaces and SAM data use Cloudflare',
     managed: 'Vendor-managed',
-    selfHosted: 'Full — your infrastructure',
+    selfHosted: 'Full: your infrastructure',
     samWins: true,
   },
 ];
@@ -105,9 +105,9 @@ const rows = [
   <div class="container">
     <div class="comparison-header animate-on-scroll">
       <span class="section-label">Comparison</span>
-      <h2 class="section-title">How SAM stacks up</h2>
+      <h2 class="section-title">How SAM compares</h2>
       <p class="section-subtitle">
-        Own your infrastructure. Choose your agent. Pay cloud prices.
+        You own the servers, choose the agent, and pay your cloud provider's prices.
       </p>
     </div>
 
@@ -124,13 +124,13 @@ const rows = [
             </th>
             <th class="col-other">
               <div class="col-header-content col-header-managed">
-                Managed AI Platforms
+                Hosted agent platforms
                 <span class="col-examples">Devin</span>
               </div>
             </th>
             <th class="col-other">
               <div class="col-header-content col-header-selfhosted">
-                Self-Hosted CDEs
+                Self-hosted dev environments
                 <span class="col-examples">Coder</span>
               </div>
             </th>
@@ -141,8 +141,8 @@ const rows = [
             <tr>
               <td class="col-label">{row.label}</td>
               <td class={`col-sam ${row.samWins ? 'highlight' : ''}`} data-label="SAM">{row.sam}</td>
-              <td class="col-other" data-label="Managed AI Platforms">{row.managed}</td>
-              <td class="col-other" data-label="Self-Hosted CDEs">{row.selfHosted}</td>
+              <td class="col-other" data-label="Hosted agent platforms">{row.managed}</td>
+              <td class="col-other" data-label="Self-hosted dev environments">{row.selfHosted}</td>
             </tr>
           ))}
         </tbody>
@@ -150,8 +150,8 @@ const rows = [
     </div>
 
     <p class="comparison-footnote animate-on-scroll">
-      Compute costs exclude AI inference — connect agent credentials or use SAM-managed AI where configured.
-      Managed platform pricing bundles compute and model inference.
+      Compute costs don't include AI usage. Agents use your own key or plan, or SAM-managed AI where
+      your installation offers it. Hosted platforms bundle compute and AI usage into one price.
       Read the <a href="/compare/paseo/">SAM vs Paseo comparison</a>.
     </p>
   </div>

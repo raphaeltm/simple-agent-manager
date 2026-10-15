@@ -1,8 +1,8 @@
 {
   "slug": "compute-pools",
-  "label": "Compute Pools & Cost Reporting",
+  "label": "Cloud & Costs",
   "title": "Pick your clouds.\nSee what they cost.",
-  "subtitle": "Build a compute pool from real, provider-native machines across seven clouds. Track token and compute usage per user, with budgets and quotas that keep spend predictable.",
+  "subtitle": "Connect Hetzner, Scaleway, GCP, or four other providers. You pay them directly at their prices, and SAM shows how much each person used.",
   "summary": "Real multi-cloud machines with a placement strategy, plus per-user token and compute usage reporting.",
   "highlights": [
     "Pools are built from each connected credential’s live catalog — concrete SKUs like cx33 or PRO2-S with real vCPU, RAM, disk, and price",
@@ -20,6 +20,11 @@
       "caption": "Choose exactly which machines SAM may rent, from every connected provider’s real catalog"
     }
   ],
+  "homepage": {
+    "headline": "Choose the exact machines agents run on",
+    "body": "Browse each provider's catalog with real prices, filter by region, CPU, or memory, and add the machine types you want. SAM can run several agents on one machine, so you don't pay for a server per task.",
+    "caption": "The catalog, then the server SAM picked and why"
+  },
   "details": [
     {
       "headline": "Real machines, not size labels",

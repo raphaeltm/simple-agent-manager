@@ -1,8 +1,8 @@
 {
   "slug": "comments",
-  "label": "Comments as Context",
-  "title": "Feedback that reaches\nthe agent.",
-  "subtitle": "Leave a comment on a chat message or a library file. Send it to the agent as context, and the agent can reply and resolve it — right from the tool it is using.",
+  "label": "Comments",
+  "title": "Comment on the exact line.\nThe agent reads it.",
+  "subtitle": "Pick a sentence in the agent's reply or a line in a file it wrote. Send the thread over, and the agent can answer and mark it resolved.",
   "summary": "Comment on chat messages or library files, then send the thread to the agent as context.",
   "highlights": [
     "Threads anchor to a quoted sentence in a chat message, or to a library file",
@@ -20,6 +20,11 @@
       "caption": "Comment on exactly the sentence you mean, then send it to the agent as context"
     }
   ],
+  "homepage": {
+    "headline": "Review agent work like a pull request",
+    "body": "Every thread lands in one inbox, sorted by whether it's waiting on you. A review comment can turn into a fix without you pasting anything back into the chat.",
+    "caption": "A comment thread on one line of a file"
+  },
   "details": [
     {
       "headline": "Comment on exactly what you mean",

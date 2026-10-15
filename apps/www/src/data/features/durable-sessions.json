@@ -1,13 +1,12 @@
 {
   "slug": "durable-sessions",
-  "label": "Durable Sessions & Orchestration",
-  "title": "Agents that sleep,\nwake, and coordinate.",
-  "subtitle": "Sessions normally sleep and wake from a 7-day snapshot. After repeated snapshot failures, idle VM sessions can fall back to the transcript and a verified Git recovery point, with a notice. Agents dispatch subtasks to each other and can interrupt a busy peer. App deployments turn a Compose release into a running, configurable app.",
+  "label": "Sessions That Wait",
+  "title": "Leave any time.\nPick up where you left off.",
+  "subtitle": "Sessions you leave idle go to sleep and keep their work for up to seven days.",
   "summary": "Sessions survive runtime teardown, agents coordinate with each other, and Compose releases deploy straight from the project.",
   "highlights": [
     "Sessions normally restore home and repository state from a 7-day snapshot; VM fallback preserves the transcript and a verified Git recovery point",
     "Agents dispatch subtasks to peers and send durable messages that can interrupt a busy agent",
-    "Missions coordinate multi-agent work toward a shared goal",
     "App deployments run Compose releases with environments, configuration, and logs",
     "Six agent harnesses: Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp"
   ],
@@ -20,6 +19,11 @@
       "caption": "Send a message to a sleeping session and SAM restores the workspace, then delivers it"
     }
   ],
+  "homepage": {
+    "headline": "A message wakes it up",
+    "body": "Reply to a sleeping session and SAM brings back its files, branch, and conversation, so the agent continues where it stopped.",
+    "caption": "SAM rebuilds the workspace, then delivers your message"
+  },
   "details": [
     {
       "headline": "Close the tab. The session waits.",
@@ -32,7 +36,7 @@
     },
     {
       "headline": "Agents that dispatch to each other",
-      "body": "An agent can dispatch a subtask to a peer, send a durable message that interrupts a busy agent instead of waiting behind it, and coordinate multi-step work through missions. Work keeps moving even when one agent is heads-down on something else.",
+      "body": "An agent can dispatch a subtask to a peer and send a durable message that interrupts a busy agent instead of waiting behind it. Work keeps moving even when one agent is heads-down on something else.",
       "screenshot": {
         "src": "/images/features/sam-agents-orchestration.png",
         "alt": "Task Hierarchy view showing a running parent task with three dispatched subtasks: one completed with a PR opened, one queued and blocked on sign-off, and one running",
