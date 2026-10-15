@@ -1,12 +1,11 @@
 import type {
   CapacityPoolScope,
-  CredentialProvider,
   SafeEffectiveCapacityPoolSummary,
 } from '@simple-agent-manager/shared';
-import { getLocationsForProvider } from '@simple-agent-manager/shared';
+import { getLocationsForProvider, isValidProvider } from '@simple-agent-manager/shared';
 import { Link } from 'react-router';
 
-import { providerDisplayName } from '../../lib/compute-pool-machines';
+import { providerDisplayName } from '../../lib/compute-pool-offering-fields';
 import { joinNatural } from './machine-labels';
 import { TEXT_LINK_CLASS } from './styles';
 
@@ -14,14 +13,8 @@ const PRIMARY_LINK =
   'inline-flex min-h-9 items-center justify-center rounded-md border border-transparent bg-accent px-3 text-sm font-semibold text-fg-on-accent';
 
 function locationName(provider: string, location: string): string {
-  try {
-    const known = getLocationsForProvider(provider as CredentialProvider)?.find(
-      (item) => item.id === location
-    );
-    return known?.name ?? location;
-  } catch {
-    return location;
-  }
+  if (!isValidProvider(provider)) return location;
+  return getLocationsForProvider(provider).find((item) => item.id === location)?.name ?? location;
 }
 
 /** "Hetzner cx23, cx33 or cx43 in Falkenstein or Helsinki" from the safe summary. */

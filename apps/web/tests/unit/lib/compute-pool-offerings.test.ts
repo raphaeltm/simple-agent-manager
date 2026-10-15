@@ -1,10 +1,12 @@
-import type {
-  CapacityPoolCandidate,
-  CapacitySourceIdentity,
-  ProviderCatalog,
+import {
+  type CapacityPoolCandidate,
+  type CapacitySourceIdentity,
+  PROVIDER_LABELS,
+  type ProviderCatalog,
 } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
+import { providerDisplayName } from '../../../src/lib/compute-pool-offering-fields';
 import {
   buildComputePoolOfferingsModel,
   canAddComputePoolOffering,
@@ -430,5 +432,17 @@ describe('compute-pool source to catalog matching', () => {
     expect(model.catalog.filter((offering) => offering.sourceId === 'source-legacy').length).toBe(
       catalog().offerings!.length
     );
+  });
+});
+
+describe('providerDisplayName', () => {
+  it('uses the app-wide provider labels so every page names a provider the same way', () => {
+    expect(providerDisplayName('infomaniak')).toBe(PROVIDER_LABELS.infomaniak);
+    expect(providerDisplayName('gcp')).toBe(PROVIDER_LABELS.gcp);
+  });
+
+  it('title-cases providers the app does not know yet', () => {
+    expect(providerDisplayName('new-cloud_co')).toBe('New Cloud Co');
+    expect(providerDisplayName(null)).toBe('Unknown provider');
   });
 });

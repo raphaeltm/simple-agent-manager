@@ -6,7 +6,6 @@ import type {
   ProviderCatalog,
 } from '@simple-agent-manager/shared';
 
-import { titleCaseProvider } from './compute-pool-offering-fields';
 import {
   buildComputePoolOfferingsModel,
   canAddComputePoolOffering,
@@ -323,8 +322,4 @@ export function rowPriceLabel(
   const cheapest = [...priced].sort((a, b) => compareNullable(a.monthlyPrice, b.monthlyPrice))[0];
   if (!cheapest?.priceLabel) return null;
   return labels.size === 1 ? cheapest.priceLabel : `from ${cheapest.priceLabel}`;
-}
-
-export function providerDisplayName(provider: string): string {
-  return titleCaseProvider(provider);
 }

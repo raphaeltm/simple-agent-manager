@@ -2,6 +2,8 @@ import {
   type CapacityPoolCandidate,
   type CapacitySourceIdentity,
   DEFAULT_APPROXIMATE_BILLING_MONTH_HOURS,
+  isValidProvider,
+  PROVIDER_LABELS,
   type ProviderCatalog,
 } from '@simple-agent-manager/shared';
 
@@ -43,28 +45,18 @@ export type ExtendedCandidate = CapacityPoolCandidate & {
   catalogStatus?: string | null;
 };
 
-export function titleCaseProvider(value: string | null | undefined): string {
+/** Known providers use the app-wide `PROVIDER_LABELS`; anything else is title-cased. */
+export function providerDisplayName(value: string | null | undefined): string {
   if (!value) return 'Unknown provider';
-  const named: Record<string, string> = {
-    digitalocean: 'DigitalOcean',
-    gcp: 'Google Cloud',
-    hetzner: 'Hetzner',
-    infomaniak: 'Infomaniak',
-    scaleway: 'Scaleway',
-    upcloud: 'UpCloud',
-    vultr: 'Vultr',
-  };
-  return (
-    named[value] ??
-    value
-      .split(/[-_\s]+/)
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ')
-  );
+  if (isValidProvider(value)) return PROVIDER_LABELS[value];
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
-export function identityPart(value: string | null | undefined): string {
+function identityPart(value: string | null | undefined): string {
   const normalized = value?.trim();
   return normalized ? normalized.toLowerCase() : 'unknown';
 }
@@ -114,15 +106,6 @@ export function offeringKey(
     .join(':');
 }
 
-export function legacyOfferingKey(
-  sourceKey: string | null | undefined,
-  provider: string,
-  location: string,
-  machineSize: string
-): string {
-  return offeringKey(sourceKey, provider, location, machineSize);
-}
-
 export function candidateSourceKey(
   candidate: ExtendedCandidate,
   sourceKeysById: ReadonlyMap<string, string | null>
@@ -133,7 +116,7 @@ export function candidateSourceKey(
   return sourceId ? `capacity-source:${sourceId}` : null;
 }
 
-export function parsePriceAmount(value: string | null | undefined): number | null {
+function parsePriceAmount(value: string | null | undefined): number | null {
   if (!value) return null;
   const match = value.replace(',', '.').match(/([0-9]+(?:\.[0-9]+)?)/);
   if (!match) return null;

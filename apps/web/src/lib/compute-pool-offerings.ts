@@ -12,15 +12,14 @@ import {
   candidateSourceKey,
   catalogSourceKey,
   type ExtendedCandidate,
-  legacyOfferingKey,
   monthlyPriceAmount,
   normalizeDiskGb,
   normalizeNumber,
   normalizeRamGb,
   offeringKey,
   priceLabelForOffering,
+  providerDisplayName,
   sourceKeyFromIdentity,
-  titleCaseProvider,
 } from './compute-pool-offering-fields';
 
 export interface ComputePoolOffering {
@@ -79,7 +78,7 @@ function offeringFromLegacySize(
     sourceId: null,
     sourceKey,
     provider: catalog.provider,
-    providerLabel: titleCaseProvider(catalog.provider),
+    providerLabel: providerDisplayName(catalog.provider),
     location: locationId,
     locationLabel,
     country,
@@ -120,7 +119,7 @@ function offeringFromNativeCatalog(
     sourceId: null,
     sourceKey,
     provider: catalog.provider,
-    providerLabel: titleCaseProvider(catalog.provider),
+    providerLabel: providerDisplayName(catalog.provider),
     location,
     locationLabel: offering.locationName ?? locationInfo?.name ?? location,
     country: offering.country ?? locationInfo?.country ?? null,
@@ -151,9 +150,7 @@ function offeringFromNativeCatalog(
   };
 }
 
-function flattenProviderCatalogOfferings(
-  catalogs: ProviderCatalog[]
-): ComputePoolOffering[] {
+function flattenProviderCatalogOfferings(catalogs: ProviderCatalog[]): ComputePoolOffering[] {
   return catalogs.flatMap((catalog) => {
     if (catalog.offerings && catalog.offerings.length > 0) {
       return catalog.offerings.map((offering) => offeringFromNativeCatalog(catalog, offering));
@@ -213,7 +210,7 @@ function candidateFallbackOffering(
     sourceId: candidate.capacitySourceId ?? null,
     sourceKey,
     provider,
-    providerLabel: titleCaseProvider(provider),
+    providerLabel: providerDisplayName(provider),
     location,
     locationLabel: location,
     country: null,
@@ -281,7 +278,7 @@ export function buildComputePoolOfferingsModel(
     byUnscopedKey.set(unscopedKey, [...(byUnscopedKey.get(unscopedKey) ?? []), offering]);
     if (!offering.machineSizeHint) continue;
     byLegacyCandidate.set(
-      legacyOfferingKey(
+      offeringKey(
         offering.sourceKey,
         offering.provider,
         offering.location,
@@ -307,9 +304,7 @@ export function buildComputePoolOfferingsModel(
         (unscopedMatches.length === 1 ? unscopedMatches[0] : null))
       : null;
     const legacyCatalogOffering = extended.machineSize
-      ? byLegacyCandidate.get(
-          legacyOfferingKey(sourceKey, provider, location, extended.machineSize)
-        )
+      ? byLegacyCandidate.get(offeringKey(sourceKey, provider, location, extended.machineSize))
       : null;
     const base =
       exactCatalogOffering ??
