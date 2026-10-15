@@ -44,6 +44,19 @@ Fixture prompt (replace only probe source and matrix label):
 
 The probe preserves pre-existing staged entries and creates a local commit, staged plus unstaged tracked content, a staged new file, an untracked file, and workflow files. It refuses default branches and existing fixture directories. It never pushes. Baseline JSON stays inside the supported root and contains hashes/refs, no credentials. The printed JSON is a fixed `checks`/`statuses` phase result, not the baseline. Preserve stdout alone as the phase artifact, and separately export the actual `.reliability-a/baseline.json` through the private artifact path. Never substitute the baseline file, model prose, a tool wrapper, or combined streams for phase stdout; neither artifact alone proves the other. Do not rely only on a file inside the sleeping runtime. Include the exact probe from this ref in the prompt; do not ask the agent to fetch arbitrary unpinned main.
 
+Private upload selectors are explicit and independent. Upload original file bytes; never ask the fixture model to reformat JSON or summarize/count refs. Capture CLI stdout alone into the named phase file, with stderr kept private.
+
+| File | Controller schema | Phase selector |
+| --- | --- | --- |
+| `a-prepare.json` (redirected prepare stdout) | `probe` | `a-prepare` |
+| `a-check.json` (redirected check stdout) | `probe` | `a-check` |
+| `.reliability-a/baseline.json` | `baseline` | none |
+| `expectations.json` (observer private output file) | `expectations` | none |
+| `observer-record.json` (redirected record stdout) | `probe` | `observer-record` |
+| `observer-check.json` (redirected check stdout) | `probe` | `observer-check` |
+
+Every download must carry the same exact task ID and task branch for its fixture. Keep copied baseline and expectations outside the fixture repository. These are separate artifacts; a phase result is not a baseline or expectations file.
+
 ## Turn end, explicit sleep and wake
 
 1. Wait for the actual first prompt to end with no tools/background work in flight (session state `/api/projects/{projectId}/sessions/{sessionId}/state` plus messages/UI). Capture canonical UTC timestamps, workspace ID, actual runtime/harness, HEAD/index/status hashes and remote refs. Independently inspect the disposable repository's PR/MR list before/after using its authorized Git host API or `gh pr list --state all --head <fixture-branch> --json number,url,state,headRefName`. Do not count agent prose alone as proof.
