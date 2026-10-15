@@ -69,14 +69,34 @@ export function identityPart(value: string | null | undefined): string {
   return normalized ? normalized.toLowerCase() : 'unknown';
 }
 
+interface SourceKeyParts {
+  credentialSource?: string | null;
+  credentialId?: string | null;
+  platformCredentialId?: string | null;
+  externalSourceRef?: string | null;
+}
+
+/**
+ * The one key that ties a pool source to the provider catalog read through the same
+ * credential. Both sides MUST use this function: a composable attachment carries a
+ * credential id AND an attachment ref (`cc_attachments:…`, see `provider-catalogs.ts`),
+ * and when the source keyed by the credential id while the catalog keyed by the
+ * attachment ref, every offering of that source rendered as stale catalog data.
+ */
+function capacitySourceKey(parts: SourceKeyParts): string | null {
+  const source = parts.credentialSource?.trim() || null;
+  const externalRef = parts.externalSourceRef?.trim() || null;
+  const platformId = parts.platformCredentialId?.trim() || null;
+  const credentialId = parts.credentialId?.trim() || null;
+  if (source && externalRef) return `${source}:${externalRef}`;
+  if (platformId) return `platform:${platformId}`;
+  if (source && credentialId) return `${source}:${credentialId}`;
+  if (externalRef) return `external:${externalRef}`;
+  return null;
+}
+
 export function catalogSourceKey(catalog: ProviderCatalog): string | null {
-  const source = catalog.credentialSource?.trim();
-  if (source && catalog.externalSourceRef?.trim()) {
-    return `${source}:${catalog.externalSourceRef.trim()}`;
-  }
-  const id =
-    source === 'platform' ? catalog.platformCredentialId?.trim() : catalog.credentialId?.trim();
-  return source && id ? `${source}:${id}` : null;
+  return capacitySourceKey(catalog);
 }
 
 export function sourceLabelFromParts(
@@ -98,15 +118,7 @@ export function sourceLabelFromParts(
 }
 
 export function sourceKeyFromIdentity(source: CapacitySourceIdentity): string | null {
-  if (source.platformCredentialId) return `platform:${source.platformCredentialId}`;
-  if (source.credentialId && source.credentialSource) {
-    return `${source.credentialSource}:${source.credentialId}`;
-  }
-  if (source.externalSourceRef && source.credentialSource) {
-    return `${source.credentialSource}:${source.externalSourceRef}`;
-  }
-  if (source.externalSourceRef) return `external:${source.externalSourceRef}`;
-  return null;
+  return capacitySourceKey(source);
 }
 
 export function sourceLabelFromIdentity(source: CapacitySourceIdentity): string | null {

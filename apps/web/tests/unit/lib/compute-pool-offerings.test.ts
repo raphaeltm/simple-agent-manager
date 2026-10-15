@@ -435,3 +435,92 @@ describe('compute-pool offering filters', () => {
     });
   });
 });
+
+describe('compute-pool source to catalog matching', () => {
+  // Production shape (2026-10-15): one user pool with a legacy credential source AND a
+  // composable connection source for the same provider. The composable source carries
+  // both a credential id and an attachment ref; provider-catalogs.ts keys its catalog by
+  // the attachment ref.
+  const LEGACY_ID = 'legacy-credential';
+  const COMPOSABLE_ID = 'cc-backfill-composable-credential';
+  const ATTACHMENT_REF = 'cc_attachments:attachment-1';
+
+  function userCatalog(overrides: Partial<ProviderCatalog>): ProviderCatalog {
+    return { ...catalog(), credentialSource: 'user', ...overrides };
+  }
+
+  const legacySource = sourceIdentity({
+    id: 'source-legacy',
+    scope: 'user',
+    ownerUserId: 'user-1',
+    ownerProjectId: null,
+    credentialSource: 'user',
+    credentialId: LEGACY_ID,
+    credentialReference: `credentials:${LEGACY_ID}`,
+  });
+  const composableSource = sourceIdentity({
+    id: 'source-composable',
+    scope: 'user',
+    ownerUserId: 'user-1',
+    ownerProjectId: null,
+    credentialSource: 'user',
+    credentialId: COMPOSABLE_ID,
+    credentialReference: `cc_credentials:${COMPOSABLE_ID}`,
+    externalSourceRef: ATTACHMENT_REF,
+  });
+
+  function buildTwoSourceModel() {
+    return buildComputePoolOfferingsModel(
+      [
+        candidate({ id: 'legacy-cx22', capacitySourceId: 'source-legacy', status: 'active' }),
+        candidate({
+          id: 'composable-cx22',
+          capacitySourceId: 'source-composable',
+          status: 'deleted',
+        }),
+      ],
+      [
+        userCatalog({ credentialId: LEGACY_ID, externalSourceRef: null }),
+        userCatalog({ credentialId: COMPOSABLE_ID, externalSourceRef: ATTACHMENT_REF }),
+      ],
+      [legacySource, composableSource]
+    );
+  }
+
+  it('matches a composable source to the catalog read through its attachment', () => {
+    const model = buildTwoSourceModel();
+
+    const composable = model.excluded.find(
+      (offering) => offering.candidateId === 'composable-cx22'
+    );
+    expect(composable).toMatchObject({
+      sourceId: 'source-composable',
+      stale: false,
+      available: true,
+      locationLabel: 'Falkenstein',
+      country: 'DE',
+    });
+    expect(canAddComputePoolOffering(composable!)).toBe(true);
+
+    // The composable catalog's row for the same machine belongs to the composable source,
+    // so it is addable instead of a dead "reconcile source" row.
+    const composableCatalogRows = model.catalog.filter(
+      (offering) => offering.sourceId === 'source-composable'
+    );
+    expect(composableCatalogRows.length).toBe(catalog().offerings!.length);
+    expect(composableCatalogRows.find((offering) => offering.sku === 'cx22')).toMatchObject({
+      candidateId: 'composable-cx22',
+      candidateStatus: 'deleted',
+    });
+  });
+
+  it('keeps the legacy source matched to its own catalog (control)', () => {
+    const model = buildTwoSourceModel();
+
+    const legacy = model.allowed.find((offering) => offering.candidateId === 'legacy-cx22');
+    expect(legacy).toMatchObject({ sourceId: 'source-legacy', stale: false, available: true });
+    expect(model.catalog.filter((offering) => offering.sourceId === 'source-legacy').length).toBe(
+      catalog().offerings!.length
+    );
+  });
+});
