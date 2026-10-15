@@ -79,7 +79,7 @@ function entity(value,kind,privateState){
     if(value[key]!==undefined&&value[key]!==null)selected[key]=value[key];
   }
   // These are real task statuses missing from the generic boundary's small enum.
-  const extraStatus=['delegated','blocked','awaiting_followup','stopping','error','destroying','provisioning','deleting','starting','restoring'];
+  const extraStatus=['delegated','blocked','awaiting_followup','stopping','error','destroying','provisioning','deleting','starting','restoring','recovery','evicted','deleted'];
   const status=selected.status;
   if(extraStatus.includes(status))delete selected.status;
   const result=privateState(selected);
