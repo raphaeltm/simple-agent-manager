@@ -98,6 +98,13 @@ export async function abandonRecoveryHandoff(
   }
 }
 
+// Mode describes the conversation, not whether its last turn was interrupted.
+function recoveryNextStep(options: SessionRecoveryOptions): SessionRecoveryNextStep {
+  return options.wakeCause === 'runtime_lost' && options.interruptedWork !== false
+    ? 'continue_assigned_task'
+    : 'answer_queued_message';
+}
+
 export async function startRecoveryTask(
   env: Env,
   context: RecoveryContext,
@@ -123,11 +130,7 @@ export async function startRecoveryTask(
   const contract = parseSessionRuntimeContract(context.snapshot.runtimeContractJson);
   const taskMode =
     contract?.taskContext?.taskMode ?? (task.taskMode === 'task' ? 'task' : 'conversation');
-  // Mode describes the conversation, not whether its last turn was interrupted.
-  const nextStep: SessionRecoveryNextStep =
-    options.wakeCause === 'runtime_lost' && options.interruptedWork !== false
-      ? 'continue_assigned_task'
-      : 'answer_queued_message';
+  const nextStep = recoveryNextStep(options);
   const profile = task.agentProfileHint
     ? await db
         .select()

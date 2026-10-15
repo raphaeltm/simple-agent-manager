@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -11,6 +12,13 @@ import (
 func evictionDeliveryFixture() EvictionDelivery {
 	return EvictionDelivery{WorkspaceID: "workspace-1", ProjectID: "project-1", NodeID: "node-1", ContainerID: "container-1",
 		Generation: "run-1", Reason: "memory_pressure", OccurredAt: time.Now().Add(-time.Minute).UTC()}
+}
+
+func assertInterruptedWork(t *testing.T, got, want *bool) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("interrupted work evidence changed: got %v, want %v", got, want)
+	}
 }
 
 func TestEvictionIntentSurvivesRestartAndFinalizationIsAtomic(t *testing.T) {
@@ -44,9 +52,7 @@ func TestEvictionIntentSurvivesRestartAndFinalizationIsAtomic(t *testing.T) {
 	if err != nil || claimed == nil || claimed.ContainerStopped {
 		t.Fatalf("intent=%#v err=%v", claimed, err)
 	}
-	if claimed.InterruptedWork == nil || !*claimed.InterruptedWork {
-		t.Fatal("lost pre-stop ownership on restart")
-	}
+	assertInterruptedWork(t, claimed.InterruptedWork, &interrupted)
 	// Stop/error reporting has cleared activity; completion must not rewrite it.
 	idle := false
 	d.InterruptedWork = &idle
@@ -58,9 +64,7 @@ func TestEvictionIntentSurvivesRestartAndFinalizationIsAtomic(t *testing.T) {
 	if err != nil || ready == nil || !ready.ContainerStopped || !ready.SnapshotCaptured {
 		t.Fatalf("ready=%#v err=%v", ready, err)
 	}
-	if ready.InterruptedWork == nil || !*ready.InterruptedWork {
-		t.Fatal("completion overwrote captured ownership")
-	}
+	assertInterruptedWork(t, ready.InterruptedWork, &interrupted)
 	if err := store.CompleteEvictionDelivery(context.Background(), ready.ID, ready.Attempts, ready.PayloadRevision); err != nil {
 		t.Fatal(err)
 	}
@@ -183,6 +187,7 @@ func TestEvictionIdleEvidenceAndLegacyUnknown(t *testing.T) {
 			if _, err := store.RecordWorkspaceEviction(context.Background(), d); err != nil {
 				t.Fatal(err)
 			}
+			expected := d.InterruptedWork
 			d.InterruptedWork = nil
 			d.ContainerStopped = true
 			if _, err := store.RecordWorkspaceEviction(context.Background(), d); err != nil {
@@ -192,12 +197,7 @@ func TestEvictionIdleEvidenceAndLegacyUnknown(t *testing.T) {
 			if err != nil || got == nil {
 				t.Fatalf("claim %v %v", got, err)
 			}
-			if known && (got.InterruptedWork == nil || *got.InterruptedWork) {
-				t.Fatal("idle evidence lost")
-			}
-			if !known && got.InterruptedWork != nil {
-				t.Fatal("invented idle evidence for legacy intent")
-			}
+			assertInterruptedWork(t, got.InterruptedWork, expected)
 		})
 	}
 }

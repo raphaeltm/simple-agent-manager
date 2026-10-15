@@ -50,7 +50,9 @@ func (s *Server) prepareWorkspaceEvictionStop(ctx context.Context, target resour
 	// Capture before Docker stop and before finishLocalWorkspaceEviction clears activity.
 	// Retain the admission fence once the durable intent owns this runtime.
 	committed := false
-	rollbackAdmission := func() {}
+	rollbackAdmission := func() {
+		// No host means no admission fence was acquired.
+	}
 	defer func() {
 		if !committed {
 			rollbackAdmission()
