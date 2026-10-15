@@ -1,0 +1,27 @@
+# Reliability C storage rollout
+
+MCP admission uses a dedicated SQLite `McpRateCounter` per existing task/agent-session/workspace fallback identity. Boot logs use a dedicated `WorkspaceBootLog` per workspace. Neither adds traffic to ProjectData. Wrangler migration v22 adds both SQLite classes and bindings; generated environments copy these top-level bindings. Existing installations append v22; new installations replay the unchanged earlier migrations plus v22.
+
+## Two-stage activation (release coordinator owns execution)
+
+1. Deploy this bridge with both cutovers unset, preserving the existing KV ownership. Confirm both bindings/classes and migration exist. Route 100% of traffic to the bridge; drain every prebridge Worker invocation and boot callback. Do not use gradual deployment across the activation boundary.
+2. Choose one future Unix-second boundary aligned to the current `MCP_RATE_LIMIT_WINDOW_SECONDS`. Configure `MCP_RATE_COUNTER_CUTOVER_AT` and `BOOT_LOG_STORAGE_CUTOVER_AT` identically in the deployment environment. The reusable deploy forwards these values to generated Wrangler vars. Freeze window size, identity derivation and cutovers throughout rollout and rollback.
+3. Finish deploying the configured bridge to 100% before the boundary. Verify the actual deployed settings and prepare a rollback artifact carrying identical settings, bindings and DO protocol. If deployment cannot finish before the boundary, abort activation before it occurs; never run configured and unconfigured versions across it. Rescheduling is safe only before any activation and with every version still on KV.
+4. At activation, the limiter chooses ownership using the computed **window start**, so an already-open KV window stays KV through its reset. New windows are DO-only; no KV seeding or dual authoritative counters. A missing binding, invalid timestamp or DO error throws and never falls back to KV. Existing authentication and rate headers remain in the route layer.
+5. Boot-log appends/replacements move to DO at their boundary. Ensure legacy invocations have drained before this boundary. Read-compatible merging tolerates delayed KV propagation without freezing the first snapshot. DO reads merge the bounded legacy KV tail before SQLite-native entries while legacy keys naturally expire. There is no one-time import, which would freeze a stale eventually-consistent snapshot. Clears/replacements suppress legacy reads durably, including across restart. Appends refresh receipt-based TTL for SQLite-native entries; alarm/read expiry removes log rows and suppresses legacy data. During migration legacy entries retain their original KV expiry rather than inheriting later DO append TTL. This is the intentional KV drain behavior; legacy payload expiry cannot be reconstructed from event timestamps. A single bounded marker remains to prevent resurrection after clear/expiry. Legacy KV keys are never rewritten after activation and drain through their original TTL.
+
+## Rollback
+
+Before activation, rollback to the legacy release is safe while all traffic still uses KV. After activation, rollback is only to a compatible bridge artifact with the **same activated cutovers, window size, identity algorithm, bindings and SQLite classes**. Never unset cutovers, restore an unconfigured bridge, delete namespaces, reuse a migration tag, or deploy a KV-only binary after activation. These actions split ownership or reset consumed quotas. Forward-fix if no compatible rollback artifact exists. A rollback must preserve existing DO state.
+
+## Retention and deduplication
+
+Rate count is capped at the configured limit; one row per live window, expired rows removed on admission/alarm. Log entries are capped by `BOOT_LOG_MAX_ENTRIES` (default 50), and receipt-based inactivity expiry uses `BOOT_LOG_TTL_SECONDS` (default 1800). Clears and expiry retain one small metadata row per workspace, not log payloads. No periodic global sweeps or new timers are added.
+
+A retry with the same original timestamp and identical step/status/message/detail is deduplicated while that entry is retained. Distinct payloads remain distinct; retries without an original timestamp cannot be recognized (the existing callback supplies server time). Identical legitimate events in the reporter's second-resolution timestamp collide; the log is a bounded provisioning progress view, not an audit ledger. The Go reporter and callback authentication contract are unchanged.
+
+## Consolidated staging evidence required
+
+Coordinator pins the final integrated head and runs one shared sweep: bridge unset and existing KV records; migrations/bindings on clean and existing installs; future activation and last KV window; concurrent MCP bursts with exact admission/header checks and fallback identities; restart without quota reset; mixed compatible versions and rollback after consumed quota; callback started/completed burst, retry dedupe, cap/TTL, clear before import and after restart, legacy read compatibility and no new hot KV writes; injected DO failures fail closed. Provision one normal configured-pool VM to generate real callbacks, verify heartbeat/workspace access, then clean it up. Shared staging remains coordinator-owned; no separate C deployment.
+
+Cloudflare references: [SQLite transactions](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/), [rollbacks](https://developers.cloudflare.com/workers/versions-and-deployments/rollbacks/).

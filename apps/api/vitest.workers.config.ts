@@ -58,6 +58,8 @@ export default defineConfig({
         kvNamespaces: ['KV', 'OAUTH_KV'],
         r2Buckets: ['R2', 'PROJECT_DATA_ARCHIVE_R2'],
         durableObjects: {
+          MCP_RATE_COUNTER: { className: 'McpRateCounter', useSQLite: true },
+          WORKSPACE_BOOT_LOG: { className: 'WorkspaceBootLog', useSQLite: true },
           PROJECT_DATA: {
             className: 'ProjectDataTestDouble',
             useSQLite: true,

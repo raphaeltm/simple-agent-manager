@@ -1,0 +1,155 @@
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
+import type { McpRateCounter } from '../../src/durable-objects/mcp-rate-counter';
+import type { WorkspaceBootLog } from '../../src/durable-objects/workspace-boot-log';
+import type { Env } from '../../src/env';
+import { checkMcpRateLimit } from '../../src/routes/mcp/_helpers';
+import { appendBootLog, getBootLogs, writeBootLogs } from '../../src/services/boot-log';
+
+const api = env as unknown as Env;
+const entry = {
+  step: 'clone',
+  status: 'started' as const,
+  message: 'Cloning',
+  timestamp: '2026-10-15T00:00:00Z',
+};
+function activated(): Env {
+  return { ...api, MCP_RATE_COUNTER_CUTOVER_AT: '0', BOOT_LOG_STORAGE_CUTOVER_AT: '0' };
+}
+
+describe('Reliability C real SQLite storage', () => {
+  it('admits exactly the limit under concurrent requests, persists across reconstructed instances', async () => {
+    const identity = crypto.randomUUID();
+    const config = { ...activated(), MCP_RATE_LIMIT: '7' };
+    const results = await Promise.all(
+      Array.from({ length: 30 }, () => checkMcpRateLimit(api.KV, identity, config))
+    );
+    expect(results.filter((r) => r.allowed)).toHaveLength(7);
+    const stub = api.MCP_RATE_COUNTER!.get(
+      api.MCP_RATE_COUNTER!.idFromName(identity)
+    ) as DurableObjectStub<McpRateCounter>;
+    await runInDurableObject(stub, async (instance, state) => {
+      expect(state.storage.sql.exec('SELECT count FROM counters').toArray()).toEqual([
+        { count: 7 },
+      ]);
+      // Reconstruct the production class over the same durable SQLite storage.
+      const fresh = new (instance.constructor as typeof McpRateCounter)(state, config);
+      const now = Math.floor(Date.now() / 1000);
+      const start = Math.floor(now / 60) * 60;
+      expect((await fresh.consume(start, start + 60, 7)).allowed).toBe(false);
+    });
+    expect(
+      await api.KV.get(`ratelimit:mcp:${identity}:${Math.floor(Date.now() / 60000) * 60}`)
+    ).toBeNull();
+  });
+
+  it('uses the same owner for all requests in a cutover-straddling window', async () => {
+    const identity = crypto.randomUUID();
+    const now = Math.floor(Date.now() / 1000);
+    const start = Math.floor(now / 60) * 60;
+    const config = { ...api, MCP_RATE_LIMIT: '1', MCP_RATE_COUNTER_CUTOVER_AT: String(start + 1) };
+    expect((await checkMcpRateLimit(api.KV, identity, config)).allowed).toBe(true);
+    expect((await checkMcpRateLimit(api.KV, identity, config)).allowed).toBe(false);
+    expect(await api.KV.get(`ratelimit:mcp:${identity}:${start}`, 'json')).toMatchObject({
+      count: 2,
+    });
+  });
+
+  it('mixed activated bridge versions and rollback preserve consumed quota', async () => {
+    const identity = crypto.randomUUID();
+    const rollout = { ...activated(), MCP_RATE_LIMIT: '1' };
+    const rollback = { ...rollout };
+    expect((await checkMcpRateLimit(api.KV, identity, rollout)).allowed).toBe(true);
+    expect((await checkMcpRateLimit(api.KV, identity, rollback)).allowed).toBe(false);
+  });
+
+  it('prunes expired counter windows while keeping live quota', async () => {
+    const ns = api.MCP_RATE_COUNTER!;
+    const stub = ns.get(ns.idFromName(crypto.randomUUID())) as DurableObjectStub<McpRateCounter>;
+    const now = Math.floor(Date.now() / 1000);
+    await stub.consume(now, now + 60, 2);
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec('INSERT INTO counters VALUES (?, ?, ?)', now - 60, now - 1, 99);
+      await instance.alarm();
+      expect(state.storage.sql.exec('SELECT count FROM counters').toArray()).toEqual([
+        { count: 1 },
+      ]);
+    });
+  });
+
+  it('merges existing KV, serializes append bursts, deduplicates retries and caps retained entries', async () => {
+    const workspace = crypto.randomUUID();
+    await api.KV.put(`bootlog:${workspace}`, JSON.stringify([entry]));
+    const config = { ...activated(), BOOT_LOG_MAX_ENTRIES: '4' };
+    expect(await getBootLogs(api.KV, workspace, config)).toEqual([entry]);
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) =>
+        appendBootLog(api.KV, workspace, { ...entry, message: `entry-${i}` }, config)
+      )
+    );
+    const logs = await getBootLogs(api.KV, workspace, config);
+    expect(logs).toHaveLength(4);
+    await Promise.all([
+      appendBootLog(api.KV, workspace, logs[3]!, config),
+      appendBootLog(api.KV, workspace, logs[3]!, config),
+    ]);
+    expect(await getBootLogs(api.KV, workspace, config)).toEqual(logs);
+    expect(await api.KV.get(`bootlog:${workspace}`, 'json')).toEqual([entry]);
+  });
+
+  it('observes late legacy propagation after the first durable append without replacing new entries', async () => {
+    const workspace = crypto.randomUUID();
+    const config = activated();
+    await appendBootLog(api.KV, workspace, { ...entry, message: 'new durable entry' }, config);
+    // Models a pre-cutover write becoming visible only after first DO append.
+    await api.KV.put(`bootlog:${workspace}`, JSON.stringify([entry]));
+    expect(await getBootLogs(api.KV, workspace, config)).toEqual([
+      entry,
+      { ...entry, message: 'new durable entry' },
+    ]);
+    await writeBootLogs(api.KV, workspace, [], config);
+    expect(await getBootLogs(api.KV, workspace, config)).toEqual([]);
+  });
+
+  it('keeps native append order when a legacy entry is retried after cutover', async () => {
+    const workspace = crypto.randomUUID();
+    const config = { ...activated(), BOOT_LOG_MAX_ENTRIES: '2' };
+    const a = { ...entry, message: 'A' };
+    const b = { ...entry, message: 'B' };
+    const c = { ...entry, message: 'C' };
+    await api.KV.put(`bootlog:${workspace}`, JSON.stringify([a, b]));
+    await appendBootLog(api.KV, workspace, c, config);
+    await appendBootLog(api.KV, workspace, a, config);
+    expect(await getBootLogs(api.KV, workspace, config)).toEqual([c, a]);
+  });
+
+  it('clear before import and restart never resurrect stale KV logs', async () => {
+    const workspace = crypto.randomUUID();
+    await api.KV.put(`bootlog:${workspace}`, JSON.stringify([entry]));
+    const config = activated();
+    await writeBootLogs(api.KV, workspace, [], config);
+    const ns = api.WORKSPACE_BOOT_LOG!;
+    const stub = ns.get(ns.idFromName(workspace)) as DurableObjectStub<WorkspaceBootLog>;
+    await runInDurableObject(stub, async (instance, state) => {
+      const fresh = new (instance.constructor as typeof WorkspaceBootLog)(state, config);
+      expect(await fresh.read(workspace, 50)).toEqual([]);
+    });
+    expect(await getBootLogs(api.KV, workspace, config)).toEqual([]);
+  });
+
+  it('expires logs using server receipt time, keeps bounded legacy tombstone', async () => {
+    const workspace = crypto.randomUUID();
+    const config = activated();
+    await appendBootLog(api.KV, workspace, entry, config);
+    const ns = api.WORKSPACE_BOOT_LOG!;
+    const stub = ns.get(ns.idFromName(workspace)) as DurableObjectStub<WorkspaceBootLog>;
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec('UPDATE log_state SET expires_at = 0');
+      await instance.alarm();
+      expect(state.storage.sql.exec('SELECT * FROM entries').toArray()).toEqual([]);
+      expect(state.storage.sql.exec('SELECT * FROM log_state').toArray()).toHaveLength(1);
+    });
+    expect(await getBootLogs(api.KV, workspace, config)).toEqual([]);
+  });
+});
