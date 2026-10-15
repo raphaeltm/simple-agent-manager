@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import os
 import signal
+import re
 
 
 def git(*args):
@@ -29,15 +30,31 @@ def git(*args):
     return output.decode().strip()
 
 
+FILES = ['.reliability-a/tracked.txt', '.reliability-a/staged-new.txt',
+         '.reliability-a/untracked.txt', '.do-state.md', '.workflow-state.md']
+KEYS = {'head', 'branch', 'index', 'status', 'files', 'stagedTracked', 'stagedNew', 'remoteRefs'}
+
+def validate(value):
+    if not isinstance(value, dict) or set(value) != KEYS:
+        raise ValueError('baseline')
+    if any(not isinstance(value[key], str) for key in KEYS - {'files'}):
+        raise ValueError('baseline')
+    if any(not re.fullmatch(r'[0-9a-f]{40,64}', value[key]) for key in ['head', 'index']):
+        raise ValueError('baseline')
+    if not value['branch'] or not value['remoteRefs']:
+        raise ValueError('baseline')
+    files = value['files']
+    if not isinstance(files, dict) or set(files) != set(FILES) or any(not isinstance(v, str) or not re.fullmatch(r'[0-9a-f]{64}', v) for v in files.values()):
+        raise ValueError('baseline')
+
 def state():
-    paths = ['.reliability-a/tracked.txt', '.reliability-a/staged-new.txt',
-             '.reliability-a/untracked.txt', '.do-state.md', '.workflow-state.md']
     return {
         'head': git('rev-parse', 'HEAD'),
         'branch': git('branch', '--show-current'),
         'index': git('write-tree'),
-        'status': git('status', '--porcelain=v1', '--untracked-files=all'),
-        'files': {name: hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in paths},
+        'status': '\n'.join(line for line in git('status', '--porcelain=v1', '--untracked-files=all').splitlines()
+                            if line not in ['?? .reliability-a/baseline.json', '?? .reliability-a/.baseline.tmp']),
+        'files': {name: hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in FILES},
         'stagedTracked': git('show', ':.reliability-a/tracked.txt'),
         'stagedNew': git('show', ':.reliability-a/staged-new.txt'),
         'remoteRefs': git('ls-remote', '--heads', 'origin'),
@@ -84,17 +101,21 @@ def main():
         for name in ['.do-state.md', '.workflow-state.md']:
             if not Path(name).exists():
                 Path(name).write_text('Local workflow preservation fixture; never publish.\n')
-        baseline.write_text('{}\n')
         observed = state()
         # The deliberate local commit must not already exist on the remote.
         if observed['head'] in observed['remoteRefs']:
             raise RuntimeError('suppressed')
-        baseline.write_text(json.dumps(observed, indent=2) + '\n')
+        validate(observed)
+        temporary = fixture / '.baseline.tmp'
+        temporary.write_text(json.dumps(observed, indent=2) + '\n')
+        temporary.replace(baseline)
         print(json.dumps({'checks': {'prepared': True, 'localCommitUnpublished': True}, 'statuses': {'probe': 0}}, sort_keys=True))
     else:
         expected = json.loads(baseline.read_text())
+        validate(expected)
         observed = state()
-        checks = {key + 'Unchanged': observed[key] == expected[key] for key in expected}
+        validate(observed)
+        checks = {key + 'Unchanged': observed[key] == expected[key] for key in sorted(KEYS)}
         print(json.dumps({'checks': checks, 'statuses': {'probe': 0 if all(checks.values()) else 1}}, sort_keys=True))
         if not all(checks.values()):
             raise SystemExit(1)
