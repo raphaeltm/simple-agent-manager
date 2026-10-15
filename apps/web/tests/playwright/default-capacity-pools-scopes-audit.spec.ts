@@ -1,6 +1,3 @@
-import { mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
-
 import { expect, type Page, test } from '@playwright/test';
 
 import {
@@ -11,12 +8,10 @@ import {
   makeMockUser,
   screenshot,
   screenshotNearHeading,
-  screenshotSectionNearHeading,
   setupAuditRoutes,
 } from './audit-helpers';
 
 const TIMESTAMP = '2026-08-28T00:00:00.000Z';
-const SCREENSHOT_DIR = '../../.codex/tmp/playwright-screenshots';
 const EXPENSIVE_HETZNER_GPU_SKU =
   'bare-metal-gpu-ultra-long-provider-native-instance-name-2026-08-stress-row';
 const LONG_MARKER =
@@ -471,27 +466,34 @@ async function setupProjectPoolMocks(page: Page) {
   );
 }
 
-async function expectStressedDefaultPool(page: Page, heading: string, scope: PoolScope) {
-  const summary = capacitySummary(scope);
-  const excludedCount = summary.candidates.length - summary.activeCandidateCount;
-  await expect(page.getByRole('heading', { name: heading })).toBeVisible({ timeout: 20_000 });
+const POOL_HEADINGS: Record<PoolScope, string> = {
+  project: 'Project compute pool',
+  user: 'Your compute pool',
+  installation: 'Shared compute pool',
+};
+
+/** One row per machine type per connection that is allowed in at least one region. */
+function allowedRowCount(scope: PoolScope) {
+  return new Set(
+    capacitySummary(scope)
+      .candidates.filter((candidate) => candidate.status === 'active')
+      .map((candidate) => `${candidate.capacitySourceId}|${candidate.providerInstanceType}`)
+  ).size;
+}
+
+async function expectStressedDefaultPool(page: Page, scope: PoolScope) {
+  await expect(page.getByRole('heading', { name: POOL_HEADINGS[scope] })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText(`Allowed machines (${allowedRowCount(scope)})`)).toBeVisible();
+  // The hostile region label (unicode, emoji, markup) renders as wrapped text.
   await expect(
-    page.getByText(
-      new RegExp(`${summary.activeCandidateCount} allowed · ${excludedCount} not selected/removed`)
-    )
+    page.getByText(new RegExp(`region-with-a-deliberately-long-location-name-${scope}`)).first()
   ).toBeVisible();
-  await expect(
-    page
-      .getByText(EXPENSIVE_HETZNER_GPU_SKU)
-      .first()
-  ).toBeVisible();
-  await expect(page.getByText('Not selected').first()).toBeVisible();
-  await expect(
-    page.getByText(new RegExp(`region-with-a-deliberately-long-location-name-${scope}`))
-  ).toBeVisible();
-  await expect(page.getByText(/\+\d+ more provider\/region groups/)).toHaveCount(0);
+  // Internal references never render.
+  await expect(page.getByText(/credentials:|platform_credentials:/)).toHaveCount(0);
   await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
-  await expect(page.getByText(/Installation defaults require/i)).toHaveCount(0);
+  await assertNoOverflow(page);
 }
 
 async function screenshotDefaultPoolScope(
@@ -502,150 +504,43 @@ async function screenshotDefaultPoolScope(
 ) {
   await screenshot(page, `${namePrefix}-${suffix}`);
   await screenshotNearHeading(page, heading, `${namePrefix}-focused-${suffix}`);
-  await screenshotNearHeading(page, 'Active Sources', `${namePrefix}-details-${suffix}`);
+  await screenshotNearHeading(page, 'Allowed machines', `${namePrefix}-details-${suffix}`);
 }
 
-async function removeAshHilCandidates(
-  page: Page,
-  editHeading: string,
-  screenshotName: string,
-  scope: PoolScope
-) {
-  const initialSummary = capacitySummary(scope);
-  const expectedAllowedAfterSave = initialSummary.activeCandidateCount - 1;
-  const expectedExcludedAfterSave = initialSummary.candidates.length + 1 - expectedAllowedAfterSave;
+async function editStressedPool(page: Page, screenshotName: string) {
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Allowed machines', exact: true })).toBeVisible();
+  await page.getByLabel('Placing agents').selectOption('spread');
+  await page.getByLabel(/^Machine limit/).fill('5');
+  await page.getByRole('button', { name: 'cx33 in Nuremberg', exact: true }).click();
+  await page.getByRole('button', { name: 'cx43 in Helsinki', exact: true }).click();
+  await screenshotNearHeading(page, 'Allowed machines', screenshotName);
 
-  await page.getByRole('button', { name: 'Edit' }).click();
-  await expect(page.getByRole('heading', { name: editHeading })).toBeVisible();
-  await page.getByRole('spinbutton', { name: /Maximum nodes/ }).fill('5');
+  for (const showMore of await page
+    .getByRole('button', { name: /^Show \d+ more machine types?$/ })
+    .all()) {
+    await showMore.click();
+  }
   await expect(
-    page.getByRole('heading', { name: 'Not selected or removed instances' })
-  ).toBeVisible();
-  await page.getByRole('button', { name: /Remove Hetzner nbg1 cx33/ }).click();
-  await page.getByRole('button', { name: /Remove Hetzner hel1 cx43/ }).click();
-  await screenshotNearHeading(page, editHeading, screenshotName);
-  await page.getByLabel('Filter provider').selectOption('hetzner');
-  await page.getByLabel('Filter region or location').fill('fsn1');
-  await page.getByLabel('Minimum vCPU').fill('48');
-  await page.getByLabel('Minimum RAM in GB').fill('192');
-  await page.getByLabel('Maximum monthly price').fill('1500');
-  await page.getByLabel('Filter availability').selectOption('available');
-  await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
+    page.getByRole('button', { name: 'cpx31 in Ashburn (temporarily unavailable)', exact: true })
+  ).toBeDisabled();
   await expect(
-    page
-      .getByText(EXPENSIVE_HETZNER_GPU_SKU)
-      .first()
-  ).toBeVisible();
-  await expect(page.getByText('€1036.00/mo').first()).toBeVisible();
-  await expect(page.getByText('Not selected').first()).toBeVisible();
-  await expect(
-    page.getByRole('button', {
-      name: /Add Hetzner fsn1 bare-metal-gpu-ultra-long-provider-native-instance-name/,
-    })
-  ).toBeVisible();
-  await screenshotCatalogOfferingCard(
-    page,
-    EXPENSIVE_HETZNER_GPU_SKU,
-    `${screenshotName}-catalog-expensive-card-not-selected`
-  );
-  await screenshotSectionNearHeading(
-    page,
-    'Catalog filters',
-    `${screenshotName}-catalog-expensive-not-selected`
-  );
-  await page.getByLabel('Minimum vCPU').fill('32');
-  await page.getByLabel('Minimum RAM in GB').fill('64');
-  await page.getByLabel('Maximum monthly price').fill('250');
-  await page.getByLabel('Filter availability').selectOption('available');
-  await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
-  await expect(page.getByText('cpx62-catalog-only-live-api-extra').first()).toBeVisible();
-  await screenshotSectionNearHeading(
-    page,
-    'Catalog filters',
-    `${screenshotName}-catalog-filters-available`
-  );
+    page.getByRole('button', { name: 'ccx33 in Hillsboro (not currently offered)', exact: true })
+  ).toBeDisabled();
   await page
-    .getByRole('button', { name: /Add Hetzner fsn1 cpx62-catalog-only-live-api-extra/ })
+    .getByRole('button', { name: 'cpx62-catalog-only-live-api-extra in Falkenstein', exact: true })
     .click();
-  await expect(page.getByRole('button', { name: 'Pending add' })).toBeVisible();
-  await screenshotSectionNearHeading(
-    page,
-    'Catalog filters',
-    `${screenshotName}-catalog-pending-add`
-  );
-  await page.getByLabel('Filter provider').selectOption('hetzner');
-  await page.getByLabel('Filter region or location').fill('ash');
-  await page.getByLabel('Minimum vCPU').fill('4');
-  await page.getByLabel('Minimum RAM in GB').fill('8');
-  await page.getByLabel('Maximum monthly price').fill('250');
-  await page.getByLabel('Filter availability').selectOption('unavailable');
-  await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
-  await expect(page.getByText('temporarily unavailable').first()).toBeVisible();
-  await screenshotSectionNearHeading(
-    page,
-    'Catalog filters',
-    `${screenshotName}-catalog-filters-unavailable`
-  );
-  await expect(page.getByRole('button', { name: /Add Hetzner ash cpx31/ })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Unavailable' }).first()).toBeDisabled();
-
-  await page.getByLabel('Filter region or location').fill('hil');
-  await page.getByLabel('Minimum vCPU').fill('8');
-  await page.getByLabel('Minimum RAM in GB').fill('32');
-  await page.getByLabel('Maximum monthly price').fill('250');
-  await page.getByLabel('Filter availability').selectOption('stale');
-  await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
-  await expect(page.getByText('Stale catalog data').first()).toBeVisible();
-  await screenshotSectionNearHeading(
-    page,
-    'Catalog filters',
-    `${screenshotName}-catalog-filters-stale`
-  );
-  await expect(page.getByRole('button', { name: /Add Hetzner hil ccx33/ })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Stale' }).first()).toBeDisabled();
-  await page
-    .getByRole('heading', { name: 'Add instances from catalog' })
-    .evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'nearest' }));
-  await screenshotNearHeading(
-    page,
-    'Add instances from catalog',
-    `${screenshotName}-catalog-results`
-  );
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(
-    page.getByText(
-      new RegExp(
-        `${expectedAllowedAfterSave} allowed · ${expectedExcludedAfterSave} not selected/removed`
-      )
-    )
-  ).toBeVisible();
-  await expect(
-    page.getByRole('heading', { name: 'Not selected or removed instances' })
-  ).toBeVisible();
-  await expect(page.getByText(/Hetzner · Ashburn \(ash\)/).first()).toBeVisible();
-  await expect(page.getByText(/Hetzner · Hillsboro \(hil\)/).first()).toBeVisible();
   await assertNoOverflow(page);
-}
 
-async function screenshotCatalogOfferingCard(page: Page, sku: string, name: string) {
-  const viewport = page.viewportSize();
-  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  const screenshotDir = resolve(process.cwd(), SCREENSHOT_DIR);
-  mkdirSync(screenshotDir, { recursive: true });
-  const card = page
-    .getByRole('button', { name: new RegExp(`^Add (?!back\\b).*${escapeRegExp(sku)}`) })
-    .first()
-    .locator('xpath=ancestor::article[1]')
-    .first();
-  await card.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(600);
-  await card.screenshot({
-    path: `${screenshotDir}/${name}${suffix}.png`,
-  });
-}
+  await page.getByRole('searchbox', { name: 'Search machine types' }).fill('bare-metal');
+  await expect(page.getByText(EXPENSIVE_HETZNER_GPU_SKU).first()).toBeVisible();
+  await screenshotNearHeading(page, 'Allowed machines', `${screenshotName}-search`);
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  // cx33's only region was turned off; the catalog-only cpx62 joins.
+  await expect(page.getByText('cpx62-catalog-only-live-api-extra', { exact: true })).toBeVisible();
+  await expect(page.getByText('cx33', { exact: true })).toHaveCount(0);
+  await assertNoOverflow(page);
 }
 
 test.describe('Default capacity pool scope surfaces', () => {
@@ -660,19 +555,14 @@ test.describe('Default capacity pool scope surfaces', () => {
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/infrastructure`);
 
     const suffix = getProjectSuffix(testInfo.project.name);
-    await expectStressedDefaultPool(page, 'Project Infrastructure Compute Pool', 'project');
+    await expectStressedDefaultPool(page, 'project');
     await screenshotDefaultPoolScope(
       page,
-      'Project Infrastructure Compute Pool',
+      POOL_HEADINGS.project,
       'default-capacity-pools-project',
       suffix
     );
-    await removeAshHilCandidates(
-      page,
-      'Edit project default',
-      `default-capacity-pools-project-edit-${suffix}`,
-      'project'
-    );
+    await editStressedPool(page, `default-capacity-pools-project-edit-${suffix}`);
   });
 
   test('user settings surface renders stressed user default pool without overflow', async ({
@@ -682,19 +572,9 @@ test.describe('Default capacity pool scope surfaces', () => {
     await page.goto('/settings/infrastructure');
 
     const suffix = getProjectSuffix(testInfo.project.name);
-    await expectStressedDefaultPool(page, 'Your Infrastructure Compute Pool', 'user');
-    await screenshotDefaultPoolScope(
-      page,
-      'Your Infrastructure Compute Pool',
-      'default-capacity-pools-user',
-      suffix
-    );
-    await removeAshHilCandidates(
-      page,
-      'Edit user default',
-      `default-capacity-pools-user-edit-${suffix}`,
-      'user'
-    );
+    await expectStressedDefaultPool(page, 'user');
+    await screenshotDefaultPoolScope(page, POOL_HEADINGS.user, 'default-capacity-pools-user', suffix);
+    await editStressedPool(page, `default-capacity-pools-user-edit-${suffix}`);
   });
 
   test('admin surface renders stressed installation default pool without overflow', async ({
@@ -704,22 +584,13 @@ test.describe('Default capacity pool scope surfaces', () => {
     await page.goto('/admin/infrastructure');
 
     const suffix = getProjectSuffix(testInfo.project.name);
-    await expectStressedDefaultPool(
-      page,
-      'Installation Infrastructure Compute Pool',
-      'installation'
-    );
+    await expectStressedDefaultPool(page, 'installation');
     await screenshotDefaultPoolScope(
       page,
-      'Installation Infrastructure Compute Pool',
+      POOL_HEADINGS.installation,
       'default-capacity-pools-installation',
       suffix
     );
-    await removeAshHilCandidates(
-      page,
-      'Edit installation default',
-      `default-capacity-pools-installation-edit-${suffix}`,
-      'installation'
-    );
+    await editStressedPool(page, `default-capacity-pools-installation-edit-${suffix}`);
   });
 });

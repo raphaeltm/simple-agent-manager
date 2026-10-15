@@ -355,25 +355,10 @@ interface OfferingSpec {
   unavailable?: string;
 }
 
-// `ComputePoolOfferingsManager`'s `sortOfferings` groups every list
-// (Allowed instances AND the catalog-add list) by `providerLabel` first —
-// alphabetically Hetzner < Scaleway < Vultr, unconditionally — then by
-// location, then by price. That means an "Allowed" card's position is NOT
-// controlled by insertion order; it is entirely a function of (a) which
-// provider it belongs to and (b) how many OTHER active offerings share a
-// provider that sorts earlier. To get a multi-provider story inside the
-// first few cards, Hetzner's ACTIVE footprint must be minimal (else every
-// Hetzner card sorts before any Scaleway/Vultr card, regardless of order).
-// See the coordinator note in the PR description for the exact tradeoff.
-// `ComputePoolOfferingsManager`'s "Allowed instances" list is ALSO capped —
-// `max-h-[28rem] overflow-y-auto` (448px, its own internal scroll) — so only
-// ~3 cards are visible in ANY viewport tall enough to reach it, independent
-// of outer page scroll. Getting 3 distinct providers into that 3-card window
-// requires exactly one active Hetzner card, exactly one active Scaleway
-// card, and the FIRST (alphabetically-earliest-location, then
-// cheapest-in-that-location) active Vultr card to be vc2-4c-8gb @ ewr — so
-// vc2-2c-4gb @ ewr must NOT be active (it would outsort vc2-4c-8gb on price
-// and take the 3rd-card slot instead).
+// The pool panel shows one section per connection (here one per provider), with
+// machine types allowed in at least one region first. Hetzner keeps a sold-out
+// and a not-selected type, plus a catalog-only type, so the edit view shows every
+// region state once "Show more" is expanded.
 const OFFERING_SPECS: OfferingSpec[] = [
   // Hetzner: only cx23 is active (card 1 of "Allowed"). cx43 and cx33 stay
   // real catalog rows (unavailable / not-selected) so the offerings-manager
@@ -586,40 +571,37 @@ test.describe('A. Compute pool editor', () => {
     });
 
     await page.goto(`/projects/${PROJECT.id}/settings/infrastructure`);
-    const heading = page.getByRole('heading', { name: 'Project Infrastructure Compute Pool' });
+    const heading = page.getByRole('heading', { name: 'Project compute pool' });
     await expect(heading).toBeVisible({ timeout: 20_000 });
-    const excludedCount = POOL_CANDIDATES.length - POOL_ACTIVE_COUNT;
-    await expect(
-      page.getByText(`${POOL_ACTIVE_COUNT} allowed · ${excludedCount} not selected/removed`)
-    ).toBeVisible();
+    const allowedTypes = new Set(
+      OFFERING_SPECS.filter((spec) => spec.candidateId && !spec.disabled).map(
+        (spec) => `${spec.provider}|${spec.sku}`
+      )
+    ).size;
+    await expect(page.getByText(`Allowed machines (${allowedTypes})`)).toBeVisible();
 
     const section = heading.locator('xpath=ancestor::section[1]').first();
     await section.getByRole('button', { name: 'Edit' }).click();
-    await expect(page.getByRole('heading', { name: 'Edit project default' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Catalog filters' })).toBeVisible();
-    await expect(page.getByText('Catalog only').first()).toBeVisible();
-    await expect(page.getByText('Not selected').first()).toBeVisible();
-    await expect(page.getByText('Region sold out').first()).toBeVisible();
+    const machinesHeading = page.getByRole('heading', { name: 'Allowed machines', exact: true });
+    await expect(machinesHeading).toBeVisible();
+    const showMoreButtons = page.getByRole('button', { name: /^Show \d+ more machine types?$/ });
+    for (const showMore of await showMoreButtons.all()) {
+      await showMore.click();
+    }
+    await expect(page.getByText('region sold out', { exact: false }).first()).toBeVisible();
     await assertNoOverflow(page);
 
-    // sam-compute-pool-editor: a viewport-bounded shot (not the whole,
-    // 8000px-tall edit section) — resize taller than the shared marketing
-    // viewport so the pool summary header, Strategy/Exhaustion selects, and
-    // several Allowed cards all land above the fold, then scroll the heading
-    // to just below the top of the AppShell's internal scroller.
+    // sam-compute-pool-editor: a viewport-bounded shot of the top of the editor
+    // (placement settings and the first machine rows).
     await page.setViewportSize({ width: 1440, height: 1100 });
     await page.waitForTimeout(300);
     await scrollHeadingNearTop(page, heading, 24);
-    await expect(page.getByText(`${POOL_ACTIVE_COUNT} allowed · ${excludedCount} not selected/removed`)).toBeVisible();
     await marketingShot(page, 'sam-compute-pool-editor');
 
-    // sam-compute-offerings-manager: same idea, scrolled to the catalog
-    // filters + "Add instances from catalog" panel instead.
+    // sam-compute-offerings-manager: the machine list with its region chips.
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.waitForTimeout(300);
-    const catalogHeading = page.getByRole('heading', { name: 'Catalog filters' });
-    await scrollHeadingNearTop(page, catalogHeading, 24);
-    await expect(page.getByRole('heading', { name: 'Add instances from catalog' })).toBeVisible();
+    await scrollHeadingNearTop(page, machinesHeading, 24);
     await marketingShot(page, 'sam-compute-offerings-manager');
   });
 });

@@ -8,21 +8,9 @@ import { describe, expect, it } from 'vitest';
 import {
   buildComputePoolOfferingsModel,
   canAddComputePoolOffering,
-  type ComputePoolOfferingFilters,
-  flattenProviderCatalogOfferings,
-  matchesComputePoolFilters,
 } from '../../../src/lib/compute-pool-offerings';
 
 type CatalogOffering = NonNullable<ProviderCatalog['offerings']>[number];
-
-const BASE_FILTERS: ComputePoolOfferingFilters = {
-  provider: 'all',
-  location: '',
-  minVcpu: '',
-  minRamGb: '',
-  maxMonthlyPrice: '',
-  availability: 'all',
-};
 
 const CATALOG_LAST_SEEN_AT = '2026-08-28T00:00:00.000Z';
 
@@ -189,73 +177,7 @@ function catalog(): ProviderCatalog {
   };
 }
 
-describe('compute-pool offering filters', () => {
-  const offerings = flattenProviderCatalogOfferings([catalog()]);
-  const bySku = Object.fromEntries(offerings.map((offering) => [offering.sku, offering]));
-
-  it('filters provider-native catalog rows by provider and location metadata', () => {
-    expect(matchesComputePoolFilters(bySku.cx22!, { ...BASE_FILTERS, provider: 'hetzner' })).toBe(
-      true
-    );
-    expect(
-      matchesComputePoolFilters(bySku.cx22!, { ...BASE_FILTERS, provider: 'digitalocean' })
-    ).toBe(false);
-    expect(matchesComputePoolFilters(bySku.cpx31!, { ...BASE_FILTERS, location: 'ash' })).toBe(
-      true
-    );
-    expect(matchesComputePoolFilters(bySku.cpx31!, { ...BASE_FILTERS, location: 'germany' })).toBe(
-      false
-    );
-  });
-
-  it('filters by minimum vCPU, minimum RAM, and maximum monthly price', () => {
-    expect(matchesComputePoolFilters(bySku.cpx31!, { ...BASE_FILTERS, minVcpu: '4' })).toBe(true);
-    expect(matchesComputePoolFilters(bySku.cx22!, { ...BASE_FILTERS, minVcpu: '4' })).toBe(false);
-    expect(matchesComputePoolFilters(bySku.ccx33!, { ...BASE_FILTERS, minRamGb: '32' })).toBe(true);
-    expect(matchesComputePoolFilters(bySku.cpx31!, { ...BASE_FILTERS, minRamGb: '32' })).toBe(
-      false
-    );
-    expect(
-      matchesComputePoolFilters(bySku.cpx31!, { ...BASE_FILTERS, maxMonthlyPrice: '15' })
-    ).toBe(true);
-    expect(
-      matchesComputePoolFilters(bySku.ccx33!, { ...BASE_FILTERS, maxMonthlyPrice: '15' })
-    ).toBe(false);
-  });
-
-  it('filters by availability state including unavailable and stale catalog rows', () => {
-    expect(
-      matchesComputePoolFilters(bySku.cx22!, { ...BASE_FILTERS, availability: 'available' })
-    ).toBe(true);
-    expect(
-      matchesComputePoolFilters(bySku.ccx33!, { ...BASE_FILTERS, availability: 'available' })
-    ).toBe(false);
-    expect(
-      matchesComputePoolFilters(bySku['stale-16c-64gb']!, {
-        ...BASE_FILTERS,
-        availability: 'available',
-      })
-    ).toBe(false);
-    expect(
-      matchesComputePoolFilters(bySku.ccx33!, { ...BASE_FILTERS, availability: 'unavailable' })
-    ).toBe(true);
-    expect(
-      matchesComputePoolFilters(bySku['stale-16c-64gb']!, {
-        ...BASE_FILTERS,
-        availability: 'unavailable',
-      })
-    ).toBe(false);
-    expect(
-      matchesComputePoolFilters(bySku['stale-16c-64gb']!, {
-        ...BASE_FILTERS,
-        availability: 'stale',
-      })
-    ).toBe(true);
-    expect(matchesComputePoolFilters(bySku.cx22!, { ...BASE_FILTERS, availability: 'stale' })).toBe(
-      false
-    );
-  });
-
+describe('compute-pool offerings model', () => {
   it('keeps removed provider-native catalog rows addable without exposing legacy size choices', () => {
     const model = buildComputePoolOfferingsModel(
       [
@@ -342,7 +264,6 @@ describe('compute-pool offering filters', () => {
     expect(cpx31).toMatchObject({
       candidateId: 'candidate-cpx31',
       candidateStatus: 'deleted',
-      canUpdateExistingCandidate: true,
       machineSizeHint: null,
     });
     expect(canAddComputePoolOffering(cpx31!)).toBe(true);
@@ -404,7 +325,7 @@ describe('compute-pool offering filters', () => {
     expect(catalogOnly).toMatchObject({
       candidateId: null,
       candidateStatus: 'not-configured',
-      canUpdateExistingCandidate: false,
+      sourceId: null,
     });
   });
 
@@ -416,23 +337,10 @@ describe('compute-pool offering filters', () => {
       sourceId: 'source-project',
       candidateId: null,
       candidateStatus: 'not-configured',
-      canUpdateExistingCandidate: false,
       providerInstanceType: 'cpx31',
       providerInstanceSku: null,
     });
     expect(canAddComputePoolOffering(cpx31!)).toBe(true);
-
-    const pendingModel = buildComputePoolOfferingsModel(
-      [],
-      [catalog()],
-      [sourceIdentity()],
-      {},
-      new Set([cpx31!.key])
-    );
-    expect(pendingModel.catalog.find((offering) => offering.sku === 'cpx31')).toMatchObject({
-      sourceId: 'source-project',
-      candidateStatus: 'pending-add',
-    });
   });
 });
 

@@ -99,33 +99,8 @@ export function catalogSourceKey(catalog: ProviderCatalog): string | null {
   return capacitySourceKey(catalog);
 }
 
-export function sourceLabelFromParts(
-  credentialSource: string | null | undefined,
-  credentialId: string | null | undefined
-): string | null {
-  if (!credentialSource && !credentialId) return null;
-  const source =
-    credentialSource === 'platform'
-      ? 'Platform credential'
-      : credentialSource === 'project'
-        ? 'Project credential'
-        : credentialSource === 'user'
-          ? 'User credential'
-          : credentialSource
-            ? `${titleCaseProvider(credentialSource)} credential`
-            : 'Credential';
-  return credentialId ? `${source} ${credentialId}` : source;
-}
-
 export function sourceKeyFromIdentity(source: CapacitySourceIdentity): string | null {
   return capacitySourceKey(source);
-}
-
-export function sourceLabelFromIdentity(source: CapacitySourceIdentity): string | null {
-  return sourceLabelFromParts(
-    source.credentialSource,
-    source.credentialId ?? source.platformCredentialId ?? source.externalSourceRef
-  );
 }
 
 export function offeringKey(
