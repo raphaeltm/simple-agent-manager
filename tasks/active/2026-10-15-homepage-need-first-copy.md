@@ -106,6 +106,21 @@ Not asked: merging or deploying. Stop at a ready PR for approval.
   - Fixed: the PR review table was refreshed, the compute pools strings were rewritten, and the checklist was updated. The skills were confirmed with `get_skill`.
   - Left as is: `docs/reference/roadmap.md` still says "Event Streams & Triggers". It is a reference doc using the feature's own name, which is fine for that audience.
 
+## Raphaël's PR review comment (2026-10-15, 17:19 UTC)
+
+Source: https://github.com/raphaeltm/simple-agent-manager/pull/2356#issuecomment-6198015592 (it woke this session through the PR event subscription).
+
+- **Compare the big ones and drop Devin.** Done.
+  - The comparison column is now "Vendor cloud agents" (Claude Code on the web, Codex cloud, Cursor Cloud Agents). The Coder column is kept.
+  - Three local agents researched the official docs and pricing on 2026-10-15; the PR ledger has the URLs (V1 to V14).
+  - SAM is no longer highlighted where a vendor matches or leads.
+- **Cost example.** Added:
+  - the Workers Paid plan is "$5 a month minimum" in How it works and the table (Cloudflare pricing page, 2026-10-15);
+  - a footnote gives his heavy-use figures: $5 to $10 a month on Cloudflare plus $20 to $40 on Hetzner;
+  - a month without use costs $5. Known gap: a node that never enters warm can keep running; the fix is draft PR #2305.
+- **Self-hosted framing.** Kept. AWS is already listed as planned on the roadmap.
+- **Feature-page specifics.** "Ok", so no change.
+
 ## Acceptance criteria
 
 - The feature buttons have clear space below the divider on desktop and phone.

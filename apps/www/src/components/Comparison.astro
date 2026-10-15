@@ -3,98 +3,98 @@ const rows = [
   {
     label: 'Where your code runs',
     sam: 'Your own cloud account (Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, GCP), or Instant workspaces on your Cloudflare account alone',
-    managed: 'Their infrastructure',
+    vendor: "The vendor's cloud",
     selfHosted: 'Your infra (AWS, GCP, K8s)',
     samWins: true,
   },
   {
     label: 'Which agents you can use',
     sam: 'Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp',
-    managed: 'Their proprietary agent',
+    vendor: "Only the vendor's own agent",
     selfHosted: 'Native agent with configurable LLM providers; third-party agents in workspaces',
     samWins: true,
   },
   {
     label: 'Open source',
     sam: 'Yes, AGPL-3.0',
-    managed: 'Proprietary',
+    vendor: 'No',
     selfHosted: 'Open-source core',
     samWins: true,
   },
   {
-    label: 'Running SAM itself',
-    sam: 'A Cloudflare Workers Paid plan',
-    managed: 'Bundled into pricing',
+    label: 'Running the service',
+    sam: 'Your Cloudflare Workers Paid plan, from $5 a month',
+    vendor: 'A paid plan per person, from $20 a month',
     selfHosted: 'You host it (K8s / Docker)',
     samWins: true,
   },
   {
     label: 'What you pay for compute',
     sam: 'You pay your cloud provider directly for servers, and Cloudflare for Instant workspaces',
-    managed: 'From $20/mo (compute + inference)',
+    vendor: 'Included in the plan, with usage caps or token charges',
     selfHosted: 'Your cloud bill + license fees',
     samWins: true,
   },
   {
     label: 'Can you host it yourself?',
     sam: 'Yes, on your own Cloudflare account and cloud servers',
-    managed: 'Managed service; enterprise VPC deployment available',
+    vendor: 'No; Claude Code and Cursor offer self-hosted runners on some plans',
     selfHosted: 'Yes: standalone server, Docker, or K8s; Terraform workspaces',
     samWins: true,
   },
   {
     label: 'Team projects',
     sam: 'Invite links, approval, and owner and admin roles',
-    managed: 'Seat-based team plans',
+    vendor: 'Team plans with shared environments',
     selfHosted: 'Workspace access control and read-only agent chat sharing',
-    samWins: true,
+    samWins: false,
   },
   {
     label: 'Comments the agent reads',
     sam: 'Comment on agent replies and send the thread to the agent, which can answer and resolve it',
-    managed: 'Bundled or unavailable',
+    vendor: 'Pull request comments, for example @codex or @cursor',
     selfHosted: 'No agent-level comments',
-    samWins: true,
+    samWins: false,
   },
   {
     label: 'Mixing cloud providers',
     sam: '7 providers; you pick the machine types and how work is spread',
-    managed: 'Single vendor',
+    vendor: "No; fixed machine sizes on the vendor's cloud",
     selfHosted: 'You wire it yourself',
     samWins: true,
   },
   {
     label: 'Usage tracking',
     sam: 'Server hours per person and an estimated cost summary for admins',
-    managed: 'Bundled into one bill',
+    vendor: 'Usage dashboards, plan limits, and spend caps',
     selfHosted: 'AI usage reporting and licensed AI Gateway budgets',
-    samWins: true,
+    samWins: false,
   },
   {
     label: 'Work that starts on its own',
     sam: 'Schedules, GitHub events, and authenticated webhooks',
-    managed: 'Schedules, GitHub/integration events, and custom webhooks',
+    vendor: 'GitHub and Slack triggers; Claude Code and Cursor also run on schedules',
     selfHosted: 'Agent API for custom webhook and scheduled automation',
-    samWins: true,
+    samWins: false,
   },
   {
     label: 'Picking up where you left off',
     sam: 'Sessions sleep and wake with their branch and uncommitted changes for up to 7 days',
-    managed: 'Varies by vendor',
+    vendor: 'Chats are kept; how long workspaces last varies by vendor',
     selfHosted: 'Persistent agent chats; workspace storage depends on template',
-    samWins: true,
+    samWins: false,
   },
   {
     label: 'Setup effort',
     sam: 'Deploy to your Cloudflare account; connect a cloud provider for your own servers',
-    managed: 'Zero config',
+    vendor: 'Sign in and connect GitHub',
     selfHosted: 'Server deployment + Terraform workspace templates',
     samWins: false,
   },
   {
     label: 'Where your data lives',
     sam: 'Workspaces run on your servers or your Cloudflare account, which also stores chats, session snapshots, and SAM data',
-    managed: 'Vendor-managed',
+    vendor: 'Stored by the vendor',
     selfHosted: 'Full: your infrastructure',
     samWins: true,
   },
@@ -124,8 +124,8 @@ const rows = [
             </th>
             <th class="col-other">
               <div class="col-header-content col-header-managed">
-                Hosted agent platforms
-                <span class="col-examples">Devin</span>
+                Vendor cloud agents
+                <span class="col-examples">Claude Code on the web, Codex cloud, Cursor Cloud Agents</span>
               </div>
             </th>
             <th class="col-other">
@@ -141,7 +141,7 @@ const rows = [
             <tr>
               <td class="col-label">{row.label}</td>
               <td class={`col-sam ${row.samWins ? 'highlight' : ''}`} data-label="SAM">{row.sam}</td>
-              <td class="col-other" data-label="Hosted agent platforms">{row.managed}</td>
+              <td class="col-other" data-label="Vendor cloud agents">{row.vendor}</td>
               <td class="col-other" data-label="Self-hosted dev environments">{row.selfHosted}</td>
             </tr>
           ))}
@@ -150,8 +150,12 @@ const rows = [
     </div>
 
     <p class="comparison-footnote animate-on-scroll">
-      Compute costs don't include AI usage, which usually goes on your own key or plan. Hosted platforms
-      bundle compute and AI usage into one price. For a local alternative, read
+      What SAM costs in practice: its maintainer uses it heavily and pays $5 to $10 a month on Cloudflare
+      plus $20 to $40 on Hetzner (October 2026). A month without use costs the $5 Workers Paid minimum.
+      AI usage is extra and goes on your own key or plan.
+    </p>
+    <p class="comparison-footnote animate-on-scroll">
+      Vendor plans and features as listed on October 15, 2026. For a local alternative, read
       <a href="/compare/paseo/">how SAM compares with Paseo</a>, a local-first app for coding agents.
     </p>
   </div>
@@ -360,6 +364,10 @@ const rows = [
     margin-left: auto;
     margin-right: auto;
     line-height: 1.5;
+  }
+
+  .comparison-footnote + .comparison-footnote {
+    margin-top: 8px;
   }
 
   .comparison-footnote a {
