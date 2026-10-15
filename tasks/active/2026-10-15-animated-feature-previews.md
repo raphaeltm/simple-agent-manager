@@ -106,6 +106,18 @@ story, hidden tab rests it, reduced-motion re-arm, resume while in view, middle-
 scene), ring hand-over, crossfade step, narrow composition, original caption, tiles per step,
 stage fit.
 
+## Review round 2 (on 62087e100)
+
+| Reviewer              | Verdict | Findings → resolution                                                                                                                                                                                                                                                                                                                                                                                         |
+| --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| architecture-reviewer | PASS    | Round-1 fixes verified in code. LOW (optional): the validator, build script and specs import `src/lib/motion.ts` in Node → module comment now says its top level must stay free of browser globals.                                                                                                                                                                                                           |
+| ui-ux-specialist      | PASS    | Round-1 fixes verified on fresh evidence; reduced motion, pause, keyboard focus and 320/375 px overflow checked live. LOW: multiplayer request card covers the second request's buttons → kept (chips float in front of the window, as in the hero). MEDIUM judgment: red Interrupt button → kept; verified the hero's own `StreamingWindow.astro` `.sw-stop` is the same red control, always visible.        |
+| test-engineer         | PASS    | Round-1 findings verified; scene suite ×3 repeats on both projects, 0 failures, 0 flaky. LOW: theme test relied on the default viewport → sets 1280×900 explicitly (header theme button shows from 1120 px). Nit: redundant `stageAspects` read in the resize test → removed. LOW (info): theme test is desktop-only → no change.                                                                             |
+| performance-reviewer  | PASS    | Round-1 fixes verified at runtime: rings transition opacity/transform only, stories rest offscreen and in hidden tabs, 0 blur filters, 3 shared observers with balanced observe/unobserve (21/21). INFO: phone CLS 0.23–0.38 from the hero (`hero-haze`, `hero-figure`), not the scenes → reproduced on production www (0.225 in 1 of 3 runs), so it predates this PR; SAM idea `01M4ZAEF39QPKCZ50WDF7A1P60`. |
+
+Also found while measuring: the bare domain `simple-agent-manager.org` returns Cloudflare 522 (www is
+fine) → SAM idea `01M4ZAEM6HSQE0Q6VZ9R9W9GEE`.
+
 ## Implementation notes
 
 - Blank tiles: a single stretched background row turned the app's grain and radial glows into
@@ -119,10 +131,12 @@ stage fit.
   ratio: a scene taller than the screen could never reach a ratio and would wait in its intro.
 - Tests drive a paused Playwright clock and wait for the IntersectionObserver-driven start before
   stepping; `scrollIntoView` must be `behavior: 'instant'` because the page scrolls smoothly.
-- Measured (same script, decoded bytes; baseline = live production main): desktop load
-  1,007 → 782 KB, full scroll 1,344 → 1,129 KB; phone load 842 → 653 KB, full scroll
-  1,245 → 1,030 KB; DOM 694 → 772; page height desktop 14,334 → 14,986 px, phone
-  18,651 → 19,909 px (scenes are taller than the old screenshots, and now legible).
+- Measured on 62087e100 (same script, decoded bytes; baseline = live production www): desktop
+  load 1,007 → 782 KB, full scroll 1,344 → 1,129 KB; phone load 842 → 652 KB, full scroll
+  1,245 → 1,030 KB; DOM 694 → 778; page height desktop 14,334 → 15,061 px, phone
+  18,651 → 19,980 px (scenes are taller than the old screenshots, and now legible). JavaScript
+  (gzip): scene chunk 1.4 KB plus shared motion chunk 0.5 KB, hero chunk 7.2 → 7.1 KB; net about
+  +1.8 KB.
 
 ## Acceptance criteria
 

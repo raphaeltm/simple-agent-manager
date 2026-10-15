@@ -494,7 +494,7 @@ test.describe('homepage feature scene layout', () => {
     await page.goto('/');
     const scene = sceneLocator(page, 'chat');
     await bringIntoView(scene);
-    let aspects = await stageAspects(scene);
+    const aspects = await stageAspects(scene);
     expect(aspects.drawn).toBeCloseTo(aspects.wide, 1);
 
     // The preview column narrows below the scene's 560px container breakpoint.
@@ -503,11 +503,12 @@ test.describe('homepage feature scene layout', () => {
     expect(await cutOffLayers(page)).toEqual({ cut: [], documentOverflow: false });
 
     await page.setViewportSize({ width: 1280, height: 900 });
-    aspects = await stageAspects(scene);
     await expect.poll(async () => (await stageAspects(scene)).drawn).toBeCloseTo(aspects.wide, 1);
   });
 
   test('switching theme on the page swaps scene images to the other theme', async ({ page }) => {
+    // The header's theme button shows from 1120px; narrower pages move it into the menu.
+    await page.setViewportSize({ width: 1280, height: 900 });
     await page.addInitScript(() => window.localStorage.setItem('starlight-theme', 'dark'));
     await page.goto('/');
     const scene = sceneLocator(page, 'chat');

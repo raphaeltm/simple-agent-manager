@@ -4,6 +4,10 @@
  * The hero's pause control (WCAG 2.2.2) pauses every homepage animation, so the scenes read the
  * same page-wide flag instead of carrying their own controls. The story budget below is shared
  * by the scene validator (src/data/scenes) and the scene runtime, so both enforce one number.
+ *
+ * Node code imports this module too (the scene validator, and through it the scene build script
+ * and unit tests, plus the Playwright specs), so its top level must not touch browser globals;
+ * only function bodies may.
  */
 export const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 export const FINE_POINTER_QUERY = '(hover: hover) and (pointer: fine)';
