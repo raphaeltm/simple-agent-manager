@@ -34,3 +34,10 @@ Production chat 5d4e32b6-4831-4f98-84d9-292e32330d95 was evicted for memory pres
 
 ## Post-mortem
 The runtime-loss continuation added in PR #2300 used task mode as a proxy for unfinished work. Conversational sessions can perform implementation work, while task sessions can already have returned control. Regression coverage now crosses both modes with active/idle ownership and tests the persisted callback evidence, migration, restart, retries, and real DO restored/fresh prompt paths. Existing capture-before-teardown guidance applies; no new standing instruction needed.
+
+## Implementation archive and release handoff
+Implementation completion re-reviewed PASS after merging main at 0b0dd3ce3 (PR #2359). All research, checklist implementation, acceptance regression, cross-boundary and docs checks passed. Integrated recovery/attachment delivery tests: 73 passed; real Workers recovery tests: 19 passed. The shared TTS startup prerequisite is upstream and absent from this PR's effective diff.
+
+Staging deployment and smoke tests passed. Authenticated Playwright dashboard, projects and settings loaded real data without page errors. Configured-pool node 01M506FJ57AEH324BF1FJEZVFJ first heartbeat was 16:34:28 UTC, reporting implementation binary 3333ab9a0. Replacement smoke session b3211a64-47e5-403e-b8ce-531b4bee64a2 completed its ACP prompt at 16:38:36 and awaited follow-up. The first fixture used an invalid permission mode; it was corrected and its workspace deleted before reuse of the same node.
+
+Operational gates above remain unchecked: exact response/sleep-wake readback, cleanup, CI/review and production verification. They are tracked in PR #2362 and `.do-state.md`; this archive records implementation completion, not completion of the user's shipping request. Cleanup resumes after the 17:00 UTC test-login rate window resets, using a reused authentication context. No shared pool mutation or forced node-wide memory pressure was used. Forced-eviction delivery is covered by Go race and real Workers tests; live verification does not claim that scenario.
