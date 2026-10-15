@@ -4,6 +4,7 @@ import {isAbsolute,join} from 'node:path';
 
 const ulid=v=>typeof v==='string'&&/^[0-9A-HJKMNP-TV-Z]{26}$/u.test(v);
 const uuid=v=>typeof v==='string'&&/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/u.test(v);
+const agentIdentity=v=>ulid(v)||uuid(v);
 const branch=v=>typeof v==='string'&&/^sam\/[a-z0-9][a-z0-9/-]{0,150}$/u.test(v);
 const hex=v=>typeof v==='string'&&/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(v);
 const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join()===keys.slice().sort().join();
@@ -139,7 +140,7 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
     delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
     await writeFile(join(root,'ready.json'),JSON.stringify(safeSummary(login)),{mode:0o600});
     if(login.category!=='ok'){final=login;throw new Error();}
-    const done=new Set(),idle=new Set(),sleeping=new Set(),submitted=new Map(),completed=new Set(),workspaces=new Map();
+    const done=new Set(),idle=new Set(),sleeping=new Set(),submitted=new Map(),completed=new Set(),workspaces=new Map(),submittedAt=new Map();
     const end=Date.now()+duration;
     let stopping=false,failed=false;
     while(Date.now()<end&&!stopping){
@@ -178,15 +179,15 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
               idle.delete(session);sleeping.delete(session);
             }
             if(type==='state')idle.delete(cmd.path.split('/').at(-2));
-            let selected;
+            let selected;const requestStartedAt=Date.now();
             result=await requestSafe(context,api,cmd,json=>{
               if(type==='list'){if(!Array.isArray(json))throw new Error();selected=json.map(v=>entity(v,'item',privateState));}
               else if(type==='state'){
                 if(!json||typeof json!=='object')throw new Error();
                 const session=cmd.path.split('/').at(-2);
                 selected={stateAvailable:json.state!==null&&json.state!==undefined};
-                if(selected.stateAvailable){selected.state=entity(json.state,'state',privateState);if(json.agentSessionId!==null&&!ulid(json.agentSessionId))throw new Error();if(json.agentSessionId!==null)selected.agentSessionId=json.agentSessionId;
-                  if(ulid(json.agentSessionId)&&selected.state.activity==='idle'&&selected.state.runtimeWorkState==='inactive'&&selected.state.runtimeWorkCount===0)idle.add(session);else{idle.delete(session);sleeping.delete(session);}}
+                if(selected.stateAvailable){selected.state=entity(json.state,'state',privateState);if(json.agentSessionId!==null&&!agentIdentity(json.agentSessionId))throw new Error();if(json.agentSessionId!==null)selected.agentSessionId=json.agentSessionId;
+                  if(agentIdentity(json.agentSessionId)&&selected.state.activity==='idle'&&selected.state.runtimeWorkState==='inactive'&&selected.state.runtimeWorkCount===0&&selected.state.activityAt>=submittedAt.get(session)&&selected.state.runtimeWorkUpdatedAt>=submittedAt.get(session)&&selected.state.activityAt<=Date.now()&&selected.state.runtimeWorkUpdatedAt<=Date.now())idle.add(session);else{idle.delete(session);sleeping.delete(session);}}
               }else if(type==='action'||type==='prompt'){
                 selected={};
                 if(!json||typeof json!=='object')throw new Error();
@@ -194,7 +195,8 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
                 if(type==='prompt'){
                   if(json.accepted!==true||json.status!=='queued')throw new Error();
                 }else if(method==='DELETE'){
-                  if(json.success!==true)throw new Error();
+                  if(json.success!==true||json.deletionStatus!=='confirmed')throw new Error();
+                  selected.deletionConfirmed=true;
                 }else if(cmd.path.endsWith('/stop')){
                   if(json.status!=='stopped'||json.workspaceDeleted!==true)throw new Error();
                 }else if(cmd.path.endsWith('/sleep')){
@@ -208,7 +210,7 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
                 if(json.id!==undefined)selected={...selected,...entity(json,'action',privateState)};
                 if(!Object.keys(selected).length)throw new Error();
               }else{selected=entity(json,type,privateState);if(type==='submit'){
-                  if(!ulid(selected.taskId)||!uuid(selected.sessionId)||selected.status!=='queued'||json.accepted===false||json.success===false)throw new Error();submitted.set(selected.taskId,selected.sessionId);
+                  if(!ulid(selected.taskId)||!uuid(selected.sessionId)||selected.status!=='queued'||json.accepted===false||json.success===false)throw new Error();submitted.set(selected.taskId,selected.sessionId);submittedAt.set(selected.sessionId,requestStartedAt);
                 }else if(type==='task'){
                   if(selected.id!==target)throw new Error();
                   if(selected.sessionId!==undefined&&selected.sessionId!==submitted.get(target))throw new Error();
