@@ -19,7 +19,9 @@ const lightSrc = src.replace(/\.png$/, '-light.png');
 const hasLight = lightSrc !== src && existsSync(resolve(publicDir, `.${lightSrc}`));
 
 // Intrinsic size from the PNG header (IHDR: width and height at bytes 16-23), so the browser
-// reserves the right box before the image loads.
+// reserves the right box before the image loads. A 24-byte synchronous read keeps this
+// component synchronous; the build scripts (optimize-feature-images, build-hero-layers) use
+// sharp because they decode and re-encode pixels anyway.
 const pngSize = (pngSrc: string): { width: number; height: number } | null => {
   const path = resolve(publicDir, `.${pngSrc}`);
   if (!existsSync(path)) return null;

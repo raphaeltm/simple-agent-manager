@@ -289,11 +289,16 @@ const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
     background-size: 100% 100%;
   }
 
+  /* The stage starts just right of the copy column and is scaled per width band so the
+     resting frame always fits the viewport (rule 56: the hero clips, so nothing may rely on
+     content spilling past it). The copy column is max(48px, 50% - 624px) + its width. */
   .hero-figure {
+    --copy-width: 500px;
+    --stage-scale: 1;
     position: absolute;
     z-index: 4;
     top: 84px;
-    left: max(600px, calc(50% - 120px));
+    left: calc(max(48px, 50% - 624px) + var(--copy-width) + 20px);
     width: 860px;
     height: 800px;
     margin: 0;
@@ -356,14 +361,32 @@ const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
   }
 
   /* ---- Laptop: same composition, smaller stage ---- */
+  @media (max-width: 1599.98px) {
+    .hero-figure {
+      --stage-scale: 0.94;
+    }
+  }
+
   @media (max-width: 1439.98px) {
     .hero-copy {
       width: 460px;
     }
 
     .hero-figure {
+      --copy-width: 460px;
+      --stage-scale: 0.9;
+    }
+  }
+
+  @media (max-width: 1359.98px) {
+    .hero-figure {
       --stage-scale: 0.84;
-      left: calc(50% - 110px);
+    }
+  }
+
+  @media (max-width: 1279.98px) {
+    .hero-figure {
+      --stage-scale: 0.76;
     }
   }
 

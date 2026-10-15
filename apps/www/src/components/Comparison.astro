@@ -115,7 +115,7 @@ const rows = [
       <table class="comparison-table">
         <thead>
           <tr>
-            <th class="col-label"></th>
+            <th class="col-label"><span class="sr-only">Capability</span></th>
             <th class="col-sam">
               <div class="col-header-content">
                 <img src="/images/sam-head.png" width="20" height="20" alt="" aria-hidden="true" style="border-radius: 4px;" />
@@ -230,6 +230,16 @@ const rows = [
 
   :global(html[data-theme='light']) .comparison-table .col-sam {
     background: rgb(21 128 61 / 0.06);
+  }
+
+  /* Where SAM does not win, the band goes neutral so the column does not oversell. */
+  .comparison-table td.col-sam:not(.highlight) {
+    background: rgb(255 255 255 / 0.03);
+    color: var(--color-fg-muted);
+  }
+
+  :global(html[data-theme='light']) .comparison-table td.col-sam:not(.highlight) {
+    background: rgb(17 39 29 / 0.03);
   }
 
   .col-header-content {

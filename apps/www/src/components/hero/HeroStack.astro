@@ -95,7 +95,7 @@ const notifyDone = heroCrop('notifyDone');
     --sx: 56deg;
     --sy: 0deg;
     --sz: -34deg;
-    --sc: 0.84;
+    --sc: 0.8;
   }
 
   .stack > .plane {
@@ -267,9 +267,10 @@ const notifyDone = heroCrop('notifyDone');
     transform: translateZ(260px);
   }
 
+  /* Pulled in so the exploded fan stays inside the viewport at every width. */
   .stack.is-exploded .chip-place,
   :global([data-motion='intro']) .chip-place {
-    transform: translateZ(230px);
+    transform: translateZ(230px) translateX(-60px);
   }
 
   .fig {

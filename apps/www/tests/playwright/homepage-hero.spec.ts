@@ -21,6 +21,13 @@ async function countFrames(page: Page) {
   });
 }
 
+/**
+ * The renderer re-arms requestAnimationFrame every vsync (it only skips drawing to hold 30fps),
+ * so an animating hero normally logs 45-60 calls a second. The floor is low on purpose: CPU
+ * contention on CI runners can starve frames, while a stopped hero logs exactly zero.
+ */
+const ANIMATING_MIN_FRAMES = 3;
+
 async function framesDuring(page: Page, ms: number) {
   const read = () => page.evaluate(() => (window as unknown as { __rafCalls: number }).__rafCalls);
   const before = await read();
@@ -80,7 +87,7 @@ test.describe('homepage hero', () => {
     const hero = page.locator('[data-hero]');
     const toggle = hero.getByRole('button', { name: 'Pause animation' });
     await expect(toggle).toBeVisible();
-    expect(await framesDuring(page, 1_000)).toBeGreaterThan(10);
+    expect(await framesDuring(page, 1_000)).toBeGreaterThan(ANIMATING_MIN_FRAMES);
 
     await toggle.click();
     const play = hero.getByRole('button', { name: 'Play animation' });
@@ -95,7 +102,7 @@ test.describe('homepage hero', () => {
     await play.click();
     await expect(hero.getByRole('button', { name: 'Pause animation' })).toBeVisible();
     if (!isMobile(page)) await expect(hero.locator('[data-hero-stack]')).toHaveClass(/is-exploded/);
-    expect(await framesDuring(page, 1_000)).toBeGreaterThan(10);
+    expect(await framesDuring(page, 1_000)).toBeGreaterThan(ANIMATING_MIN_FRAMES);
   });
 
   test('reduced motion shows the composed frame with nothing animating', async ({ page }) => {
@@ -140,6 +147,147 @@ test.describe('homepage hero', () => {
       expect(requested.filter((path) => path.startsWith(`${HERO_IMAGES}${other}`))).toEqual([]);
     });
   }
+});
+
+/**
+ * The hero clips (`overflow: clip`), so a document-level overflow check cannot see a layer
+ * cut off at the viewport edge (rule 56). Measure the layers themselves, in the exploded intro
+ * and in the resting frame, across the widths the layout steps through.
+ */
+const LAYOUT_VIEWPORTS = [
+  { width: 1920, height: 1080 },
+  { width: 1440, height: 900 },
+  { width: 1280, height: 800 },
+  { width: 1200, height: 800 },
+  { width: 1024, height: 768 },
+  { width: 768, height: 1024 },
+  { width: 390, height: 844 },
+  { width: 375, height: 667 },
+  { width: 360, height: 740 },
+];
+const HERO_LAYERS = [
+  '.hero-copy *',
+  '[data-hero-app]',
+  '.plane-nodes',
+  '.chip',
+  '.phone',
+  '.phone-chip',
+];
+
+async function heroLayout(page: Page) {
+  return page.evaluate((layers) => {
+    const width = window.innerWidth;
+    const cutOff: string[] = [];
+    for (const selector of layers) {
+      for (const element of document.querySelectorAll<HTMLElement>(selector)) {
+        if (!element.offsetParent) continue;
+        const box = element.getBoundingClientRect();
+        if (box.width === 0) continue;
+        if (box.left < -1 || box.right > width + 1) {
+          cutOff.push(`${selector} spans ${Math.round(box.left)}..${Math.round(box.right)} of ${width}`);
+        }
+      }
+    }
+    // Every other clipping container must fit its content; the hero clips its floor by design.
+    const clipped: string[] = [];
+    for (const element of document.querySelectorAll<HTMLElement>('body *')) {
+      if (element.matches('[data-hero]')) continue;
+      const style = getComputedStyle(element);
+      if (style.overflowX !== 'hidden' && style.overflowX !== 'clip') continue;
+      if (style.textOverflow === 'ellipsis' || element.clientWidth < 4) continue;
+      if (element.scrollWidth > element.clientWidth + 1) clipped.push(`${element.tagName}.${element.className}`);
+    }
+    const copy = document.querySelector('.hero-copy')?.getBoundingClientRect();
+    const comment = document.querySelector('.chip-comment')?.getBoundingClientRect();
+    return {
+      cutOff,
+      clipped,
+      documentOverflow: document.documentElement.scrollWidth > window.innerWidth,
+      // Side by side (>= 1200px), the stage must start right of the copy column.
+      overlapsCopy: Boolean(width >= 1200 && copy && comment && comment.left < copy.right),
+    };
+  }, HERO_LAYERS);
+}
+
+test.describe('homepage hero layout', () => {
+  test.skip(({ isMobile }) => isMobile, 'viewports are set explicitly; one project is enough');
+
+  for (const viewport of LAYOUT_VIEWPORTS) {
+    test(`nothing is cut off at ${viewport.width}px, exploded or at rest`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await page.goto('/');
+      const clean = { cutOff: [], clipped: [], documentOverflow: false, overlapsCopy: false };
+      // The intro starts exploded and holds that pose for 1.5s.
+      await expect(page.locator('[data-hero]')).toHaveAttribute('data-motion', 'live');
+      expect(await heroLayout(page)).toEqual(clean);
+
+      // Pausing composes the resting frame immediately.
+      await page.getByRole('button', { name: 'Pause animation' }).click();
+      await expect(page.getByRole('button', { name: 'Play animation' })).toBeVisible();
+      expect(await heroLayout(page)).toEqual(clean);
+    });
+  }
+
+  test('switching theme on the page repaints the floor and swaps the layers', async ({ page }) => {
+    await useTheme(page, 'dark');
+    await page.goto('/');
+    const layers = streamingWindow(page);
+    const floor = page.locator('[data-hero-field] canvas').first();
+    await expect(floor).toBeAttached();
+    const darkFloor = await floor.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
+    expect(await layers.evaluate((el) => getComputedStyle(el).backgroundImage)).toContain('/images/hero/desktop.webp');
+
+    await page.locator('.header').getByRole('button', { name: 'Light theme' }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    await expect
+      .poll(() => layers.evaluate((el) => getComputedStyle(el).backgroundImage))
+      .toContain('/images/hero/desktop-light.webp');
+    await expect.poll(() => floor.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL())).not.toBe(darkFloor);
+  });
+
+  test('crossing the phone breakpoint swaps the stage and rebuilds the floor once', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    const hero = page.locator('[data-hero]');
+    await expect(hero.locator('[data-hero-field] canvas')).toHaveCount(2);
+    await expect(hero.locator('.hero-stack')).toBeVisible();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(hero.locator('.hero-phone')).toBeVisible();
+    await expect(hero.locator('.hero-stack')).toBeHidden();
+    // The old field was destroyed: still exactly one pair of canvases, and the phone rests composed.
+    await expect(hero.locator('[data-hero-field] canvas')).toHaveCount(2);
+    await expect(hero.locator('[data-hero-phone-chip]')).not.toHaveClass(/is-hidden/);
+  });
+
+  test('the homepage stays under 1,000 elements', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('[data-hero-field] canvas')).toHaveCount(2);
+    expect(await page.evaluate(() => document.getElementsByTagName('*').length)).toBeLessThan(1000);
+  });
+});
+
+test.describe('header menu', () => {
+  test('opens, closes on Escape with focus returned, and closes after following a link', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto('/');
+    const toggle = page.getByRole('button', { name: 'Toggle menu' });
+    const menu = page.locator('#mobile-nav');
+    await expect(menu).toBeHidden();
+
+    await toggle.click();
+    await expect(menu).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).toBeFocused();
+
+    await toggle.click();
+    await menu.getByRole('link', { name: 'How It Works' }).click();
+    await expect(menu).toBeHidden();
+    await expect(page).toHaveURL(/#how-it-works$/);
+  });
 });
 
 test.describe('themed screenshots', () => {

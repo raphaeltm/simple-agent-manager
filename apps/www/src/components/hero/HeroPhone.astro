@@ -84,7 +84,8 @@ const comment = heroCrop('comment');
 
   .phone-chip {
     position: absolute;
-    left: calc(50% - 189px);
+    /* Overlaps the phone's left edge but never the screen's, down to 360px wide. */
+    left: max(14px, calc(50% - 177px));
     top: 66px;
     width: 124px;
     border-radius: 12px;
