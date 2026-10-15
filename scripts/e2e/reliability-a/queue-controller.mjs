@@ -104,7 +104,7 @@ function selector(path,method,project){
   if(['/api/nodes','/api/workspaces'].includes(path)&&method==='GET')return 'list';
   if(/^\/api\/workspaces\/[0-9A-HJKMNP-TV-Z]{26}\/agent-sessions$/u.test(path)&&method==='GET')return 'list';
   if(/^\/api\/workspaces\/[0-9A-HJKMNP-TV-Z]{26}$/u.test(path)&&method==='GET')return 'workspace';
-  if(/^\/api\/(workspaces|nodes)\/[0-9A-HJKMNP-TV-Z]{26}$/u.test(path)&&method==='DELETE')return 'action';
+  if(/^\/api\/workspaces\/[0-9A-HJKMNP-TV-Z]{26}$/u.test(path)&&method==='DELETE')return 'action';
   if(/^\/api\/workspaces\/[0-9A-HJKMNP-TV-Z]{26}\/sleep$/u.test(path)&&method==='POST')return 'action';
   throw new Error();
 }
@@ -139,7 +139,7 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
     delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
     await writeFile(join(root,'ready.json'),JSON.stringify(safeSummary(login)),{mode:0o600});
     if(login.category!=='ok'){final=login;throw new Error();}
-    const done=new Set(),idle=new Set(),sleeping=new Set(),submitted=new Map(),completed=new Set(),workspaces=new Map(),nodes=new Set();
+    const done=new Set(),idle=new Set(),sleeping=new Set(),submitted=new Map(),completed=new Set(),workspaces=new Map();
     const end=Date.now()+duration;
     let stopping=false,failed=false;
     while(Date.now()<end&&!stopping){
@@ -169,8 +169,7 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
               if(cmd.path.endsWith('/stop')){if(![...submitted.values()].includes(session))throw new Error();}
               else if(cmd.path.endsWith('/sleep')){if(!workspaces.has(session))throw new Error();}
               else if(method==='DELETE'){
-                if(cmd.path.startsWith('/api/nodes/')){if(!nodes.has(target))throw new Error();}
-                else if(!workspaces.has(target))throw new Error();
+                if(!workspaces.has(target))throw new Error();
               }
             }
             if(type==='prompt'){
@@ -202,8 +201,7 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
               if(cmd.path.endsWith('/stop')){if(![...submitted.values()].includes(session))throw new Error();}
               else if(cmd.path.endsWith('/sleep')){if(!workspaces.has(session))throw new Error();}
               else if(method==='DELETE'){
-                if(cmd.path.startsWith('/api/nodes/')){if(!nodes.has(target))throw new Error();}
-                else if(!workspaces.has(target))throw new Error();
+                if(!workspaces.has(target))throw new Error();
               }
             }
             if(type==='prompt'){
@@ -231,7 +229,6 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
                   if(selected.status==='completed')completed.add(selected.id);
                 }else if(type==='workspace'){
                   if(selected.id!==target)throw new Error();
-                  if(selected.nodeId!==undefined)nodes.add(selected.nodeId);
                 }}
               return true;
             });
