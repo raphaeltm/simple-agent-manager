@@ -55,7 +55,8 @@ Not asked: merging or deploying. Stop at a ready PR for approval.
   - full Playwright at `df5a46516`: 296 passed, 26 skipped;
   - homepage and marketing specs rerun at `7b85edda0`.
 - [x] Full-page screenshots (desktop and phone) uploaded to the library: `/marketing/homepage-copy-2026-10-15/`, 9 files (homepage desktop and phone in both themes, `/features/chat/`, `/features/`, and the open phone menu). They are listed in the PR #2356 evidence comment.
-- [ ] PR with copy deck, evidence, local reviews and CodeRabbit request; held for approval
+- [x] PR with copy deck, evidence, local reviews and CodeRabbit request; held for approval: PR #2356, ready, `needs-human-review`.
+  - CodeRabbit reviewed `db66ae204` with 1 actionable comment and 1 nitpick. The actionable one was partly applied ("its saved branch…"), with the failure-mode clause left off the homepage per the skill; the thread was answered and resolved. The nitpick (caption helper now throws) was fixed in `b9d861336`.
 
 ## Skill review (local agent)
 
