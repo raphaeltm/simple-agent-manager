@@ -51,7 +51,10 @@ never inventory alone, old incident fixtures, or invented values. `receipt` is t
 unchanged typed accepted-submit projection: EXACT `taskId`, `sessionId`,
 `branchName`, `status:'queued'`. `submittedAt` is the canonical per-task creation
 clock, between createdAt and createdAt+600000; evidencePrUrl is the real pre-existing
-fixture repository PR URL, established BEFORE the corresponding protected baseline.
+fixture repository PR URL OR the EXACT source evidence PR
+https://github.com/raphaeltm/simple-agent-manager/pull/2355. Other source PR URLs
+are rejected. Establish the evidence URL BEFORE the corresponding protected baseline;
+remote refs/PR inventory always remains scoped to serverspresentation2025/crewai.
 No PR is created by this controller. Context task/session/workspace/node/branches
 must all be distinct. Both slots are run-specific capabilities requiring coordinator
 review/GO, not a reusable authority grant to arbitrary existing sessions.

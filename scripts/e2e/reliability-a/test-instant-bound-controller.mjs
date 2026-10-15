@@ -32,15 +32,16 @@ test('actual supervised exact-context lifecycle preserves ownership, completion 
   execute('git',['push','--quiet','origin','main:refs/heads/sam/future-vm'],repo);
   const bad=JSON.parse(execute('python3',checkArgs,repo,1,probeEnv));
   assert.equal(good.checks.remoteRefsUnchanged,true);assert.equal(bad.checks.remoteRefsUnchanged,false,'next startup branch invalidates old protected baseline');
-  for(const mode of ['ok','changed-refs','foreign-project','foreign-session','wrong-runtime','wrong-profile','wrong-branch','no-reopen-proof','reopen','pending-delete','cleanup','sleep','expired','expired-cleanup','prepare','check-record','wake-check','complete','missing-phase','null-state','late-phase']){
+  for(const mode of ['ok','changed-refs','foreign-project','foreign-session','wrong-runtime','wrong-profile','wrong-branch','no-reopen-proof','reopen','pending-delete','cleanup','sleep','expired','expired-cleanup','prepare','check-record','wake-check','complete','missing-phase','null-state','late-phase','source-pr','wrong-source-pr']){
    const dir=join(root,mode);mkdirSync(dir,{mode:0o700});
    const contexts=[0,1].map(i=>({taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,workspaceId:uid(20+i),nodeId:uid(30+i),branch:i?'sam/final':'sam/first',agentProfileId:uid(40+i),agentType:i?'claude-code':'openai-codex',submittedAt:Date.now()-2000,evidencePrUrl:`https://github.com/${repository}/pull/1`,receipt:{taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,branchName:i?'sam/final':'sam/first',status:'queued'}}));
+   if(['source-pr','wrong-source-pr'].includes(mode))contexts.forEach(x=>x.evidencePrUrl='https://github.com/raphaeltm/simple-agent-manager/pull/'+(mode==='source-pr'?'2355':'2356'));
    const c={createdAt:Date.now()-3000,expiresAt:Date.now()+7_000_000,contexts,cleanupAuthorized:true};
    if(['expired','expired-cleanup'].includes(mode))c.expiresAt=Date.now()-1;
-   const kind=['cleanup','pending-delete','expired-cleanup'].includes(mode)?'cleanup':mode==='sleep'?'sleep':['prepare','check-record','wake-check','complete'].includes(mode)?mode:['missing-phase','late-phase'].includes(mode)?'wake-check':'observe';
+   const kind=mode==='source-pr'?'complete':['cleanup','pending-delete','expired-cleanup'].includes(mode)?'cleanup':mode==='sleep'?'sleep':['prepare','check-record','wake-check','complete'].includes(mode)?mode:['missing-phase','late-phase'].includes(mode)?'wake-check':'observe';
    const op={kind,contextSlot:1,...(kind==='observe'?{target:{taskId:contexts[0].taskId,branch:'sam/first',baseline,expectations}}:{})};
    writeFileSync(join(dir,'config.json'),JSON.stringify(c),{mode:0o600});writeFileSync(join(dir,'operation.json'),JSON.stringify(op),{mode:0o600});
-   if(['check-record','wake-check','complete','late-phase'].includes(mode))writeFileSync(join(dir,contexts[1].taskId+'-phase-start.json'),JSON.stringify({startedAt:Date.now()-(mode==='late-phase'?781000:500)}),{mode:0o600});
+   if(['check-record','wake-check','complete','late-phase','source-pr'].includes(mode))writeFileSync(join(dir,contexts[1].taskId+'-phase-start.json'),JSON.stringify({startedAt:Date.now()-(mode==='late-phase'?781000:500)}),{mode:0o600});
    writeFileSync(join(dir,'observer-artifact.json'),JSON.stringify({artifactId:uid(50),taskId:contexts[1].taskId}),{mode:0o600});
    if(mode==='reopen')writeFileSync(join(dir,contexts[1].taskId+'-independent-proof.json'),JSON.stringify({taskId:contexts[1].taskId,branch:contexts[1].branch,completedAt,...good}),{mode:0o600});
    for(const name of ['queue-controller.mjs','b-probe.py','git-probe.py','terminal-observer.py'])copyFileSync(join(here,name),join(dir,name));
@@ -55,7 +56,7 @@ test('actual supervised exact-context lifecycle preserves ownership, completion 
      else if(path==='/api/auth/sign-out')loggedIn=false;
      else if(path==='/api/auth/get-session')body=null;
      else if(path==='/api/nodes'){if(!loggedIn)status=403;else body=[{id:own.nodeId,cloudProvider:mode==='wrong-runtime'?'hetzner':'cloudflare',providerInstanceType:'cf-container'}];}
-     else if(path==='/api/projects/${project}/tasks/'+own.taskId)body={id:own.taskId,projectId:mode==='foreign-project'?'foreign':${JSON.stringify(project)},outputBranch:mode==='wrong-branch'?'sam/foreign':own.branch,agentProfileHint:mode==='wrong-profile'?'foreign':own.agentProfileId,taskMode:'task',workspaceId:deleted?null:own.workspaceId,status:deleted?'cancelled':mode==='complete'&&prompted?'completed':['reopen','no-reopen-proof'].includes(mode)&&!prompted?'completed':'in_progress',completedAt:mode==='complete'&&prompted?new Date().toISOString():completedAt};
+     else if(path==='/api/projects/${project}/tasks/'+own.taskId)body={id:own.taskId,projectId:mode==='foreign-project'?'foreign':${JSON.stringify(project)},outputBranch:mode==='wrong-branch'?'sam/foreign':own.branch,agentProfileHint:mode==='wrong-profile'?'foreign':own.agentProfileId,taskMode:'task',workspaceId:deleted?null:own.workspaceId,status:deleted?'cancelled':['complete','source-pr'].includes(mode)&&prompted?'completed':['reopen','no-reopen-proof'].includes(mode)&&!prompted?'completed':'in_progress',completedAt:['complete','source-pr'].includes(mode)&&prompted?new Date().toISOString():completedAt};
      else if(path==='/api/projects/${project}/tasks/'+target.taskId)body={id:target.taskId,projectId:${JSON.stringify(project)},outputBranch:target.branch,status:'completed',completedAt,completionEvidence:{notes:canary}};
      else if(path==='/api/workspaces/'+own.workspaceId){
       if(options.method==='DELETE'){if(mode==='pending-delete'){status=202;body={success:true,deletionStatus:'pending'};}else{deleted=true;body={success:true,deletionStatus:'confirmed'};}}
@@ -77,7 +78,7 @@ test('actual supervised exact-context lifecycle preserves ownership, completion 
    const entry=join(dir,'entry.mjs');writeFileSync(entry,source);
    const r=spawnSync(process.execPath,[join(here,'safe-controller.mjs'),entry,'5000'],{encoding:'utf8',timeout:7000,env:{...process.env,SAM_INSTANT_BOUND_ROOT:dir,SAM_PLAYWRIGHT_PRIMARY_USER:canary}});
    assert.equal(r.status,0,'supervised status');assert.equal(r.stderr,'','private stderr');assert.ok(!r.stdout.includes(canary),'private stdout');
-   const pass=['ok','reopen','cleanup','sleep','expired-cleanup','prepare','check-record','wake-check','complete'].includes(mode);assert.equal(JSON.parse(r.stdout).category,pass?'ok':'controller','mode '+mode);
+   const pass=['ok','reopen','cleanup','sleep','expired-cleanup','prepare','check-record','wake-check','complete','source-pr'].includes(mode);assert.equal(JSON.parse(r.stdout).category,pass?'ok':'controller','mode '+mode);
    if(pass){const file=join(dir,'result.json');assert.ok(!readFileSync(file,'utf8').includes(canary),'safe sidecar');assert.equal(statSync(file).mode&0o777,0o600);}
    else assert.equal(existsSync(join(dir,'result.json')),false,'no failed sidecar');
    if(mode==='reopen')assert.equal(JSON.parse(readFileSync(join(dir,contexts[1].taskId+'-before-reopen.json'),'utf8')).completedAt,completedAt,'preserved original completion');
