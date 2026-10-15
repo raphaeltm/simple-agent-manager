@@ -31,6 +31,37 @@ class ActualProbeCanaryTests(unittest.TestCase):
                 scalar_output(self, result)
                 self.assertEqual(result.returncode, 1)
 
+    def test_detached_descendant_pipes_do_not_block_timeout(self):
+        import signal,time
+        for script in ['git-probe.py', 'b-probe.py']:
+            with self.subTest(script=script), tempfile.TemporaryDirectory(prefix='sam-detached-canary-') as tmp:
+                directory = Path(tmp)
+                pids = directory / 'pids'
+                fake = directory / 'git'
+                fake.write_text('''#!/usr/bin/env python3
+import os,subprocess,sys,time
+child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(10)'],start_new_session=True)
+with open(os.environ['PROBE_PIDS'],'a') as f:f.write(str(child.pid)+'\\n')
+print(os.environ['PROBE_CANARY'],flush=True)
+print(os.environ['PROBE_CANARY'],file=sys.stderr,flush=True)
+time.sleep(10)
+''')
+                fake.chmod(0o700)
+                env={**os.environ,'PATH':str(directory)+os.pathsep+os.environ['PATH'],
+                     'PROBE_PIDS':str(pids),'PROBE_CANARY':CANARY,'SAM_PROBE_GIT_TIMEOUT_SECONDS':'0.05'}
+                args=['check'] if script=='git-probe.py' else ['--inspect-only','--repository','owner/disposable','--helper-path',str(fake),'--timeout-seconds','0.05']
+                started=time.monotonic()
+                try:
+                    result=subprocess.run(['python3',str(ROOT/script),*args],cwd=directory,env=env,capture_output=True,text=True,timeout=8)
+                    scalar_output(self,result)
+                    self.assertEqual(result.returncode,1)
+                    self.assertLess(time.monotonic()-started,5)
+                finally:
+                    if pids.exists():
+                        for pid in pids.read_text().splitlines():
+                            try:os.kill(int(pid),signal.SIGKILL)
+                            except ProcessLookupError:pass
+
     def test_a_timeout_kills_descendants(self):
         with tempfile.TemporaryDirectory(prefix='sam-timeout-canary-') as tmp:
             directory = Path(tmp)
@@ -218,6 +249,20 @@ else:print(os.environ['PROBE_CANARY'])
             output = scalar_output(self, result)
             self.assertEqual(result.returncode, 1)
             self.assertFalse(output['checks']['probeCompleted'])
+            interrupted = directory / 'interrupted'
+            git('clone', str(remote), str(interrupted))
+            git('config', 'user.name', 'Local synthetic probe', cwd=interrupted)
+            git('config', 'user.email', 'probe@example.invalid', cwd=interrupted)
+            git('switch', '-c', 'sam/interrupted', cwd=interrupted)
+            wrapper.write_text('#!/usr/bin/env python3\nimport os,sys\nif sys.argv[1:]==["write-tree"]:sys.exit(42)\nos.execv("/usr/bin/git",["git",*sys.argv[1:]])\n')
+            result = subprocess.run(['python3', str(ROOT/'git-probe.py'), 'prepare', '--disposable-repository'], cwd=interrupted, env=env, capture_output=True, text=True, timeout=15)
+            scalar_output(self,result)
+            self.assertEqual(result.returncode,1)
+            self.assertFalse((interrupted/'.reliability-a/baseline.json').exists())
+            result = subprocess.run(['python3', str(ROOT/'git-probe.py'), 'check'], cwd=interrupted, env=env, capture_output=True, text=True, timeout=15)
+            scalar_output(self,result)
+            self.assertEqual(result.returncode,1)
+
 
 
 if __name__ == '__main__':
