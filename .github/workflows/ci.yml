@@ -105,6 +105,9 @@ jobs:
             marketing-site:
               - 'apps/www/**'
               - '.github/workflows/deploy-www.yml'
+              # Shared sources the marketing site imports from @simple-agent-manager/ui
+              - 'packages/ui/src/glass/**'
+              - 'packages/ui/package.json'
             repo-quality:
               - 'apps/api/**'
               - 'apps/web/**'
