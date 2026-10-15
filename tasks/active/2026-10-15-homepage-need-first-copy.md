@@ -6,7 +6,7 @@ Raphaël (2026-10-15), after PR #2349 shipped the animated feature scenes:
 
 - The row of feature buttons (Chat-First Development … Agents That Learn) is "pressed up against a line on the top side. It's really awkward. Let's either remove the line at the top or move those buttons down."
 - "Can we also run a humanizer skill against the copy? (https://github.com/blader/humanizer) A lot of it feels 'sloppy'. Maybe save the humanizer skill in sam skills. Keep in mind the way a casual user would read the copy. As an example 'Real machines, not size labels' means fuckall to a user. And … 'You choose the strategy (Balanced, Pack, Spread, Smallest fit) and what happens when a provider runs out (Queue, Fail, Fallback chain).' means nothing to someone who doesn't know the system yet."
-- "I think the graphics are good, but the copy doesn't speak to the *need* the user is facing. It's selling the engine, not the car." He asked for a skill that builds marketing copy around the end user's need, reviewed by a local agent, saved (for example as a "homepage copy skill"), then used to rewrite the homepage copy in a PR, plus a full-page homepage screenshot in the library.
+- "I think the graphics are good, but the copy doesn't speak to the _need_ the user is facing. It's selling the engine, not the car." He asked for a skill that builds marketing copy around the end user's need, reviewed by a local agent, saved (for example as a "homepage copy skill"), then used to rewrite the homepage copy in a PR, plus a full-page homepage screenshot in the library.
 
 Not asked: merging or deploying. Stop at a ready PR for approval.
 
