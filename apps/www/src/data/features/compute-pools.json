@@ -27,12 +27,12 @@
   },
   "details": [
     {
-      "headline": "Real machines, not size labels",
-      "body": "A compute pool lists the actual provider-native offerings it is allowed to rent — cx33, PRO2-S, vc2-4c-8gb, and more — across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP, each with its real vCPU, RAM, disk, and price. Browse each provider’s full catalog, filter by provider, region, vCPU, RAM, or price, and add a machine type without leaving the page. You choose the strategy (Balanced, Pack, Spread, Smallest fit) and what happens when a provider runs out (Queue, Fail, Fallback chain).",
+      "headline": "Choose the exact machine types",
+      "body": "A compute pool lists the machine types SAM may rent, such as cx33 at Hetzner or PRO2-S at Scaleway, with each one’s vCPU, RAM, disk, and estimated price. Browse Hetzner’s live catalog or the standard sizes at the other six providers, filter by region, size, or price, and add a machine type without leaving the page. You also choose how SAM spreads work across servers, and what it does when no allowed machine is available: wait for one, stop with an error, or try your other allowed machine types in order.",
       "screenshot": {
         "src": "/images/features/sam-compute-offerings-manager.png",
         "alt": "Catalog filters for provider, region, minimum vCPU, minimum RAM, maximum price, and availability above the Add instances from catalog list, where Hetzner offerings are marked Already allowed, Region sold out, Catalog only with an Add button, or Not selected",
-        "caption": "Filter a provider’s live catalog and add the exact instance types you want in the pool"
+        "caption": "Filter Hetzner’s live catalog and add the machine types you want in the pool"
       }
     },
     {

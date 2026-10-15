@@ -45,8 +45,16 @@ Not asked: merging or deploying. Stop at a ready PR for approval.
 - [x] Copy rewritten (hero, agent dock, features, How It Works, comparison, roadmap, CTA, proof strip, hero layer labels, header button, page meta, scene descriptions)
 - [x] Humanizer pass and cold-reader review (first pass and two cold reads in earlier commits; final humanizer pass and a third, text-only cold read applied in `df5a46516`)
 - [x] Pages the homepage links to: the phone menu button says "Deploy SAM"; the feature pages' closing block lists what deploying needs instead of "in minutes… free to self-host"; no em dashes in feature page titles
-- [ ] Tests updated, lint, typecheck, unit and Playwright suites pass
-- [ ] Full-page screenshots (desktop and phone) uploaded to the library
+- [x] The compute pools feature page no longer carries the two strings Raphaël named:
+  - "Real machines, not size labels" is now "Choose the exact machine types";
+  - the strategy and "provider runs out" option names are now plain words (wait for one, stop with an error, or try your other allowed machine types in order), checked against `docs/guides/compute-pools.md`.
+- [x] Tests updated, lint, typecheck, unit and Playwright suites pass:
+  - www lint is clean;
+  - typecheck has the baseline error only;
+  - 94/94 unit tests pass;
+  - full Playwright at `df5a46516`: 296 passed, 26 skipped;
+  - homepage and marketing specs rerun at `7b85edda0`.
+- [x] Full-page screenshots (desktop and phone) uploaded to the library: `/marketing/homepage-copy-2026-10-15/`, 9 files (homepage desktop and phone in both themes, `/features/chat/`, `/features/`, and the open phone menu). They are listed in the PR #2356 evidence comment.
 - [ ] PR with copy deck, evidence, local reviews and CodeRabbit request; held for approval
 
 ## Skill review (local agent)
@@ -92,7 +100,10 @@ Not asked: merging or deploying. Stop at a ready PR for approval.
   - no cost example for running SAM, because the Workers Paid price needs a dated source;
   - "self-hosted" and "your own cloud" can read as your own hardware or AWS (the H1 is the locked one-liner);
   - competitor cells were left unchanged;
-  - `/features/` index summaries still use internal terms and em dashes.
+  - `/features/` index summaries, and the detail rows on other feature pages, still use internal terms and em dashes. Feature pages keep their specifics by design; only the compute pools strings Raphaël named were rewritten.
+- task-completion-validator: PASS WITH FINDINGS, 0 critical or high.
+  - Fixed: the PR review table was refreshed, the compute pools strings were rewritten, and the checklist was updated. The skills were confirmed with `get_skill`.
+  - Left as is: `docs/reference/roadmap.md` still says "Event Streams & Triggers". It is a reference doc using the feature's own name, which is fine for that audience.
 
 ## Acceptance criteria
 
