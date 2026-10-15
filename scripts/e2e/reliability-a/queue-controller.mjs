@@ -139,7 +139,7 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
     delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
     await writeFile(join(root,'ready.json'),JSON.stringify(safeSummary(login)),{mode:0o600});
     if(login.category!=='ok'){final=login;throw new Error();}
-    const done=new Set(),idle=new Set(),sleeping=new Set(),submitted=new Map(),completed=new Set();
+    const done=new Set(),idle=new Set(),sleeping=new Set(),submitted=new Map(),completed=new Set(),workspaces=new Map(),nodes=new Set();
     const end=Date.now()+duration;
     let stopping=false,failed=false;
     while(Date.now()<end&&!stopping){
@@ -158,6 +158,20 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
               if(!exact(cmd.data,cmd.data?.workspaceProfile===undefined?['message','agentProfileId','taskMode']:['message','agentProfileId','taskMode','workspaceProfile'])
                 ||!ulid(cmd.data.agentProfileId)||cmd.data.taskMode!=='task'||typeof cmd.data.message!=='string'||cmd.data.message.length>16000
                 ||(cmd.data.workspaceProfile!==undefined&&cmd.data.workspaceProfile!=='lightweight'))throw new Error();
+            }
+            // Authorization derives only from this run's accepted submit -> canonical task -> workspace chain.
+            // Inventory reads never grant mutation authority. Retain confirmed IDs for cleanup after sleep/stop.
+            const target=cmd.path.split('/').at(-1),session=cmd.path.split('/').at(-2);
+            if(type==='task'&&!submitted.has(target))throw new Error();
+            if(type==='state'&&![...submitted.values()].includes(session))throw new Error();
+            if(type==='workspace'&&!workspaces.has(target))throw new Error();
+            if(type==='action'){
+              if(cmd.path.endsWith('/stop')){if(![...submitted.values()].includes(session))throw new Error();}
+              else if(cmd.path.endsWith('/sleep')){if(!workspaces.has(session))throw new Error();}
+              else if(method==='DELETE'){
+                if(cmd.path.startsWith('/api/nodes/')){if(!nodes.has(target))throw new Error();}
+                else if(!workspaces.has(target))throw new Error();
+              }
             }
             if(type==='prompt'){
               const session=cmd.path.split('/').at(-2);
@@ -178,7 +192,21 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
                 selected={};
                 if(!json||typeof json!=='object')throw new Error();
                 if(['success','accepted','workspaceDeleted'].some(k=>json[k]===false))throw new Error();
-                if(type==='prompt'){
+                // Authorization derives only from this run's accepted submit -> canonical task -> workspace chain.
+            // Inventory reads never grant mutation authority. Retain confirmed IDs for cleanup after sleep/stop.
+            const target=cmd.path.split('/').at(-1),session=cmd.path.split('/').at(-2);
+            if(type==='task'&&!submitted.has(target))throw new Error();
+            if(type==='state'&&![...submitted.values()].includes(session))throw new Error();
+            if(type==='workspace'&&!workspaces.has(target))throw new Error();
+            if(type==='action'){
+              if(cmd.path.endsWith('/stop')){if(![...submitted.values()].includes(session))throw new Error();}
+              else if(cmd.path.endsWith('/sleep')){if(!workspaces.has(session))throw new Error();}
+              else if(method==='DELETE'){
+                if(cmd.path.startsWith('/api/nodes/')){if(!nodes.has(target))throw new Error();}
+                else if(!workspaces.has(target))throw new Error();
+              }
+            }
+            if(type==='prompt'){
                   if(json.accepted!==true||json.status!=='queued')throw new Error();
                 }else if(method==='DELETE'){
                   if(json.success!==true)throw new Error();
@@ -186,7 +214,7 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
                   if(json.status!=='stopped'||json.workspaceDeleted!==true)throw new Error();
                 }else if(cmd.path.endsWith('/sleep')){
                   if(json.status!=='sleeping'||!ulid(json.workspaceId)||!uuid(json.chatSessionId)||!when(json.snapshotExpiresAt)
-                    ||![...submitted.values()].includes(json.chatSessionId))throw new Error();
+                    ||json.workspaceId!==session||workspaces.get(session)!==json.chatSessionId)throw new Error();
                   sleeping.add(json.chatSessionId);
                   selected.snapshotExpiresAt=json.snapshotExpiresAt;
                 }else throw new Error();
@@ -196,7 +224,15 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
                 if(!Object.keys(selected).length)throw new Error();
               }else{selected=entity(json,type,privateState);if(type==='submit'){
                   if(!ulid(selected.taskId)||!uuid(selected.sessionId)||selected.status!=='queued'||json.accepted===false||json.success===false)throw new Error();submitted.set(selected.taskId,selected.sessionId);
-                }else if(type==='task'&&selected.status==='completed')completed.add(selected.id);}
+                }else if(type==='task'){
+                  if(selected.id!==target)throw new Error();
+                  if(selected.sessionId!==undefined&&selected.sessionId!==submitted.get(target))throw new Error();
+                  if(selected.workspaceId!==undefined)workspaces.set(selected.workspaceId,submitted.get(target));
+                  if(selected.status==='completed')completed.add(selected.id);
+                }else if(type==='workspace'){
+                  if(selected.id!==target)throw new Error();
+                  if(selected.nodeId!==undefined)nodes.add(selected.nodeId);
+                }}
               return true;
             });
             if(result.category==='ok')await writeFile(join(root,'private/state',name),JSON.stringify(selected),{mode:0o600});
