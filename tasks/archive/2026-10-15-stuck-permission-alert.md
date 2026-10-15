@@ -29,3 +29,7 @@ Considered hiding all settled requests, a dismiss button, and chronological plac
 ## Post-mortem
 What broke: old delivered requests stayed below newer activity. Root cause: original placement from PR #2202 treated all missing anchors as live-footer content. Why missed: fixtures anchored every settled interaction and only tested pending unanchored cards. Prevention: settled unanchored browser scenario, measured ordering, append/history/empty and non-monotonic timestamp tests. No additional standing steering text needed.
 - Production reproduction: ran the regression against `https://app.simple-agent-manager.org` served JS with all conversation API data mocked. It failed exactly because the settled receipt had zero conversation-row ancestors (footer). No live session was created/answered. API health healthy; initial app entry `/assets/index-D7oxvRcd.js`.
+- Final complete web suite: 339 files / 4,057 tests passed. Full web lint: zero errors (three existing warnings); final typecheck passed. Production Vite build passed through Playwright webServer. Quality preflight and specialist review evidence checkers passed locally.
+
+## Release tracking
+Implementation acceptance is complete. This file is archived per /do Phase 4; the two unchecked release items above are intentionally post-implementation gates, tracked in the PR and local .do-state.md until CI/CodeRabbit/merge/deployment and production browser verification finish. They are not claimed complete here.
