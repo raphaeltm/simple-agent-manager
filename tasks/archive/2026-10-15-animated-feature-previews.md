@@ -92,8 +92,10 @@ One generic, data-driven scene per feature section:
       ([comment](https://github.com/raphaeltm/simple-agent-manager/pull/2349#issuecomment-6187935813));
       CI green apart from the intentional `needs-human-review` hold; CodeRabbit requested, and it
       skipped the PR (104 files, over its 100-file limit)
-- [ ] Raphaël approves and merges (not done here: no merge, no deploy); then check the live homepage
-      once `deploy-www.yml` finishes
+- [x] Approved for production in the task session on 2026-10-15 ("Ok. Ship it to prod."); hold
+      label removed, PR squash-merged
+- Post-merge (recorded on PR #2349, not in this file): `deploy-www.yml` and Deploy Production
+  monitored to completion, then the live homepage checked on desktop and phone
 
 ## Review round 1 (local specialists) and what changed
 
