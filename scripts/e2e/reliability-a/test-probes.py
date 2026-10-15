@@ -173,6 +173,41 @@ else:print(os.environ['PROBE_CANARY'])
             result = probe('check')
             output = scalar_output(self, result)
             self.assertTrue(all(output['checks'].values()))
+            baseline = repo / '.reliability-a/baseline.json'
+            original = baseline.read_text()
+            malformed = ['{}', '{"head":"' + 'a'*40 + '"}', '{',
+                         json.dumps({**json.loads(original), 'unexpected': True}),
+                         json.dumps({**json.loads(original), 'files': {}}),
+                         json.dumps({**json.loads(original), 'index': 1})]
+            for invalid in malformed:
+                baseline.write_text(invalid)
+                result = probe('check')
+                output = scalar_output(self, result)
+                self.assertEqual(result.returncode, 1)
+                self.assertFalse(output['checks']['probeCompleted'])
+            baseline.unlink()  # Interrupted preparation cannot supply a usable baseline.
+            result = probe('check')
+            scalar_output(self, result)
+            self.assertEqual(result.returncode, 1)
+            baseline.write_text(original)
+            (repo / 'index-change.txt').write_text('index change')
+            git('add', 'index-change.txt', cwd=repo)
+            result = probe('check')
+            output = scalar_output(self, result)
+            self.assertFalse(output['checks']['indexUnchanged'])
+            git('reset', '--', 'index-change.txt', cwd=repo)
+            (repo / 'index-change.txt').unlink()
+            old_head = json.loads(original)['head']
+            git('commit', '--allow-empty', '-m', 'head change', cwd=repo)
+            result = probe('check')
+            output = scalar_output(self, result)
+            self.assertFalse(output['checks']['headUnchanged'])
+            git('reset', '--soft', old_head, cwd=repo)
+            git('update-ref', 'refs/heads/remote-change', 'HEAD', cwd=remote)
+            result = probe('check')
+            output = scalar_output(self, result)
+            self.assertFalse(output['checks']['remoteRefsUnchanged'])
+            git('update-ref', '-d', 'refs/heads/remote-change', cwd=remote)
             (repo / '.reliability-a/tracked.txt').write_text(CANARY)
             result = probe('check')
             output = scalar_output(self, result)
