@@ -9,6 +9,7 @@ const branch=v=>typeof v==='string'&&/^sam\/[a-z0-9][a-z0-9/-]{0,150}$/u.test(v)
 const hex=v=>typeof v==='string'&&/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(v);
 const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join()===keys.slice().sort().join();
 const files=['.reliability-a/tracked.txt','.reliability-a/staged-new.txt','.reliability-a/untracked.txt','.do-state.md','.workflow-state.md'];
+const observerWhen=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)$/u.test(v)&&Number.isFinite(Date.parse(v));
 const when=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/u.test(v)&&Number.isFinite(Date.parse(v));
 function refs(text){
   if(typeof text!=='string'||!text.trim())throw new Error();
@@ -34,7 +35,7 @@ export function baselineArtifact(value, expectedBranch){
 }
 export function expectationsArtifact(value, baseline, repository){
   if(!exact(value,['repository','branch','remoteRefs','prs','recordedAt','prLimit'])||value.repository!==repository
-    ||value.branch!==baseline.branch||!when(value.recordedAt)||!Number.isSafeInteger(value.prLimit)||value.prLimit<1||value.prLimit>1000
+    ||value.branch!==baseline.branch||!observerWhen(value.recordedAt)||!Number.isSafeInteger(value.prLimit)||value.prLimit<1||value.prLimit>1000
     ||!Array.isArray(value.prs)||value.prs.length>=value.prLimit)throw new Error();
   const expected=refs(baseline.remoteRefs);
   if(!exact(value.remoteRefs,Object.keys(expected))||Object.keys(expected).some(k=>value.remoteRefs[k]!==expected[k]))throw new Error();
