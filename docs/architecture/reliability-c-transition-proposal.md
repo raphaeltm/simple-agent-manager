@@ -31,25 +31,29 @@ Use the existing reviewed bridge and immutable activation protocol. Avoid a new
 credential format or permanent legacy cohort. The missing primitive is a real
 termination fence, not another application timer.
 
-Before scheduling maintenance, obtain a documented provider operation or written
-provider guarantee that identifies and terminates **all** prebridge executions
-and prevents their deferred KV work from committing afterward. Coverage must
-include HTTP/body waits, WebSockets, scheduled/queue events, DO invocations,
-service bindings and deployment/version overrides. Record the exact operation,
-scope, completion acknowledgement, residual-work semantics and failure behavior.
-An unavailable primitive means this proposal cannot execute safely.
+Before scheduling maintenance, identify a narrow supported operation that fences
+prebridge executions able to mutate MCP counter keys or workspace boot-log keys,
+including issuer paths that can enable those mutations. The invariant concerns
+these side effects, not termination of every Worker invocation. Inventory HTTP
+body waits and other producers only where an actual path can reach those keys;
+WebSockets, scheduled/queue events, DOs and service bindings are not included merely
+because they exist. Document the exact operation, completion acknowledgement,
+residual-write semantics and failure behavior. No such operation is established;
+this proposal therefore cannot execute safely. Do not repeat broad guarantee
+searches, contact vendors or create infrastructure to work around that dependency.
 
-First complete the isolated termination/activation experiment described below,
-with independent review. Only after that evidence and maintenance approval can
+Only after proposing that exact narrow supported operation may the coordinator
+authorize the isolated experiment below. Complete it with independent review
+before maintenance approval. Only after that evidence and approval can
 the coordinator execute this production sequence:
 
-1. Inventory all ingress, producers, active deployments and rollback artifacts.
+1. Inventory relevant writers/issuers, their ingress and deployment/rollback artifacts.
    Pin one corrected bridge and preserve deployment/configuration manifests.
 2. Enter an explicit maintenance window: stop new dispatch and mutation ingress;
    preserve supported session snapshots, staged work and local commits. Quiesce
-   scheduled/queue producers through supported controls. Do not force a snapshot
+   relevant scheduled/queue producers through supported controls. Do not force a snapshot
    while an agent is still writing. Report any session that cannot safely pause.
-3. Execute the provider-confirmed termination fence. Require its acknowledgement
+3. Execute the supported side-effect fence. Require its acknowledgement
    for the complete inventory. A routing change, zero observed requests or elapsed
    interval is not this acknowledgement. On incomplete coverage, abort activation.
 4. Restore only corrected bridge writers, still in KV bridge mode. Verify the
@@ -98,7 +102,9 @@ or approval of an unproven cancellation procedure.
 ## Evidence required before implementation or activation
 
 Keep the existing held-body, held-KV-put/clear, immutable-record and mixed-version
-regressions. Add a provider-isolated experiment that holds an authenticated old
+regressions. Do not run a new experiment until the exact narrow supported fencing
+operation is proposed and the coordinator authorizes its validation. Then use an
+isolated experiment that holds an authenticated old
 request and a deferred write across the proposed termination operation, proves
 both cannot mutate afterward, and verifies corrected-only restart/rollback.
 The experiment supplements the provider guarantee; a successful sample alone
