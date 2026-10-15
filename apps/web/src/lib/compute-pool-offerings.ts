@@ -12,6 +12,7 @@ import {
   candidateSourceKey,
   catalogSourceKey,
   type ExtendedCandidate,
+  knownProviderLocation,
   monthlyPriceAmount,
   normalizeDiskGb,
   normalizeNumber,
@@ -205,6 +206,8 @@ function candidateFallbackOffering(
       ? candidate.providerInstancePriceHourlyMicros / 1_000_000
       : null;
 
+  const knownLocation = knownProviderLocation(provider, location);
+
   return {
     key: offeringKey(sourceKey, provider, location, sku),
     sourceId: candidate.capacitySourceId ?? null,
@@ -212,8 +215,8 @@ function candidateFallbackOffering(
     provider,
     providerLabel: providerDisplayName(provider),
     location,
-    locationLabel: location,
-    country: null,
+    locationLabel: knownLocation?.name ?? location,
+    country: knownLocation?.country ?? null,
     sku,
     providerInstanceType:
       candidate.providerInstanceType ?? candidate.instanceType ?? candidate.type ?? sku,
@@ -269,6 +272,11 @@ export function buildComputePoolOfferingsModel(
     if (key) sourceIdsByKey.set(key, source.id);
   }
   const catalogOfferings = flattenProviderCatalogOfferings(catalogs);
+  // A row is only "no longer offered" when its own account's catalog is loaded and lacks it.
+  // Without that catalog (a fallback pool, a failed catalog read) there is no evidence either way.
+  const loadedCatalogSourceKeys = new Set(
+    catalogs.map((catalog) => catalogSourceKey(catalog)).filter((key): key is string => !!key)
+  );
   const byKey = new Map(catalogOfferings.map((offering) => [offering.key, offering]));
   const byLegacyCandidate = new Map<string, ComputePoolOffering>();
   const byUnscopedKey = new Map<string, ComputePoolOffering[]>();
@@ -311,7 +319,11 @@ export function buildComputePoolOfferingsModel(
       legacyCatalogOffering ??
       candidateFallbackOffering(extended, sourceKey);
     const missingFromCurrentCatalog =
-      nativeSku !== null && !exactCatalogOffering && !legacyCatalogOffering;
+      nativeSku !== null &&
+      !exactCatalogOffering &&
+      !legacyCatalogOffering &&
+      sourceKey !== null &&
+      loadedCatalogSourceKeys.has(sourceKey);
 
     return {
       ...base,

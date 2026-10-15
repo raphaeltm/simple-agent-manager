@@ -2,7 +2,9 @@ import {
   type CapacityPoolCandidate,
   type CapacitySourceIdentity,
   DEFAULT_APPROXIMATE_BILLING_MONTH_HOURS,
+  getLocationsForProvider,
   isValidProvider,
+  type LocationMeta,
   PROVIDER_LABELS,
   type ProviderCatalog,
 } from '@simple-agent-manager/shared';
@@ -54,6 +56,15 @@ export function providerDisplayName(value: string | null | undefined): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
+}
+
+/**
+ * City and country for a provider region from the app's region list, for pool rows no loaded
+ * catalog describes (for example a project page showing the personal pool it falls back to).
+ */
+export function knownProviderLocation(provider: string, location: string): LocationMeta | null {
+  if (!isValidProvider(provider)) return null;
+  return getLocationsForProvider(provider).find((item) => item.id === location) ?? null;
 }
 
 function identityPart(value: string | null | undefined): string {

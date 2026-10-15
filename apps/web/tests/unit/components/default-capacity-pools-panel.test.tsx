@@ -478,6 +478,25 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
   });
 
+  it('names the regions of a fallback pool without calling its machines unavailable', async () => {
+    // The project-scoped catalog request covers project credentials only, so the personal
+    // pool a project falls back to arrives without a catalog of its own (seen on staging).
+    mocks.providerCatalogs = [];
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
+
+    renderPanel();
+
+    expect(
+      await screen.findByText(/This project uses your personal compute pool/)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'SAM can start Hetzner machines in Falkenstein or Ashburn, from cx22 (2 vCPU, 4 GB RAM, €3.79/mo) to cpx31 (4 vCPU, 8 GB RAM, €13.10/mo).'
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryAllByText(/not currently offered/i)).toHaveLength(0);
+  });
+
   it('keeps an owned pool with no allowed machines editable so machines can be allowed again', async () => {
     const empty = summary('project');
     empty.pool = { ...empty.pool, status: 'disabled' };

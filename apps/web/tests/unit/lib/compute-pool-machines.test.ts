@@ -243,6 +243,29 @@ describe('buildMachineGroups', () => {
     expect(ccCell).toMatchObject({ allowed: false, canAllow: true, locationLabel: 'Falkenstein' });
   });
 
+  it('trusts rows whose account catalog is not loaded, and names their regions', () => {
+    // A project page shows the personal pool it falls back to. The project-scoped catalog
+    // request covers project credentials only, so no catalog describes these rows.
+    const groups = buildMachineGroups(
+      [
+        candidate('cx23-hel1', 'cx23', 'hel1', 'active'),
+        candidate('cx23-fsn1', 'cx23', 'fsn1', 'active'),
+        candidate('cx33-fsn1', 'cx33', 'fsn1', 'disabled'),
+      ],
+      [],
+      [source()]
+    );
+    expect(cell(groups, 'cx23', 'fsn1')).toMatchObject({
+      allowed: true,
+      issue: null,
+      locationLabel: 'Falkenstein',
+      country: 'DE',
+    });
+    expect(cell(groups, 'cx23', 'hel1')).toMatchObject({ allowed: true, issue: null });
+    expect(cell(groups, 'cx33', 'fsn1')).toMatchObject({ allowed: false, issue: null });
+    expect(summarizeAllowedMachines(groups).regions).toEqual(['Falkenstein', 'Helsinki']);
+  });
+
   it('leaves out catalog rows that no pool source can write', () => {
     const groups = buildMachineGroups(
       [],
