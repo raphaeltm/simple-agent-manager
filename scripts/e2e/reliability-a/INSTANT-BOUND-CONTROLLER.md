@@ -160,3 +160,16 @@ and logout. A returned turn is not assets proof; the host must independently loc
 and validate the task-scoped original upload before any A baseline. The existing
 240-second poll and 300-second supervisor ceiling apply; failure does not authorize
 an automatic prompt retry or acceptance phase.
+
+`resume-incomplete` is the one authorized new FIRST acceptance attempt, not a rerun
+of the failed original baseline. Use a new private operation directory, preserve
+the failed attempt's marker and artifacts, and retain `acceptance-attempt.json`
+(`first-guarded-resume-1`, prior outcome `failed`) with the new phase marker and
+uploads. The probe refuses before writes unless the exact FIRST branch has only
+the known staged tracked file, matching worktree/index bytes, no baseline or other
+fixture/workflow files, no other changes, and HEAD equal to the remote task branch.
+Its explicit named-file commit uses command-local synthetic author identity; no
+user/global Git configuration changes. Only after that commit succeeds does it
+create a new baseline. New ordinary preparation uses the same command-local
+identity for SECOND. Actual runtime guard eligibility must be measured; the earlier
+readonly partial-state evidence alone does not establish it.
