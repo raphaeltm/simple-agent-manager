@@ -11,7 +11,7 @@ import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { getPlatformOperationLimits } from '../../operations/limits';
 import { type McpTokenData, type McpTokenEnv, validateMcpToken } from '../../services/mcp-token';
-import { storageCutover } from '../../services/reliability-storage';
+import { readStorageActivation } from '../../services/reliability-storage';
 import { LIVE_TASK_STATUSES, WAKEABLE_TASK_STATUSES } from '../../services/task-status';
 
 // Re-export McpTokenData for use by tool handler files
@@ -348,7 +348,12 @@ export async function checkMcpRateLimit(
   const now = Math.floor(Date.now() / 1000);
   const windowStart = Math.floor(now / windowSeconds) * windowSeconds;
   const resetAt = windowStart + windowSeconds;
-  const cutover = storageCutover(env.MCP_RATE_COUNTER_CUTOVER_AT);
+  // Pin the window before awaiting shared configuration. A request that saw no
+  // future activation can never resume in a different, DO-owned window.
+  const activation = await readStorageActivation(env.DATABASE);
+  if (activation && activation.windowSeconds !== windowSeconds)
+    throw new Error('MCP rate window differs from shared activation');
+  const cutover = activation?.rateCutoverAt ?? null;
   if (cutover !== null && windowStart >= cutover) {
     if (!env.MCP_RATE_COUNTER) throw new Error('MCP_RATE_COUNTER binding required after cutover');
     const stub = env.MCP_RATE_COUNTER.get(

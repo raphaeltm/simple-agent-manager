@@ -3,6 +3,7 @@ import { DurableObject } from 'cloudflare:workers';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { readStorageActivation } from '../services/reliability-storage';
 
 const StoredEntry = v.object({
   step: v.string(),
@@ -74,59 +75,131 @@ export class WorkspaceBootLog extends DurableObject<Env> {
   }
 
   async read(workspaceId: string, maxEntries: number): Promise<BootLogEntry[]> {
-    return this.withLock(async () => {
-      this.expire();
-      const state = this.state();
-      // Read compatibility, not a one-time import: propagation can reveal a late KV
-      // write after the first post-cutover read. Legacy keys expire naturally.
-      const legacy =
-        !state || state.allow_legacy
-          ? ((await this.env.KV.get<unknown>(`bootlog:${workspaceId}`, { type: 'json' })) ?? [])
-          : [];
-      const old = v.parse(v.array(StoredEntry), legacy).slice(-maxEntries);
-      const current = this.ctx.storage.sql
-        .exec<{ payload: string }>('SELECT payload FROM entries ORDER BY sequence')
-        .toArray()
-        .map((row) => v.parse(StoredEntry, JSON.parse(row.payload)));
-      const unique = new Map<string, BootLogEntry>();
-      for (const entry of [...old, ...current]) {
-        const key = payload(entry);
-        unique.delete(key);
-        unique.set(key, entry);
-      }
-      return [...unique.values()].slice(-maxEntries);
-    });
+    return this.withLock(() => this.readUnlocked(workspaceId, maxEntries));
+  }
+
+  private async readUnlocked(workspaceId: string, maxEntries: number): Promise<BootLogEntry[]> {
+    this.expire();
+    const state = this.state();
+    // Read compatibility, not a one-time import: propagation can reveal a late KV
+    // write after the first post-cutover read. Legacy keys expire naturally.
+    const legacy =
+      !state || state.allow_legacy
+        ? ((await this.env.KV.get<unknown>(`bootlog:${workspaceId}`, { type: 'json' })) ?? [])
+        : [];
+    const old = v.parse(v.array(StoredEntry), legacy).slice(-maxEntries);
+    const current = this.ctx.storage.sql
+      .exec<{ payload: string }>('SELECT payload FROM entries ORDER BY sequence')
+      .toArray()
+      .map((row) => v.parse(StoredEntry, JSON.parse(row.payload)));
+    const unique = new Map<string, BootLogEntry>();
+    for (const entry of [...old, ...current]) {
+      const key = payload(entry);
+      unique.delete(key);
+      unique.set(key, entry);
+    }
+    return [...unique.values()].slice(-maxEntries);
   }
 
   async append(entry: BootLogEntry, ttl: number, maxEntries: number): Promise<void> {
-    return this.withLock(async () => {
-      const expiresAt = Date.now() + ttl * 1000;
-      await this.ctx.storage.setAlarm(expiresAt);
-      this.ctx.storage.transactionSync(() => {
-        this.expire();
-        this.insert(entry);
-        this.trim(maxEntries);
-        this.ctx.storage.sql.exec(
-          `INSERT INTO log_state VALUES (1, ?, 1)
+    return this.withLock(() => this.appendUnlocked(entry, ttl, maxEntries));
+  }
+
+  private async appendUnlocked(
+    entry: BootLogEntry,
+    ttl: number,
+    maxEntries: number
+  ): Promise<void> {
+    const expiresAt = Date.now() + ttl * 1000;
+    await this.ctx.storage.setAlarm(expiresAt);
+    this.ctx.storage.transactionSync(() => {
+      this.expire();
+      this.insert(entry);
+      this.trim(maxEntries);
+      this.ctx.storage.sql.exec(
+        `INSERT INTO log_state VALUES (1, ?, 1)
           ON CONFLICT(id) DO UPDATE SET expires_at = excluded.expires_at`,
-          expiresAt
-        );
-      });
+        expiresAt
+      );
     });
   }
 
   async replace(logs: BootLogEntry[], ttl: number, maxEntries: number): Promise<void> {
-    return this.withLock(async () => {
-      const expiresAt = Date.now() + ttl * 1000;
-      await this.ctx.storage.setAlarm(expiresAt);
-      this.ctx.storage.transactionSync(() => {
-        this.ctx.storage.sql.exec('DELETE FROM entries');
-        for (const entry of logs.slice(-maxEntries)) this.insert(entry);
-        this.ctx.storage.sql.exec(
-          `INSERT INTO log_state VALUES (1, ?, 0)
+    return this.withLock(() => this.replaceUnlocked(logs, ttl, maxEntries));
+  }
+
+  private async replaceUnlocked(
+    logs: BootLogEntry[],
+    ttl: number,
+    maxEntries: number
+  ): Promise<void> {
+    const expiresAt = Date.now() + ttl * 1000;
+    await this.ctx.storage.setAlarm(expiresAt);
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec('DELETE FROM entries');
+      for (const entry of logs.slice(-maxEntries)) this.insert(entry);
+      this.ctx.storage.sql.exec(
+        `INSERT INTO log_state VALUES (1, ?, 0)
           ON CONFLICT(id) DO UPDATE SET expires_at = excluded.expires_at, allow_legacy = 0`,
-          expiresAt
-        );
+        expiresAt
+      );
+    });
+  }
+
+  private async usesSQLite(): Promise<boolean> {
+    const activation = await readStorageActivation(this.env.DATABASE);
+    return activation !== null && Math.floor(Date.now() / 1000) >= activation.bootLogCutoverAt;
+  }
+
+  async readBridge(workspaceId: string, maxEntries: number): Promise<BootLogEntry[]> {
+    return this.withLock(async () => {
+      if ((await this.usesSQLite()) || this.state()?.allow_legacy === 0)
+        return this.readUnlocked(workspaceId, maxEntries);
+      return (
+        (await this.env.KV.get<BootLogEntry[]>(`bootlog:${workspaceId}`, { type: 'json' })) ?? []
+      );
+    });
+  }
+
+  async appendBridge(
+    workspaceId: string,
+    entry: BootLogEntry,
+    ttl: number,
+    maxEntries: number
+  ): Promise<void> {
+    return this.withLock(async () => {
+      if (await this.usesSQLite()) return this.appendUnlocked(entry, ttl, maxEntries);
+      // A replacement establishes ordering even before activation. Preserve later
+      // bridge appends in the same durable view rather than reimporting stale KV.
+      if (this.state()?.allow_legacy === 0) {
+        await this.appendUnlocked(entry, ttl, maxEntries);
+        await this.env.KV.put(`bootlog:${workspaceId}`, JSON.stringify(await this.readUnlocked(workspaceId, maxEntries)), {expirationTtl: ttl});
+        return;
+      }
+      const existing =
+        (await this.env.KV.get<BootLogEntry[]>(`bootlog:${workspaceId}`, { type: 'json' })) ?? [];
+      await this.env.KV.put(
+        `bootlog:${workspaceId}`,
+        JSON.stringify([...existing, entry].slice(-maxEntries)),
+        { expirationTtl: ttl }
+      );
+    });
+  }
+
+  async replaceBridge(
+    workspaceId: string,
+    logs: BootLogEntry[],
+    ttl: number,
+    maxEntries: number
+  ): Promise<void> {
+    return this.withLock(async () => {
+      const activated = await this.usesSQLite();
+      // Persist the clear/replacement fence before the eventually-consistent KV
+      // mirror, so cutover/restart cannot resurrect the pre-replacement tail.
+      await this.replaceUnlocked(logs, ttl, maxEntries);
+      if (activated) return;
+      await this.env.KV.put(`bootlog:${workspaceId}`, JSON.stringify(logs.slice(-maxEntries)), {
+        expirationTtl: ttl,
       });
     });
   }

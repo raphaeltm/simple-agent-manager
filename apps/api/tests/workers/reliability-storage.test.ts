@@ -1,6 +1,6 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { Hono } from 'hono';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { McpRateCounter } from '../../src/durable-objects/mcp-rate-counter';
 import type { WorkspaceBootLog } from '../../src/durable-objects/workspace-boot-log';
@@ -9,8 +9,17 @@ import { mcpRoutes } from '../../src/routes/mcp';
 import { checkMcpRateLimit } from '../../src/routes/mcp/_helpers';
 import { appendBootLog, getBootLogs, writeBootLogs } from '../../src/services/boot-log';
 import { generateMcpToken, storeMcpToken } from '../../src/services/mcp-token';
-
+import { RELIABILITY_STORAGE_ACTIVATION_KEY } from '../../src/services/reliability-storage';
 const api = env as unknown as Env;
+async function publish(rateCutoverAt = 60, bootLogCutoverAt = 60) {
+  await api.DATABASE.prepare('INSERT OR REPLACE INTO platform_settings(key, value) VALUES (?, ?)')
+    .bind(
+      RELIABILITY_STORAGE_ACTIVATION_KEY,
+      JSON.stringify({ publishedAt: 0, rateCutoverAt, bootLogCutoverAt, windowSeconds: 60 })
+    )
+    .run();
+}
+beforeEach(() => publish());
 const entry = {
   step: 'clone',
   status: 'started' as const,
@@ -18,7 +27,7 @@ const entry = {
   timestamp: '2026-10-15T00:00:00Z',
 };
 function activated(): Env {
-  return { ...api, MCP_RATE_COUNTER_CUTOVER_AT: '0', BOOT_LOG_STORAGE_CUTOVER_AT: '0' };
+  return { ...api };
 }
 
 describe('Reliability C real SQLite storage', () => {
@@ -100,6 +109,7 @@ describe('Reliability C real SQLite storage', () => {
     const identity = crypto.randomUUID();
     const now = Math.floor(Date.now() / 1000);
     const start = Math.floor(now / 60) * 60;
+    await publish(start + 60);
     const config = { ...api, MCP_RATE_LIMIT: '1', MCP_RATE_COUNTER_CUTOVER_AT: String(start + 1) };
     expect((await checkMcpRateLimit(api.KV, identity, config)).allowed).toBe(true);
     expect((await checkMcpRateLimit(api.KV, identity, config)).allowed).toBe(false);
@@ -204,4 +214,110 @@ describe('Reliability C real SQLite storage', () => {
     });
     expect(await getBootLogs(api.KV, workspace, config)).toEqual([]);
   });
+  it('a held-body env-unset bridge request resumes into the shared DO owner', async () => {
+    await api.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?')
+      .bind(RELIABILITY_STORAGE_ACTIVATION_KEY)
+      .run();
+    const identity = crypto.randomUUID();
+    const token = generateMcpToken();
+    await storeMcpToken(api.KV, token, {
+      taskId: identity,
+      workspaceId: crypto.randomUUID(),
+      projectId: crypto.randomUUID(),
+      userId: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+    });
+    const app = new Hono<{ Bindings: Env }>();
+    app.route('/mcp', mcpRoutes);
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let bodyRead!: () => void;
+    const reading = new Promise<void>(resolve => {bodyRead = resolve;});
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {controller = c;},
+      pull() {bodyRead();},
+    }, {highWaterMark: 0});
+    const config = { ...api, MCP_RATE_LIMIT: '1' }; // Original bridge env has no activation timestamps.
+    const held = app.request(
+      '/mcp',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body,
+      },
+      config
+    );
+    // Request body cannot complete until this test releases it. A new version
+    // publishes activation and consumes the quota while the old request waits.
+    await reading; // Auth completed and the real route is waiting in req.json().
+    await publish();
+    expect(
+      (await checkMcpRateLimit(api.KV, identity, { ...activated(), MCP_RATE_LIMIT: '1' })).allowed
+    ).toBe(true);
+    controller.enqueue(
+      new TextEncoder().encode(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }))
+    );
+    controller.close();
+    expect((await held).status).toBe(429);
+    expect(
+      await api.KV.get(`ratelimit:mcp:${identity}:${Math.floor(Date.now() / 60000) * 60}`)
+    ).toBeNull();
+  });
+
+  it('serializes a held legacy KV append before activated clear and fences late visibility', async () => {
+    await api.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?')
+      .bind(RELIABILITY_STORAGE_ACTIVATION_KEY)
+      .run();
+    const workspace = crypto.randomUUID();
+    const ns = api.WORKSPACE_BOOT_LOG!;
+    const stub = ns.get(ns.idFromName(workspace)) as DurableObjectStub<WorkspaceBootLog>;
+    await runInDurableObject(stub, async (instance, state) => {
+      let release!: () => void;
+      let entered!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const fresh = new (instance.constructor as typeof WorkspaceBootLog)(state, {
+        ...api,
+        KV: {
+          ...api.KV,
+          get: api.KV.get.bind(api.KV),
+          put: async (...args: Parameters<KVNamespace['put']>) => {
+            entered();
+            await held;
+            return api.KV.put(...args);
+          },
+        } as KVNamespace,
+      });
+      const append = fresh.appendBridge(workspace, entry, 1800, 50);
+      await started;
+      await publish();
+      const clear = fresh.replaceBridge(workspace, [], 1800, 50);
+      release();
+      await Promise.all([append, clear]);
+      await api.KV.put(`bootlog:${workspace}`, JSON.stringify([entry]));
+      expect(await fresh.readBridge(workspace, 50)).toEqual([]);
+    });
+  });
+  it('keeps a preactivation clear and later append across stale KV visibility, activation and restart', async () => {
+    await api.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(RELIABILITY_STORAGE_ACTIVATION_KEY).run();
+    const workspace = crypto.randomUUID();
+    await api.KV.put(`bootlog:${workspace}`, JSON.stringify([entry]));
+    await writeBootLogs(api.KV, workspace, [], api);
+    // An edge still observes the preclear tail while another bridge append arrives.
+    await api.KV.put(`bootlog:${workspace}`, JSON.stringify([entry]));
+    const later = {...entry, message: 'valid after clear'};
+    await appendBootLog(api.KV, workspace, later, api);
+    await publish();
+    await api.KV.put(`bootlog:${workspace}`, JSON.stringify([entry]));
+    const ns = api.WORKSPACE_BOOT_LOG!;
+    await runInDurableObject(ns.get(ns.idFromName(workspace)) as DurableObjectStub<WorkspaceBootLog>, async (instance, state) => {
+      const fresh = new (instance.constructor as typeof WorkspaceBootLog)(state, api);
+      expect(await fresh.readBridge(workspace, 50)).toEqual([later]);
+    });
+    expect(await getBootLogs(api.KV, workspace, api)).toEqual([later]);
+  });
+
 });

@@ -2,24 +2,20 @@ import type { BootLogEntry } from '@simple-agent-manager/shared';
 
 import type { WorkspaceBootLog } from '../durable-objects/workspace-boot-log';
 import type { Env } from '../env';
-import { storageCutover } from './reliability-storage';
 
 type BootLogEnv = Pick<
   Env,
   | 'BOOT_LOG_TTL_SECONDS'
   | 'BOOT_LOG_MAX_ENTRIES'
   | 'WORKSPACE_BOOT_LOG'
-  | 'BOOT_LOG_STORAGE_CUTOVER_AT'
 >;
 
 function durableLog(
   env: BootLogEnv | undefined,
   workspaceId: string
 ): DurableObjectStub<WorkspaceBootLog> | null {
-  const cutover = storageCutover(env?.BOOT_LOG_STORAGE_CUTOVER_AT);
-  if (cutover === null || Math.floor(Date.now() / 1000) < cutover) return null;
-  if (!env?.WORKSPACE_BOOT_LOG)
-    throw new Error('WORKSPACE_BOOT_LOG binding required after cutover');
+  if (!env) return null; // Legacy utility calls only; production routes supply Env.
+  if (!env.WORKSPACE_BOOT_LOG) throw new Error('WORKSPACE_BOOT_LOG bridge binding required');
   return env.WORKSPACE_BOOT_LOG.get(
     env.WORKSPACE_BOOT_LOG.idFromName(workspaceId)
   ) as DurableObjectStub<WorkspaceBootLog>;
@@ -52,7 +48,7 @@ export async function getBootLogs(
 ): Promise<BootLogEntry[]> {
   const durable = durableLog(env, workspaceId);
   if (durable) {
-    return durable.read(workspaceId, getBootLogMaxEntries(env));
+    return durable.readBridge(workspaceId, getBootLogMaxEntries(env));
   }
   const data = await kv.get<BootLogEntry[]>(`${BOOT_LOG_PREFIX}${workspaceId}`, { type: 'json' });
   return data || [];
@@ -65,7 +61,8 @@ export async function appendBootLog(
   env?: BootLogEnv
 ): Promise<void> {
   const durable = durableLog(env, workspaceId);
-  if (durable) return durable.append(entry, getBootLogTTL(env), getBootLogMaxEntries(env));
+  if (durable)
+    return durable.appendBridge(workspaceId, entry, getBootLogTTL(env), getBootLogMaxEntries(env));
   const existing = await getBootLogs(kv, workspaceId);
   existing.push(entry);
   const maxEntries = getBootLogMaxEntries(env);
@@ -82,7 +79,8 @@ export async function writeBootLogs(
   env?: BootLogEnv
 ): Promise<void> {
   const durable = durableLog(env, workspaceId);
-  if (durable) return durable.replace(logs, getBootLogTTL(env), getBootLogMaxEntries(env));
+  if (durable)
+    return durable.replaceBridge(workspaceId, logs, getBootLogTTL(env), getBootLogMaxEntries(env));
   await kv.put(`${BOOT_LOG_PREFIX}${workspaceId}`, JSON.stringify(logs), {
     expirationTtl: getBootLogTTL(env),
   });

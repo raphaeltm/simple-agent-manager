@@ -55,3 +55,7 @@ Task-only main push rejected by repository GH013 required Durable Object Workers
 - DO migration safety and Wrangler binding checks PASS; formatting and diff checks PASS.
 
 Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2357. Implementation head 3a90b30c92b082637cb8c152f56960dee0eece8f; final evidence commit contains only this task update. No independent staging deployment or merge. Actual runtime migration/rollout and release gates remain pending under coordinator ownership; task remains active rather than archived.
+
+## Coordinator-assigned correction (Sol B integration owner)
+
+Original per-version cutovers permit a delayed env-unset bridge invocation to use KV after a configured version switches to DO. Correction uses an uncached primary D1 insert-once shared activation record, pins rate windows before the lookup, and routes every bridge boot-log operation through its workspace DO lock including awaited legacy KV operations. Real Worker regressions cover held request body and delayed legacy append versus activated clear. Initial prebridge retirement is explicitly unresolved and blocks activation, staging readiness, and release; no fixed wait or traffic percentage is a proof. No scanner/baseline waiver.

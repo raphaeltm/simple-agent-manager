@@ -89,7 +89,7 @@ describe('sync wrangler config', () => {
   });
 
   it.each(['staging', 'prod'] as const)(
-    'preserves Reliability C bindings and activation for %s',
+    'preserves Reliability C bindings for %s',
     (environment) => {
       vi.stubEnv('RESOURCE_PREFIX', 's123abc');
       vi.stubEnv('MCP_RATE_COUNTER_CUTOVER_AT', '1800000000');
@@ -98,10 +98,8 @@ describe('sync wrangler config', () => {
         readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
       ) as WranglerToml;
       const generated = generateApiWorkerEnv(checkedIn, outputs, environment, false, false, null);
-      expect(generated.vars).toMatchObject({
-        MCP_RATE_COUNTER_CUTOVER_AT: '1800000000',
-        BOOT_LOG_STORAGE_CUTOVER_AT: '1800000000',
-      });
+      expect(generated.vars).not.toHaveProperty('MCP_RATE_COUNTER_CUTOVER_AT');
+      expect(generated.vars).not.toHaveProperty('BOOT_LOG_STORAGE_CUTOVER_AT');
       expect(generated.durable_objects?.bindings).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ name: 'MCP_RATE_COUNTER', class_name: 'McpRateCounter' }),
