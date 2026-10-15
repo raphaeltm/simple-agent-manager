@@ -68,6 +68,39 @@ def state():
     }
 
 
+RESUME_BRANCH = 'sam/bootstrap-only-authorized-reliability-w6frxd'
+TRACKED_CONTENT = b'local committed baseline\n'
+
+
+def require_resume_eligible(root, fixture):
+    # This exception is bound to the one observed failed FIRST fixture, never a
+    # general adoption/reset path. Every check happens before the commit or writes.
+    if git('branch', '--show-current') != RESUME_BRANCH:
+        raise ValueError('suppressed')
+    if fixture.is_symlink() or not fixture.is_dir() or sorted(p.name for p in fixture.iterdir()) != ['tracked.txt']:
+        raise ValueError('suppressed')
+    tracked = fixture / 'tracked.txt'
+    if tracked.is_symlink() or not tracked.is_file() or tracked.read_bytes() != TRACKED_CONTENT:
+        raise ValueError('suppressed')
+    if any((root / name).exists() or (root / name).is_symlink() for name in FILES[1:]):
+        raise ValueError('suppressed')
+    if git('status', '--porcelain=v1', '--untracked-files=all') != 'A  .reliability-a/tracked.txt':
+        raise ValueError('suppressed')
+    if git('diff', '--cached', '--name-only') != '.reliability-a/tracked.txt':
+        raise ValueError('suppressed')
+    algorithm = git('rev-parse', '--show-object-format')
+    if algorithm not in ['sha1', 'sha256']:
+        raise ValueError('suppressed')
+    blob = hashlib.new(algorithm, b'blob ' + str(len(TRACKED_CONTENT)).encode() + b'\0' + TRACKED_CONTENT).hexdigest()
+    if git('rev-parse', ':.reliability-a/tracked.txt') != blob:
+        raise ValueError('suppressed')
+    head = git('rev-parse', 'HEAD')
+    if not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', head):
+        raise ValueError('suppressed')
+    if git('ls-remote', '--heads', 'origin', 'refs/heads/' + RESUME_BRANCH) != head + '\trefs/heads/' + RESUME_BRANCH:
+        raise ValueError('suppressed')
+
+
 class QuietParser(argparse.ArgumentParser):
     def error(self, message):
         raise ValueError('configuration')
@@ -75,7 +108,7 @@ class QuietParser(argparse.ArgumentParser):
 
 def main():
     parser = QuietParser(description=__doc__)
-    parser.add_argument('mode', choices=['prepare', 'check'])
+    parser.add_argument('mode', choices=['prepare', 'check', 'resume-incomplete'])
     parser.add_argument('--disposable-repository', action='store_true')
     args = parser.parse_args()
     root = Path(git('rev-parse', '--show-toplevel')).resolve()
@@ -83,23 +116,26 @@ def main():
         parser.error('Run from the supported workspace repository root')
     fixture = root / '.reliability-a'
     baseline = fixture / 'baseline.json'
-    if args.mode == 'prepare':
+    if args.mode in ['prepare', 'resume-incomplete']:
         if not args.disposable_repository:
             parser.error('prepare requires --disposable-repository; it explicitly commits named test files')
-        if fixture.exists():
+        if args.mode == 'prepare' and fixture.exists():
             parser.error('Fixture already exists; do not overwrite or rerun preparation')
+        if args.mode == 'resume-incomplete':
+            require_resume_eligible(root, fixture)
         remote_head = git('ls-remote', '--symref', 'origin', 'HEAD')
         default_refs = [line.split()[1].removeprefix('refs/heads/') for line in remote_head.splitlines() if line.startswith('ref: ')]
         if not default_refs:
             parser.error('Remote default branch is unknown; resolve repository setup before testing')
         if git('branch', '--show-current') in ['', 'main', 'master', *default_refs]:
             parser.error('Use a dedicated disposable task output branch, never the default branch')
-        fixture.mkdir()
         tracked = fixture / 'tracked.txt'
-        tracked.write_text('local committed baseline\n')
-        git('add', '--', '.reliability-a/tracked.txt')
+        if args.mode == 'prepare':
+            fixture.mkdir()
+            tracked.write_bytes(TRACKED_CONTENT)
+            git('add', '--', '.reliability-a/tracked.txt')
         # Only fixture path is committed; preserve any pre-existing staged user work.
-        git('commit', '--only', '-m', 'test: explicit local preservation fixture', '--', '.reliability-a/tracked.txt')
+        git('-c', 'user.name=Reliability Verification', '-c', 'user.email=reliability-verification@example.invalid', 'commit', '--only', '-m', 'test: explicit local preservation fixture', '--', '.reliability-a/tracked.txt')
         tracked.write_text('staged tracked content\n')
         (fixture / 'staged-new.txt').write_text('staged new content\n')
         git('add', '--', '.reliability-a/tracked.txt', '.reliability-a/staged-new.txt')
