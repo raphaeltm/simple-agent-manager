@@ -146,7 +146,7 @@ const NO_EXTERNAL_REPLAY =
   'Do not repeat actions with effects outside this workspace that the transcript shows already happened, such as pushes, pull requests, deployments, messages, or API calls. If you cannot tell whether one happened, check first';
 
 /**
- * The first prompt of a task-mode wake that nothing queued: the runtime was lost
+ * The first prompt for interrupted work after runtime loss: the runtime was lost
  * mid-task (an eviction), so the agent must carry on with its task, not wait.
  */
 export const SESSION_RECOVERY_CONTINUE_TASK_PROMPT = [

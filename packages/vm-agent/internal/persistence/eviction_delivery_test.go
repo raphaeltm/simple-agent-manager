@@ -201,3 +201,33 @@ func TestEvictionIdleEvidenceAndLegacyUnknown(t *testing.T) {
 		})
 	}
 }
+
+func TestEvictionOwnershipMigrationPreservesLegacyIntent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertWorkspaceMetadata(WorkspaceMetadata{WorkspaceID: "workspace-1", EvictionGeneration: "run-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RecordWorkspaceEviction(context.Background(), evictionDeliveryFixture()); err != nil {
+		t.Fatal(err)
+	}
+	// Reconstruct the v18 shape, including an existing pending callback.
+	if _, err := store.db.Exec(`ALTER TABLE eviction_deliveries DROP COLUMN interrupted_work; DELETE FROM schema_version WHERE version > 18`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	got, err := store.ClaimEvictionDelivery(context.Background(), "", time.Now(), time.Second, time.Minute, time.Second)
+	if err != nil || got == nil || got.InterruptedWork != nil {
+		t.Fatalf("legacy intent changed: %#v %v", got, err)
+	}
+}
