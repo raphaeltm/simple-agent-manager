@@ -65,3 +65,24 @@ Coordinator-owned staging and exact-head CI/Sonar/security/CodeRabbit remain pen
 `pnpm exec turbo run test --concurrency=1` passed21/21 tasks (9cached), exit0. API:878files passed/1existing skipped, 12,389tests passed/2existing skipped. Web:339files passed. No skip, timeout, coverage, scanner or baseline setting was changed. The prior ESLint timeout disappears in this serialized rerun.
 
 All local implementation and review work is complete. Task stays active and PR stays draft until the coordinator records consolidated runtime staging and final exact-head gates. No staging gate exemption or release readiness is claimed.
+
+## Coordinator follow-up and clean release branch
+
+Delayed coordinator messages required a clean release branch after platform autosave pushed `4eee69ceb` (only `.do-state.md`) onto PR2352. The intended implementation at `f2dbf50fb` remains the base. Build a separate clean branch using an alternate Git index and explicit source/test/doc paths, leaving the live checkout on the original task branch. This keeps future legacy platform HEAD autosaves away from the release branch without deleting work, force-pushing, changing snapshot filters, or weakening the runtime-state gate.
+
+Additional review findings addressed:
+
+- `9eb4a01ea` already skips unchanged page-hint writes; only new/moved/expired hints write KV.
+- Exported constants in `github-app.ts` derive the hint page bound from the existing 10,000-repository scan limit and 100-item page size. The authoritative service validates hints and scans using the same bound; cached hints never authorize access.
+- Runtime config validation now requires attempt <= shared response-header deadline, attempt <= total < helper for workspace modes, and backoff < total. Invalid overrides fail the normal `Load()` → `Validate()` startup path with relevant variable names. Coherent short overrides are supported. Existing old rendered helper coverage remains limited until natural recreation/new installation; no blanket restart is authorized.
+- PR preflight markers and concrete paths were already fixed; local evidence validator passed. Coordinator retains final exact-head CI/Sonar/security/CodeRabbit request/wait; a draft CodeRabbit skip is not review evidence.
+
+Fresh affected checks: config package PASS, primary API4files90tests PASS, scoped API lint PASS. Original full root sweep remains documented above; follow-up checks are targeted and final exact-head CI belongs to coordinator.
+
+Independent follow-up review records:
+
+- `/root/go_review`, review ID `REL-B-GO-20261015-01`: PASS/ADDRESSED after correcting tests to follow Load then Validate; five invalid budget combinations and coherent short override covered, no remaining Go blocker.
+- `/root/security_review`, review ID `security-review-reliability-b-bounds-2026-10-15-01`: fresh adversarial PASS; shared bounds preserve current user∩installation authorization, hierarchy checks do not weaken scope/redirect/cancellation/redaction.
+- `/root/completion_review`, review ID `RB-COMPLETION-CONFIG-20261015-02`: PASS local handoff; shared bounds, fresh authorization, startup budget validation, docs/constitution/task mapping all pass. Final coordinator gates remain pending.
+
+Final simplification keeps bounds in the existing GitHub service and isolates pagination-bound coverage in `apps/api/tests/unit/services/github-repository-pagination.test.ts`. Fresh security review `security-review-reliability-b-bounds-2026-10-15-02` passes authorization. Current-tree scanner is BLOCKED by three existing reviewed matches whose line positions changed (50 total; no new match bytes). Scanner and baseline unchanged; no layout manipulation or waiver. Coordinator must resolve the exact private baseline migration decision before staging/readiness.

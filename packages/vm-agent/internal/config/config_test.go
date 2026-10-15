@@ -2205,3 +2205,42 @@ func TestValidateGitTokenRetryConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestGitTokenBudgetHierarchyRejectsInvalidLoadedConfig(t *testing.T) {
+	for _, tc := range []struct{ name, key, value, want string }{
+		{"helper shorter than total", "GIT_CREDENTIAL_TIMEOUT", "5s", "GIT_CREDENTIAL_TIMEOUT must be >"},
+		{"helper equal to total", "GIT_CREDENTIAL_TIMEOUT", "25s", "GIT_CREDENTIAL_TIMEOUT must be >"},
+		{"attempt longer than headers", "GIT_TOKEN_ATTEMPT_TIMEOUT", "11s", "response-header timeout"},
+		{"attempt longer than total", "GIT_TOKEN_TIMEOUT", "5s", "GIT_TOKEN_ATTEMPT_TIMEOUT must be <="},
+		{"backoff consumes total", "GIT_TOKEN_RETRY_DELAY", "25s", "GIT_TOKEN_RETRY_DELAY must be <"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+			t.Setenv("WORKSPACE_ID", "ws-test")
+			t.Setenv(tc.key, tc.value)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = cfg.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %s, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestGitTokenBudgetHierarchyAcceptsCoherentOverrides(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-test")
+	t.Setenv("GIT_CREDENTIAL_TIMEOUT", "1750ms")
+	t.Setenv("GIT_TOKEN_TIMEOUT", "1500ms")
+	t.Setenv("GIT_TOKEN_ATTEMPT_TIMEOUT", "1s")
+	t.Setenv("GIT_TOKEN_RETRY_DELAY", "100ms")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("coherent budgets rejected: %v", err)
+	}
+}

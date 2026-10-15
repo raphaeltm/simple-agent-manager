@@ -269,7 +269,11 @@ export async function assertRepositoryAccess(
   let pageHint: number | undefined;
   try {
     const cached = await env?.KV?.get<{ page: number }>(cacheKey, 'json');
-    if (cached && Number.isInteger(cached.page) && cached.page >= 1 && cached.page <= 100) {
+    if (
+      cached &&
+      Number.isInteger(cached.page) &&
+      cached.page >= 1
+    ) {
       pageHint = cached.page;
     }
   } catch {

@@ -86,12 +86,13 @@ const (
 
 	// DefaultGitCredentialTimeout bounds credential-helper calls back to the
 	// local VM agent. Override via GIT_CREDENTIAL_TIMEOUT.
-	DefaultGitCredentialTimeout   = 30 * time.Second
-	DefaultGitTokenTimeout        = 25 * time.Second
-	DefaultGitTokenAttemptTimeout = 10 * time.Second
-	DefaultGitTokenMaxAttempts    = 3
-	MaxGitTokenAttempts           = 10
-	DefaultGitTokenRetryDelay     = 500 * time.Millisecond
+	DefaultGitCredentialTimeout              = 30 * time.Second
+	DefaultGitTokenTimeout                   = 25 * time.Second
+	DefaultControlPlaneResponseHeaderTimeout = 10 * time.Second
+	DefaultGitTokenAttemptTimeout            = DefaultControlPlaneResponseHeaderTimeout
+	DefaultGitTokenMaxAttempts               = 3
+	MaxGitTokenAttempts                      = 10
+	DefaultGitTokenRetryDelay                = 500 * time.Millisecond
 
 	// DefaultStandaloneCloneFilter is the git partial-clone filter used by
 	// standalone (container) workspace preparation. Blobless clones skip all
