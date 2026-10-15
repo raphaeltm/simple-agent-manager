@@ -46,23 +46,28 @@ export function projectInteractions(value,now){
  result.complete=value.cursor===null;return result;
 }
 export async function run({requestSafe,logoutSafe,summary,safeSummary}){
- let browser,context,projection=null,loggedOut=false;
+ let browser,context,projection=null,loggedOut=false,stage='login',failedStage=null;
+ const stages=['login','canonical-before','messages','interactions','canonical-after','projection','logout','nullsession','protecteddenial','browserclosed'];
+ const checkpoints=Object.fromEntries(stages.map(key=>[key,false]));
+ const httpStatuses=Object.fromEntries(stages.map(key=>[key,0]));
+ const status=value=>Number.isInteger(value)&&value>=100&&value<=599?value:0;
+ const failed=()=>{if(failedStage===null)failedStage=stage;};
  try{
   const token=process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
   if(typeof token!=='string'||!token||token.startsWith('__SAM_SECRET_'))return summary('configuration');
   const {chromium}=await import('/tmp/reliability-browser-deps/node_modules/playwright/index.mjs');
   browser=await chromium.launch({headless:true});context=await browser.newContext();
   const request=async(path,accept,options={})=>{
-   const r=await requestSafe(context,api,{path,timeoutMs:10_000,...options},accept);if(r.category!=='ok')throw new Error();
+   const r=await requestSafe(context,api,{path,timeoutMs:10_000,...options},accept);httpStatuses[stage]=status(r.status);if(r.category!=='ok')throw new Error();
   };
-  await request('/api/auth/token-login',undefined,{method:'POST',data:{token}});delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
+  await request('/api/auth/token-login',undefined,{method:'POST',data:{token}});delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;checkpoints.login=true;
   // The existing supervisor rejects query-bearing paths. This closed two-value reader
   // preserves its Origin, no-redirect, timeout, dispose and no-raw-error guarantees.
   const fixedRead=async(kind,accept)=>{
    const path=kind==='binding'?base+'?limit=1':kind==='messages'?base+'/messages?limit=100&order=desc&compact=true':null;
    if(!path)throw new Error();
    const response=await context.request.fetch(api+path,{method:'GET',headers:{Origin:api},timeout:10_000,maxRedirects:0,failOnStatusCode:false});
-   try{if(response.status()!==200||!accept(await response.json()))throw new Error();}finally{try{await response.dispose();}catch{}}
+   try{httpStatuses[stage]=status(response.status());if(response.status()!==200||!accept(await response.json()))throw new Error();}finally{try{await response.dispose();}catch{}}
   };
   const bind=async()=>{
    await request(`/api/projects/${project}/tasks/${task}`,v=>v?.id===task&&v.projectId===project&&v.workspaceId===workspace
@@ -70,26 +75,36 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
    await fixedRead('binding',v=>v?.session?.id===session&&v.session.taskId===task&&v.session.workspaceId===workspace
     &&v.session.task?.id===task&&v.session.task.outputBranch===branch);
   };
-  await bind();const readAt=Date.now();let messages,interactions;
-  await fixedRead('messages',v=>{messages=projectMessages(v,Date.now());return messages!==null;});
-  await request(base+'/interactions',v=>{interactions=projectInteractions(v,Date.now());return interactions!==null;});
-  await bind();
+  stage='canonical-before';await bind();checkpoints[stage]=true;const readAt=Date.now();let messages,interactions;
+  stage='messages';
+  await fixedRead('messages',v=>{messages=projectMessages(v,Date.now());return messages!==null;});checkpoints[stage]=true;
+  stage='interactions';
+  await request(base+'/interactions',v=>{interactions=projectInteractions(v,Date.now());return interactions!==null;});checkpoints[stage]=true;
+  stage='canonical-after';await bind();checkpoints[stage]=true;
   projection={taskId:task,sessionId:session,projectId:project,readAt,messages,interactions,
    retentionVerified:false,underlyingCause:'unknown',noExecutionProven:false};
- }catch{projection=null;}
+ }catch{failed();projection=null;}
  finally{
   delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
-  if(context)try{
-   const out=await logoutSafe(context,api);
-   const absent=await requestSafe(context,api,{path:'/api/auth/get-session'},v=>v===null);
-   const denied=await requestSafe(context,api,{path:'/api/nodes'});
-   loggedOut=out.category==='ok'&&absent.category==='ok'&&[401,403].includes(denied.status);
-  }catch{loggedOut=false;}
-  if(browser)try{await browser.close();}catch{loggedOut=false;}
+  if(context){
+   stage='logout';try{const out=await logoutSafe(context,api);httpStatuses[stage]=status(out.status);checkpoints[stage]=out.category==='ok';}catch{}if(!checkpoints[stage])failed();
+   stage='nullsession';try{const absent=await requestSafe(context,api,{path:'/api/auth/get-session'},v=>v===null);httpStatuses[stage]=status(absent.status);checkpoints[stage]=absent.category==='ok';}catch{}if(!checkpoints[stage])failed();
+   stage='protecteddenial';try{const denied=await requestSafe(context,api,{path:'/api/nodes'});httpStatuses[stage]=status(denied.status);checkpoints[stage]=[401,403].includes(denied.status);}catch{}if(!checkpoints[stage])failed();
+  }
+  stage='browserclosed';if(browser)try{await browser.close();checkpoints[stage]=true;}catch{}if(!checkpoints[stage])failed();
+  loggedOut=checkpoints.logout&&checkpoints.nullsession&&checkpoints.protecteddenial&&checkpoints.browserclosed;
  }
- if(projection&&loggedOut)try{
-  await writeFile(new URL('./instant-tools-result.json',import.meta.url),JSON.stringify(projection)+'\n',{flag:'wx',mode:0o600});
-  return safeSummary(summary('ok',200,true));
- }catch{}
+ if(projection&&loggedOut){
+  stage='projection';try{
+   await writeFile(new URL('./instant-tools-result.json',import.meta.url),JSON.stringify(projection)+'\n',{flag:'wx',mode:0o600});
+   checkpoints.projection=true;
+  }catch{failed();}
+ }
+ // All values are constructed fixed enums/booleans/validated HTTP integers. No API
+ // object, exception or string field can enter this failure sidecar, even if logout fails.
+ try{
+  await writeFile(new URL('./instant-tools-progress.json',import.meta.url),JSON.stringify({failedStage,checkpoints,httpStatuses})+'\n',{flag:'wx',mode:0o600});
+ }catch{return safeSummary(summary('controller'));}
+ if(checkpoints.projection)return safeSummary(summary('ok',200,true));
  return safeSummary(summary('controller'));
 }
