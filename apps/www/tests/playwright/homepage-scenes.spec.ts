@@ -25,13 +25,17 @@ const sceneSpecs = readdirSync(new URL('scenes/', DATA))
   .filter((file) => file.endsWith('.json'))
   .map((file) => JSON.parse(readFileSync(new URL(`scenes/${file}`, DATA), 'utf8')) as SceneFile);
 
-/** The caption from the section's homepage pitch, which the scene shows unchanged. */
-const sectionCaption = (slug: string) =>
-  (
-    JSON.parse(readFileSync(new URL(`features/${slug}.json`, DATA), 'utf8')) as {
-      homepage?: { caption: string };
-    }
-  ).homepage?.caption ?? '';
+/**
+ * The caption from the section's homepage pitch, which the scene shows unchanged. Throws when it is
+ * missing: an empty expectation would let `toContainText` pass on a page that lost its caption.
+ */
+const sectionCaption = (slug: string) => {
+  const { homepage } = JSON.parse(readFileSync(new URL(`features/${slug}.json`, DATA), 'utf8')) as {
+    homepage?: { caption?: string };
+  };
+  if (!homepage?.caption) throw new Error(`features/${slug}.json has no homepage caption`);
+  return homepage.caption;
+};
 
 const sceneLocator = (page: Page, slug: string) => page.locator(`[data-scene="${slug}"]`);
 
