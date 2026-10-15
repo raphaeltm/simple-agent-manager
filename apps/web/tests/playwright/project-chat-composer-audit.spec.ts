@@ -653,3 +653,74 @@ for (const mode of ['new', 'active'] as const) {
     });
   });
 }
+
+for (const mode of ['new', 'active'] as const) {
+  test(`attachments ${mode}: stage, remove, paste, drop and show errors`, async ({
+    page,
+  }, testInfo) => {
+    await openMockedChat(page, mode, mode === 'active' ? ACTIVE_SESSION.id : undefined);
+    let upload = 0;
+    await page.route('**/tasks/request-upload', (route) => {
+      const body = route.request().postDataJSON();
+      if (body.filename === 'failed.txt')
+        return route.fulfill({
+          status: 503,
+          body: JSON.stringify({ message: 'Upload unavailable' }),
+        });
+      upload++;
+      return route.fulfill({
+        json: {
+          uploadId: `upload-${upload}`,
+          uploadUrl: `http://localhost:4173/mock-upload/${upload}`,
+        },
+      });
+    });
+    await page.route('**/mock-upload/*', (route) => route.fulfill({ status: 200 }));
+    const textarea = page.locator('textarea[role="combobox"]');
+    await textarea.fill('Please read all attached files and compare them.');
+    await page.locator('input[type=file]').setInputFiles([
+      {
+        name: 'long-file-name-'.repeat(14) + '.txt',
+        mimeType: 'text/plain',
+        buffer: Buffer.from('first'),
+      },
+      { name: 'second.txt', mimeType: 'text/plain', buffer: Buffer.from('second') },
+    ]);
+    await expect(
+      page.getByRole('button', { name: 'Remove second.txt', exact: true })
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+    await page.getByRole('button', { name: 'Remove second.txt', exact: true }).click();
+    await textarea.evaluate((element) => {
+      const transfer = new DataTransfer();
+      transfer.files;
+      transfer.items.add(new File(['image'], 'pasted-image.png', { type: 'image/png' }));
+      element.dispatchEvent(
+        new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer })
+      );
+    });
+    await expect(page.getByRole('button', { name: 'Remove pasted-image.png' })).toBeVisible();
+    await textarea.evaluate((element) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(['drop'], 'dropped.txt', { type: 'text/plain' }));
+      element.dispatchEvent(
+        new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer })
+      );
+    });
+    await expect(page.getByRole('button', { name: 'Remove dropped.txt' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeInViewport();
+    await screenshot(page, `attachments-${mode}-ready-${getProjectSuffix(testInfo.project.name)}`);
+    await assertNoOverflow(page);
+    await page
+      .locator('input[type=file]')
+      .setInputFiles({
+        name: 'failed.txt',
+        mimeType: 'text/plain',
+        buffer: Buffer.from('failure'),
+      });
+    await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+    await screenshot(page, `attachments-${mode}-error-${getProjectSuffix(testInfo.project.name)}`);
+    await assertNoOverflow(page);
+  });
+}

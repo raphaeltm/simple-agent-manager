@@ -18,7 +18,12 @@ vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
       onTranscription: (text: string) => void;
       disabled?: boolean;
     }) => (
-      <button type="button" data-testid="voice-button" disabled={disabled} onClick={() => onTranscription('voice text')}>
+      <button
+        type="button"
+        data-testid="voice-button"
+        disabled={disabled}
+        onClick={() => onTranscription('voice text')}
+      >
         Voice
       </button>
     ),
@@ -151,11 +156,11 @@ describe('ProjectChatComposer', () => {
     expect(screen.getByText('Press Ctrl+Enter to send, Enter for new line')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send' })).toHaveAttribute(
       'title',
-      'Send message (Ctrl+Enter)',
+      'Send message (Ctrl+Enter)'
     );
     expect(screen.getByRole('button', { name: 'Send' })).toHaveAttribute(
       'aria-keyshortcuts',
-      'Control+Enter',
+      'Control+Enter'
     );
   });
 
@@ -165,14 +170,16 @@ describe('ProjectChatComposer', () => {
     render(<ComposerHarness initialValue="Ship it" />);
 
     expect(screen.getByText('Press Cmd+Enter to send, Enter for new line')).toBeInTheDocument();
-    expect(screen.queryByText('Press Ctrl+Enter to send, Enter for new line')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Press Ctrl+Enter to send, Enter for new line')
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send' })).toHaveAttribute(
       'title',
-      'Send message (Cmd+Enter)',
+      'Send message (Cmd+Enter)'
     );
     expect(screen.getByRole('button', { name: 'Send' })).toHaveAttribute(
       'aria-keyshortcuts',
-      'Meta+Enter',
+      'Meta+Enter'
     );
   });
 
@@ -203,7 +210,7 @@ describe('ProjectChatComposer', () => {
         sending={false}
         placeholder="Send a message..."
         transcribeApiUrl="/api/transcribe"
-      />,
+      />
     );
     const textarea = screen.getByRole('combobox') as HTMLTextAreaElement;
     Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 180 });
@@ -216,7 +223,7 @@ describe('ProjectChatComposer', () => {
         sending={false}
         placeholder="Send a message..."
         transcribeApiUrl="/api/transcribe"
-      />,
+      />
     );
 
     expect(textarea.style.height).toBe('120px');
@@ -236,7 +243,7 @@ describe('FollowUpInput', () => {
         transcribeApiUrl="/api/transcribe"
         slashCommands={COMMANDS}
         agentProfiles={PROFILES}
-      />,
+      />
     );
 
     expect(screen.getByText('/commit')).toBeInTheDocument();
@@ -254,9 +261,54 @@ describe('FollowUpInput', () => {
         transcribeApiUrl="/api/transcribe"
         slashCommands={COMMANDS}
         agentProfiles={PROFILES}
-      />,
+      />
     );
 
     expect(screen.getByText('@Codex')).toBeInTheDocument();
+  });
+});
+
+describe('attachment ingestion', () => {
+  const base = {
+    value: 'Read these',
+    onChange: vi.fn(),
+    onSend: vi.fn(),
+    sending: false,
+    placeholder: 'Message',
+    transcribeApiUrl: '/transcribe',
+  };
+  it('stages pasted image files and dropped files through the same callback', () => {
+    const onFilesSelected = vi.fn();
+    render(<ProjectChatComposer {...base} onFilesSelected={onFilesSelected} />);
+    const input = screen.getByRole('combobox');
+    const file = new File(['image'], 'image.png', { type: 'image/png' });
+    fireEvent.paste(input, { clipboardData: { files: [file], getData: () => '' } });
+    expect(onFilesSelected).toHaveBeenLastCalledWith([file]);
+    fireEvent.drop(input, { dataTransfer: { files: [file], types: ['Files'] } });
+    expect(onFilesSelected).toHaveBeenCalledTimes(2);
+  });
+  it('converts long text to a text attachment but preserves normal paste', async () => {
+    const onFilesSelected = vi.fn();
+    render(<ProjectChatComposer {...base} onFilesSelected={onFilesSelected} />);
+    const input = screen.getByRole('combobox');
+    fireEvent.paste(input, { clipboardData: { files: [], getData: () => 'short text' } });
+    expect(onFilesSelected).not.toHaveBeenCalled();
+    fireEvent.paste(input, { clipboardData: { files: [], getData: () => 'x'.repeat(5000) } });
+    const file = onFilesSelected.mock.calls[0]![0][0];
+    expect(file.type).toBe('text/plain');
+    expect(file.size).toBe(5000);
+  });
+  it('blocks both button and keyboard submission while an attachment failed', () => {
+    const onSend = vi.fn();
+    render(
+      <ProjectChatComposer
+        {...base}
+        onSend={onSend}
+        attachments={[{ file: new File(['a'], 'a.txt'), progress: 0, status: 'error' }]}
+      />
+    );
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter', ctrlKey: true });
+    expect(onSend).not.toHaveBeenCalled();
   });
 });

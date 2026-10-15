@@ -1,6 +1,8 @@
 import { MAX_HUMAN_INPUT_OPTION_LENGTH } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import { TaskAttachmentSchema } from './tasks';
+
 // Terminal
 export const TerminalRequestSchema = v.object({
   workspaceId: v.string(),
@@ -50,6 +52,7 @@ export const CreateChatSessionSchema = v.object({
 
 export const SendChatMessageSchema = v.object({
   content: v.optional(v.string()),
+  attachments: v.optional(v.array(TaskAttachmentSchema)),
 });
 
 export const ResolveAttentionAnswerSchema = v.object({

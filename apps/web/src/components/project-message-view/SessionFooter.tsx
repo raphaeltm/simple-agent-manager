@@ -133,6 +133,9 @@ export function SessionFooter({
           }}
           sending={lc.sendingFollowUp}
           uploading={lc.uploading}
+          attachments={lc.attachments}
+          onRemoveAttachment={lc.removeAttachment}
+          uploadError={lc.uploadError}
           placeholder={
             // A wake already in flight must not be advertised as "send a message
             // to wake" — that contradicts the banner directly above and is what

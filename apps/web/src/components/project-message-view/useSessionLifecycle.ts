@@ -51,15 +51,14 @@ export function useSessionLifecycle(
     () => transcript.detail?.session.task ?? null
   );
 
-  const appendOptimisticMessage = useCallback(
-    (message: ChatMessageResponse) => appendMessages([message]),
-    [appendMessages]
-  );
-  const { uploading, handleUploadFiles } = useSessionFileUpload({
-    projectId,
-    sessionId,
-    onOptimisticMessage: appendOptimisticMessage,
-  });
+  const {
+    uploading,
+    handleUploadFiles,
+    attachments,
+    removeAttachment,
+    clearAttachments,
+    uploadError,
+  } = useSessionFileUpload({ projectId, sessionId });
 
   const { workspace, node } = useSessionInfrastructure(session?.workspaceId);
   const draft = useSessionDraft(sessionId);
@@ -330,7 +329,8 @@ export function useSessionLifecycle(
   // ── Send follow-up via REST API ──
   const handleSendFollowUp = async () => {
     const trimmed = followUp.trim();
-    if (!trimmed || sendingFollowUp) return;
+    if (!trimmed || sendingFollowUp || attachments.some((a) => a.status !== 'complete')) return;
+    const attachmentRefs = attachments.flatMap((a) => (a.ref ? [a.ref] : []));
 
     const wakingSleepingSession = sessionState === 'sleeping';
     if (wakingSleepingSession) sleepingWakePendingRef.current = true;
@@ -388,7 +388,12 @@ export function useSessionLifecycle(
       // cleared only when delivery is confirmed (onDelivered); a failed resume
       // or delivery resets the working state and keeps the typed text as the
       // manual-retry affordance (onFailed).
-      if (sessionState === 'idle' && session?.workspaceId && session?.agentSessionId) {
+      if (
+        attachmentRefs.length === 0 &&
+        sessionState === 'idle' &&
+        session?.workspaceId &&
+        session?.agentSessionId
+      ) {
         recovery.resumeAndSend(trimmed, {
           onDelivered: () => {
             draft.delivered(trimmed);
@@ -401,7 +406,8 @@ export function useSessionLifecycle(
       } else {
         // Forward prompt to the running agent via REST API
         try {
-          await sendFollowUpPrompt(projectId, sessionId, trimmed);
+          await sendFollowUpPrompt(projectId, sessionId, trimmed, attachmentRefs);
+          clearAttachments();
           // Delivery confirmed — clear any stale recovery banner and the composer.
           recovery.clearResumeError();
           draft.delivered(trimmed);
@@ -480,6 +486,9 @@ export function useSessionLifecycle(
     cancelError,
     handleSendFollowUp,
     handleUploadFiles,
+    attachments,
+    removeAttachment,
+    uploadError,
     loadMore: transcript.loadMore,
     loadUntil: transcript.loadUntil,
     loadingMore: transcript.loadingMore,
