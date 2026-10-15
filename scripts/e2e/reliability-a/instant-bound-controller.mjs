@@ -38,7 +38,7 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
   const c=validateConfig(JSON.parse(await readFile(join(root,'config.json'),'utf8')),Date.now(),op.kind==='cleanup');
   if(!exact(op,op.kind==='observe'?['kind','contextSlot','target']:['kind','contextSlot'])
    ||![0,1].includes(op.contextSlot)||!['prepare','check-record','wake-check','complete','observe','sleep','cleanup'].includes(op.kind))throw new Error();
-  const own=c.contexts[op.contextSlot],now=Date.now(),end=Math.min(c.expiresAt,now+240_000);
+  const own=c.contexts[op.contextSlot],now=Date.now();let end=Math.min(c.expiresAt,now+240_000);
   const ownPath=`/api/projects/${project}/tasks/${own.taskId}`,sessionPath=`/api/projects/${project}/sessions/${own.sessionId}`;
   const privateJson=async(name,value)=>writeFile(join(root,name),JSON.stringify(value)+'\n',{flag:'wx',mode:0o600});
   const request=async(path,options={},accept)=>{
@@ -123,7 +123,8 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
     const marker=join(root,own.taskId+'-phase-start.json');
     if(op.kind==='prepare')await privateJson(own.taskId+'-phase-start.json',{startedAt:now});
     const phase=JSON.parse(await readFile(marker,'utf8'));
-    if(!exact(phase,['startedAt'])||!integer(phase.startedAt)||Date.now()-phase.startedAt>900_000||phase.startedAt>now)throw new Error();
+    if(!exact(phase,['startedAt'])||!integer(phase.startedAt)||Date.now()-phase.startedAt>=780_000||phase.startedAt>now)throw new Error();
+    end=Math.min(end,phase.startedAt+780_000); // Reserve the final two minutes for logout/retention/own cleanup.
    }
    const assets={};for(const [name,expected] of Object.entries(hashes)){
     const bytes=await readFile(new URL('./'+name,import.meta.url));if(hash(bytes)!==expected)throw new Error();assets[name]=bytes.toString('utf8');

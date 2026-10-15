@@ -82,7 +82,7 @@ workspace IDs, profiles, runtime or branch to make a read pass. No node DELETE e
 
 Before `check-record`, `wake-check`, `complete`, copy the original
 `<taskId>-phase-start.json` from prepare into the next operation directory. NEVER
-reset the phase clock. Host controller independently downloads and validates all
+reset the phase clock. Phase actions stop by minute13; the final two minutes are reserved for logout/retention/own cleanup. Host controller independently downloads and validates all
 A phase/baseline/expectations artifacts with the unchanged 0a63 exact validators;
 `turnEnded:true` is NOT an A probe PASS. Capture actual profile, runtime pin, UI and
 canonical completion evidence using the existing reviewed acceptance procedure.

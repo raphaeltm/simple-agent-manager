@@ -32,15 +32,15 @@ test('actual supervised exact-context lifecycle preserves ownership, completion 
   execute('git',['push','--quiet','origin','main:refs/heads/sam/future-vm'],repo);
   const bad=JSON.parse(execute('python3',checkArgs,repo,1,probeEnv));
   assert.equal(good.checks.remoteRefsUnchanged,true);assert.equal(bad.checks.remoteRefsUnchanged,false,'next startup branch invalidates old protected baseline');
-  for(const mode of ['ok','changed-refs','foreign-project','foreign-session','wrong-runtime','wrong-profile','wrong-branch','no-reopen-proof','reopen','pending-delete','cleanup','sleep','expired','expired-cleanup','prepare','check-record','wake-check','complete','missing-phase','null-state']){
+  for(const mode of ['ok','changed-refs','foreign-project','foreign-session','wrong-runtime','wrong-profile','wrong-branch','no-reopen-proof','reopen','pending-delete','cleanup','sleep','expired','expired-cleanup','prepare','check-record','wake-check','complete','missing-phase','null-state','late-phase']){
    const dir=join(root,mode);mkdirSync(dir,{mode:0o700});
    const contexts=[0,1].map(i=>({taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,workspaceId:uid(20+i),nodeId:uid(30+i),branch:i?'sam/final':'sam/first',agentProfileId:uid(40+i),agentType:i?'claude-code':'openai-codex',submittedAt:Date.now()-2000,evidencePrUrl:`https://github.com/${repository}/pull/1`,receipt:{taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,branchName:i?'sam/final':'sam/first',status:'queued'}}));
    const c={createdAt:Date.now()-3000,expiresAt:Date.now()+7_000_000,contexts,cleanupAuthorized:true};
    if(['expired','expired-cleanup'].includes(mode))c.expiresAt=Date.now()-1;
-   const kind=['cleanup','pending-delete','expired-cleanup'].includes(mode)?'cleanup':mode==='sleep'?'sleep':['prepare','check-record','wake-check','complete'].includes(mode)?mode:mode==='missing-phase'?'wake-check':'observe';
+   const kind=['cleanup','pending-delete','expired-cleanup'].includes(mode)?'cleanup':mode==='sleep'?'sleep':['prepare','check-record','wake-check','complete'].includes(mode)?mode:['missing-phase','late-phase'].includes(mode)?'wake-check':'observe';
    const op={kind,contextSlot:1,...(kind==='observe'?{target:{taskId:contexts[0].taskId,branch:'sam/first',baseline,expectations}}:{})};
    writeFileSync(join(dir,'config.json'),JSON.stringify(c),{mode:0o600});writeFileSync(join(dir,'operation.json'),JSON.stringify(op),{mode:0o600});
-   if(['check-record','wake-check','complete'].includes(mode))writeFileSync(join(dir,contexts[1].taskId+'-phase-start.json'),JSON.stringify({startedAt:Date.now()-500}),{mode:0o600});
+   if(['check-record','wake-check','complete','late-phase'].includes(mode))writeFileSync(join(dir,contexts[1].taskId+'-phase-start.json'),JSON.stringify({startedAt:Date.now()-(mode==='late-phase'?781000:500)}),{mode:0o600});
    writeFileSync(join(dir,'observer-artifact.json'),JSON.stringify({artifactId:uid(50),taskId:contexts[1].taskId}),{mode:0o600});
    if(mode==='reopen')writeFileSync(join(dir,contexts[1].taskId+'-independent-proof.json'),JSON.stringify({taskId:contexts[1].taskId,branch:contexts[1].branch,completedAt,...good}),{mode:0o600});
    for(const name of ['queue-controller.mjs','b-probe.py','git-probe.py','terminal-observer.py'])copyFileSync(join(here,name),join(dir,name));
