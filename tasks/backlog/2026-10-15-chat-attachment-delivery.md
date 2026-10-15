@@ -16,7 +16,7 @@ New chats stage attachments in R2, while existing chats upload directly to a liv
 - [x] Validate owned attachment references at follow-up acceptance and persist them with durable message.
 - [x] Transfer after runtime readiness and before prompt; retry safely; include explicit per-upload file paths.
 - [x] Regression tests for queue removal, ingestion, ownership, failed transfer, wake ordering and prompt references.
-- [ ] Documentation, specialist reviews, mobile/desktop screenshot audits.
+- [x] Documentation, specialist reviews, mobile/desktop screenshot audits.
 - [ ] Staging new/active/sleeping verification, clean up, green CI, CodeRabbit request/wait, merge and production deployment.
 
 ## Acceptance
@@ -36,3 +36,6 @@ Multiple files upload to R2 immediately and remain removable before send. No wor
 - Four Playwright attachment audits passed (new/active × 375×667/1280×800). Screenshots reviewed; fixed new-chat starter area min-height to keep Send visible; bounded chip list height.
 - Local backend/security/Cloudflare/constitution review PASS. UI review 4/4/4/4/5; addressed empty-file text, attachment-only send, retry/scope tests. Completion review identified duplicate plain WS + enriched durable messages; attachment sends now rely solely on durable transcript persistence.
 - Staging, CI, CodeRabbit, merge and production remain pending. No completion claim before those gates.
+
+## Staging deployment blocker
+Initial deployment 38756062202 failed Cloudflare validation10021 (Worker startup CPU). The local startup profile identified eager speech model-registry initialization. Deferred the two speech-only imports inside their existing request-time error handling: active startup CPU fell from1462.8ms to530.2ms locally; all94 speech tests passed, backend reviewer PASS. This narrow adjacent fix is required to deploy the attachment changes. Full API suite12386passed with one boot callback timeout; isolated rerun9/9passed.
