@@ -12,7 +12,7 @@ const exact=(x,keys)=>x&&typeof x==='object'&&!Array.isArray(x)&&Object.keys(x).
 const integer=x=>Number.isSafeInteger(x)&&x>=0;
 const when=x=>typeof x==='string'&&/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(x)&&Number.isFinite(Date.parse(x));
 const hash=x=>createHash('sha256').update(x).digest('hex');
-const hashes={'b-probe.py':'889d7588ed44c8ab89e6ba7880ff20d81017f294bb7b31edfbc320ced064f509','git-probe.py':'b8721fa626cd111b7030b155071a013ad988e0f194d7157a9b9610a40f4d5568','terminal-observer.py':'d0970080ce89ab2810c0c9d758d1fc978efafe75fed91a4454f08639da88adff'};
+const hashes={'b-probe.py':'889d7588ed44c8ab89e6ba7880ff20d81017f294bb7b31edfbc320ced064f509','git-probe.py':'f061b7cd447cef55ceb08cb6a78fcb0b236ec3f347731e66d4b8447c224afa6c','terminal-observer.py':'d0970080ce89ab2810c0c9d758d1fc978efafe75fed91a4454f08639da88adff'};
 export function validateConfig(c,now=Date.now(),allowExpired=false){
  if(!exact(c,['createdAt','expiresAt','contexts','cleanupAuthorized'])||!integer(c.createdAt)||!integer(c.expiresAt)
   ||c.createdAt>now||(!allowExpired&&c.expiresAt<=now)||c.expiresAt<=c.createdAt||c.expiresAt-c.createdAt>7_200_000||typeof c.cleanupAuthorized!=='boolean'
@@ -37,7 +37,7 @@ try:
  expected=${JSON.stringify(hashes)}
  for name,digest in expected.items():
   step='download-'+name.removesuffix('.py')
-  with urllib.request.urlopen('https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/28869f029d56d0de46ed399820b5f6362720f708/scripts/e2e/reliability-a/'+name,timeout=20) as r:data=r.read(100000)
+  with urllib.request.urlopen('https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/e9e9d000f7ee16530432dfc5c0800e444b3de7b3/scripts/e2e/reliability-a/'+name,timeout=20) as r:data=r.read(100000)
   step='hash-'+name.removesuffix('.py')
   if hashlib.sha256(data).hexdigest()!=digest:raise ValueError()
   (out/name).write_bytes(data)
@@ -91,7 +91,7 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
   const op=JSON.parse(await readFile(join(root,'operation.json'),'utf8'));
   const c=validateConfig(JSON.parse(await readFile(join(root,'config.json'),'utf8')),Date.now(),op.kind==='cleanup');
   if(!exact(op,op.kind==='observe'?['kind','contextSlot','target']:['kind','contextSlot'])
-   ||![0,1].includes(op.contextSlot)||!['prepare','check-record','wake-check','complete','observe','sleep','cleanup','bootstrap-assets','readonly-state'].includes(op.kind)||(op.kind==='bootstrap-assets'&&op.contextSlot!==1)||(op.kind==='readonly-state'&&op.contextSlot!==0))throw new Error();
+   ||![0,1].includes(op.contextSlot)||!['prepare','check-record','wake-check','complete','observe','sleep','cleanup','bootstrap-assets','readonly-state','resume-incomplete'].includes(op.kind)||(op.kind==='bootstrap-assets'&&op.contextSlot!==1)||(['readonly-state','resume-incomplete'].includes(op.kind)&&op.contextSlot!==0))throw new Error();
   const own=c.contexts[op.contextSlot],now=Date.now();let end=Math.min(c.expiresAt,now+(op.kind==='readonly-state'?180_000:240_000));
   const ownPath=`/api/projects/${project}/tasks/${own.taskId}`,sessionPath=`/api/projects/${project}/sessions/${own.sessionId}`;
   const privateJson=async(name,value)=>writeFile(join(root,name),JSON.stringify(value)+'\n',{flag:'wx',mode:0o600});
@@ -184,7 +184,8 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
     await privateJson(target.taskId+'-canonical-completed.json',{taskId:target.taskId,branch:target.branch,completedAt});
    }else if(!['bootstrap-assets','readonly-state'].includes(op.kind)){
     const marker=join(root,own.taskId+'-phase-start.json');
-    if(op.kind==='prepare')await privateJson(own.taskId+'-phase-start.json',{startedAt:now});
+    if(['prepare','resume-incomplete'].includes(op.kind))await privateJson(own.taskId+'-phase-start.json',{startedAt:now});
+    if(op.kind==='resume-incomplete')await privateJson('acceptance-attempt.json',{attempt:'first-guarded-resume-1',priorOutcome:'failed',startedAt:now});
     const phase=JSON.parse(await readFile(marker,'utf8'));
     if(!exact(phase,['startedAt'])||!integer(phase.startedAt)||Date.now()-phase.startedAt>=780_000||phase.startedAt>now)throw new Error();
     end=Math.min(end,phase.startedAt+780_000); // Reserve the final two minutes for logout/retention/own cleanup.
@@ -198,11 +199,12 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
    const folder='/workspaces/reliability-observer-assets/'+(target?.taskId??own.taskId);
    let instructions;
    if(op.kind==='observe')instructions=`Run ONLY ${folder}/terminal-observer.py check --repository ${repository} --branch ${target.branch} --baseline ${folder}/baseline.json --expectations ${folder}/expectations.json --terminal-completed-at ${completedAt} --pr-limit ${expectations.prLimit}. Use exact baseline.json and expectations.json from the same validated bundle outside Git. Redirect only observer stdout to ${folder}/observer-check.json, stderr PRIVATE. Upload original file bytes to a NEW task-scoped Library directory; report fileID only. No git-probe check of observer's own old fixture.`;
-   else if(op.kind==='prepare')instructions=`From canonical repository root ONLY run ${folder}/git-probe.py prepare --disposable-repository, stdout alone ${folder}/a-prepare.json, stderr PRIVATE. Upload ORIGINAL phase stdout and ORIGINAL .reliability-a/baseline.json separately. Return idle; no completion.`;
+   else if(op.kind==='resume-incomplete')instructions=`NEW acceptance attempt first-guarded-resume-1; prior original attempt FAILED and remains recorded. From canonical repository root ONLY run ${folder}/git-probe.py resume-incomplete --disposable-repository, stdout alone ${folder}/a-prepare.json, stderr PRIVATE. This refuses any ambiguity before writes and resumes only the exact known FIRST tracked-only partial fixture. It uses command-local synthetic author identity for the explicit named fixture commit; NEVER configure user/global identity. Upload ORIGINAL new phase stdout and ORIGINAL new .reliability-a/baseline.json separately to NEW task-scoped directory labeled first-guarded-resume-1. No delete/reset/rebase/reprepare or remote publication. Return idle; no completion.`;
+   else if(op.kind==='prepare')instructions=`From canonical repository root ONLY run ${folder}/git-probe.py prepare --disposable-repository (the probe supplies command-local synthetic identity ONLY for its explicit fixture commit; NEVER configure user/global identity), stdout alone ${folder}/a-prepare.json, stderr PRIVATE. Upload ORIGINAL phase stdout and ORIGINAL .reliability-a/baseline.json separately. Return idle; no completion.`;
    else if(op.kind==='check-record')instructions=`From canonical repository root run ONLY ${folder}/git-probe.py check to ${folder}/a-check.json; then ${folder}/terminal-observer.py record --repository ${repository} --branch ${own.branch} --baseline .reliability-a/baseline.json --expectations ${folder}/expectations.json to ${folder}/observer-record.json. Stdout only, stderr PRIVATE. Upload all three original files separately, no reformatted JSON. Return idle.`;
    else if(op.kind==='wake-check')instructions=`NORMAL owner wake: from canonical restored repository root run ONLY ${folder}/git-probe.py check against EXISTING .reliability-a/baseline.json, stdout ${folder}/a-check.json, stderr PRIVATE. NEVER prepare or recreate baseline. Upload ORIGINAL check file to NEW unique task-scoped evidence directory; return idle.`;
    else instructions=`From canonical repository root run ONLY ${folder}/git-probe.py check, stdout ${folder}/a-check.json, stderr PRIVATE; upload original bytes. ONLY if all actual checks true/status0, call actual complete_task with evidence.prUrl=${own.evidencePrUrl} and measured local commit SHA in evidence.notes/verifications (not unsupported commitSha property). Report no publication. Do NOT push/create PR/alter files. Actual task completion is last.`;
-   const content=op.kind==='readonly-state'?readonlyStatePrompt(own):op.kind==='bootstrap-assets'?bootstrapAssetsPrompt(own):`Authorized bounded Reliability acceptance ${op.kind}; exact task ${own.taskId}, session ${own.sessionId}, branch ${own.branch}. Use existing Python only, no installs/sudo. Recreate ONLY external assets ${folder} from exact gzip/base64 JSON bundle ${bundle}; hash map ${JSON.stringify(assetHashes)}; preserve script bytes, decode quietly and verify hashes privately. All credential/helper/stdout/stderr/error streams PRIVATE, report fixed booleans/status/fileIDs only; no helper Read/free negative commands. NO publication, repo edits (except prepare's exact fixture), new task, PR or background work. ${instructions}`;
+   const content=op.kind==='readonly-state'?readonlyStatePrompt(own):op.kind==='bootstrap-assets'?bootstrapAssetsPrompt(own):`Authorized bounded Reliability acceptance ${op.kind}; exact task ${own.taskId}, session ${own.sessionId}, branch ${own.branch}. Use existing Python only, no installs/sudo. Recreate ONLY external assets ${folder} from exact gzip/base64 JSON bundle ${bundle}; hash map ${JSON.stringify(assetHashes)}; preserve script bytes, decode quietly and verify hashes privately. All credential/helper/stdout/stderr/error streams PRIVATE, report fixed booleans/status/fileIDs only; no helper Read/free negative commands. NO publication, repo edits (except prepare/resume-incomplete's exact authorized fixture), new task, PR or background work. ${instructions}`;
    if(content.length>16000)throw new Error();
    if(workspace.status!=='sleeping'&&task.status!=='completed'){await readState();if(!idle())throw new Error();}
    await bind();
