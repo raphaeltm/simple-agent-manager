@@ -28,6 +28,35 @@ export function validateConfig(c,now=Date.now(),allowExpired=false){
   for(const field of ['taskId','sessionId','workspaceId','nodeId','branch']){const key=field+':'+x[field];if(seen.has(key))throw new Error();seen.add(key);}
  });return c;
 }
+export function bootstrapAssetsScript(folder){
+ return `import pathlib,json,hashlib,urllib.request
+out=pathlib.Path(${JSON.stringify(folder)})
+out.mkdir(parents=True,exist_ok=True,mode=0o700);out.chmod(0o700)
+step='download-b-probe';ok=False
+try:
+ expected=${JSON.stringify(hashes)}
+ for name,digest in expected.items():
+  step='download-'+name.removesuffix('.py')
+  with urllib.request.urlopen('https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/28869f029d56d0de46ed399820b5f6362720f708/scripts/e2e/reliability-a/'+name,timeout=20) as r:data=r.read(100000)
+  step='hash-'+name.removesuffix('.py')
+  if hashlib.sha256(data).hexdigest()!=digest:raise ValueError()
+  (out/name).write_bytes(data)
+ step='installed-version'
+ if json.loads(pathlib.Path('/etc/sam/vm-agent-version.json').read_text()).get('version')!='b467f389811eadeaf973960bb30f9fa7b9cb4678':raise ValueError()
+ step='installed-binary'
+ if hashlib.sha256(pathlib.Path('/usr/local/bin/vm-agent').read_bytes()).hexdigest()!='a59a4850337fe7af588267c481dee046db5baba4d3f705c85f19f85ded09e06f':raise ValueError()
+ step='complete';ok=True
+except Exception:pass
+for name,value in [('asset-hashes.json',{'checks':{'assetHashesMatch':ok},'statuses':{'hash':0 if ok else 1}}),('bootstrap-step.json',{'step':step,'status':0 if ok else 1,'ok':ok})]:
+ path=out/name;path.write_text(json.dumps(value)+'\\n');path.chmod(0o600)
+`;
+}
+export function bootstrapAssetsPrompt(own){
+ const folder='/workspaces/reliability-verification-assets/'+own.taskId;
+ const encoded=Buffer.from(bootstrapAssetsScript(folder)).toString('base64');
+ const command=`mkdir -p '${folder}' && chmod 700 '${folder}'; found=0; for py in /opt/uv-python/*/bin/python3 /usr/bin/python3 /usr/local/bin/python3; do if [ -x "$py" ]; then found=1; "$py" -c 'import base64;exec(base64.b64decode("${encoded}"))'; break; fi; done; if [ "$found" = 0 ]; then printf '%s\\n' '{"checks":{"assetHashesMatch":false},"statuses":{"hash":1}}' > '${folder}/asset-hashes.json'; printf '%s\\n' '{"step":"interpreter","status":1,"ok":false}' > '${folder}/bootstrap-step.json'; chmod 600 '${folder}/asset-hashes.json' '${folder}/bootstrap-step.json'; fi`;
+ return `Authorized ONE targeted bootstrap finish only. Exact task ${own.taskId}, session ${own.sessionId}, branch ${own.branch}. Do NOT get_instructions again. Run this exact fixed Sol command ONCE using Bash, capture ALL stdout/stderr privately, never print commands/errors/content. No retries/interpreter install/sudo/Git/PR/Aprepare/complete/background work. It discovers only existing absolute Python paths, fetches ONLY THREE host-verified public pinned scripts and verifies hashes plus installed metadata/binary. External directory only. Command start:\n{ ${command}; } >/dev/null 2>&1\nCommand end. Then explicitly call mcp__sam_mcp__upload_to_library TWICE with filePath=${folder}/asset-hashes.json and filePath=${folder}/bootstrap-step.json in a NEW unique Library directory scoped to THIS task/session. Upload ORIGINAL files even if checks false; no raw logs or errors. Return control with fileIDs only. Do NOT substitute a different tool or report a fabricated artifact.`;
+}
 export async function run({requestSafe,logoutSafe,summary,safeSummary}){
  let browser,context,result=summary('controller'),output=null,loggedOut=false,root;
  try{
@@ -37,7 +66,7 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
   const op=JSON.parse(await readFile(join(root,'operation.json'),'utf8'));
   const c=validateConfig(JSON.parse(await readFile(join(root,'config.json'),'utf8')),Date.now(),op.kind==='cleanup');
   if(!exact(op,op.kind==='observe'?['kind','contextSlot','target']:['kind','contextSlot'])
-   ||![0,1].includes(op.contextSlot)||!['prepare','check-record','wake-check','complete','observe','sleep','cleanup'].includes(op.kind))throw new Error();
+   ||![0,1].includes(op.contextSlot)||!['prepare','check-record','wake-check','complete','observe','sleep','cleanup','bootstrap-assets'].includes(op.kind)||(op.kind==='bootstrap-assets'&&op.contextSlot!==1))throw new Error();
   const own=c.contexts[op.contextSlot],now=Date.now();let end=Math.min(c.expiresAt,now+240_000);
   const ownPath=`/api/projects/${project}/tasks/${own.taskId}`,sessionPath=`/api/projects/${project}/sessions/${own.sessionId}`;
   const privateJson=async(name,value)=>writeFile(join(root,name),JSON.stringify(value)+'\n',{flag:'wx',mode:0o600});
@@ -128,7 +157,7 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
       &&v.completionEvidence!==null&&typeof v.completionEvidence==='object';
     });
     await privateJson(target.taskId+'-canonical-completed.json',{taskId:target.taskId,branch:target.branch,completedAt});
-   }else{
+   }else if(op.kind!=='bootstrap-assets'){
     const marker=join(root,own.taskId+'-phase-start.json');
     if(op.kind==='prepare')await privateJson(own.taskId+'-phase-start.json',{startedAt:now});
     const phase=JSON.parse(await readFile(marker,'utf8'));
@@ -148,7 +177,7 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
    else if(op.kind==='check-record')instructions=`From canonical repository root run ONLY ${folder}/git-probe.py check to ${folder}/a-check.json; then ${folder}/terminal-observer.py record --repository ${repository} --branch ${own.branch} --baseline .reliability-a/baseline.json --expectations ${folder}/expectations.json to ${folder}/observer-record.json. Stdout only, stderr PRIVATE. Upload all three original files separately, no reformatted JSON. Return idle.`;
    else if(op.kind==='wake-check')instructions=`NORMAL owner wake: from canonical restored repository root run ONLY ${folder}/git-probe.py check against EXISTING .reliability-a/baseline.json, stdout ${folder}/a-check.json, stderr PRIVATE. NEVER prepare or recreate baseline. Upload ORIGINAL check file to NEW unique task-scoped evidence directory; return idle.`;
    else instructions=`From canonical repository root run ONLY ${folder}/git-probe.py check, stdout ${folder}/a-check.json, stderr PRIVATE; upload original bytes. ONLY if all actual checks true/status0, call actual complete_task with evidence.prUrl=${own.evidencePrUrl} and measured local commit SHA in evidence.notes/verifications (not unsupported commitSha property). Report no publication. Do NOT push/create PR/alter files. Actual task completion is last.`;
-   const content=`Authorized bounded Reliability acceptance ${op.kind}; exact task ${own.taskId}, session ${own.sessionId}, branch ${own.branch}. Use existing Python only, no installs/sudo. Recreate ONLY external assets ${folder} from exact gzip/base64 JSON bundle ${bundle}; hash map ${JSON.stringify(assetHashes)}; preserve script bytes, decode quietly and verify hashes privately. All credential/helper/stdout/stderr/error streams PRIVATE, report fixed booleans/status/fileIDs only; no helper Read/free negative commands. NO publication, repo edits (except prepare's exact fixture), new task, PR or background work. ${instructions}`;
+   const content=op.kind==='bootstrap-assets'?bootstrapAssetsPrompt(own):`Authorized bounded Reliability acceptance ${op.kind}; exact task ${own.taskId}, session ${own.sessionId}, branch ${own.branch}. Use existing Python only, no installs/sudo. Recreate ONLY external assets ${folder} from exact gzip/base64 JSON bundle ${bundle}; hash map ${JSON.stringify(assetHashes)}; preserve script bytes, decode quietly and verify hashes privately. All credential/helper/stdout/stderr/error streams PRIVATE, report fixed booleans/status/fileIDs only; no helper Read/free negative commands. NO publication, repo edits (except prepare's exact fixture), new task, PR or background work. ${instructions}`;
    if(content.length>16000)throw new Error();
    if(workspace.status!=='sleeping'&&task.status!=='completed'){await readState();if(!idle())throw new Error();}
    await bind();
@@ -179,7 +208,13 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
     await privateJson(target.taskId+'-independent-proof.json',output);
     await bind();await readState();if(!idle())throw new Error();
     await request('/api/workspaces/'+own.workspaceId+'/sleep',{method:'POST',data:{}},v=>v?.status==='sleeping'&&v.workspaceId===own.workspaceId&&v.chatSessionId===own.sessionId&&when(v.snapshotExpiresAt));
-   }else output??={taskId:own.taskId,sessionId:own.sessionId,phase:op.kind,turnEnded:true};
+   }else{
+    if(op.kind==='bootstrap-assets'){
+     await bind();await readState();if(!idle())throw new Error();
+     await request('/api/workspaces/'+own.workspaceId+'/sleep',{method:'POST',data:{}},v=>v?.status==='sleeping'&&v.workspaceId===own.workspaceId&&v.chatSessionId===own.sessionId&&when(v.snapshotExpiresAt));
+    }
+    output??={taskId:own.taskId,sessionId:own.sessionId,phase:op.kind,turnEnded:true};
+   }
   }
   result=summary('ok',200,true);
  }catch{result=summary('controller');output=null;}

@@ -149,3 +149,14 @@ Missing, ambiguous, foreign or raw-ID display responses fail closed. Names and
 profile bodies are never persisted in evidence. This public display check alone
 cannot prove the task's stored profile ID; preserve the accepted dispatch binding
 and independent exact-ID observation rather than claiming name equality proves it.
+
+`bootstrap-assets` is restricted to the existing second Claude context. It creates
+no acceptance phase marker or Git changes. A fixed Sol capsule discovers an
+existing absolute Python executable, fetches the three pinned public scripts,
+checks their hashes and the installed agent version/binary, and writes only fixed
+boolean/status and step-enum artifacts outside Git. It explicitly asks for the
+original two artifacts to be uploaded, then retains the context with normal Sleep
+and logout. A returned turn is not assets proof; the host must independently locate
+and validate the task-scoped original upload before any A baseline. The existing
+240-second poll and 300-second supervisor ceiling apply; failure does not authorize
+an automatic prompt retry or acceptance phase.
