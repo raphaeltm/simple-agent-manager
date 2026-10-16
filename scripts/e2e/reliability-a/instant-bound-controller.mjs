@@ -3,6 +3,7 @@ import {readFile,writeFile,stat} from 'node:fs/promises';
 import {isAbsolute,join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
+import {pythonInvocationBlock,probeStepsScript} from './python-invocation.mjs';
 import {baselineArtifact,expectationsArtifact,probeArtifact} from './queue-controller.mjs';
 const api='https://api.sammy.party',project='01KJNR9R3TEN3KX1ETE33852R8',repository='serverspresentation2025/crewai';
 const ulid=x=>typeof x==='string'&&/^[0-9A-HJKMNP-TV-Z]{26}$/.test(x);
@@ -53,9 +54,8 @@ for name,value in [('asset-hashes.json',{'checks':{'assetHashesMatch':ok},'statu
 }
 export function bootstrapAssetsPrompt(own){
  const folder='/workspaces/reliability-verification-assets/'+own.taskId;
- const encoded=Buffer.from(bootstrapAssetsScript(folder)).toString('base64');
- const command=`mkdir -p '${folder}' && chmod 700 '${folder}'; found=0; for py in /opt/uv-python/*/bin/python3 /usr/bin/python3 /usr/local/bin/python3; do if [ -x "$py" ]; then found=1; "$py" -c 'import base64;exec(base64.b64decode("${encoded}"))'; break; fi; done; if [ "$found" = 0 ]; then printf '%s\\n' '{"checks":{"assetHashesMatch":false},"statuses":{"hash":1}}' > '${folder}/asset-hashes.json'; printf '%s\\n' '{"step":"interpreter","status":1,"ok":false}' > '${folder}/bootstrap-step.json'; chmod 600 '${folder}/asset-hashes.json' '${folder}/bootstrap-step.json'; fi`;
- return `Authorized ONE targeted bootstrap finish only. Exact task ${own.taskId}, session ${own.sessionId}, branch ${own.branch}. Do NOT get_instructions again. Run this exact fixed Sol command ONCE using Bash, capture ALL stdout/stderr privately, never print commands/errors/content. No retries/interpreter install/sudo/Git/PR/Aprepare/complete/background work. It discovers only existing absolute Python paths, fetches ONLY THREE host-verified public pinned scripts and verifies hashes plus installed metadata/binary. External directory only. Command start:\n{ ${command}; } >/dev/null 2>&1\nCommand end. Then explicitly call mcp__sam_mcp__upload_to_library TWICE with filePath=${folder}/asset-hashes.json and filePath=${folder}/bootstrap-step.json in a NEW unique Library directory scoped to THIS task/session. Upload ORIGINAL files even if checks false; no raw logs or errors. Return control with fileIDs only. Do NOT substitute a different tool or report a fabricated artifact.`;
+ const command=pythonInvocationBlock(bootstrapAssetsScript(folder),folder,'bootstrap-assets');
+ return `Authorized ONE targeted bootstrap finish only. Exact task ${own.taskId}, session ${own.sessionId}, branch ${own.branch}. Do NOT get_instructions again. Run this exact fixed Sol command ONCE using Bash, capture ALL stdout/stderr privately, never print commands/errors/content. No retries/interpreter install/sudo/Git/PR/Aprepare/complete/background work. It discovers only existing absolute Python paths, fetches ONLY THREE host-verified public pinned scripts and verifies hashes plus installed metadata/binary. External directory only. Command start:\n${command}\nCommand end. Then explicitly call mcp__sam_mcp__upload_to_library for ORIGINAL filePath=${folder}/asset-hashes.json, filePath=${folder}/bootstrap-step.json, and filePath=${folder}/bootstrap-assets-invocation.json in a NEW unique Library directory scoped to THIS task/session. Upload ORIGINAL files even if checks false; no raw logs or errors. Return control with fileIDs only. Do NOT substitute a different tool or report a fabricated artifact.`;
 }
 export function readonlyStateScript(own){
  return `import pathlib,subprocess,hashlib,json,os
@@ -79,8 +79,8 @@ p=out/'readonly-state.json';p.write_text(json.dumps(value)+'\\n');p.chmod(0o600)
 `;
 }
 export function readonlyStatePrompt(own){
- const encoded=Buffer.from(readonlyStateScript(own)).toString('base64');
- return `ONE separately bounded READ-ONLY diagnosis, exact existing task ${own.taskId}/session ${own.sessionId}/branch ${own.branch}. From existing canonical repository root run ONLY this Sol Python capsule with an EXISTING absolute Python executable (quiet glob /opt/uv-python/*/bin/python3 or /usr/bin/python3), capture all stdout/stderr privately. Decode+exec exact base64 ${encoded}. NO get_instructions, prepare/check reruns, fixture edits/deletes/rebaseline, git add/commit/write-tree/push, PR/newtask/background work or installs. Reads ONLY git root/branch/local default/identity-present/index-readable, exact named fixture existence and three existing script hashes. Explicit mcp__sam_mcp__upload_to_library original /workspaces/reliability-readonly-state/${own.taskId}/readonly-state.json to NEW unique THIS-task scoped directory; fileID/fixed booleans/status ONLY, no values/paths/errors/content. Return control immediately; host owns Sleep.`;
+ const command=pythonInvocationBlock(readonlyStateScript(own),'/workspaces/reliability-readonly-state/'+own.taskId,'readonly-state');
+ return `ONE separately bounded READ-ONLY diagnosis, exact existing task ${own.taskId}/session ${own.sessionId}/branch ${own.branch}. From canonical repository root run this exact Bash block ONCE: ${command}. No get_instructions, fixture edits/deletes/rebaseline, Git publication, PR/newtask/background work or installs. Upload ORIGINAL readonly-state.json and readonly-state-invocation.json from /workspaces/reliability-readonly-state/${own.taskId}; fixedbooleans/status/fileIDs ONLY, no paths/commands/content/errors. Return immediately; host owns Sleep.`;
 }
 export async function run({requestSafe,logoutSafe,summary,safeSummary}){
  let browser,context,result=summary('controller'),output=null,loggedOut=false,root;
@@ -222,14 +222,25 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
    const assetHashes=Object.fromEntries(Object.entries(assets).map(([name,bytes])=>[name,hash(bytes)]));
    const bundle=gzipSync(JSON.stringify(assets)).toString('base64');
    const folder='/workspaces/reliability-observer-assets/'+(target?.taskId??own.taskId);
-   let instructions;
-   if(observing)instructions=`Run ONLY ${folder}/terminal-observer.py check --repository ${repository} --branch ${target.branch} --baseline ${folder}/baseline.json --expectations ${folder}/expectations.json --terminal-completed-at ${completedAt} --pr-limit ${expectations.prLimit}. Use exact baseline.json and expectations.json from the same validated bundle outside Git. Redirect only observer stdout to ${folder}/observer-check.json, stderr PRIVATE. Upload original file bytes to a NEW task-scoped Library directory; report fileID only. No git-probe check of observer's own old fixture.`;
-   else if(op.kind==='resume-incomplete')instructions=`NEW acceptance attempt first-guarded-resume-1; prior original attempt FAILED and remains recorded. From canonical repository root ONLY run ${folder}/git-probe.py resume-incomplete --disposable-repository, stdout alone ${folder}/a-prepare.json, stderr PRIVATE. This refuses any ambiguity before writes and resumes only the exact known FIRST tracked-only partial fixture. It uses command-local synthetic author identity for the explicit named fixture commit; NEVER configure user/global identity. Upload ORIGINAL new phase stdout and ORIGINAL new .reliability-a/baseline.json separately to NEW task-scoped directory labeled first-guarded-resume-1. No delete/reset/rebase/reprepare or remote publication. Return idle; no completion.`;
-   else if(op.kind==='prepare')instructions=`From canonical repository root ONLY run ${folder}/git-probe.py prepare --disposable-repository (the probe supplies command-local synthetic identity ONLY for its explicit fixture commit; NEVER configure user/global identity), stdout alone ${folder}/a-prepare.json, stderr PRIVATE. Upload ORIGINAL phase stdout and ORIGINAL .reliability-a/baseline.json separately. Return idle; no completion.`;
-   else if(op.kind==='check-record')instructions=`From canonical repository root run ONLY ${folder}/git-probe.py check to ${folder}/a-check.json; then ${folder}/terminal-observer.py record --repository ${repository} --branch ${own.branch} --baseline .reliability-a/baseline.json --expectations ${folder}/expectations.json to ${folder}/observer-record.json. Stdout only, stderr PRIVATE. Upload all three original files separately, no reformatted JSON. Return idle.`;
-   else if(op.kind==='wake-check')instructions=`NORMAL owner wake: from canonical restored repository root run ONLY ${folder}/git-probe.py check against EXISTING .reliability-a/baseline.json, stdout ${folder}/a-check.json, stderr PRIVATE. NEVER prepare or recreate baseline. Upload ORIGINAL check file to NEW unique task-scoped evidence directory; return idle.`;
-   else instructions=`From canonical repository root run ONLY ${folder}/git-probe.py check, stdout ${folder}/a-check.json, stderr PRIVATE; upload original bytes. ONLY if all actual checks true/status0, call actual complete_task with evidence.prUrl=${own.evidencePrUrl} and measured local commit SHA in evidence.notes/verifications (not unsupported commitSha property). Report no publication. Do NOT push/create PR/alter files. Actual task completion is last.`;
-   const content=op.kind==='readonly-state'?readonlyStatePrompt(own):op.kind==='bootstrap-assets'?bootstrapAssetsPrompt(own):`Authorized bounded Reliability acceptance ${op.kind}; exact task ${own.taskId}, session ${own.sessionId}, branch ${own.branch}. Use existing Python only, no installs/sudo. Recreate ONLY external assets ${folder} from exact gzip/base64 JSON bundle ${bundle}; hash map ${JSON.stringify(assetHashes)}; preserve script bytes, decode quietly and verify hashes privately. All credential/helper/stdout/stderr/error streams PRIVATE, report fixed booleans/status/fileIDs only; no helper Read/free negative commands. NO publication, repo edits (except prepare/resume-incomplete's exact authorized fixture), new task, PR or background work. ${instructions}`;
+   const steps=[];
+   const probe=(script,args,output)=>steps.push({script:folder+'/'+script,args,output:folder+'/'+output});
+   if(observing)probe('terminal-observer.py',['check','--repository',repository,'--branch',target.branch,'--baseline',folder+'/baseline.json','--expectations',folder+'/expectations.json','--terminal-completed-at',completedAt,'--pr-limit',String(expectations.prLimit)],'observer-check.json');
+   else if(['prepare','resume-incomplete'].includes(op.kind))probe('git-probe.py',[op.kind,'--disposable-repository'],'a-prepare.json');
+   else{
+    probe('git-probe.py',['check'],'a-check.json');
+    if(op.kind==='check-record')probe('terminal-observer.py',['record','--repository',repository,'--branch',own.branch,'--baseline','.reliability-a/baseline.json','--expectations',folder+'/expectations.json'],'observer-record.json');
+   }
+   const setup=`import pathlib,gzip,base64,json,hashlib
+out=pathlib.Path(${JSON.stringify(folder)});out.mkdir(parents=True,exist_ok=True,mode=0o700)
+assets=json.loads(gzip.decompress(base64.b64decode(${JSON.stringify(bundle)})))
+expected=${JSON.stringify(assetHashes)}
+for name,body in assets.items():
+ if hashlib.sha256(body.encode()).hexdigest()!=expected[name]:raise ValueError()
+ (out/name).write_text(body)
+`;
+   const command=pythonInvocationBlock(setup+probeStepsScript(steps),folder,op.kind);
+   const uploads=[...steps.map(x=>x.output),folder+'/'+op.kind+'-invocation.json',...(['prepare','resume-incomplete'].includes(op.kind)?['.reliability-a/baseline.json']:op.kind==='check-record'?[folder+'/expectations.json']:[])];
+   const content=op.kind==='readonly-state'?readonlyStatePrompt(own):op.kind==='bootstrap-assets'?bootstrapAssetsPrompt(own):`Authorized bounded Reliability acceptance ${op.kind}; exact task ${own.taskId}, session ${own.sessionId}, branch ${own.branch}. From canonical repository root run this EXACT Bash block ONCE, no alternate interpreter/direct probe/shebang invocation: ${command}. It selects and validates an existing absolute Python path in THIS block, installs/verifies exact external asset bytes, and prefixes EVERY probe with that SAME interpreter. No installs, global config, helper reads, publication, newtask/PR/background work. Upload ORIGINAL files ${uploads.join(', ')} to a NEW task-scoped Library directory, fixedbooleans/status/fileIDs only. ${observing?'Do not check observers own old baseline.':op.kind==='complete'?`ONLY if original check allTRUE/status0, call actual complete_task with evidence.prUrl=${own.evidencePrUrl}; do not publish or edit files.`:'Return idle, no completion.'} ${op.kind==='resume-incomplete'?'Prior failed attempt remains recorded; exact guarded resume only, never reprepare/reset.':''}`;
    if(content.length>16000)throw new Error();
    if(workspace.status!=='sleeping'&&task.status!=='completed'){await readState();if(!idle())throw new Error();}
    await bind();
