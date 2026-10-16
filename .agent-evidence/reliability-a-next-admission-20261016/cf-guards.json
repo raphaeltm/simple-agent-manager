@@ -121,7 +121,7 @@
     "targetActiveWorkspacesZero": 0,
     "unexpiredProvisioningLeasesZero": 0
   },
-  "observedAtMs": 1792153493000,
+  "observedAtMs": 1792153669035,
   "ok": false,
   "planningCost": {
     "activePlusTailVmMinutes": 85,

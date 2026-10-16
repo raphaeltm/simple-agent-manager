@@ -1,0 +1,41 @@
+{
+  "activeSameSessionWorkspaces": 0,
+  "globalNondeletedVmCount": 1,
+  "globalNonterminalWarmClaims": 0,
+  "node": [
+    {
+      "id": "01M52AZAP0751E1W2CSFZFA5T1",
+      "runtime_termination_confirmed_at": null,
+      "status": "running",
+      "warm_since": "2026-10-16T12:37:38.471Z"
+    }
+  ],
+  "nodeActiveWorkspaces": 0,
+  "nodeWarmClaims": 0,
+  "observedAtMs": 1792154278198,
+  "ok": true,
+  "rows": [
+    {
+      "agent_version": "b467f389811eadeaf973960bb30f9fa7b9cb4678",
+      "capacity_pool_revision": 40,
+      "claimed_warm_node_id": null,
+      "id": "01M52AZ2JZKRN9V0BSHRBZW9C9",
+      "node_id": "01M52AZAP0751E1W2CSFZFA5T1",
+      "node_status": "running",
+      "runtime": "vm",
+      "status": "sleeping",
+      "warm_since": "2026-10-16T12:37:38.471Z",
+      "workspace_id": "01M52B9VTEA73KBCWAFCH1SJKH",
+      "workspace_status": "sleeping"
+    }
+  ],
+  "snapshots": [
+    {
+      "degradation": "none",
+      "expires_at": "2026-10-23T12:37:30.180Z",
+      "id": "01M52BCGZ92JC2FTGNPQKM5CZQ",
+      "sleeping_at": "2026-10-16T12:37:30.180Z",
+      "status": "available"
+    }
+  ]
+}
