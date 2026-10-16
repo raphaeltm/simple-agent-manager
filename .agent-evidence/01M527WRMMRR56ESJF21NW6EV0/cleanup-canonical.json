@@ -1,6 +1,6 @@
 {
   "activeSameSessionWorkspaces": 0,
-  "globalNondeletedVmCount": 0,
+  "globalNondeletedVmCount": 1,
   "globalNonterminalWarmClaims": 0,
   "node": [
     {
@@ -12,7 +12,7 @@
   ],
   "nodeActiveWorkspaces": 0,
   "nodeWarmClaims": 0,
-  "observedAtMs": 1792153402528,
+  "observedAtMs": 1792154671663,
   "ok": true,
   "rows": [
     {
