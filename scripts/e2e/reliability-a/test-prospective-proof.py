@@ -68,10 +68,11 @@ class ReaderTests(unittest.TestCase):
                 elif 'FROM session_snapshots' in sql:
                     from datetime import datetime, timezone
                     restored = datetime.fromtimestamp((now - (6000 if failure == 'wrong-time' else 1000))/1000, timezone.utc).isoformat()
-                    rows = [{'id': snapshot, 'user_id': 'owner', 'project_id': reader.PROJECT, 'chat_session_id': own['sessionId'], 'workspace_id': workspace, 'runtime': runtime, 'status': 'available', 'degradation': 'none', 'expires_at': '2026-12-01T00:00:00.000Z', 'sleeping_at': '2026-10-16T06:00:00.000Z', 'snapshot_generation': 'generation2' if failure == 'wrong-generation' else 'generation1', 'home_sha256': 'a'*64, 'wip_sha256': 'b'*64, 'recovery_status': None if failure == 'wrong-status' else 'waking' if failure == 'resume-pending-claim' else 'restored', 'recovery_claimed_at': restored if failure in ['resume-pending-claim','resume-retained-claim'] else None, 'recovery_attempt_id':'11111111-2222-4333-8444-555555555555', 'recovery_task_id': own['taskId'], 'recovery_workspace_id': workspace, 'restored_at': restored}]
+                    rows = [{'id': '01M51FFFFFFFFFFFFFFFFFFFFF' if failure == 'wrong-snapshot' else snapshot, 'user_id': 'owner', 'project_id': reader.PROJECT, 'chat_session_id': own['sessionId'], 'workspace_id': workspace, 'runtime': runtime, 'status': 'available', 'degradation': 'none', 'expires_at': '2026-12-01T00:00:00.000Z', 'sleeping_at': '2026-10-16T06:00:00.000Z', 'snapshot_generation': 'generation2' if failure == 'postwake-checkpoint' else CANARY if failure == 'private-generation' else 'generation1', 'home_sha256': 'a'*64, 'wip_sha256': 'b'*64, 'recovery_status': None if failure == 'wrong-status' else 'waking' if failure == 'resume-pending-claim' else 'restored', 'recovery_claimed_at': restored if failure in ['resume-pending-claim','resume-retained-claim'] else None, 'recovery_attempt_id':'11111111-2222-4333-8444-555555555555', 'recovery_task_id': '01M51FFFFFFFFFFFFFFFFFFFFF' if failure == 'wrong-task' else own['taskId'], 'recovery_workspace_id': '01M51FFFFFFFFFFFFFFFFFFFFF' if failure == 'wrong-workspace' else workspace, 'restored_at': restored}]
                     if failure == 'private-row':
                         rows[0].update(snapshot_generation=CANARY, recovery_status=CANARY, recovery_task_id=CANARY, recovery_workspace_id=CANARY, restored_at=CANARY, extra=CANARY)
                     if failure == 'wrong-types': rows[0].update(snapshot_generation=7, restored_at=123)
+                    if failure == 'wrong-generation-type': rows[0]['snapshot_generation']=7
                 else: raise AssertionError('unexpected fixed query')
                 return Response({'result': [{'results': rows}]})
             output = io.StringIO()
@@ -79,12 +80,22 @@ class ReaderTests(unittest.TestCase):
                 reader.main()
             self.assertNotIn(CANARY, output.getvalue())
             result = json.loads(output.getvalue())
-            self.assertEqual(result['ok'], failure is None)
-            if failure is None:
+            expected_ok = failure in [None,'postwake-checkpoint','private-generation']
+            self.assertEqual(result['ok'], expected_ok)
+            if expected_ok:
                 source = (root / (mode + '-source.json')).read_bytes()
                 artifact = root / (mode + '.json' if mode in ['protected-snapshot', 'observer-snapshot', 'resume-snapshot', 'completion-runtime'] else mode + '-grant.json')
                 self.assertEqual(json.loads(artifact.read_text())['sourceEvidenceSha256'], hashlib.sha256(source).hexdigest())
                 self.assertNotIn(CANARY, source.decode())
+                if mode == 'wake-check':
+                    grant=json.loads(artifact.read_text()); projection=json.loads((root/'wake-check-restore-source.json').read_text())
+                    self.assertFalse(grant['restoreProvenance']['consumedGenerationObserved'])
+                    self.assertFalse(projection['consumedGenerationObserved'])
+                    self.assertEqual(grant['restoreProvenance']['latestGenerationMatchesProtected'],failure is None)
+                    if failure is not None:
+                        self.assertNotEqual(grant['restoreProvenance']['protectedGenerationSha256'],grant['restoreProvenance']['latestGenerationSha256'])
+                    for path in root.iterdir():
+                        if path.is_file():self.assertNotIn(CANARY,path.read_text())
             elif mode == 'wake-check':
                 proof_file = root / 'wake-check-restore-source.json'
                 original = proof_file.read_bytes()
@@ -136,13 +147,29 @@ class ReaderTests(unittest.TestCase):
         self.assertIn('recoveryClaimedAt: nowIso',claim)
         recovery = subprocess.run(['git','show','e2c81c045fa16490c7515fa80573418e60ef4017:apps/api/src/services/session-recovery.ts'],capture_output=True,check=True,text=True).stdout
         self.assertLess(recovery.index('const claim = await claimSessionSnapshotRecovery'),recovery.index('recoveryTask = await reactivateSleepingTask'))
+        idle = subprocess.run(['git','show','e2c81c045fa16490c7515fa80573418e60ef4017:apps/api/src/services/acp-activity-idle-snapshot.ts'],capture_output=True,check=True,text=True).stdout
+        self.assertIn("input.body.activity === 'idle'",idle)
+        self.assertIn('hibernateAgentSessionOnNode(',idle)
+        self.assertIn('background: true',idle)
+        persistence = subprocess.run(['git','show','e2c81c045fa16490c7515fa80573418e60ef4017:apps/api/src/services/session-snapshot-persistence.ts'],capture_output=True,check=True,text=True).stdout
+        self.assertIn('snapshotGeneration: captureGeneration',persistence)
+        completion = persistence.split('const completed = await db',1)[1].split('.where(',1)[0]
+        for field in ['recoveryStatus:', 'recoveryTaskId:', 'recoveryWorkspaceId:', 'restoredAt:']:
+            self.assertNotIn(field,completion)
+        prepare = subprocess.run(['git','show','e2c81c045fa16490c7515fa80573418e60ef4017:apps/api/src/services/session-snapshot-prepare.ts'],capture_output=True,check=True,text=True).stdout
+        available = prepare.split("if (current.status === 'available' || current.status === 'degraded') {",1)[1].split('} else {',1)[0]
+        self.assertIn('captureGeneration: generation',available)
+        self.assertNotIn('snapshotGeneration:',available)
+        self.assertNotIn('recoveryStatus:',available)
 
     def test_fixed_modes(self):
         for mode in reader.MODES:
             with self.subTest(mode=mode): self.invoke(mode)
+        for capture in ['postwake-checkpoint','private-generation']:
+            with self.subTest(capture=capture):self.invoke('wake-check',capture)
 
     def test_concrete_failures(self):
-        for mode, failure, stage in [('setup', 'transport', 'settings'), ('setup', 'wrong-profile', 'mapping'), ('setup', 'foreign-claim', 'resource-guards'), *[('wake-check', f, 'restored-generation') for f in ['wrong-generation','wrong-status','wrong-time','wrong-types','private-row','missing-wake']]]:
+        for mode, failure, stage in [('setup', 'transport', 'settings'), ('setup', 'wrong-profile', 'mapping'), ('setup', 'foreign-claim', 'resource-guards'), *[('wake-check', f, 'restored-generation') for f in ['wrong-snapshot','wrong-task','wrong-workspace','wrong-status','wrong-time','wrong-types','wrong-generation-type','private-row','missing-wake']]]:
             with self.subTest(failure=failure): self.assertEqual(self.invoke(mode, failure)['stage'], stage)
         for failure in ['resume-vm-present','resume-foreign-task','resume-pending-claim','resume-retained-claim']:
             with self.subTest(failure=failure): self.assertEqual(self.invoke('resume-snapshot',failure)['stage'],'snapshot')

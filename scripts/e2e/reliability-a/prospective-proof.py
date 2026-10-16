@@ -39,17 +39,20 @@ def restore_projection(rows, protected, own, mapping, wake, observed, started):
     wake_ms = wake.get('at') if isinstance(wake, dict) else None
     valid_wake = type(wake_ms) is int and started <= wake_ms <= observed and set(wake) == {'taskId', 'sessionId', 'at'} and wake.get('taskId') == own['taskId'] and wake.get('sessionId') == own['sessionId']
     generation = row.get('snapshot_generation')
+    protected_generation = protected.get('snapshotGeneration')
     canonical = {'snapshotId': ident(row.get('id')), 'generationSha256': hashlib.sha256(generation.encode()).hexdigest() if isinstance(generation, str) and len(generation) <= 256 else None,
+                 'protectedGenerationSha256': hashlib.sha256(protected_generation.encode()).hexdigest() if isinstance(protected_generation, str) and 0 < len(protected_generation) <= 128 else None,
                  'recoveryStatus': row.get('recovery_status') if row.get('recovery_status') in ['waking', 'restored', 'failed', None] else 'other',
                  'recoveryTaskId': ident(row.get('recovery_task_id')), 'recoveryWorkspaceId': ident(row.get('recovery_workspace_id')),
                  'restoredAtMs': restored_ms, 'wakeSubmittedAtMs': wake_ms if valid_wake else None}
     predicates = {'oneRow': len(rows) == 1, 'snapshotIdMatches': row.get('id') == protected.get('snapshotId'),
                   'generationMatches': isinstance(generation, str) and generation == protected.get('snapshotGeneration'),
+                  'latestGenerationTyped': isinstance(generation, str) and 0 < len(generation) <= 128,
                   'statusRestored': row.get('recovery_status') == 'restored', 'taskMatches': row.get('recovery_task_id') == own['taskId'],
                   'workspaceMatches': row.get('recovery_workspace_id') == mapping['workspaceId'], 'restoredAtPresent': bool(restored),
                   'restoredAtParseable': restored_ms is not None, 'wakeReceiptValid': bool(valid_wake),
                   'restoredAfterWake': bool(valid_wake and restored_ms is not None and wake_ms <= restored_ms <= observed)}
-    return {'observedAt': observed, 'canonical': canonical, 'types': types, 'predicates': predicates}
+    return {'observedAt': observed, 'canonical': canonical, 'types': types, 'predicates': predicates, 'consumedGenerationObserved': False}
 
 
 def main():
@@ -157,12 +160,18 @@ def main():
                 raw_projection = (root / 'wake-check-restore-source.json').read_bytes()
                 failure_source_sha = hashlib.sha256(raw_projection).hexdigest()
                 restore_evidence = {'observedAt': projection['observedAt'], 'predicates': projection['predicates'], 'types': projection['types'], 'sourceEvidenceSha256': failure_source_sha}
-                assert all(projection['predicates'].values())
+                # A normal post-wake idle checkpoint can rotate the latest generation.
+                # Equality is an observation, never immutable consumed-restore proof.
+                assert all(v for k, v in projection['predicates'].items() if k != 'generationMatches')
+                assert projection['canonical']['protectedGenerationSha256'] is not None
                 row = rows[0]
                 from datetime import datetime
                 value['recoveredSnapshotId'] = row['id']
                 value['snapshotRestoreConfirmedAt'] = int(datetime.fromisoformat(row['restored_at'].replace('Z', '+00:00')).timestamp() * 1000)
-                source['restored'] = row
+                value['restoreProvenance'] = {'protectedGenerationSha256': projection['canonical']['protectedGenerationSha256'],
+                     'latestGenerationSha256': projection['canonical']['generationSha256'],
+                     'latestGenerationMatchesProtected': projection['predicates']['generationMatches'], 'consumedGenerationObserved': False}
+                source['restored'] = projection
         stage = 'evidence'
         raw = json.dumps(source, separators=(',', ':'), sort_keys=True)
         digest = hashlib.sha256(raw.encode()).hexdigest()

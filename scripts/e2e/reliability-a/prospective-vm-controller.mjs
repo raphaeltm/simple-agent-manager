@@ -47,7 +47,11 @@ export async function run({requestSafe,logoutSafe,summary},resume=false){
  };
  let protectedSnapshot=null,wakeSubmittedAt=null,lastSleep=null;
  const grant=async(name,own,mapping)=>{
-  while(Date.now()<action()){await producerFailed(name.replace(/-grant$/,''),own);try{const g=await read(name+'.json');if(g.workspaceId!==mapping.workspaceId||g.nodeId!==mapping.nodeId||g.agentSessionId!==mapping.agentSessionId||g.ownerId!==owner||g.storedProfileId!==own.agentProfileId)throw Error('binding');if(name==='wake-check-grant'&&(!protectedSnapshot||g.recoveredSnapshotId!==protectedSnapshot.snapshotId||!Number.isSafeInteger(g.snapshotRestoreConfirmedAt)||g.snapshotRestoreConfirmedAt<wakeSubmittedAt||g.snapshotRestoreConfirmedAt>Date.now()))throw Error('binding');return g;}catch(e){if(e?.message==='binding')throw 0;}await pause(1000);}throw 0;
+  while(Date.now()<action()){await producerFailed(name.replace(/-grant$/,''),own);try{const g=await read(name+'.json');if(g.workspaceId!==mapping.workspaceId||g.nodeId!==mapping.nodeId||g.agentSessionId!==mapping.agentSessionId||g.ownerId!==owner||g.storedProfileId!==own.agentProfileId)throw Error('binding');if(name==='wake-check-grant'){
+    if(!protectedSnapshot||g.recoveredSnapshotId!==protectedSnapshot.snapshotId||!Number.isSafeInteger(g.snapshotRestoreConfirmedAt)||g.snapshotRestoreConfirmedAt<wakeSubmittedAt||g.snapshotRestoreConfirmedAt>Date.now())throw Error('binding');
+    const p=g.restoreProvenance;if(!exact(p,['protectedGenerationSha256','latestGenerationSha256','latestGenerationMatchesProtected','consumedGenerationObserved'])||p.protectedGenerationSha256!==hash(protectedSnapshot.snapshotGeneration)||!/^[0-9a-f]{64}$/.test(p.latestGenerationSha256)||typeof p.latestGenerationMatchesProtected!=='boolean'||p.latestGenerationMatchesProtected!==(p.protectedGenerationSha256===p.latestGenerationSha256)||p.consumedGenerationObserved!==false)throw Error('binding');
+    await save('wake-restore-provenance.json',p);result.consumedGenerationObserved=false;
+   }return g;}catch(e){if(e?.message==='binding')throw 0;}await pause(1000);}throw 0;
  };
  const phase=async(name,own,operation,originals,mapping)=>{
   live();const dir=root+'/'+name;await mkdir(dir,{mode:0o700});await save(name+'-mapping.json',{taskId:own.taskId,sessionId:own.sessionId,...mapping,at:Date.now()});
@@ -114,7 +118,7 @@ export async function run({requestSafe,logoutSafe,summary},resume=false){
   if(resume)await save('resume-attempt-receipt.json',{kind:'second-prospective-restore',taskId:config.own.taskId,sessionId:config.own.sessionId,branch:config.own.branch,agentProfileId:config.own.agentProfileId,started:config.started,hard:config.hard,submittedAt:wakeAt,acceptedAt:Date.now(),promptStatus:202,snapshotId:protectedSnapshot.snapshotId,snapshotGenerationSha256:hash(protectedSnapshot.snapshotGeneration),originalEvidenceSha256:config.resume.originalEvidenceSha256});
   mapping=await waitIdle(config.own,wakeAt);
   sequence.append('wake',{ok:true,actualHarness:true,freshInactive:true,prompt202:true},Date.now());
-  stage='wake-check';await phase('wake-check',config.own,'check',{baseline,expectations},mapping);sequence.append('wake-check',{ok:true},Date.now());
+  stage='wake-check';await phase('wake-check',config.own,'check',{baseline,expectations},mapping);result.originalRestoredBytesVerified=true;sequence.append('wake-check',{ok:true,originalRestoredBytesVerified:true,consumedGenerationObserved:false},Date.now());
   stage='complete';const completeAt=await prompt(config.own,`Call actual mcp__sam_mcp__complete_task now. No Bash/Git/publication/other writes. Use evidence.prUrl=${config.evidencePrUrl}, and evidence.notes containing the measured fixture commit ${JSON.parse(baseline).head}. Report that host preservation checks passed, without claiming unobserved stages.`);
   let completed;
   while(Date.now()<action()){const t=await canonical(config.own);if(t.status==='completed'&&Number.isFinite(Date.parse(t.completedAt))&&Date.parse(t.completedAt)>=completeAt&&t.completionEvidence?.prUrl===config.evidencePrUrl&&typeof t.completionEvidence.notes==='string'&&t.completionEvidence.notes.includes(JSON.parse(baseline).head)){completed=t;break;}await pause(5000);}if(!completed)throw 0;
