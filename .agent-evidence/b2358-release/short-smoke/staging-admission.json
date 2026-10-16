@@ -1,0 +1,1 @@
+{"deployments": [{"id": "10260a9b-5750-4908-93af-f6e2f3315610", "source": "wrangler", "strategy": "percentage", "annotations": {"workers/message": "Automatic deployment on upload.", "workers/triggered_by": "upload"}, "versions": [{"version_id": "250f77a4-80ab-499b-93d5-91afaab32cf9", "percentage": 100}], "created_on": "2026-10-16T17:36:18.686683Z"}], "activeVMs": [[]]}
