@@ -1,0 +1,27 @@
+{
+  "exactBoundSessionsRecoveryCount": 0,
+  "exactBoundSessionsRecoveryZero": true,
+  "historicalTaskTerminal": true,
+  "observedAtMs": 1792150277298,
+  "ok": true,
+  "rows": [
+    {
+      "chat_session_id": "3c9b9203-3f22-4111-b86c-160393e173ed",
+      "id": "01M034GG4EM5BPNGXEQ5JXJ61E",
+      "recovery_claimed_at": "2026-08-15T16:40:44.439Z",
+      "recovery_status": "waking",
+      "recovery_task_id": "01M034R54Q8300R3TNA4R1MFM0",
+      "status": "degraded",
+      "task_status": "failed"
+    },
+    {
+      "chat_session_id": "3273cc47-df19-4dce-9787-9938a4ce20e7",
+      "id": "01M4ET604RMC8HTV9SRZ0HDFA7",
+      "recovery_claimed_at": "2026-10-08T23:08:02.318Z",
+      "recovery_status": "waking",
+      "recovery_task_id": "01M4ET41C094NTE1BH2HPHWG8P",
+      "status": "available",
+      "task_status": "cancelled"
+    }
+  ]
+}

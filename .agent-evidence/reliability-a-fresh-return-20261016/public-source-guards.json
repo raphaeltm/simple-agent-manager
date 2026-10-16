@@ -1,0 +1,15 @@
+{
+  "binarySha256": "a59a4850337fe7af588267c481dee046db5baba4d3f705c85f19f85ded09e06f",
+  "checks": {
+    "apiRestoreSuccess": true,
+    "cssBaselineMatches": true,
+    "frozenSourceHashes": true,
+    "jsBaselineMatches": true,
+    "latestSourceExpected": true,
+    "noActiveDeploymentListed": true,
+    "publishedBinaryMatches": true
+  },
+  "cssSha256": "1940ad180f8d6dc676dcfba9dc24d69c7030117233fa27daef35e3d13972dc2f",
+  "jsSha256": "3776c1683bfb90a766781d2aedac99d8b9cddac67966acc9d847fea099a956a2",
+  "ok": true
+}
