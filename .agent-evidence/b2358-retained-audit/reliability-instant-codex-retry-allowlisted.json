@@ -1,0 +1,77 @@
+{
+  "taskId": "01M50N9VWJ5X1GYY0Z6TK5TAYN",
+  "sessionId": "6ca63b6d-5bd9-4327-8c1e-ac35ab5480f3",
+  "workspaceId": "01M50N9YAG35XZMFT0R1QG941T",
+  "nodeId": "01M50N9Y253QDSBV06EHKJD2NX",
+  "agentSessionId": "01M50NA7J1NVRQ5K8PP1A75Q9T",
+  "agentType": "openai-codex",
+  "createdAt": "2026-10-15T20:50:47.962Z",
+  "deadline": "2026-10-15T21:05:47.962Z",
+  "controllerCompletedAt": "2026-10-15T20:53:39.514Z",
+  "acceptance": "blocked-a-prepare-schema",
+  "controllerHead": "27e922dbd187b05d6a69c085c3bcc3c294bd0576",
+  "release": "b467f389811eadeaf973960bb30f9fa7b9cb4678",
+  "bBranch": "sam/reliability-b-instant-codex-retry-20261015",
+  "cleanup": {
+    "sessionStop": 200,
+    "workspaceRead": 404,
+    "nodesEmpty": true,
+    "logout": 200,
+    "logoutReadbacksPassed": true,
+    "browserJobCompleted": true
+  },
+  "assetHashes": {
+    "checks": {
+      "assetHashesMatch": true
+    },
+    "statuses": {
+      "hash": 0
+    }
+  },
+  "bPublish": {
+    "checks": {
+      "beforeABaseline": true,
+      "explicitPush": true,
+      "foreignHostDenied": true,
+      "helperSimpleAbsolutePath": true,
+      "helperTimeout30": true,
+      "http.lowSpeedLimitUnsetOrNumeric": true,
+      "http.lowSpeedTimeUnsetOrNumeric": true,
+      "installedBinaryMatches": true,
+      "installedReleaseMatches": true,
+      "missingPathReturnedCredential": true,
+      "privateClone": true,
+      "privateGhAccess": true,
+      "privateGitAccess": true,
+      "probeCompleted": true,
+      "testCommitTreeUnchanged": true,
+      "useHttpPath": true
+    },
+    "statuses": {
+      "afterTree": 0,
+      "beforeTree": 0,
+      "branch": 0,
+      "clone": 0,
+      "commit": 0,
+      "credential.helper": 0,
+      "credential.useHttpPath": 0,
+      "email": 0,
+      "foreignHost": 0,
+      "http.lowSpeedLimit": 1,
+      "http.lowSpeedTime": 1,
+      "missingPath": 0,
+      "name": 0,
+      "privateGhAccess": 0,
+      "privateGitAccess": 0,
+      "push": 0
+    }
+  },
+  "aPrepareTransfer": {
+    "category": "malformed",
+    "status": 200,
+    "checks": {
+      "requestSucceeded": false,
+      "responseAccepted": false
+    }
+  }
+}
