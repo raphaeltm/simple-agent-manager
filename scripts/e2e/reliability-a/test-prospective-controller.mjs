@@ -19,12 +19,13 @@ try{
  const observer={taskId:'01M50VYZ60RQXXTGSVPXW6FRXD',sessionId:'4e5282b9-0cd5-454f-a8f0-db160b9823fe',branch:'sam/bootstrap-only-authorized-reliability-w6frxd',agentProfileId:'01KYQ5YDHC1VS0BZ9F3NY97FNH',agentType:'openai-codex'};
  for(const x of [own,observer])x.receipt={taskId:x.taskId,sessionId:x.sessionId,branchName:x.branch,status:'queued'};
  let count=0;
- for(const mode of ['success','setup-failure','wake-check-failure','complete-missing-notes']){
+ for(const mode of ['success','setup-failure','wake-check-failure','complete-missing-notes','early-complete']){
   count++;const dir=join(root,mode);await mkdir(dir);process.env.SAM_PROSPECTIVE_ROOT=dir;process.env.SAM_PLAYWRIGHT_PRIMARY_USER='SYNTHETIC_PRIVATE_CANARY';
   const started=Date.now()-1000,hard=started+2700000,config={started,hard,own,observer,evidencePrUrl:'https://github.com/raphaeltm/simple-agent-manager/pull/2355'};
   await writeFile(join(dir,'config.json'),JSON.stringify(config));
   let virtualNow=null;
   let woken=false,ownStatus='in_progress',observerStatus='completed',completedAt,active=own,loggedOut=false,browserClosed=false;
+  if(mode==='early-complete'){ownStatus='completed';completedAt=new Date().toISOString();}
   const stages=[],prompts=[],slept=[];
   const mapping=(x)=>({workspaceId:x===observer?'01M51OOOOOOOOOOOOOOOOOOOOO':woken?'01M51YYYYYYYYYYYYYYYYYYYYY':'01M51XXXXXXXXXXXXXXXXXXXXX',nodeId:'01M51NNNNNNNNNNNNNNNNNNNNN',agentSessionId:'01M51AAAAAAAAAAAAAAAAAAAAA'});
   const snapId='01M51SSSSSSSSSSSSSSSSSSSSS';
@@ -73,10 +74,10 @@ try{
   assert(loggedOut&&browserClosed);assert(!JSON.stringify(result).includes('CANARY'));
   const final=JSON.parse(await readFile(join(dir,'final.json')));assert.equal(result.ok,mode==='success',JSON.stringify({mode,stage:final.stage,events:final.events.map(x=>x.kind)}));
   if(mode==='success'){assert.equal(final.events.length,8);assert.equal(prompts.length,4);assert.equal(stages.length,4);assert.equal(slept.length,2);assert.equal(final.stage,'done');}
-  else{assert(!final.ok);assert(slept.includes(own.taskId));if(mode!=='complete-missing-notes')assert(!prompts.some(p=>p.startsWith('Call actual')));else assert(!prompts.some(p=>p.startsWith('Authorized independent observer')));}
+  else{assert(!final.ok);if(mode==='early-complete'){assert.equal(prompts.length,0);assert.equal(stages.length,0);assert(JSON.parse(await readFile(join(dir,'unexpected-completion.json'))).status==='completed');}else assert(slept.includes(own.taskId));if(mode!=='complete-missing-notes')assert(!prompts.some(p=>p.startsWith('Call actual')));else assert(!prompts.some(p=>p.startsWith('Authorized independent observer')));}
  }
  const now=Date.now(),s={taskId:own.taskId,sessionId:own.sessionId,workspaceId:'ws',snapshotId:'01M51SSSSSSSSSSSSSSSSSSSSS',status:'available',runtime:'vm',degradation:'none',expiresAt:new Date(now+10000).toISOString(),snapshotGeneration:'synthetic-generation',observedAt:now,sourceEvidenceSha256:'a'.repeat(64)};
  snapshotProof(s,own,'ws',now-1,now+1000,now);for(const patch of [{observedAt:undefined},{degradation:'partial'},{sessionId:observer.sessionId},{expiresAt:new Date(now-1).toISOString()}])assert.throws(()=>snapshotProof({...s,...patch},own,'ws',now-1,now+1000,now));
  assert.throws(()=>completionProof({taskId:own.taskId},own,now-1,new Date(now).toISOString(),now));
- console.log(JSON.stringify({ok:true,lifecycleCases:4,typedProofNegatives:5,missingCompletionNotesRejected:true,liveCalls:0,limits:'browser/terminal/CF producers simulated; real caller+ledger'}));
+ console.log(JSON.stringify({ok:true,lifecycleCases:5,typedProofNegatives:5,missingCompletionNotesRejected:true,earlyCompletionRetained:true,liveCalls:0,limits:'browser/terminal/CF producers simulated; real caller+ledger'}));
 }finally{delete globalThis.__prospectiveTest;delete process.env.SAM_PROSPECTIVE_ROOT;delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;await rm(root,{recursive:true,force:true});}
