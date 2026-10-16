@@ -1,4 +1,4 @@
-import {writeFile} from 'node:fs/promises';
+import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {run as queueRun} from './queue-controller.mjs';
 const project='01KJNR9R3TEN3KX1ETE33852R8';
@@ -27,10 +27,17 @@ export async function run(deps){
   }
   if(cmd.path===`/api/projects/${project}/tasks/submit`&&(!profile||cmd.data?.agentProfileId!==profile.id))return deps.summary('configuration');
   const verify=typeof accept==='function'?async v=>{
-   if(new RegExp(`^/api/projects/${project}/tasks/[0-9A-HJKMNP-TV-Z]{26}$`).test(cmd.path)&&(v?.userId!==owner||v?.agentProfileHint!==profile?.name||v?.projectId!==project))return false;
+   if(new RegExp(`^/api/projects/${project}/tasks/[0-9A-HJKMNP-TV-Z]{26}$`).test(cmd.path)&&(v?.userId!==owner||v?.agentProfileHint!==(profile?.projectId===project&&profile?.userId!==owner?profile?.id:profile?.name)||v?.projectId!==project))return false;
    return accept(v);
   }:accept;
   return deps.requestSafe(context,origin,cmd,verify);
  };
- return queueRun({...deps,requestSafe});
+ let resumeOwn;
+ if(process.env.SAM_RESUME_EXACT_VM_TASK!==undefined){
+  if(process.env.SAM_RESUME_EXACT_VM_TASK!=='01M513P9XK1NB2GWQF5K36EBTV'||expected!=='01KXG9MJRZ36FFJX0RVNW67SWB')return deps.summary('configuration');
+  const receipt=JSON.parse(await readFile('/tmp/reliability-vm-codex-reset/private/state/0001.json','utf8'));
+  if(receipt.taskId!=='01M513P9XK1NB2GWQF5K36EBTV'||receipt.sessionId!=='b01f5478-28d0-42d6-af66-6dc57ad8223d'||receipt.branchName!=='sam/authorized-one-required-vm-36ebtv')return deps.summary('configuration');
+  resumeOwn={receipt,submittedAt:Date.parse('2026-10-16T01:02:07.633Z')};
+ }
+ return queueRun({...deps,requestSafe,resumeOwn});
 }

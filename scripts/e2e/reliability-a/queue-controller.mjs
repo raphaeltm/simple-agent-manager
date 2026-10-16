@@ -111,7 +111,7 @@ function selector(path,method,project){
   throw new Error();
 }
 const pause=()=>new Promise(r=>setTimeout(r,100));
-export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSummary,privateState}){
+export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSummary,privateState,resumeOwn}){
   let browser,context,finishLogout,final=summary('ok',0,true),loggedOut=false;
   try{
     const root=process.env.SAM_VERIFICATION_ROOT;
@@ -142,6 +142,19 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
     await writeFile(join(root,'ready.json'),JSON.stringify(safeSummary(login)),{mode:0o600});
     if(login.category!=='ok'){final=login;throw new Error();}
     const done=new Set(),idle=new Set(),sleeping=new Set(),submitted=new Map(),completed=new Set(),workspaces=new Map(),submittedAt=new Map();
+    if(resumeOwn!==undefined){
+      const r=resumeOwn.receipt;
+      if(!exact(resumeOwn,['receipt','submittedAt'])||!exact(r,['taskId','sessionId','branchName','status'])||!ulid(r.taskId)||!uuid(r.sessionId)||!branch(r.branchName)||r.status!=='queued'||!Number.isSafeInteger(resumeOwn.submittedAt)||resumeOwn.submittedAt>Date.now())throw new Error();
+      let owned;
+      const t=await requestSafe(context,api,{path:`/api/projects/${project}/tasks/${r.taskId}`},v=>{
+        owned=v;return v?.id===r.taskId&&v.projectId===project&&v.outputBranch===r.branchName&&ulid(v.workspaceId)&&['in_progress','delegated','blocked'].includes(v.status);
+      });
+      if(t.category!=='ok')throw new Error();
+      const w=await requestSafe(context,api,{path:'/api/workspaces/'+owned.workspaceId},v=>v?.id===owned.workspaceId&&v.projectId===project&&v.chatSessionId===r.sessionId&&v.branch===r.branchName&&v.repository===repository&&ulid(v.nodeId));
+      if(w.category!=='ok')throw new Error();
+      submitted.set(r.taskId,r.sessionId);submittedAt.set(r.sessionId,resumeOwn.submittedAt);workspaces.set(owned.workspaceId,r.sessionId);
+    }
+
     const end=Date.now()+duration;
     let stopping=false,failed=false;
     while(Date.now()<end&&!stopping){
