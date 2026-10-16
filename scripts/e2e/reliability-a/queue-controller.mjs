@@ -170,7 +170,9 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
             const method=cmd.method??'GET';const type=selector(cmd.path,method,project);
             if(failed&&method!=='GET'&&method!=='DELETE'&&!(type==='action'&&cmd.path.endsWith('/stop')))throw new Error();
             if(type==='submit'){
-              if(!exact(cmd.data,cmd.data?.workspaceProfile===undefined?['message','agentProfileId','taskMode']:['message','agentProfileId','taskMode','workspaceProfile'])
+              const fields=['message','agentProfileId','taskMode',...(cmd.data?.workspaceProfile===undefined?[]:['workspaceProfile']),...(cmd.data?.nodeId===undefined?[]:['nodeId'])];
+              if(!exact(cmd.data,fields)
+                ||(cmd.data?.nodeId!==undefined&&(!ulid(cmd.data.nodeId)||cmd.data.nodeId!==process.env.SAM_VERIFICATION_REUSE_NODE_ID))
                 ||!ulid(cmd.data.agentProfileId)||cmd.data.taskMode!=='task'||typeof cmd.data.message!=='string'||cmd.data.message.length>16000
                 ||(cmd.data.workspaceProfile!==undefined&&cmd.data.workspaceProfile!=='lightweight'))throw new Error();
             }

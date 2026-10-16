@@ -179,3 +179,8 @@ test('source workspace deletion pending202 is incomplete; only confirmed deletio
  let v=fixture('delete-pending',[submit,task,deleteWorkspace,{op:'stop'}]);assert.notEqual(v.outputs['out/0003.json'].category,'ok');assert.equal(v.outputs['out/0003.json'].status,202);assert.ok(!v.outputs['private/state/0003.json']);
  v=fixture('normal',[submit,task,deleteWorkspace,{op:'stop'}]);assert.equal(v.outputs['out/0003.json'].category,'ok');assert.equal(v.outputs['private/state/0003.json'].deletionConfirmed,true);
 });
+
+test('explicit existing-node submission is bound to the trusted reuse node and rejects a foreign node',()=>{
+ const prior=process.env.SAM_VERIFICATION_REUSE_NODE_ID;process.env.SAM_VERIFICATION_REUSE_NODE_ID=ID;
+ try{const own=fixture('normal',[{...submit,data:{...submit.data,nodeId:ID}},{op:'stop'}]);assert.equal(own.outputs['out/0001.json'].category,'ok');const foreign=fixture('normal',[{...submit,data:{...submit.data,nodeId:OTHER}},{op:'stop'}]);assert.notEqual(foreign.outputs['out/0001.json'].category,'ok');assert.ok(!foreign.events.some(e=>e.path?.endsWith('/tasks/submit')));}finally{if(prior===undefined)delete process.env.SAM_VERIFICATION_REUSE_NODE_ID;else process.env.SAM_VERIFICATION_REUSE_NODE_ID=prior;}
+});

@@ -1,3 +1,4 @@
+import {gzipSync} from 'node:zlib';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {run as queueRun} from './queue-controller.mjs';
@@ -40,4 +41,20 @@ export async function run(deps){
   resumeOwn={receipt,submittedAt:Date.parse('2026-10-16T01:02:07.633Z')};
  }
  return queueRun({...deps,requestSafe,resumeOwn});
+}
+
+export function vmPrepareScript(assets){
+ const hashes={'git-probe.py':'f061b7cd447cef55ceb08cb6a78fcb0b236ec3f347731e66d4b8447c224afa6c','b-probe.py':'889d7588ed44c8ab89e6ba7880ff20d81017f294bb7b31edfbc320ced064f509','terminal-observer.py':'d0970080ce89ab2810c0c9d758d1fc978efafe75fed91a4454f08639da88adff'};
+ if(Object.keys(assets).sort().join()!==Object.keys(hashes).sort().join()||Object.values(assets).some(v=>typeof v!=='string'))throw new Error();
+ const bundle=gzipSync(JSON.stringify(assets)).toString('base64');
+ return `import pathlib,json,gzip,base64,hashlib,subprocess,sys
+p=pathlib.Path('/workspaces/reliability-verification-assets');p.mkdir(parents=True,exist_ok=True)
+a=json.loads(gzip.decompress(base64.b64decode('${bundle}')))
+for n,b in a.items():(p/n).write_text(b)
+ok=all(hashlib.sha256((p/n).read_bytes()).hexdigest()==h for n,h in json.loads('${JSON.stringify(hashes)}').items())
+f=p/'asset-hashes.json';f.write_text(json.dumps({'checks':{'assetHashesMatch':ok},'statuses':{'hash':0 if ok else 1}}));f.chmod(0o600)
+if ok:
+ with (p/'a-prepare.json').open('w') as out:subprocess.run([sys.executable,str(p/'git-probe.py'),'prepare','--disposable-repository'],stdout=out,stderr=subprocess.DEVNULL,timeout=60)
+ (p/'a-prepare.json').chmod(0o600)
+`;
 }
