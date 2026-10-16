@@ -68,7 +68,8 @@ classify the failure. Treat it like the interrupted case: check before you resen
 Several sections below say to check GitHub for anything the agent pushed. Work started as a task
 runs on its own `sam/…` [output branch](/docs/guides/idea-execution/#where-the-work-lands), and the
 project **Files** tab shows its diff without opening a workspace. A chat started in the composer on
-an Instant profile has no branch of its own, and pushes only what you ask the agent to push.
+an Instant profile, without attachments, has no branch of its own, and pushes only what you ask the
+agent to push.
 
 A **Task** keeps its task completion and git delivery behavior after sleep and wake;
 a **Chat** remains a Chat. [Wake settings](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
@@ -373,7 +374,8 @@ anything it didn't push, including commits it made only in the workspace, is gon
 starts from your default branch, not the original's, so to build on what was pushed, tell it to
 continue from the original chat's branch. If the original ran on a VM, the new agent can look the
 branch up from the parent task ID in the message; for a chat started from the message box on an
-Instant profile without attachments, name the branch its agent pushed to. **Retry** isn't offered for an expired chat.
+Instant profile without attachments, and not from an idea's **Execute** button, name the branch its
+agent pushed to. **Retry** isn't offered for an expired chat.
 
 ## Wake failed
 
@@ -538,8 +540,9 @@ These releases refuse a message in which `@` is directly followed by a word that
 profile names, with **Agent profile not found**, so it never reaches the agent. That includes email
 addresses (`bob@example.com`), package names (`@types/node`), code with decorators or annotations
 (`@dataclass`, `@Override`), and text SAM fills in for you, such as the chat title Fork quotes.
-Picking a profile from the list doesn't help when its name has punctuation but no spaces: the list
-inserts `@code-reviewer`, which these releases read as `@code`, so type `@"code-reviewer"` instead.
+Picking a profile from the list doesn't help when its name has no spaces but has a character other
+than an unaccented letter, a digit, or `_` (such as `-`, `.`, or `é`): the list inserts
+`@code-reviewer`, which these releases read as `@code`, so type `@"code-reviewer"` instead.
 Update to v2026.10.15 or later. Until then, write the `@` so a word doesn't directly follow it, for
 example `bob at example.com` or `@ dataclass`. The hosted service was fixed on 14 October.
 :::
@@ -550,7 +553,7 @@ When a VM runs short of memory, SAM may move a session off it: the chat shows **
 moment, then wakes on another machine with its files. If the agent was in the middle of something,
 it's told to carry on from where it stopped, in a **Task** or a **Chat**; if it was idle, it waits
 for your next message. Check what it picked up. On a self-hosted release up to v2026.10.15, a
-**Chat** waits for your next message either way. The session's **Resources** history covers both machines; see
+**Chat** waits for your next message either way, and on v2026.10.08 or earlier so does a **Task**. The session's **Resources** history covers both machines; see
 [Session Resource History](/docs/guides/session-resources/).
 
 ## None of these fit

@@ -237,3 +237,17 @@ fork|retry --launch` behaves like `sam tasks submit`; the mention note's exact s
   to update to v2026.10.15 also get #2332 (Secret variables become placeholders, v2026.10.14), and
   only message-box Instant chats without attachments lack a branch. Push-trigger edit gap appended
   to idea `01M4SRSG31V5SJNC8KCHP0KMH4`.
+
+### Round 7
+
+- **Code fact-check:** 1 MEDIUM, 2 LOW, adopted: the trigger caution's cutoff is 15:05 UTC (the
+  fixed web app went live 14:55, the API 15:02); idea **Execute** chats also get a branch; the
+  old-release `@` parser only read unaccented letters, digits and `_`. v2026.10.16 (today) carries
+  #2362, so "up to v2026.10.15" is exact.
+- **User journeys:** 1 MEDIUM, 4 LOW. Adopted: the Instant no-branch rule is now consistent in
+  `instant-sessions.md`, `session-troubleshooting.md` and `idea-execution.md` (no attachments, not
+  from **Execute**); on v2026.10.08 or earlier a moved Task also waits. Already fixed by the
+  fact-check: the cutoff time and accented names. Pushed back: "a new workspace on an old node
+  gets the placeholder without `exec_with_secrets`" — placement only reuses nodes whose agent build
+  matches `VM_AGENT_REQUIRED_VERSION` (`node-selection.ts`), and #2332 changed the VM agent, so
+  older nodes don't receive new workspaces.

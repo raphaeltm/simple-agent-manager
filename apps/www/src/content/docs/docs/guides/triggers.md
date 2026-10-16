@@ -40,7 +40,7 @@ You can create triggers yourself, or ask an agent in the project to create them 
      **Ignore draft pull requests**; to start when a draft is marked ready, add `ready_for_review`
      to **Actions**.
 
-     :::caution[GitHub triggers made before 13 October, 14:40 UTC]
+     :::caution[GitHub triggers made before 13 October, 15:05 UTC]
      The form used to keep `created` in **Actions** whatever the event, which issues, pull requests,
      and pushes never send, and it didn't save a cleared **Ignore draft pull requests**. So a
      trigger made before then (before v2026.10.14 on a self-hosted instance) may never run. Open

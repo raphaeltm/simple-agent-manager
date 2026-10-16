@@ -80,7 +80,7 @@ When an agent finishes its work:
 
 ## Where the work lands
 
-Every **submitted task** gets its own **output branch** — a prefixed name derived from your description, `sam/` by default (self-hosters can change the prefix with `BRANCH_NAME_PREFIX`). This covers work you submit as a task and work an agent creates with `dispatch_task`, on either runtime. An [Instant](/docs/guides/instant-sessions/) chat is the exception: it gets no branch at all — see [What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work). Note that having a branch does not mean SAM pushes to it: conversation-mode work (including any task using the **Lightweight** workspace profile) gets a branch but no auto-commit. The workspace is now checked out on that branch from the moment it's created: SAM clones your project's default branch as the base, then creates and checks out the output branch before the agent starts. Run `git branch --show-current` inside a task workspace and you'll see the task branch, not `main`.
+Every **submitted task** gets its own **output branch** — a prefixed name derived from your description, `sam/` by default (self-hosters can change the prefix with `BRANCH_NAME_PREFIX`). This covers work you submit as a task and work an agent creates with `dispatch_task`, on either runtime. A chat you type into the message box on an [Instant](/docs/guides/instant-sessions/) profile, without attachments, is the exception: it gets no branch at all — see [What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work). Note that having a branch does not mean SAM pushes to it: conversation-mode work (including any task using the **Lightweight** workspace profile) gets a branch but no auto-commit. The workspace is now checked out on that branch from the moment it's created: SAM clones your project's default branch as the base, then creates and checks out the output branch before the agent starts. Run `git branch --show-current` inside a task workspace and you'll see the task branch, not `main`.
 
 That means an agent that never thinks about branching still produces a reviewable branch and a PR, instead of committing on top of your default branch.
 
@@ -110,12 +110,12 @@ SAM automatically generates concise titles for ideas using Workers AI:
 
 Configure via environment variables:
 
-| Variable                             | Default               | Description                                |
-| ------------------------------------ | --------------------- | ------------------------------------------ |
+| Variable                             | Default                         | Description                                |
+| ------------------------------------ | ------------------------------- | ------------------------------------------ |
 | `TASK_TITLE_MODEL`                   | `@cf/google/gemma-4-26b-a4b-it` | Workers AI model for title generation      |
-| `TASK_TITLE_GENERATION_ENABLED`      | `true`                | Set `false` to always use truncation       |
-| `TASK_TITLE_TIMEOUT_MS`              | `5000`                | Per-attempt timeout                        |
-| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | `100`                 | Messages at or below this length bypass AI |
+| `TASK_TITLE_GENERATION_ENABLED`      | `true`                          | Set `false` to always use truncation       |
+| `TASK_TITLE_TIMEOUT_MS`              | `5000`                          | Per-attempt timeout                        |
+| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | `100`                           | Messages at or below this length bypass AI |
 
 ## Agent-to-Agent Dispatch
 
@@ -125,17 +125,17 @@ Running agents can spawn follow-up work within the same project using MCP tools.
 
 An agent running inside a workspace has access to MCP tools that provide project awareness:
 
-| Tool                  | Purpose                                                                       |
-| --------------------- | ----------------------------------------------------------------------------- |
-| `dispatch_task`       | Spawn work using the selected profile runtime or an explicit runtime override |
-| `create_idea`         | Create a new idea                                                             |
-| `update_idea`         | Update an idea's title, content, priority, or status                          |
-| `list_ideas`          | View existing ideas                                                           |
-| `get_idea`            | Read idea details                                                             |
-| `search_ideas`        | Search ideas by keyword                                                       |
-| `update_task_status`  | Report progress                                                               |
+| Tool                  | Purpose                                                                                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dispatch_task`       | Spawn work using the selected profile runtime or an explicit runtime override                                                                           |
+| `create_idea`         | Create a new idea                                                                                                                                       |
+| `update_idea`         | Update an idea's title, content, priority, or status                                                                                                    |
+| `list_ideas`          | View existing ideas                                                                                                                                     |
+| `get_idea`            | Read idea details                                                                                                                                       |
+| `search_ideas`        | Search ideas by keyword                                                                                                                                 |
+| `update_task_status`  | Report progress                                                                                                                                         |
 | `complete_task`       | Mark the current work as done; pass the pull request URL as `evidence.prUrl` so it is saved on the task, alongside any structured verification evidence |
-| `request_human_input` | Ask the user for a decision                                                   |
+| `request_human_input` | Ask the user for a decision                                                                                                                             |
 
 `dispatch_task` accepts an optional `runtime` value of `vm` or `cf-container`. Container dispatch starts an [Instant](/docs/guides/instant-sessions/) task without VM sizing or cloud credentials — but only when asked: dispatch defaults to a VM unless `cf-container` is set explicitly or comes from the dispatching profile. Explicit VM-only options such as `vmSize`, `provider`, `vmLocation`, `workspaceProfile`, and `devcontainerConfigName` cannot be combined with a container runtime; choose `runtime: "vm"` or remove those options.
 

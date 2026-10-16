@@ -425,8 +425,8 @@ from an idea, a task, or a quick question, and SAM records the new chat's parent
 4. Add what to do next at the end of the message, keeping the IDs, and send it. To build on what
    the original agent pushed, say so, for example "continue from the original chat's branch". If
    the original ran on a VM, the new agent can look the branch up from the parent task ID; a chat
-   started from the message box on an Instant profile, without attachments, has no branch of its
-   own, so name the branch its agent pushed to.
+   started from the message box on an Instant profile, without attachments and not from an idea's
+   **Execute** button, has no branch of its own, so name the branch its agent pushed to.
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/chat-fork-composer-mobile.png 2x" />
