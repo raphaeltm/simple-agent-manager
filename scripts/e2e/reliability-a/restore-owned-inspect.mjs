@@ -1,13 +1,20 @@
 import {readFile,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {inspectOwnedFixture} from './owner-terminal-inspect.mjs';
-const root='/tmp/reliability-vm-claude-owner-inspect',api='https://api.sammy.party';
+export function approvedAttemptBinding(name='original'){
+ if(name==='original')return Object.freeze({root:'/tmp/reliability-vm-claude-owner-inspect',started:1792125871407,hard:1792127371407,previousWorkspace:'01M51CJ70CX1ZYQ3M8TDVGM885'});
+ if(name==='dto-readstate-0535')return Object.freeze({root:'/tmp/reliability-vm-claude-owner-inspect-2',started:1792128900000,hard:1792130400000,previousWorkspace:'01M51GKB78GQ00MXE8M7H5WE1E'});
+ throw new Error('configuration');
+}
+const attemptName=process.env.SAM_VERIFICATION_ATTEMPT??'original',binding=approvedAttemptBinding(attemptName);
+const root=binding.root,api='https://api.sammy.party';
 const project='01KJNR9R3TEN3KX1ETE33852R8',task='01M51CCMB1S684RXVNBNDQRDAS',session='1135ad88-96dd-4ec2-a1d1-5813d295d2a5',branch='sam/authorized-one-required-reliability-dqrdas',profile='01KRS7Z2R88JFC73ARA7DV9WTK';
 const id=v=>typeof v==='string'&&/^[0-9A-HJKMNP-TV-Z]{26}$/.test(v);
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 // Called only AFTER exact task/owner/session/branch binding and accepted same-run recovery proof.
-export function pendingRecovery(status,workspaceId,originalHttpStatus){
- return (status==='queued'&&workspaceId===null)||(workspaceId==='01M51CJ70CX1ZYQ3M8TDVGM885'&&originalHttpStatus===404&&['sleeping','queued'].includes(status));
+export function pendingRecovery(status,workspaceId,originalHttpStatus,name='original'){
+ const previous=approvedAttemptBinding(name).previousWorkspace;
+ return (status==='queued'&&workspaceId===null)||(workspaceId===previous&&originalHttpStatus===404&&['sleeping','queued'].includes(status));
 }
 export function literalIdle(s,since,now){
  return s?.activity==='idle'&&s.runtimeWorkState==='inactive'&&s.runtimeWorkCount===0
@@ -27,10 +34,10 @@ export async function run({requestSafe,logoutSafe,summary}){
  };
  const readRuntime=async()=>{
   const t=await bind();out.pendingRecovery=false;
-  if(pendingRecovery(t.status,t.workspaceId,null)){ws=undefined;out.pendingRecovery=true;out.idle=false;await save();return t;}
+  if(pendingRecovery(t.status,t.workspaceId,null,attemptName)){ws=undefined;out.pendingRecovery=true;out.idle=false;await save();return t;}
   if(!id(t.workspaceId))throw 0;
-  const w=await get('/api/workspaces/'+t.workspaceId,'workspace',t.workspaceId==='01M51CJ70CX1ZYQ3M8TDVGM885');
-  if(!w&&pendingRecovery(t.status,t.workspaceId,404)){ws=undefined;out.pendingRecovery=true;out.idle=false;await save();return t;}
+  const w=await get('/api/workspaces/'+t.workspaceId,'workspace',t.workspaceId===binding.previousWorkspace);
+  if(!w&&pendingRecovery(t.status,t.workspaceId,404,attemptName)){ws=undefined;out.pendingRecovery=true;out.idle=false;await save();return t;}
   out.subcheck='workspace-binding';await save();if(!w||w.id!==t.workspaceId||w.projectId!==project||w.chatSessionId!==session||w.branch!==branch||w.repository!=='serverspresentation2025/crewai')throw 0;ws=w;
   const a=await get(`/api/projects/${project}/sessions/${session}/state`,'runtime-state');
   lastState=a.state;
@@ -39,12 +46,13 @@ export async function run({requestSafe,logoutSafe,summary}){
   out.idle=literalIdle(a.state,clock.started,Date.now());await save();return t;
  };
  try{
-  if(Date.now()>=action||clock.started!==1792125871407||hard!==1792127371407)throw 0;
+  if(Date.now()<binding.started||Date.now()>=action||clock.started!==binding.started||hard!==binding.hard)throw 0;
   const {chromium}=await import('/tmp/reliability-browser-deps/node_modules/playwright/index.mjs');browser=await chromium.launch({headless:true});c=await browser.newContext();
   let r=await requestSafe(c,api,{path:'/api/auth/token-login',method:'POST',data:{token:process.env.SAM_PLAYWRIGHT_PRIMARY_USER}});delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;out.loginStatus=r.status;if(r.category!=='ok')throw 0;
   owner=(await get('/api/auth/get-session','owner'))?.user?.id;if(typeof owner!=='string'||!owner)throw 0;
   const accepted=JSON.parse(await readFile(root+'/accepted-recovery.json','utf8'));
   if(accepted.promptStatus!==202||accepted.authCleanup!==true||accepted.browserClosed!==true)throw 0;
+  if(attemptName==='dto-readstate-0535'&&(accepted.runId!=='dto-readstate-0535'||accepted.taskId!==task||accepted.sessionId!==session||accepted.branch!==branch||accepted.agentProfileId!==profile||accepted.previousWorkspaceId!==binding.previousWorkspace||accepted.startedAt!==binding.started||accepted.hard!==binding.hard||!Number.isSafeInteger(accepted.acceptedAt)||accepted.acceptedAt<binding.started||accepted.acceptedAt>Date.now()))throw 0;
   const original=JSON.parse(await readFile(root+'/task-before.json','utf8'));if(original.status!=='sleeping')throw 0;
   await bind();restored=true;out.stage='restore-idle';await save();
   while(Date.now()<action){await readRuntime();if(out.workspaceRunning&&out.agentClaude&&out.agentSessionId&&out.idle)break;await pause(10000);}
