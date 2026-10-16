@@ -112,11 +112,11 @@ test('actual bootstrap capsule yields only fixed steps and booleans on success a
 test('readonly diagnosis uses one fixed prompt, no acceptance marker or mutation endpoint, and rejects other kinds/slots',()=>{
  const root=mkdtempSync(join(tmpdir(),'sam-readonly-state-'));
  try{
-  for(const mode of ['readonly-state','resume-incomplete','unknown-kind','wrong-slot','completed-sleep','completed-active']){
+  for(const mode of ['readonly-state','resume-incomplete','unknown-kind','wrong-slot','completed-sleep','completed-active','completed-preflight']){
    const dir=join(root,mode);mkdirSync(dir,{mode:0o700});
    const contexts=[0,1].map(i=>({taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,workspaceId:uid(20+i),nodeId:uid(30+i),branch:i?'sam/second':'sam/first',agentProfileId:uid(40+i),agentType:i?'claude-code':'openai-codex',submittedAt:Date.now()-1000,evidencePrUrl:'https://github.com/raphaeltm/simple-agent-manager/pull/2355',receipt:{taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,branchName:i?'sam/second':'sam/first',status:'queued'}}));
    writeFileSync(join(dir,'config.json'),JSON.stringify({createdAt:Date.now()-2000,expiresAt:Date.now()+3600000,contexts,cleanupAuthorized:false}),{mode:0o600});
-   writeFileSync(join(dir,'operation.json'),JSON.stringify({kind:mode==='unknown-kind'?'arbitrary-prompt':mode.startsWith('completed-')?'sleep':mode==='resume-incomplete'?'resume-incomplete':'readonly-state',contextSlot:mode==='wrong-slot'?1:0}),{mode:0o600});
+   writeFileSync(join(dir,'operation.json'),JSON.stringify({kind:mode==='unknown-kind'?'arbitrary-prompt':mode==='completed-preflight'?'sleep-preflight':mode.startsWith('completed-')?'sleep':mode==='resume-incomplete'?'resume-incomplete':'readonly-state',contextSlot:mode==='wrong-slot'?1:0}),{mode:0o600});
    for(const n of ['queue-controller.mjs','b-probe.py','git-probe.py','terminal-observer.py'])copyFileSync(join(here,n),join(dir,n));
    const mock=join(dir,'mock.mjs');
    writeFileSync(mock,`const own=${JSON.stringify(contexts[0])},canary=${JSON.stringify(canary)},mode=${JSON.stringify(mode)};let prompted=false,asleep=!mode.startsWith('completed-'),loggedIn=true;
@@ -149,8 +149,9 @@ test('readonly diagnosis uses one fixed prompt, no acceptance marker or mutation
     }}}),close:async()=>{}})};`);
    const entry=join(dir,'entry.mjs');writeFileSync(entry,readFileSync(join(here,'instant-bound-controller.mjs'),'utf8').replace("'/tmp/reliability-browser-deps/node_modules/playwright/index.mjs'",JSON.stringify(pathToFileURL(mock).href)));
    const r=spawnSync(process.execPath,[join(here,'safe-controller.mjs'),entry,'3000'],{encoding:'utf8',timeout:5000,env:{...process.env,SAM_INSTANT_BOUND_ROOT:dir,SAM_PLAYWRIGHT_PRIMARY_USER:canary}});
-   assert.equal(r.status,0);assert.equal(r.stderr,'');assert.ok(!r.stdout.includes(canary));assert.equal(JSON.parse(r.stdout).category,['readonly-state','resume-incomplete','completed-sleep'].includes(mode)?'ok':'controller',mode);
+   assert.equal(r.status,0);assert.equal(r.stderr,'');assert.ok(!r.stdout.includes(canary));assert.equal(JSON.parse(r.stdout).category,['readonly-state','resume-incomplete','completed-sleep','completed-preflight'].includes(mode)?'ok':'controller',mode);
    assert.equal(existsSync(join(dir,contexts[0].taskId+'-phase-start.json')),mode==='resume-incomplete','only new acceptance resume creates a marker');
+   if(mode.startsWith('completed-')){const t=JSON.parse(readFileSync(join(dir,'sleep-telemetry.json'),'utf8'));assert.equal(t.authCleanup,true);assert.equal(t.postAttempted,mode==='completed-sleep');assert.ok(!JSON.stringify(t).includes(canary));if(mode==='completed-active'){assert.equal(t.stage,'terminal-state');assert.equal(t.stateChecks.activityAllowed,false);}if(mode==='completed-preflight'){assert.equal(t.bindPass,2);assert.equal(t.stateChecks.stateNull,true);}}
    if(mode==='resume-incomplete')assert.equal(JSON.parse(readFileSync(join(dir,'acceptance-attempt.json'),'utf8')).priorOutcome,'failed');
   }
  }finally{rmSync(root,{recursive:true,force:true});}
