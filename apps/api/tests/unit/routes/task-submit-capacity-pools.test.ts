@@ -427,6 +427,33 @@ describe('task submit capacity-pool placement', () => {
     }
   });
 
+  it('omits system-origin bootstrap copies when forking an archived fork', async () => {
+    const { sqlite, env } = await forkFixture();
+    try {
+      mocks.getMessages.mockResolvedValue({
+        messages: [
+          { role: 'assistant', content: 'Prior result', createdAt: 3 },
+          {
+            role: 'user',
+            origin: 'system',
+            content: 'INJECTED_BOOTSTRAP_ENVELOPE Old visible prompt OLD_APPROVAL_REMINDER',
+            createdAt: 2,
+          },
+          { role: 'user', origin: 'user', content: 'Old visible prompt', createdAt: 1 },
+        ],
+        hasMore: false,
+      });
+      expect((await forkRequest(createApp(), env)).status).toBe(202);
+      const prompt = mocks.startTaskRunnerDO.mock.calls[0]![1].taskDescription;
+      expect(prompt.split('Old visible prompt')).toHaveLength(2);
+      expect(prompt).toContain('Prior result');
+      expect(prompt).not.toContain('INJECTED_BOOTSTRAP_ENVELOPE');
+      expect(prompt).not.toContain('OLD_APPROVAL_REMINDER');
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('supplies the same historical context and one new prompt to an Instant agent', async () => {
     const { sqlite, env } = await forkFixture();
     try {

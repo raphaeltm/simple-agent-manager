@@ -124,6 +124,8 @@ export async function buildArchivedForkContext(
   }
   // Newest human/assistant text is the most useful context for a follow-up. Tool,
   // system, thinking and approval records are deliberately excluded.
+  // Bootstrap audit rows have role=user but origin=system; do not carry their
+  // injected envelopes into another fork or duplicate historical user prompts.
   const limit = parsePositiveInt(env.SAM_SESSION_MESSAGES_MAX_LIMIT, 200);
   const maxChars = parsePositiveInt(env.ARCHIVED_FORK_HISTORY_MAX_CHARS, 24_000);
   const history = await projectData.getMessages(
@@ -138,7 +140,9 @@ export async function buildArchivedForkContext(
     'desc'
   );
   const tokens: TokenRow[] = history.messages.flatMap((row, index) =>
-    (row.role === 'user' || row.role === 'assistant') && typeof row.content === 'string'
+    row.origin !== 'system' &&
+    (row.role === 'user' || row.role === 'assistant') &&
+    typeof row.content === 'string'
       ? [
           {
             id: typeof row.id === 'string' ? row.id : String(index),
