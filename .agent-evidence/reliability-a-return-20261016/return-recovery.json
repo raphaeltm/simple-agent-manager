@@ -1,0 +1,56 @@
+{
+  "baselineReturn": {
+    "agentPinMatches": true,
+    "apiSource": "e2c81c045fa16490c7515fa80573418e60ef4017",
+    "cssSha256": "1940ad180f8d6dc676dcfba9dc24d69c7030117233fa27daef35e3d13972dc2f",
+    "fullAdmissionVerified": false,
+    "githubConclusion": "success",
+    "githubRun": 38881683057,
+    "globalNondeletedVms": 0,
+    "globalNonterminalWarmClaims": 0,
+    "jsSha256": "3776c1683bfb90a766781d2aedac99d8b9cddac67966acc9d847fea099a956a2",
+    "targetSnapshotAvailableUndegradedUnclaimed": true,
+    "targetSnapshotId": "01M51QM3Y0GPFEE2SMT1TT7374",
+    "unmeasured": [
+      "pool40/config/catalogue",
+      "published runtime binary",
+      "FIRST snapshot/status",
+      "project duplicates",
+      "session recovery",
+      "absence of active deployment run"
+    ],
+    "workerPercentage": 100,
+    "workerVersion": "4f0a08ad-76d9-4bff-97aa-941601c3f4c3"
+  },
+  "currentWorkspaceId": "01M52326BBKYCMDF48EADG57HX",
+  "lostClaims": [
+    "Cannot validate original 16 host bytes/schema against pinned map.",
+    "Cannot compare restored baseline bytes to original baseline d862cb6e82142a25dd92bfb448b3de8ab8b7efba9ef681714d5bdc4d69a8c190.",
+    "Cannot run reviewed third restore or prove preservation against original expectations.",
+    "Prior first UNKNOWN and second NOT PASS remain unchanged; no historical acceptance recreated."
+  ],
+  "originalWorkspaceId": "01M50MA6XFJH5QPTZY63VJARKM",
+  "prospectiveProposal": {
+    "constraints": "Coordinator must assess remaining coverage and authorize scope/window; one configured-pool fixture; no repeat of original /tmp-only retention; preserve existing snapshots; no reconstruction or rebaseline of old cases.",
+    "durability": "Before phase end, store only allowlisted baseline/expectations/results/receipts/config clock projections in task-scoped snapshot-visible private directory plus immutable Library archive and checksum manifest; download and verify bytes before proceeding. Never raw PTY, auth, transcripts or credentials.",
+    "minimalCase": "One new VM/Claude case covering remaining original-byte sleep/wake and actual completion publication checks, followed by retained FIRST observer only if its independent original baseline is recovered. Otherwise FIRST observer remains explicitly blocked.",
+    "status": "offline proposal only; no runtime authorization"
+  },
+  "recovery": {
+    "libraryReliabilityTaggedCount": 20,
+    "libraryScopedCount": 14,
+    "limitation": "Bounded searches do not prove global nonexistence; no original export identified.",
+    "original16Located": false,
+    "originalEvidenceMapSha256": "9715d238b6fcf5cc1e45e065ea041e87e8b72b38b6776664827467a6e74c14d2",
+    "searched": [
+      "Library /engineering/reliability recursive",
+      "Library global reliability tag",
+      "durable .do-state.md export references",
+      "bounded original pathname search /workspaces and /home/node"
+    ]
+  },
+  "runtimeAdmission": "BLOCKED",
+  "runtimeStarted": false,
+  "scope": "read-only return subset and bounded existing-export recovery",
+  "taskId": "01M5009MRH475RWK0M2YFDHTNP"
+}
