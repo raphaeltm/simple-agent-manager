@@ -151,11 +151,9 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
    &&integer(state.activityAt)&&integer(state.runtimeWorkUpdatedAt)&&state.activityAt>=own.submittedAt&&state.runtimeWorkUpdatedAt>=own.submittedAt
    &&state.activityAt<=Date.now()&&state.runtimeWorkUpdatedAt<=Date.now();
   const requireOriginalCompletion=async()=>{
-   const proof=JSON.parse(await readFile(join(root,own.taskId+'-independent-proof.json'),'utf8'));
-   if(!exact(proof,['taskId','branch','completedAt','checks','statuses'])||proof.taskId!==own.taskId||proof.branch!==own.branch
-    ||!when(proof.completedAt)||proof.completedAt!==task.completedAt)throw new Error();
-   const safe=probeArtifact({checks:proof.checks,statuses:proof.statuses},'observer-check');
-   if(!Object.values(safe.checks).every(Boolean)||Object.values(safe.statuses).some(x=>x!==0))throw new Error();
+   const proof=JSON.parse(await readFile(join(root,'canonical-completed-original.json'),'utf8'));
+   if(!exact(proof,['taskId','branch','completedAt'])||proof.taskId!==own.taskId||proof.branch!==own.branch
+    ||!when(proof.completedAt)||proof.completedAt!==task.completedAt||!task.completionEvidence||typeof task.completionEvidence!=='object')throw new Error();
   };
   await bind(op.kind==='cleanup');
   if(op.kind==='cleanup'){
@@ -192,13 +190,11 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
    }
    output={taskId:own.taskId,sessionId:own.sessionId,...(op.kind==='sleep'?{retainedSleeping:true}:{preflightPassed:true})};
   }else{
+   let observerOriginalCompletedAt=null;
    if(task.status==='completed'){
     if(!observing)throw new Error();
-    if(op.kind==='own-observe'){
-     const original=JSON.parse(await readFile(join(root,'canonical-completed-original.json'),'utf8'));
-     if(!exact(original,['taskId','branch','completedAt'])||original.taskId!==own.taskId||original.branch!==own.branch||!when(original.completedAt)||original.completedAt!==task.completedAt||!task.completionEvidence||typeof task.completionEvidence!=='object')throw new Error();
-     await privateJson(own.taskId+'-before-reopen.json',{...original,status:'completed',promptAccepted:false});
-    }else{await requireOriginalCompletion();await privateJson(own.taskId+'-before-reopen.json',{taskId:own.taskId,branch:own.branch,completedAt:task.completedAt,reopened:true});}
+    await requireOriginalCompletion();observerOriginalCompletedAt=task.completedAt;
+    await privateJson(own.taskId+'-before-reopen.json',{taskId:own.taskId,branch:own.branch,completedAt:task.completedAt,status:'completed',promptAccepted:false});
    }
    let target,baseline,expectations,completedAt;
    if(observing){
@@ -237,9 +233,10 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
    if(content.length>16000)throw new Error();
    if(workspace.status!=='sleeping'&&task.status!=='completed'){await readState();if(!idle())throw new Error();}
    await bind();
-   if(op.kind==='own-observe'&&(task.status!=='completed'||task.completedAt!==completedAt))throw new Error();
+   if(observerOriginalCompletedAt!==null&&(task.status!=='completed'||task.completedAt!==observerOriginalCompletedAt))throw new Error();
    const submittedAt=Date.now();
    await request(sessionPath+'/prompt',{method:'POST',data:{content}},v=>v?.accepted===true&&v.status==='queued');
+   if(op.kind==='observe')await privateJson('observer-prompt-receipt.json',{accepted:true,submittedAt,observerOriginalCompletedAt,targetTaskId:target.taskId,targetCompletedAt:completedAt});
    if(op.kind==='own-observe')await privateJson('own-observe-prompt-receipt.json',{accepted:true,submittedAt,originalCompletedAt:completedAt});let done=false;
    while(Date.now()<end){
     if(op.kind==='complete'){

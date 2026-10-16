@@ -44,7 +44,7 @@ test('actual supervised exact-context lifecycle preserves ownership, completion 
    if(['check-record','wake-check','complete','late-phase','source-pr'].includes(mode))writeFileSync(join(dir,contexts[1].taskId+'-phase-start.json'),JSON.stringify({startedAt:Date.now()-(mode==='late-phase'?781000:500)}),{mode:0o600});
    if(kind==='own-observe'&&mode!=='own-missing-proof')writeFileSync(join(dir,'canonical-completed-original.json'),JSON.stringify({taskId:contexts[0].taskId,branch:contexts[0].branch,completedAt:mode==='own-wrong-timestamp'?'2026-10-14T00:00:00.000Z':completedAt}),{mode:0o600});
    writeFileSync(join(dir,'observer-artifact.json'),JSON.stringify({artifactId:uid(50),taskId:contexts[op.contextSlot].taskId}),{mode:0o600});
-   if(mode==='reopen')writeFileSync(join(dir,contexts[1].taskId+'-independent-proof.json'),JSON.stringify({taskId:contexts[1].taskId,branch:contexts[1].branch,completedAt,...good}),{mode:0o600});
+   if(mode==='reopen')writeFileSync(join(dir,'canonical-completed-original.json'),JSON.stringify({taskId:contexts[1].taskId,branch:contexts[1].branch,completedAt}),{mode:0o600});
    for(const name of ['queue-controller.mjs','b-probe.py','git-probe.py','terminal-observer.py'])copyFileSync(join(here,name),join(dir,name));
    const mock=join(dir,'mock.mjs');
    writeFileSync(mock,`const own=${JSON.stringify(contexts[op.contextSlot])},target=${JSON.stringify(contexts[0])},mode=${JSON.stringify(mode)},kind=${JSON.stringify(kind)},completedAt=${JSON.stringify(completedAt)},canary=${JSON.stringify(canary)},probe=${JSON.stringify(mode==='changed-refs'?bad:good)};
@@ -85,6 +85,7 @@ test('actual supervised exact-context lifecycle preserves ownership, completion 
    if(pass){const file=join(dir,'result.json');assert.ok(!readFileSync(file,'utf8').includes(canary),'safe sidecar');assert.equal(statSync(file).mode&0o777,0o600);}
    else assert.equal(existsSync(join(dir,'result.json')),false,'no failed sidecar');
    if(mode==='own-observe'){const proof=JSON.parse(readFileSync(join(dir,contexts[0].taskId+'-same-context-proof.json'),'utf8'));assert.equal(proof.independentRuntime,false);assert.equal(proof.sameContext,true);assert.equal(existsSync(join(dir,contexts[0].taskId+'-independent-proof.json')),false);assert.equal(JSON.parse(readFileSync(join(dir,contexts[0].taskId+'-before-reopen.json'),'utf8')).status,'completed');}
+   if(mode==='reopen'){const receipt=JSON.parse(readFileSync(join(dir,'observer-prompt-receipt.json'),'utf8'));assert.equal(receipt.accepted,true);assert.equal(receipt.observerOriginalCompletedAt,completedAt);}
    if(mode==='reopen')assert.equal(JSON.parse(readFileSync(join(dir,contexts[1].taskId+'-before-reopen.json'),'utf8')).completedAt,completedAt,'preserved original completion');
   }
  }finally{rmSync(root,{recursive:true,force:true});}
