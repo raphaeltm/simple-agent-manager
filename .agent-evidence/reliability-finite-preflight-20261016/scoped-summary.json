@@ -1,0 +1,21 @@
+{
+  "authorization": "READONLY readiness only; no clock/login/task/provision/newwindow; explicit rootGO required.",
+  "cost": {
+    "activePlusTailVmMinutes": 85,
+    "excludes": "IP,tax,API,storage,provider-delay",
+    "maxComputeEur": 0.0512,
+    "minComputeEur": 0.0176,
+    "roundedHours": 2
+  },
+  "explicitProtectedSixPass": true,
+  "frozenHead": "6eaaf16b69f9b9b2a40acb68e80020eaff20ac48",
+  "observedAtMs": 1792157261422,
+  "qualifiers": [
+    "Broad project recovery count2 is the already accepted terminal failed/cancelled historical rows, not active recovery; raw false helper retained.",
+    "Broad branch snapshot-count helper remains false because inventory includes cancelled/bootstrap tasks without snapshots; exact six protected IDs all pass.",
+    "Earlier unsupported version query read default binary; pinned release query HTTP200 actual SHA matches. No default-binary equivalence claimed."
+  ],
+  "runbookLibraryId": "01M52CJQ8R3QS42YW8DJPSP9ZJ",
+  "scopedPass": true,
+  "strictCleanup": true
+}

@@ -1,0 +1,20 @@
+{
+  "binarySha256": "a59a4850337fe7af588267c481dee046db5baba4d3f705c85f19f85ded09e06f",
+  "checks": {
+    "cssMatches": true,
+    "jsMatches": true,
+    "pinnedApiSourceSuccess": true,
+    "publishedBinaryMatches": true
+  },
+  "cssSha256": "1940ad180f8d6dc676dcfba9dc24d69c7030117233fa27daef35e3d13972dc2f",
+  "jsSha256": "3776c1683bfb90a766781d2aedac99d8b9cddac67966acc9d847fea099a956a2",
+  "observedAtMs": 1792157199155,
+  "ok": true,
+  "pinnedBinaryHttpStatus": 200,
+  "pinnedBinaryObservedAtMs": 1792157234825,
+  "pinnedRunId": 38889462865,
+  "unversionedProbe": {
+    "qualifier": "Unsupported version parameter routed earlier request to default binary; not pinned release proof.",
+    "sha256": "0abcf99229946110f481d9f981da8b2a8409b5d4971aaf6b79ba609d8099d909"
+  }
+}
