@@ -109,9 +109,13 @@ def main():
                 assert task['status'] == 'sleeping' and task['claimed_warm_node_id'] is None and not nodes
                 assert slept['taskId'] == own['taskId'] and slept['sessionId'] == own['sessionId'] and slept['workspaceId'] == task['workspace_id'] and config['started'] <= slept['at'] <= observed
                 assert not q("SELECT id FROM workspaces WHERE project_id=? AND chat_session_id=? AND status NOT IN ('deleted','stopped','sleeping')", [PROJECT, own['sessionId']])
-            rows = q('SELECT id,user_id,project_id,chat_session_id,workspace_id,runtime,status,degradation,expires_at,sleeping_at,snapshot_generation,home_sha256,wip_sha256 FROM session_snapshots WHERE chat_session_id=?', [own['sessionId']])
+            rows = q('SELECT id,user_id,project_id,chat_session_id,workspace_id,runtime,status,degradation,expires_at,sleeping_at,snapshot_generation,home_sha256,wip_sha256,recovery_status,recovery_claimed_at FROM session_snapshots WHERE chat_session_id=?', [own['sessionId']])
             assert len(rows) == 1
             row = rows[0]
+            if mode == 'resume-snapshot':
+                # e2 claims the snapshot BEFORE reactivating the sleeping task.
+                # Historical restored/failed IDs/times may remain; an active claim may not.
+                assert row['recovery_status'] in [None, 'restored', 'failed'] and row['recovery_claimed_at'] is None
             assert row['user_id'] == owner and row['project_id'] == PROJECT and row['workspace_id'] == slept['workspaceId'] and row['status'] == 'available' and row['runtime'] == ('cf-container' if mode == 'observer-snapshot' else 'vm') and row['degradation'] == 'none'
             assert row['snapshot_generation'] and row['expires_at'] > time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime(config['hard'] / 1000))
             source['snapshot'] = row
