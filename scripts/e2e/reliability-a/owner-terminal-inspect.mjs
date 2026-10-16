@@ -107,7 +107,9 @@ export async function inspectOwnedFixture({context,page,grant,open=browserTermin
   if(!Array.isArray(profiles?.items)||profiles.items.filter(x=>x?.name===p.name).length!==1||!profiles.items.some(x=>x?.id===profile&&x.name===p.name))throw 0;
   const t=await json(`/api/projects/${project}/tasks/${task}`),s=await json(`/api/projects/${project}/sessions/${session}?limit=1`),w=await json(`/api/workspaces/${grant.workspaceId}`);
   const runtime=await json(`/api/projects/${project}/sessions/${session}/state`);
-  if(t?.id!==task||t.projectId!==project||t.userId!==grant.ownerId||t.chatSessionId!==session||t.outputBranch!==branch||t.workspaceId!==grant.workspaceId||t.agentProfileHint!==p.name
+  // Display lookup is caller-owned only: shared foreign-owned project IDs remain IDs.
+  const publicHint=p.userId===grant.ownerId?p.name:profile;
+  if(t?.id!==task||t.projectId!==project||t.userId!==grant.ownerId||t.chatSessionId!==session||t.outputBranch!==branch||t.workspaceId!==grant.workspaceId||t.agentProfileHint!==publicHint
    ||!['in_progress','completed'].includes(t.status)||s?.session?.id!==session||s.session.taskId!==task||s.session.workspaceId!==grant.workspaceId||s.session.agentType!=='claude-code'
    ||s.session.agentSessionId!==grant.agentSessionId||runtime?.agentSessionId!==grant.agentSessionId||runtime.agentType!=='claude-code'
    ||w?.id!==grant.workspaceId||w.nodeId!==grant.nodeId||w.projectId!==project||w.chatSessionId!==session||w.branch!==branch||w.repository!=='serverspresentation2025/crewai'||w.status!=='running'||w.hardware?.cloudProvider!=='hetzner')throw 0;

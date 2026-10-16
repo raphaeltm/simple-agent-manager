@@ -14,9 +14,9 @@ async function scenario(mode){
   reads++;assert.equal(options.maxRedirects,0);assert.equal(options.headers.Origin,'https://app.sammy.party');
   let v,status=200;
   if(url.endsWith('/get-session'))v={user:{id:mode==='foreign-owner'?canary:'owner'}};
-  else if(url.includes('/agent-profiles/'))v={id:profile,userId:['foreign-profile-owner','project-shared-owner','global-foreign-owner'].includes(mode)?'foreign':'owner',name:canary,agentType:'claude-code',runtime:'vm',projectId:mode==='global-foreign-owner'?null:project};
+  else if(url.includes('/agent-profiles/'))v={id:profile,userId:['foreign-profile-owner','project-shared-owner','shared-wrong-hint','global-foreign-owner'].includes(mode)?'foreign':'owner',name:canary,agentType:'claude-code',runtime:'vm',projectId:mode==='global-foreign-owner'?null:mode==='wrong-project'?nodeId:project};
   else if(url.endsWith('/agent-profiles'))v={items:[{id:profile,name:canary},...(mode==='profile-collision'?[{id:nodeId,name:canary}]:[])]};
-  else if(url.includes('/tasks/'))v={id:task,projectId:project,userId:'owner',chatSessionId:session,outputBranch:branch,workspaceId,agentProfileHint:canary,status:'in_progress'};
+  else if(url.includes('/tasks/'))v={id:task,projectId:project,userId:'owner',chatSessionId:session,outputBranch:branch,workspaceId,agentProfileHint:mode==='project-shared-owner'?profile:canary,status:'in_progress'};
   else if(url.endsWith('/state'))v={agentSessionId:mode==='wrong-acp'?nodeId:agentSessionId,agentType:'claude-code'};
   else if(url.includes('/sessions/'))v={session:{id:session,taskId:task,workspaceId,agentType:'claude-code',agentSessionId}};
   else if(url.endsWith('/api/workspaces/'+workspaceId))v={id:workspaceId,nodeId:mode==='foreign-node'?'01M51CCV9A1D2BDK4NJDK1E3MD':nodeId,projectId:project,chatSessionId:session,branch,repository:'serverspresentation2025/crewai',status:'running',hardware:{cloudProvider:'hetzner'}};
@@ -33,7 +33,7 @@ async function scenario(mode){
   send:async f=>{frames.push(f);if(f.type==='input'){assert(f.data.data.length<3800);assert(!f.data.data.includes(canary));input=true;}if(f.type==='close_session')closed=true;},
   state:async()=>({created:true,closed:closed&&mode!=='wrong-close',failed:false}),dispose:async()=>{disposed=true;if(mode==='dispose-failure')throw new Error(canary);},
  };};
- const g=structuredClone(grant);if(mode==='wrong-receipt')g.receipt.taskId=nodeId;if(['project-shared-owner','global-foreign-owner'].includes(mode))g.expectedProfileOwnerId='foreign';
+ const g=structuredClone(grant);if(mode==='wrong-receipt')g.receipt.taskId=nodeId;if(['project-shared-owner','shared-wrong-hint','global-foreign-owner'].includes(mode))g.expectedProfileOwnerId='foreign';
  const r=await inspectOwnedFixture({context,page:{},grant:g,open,now:()=>clock,pause:async ms=>{clock+=ms;}});
  assert(!JSON.stringify(r).includes(canary));
  if(['success','project-shared-owner','missing-length'].includes(mode)){assert(r.ok&&r.quiescence&&r.terminalClosed);assert.deepEqual(frames.map(f=>f.type),['create_session','input','close_session']);assert.equal(frames[0].data.workDir,undefined);assert.deepEqual(r.state,state);}
@@ -43,7 +43,7 @@ async function scenario(mode){
  if(mode==='wrong-receipt')assert.equal(reads,0);
  if(mode==='action-deadline'){assert.equal(r.terminalClosed,true);assert.equal(r.quiescence,false);}
 }
-for(const mode of ['success','project-shared-owner','global-foreign-owner','missing-length','bad-length','foreign-owner','foreign-profile-owner','foreign-node','wrong-receipt','profile-collision','wrong-acp','bad-manifest','timeout','action-deadline','wrong-close','dispose-failure'])await scenario(mode);
+for(const mode of ['success','project-shared-owner','shared-wrong-hint','wrong-project','global-foreign-owner','missing-length','bad-length','foreign-owner','foreign-profile-owner','foreign-node','wrong-receipt','profile-collision','wrong-acp','bad-manifest','timeout','action-deadline','wrong-close','dispose-failure'])await scenario(mode);
 
 // Exercise the actual browser transport parser with arbitrary PTY canary, not a replacement parser.
 const original=globalThis.WebSocket;
@@ -60,4 +60,4 @@ try{
  await assert.rejects(browserTerminal({...page,url:()=> 'https://foreign.invalid'},'wss://example.invalid',id));
  const command=inspectionCommand(id);assert(Buffer.byteLength(command.command)<3800);assert(!command.command.includes(canary));
 }finally{globalThis.WebSocket=original;}
-console.log(JSON.stringify({protocolAndPrivacy:true,cases:18,liveCalls:0}));
+console.log(JSON.stringify({protocolAndPrivacy:true,cases:20,liveCalls:0}));
