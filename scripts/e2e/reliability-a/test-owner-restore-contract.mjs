@@ -28,7 +28,7 @@ const profileSource=deployed('apps/api/src/services/agent-profile-display.ts');a
 const task='01M51CCMB1S684RXVNBNDQRDAS',session='1135ad88-96dd-4ec2-a1d1-5813d295d2a5',project='01KJNR9R3TEN3KX1ETE33852R8';
 const branch='sam/authorized-one-required-reliability-dqrdas',profile='01KRS7Z2R88JFC73ARA7DV9WTK';
 const oldWorkspace='01M51CJ70CX1ZYQ3M8TDVGM885',workspace='01M51GKB78GQ00MXE8M7H5WE1E',node='01M51GEA2HSTJ8D6G3RHT04ZTJ',acp='01M51GQ031Q6VMEDMBNTVDXE6K';
-const start=1792125871407,hard=1792127371407,canary='PRIVATE_SYNTHETIC_PROTOCOL_CANARY';
+const originalStart=1792125871407,originalHard=1792127371407,canary='PRIVATE_SYNTHETIC_PROTOCOL_CANARY';
 const hashes={'git-probe.py':'f061b7cd447cef55ceb08cb6a78fcb0b236ec3f347731e66d4b8447c224afa6c','b-probe.py':'889d7588ed44c8ab89e6ba7880ff20d81017f294bb7b31edfbc320ced064f509','terminal-observer.py':'d0970080ce89ab2810c0c9d758d1fc978efafe75fed91a4454f08639da88adff'};
 const sha=b=>createHash('sha256').update(b).digest('hex');
 const projectDto=(value,keys)=>{assert(Object.keys(value).every(k=>keys.has(k)));return value;};
@@ -41,12 +41,14 @@ try{
  await writeFile(join(assets,'expectations.json'),'{}');
  const repository=join(root,'repository');await mkdir(repository);execFileSync('git',['init','--initial-branch='+branch],{cwd:repository,stdio:['ignore','pipe','pipe']});
  await mkdir(join(repository,'.reliability-a'));await writeFile(join(repository,'.reliability-a/baseline.json'),'{}');
- for(const mode of ['success','original-deleted-pending','missing-assets','denied-pending','foreign-session','token-denied','bad-grant','bad-manifest','download-denied','wrong-close','sleep-denied','logout-denied','grant-deadline','persistence-failure']){
+ for(const mode of ['success','second-attempt-success','original-deleted-pending','missing-assets','denied-pending','foreign-session','token-denied','bad-grant','bad-manifest','download-denied','wrong-close','sleep-denied','logout-denied','grant-deadline','persistence-failure']){
   count++;const directory=join(root,mode);await mkdir(directory,{mode:0o700});
+  const second=mode==='second-attempt-success',start=second?1792128900000:originalStart,hard=second?1792130400000:originalHard;
   let time=start+10000,taskReads=0,phase='pending',input=false,closed=false,slept=false,runId,artifactDirectory;
   let contextClosed=false,loggedOut=false,tokenReads=0,persistFailure=false;const frames=[];
   const grant={workspaceId:workspace,nodeId:node,ownerId:mode==='bad-grant'?'foreign':'fixture-owner',expectedProfileOwnerId:'shared-owner',agentSessionId:acp,runtime:'vm',agentVersion:vmHead,expiresAt:time+240000,storedProfileId:profile,storedProfileObservedAt:time,receipt:{taskId:task,sessionId:session,branchName:branch,status:'queued'}};
-  for(const [name,value] of Object.entries({clock:{started:start,hard},'accepted-recovery':{promptStatus:202,authCleanup:true,browserClosed:true},'task-before':{status:'sleeping'},grant}))await writeFile(join(directory,name+'.json'),JSON.stringify(value),{mode:0o600});
+  const accepted={promptStatus:202,authCleanup:true,browserClosed:true,...(second?{runId:'dto-readstate-0535',taskId:task,sessionId:session,branch,agentProfileId:profile,previousWorkspaceId:workspace,startedAt:start,hard,acceptedAt:time-1}:{})};
+  for(const [name,value] of Object.entries({clock:{started:start,hard},'accepted-recovery':accepted,'task-before':{status:'sleeping'},grant}))await writeFile(join(directory,name+'.json'),JSON.stringify(value),{mode:0o600});
   const profileDto={id:profile,userId:'shared-owner',projectId:project,name:canary,agentType:'claude-code',runtime:'vm',vmSizeOverride:null};
   const response=(value,status=200)=>{const b=Buffer.isBuffer(value)?value:Buffer.from(JSON.stringify(value));return {status:()=>status,body:async()=>b,json:async()=>JSON.parse(b.toString()),headers:async()=>({'content-length':String(b.length)}),dispose:async()=>{}};};
   const context={request:{fetch:async(url,options)=>{
@@ -57,7 +59,7 @@ try{
    if(url.endsWith('/api/nodes'))return response({nodes:[]},loggedOut?401:200);
    if(url.includes('/agent-profiles/'))return response(profileDto);
    if(url.endsWith('/agent-profiles'))return response({items:[profileDto]});
-   if(url.includes('/tasks/')){taskReads++;phase=taskReads<=2?'pending':taskReads===3&&mode!=='success'?'old':taskReads<=4?'creating':taskReads===5?'running-no-acp':'running';return response(projectDto({id:task,projectId:project,userId:'fixture-owner',workspaceId:phase==='pending'?null:phase==='old'?oldWorkspace:workspace,outputBranch:branch,agentProfileHint:profile,status:phase==='pending'?'queued':phase==='old'?'sleeping':'in_progress',completedAt:null,completionEvidence:null},taskKeys));}
+   if(url.includes('/tasks/')){taskReads++;phase=taskReads<=2?'pending':taskReads===3&&!['success','second-attempt-success'].includes(mode)?'old':taskReads<=4?'creating':taskReads===5?'running-no-acp':'running';return response(projectDto({id:task,projectId:project,userId:'fixture-owner',workspaceId:phase==='pending'?null:phase==='old'?oldWorkspace:workspace,outputBranch:branch,agentProfileHint:profile,status:phase==='pending'?'queued':phase==='old'?'sleeping':'in_progress',completedAt:null,completionEvidence:null},taskKeys));}
    if(url.endsWith('/state'))return response({agentSessionId:['creating','running-no-acp'].includes(phase)?null:acp,agentType:['creating','running-no-acp'].includes(phase)?null:'claude-code',state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,activityAt:time,runtimeWorkUpdatedAt:time}});
    if(url.includes('/sessions/'))return response({session:{id:session,taskId:mode==='foreign-session'?node:task,workspaceId:phase==='pending'?null:phase==='old'?oldWorkspace:workspace,agentSessionId:['creating','running-no-acp'].includes(phase)?null:acp,agentType:['creating','running-no-acp'].includes(phase)?null:'claude-code',task:{id:task,outputBranch:branch}},state:null,messages:[],hasMore:false});
    if(url.endsWith('/api/workspaces/'+oldWorkspace))return response({},mode==='denied-pending'?403:404);
@@ -90,12 +92,12 @@ try{
   globalThis.__ownerContract={now:()=>time,pause:async ms=>{time+=ms;},failWrite:()=>persistFailure,chromium:{launch:async()=>({newContext:async()=>context,close:async()=>{contextClosed=true;}})}};
   let adapter=await readFile(new URL('./owner-terminal-inspect.mjs',import.meta.url),'utf8');adapter=adapter.replace('now=Date.now,pause=ms=>new Promise(r=>setTimeout(r,ms))','now=()=>globalThis.__ownerContract.now(),pause=ms=>globalThis.__ownerContract.pause(ms)');
   await writeFile(join(directory,'owner-terminal-inspect.mjs'),adapter);
-  let caller=await readFile(new URL('./restore-owned-inspect.mjs',import.meta.url),'utf8');caller=caller.replace("'/tmp/reliability-vm-claude-owner-inspect'",JSON.stringify(directory)).replace("const {chromium}=await import('/tmp/reliability-browser-deps/node_modules/playwright/index.mjs');",'const {chromium}=globalThis.__ownerContract;').replaceAll('Date.now()','globalThis.__ownerContract.now()').replace('const pause=ms=>new Promise(r=>setTimeout(r,ms));','const pause=ms=>globalThis.__ownerContract.pause(ms);');
+  let caller=await readFile(new URL('./restore-owned-inspect.mjs',import.meta.url),'utf8');caller=caller.replace(second?"'/tmp/reliability-vm-claude-owner-inspect-2'":"'/tmp/reliability-vm-claude-owner-inspect'",JSON.stringify(directory)).replace("process.env.SAM_VERIFICATION_ATTEMPT??'original'",second?"'dto-readstate-0535'":"'original'").replace("const {chromium}=await import('/tmp/reliability-browser-deps/node_modules/playwright/index.mjs');",'const {chromium}=globalThis.__ownerContract;').replaceAll('Date.now()','globalThis.__ownerContract.now()').replace('const pause=ms=>new Promise(r=>setTimeout(r,ms));','const pause=ms=>globalThis.__ownerContract.pause(ms);');
   if(mode==='persistence-failure')caller=caller.replace("import {readFile,writeFile} from 'node:fs/promises';","import {readFile,writeFile as diskWrite} from 'node:fs/promises';const writeFile=async(...a)=>{if(globalThis.__ownerContract.failWrite()&&a[0].endsWith('continuation-progress.json'))throw new Error('private');return diskWrite(...a);};");
   await writeFile(join(directory,'caller.mjs'),caller);const module=await import(pathToFileURL(join(directory,'caller.mjs')).href);
   const result=await module.run({summary,logoutSafe,requestSafe});
   assert(contextClosed);assert.equal(loggedOut,mode!=='logout-denied');assert(!JSON.stringify(result).includes(canary));
-  const success=['success','original-deleted-pending','missing-assets'].includes(mode);assert.equal(result.category,success?'ok':'controller');
+  const success=['success','second-attempt-success','original-deleted-pending','missing-assets'].includes(mode);assert.equal(result.category,success?'ok':'controller');
   if(success){assert(input&&closed&&slept);assert.deepEqual(frames,['create_session','input','close_session']);const actual=JSON.parse(await readFile(join(directory,'inspection.json')));assert(actual.ok&&actual.quiescence);if(mode==='missing-assets')assert.equal(actual.state.checks.gitProbeHash,false);else assert(Object.values(actual.state.checks).every(Boolean));assert.equal((await stat(join(artifactDirectory,'state.json'))).mode&0o777,0o600);}
   if(['denied-pending','foreign-session','bad-grant','grant-deadline'].includes(mode))assert(!input);
   if(mode==='token-denied')assert(tokenReads===1&&!input);
