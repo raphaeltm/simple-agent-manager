@@ -67,9 +67,10 @@ classify the failure. Treat it like the interrupted case: check before you resen
 
 Several sections below say to check GitHub for anything the agent pushed. A chat sent from the
 message box on an Instant profile, without attachments and not from an idea's **Execute** button,
-has no branch of its own, and pushes only what you ask the agent to push. Any other chat or task
-runs on its own `sam/…` [output branch](/docs/guides/idea-execution/#where-the-work-lands), and the
-project **Files** tab shows its diff without opening a workspace.
+has no branch of its own. Any other chat or task runs on its own `sam/…`
+[output branch](/docs/guides/idea-execution/#where-the-work-lands), and the project **Files** tab
+shows what was pushed to it without opening a workspace. Either way, a **Chat** pushes only what you
+ask the agent to push; only a **Task** is committed and pushed for you when it finishes.
 
 A **Task** keeps its task completion and git delivery behavior after sleep and wake;
 a **Chat** remains a Chat. [Wake settings](/docs/guides/agents/#after-a-chat-wakes-from-sleep)

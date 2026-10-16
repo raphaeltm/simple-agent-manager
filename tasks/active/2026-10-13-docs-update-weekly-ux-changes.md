@@ -267,3 +267,10 @@ fork|retry --launch` behaves like `sam tasks submit`; the mention note's exact s
   `chat-start.ts:177`, and starts a new container on the default branch); Troubleshooting states
   both halves of the rule; an older changelog row now says "Tasks and most chats" with a link to
   the rule.
+
+### Round 10 (combined lenses)
+
+- 1 MEDIUM, 2 LOW, adopted: Troubleshooting now says a **Chat** pushes only what you ask whether or
+  not it has a branch (push depends on task mode, `server.go:1527`), and **Files** shows what was
+  pushed; the AI title section notes the no-branch Instant chat skips AI titles; "warm" reuse is
+  VM-only (every Instant launch creates a new container).

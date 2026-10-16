@@ -119,7 +119,7 @@ When you submit work from the chat:
 
 1. SAM generates a concise title from your message (an Instant chat that gets no branch keeps the start of your message as its title)
 2. A descriptive output branch is created (`sam/...`) from your default branch, unless it's an Instant chat that [gets no branch](/docs/guides/instant-sessions/#what-happens-to-your-work)
-3. SAM selects or provisions a workspace, **already checked out on that branch**, reusing a warm one when available — or, for an Instant chat that gets no branch, starts a new container on your default branch
+3. SAM selects or provisions a workspace, **already checked out on that branch**, reusing a warm VM when available — or, for an Instant chat that gets no branch, starts a new container on your default branch
 4. Your chosen agent runs autonomously with your description — unless its [permission mode](/docs/guides/agents/#permission-mode) tells it to ask you first, in which case it [waits for your answer in the chat](/docs/guides/chat-features/#when-the-agent-needs-you)
 5. When a **Task** is done, the agent commits, pushes, and opens a pull request (a **Chat** pushes only what you ask the agent to push)
 

@@ -11,7 +11,7 @@ Type your description in the project chat input and submit. Submitting a message
 
 1. **Generate a title** — short messages are used as-is; longer ones get a concise AI-generated title (an Instant chat that gets no branch keeps the start of your message as its title)
 2. **Create an output branch** — a descriptive `sam/`-prefixed name off your default branch (except for an Instant chat that [gets no branch](/docs/guides/instant-sessions/#what-happens-to-your-work))
-3. **Provision a workspace** — already checked out on that branch; reuses a warm environment if available (an Instant chat that gets no branch starts a new container on your default branch instead)
+3. **Provision a workspace** — already checked out on that branch; reuses a warm VM if available (an Instant chat that gets no branch starts a new container on your default branch instead)
 4. **Start the agent** — runs the agent from your selected profile (Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, or Amp) with your description
 5. **Stream output** — watch the agent work in real time in the chat
 
@@ -106,6 +106,7 @@ SAM automatically generates concise titles for ideas using Workers AI:
 - Messages **at or below 100 characters** are used as the title directly (no AI needed)
 - Longer messages are summarized by a Workers AI model (default: `@cf/google/gemma-4-26b-a4b-it`)
 - If AI generation fails or times out, the message is truncated to 100 characters as a fallback
+- An Instant chat that [gets no branch](/docs/guides/instant-sessions/#what-happens-to-your-work) skips AI generation; its title is your message, truncated to 100 characters
 - Generation uses exponential backoff with up to 2 retries
 
 Configure via environment variables:
