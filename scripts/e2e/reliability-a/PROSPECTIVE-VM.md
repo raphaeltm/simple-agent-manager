@@ -41,7 +41,11 @@ The sequence is:
    `resume-snapshot-request.json`. Run the actual fixed CF producer once in
    `resume-snapshot` mode with only CF_TOKEN+CF_ACCOUNT_ID. It independently requires
    VM0/claims0/recovery0, exact task/profile/branch/session and the current AVAILABLE
-   snapshot generation/expiry. Caller saves that proof as this attempt's protected
+   snapshot generation/expiry. Recovery0 also requires canonical snapshot status
+   null/restored/failed with recovery_claimed_at NULL: APIe2 takes a waking snapshot
+   claim before reactivating a Sleeping task. Historical restored task/workspace/
+   attempt/time fields do not themselves indicate an in-flight claim and remain
+   allowed. Caller saves that proof as this attempt's protected
    snapshot. It never reuses the old generation or imports old ledger events.
 2. ONE normal READY restore prompt, no tools/setup/publication/completion. Retain
    a NEW exclusive `resume-attempt-receipt.json` with actual202, submitted/accepted

@@ -68,7 +68,7 @@ class ReaderTests(unittest.TestCase):
                 elif 'FROM session_snapshots' in sql:
                     from datetime import datetime, timezone
                     restored = datetime.fromtimestamp((now - (6000 if failure == 'wrong-time' else 1000))/1000, timezone.utc).isoformat()
-                    rows = [{'id': snapshot, 'user_id': 'owner', 'project_id': reader.PROJECT, 'chat_session_id': own['sessionId'], 'workspace_id': workspace, 'runtime': runtime, 'status': 'available', 'degradation': 'none', 'expires_at': '2026-12-01T00:00:00.000Z', 'sleeping_at': '2026-10-16T06:00:00.000Z', 'snapshot_generation': 'generation2' if failure == 'wrong-generation' else 'generation1', 'home_sha256': 'a'*64, 'wip_sha256': 'b'*64, 'recovery_status': None if failure == 'wrong-status' else 'restored', 'recovery_task_id': own['taskId'], 'recovery_workspace_id': workspace, 'restored_at': restored}]
+                    rows = [{'id': snapshot, 'user_id': 'owner', 'project_id': reader.PROJECT, 'chat_session_id': own['sessionId'], 'workspace_id': workspace, 'runtime': runtime, 'status': 'available', 'degradation': 'none', 'expires_at': '2026-12-01T00:00:00.000Z', 'sleeping_at': '2026-10-16T06:00:00.000Z', 'snapshot_generation': 'generation2' if failure == 'wrong-generation' else 'generation1', 'home_sha256': 'a'*64, 'wip_sha256': 'b'*64, 'recovery_status': None if failure == 'wrong-status' else 'waking' if failure == 'resume-pending-claim' else 'restored', 'recovery_claimed_at': restored if failure in ['resume-pending-claim','resume-retained-claim'] else None, 'recovery_attempt_id':'11111111-2222-4333-8444-555555555555', 'recovery_task_id': own['taskId'], 'recovery_workspace_id': workspace, 'restored_at': restored}]
                     if failure == 'private-row':
                         rows[0].update(snapshot_generation=CANARY, recovery_status=CANARY, recovery_task_id=CANARY, recovery_workspace_id=CANARY, restored_at=CANARY, extra=CANARY)
                     if failure == 'wrong-types': rows[0].update(snapshot_generation=7, restored_at=123)
@@ -110,6 +110,9 @@ class ReaderTests(unittest.TestCase):
                 self.assertEqual(proof_file.read_bytes(), original)
                 self.assertEqual(failure_file.read_bytes(), original_failure)
                 self.assertFalse((root / 'wake-check-grant.json').exists())
+            if mode == 'resume-snapshot' and failure is not None:
+                self.assertFalse((root / 'resume-snapshot.json').exists())
+                self.assertEqual(json.loads((root / 'resume-snapshot-failure.json').read_text())['stage'],'snapshot')
             return result
 
     def test_pinned_source_contract(self):
@@ -128,6 +131,11 @@ class ReaderTests(unittest.TestCase):
         task = mapping.split('export function toTaskResponse(', 1)[1].split('export function ', 1)[0]
         self.assertIn('taskMode:', task)
         self.assertNotIn('chatSessionId:', task)
+        claim = subprocess.run(['git','show','e2c81c045fa16490c7515fa80573418e60ef4017:apps/api/src/services/session-snapshot-recovery-lifecycle.ts'],capture_output=True,check=True,text=True).stdout
+        self.assertIn("recoveryStatus: 'waking'",claim)
+        self.assertIn('recoveryClaimedAt: nowIso',claim)
+        recovery = subprocess.run(['git','show','e2c81c045fa16490c7515fa80573418e60ef4017:apps/api/src/services/session-recovery.ts'],capture_output=True,check=True,text=True).stdout
+        self.assertLess(recovery.index('const claim = await claimSessionSnapshotRecovery'),recovery.index('recoveryTask = await reactivateSleepingTask'))
 
     def test_fixed_modes(self):
         for mode in reader.MODES:
@@ -136,7 +144,7 @@ class ReaderTests(unittest.TestCase):
     def test_concrete_failures(self):
         for mode, failure, stage in [('setup', 'transport', 'settings'), ('setup', 'wrong-profile', 'mapping'), ('setup', 'foreign-claim', 'resource-guards'), *[('wake-check', f, 'restored-generation') for f in ['wrong-generation','wrong-status','wrong-time','wrong-types','private-row','missing-wake']]]:
             with self.subTest(failure=failure): self.assertEqual(self.invoke(mode, failure)['stage'], stage)
-        for failure in ['resume-vm-present','resume-foreign-task']:
+        for failure in ['resume-vm-present','resume-foreign-task','resume-pending-claim','resume-retained-claim']:
             with self.subTest(failure=failure): self.assertEqual(self.invoke('resume-snapshot',failure)['stage'],'snapshot')
 
 
