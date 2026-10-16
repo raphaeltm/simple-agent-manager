@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {readFile,writeFile,mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {inspectOwnedFixture,inspectionCommand,browserTerminal} from './owner-terminal-inspect.mjs';
-import {pendingRecovery} from './restore-owned-inspect.mjs';
+import {pendingRecovery,literalIdle} from './restore-owned-inspect.mjs';
 const task='01M51CCMB1S684RXVNBNDQRDAS',session='1135ad88-96dd-4ec2-a1d1-5813d295d2a5',project='01KJNR9R3TEN3KX1ETE33852R8';
 const branch='sam/authorized-one-required-reliability-dqrdas',profile='01KRS7Z2R88JFC73ARA7DV9WTK',workspaceId='01M51CJ70CX1ZYQ3M8TDVGM885',nodeId='01M51CCV9A1D2BDK4NJDK1E3MC';
 const canary='PRIVATE_CANARY_DO_NOT_EMIT',now=Date.now();
@@ -66,4 +70,45 @@ assert(pendingRecovery('sleeping',workspaceId,404));
 assert(!pendingRecovery('queued',workspaceId,403));
 assert(!pendingRecovery('queued',nodeId,404));
 assert(!pendingRecovery('in_progress',null,null));
-console.log(JSON.stringify({protocolAndPrivacy:true,cases:25,liveCalls:0}));
+const inactive={activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,activityAt:now,runtimeWorkUpdatedAt:now};
+assert(literalIdle(inactive,now-1,now));
+assert(!literalIdle({...inactive,runtimeWorkState:'settling'},now-1,now+300001));
+assert(!literalIdle({...inactive,runtimeWorkCount:1},now-1,now));
+assert(!literalIdle({...inactive,activityAt:now+1},now-1,now));
+// Execute the real caller control flow in an isolated copy, replacing only external boundaries.
+// This catches an inspection failure being converted to success and cleanup skipped on disk failure.
+for(const mode of ['inspection-failure','cleanup-persistence-failure','clock-reset']){
+ const directory=await mkdtemp(join(tmpdir(),'owner-restore-boundary-'));
+ try{
+  const values={clock:{started:1792125871407,hard:1792127371407+(mode==='clock-reset'?1000:0)},'accepted-recovery':{promptStatus:202,authCleanup:true,browserClosed:true},'task-before':{status:'sleeping'},grant:{workspaceId,nodeId,agentSessionId,ownerId:'owner'}};
+  for(const [name,value] of Object.entries(values))await writeFile(join(directory,name+'.json'),JSON.stringify(value));
+  const calls={logout:0,nullSession:0,protected:0,closed:0,login:0};let failPersist=false;
+  const c={request:{fetch:async url=>{
+   let v;if(url.endsWith('/get-session'))v={user:{id:'owner'}};
+   else if(url.includes('/tasks/'))v={id:task,userId:'owner',projectId:project,outputBranch:branch,workspaceId,status:'in_progress'};
+   else if(url.endsWith('/state'))v={agentSessionId,agentType:'claude-code',state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,activityAt:1792125872407,runtimeWorkUpdatedAt:1792125872407}};
+   else if(url.includes('/sessions/'))v={session:{id:session,taskId:task}};
+   else if(url.includes('/workspaces/'))v={id:workspaceId,nodeId,projectId:project,chatSessionId:session,branch,repository:'serverspresentation2025/crewai',status:'running'};
+   else throw new Error(canary);
+   return {status:()=>200,body:async()=>Buffer.from(JSON.stringify(v)),dispose:async()=>{}};
+  }},newPage:async()=>({goto:async()=>{},close:async()=>{}})};
+  globalThis.__restoreFake={now:()=>1792125872407,chromium:{launch:async()=>({newContext:async()=>c,close:async()=>{calls.closed++;}})},inspect:async()=>{if(mode==='cleanup-persistence-failure')failPersist=true;return {ok:mode!=='inspection-failure',quiescence:mode!=='inspection-failure',terminalClosed:mode!=='inspection-failure',socketClosed:mode!=='inspection-failure',stage:'done'};},failWrite:()=>failPersist};
+  let source=await readFile(new URL('./restore-owned-inspect.mjs',import.meta.url),'utf8');
+  source=source.replace("import {readFile,writeFile} from 'node:fs/promises';", "import {readFile,writeFile as diskWrite} from 'node:fs/promises';const writeFile=async(...a)=>{if(globalThis.__restoreFake.failWrite()&&a[0].endsWith('continuation-progress.json'))throw new Error('private');return diskWrite(...a);};")
+   .replace("import {inspectOwnedFixture} from './owner-terminal-inspect.mjs';",'const inspectOwnedFixture=(...a)=>globalThis.__restoreFake.inspect(...a);')
+   .replace("'/tmp/reliability-vm-claude-owner-inspect'",JSON.stringify(directory))
+   .replace("const {chromium}=await import('/tmp/reliability-browser-deps/node_modules/playwright/index.mjs');",'const {chromium}=globalThis.__restoreFake;').replaceAll('Date.now()','globalThis.__restoreFake.now()');
+  const file=join(directory,'caller.mjs');await writeFile(file,source);const caller=await import(pathToFileURL(file).href);
+  const result=await caller.run({summary:category=>({category}),logoutSafe:async()=>{calls.logout++;return {category:'ok'};},requestSafe:async(_c,_api,command,accept)=>{
+   if(command.path.endsWith('/token-login'))calls.login++;
+   if(command.path.endsWith('/sleep')){assert(accept({status:'sleeping',workspaceId,chatSessionId:session,snapshotExpiresAt:new Date(Date.now()+100000).toISOString()}));return {category:'ok',status:200};}
+   if(command.path.endsWith('/get-session')){calls.nullSession++;assert(accept(null));return {category:'ok'};}
+   if(command.path.endsWith('/nodes')){calls.protected++;return {status:401};}
+   return {category:'ok',status:200};
+  }});
+  assert.equal(result.category,'controller');
+  if(mode==='clock-reset')assert.equal(calls.login,0);
+  else assert.deepEqual(calls,{logout:1,nullSession:1,protected:1,closed:1,login:1});
+ }finally{delete globalThis.__restoreFake;await rm(directory,{recursive:true,force:true});}
+}
+console.log(JSON.stringify({protocolAndPrivacy:true,cases:32,liveCalls:0}));
