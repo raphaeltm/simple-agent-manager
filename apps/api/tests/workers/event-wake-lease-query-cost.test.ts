@@ -93,6 +93,10 @@ describe('event wake lease scheduling cost', () => {
         requested_delivery, resolved_delivery, target_session_id, lifecycle_state, created_at, updated_at)
         VALUES ('foreign-sub', 'other-project', 'agent', 'owner', 'foreign', 'fp', '{}', 'fp', 0,
           'existing_session_prompt', 'queued_for_prompt_delivery', 'target-0', 'active', 1, 1)`);
+      sql.exec(`UPDATE project_event_subscriptions SET contract_version = 2, owner_version = 2,
+        owner_project_id = 'other-project', owner_chat_session_id = 'target-0',
+        owner_task_id = 'foreign-task', expires_at = ?, delivery_lifetime_expires_at = ?
+        WHERE id = 'foreign-sub'`, now + 1000, now + 1000);
       sql.exec(`INSERT INTO project_event_delivery_batches (id, project_id, subscription_id,
         idempotency_key, idempotency_fingerprint, state, requested_delivery, resolved_delivery,
         target_session_id, match_ids_json, event_count, created_at, updated_at, delivery_channel,
