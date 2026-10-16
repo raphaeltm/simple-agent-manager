@@ -1,0 +1,19 @@
+{
+  "boundedLimitReached": false,
+  "causeEstablished": false,
+  "correlated": [],
+  "fileId": "01M52GZ6HHCV06MB8NAF1WWECH",
+  "httpStatus": 200,
+  "observedAtMs": 1792160904518,
+  "operation": "download_library_file",
+  "responseSha256": "7f058fb167bf798eabfafd274f0d91f187ee55ed3cebb89b4e6c74f850503967",
+  "result": "no-retained-correlated-cause",
+  "returnedCount": 0,
+  "sessionId": "4e5282b9-0cd5-454f-a8f0-db160b9823fe",
+  "source": "Cloudflare retained observability sam-api-staging",
+  "timeRange": {
+    "from": "2026-10-16T14:14:07Z",
+    "to": "2026-10-16T14:14:18Z"
+  },
+  "toolCallId": "exec-403c262a-4f59-43e8-b91f-4a046d01094f"
+}
