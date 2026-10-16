@@ -27,26 +27,15 @@ You can create triggers yourself, or ask an agent in the project to create them 
      **Weekly**, or **Monthly** (at a time you choose), and a timezone, or **Advanced** for a cron
      expression such as `0 9 * * 1-5`. A schedule runs at most every 15 minutes.
    - **GitHub event**: pick the **GitHub event** (**Issue**, **Issue comment**, **Pull request**, or
-     **Push**), then narrow it down. **Actions** limits it to actions such as `opened` or
-     `labeled`, **Ignore actors** skips accounts such as `dependabot[bot]`, **Required labels**
-     (issues and pull requests) needs every listed label, **Command prefix** (issue comments) only
-     reacts to comments starting with, say, `/sam`, **Branches** (pull requests and pushes) limits
-     the branch pushed to, or a pull request's source branch, and **Text contains** (not for
-     pushes) looks for a keyword in the title, body, or comment. Draft pull requests are skipped.
-
-     :::caution[Check Actions when you change the event]
-     The form starts on **Issue comment**, with **Actions** set to `created`. That value suits only
-     issue comments: for **Issue** and **Pull request**, change it (for example to `opened`, or
-     `opened, labeled` to also catch labels added later), and for **Push**, which has no actions,
-     clear it. Otherwise the trigger never runs.
-
-     You can't fix this later with **Edit**: it locks a GitHub trigger's event and filters, and
-     shows the form's defaults where a filter is empty (`created` in **Actions**,
-     `dependabot[bot]` in **Ignore actors**, `/sam` in **Command prefix**). Check the real values under **Configuration** on
-     the trigger's page (**View history**); to change them, delete and recreate the trigger, or ask
-     an agent to update it.
-     :::
-
+     **Push**), then narrow it down. **Actions** starts at the event's usual action (`opened` for
+     issues and pull requests, `created` for issue comments; pushes have none). Add others separated
+     by commas, such as `opened, labeled` to also catch labels added later, or clear it to match
+     every action; SAM refuses an action GitHub never sends for that event. **Ignore actors** skips
+     accounts such as `dependabot[bot]`, **Required labels** (issues and pull requests) needs every
+     listed label, **Command prefix** (issue comments) only reacts to comments starting with, say,
+     `/sam`, **Branches** (pull requests and pushes) limits the branch pushed to, or a pull request's
+     source branch, and **Text contains** (not for pushes) looks for a keyword in the title, body, or
+     comment. Draft pull requests are skipped unless you clear **Ignore draft pull requests**.
    - **Webhook**: optional filters on the JSON the service sends. See
      [Webhook Triggers](/docs/guides/webhook-triggers/).
 4. Write the **Prompt Template**: the instructions the agent gets on every run. **Available
@@ -90,9 +79,11 @@ box a run there can push a branch but can't comment, add a label, or open a pull
 SAM never puts a webhook trigger's token in a tool result. Instead it gives the agent a single-use
 link, valid for 10 minutes, and tells it to fetch the token from inside its workspace and pipe it
 straight into the service that will send the webhooks, such as a Worker secret or your CI's secret
-store, so the token stays out of the conversation. The agent needs credentials for that service in
-its workspace, for example a Cloudflare API token saved as a **Secret** environment variable under
-the project's **Settings → Runtime**, to update a Worker secret.
+store, so the token stays out of the conversation. The agent also needs credentials for that
+service in the same shell, for example Cloudflare credentials for `wrangler` to update a Worker
+secret. In a fresh workspace, a variable marked **Secret** in the project's runtime settings is only
+a placeholder in that shell (see [Run commands with secrets](/docs/guides/secret-execution/)), so if
+that's how you store the credential, fetch the token yourself as described below.
 
 :::caution[Only Codex agents can fetch the token]
 Fetching the token needs a SAM credential that only **Codex** sessions are given. With **Claude
@@ -110,9 +101,9 @@ cancels the agent's unused link.
 - **One run at a time, by default.** A trigger skips its turn while its previous run is still
   going, including a run that has finished its turn but is still awake. A run that has gone to
   sleep doesn't count, so a quiet chat doesn't block the next run for long.
-- **Repeated failures pause it.** After three failed, stopped, or expired runs in a row, SAM pauses the
-  trigger the next time it would run. Fix the cause, then use **Run now** until a run succeeds, and
-  only then select **Resume**: resuming straight away pauses it again at its next turn.
+- **Repeated failures pause it.** After three failed, stopped, or expired runs in a row, SAM pauses
+  the trigger the next time it would run. Fix the cause, then select **Resume**, which starts the
+  count again.
 - **Limits.** A project can have 10 triggers unless that's changed in the project's **Settings →
   Infrastructure**, under **Scaling & Scheduling**, **Max Triggers**. GitHub triggers need your SAM
   installation to receive the GitHub App's webhooks, which is the default; an operator can turn
@@ -127,7 +118,8 @@ Agents manage triggers with `list_triggers`, `create_trigger`, `update_trigger`,
   such as `Europe/Paris`).
 - **GitHub** (`"github"`): `githubConfig` with an `eventType` (`issues`, `issue_comment`,
   `pull_request`, or `push`) and optional `filters`: `actions`, `labels`, `ignoreActors`,
-  `commandPrefix`, `bodyContains`, `branches`, and `ignoreDrafts`.
+  `commandPrefix`, `bodyContains`, `branches`, and `ignoreDrafts`. SAM rejects `actions` that GitHub
+  never sends for the event, and any `actions` on `push`.
 
   ```json
   {

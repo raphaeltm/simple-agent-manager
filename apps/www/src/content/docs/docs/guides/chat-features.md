@@ -450,9 +450,6 @@ can't load the original request, the message box says so and you can type it you
 - **Check the profile.** Fork and Retry use the profile selected in the message box, which isn't
   necessarily the one the original chat used. Picking another profile is how you retry with a
   different agent or model.
-- **Check for `@`.** Until a [known issue](/docs/guides/session-troubleshooting/#agent-profile-not-found-when-you-send-a-message)
-  is fixed, an `@` followed by a word in the pre-filled title or request, as in `@types/node`, makes
-  sending fail.
 - **The ✕ on the banner** removes the link to the original chat. The text stays in the message box,
   and sending it starts an ordinary new chat.
 - **How the new chat is labelled.** In the session list it's marked **⑂ from** and the start of the

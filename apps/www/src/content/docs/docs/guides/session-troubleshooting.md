@@ -54,8 +54,9 @@ your work is safe and what to do next. Everything here applies to both
   → [Check the Resources panel](#none-of-these-fit)
 - **The chat showed Sleeping on its own, then woke again** (VM). Its machine ran short of memory,
   so SAM moved the session to another one. → [Check where the agent got to](#sam-moved-the-session-to-another-machine)
-- **"Agent profile not found" when you send a message.** Your message has `@` followed by a word,
-  such as an email address. → [Rephrase it](#agent-profile-not-found-when-you-send-a-message)
+- **"Agent profile not found" when you send a message** (self-hosted v2026.10.10 to v2026.10.14).
+  Your message has `@` followed by a word, such as an email address.
+  → [Rephrase it, or update](#agent-profile-not-found-when-you-send-a-message)
 - **A message on your side of the chat that you didn't write, starting "SAM notice
   (system-generated, not a human message)".** Another agent sent this chat a message; SAM wrote the
   notice for the agent. You don't need to reply.
@@ -530,27 +531,23 @@ re-explain it. Neither brings this chat's files. Or start a new chat from scratc
 Typing `@` and the name of one of your [agent profiles](/docs/guides/agents/#agent-profiles)
 mentions that profile: SAM tells the agent the profile exists, so it can hand work to it. Pick the
 profile from the list that opens when you type `@`; a mention has to match the profile's name
-exactly, capitals included. If a name has punctuation but no spaces, such as `code-reviewer`, the
-list inserts `@code-reviewer`, which SAM reads as `@code`, so sending fails: type
-`@"code-reviewer"` instead.
+exactly, capitals included. An `@` that doesn't name one of your profiles is ordinary text.
 
-:::caution[Known issue]
-Since 9 October 2026 (v2026.10.10 and later on a self-hosted instance), a message with `@` directly
-followed by any other word is refused with **Agent profile not found**, so it never reaches the
-agent. That includes email addresses (`bob@example.com`), package names (`@types/node`), code with
-decorators or annotations (`@dataclass`, `@Override`), and `@` followed by quoted text that isn't
-one of your profile names (`@"…"`).
-It also includes text SAM fills in for you: Fork quotes the original chat's title, and Retry the
-original request, so check those too. Until a fix ships, write the `@` so a word or quote doesn't
-directly follow it, for example `bob at example.com` or `@ dataclass`, and send again.
+:::caution[Self-hosted v2026.10.10 to v2026.10.14]
+These releases refuse a message in which `@` is directly followed by a word that isn't one of your
+profile names, with **Agent profile not found**, so it never reaches the agent. That includes email
+addresses (`bob@example.com`), package names (`@types/node`), code with decorators or annotations
+(`@dataclass`, `@Override`), and text SAM fills in for you, such as the chat title Fork quotes.
+Update to v2026.10.15 or later. Until then, write the `@` so a word doesn't directly follow it, for
+example `bob at example.com` or `@ dataclass`. The hosted service was fixed on 14 October.
 :::
 
 ## SAM moved the session to another machine
 
 When a VM runs short of memory, SAM may move a session off it: the chat shows **Sleeping** for a
-moment, then wakes on another machine with its files. A **Task**'s agent is told to carry on from
-where it stopped; a **Chat** waits for your next message, so check what the agent was doing and tell
-it how to continue. The session's **Resources** history covers both machines; see
+moment, then wakes on another machine with its files. If the agent was in the middle of something,
+it's told to carry on from where it stopped, in a **Task** or a **Chat**; if it was idle, it waits
+for your next message. Check what it picked up. The session's **Resources** history covers both machines; see
 [Session Resource History](/docs/guides/session-resources/).
 
 ## None of these fit

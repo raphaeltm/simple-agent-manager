@@ -7,17 +7,6 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ## This cycle: 6 – 13 October 2026
 
-:::caution[Known issue: messages with @ and a word fail]
-Since 9 October (v2026.10.10 and later on a self-hosted instance), a message in which `@` is directly
-followed by a word fails with **Agent profile not found** and never reaches the agent, unless the
-word is the name of one of your agent profiles (put a name with punctuation in quotes, such as
-`@"code-reviewer"`). That includes email addresses (`bob@example.com`), package names
-(`@types/node`), and code with decorators or annotations (`@dataclass`, `@Override`), as well as a
-chat title or request that Fork or Retry fills in for you. Until a fix ships, write
-the `@` so a word doesn't directly follow it, for example `bob at example.com` or `@ dataclass`.
-→ [Agent profile not found](/docs/guides/session-troubleshooting/#agent-profile-not-found-when-you-send-a-message)
-:::
-
 ### For everyone
 
 - **Use SAM from Claude and ChatGPT.** Connect the AI app you already use to SAM, then ask it what
@@ -70,26 +59,28 @@ Also changed this week:
   agents is on the project's **Events** page. → [Messages between agents](/docs/guides/agents/#messages-between-agents)
 - **A new Chat you start on a VM no longer waits** for another workspace on the same machine to
   finish building.
+- **Messages with `@` and a word failed from 9 to 14 October.** A message with an email address
+  (`bob@example.com`), a package name (`@types/node`), or a decorator (`@dataclass`) was refused
+  with **Agent profile not found** unless the word named one of your agent profiles. Fixed on 14
+  October: an `@` that doesn't name a profile is now ordinary text.
+  → [Agent profile not found](/docs/guides/session-troubleshooting/#agent-profile-not-found-when-you-send-a-message)
 - **Resource history is no longer counted twice when a workspace re-sends it.** The duplicate
   inflated the totals agents read with `get_resource_history` and could drop that stretch's detail
   from the **Resources** panel. Sessions recorded before the fix keep the inflated totals and gaps.
 
 ### For self-hosters & admins
 
-Before you update, check two regressions against the release you pick. Each release's notes on
-[SAM's releases page](https://github.com/raphaeltm/simple-agent-manager/releases) list the pull
-requests merged since the release before it, so a fix is in the first release that lists it and in
-every release after that.
+Update to v2026.10.15 or later: two regressions affect the releases in between.
 
-- **Memory-pressure moves:** from v2026.10.09, SAM can't move a session off a VM that runs short of
-  memory. Pull request #2319 fixes it.
-- **`@` messages:** from v2026.10.10, messages with `@` and a word fail (the known issue above). No
-  release fixes it yet.
+- **Memory-pressure moves:** v2026.10.09 to v2026.10.12 can't move a session off a VM that runs
+  short of memory. Fixed in v2026.10.13, which is also the first release in which a
+  [sleep that can't finish](/docs/guides/session-troubleshooting/#sam-could-not-finish-putting-the-session-to-sleep)
+  ends visibly.
+- **`@` messages:** v2026.10.10 to v2026.10.14 refuse messages with `@` and a word, as described
+  above. Fixed in v2026.10.15.
 
-The first release that lists pull request #2317, and every later one, also ends a
-[sleep that can't finish](/docs/guides/session-troubleshooting/#sam-could-not-finish-putting-the-session-to-sleep)
-visibly. There are no new secrets or Cloudflare token permissions; the new database migrations run
-in the deploy pipeline, and the deploy creates the Connector's storage.
+There are no new secrets or Cloudflare token permissions; the new database migrations run in the
+deploy pipeline, and the deploy creates the Connector's storage.
 
 - **The SAM Connector is on after you update** (from v2026.10.10). To keep it off, switch off
   **Enable Connector** in **Admin → Integrations → Connector**, or set the `CONNECTOR_ENABLED`

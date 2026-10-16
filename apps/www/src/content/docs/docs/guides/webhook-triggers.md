@@ -119,6 +119,11 @@ curl --fail --silent --show-error --request POST \
   )
 ```
 
+`wrangler` needs Cloudflare credentials in the same shell. In a fresh workspace, a variable marked
+**Secret** is only a placeholder there (see [Run commands with secrets](/docs/guides/secret-execution/)),
+so if that's how the credential is stored, rotate the token in SAM and set it in the sending service
+yourself.
+
 Check that the pipeline succeeded. Do not print the response, use a model-visible fetch tool, enable tracing or HTTP verbosity, or automatically retry redemption. A lost response cannot be recovered: rotate through the UI/REST API, or delete the unused trigger and create a replacement. Rotation invalidates pending claims immediately. The recipient sends `Authorization: Bearer <stored token>` to the returned ingress endpoint.
 
 This implements webhook delivery; a general sensitive-input or ACP framework remains future work.
