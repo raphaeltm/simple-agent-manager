@@ -28,6 +28,13 @@ describe('mailbox alarm scheduling query cost', () => {
     await runInDurableObject(stub, async (instance, state) => {
       const sql = state.storage.sql;
       const pollMs = 30_000;
+      const expectPolling = (compute: () => number | null) => {
+        const before = Date.now();
+        const due = compute();
+        expect(due).not.toBeNull();
+        expect(due).toBeGreaterThanOrEqual(before + pollMs);
+        expect(due).toBeLessThanOrEqual(Date.now() + pollMs);
+      };
       expect(computeMailboxAlarmTime(sql, pollMs)).toBeNull();
       sql.exec(`INSERT INTO chat_sessions (id, status, message_count, started_at, created_at, updated_at)
         VALUES ('target', 'active', 0, 1000, 1000, 1000)`);
@@ -43,12 +50,10 @@ describe('mailbox alarm scheduling query cost', () => {
         VALUES ('fixture-acp', 'target', 'fixture-node', 'running', 1000, 1000)`);
       seed('first-', 1, 'delivered');
       const baseline = probe(sql);
-      expect(computeProjectDataAlarmSectionTimes(baseline.sql, {}).mailbox_delivery_sweep)
-        .toBe(Date.now() + pollMs);
+      expectPolling(() => computeProjectDataAlarmSectionTimes(baseline.sql, {}).mailbox_delivery_sweep);
       seed('retained-', 12_000, 'delivered');
       const loaded = probe(sql);
-      expect(computeProjectDataAlarmSectionTimes(loaded.sql, {}).mailbox_delivery_sweep)
-        .toBe(Date.now() + pollMs);
+      expectPolling(() => computeProjectDataAlarmSectionTimes(loaded.sql, {}).mailbox_delivery_sweep);
       expect(loaded.rowsRead()).toBeLessThanOrEqual(baseline.rowsRead() + 10);
       const holder = instance as unknown as { sql: SqlStorage };
       const originalSql = holder.sql;
@@ -65,7 +70,7 @@ describe('mailbox alarm scheduling query cost', () => {
       expect(await state.storage.getAlarm()).not.toBeNull();
       const repeated = probe(sql);
       for (let n = 0; n < 100; n++) {
-        expect(computeMailboxAlarmTime(repeated.sql, pollMs)).toBe(Date.now() + pollMs);
+        expectPolling(() => computeMailboxAlarmTime(repeated.sql, pollMs));
       }
       expect(repeated.rowsRead()).toBeLessThanOrEqual(200);
       console.log(JSON.stringify({ metric: 'mailbox_alarm_rows', baseline: baseline.rowsRead(),
@@ -75,7 +80,7 @@ describe('mailbox alarm scheduling query cost', () => {
       expect(computeMailboxAlarmTime(terminal.sql, pollMs)).toBeNull();
       expect(terminal.rowsRead()).toBeLessThan(10);
       seed('queued-', 1, 'queued');
-      expect(computeMailboxAlarmTime(sql, pollMs)).toBe(Date.now() + pollMs);
+      expectPolling(() => computeMailboxAlarmTime(sql, pollMs));
     });
   });
 });
