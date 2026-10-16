@@ -1,0 +1,105 @@
+"""Actual fixed CF reader CLI with simulated HTTP/settings/D1 boundaries; no live calls."""
+import contextlib
+import hashlib
+import importlib.util
+import io
+import json
+import os
+import re
+import subprocess
+from pathlib import Path
+import tempfile
+import time
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parent
+spec = importlib.util.spec_from_file_location('prospective_proof', ROOT / 'prospective-proof.py')
+reader = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(reader)
+CANARY = 'PRIVATE_SYNTHETIC_CF_CANARY'
+
+
+class ReaderTests(unittest.TestCase):
+    def invoke(self, mode, failure=None):
+        with tempfile.TemporaryDirectory(prefix='sam-proof-reader-') as folder:
+            root = Path(folder)
+            now = int(time.time() * 1000)
+            own = {'taskId': '01M51ZZZZZZZZZZZZZZZZZZZZZ', 'sessionId': '11111111-2222-4333-8444-555555555555', 'branch': 'sam/prospective-claude', 'agentProfileId': '01KRS7Z2R88JFC73ARA7DV9WTK', 'agentType': 'claude-code'}
+            own['receipt'] = {'taskId': own['taskId'], 'sessionId': own['sessionId'], 'branchName': own['branch'], 'status': 'queued'}
+            observer = {**own, 'agentType': 'openai-codex'}
+            config = {'own': own, 'observer': observer, 'started': now - 10000, 'hard': now + 2700000}
+            (root / 'config.json').write_text(json.dumps(config))
+            workspace, node, snapshot = '01M51YYYYYYYYYYYYYYYYYYYYY', '01M51XXXXXXXXXXXXXXXXXXXXX', '01M51SSSSSSSSSSSSSSSSSSSSS'
+            for name, value in [(mode + '-mapping.json', {'taskId': own['taskId'], 'sessionId': own['sessionId'], 'workspaceId': workspace, 'nodeId': node, 'agentSessionId': '01M51AAAAAAAAAAAAAAAAAAAAA'}),
+                                ('protected-sleep.json', {'workspaceId': workspace}),
+                                ('observer-sleep.json', {'workspaceId': workspace}),
+                                ('protected-snapshot.json', {'snapshotId': snapshot, 'snapshotGeneration': 'generation1'})]:
+                if not (mode == 'protected-snapshot' and name == 'protected-snapshot.json'):
+                    (root / name).write_text(json.dumps(value))
+            runtime = 'cf-container' if mode in ['observe','observer-snapshot'] else 'vm'
+            task = {'id': own['taskId'], 'user_id': 'owner', 'project_id': reader.PROJECT, 'chat_session_id': own['sessionId'], 'workspace_id': workspace, 'output_branch': own['branch'], 'agent_profile_hint': own['agentProfileId'], 'status': 'completed' if mode == 'completion-runtime' else 'in_progress', 'claimed_warm_node_id': None, 'completed_at': None}
+            queries = []
+
+            class Response:
+                def __init__(self, value): self.data = json.dumps(value).encode()
+                def read(self, size=-1): return self.data if size == -1 else self.data[:size]
+                def __enter__(self): return self
+                def __exit__(self, *args): pass
+            def request(req, timeout):
+                if failure == 'transport': raise ValueError(CANARY)
+                if req.full_url.endswith('/settings'):
+                    return Response({'result': {'bindings': [{'name': 'DATABASE', 'id': 'database'}, {'name': 'VM_AGENT_REQUIRED_VERSION', 'text': reader.VERSION}]}})
+                body = json.loads(req.data);sql = body['sql'];queries.append(sql)
+                self.assertTrue(sql.startswith('SELECT '))
+                if 'FROM tasks WHERE id=' in sql: rows = [task]
+                elif 'FROM nodes WHERE user_id=' in sql: rows = [{'id': node}]
+                elif 'FROM tasks WHERE user_id=' in sql: rows = [{'id': 'foreign'}] if failure == 'foreign-claim' else []
+                elif 'FROM workspaces WHERE project_id=' in sql: rows = []
+                elif 'FROM workspaces WHERE node_id=' in sql: rows = []
+                elif 'FROM workspaces WHERE id=' in sql: rows = [{'id': workspace, 'user_id': 'owner', 'project_id': reader.PROJECT, 'chat_session_id': own['sessionId'], 'node_id': node, 'branch': own['branch'], 'status': 'running'}]
+                elif 'FROM nodes WHERE id=' in sql: rows = [{'id': node, 'user_id': 'owner', 'runtime': runtime, 'agent_version': reader.VERSION, 'capacity_pool_revision': 40, 'status': 'running'}]
+                elif 'FROM agent_profiles' in sql: rows = [{'id': own['agentProfileId'], 'user_id': 'owner', 'project_id': reader.PROJECT, 'agent_type': 'wrong' if failure == 'wrong-profile' else ('openai-codex' if mode == 'observe' else 'claude-code'), 'runtime': runtime, 'vm_size_override': None}]
+                elif 'FROM session_snapshots' in sql: rows = [{'id': snapshot, 'user_id': 'owner', 'project_id': reader.PROJECT, 'chat_session_id': own['sessionId'], 'workspace_id': workspace, 'runtime': runtime, 'status': 'available', 'degradation': 'none', 'expires_at': '2026-12-01T00:00:00.000Z', 'sleeping_at': '2026-10-16T06:00:00.000Z', 'snapshot_generation': 'generation2' if failure == 'wrong-generation' else 'generation1', 'home_sha256': 'a'*64, 'wip_sha256': 'b'*64, 'recovery_status': 'restored', 'recovery_task_id': own['taskId'], 'recovery_workspace_id': workspace, 'restored_at': '2026-10-16T06:00:01.000Z'}]
+                else: raise AssertionError('unexpected fixed query')
+                return Response({'result': [{'results': rows}]})
+            output = io.StringIO()
+            with patch.dict(os.environ, {'SAM_PROSPECTIVE_ROOT': folder, 'CF_ACCOUNT_ID': 'synthetic', 'CF_TOKEN': CANARY}), patch.object(reader.sys, 'argv', ['fixed', mode]), patch.object(reader.urllib.request, 'urlopen', request), contextlib.redirect_stdout(output):
+                reader.main()
+            self.assertNotIn(CANARY, output.getvalue())
+            result = json.loads(output.getvalue())
+            self.assertEqual(result['ok'], failure is None)
+            if failure is None:
+                source = (root / (mode + '-source.json')).read_bytes()
+                artifact = root / (mode + '.json' if mode in ['protected-snapshot', 'observer-snapshot', 'completion-runtime'] else mode + '-grant.json')
+                self.assertEqual(json.loads(artifact.read_text())['sourceEvidenceSha256'], hashlib.sha256(source).hexdigest())
+                self.assertNotIn(CANARY, source.decode())
+            return result
+
+    def test_pinned_source_contract(self):
+        source = subprocess.run(['git', 'show', 'e2c81c045fa16490c7515fa80573418e60ef4017:apps/api/src/db/schema.ts'], capture_output=True, check=True, text=True).stdout
+        script = (ROOT / 'prospective-proof.py').read_text()
+        variables = {'tasks': 'tasks', 'nodes': 'nodes', 'workspaces': 'workspaces', 'agent_profiles': 'agentProfiles', 'session_snapshots': 'sessionSnapshots'}
+        queries = re.findall(r"SELECT ([a-z_,]+) FROM ([a-z_]+)", script)
+        self.assertGreater(len(queries), 8)
+        for columns, table in queries:
+            section = source.split('export const ' + variables[table] + ' =', 1)[1].split('export const ', 1)[0]
+            if '...capacityPlacementColumns()' in section:
+                section += source.split('const capacityPlacementColumns =', 1)[1].split('// =============================================================================', 1)[0]
+            for column in columns.split(','):
+                self.assertIn("'" + column + "'", section, (table, column))
+        mapping = subprocess.run(['git', 'show', 'e2c81c045fa16490c7515fa80573418e60ef4017:apps/api/src/lib/mappers.ts'], capture_output=True, check=True, text=True).stdout
+        task = mapping.split('export function toTaskResponse(', 1)[1].split('export function ', 1)[0]
+        self.assertIn('taskMode:', task)
+        self.assertNotIn('chatSessionId:', task)
+
+    def test_fixed_modes(self):
+        for mode in reader.MODES:
+            with self.subTest(mode=mode): self.invoke(mode)
+
+    def test_concrete_failures(self):
+        for mode, failure, stage in [('setup', 'transport', 'settings'), ('setup', 'wrong-profile', 'mapping'), ('setup', 'foreign-claim', 'resource-guards'), ('wake-check', 'wrong-generation', 'restored-generation')]:
+            with self.subTest(failure=failure): self.assertEqual(self.invoke(mode, failure)['stage'], stage)
+
+
+if __name__ == '__main__': unittest.main()
