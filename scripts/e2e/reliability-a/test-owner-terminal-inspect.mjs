@@ -23,7 +23,7 @@ async function scenario(mode){
   else if(url.endsWith('/terminal/token')){assert.deepEqual(options.data,{workspaceId});v={token:canary.repeat(3),expiresAt:new Date(now+300000).toISOString(),workspaceUrl:`https://ws-${workspaceId}.sammy.party`};}
   else if(url.includes('/files/download?')){
    assert(input);assert(url.includes('token='+encodeURIComponent(canary.repeat(3))));
-   if(mode==='timeout'){status=404;v={};}
+   if(['timeout','action-deadline'].includes(mode)){status=404;v={};if(mode==='action-deadline')clock=now+60001;}
    else if(decodeURIComponent(url).includes('/done.json'))v={taskId:task,sessionId:session,runId:id,operation:'read-state',status:0,stateSha256:mode==='bad-manifest'?'0'.repeat(64):digest};
    else v=state;
   }else throw new Error(canary);
@@ -38,11 +38,12 @@ async function scenario(mode){
  assert(!JSON.stringify(r).includes(canary));
  if(['success','project-shared-owner','missing-length'].includes(mode)){assert(r.ok&&r.quiescence&&r.terminalClosed);assert.deepEqual(frames.map(f=>f.type),['create_session','input','close_session']);assert.equal(frames[0].data.workDir,undefined);assert.deepEqual(r.state,state);}
  else {assert.equal(r.ok,false);assert.equal(r.quiescence,false);}
- if(['success','project-shared-owner','missing-length','bad-length','bad-manifest','timeout','wrong-close','dispose-failure'].includes(mode))assert(closed&&disposed);
+ if(['success','project-shared-owner','missing-length','bad-length','bad-manifest','timeout','action-deadline','wrong-close','dispose-failure'].includes(mode))assert(closed&&disposed);
  else assert.equal(frames.length,0);
  if(mode==='wrong-receipt')assert.equal(reads,0);
+ if(mode==='action-deadline'){assert.equal(r.terminalClosed,true);assert.equal(r.quiescence,false);}
 }
-for(const mode of ['success','project-shared-owner','global-foreign-owner','missing-length','bad-length','foreign-owner','foreign-profile-owner','foreign-node','wrong-receipt','profile-collision','wrong-acp','bad-manifest','timeout','wrong-close','dispose-failure'])await scenario(mode);
+for(const mode of ['success','project-shared-owner','global-foreign-owner','missing-length','bad-length','foreign-owner','foreign-profile-owner','foreign-node','wrong-receipt','profile-collision','wrong-acp','bad-manifest','timeout','action-deadline','wrong-close','dispose-failure'])await scenario(mode);
 
 // Exercise the actual browser transport parser with arbitrary PTY canary, not a replacement parser.
 const original=globalThis.WebSocket;
@@ -59,4 +60,4 @@ try{
  await assert.rejects(browserTerminal({...page,url:()=> 'https://foreign.invalid'},'wss://example.invalid',id));
  const command=inspectionCommand(id);assert(Buffer.byteLength(command.command)<3800);assert(!command.command.includes(canary));
 }finally{globalThis.WebSocket=original;}
-console.log(JSON.stringify({protocolAndPrivacy:true,cases:17,liveCalls:0}));
+console.log(JSON.stringify({protocolAndPrivacy:true,cases:18,liveCalls:0}));

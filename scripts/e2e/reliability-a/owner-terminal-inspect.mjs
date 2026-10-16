@@ -113,7 +113,7 @@ export async function inspectOwnedFixture({context,page,grant,open=browserTermin
    ||w?.id!==grant.workspaceId||w.nodeId!==grant.nodeId||w.projectId!==project||w.chatSessionId!==session||w.branch!==branch||w.repository!=='serverspresentation2025/crewai'||w.status!=='running'||w.hardware?.cloudProvider!=='hetzner')throw 0;
   return `https://ws-${grant.workspaceId}.sammy.party`;
  };
- const wait=async key=>{for(let i=0;i<50;i++){live();const s=await terminal.state();if(s.failed)throw 0;if(s[key])return;await pause(100);}throw 0;};
+ const wait=async(key,until=deadline)=>{for(let i=0;i<50;i++){if(now()>=until)throw 0;const s=await terminal.state();if(s.failed)throw 0;if(s[key])return;await pause(100);}throw 0;};
  try{
   const workspaceUrl=await bind();result.before=true;result.stage='terminal-token';
   const access=await json('/api/terminal/token','POST',{workspaceId:grant.workspaceId});
@@ -133,7 +133,8 @@ export async function inspectOwnedFixture({context,page,grant,open=browserTermin
   result.manifest=true;result.state=state;result.stage='canonical-after';await bind();result.after=true;
  }catch{}finally{
   result.stage=result.after?'terminal-close':result.stage;
-  if(terminal)try{if(created){await terminal.send({type:'close_session',data:{sessionId:runId}});await wait('closed');result.terminalClosed=true;}}catch{}
+  // Reserve a separate 5s cleanup window after the action deadline, within caller's 90s ceiling.
+  if(terminal)try{if(created){const cleanupDeadline=Math.min(now()+5000,started+80000);await terminal.send({type:'close_session',data:{sessionId:runId}});await wait('closed',cleanupDeadline);result.terminalClosed=true;}}catch{}
   if(terminal)try{await terminal.dispose();result.socketClosed=true;}catch{}
   token=undefined;
  }
