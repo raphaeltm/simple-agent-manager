@@ -35,3 +35,24 @@ All under `.codex/tmp/a-verification/scripts/e2e/reliability-a/`:
 - `node .../test-prospective-controller.mjs`: PASS, 15 lifecycle cases, 5 typed-proof negatives; browser/terminal/CF producers simulated, actual caller/ledger exercised.
 
 All report zero live service calls. Existing test source-contract assertions still inspect historical e2c81c source; they are regression context, not evidence that current deployed source/schema was independently validated. No Claude/Codex live matrix result is implied. Machine-generated terminal capsule and asset hash pins remain unchanged. No Instant python availability assumption was added. Original-byte export before subsequent lifecycle stages remains unchanged.
+
+## Node-only independent observer (second refresh)
+
+The Instant observer no longer depends on Python. `capsule(..., 'observe', ...)` now packages the new `prospective-observer.mjs` through the existing machine-generated gzip/base64 package, SHA-256 binding and <3800-byte line transport. VM `setup`/`check` still use the original Python script and original asset pins. Observe discovers an existing absolute executable at `/usr/local/bin/node`, `/usr/bin/node`, `/opt/node/bin/node`, or an absolute `command -v node` result; it installs nothing. Missing runtime emits the same typed `done.json` failure (`status:1`, empty `files`) through a constrained shell fallback. Package-decode/hash/import failures also produce that failure receipt, without error text or source output. New directory creation rejects symlink ancestors and existing run directories.
+
+The Node observe-only entry point performs fixed read-only Git top-level lookup, full `git ls-remote --heads` against the exact repository, and `gh pr list --head <exact branch> --state all --limit 100`. It validates original baseline/expectation schemas, full branch-ref map, exact-branch PR inventory with OPEN/CLOSED/MERGED states, duplicate numbers, inventory truncation, URL binding and record/completion/current timestamps. It produces the existing `asset-hashes.json`, `observer.json`, and immutable `done.json` schema; original baseline/expectation bytes are retained. No Git staging/commit/push or PR mutation command exists in the observer. Existing host validators remain in place before transport and after download.
+
+Native child execution uses detached process groups, bounded stdout/stderr, a fixed 15-second phase deadline and at most five seconds per child; it kills each entire child group and closes pipes on success, failure or timeout. This covers descendants that retain inherited pipes in the same process group; deliberately detached descendants are outside the process-group guarantee, as with the original Python approach.
+
+Additional changed/new files:
+- `prospective-observer.mjs` (new): standard-Node-only observe contract and native bounded child handling.
+- `prospective-vm.mjs`: observe-only runtime/package selection, verified Node bootstrap and typed early-failure receipts.
+- `test-prospective-observer.mjs` (new): six actual Node capsules/local Git cases: success, changed remote ref, changed formerly closed PR, corrupt transported package, missing gh, missing Node (simulated by hiding discovery candidates). Also schema/timing/inventory rejection and actual deadline/descendant-group cleanup.
+- `test-prospective-vm.mjs`: copies new observer into its isolated module fixture; the independent observation now runs Node through its actual PTY shell.
+
+Validation after this refresh:
+- `node .../test-prospective-observer.mjs`: PASS, six actual local Node capsules; real local Git, stubbed remote Git/gh responses; zero live calls.
+- `node .../test-prospective-vm.mjs`: PASS, 17 cases and seven real local PTY executions (including Node observer); zero live calls.
+- `node .../test-prospective-controller.mjs`: PASS, 15 lifecycle cases and five typed-proof negatives; zero live calls.
+
+No live Instant executable availability or publication outcome is asserted. This is the bounded verification transport needed to attempt that missing observation; it does not turn historical failures into passes.

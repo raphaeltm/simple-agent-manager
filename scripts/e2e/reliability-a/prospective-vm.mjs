@@ -81,9 +81,22 @@ export async function capsule(own,operation,originals={},runId=randomUUID()){
  }
  const config={taskId:own.taskId,sessionId:own.sessionId,branch:own.branch,runId,operation,assets,
   baseline:operation==='setup'?null:Buffer.from(originals.baseline).toString('base64'),expectations:operation==='setup'?null:Buffer.from(originals.expectations).toString('base64'),completedAt:operation==='observe'?originals.completedAt:null};
- const script=await readFile(new URL('prospective-capsule.py',import.meta.url));
+ const script=await readFile(new URL(operation==='observe'?'prospective-observer.mjs':'prospective-capsule.py',import.meta.url));
  const bytes=Buffer.from(JSON.stringify({script:script.toString('base64'),config}));
  const payload=gzipSync(bytes).toString('base64'),directory=`/workspaces/reliability-prospective/${own.taskId}/${runId}`;
+ if(operation==='observe'){
+  const fail=JSON.stringify({taskId:own.taskId,sessionId:own.sessionId,runId,operation:'observe',status:1,files:{}});
+  const boot=`const f=require('fs'),p=require('path');let d='${directory}';for(let x=d;;x=p.dirname(x)){if(f.existsSync(x)&&f.lstatSync(x).isSymbolicLink())throw 0;if(x===p.dirname(x))break;}if(f.existsSync(d))throw 0;f.mkdirSync(d,{recursive:true,mode:448});`;
+  const execute=`const f=require('fs'),z=require('zlib'),c=require('crypto'),u=require('url');const d='${directory}';const fail=()=>{try{f.writeFileSync(d+'/done.json',Buffer.from('${Buffer.from(fail).toString('base64')}','base64'),{flag:'wx',mode:384})}catch{}process.exitCode=1};try{const b=z.gunzipSync(Buffer.from(f.readFileSync(d+'/payload','utf8'),'base64'));if(c.createHash('sha256').update(b).digest('hex')==='${sha(bytes)}'){}else{throw 0};const v=JSON.parse(b);f.writeFileSync(d+'/config.json',JSON.stringify(v.config),{flag:'wx',mode:384});f.writeFileSync(d+'/observer.mjs',Buffer.from(v.script,'base64'),{flag:'wx',mode:384});process.argv=[process.execPath,d+'/observer.mjs',d];import(u.pathToFileURL(d+'/observer.mjs').href).catch(fail)}catch{fail()}`;
+  const lines=[`sam_reliability_node=''; for p in /usr/local/bin/node /usr/bin/node /opt/node/bin/node "$(command -v node 2>/dev/null)"; do case "$p" in /*) if [ -x "$p" ] && "$p" -e 'if(!require("path").isAbsolute(process.execPath))process.exit(1)' >/dev/null 2>&1; then sam_reliability_node="$p"; break; fi;; esac; done`,
+   `if [ -n "$sam_reliability_node" ] && "$sam_reliability_node" -e "${boot}"; then`];
+  for(let i=0;i<payload.length;i+=2400)lines.push(`printf '%s' '${payload.slice(i,i+2400)}' >> '${directory}/payload'`);
+  lines.push(`"$sam_reliability_node" -e "${execute}"`, 'else',
+   `sam_reliability_safe=1; for p in /workspaces /workspaces/reliability-prospective /workspaces/reliability-prospective/${own.taskId} '${directory}'; do if [ -L "$p" ]; then sam_reliability_safe=0; fi; done`,
+   `if [ "$sam_reliability_safe" = 1 ] && [ ! -e '${directory}' ]; then (umask 077; mkdir -p '${directory}' && printf '%s' '${fail}' > '${directory}/done.json'); fi`, 'fi');
+  if(lines.some(line=>Buffer.byteLength(line)>3800))throw Error('line');
+  return {runId,directory,command:'{\n'+lines.join('\n')+'\n} >/dev/null 2>&1\n',config,script,packageSha256:sha(bytes)};
+ }
  // Only base64 enters shell literals. Every canonical input line remains below 3800 bytes.
  const bootstrap=`import pathlib,sys; p=pathlib.Path('${directory}'); assert not any(x.is_symlink() for x in [p,*p.parents]); p.mkdir(parents=True,exist_ok=False,mode=448)`;
  const execute=`import pathlib,base64,gzip,hashlib,json,sys; p=pathlib.Path('${directory}'); b=gzip.decompress(base64.b64decode((p/'payload').read_bytes())); assert hashlib.sha256(b).hexdigest()=='${sha(bytes)}'; v=json.loads(b); f=(p/'config.json').open('x'); json.dump(v['config'],f); f.close(); (p/'config.json').chmod(384); sys.argv=['fixed-capsule',str(p)]; exec(compile(base64.b64decode(v['script']),'fixed-capsule','exec'))`;

@@ -12,7 +12,7 @@ const exec=(cmd,args,cwd,env)=>execFileSync(cmd,args,{cwd,env,stdio:['ignore','p
 let cases=0;
 try{
  const modules=join(root,'modules');await mkdir(modules);
- for(const name of ['prospective-vm.mjs','owner-terminal-inspect.mjs','queue-controller.mjs','git-probe.py','b-probe.py','terminal-observer.py'])await copyFile(new URL(name,source),join(modules,name));
+ for(const name of ['prospective-vm.mjs','prospective-observer.mjs','owner-terminal-inspect.mjs','queue-controller.mjs','git-probe.py','b-probe.py','terminal-observer.py'])await copyFile(new URL(name,source),join(modules,name));
  await copyFile(new URL('prospective-capsule.py',source),join(modules,'prospective-capsule.py'));
  const {terminalPhase,AcceptanceSequence,capsule,validateReleasePin}=await import(pathToFileURL(join(modules,'prospective-vm.mjs')));
  const pin={apiSource:'c'.repeat(40),agentSource:'d'.repeat(40),publishedBinarySha256:'e'.repeat(64),rawHostShaObserved:false,capacityPoolRevision:73};
