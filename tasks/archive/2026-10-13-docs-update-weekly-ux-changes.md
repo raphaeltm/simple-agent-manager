@@ -88,8 +88,10 @@ Product bugs found (filed as SAM ideas, not docs work):
       (`docs-screenshots-chat-states.spec.ts`). Repaired the Resources drawer docs scenes
       (`docs-screenshots-sessions.spec.ts` now serves the shared overnight timeline scenario).
 - [x] `recent-product-changes.md`: new 6 – 13 October cycle; roll previous cycles; "8 October" → 9
-- [ ] Local sub-agent review loop until no actionable feedback (round 1 done; round 2 running)
-- [ ] `pnpm --filter @simple-agent-manager/www build` + link check; PR; CI green; merge
+- [x] Local sub-agent review loop until no actionable feedback (12 rounds; see Review log)
+- [x] `pnpm --filter @simple-agent-manager/www build` + link check (0 broken, 36 pages) and
+      `test:browser` (296 passed); PR #2324 (CI, merge and production publish are recorded on the PR
+      and in the task completion evidence)
 
 ## Local environment notes
 
@@ -280,3 +282,10 @@ fork|retry --launch` behaves like `sam tasks submit`; the mention note's exact s
 - No HIGH or MEDIUM. 2 LOW on one sentence, adopted: a **Task** is only committed and pushed after a
   turn that ends without an error (`server.go:1460-1530`), and the session list's **Chat**/**Task**
   label shows which you have.
+
+### Round 12 (final check)
+
+- No actionable docs feedback: the rewritten paragraph is accurate (push conditions, label,
+  anchor, readability after a failure). One product bug found and appended to idea
+  `01M4SW5TRK3ZB6CXT69TA2TSV0`: the session list can label a Chat **Task** because the list route
+  omits `taskMode`. Review loop converged.
