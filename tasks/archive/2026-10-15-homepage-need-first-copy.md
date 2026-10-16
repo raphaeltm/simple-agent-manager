@@ -129,3 +129,11 @@ Source: https://github.com/raphaeltm/simple-agent-manager/pull/2356#issuecomment
 - No em dashes or "multi-agent" buzzwords. Missions are not mentioned.
 - The humanizer and need-first copy skills are saved in SAM skills.
 - Full-page homepage screenshots are in the library.
+
+## Outcome
+
+- Raphaël approved merging on 2026-10-16 ("Get it merged please"), and the work merged via PR #2356.
+- Before the merge, `origin/main` was merged into the branch (`ff4a3931b`), resolving conflicts with #2360's compute pool rework:
+  - the feature-page row keeps #2360's region-picker description and its UI option names behind a plain-language lead-in;
+  - the homepage pitch and the scene description now mention regions.
+- On the merged state: lint is clean, typecheck has the baseline error only, unit tests pass 94/94, and the homepage and marketing Playwright specs pass (60 passed, 14 skipped).
