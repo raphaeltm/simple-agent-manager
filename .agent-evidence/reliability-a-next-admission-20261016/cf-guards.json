@@ -1,0 +1,185 @@
+{
+  "catalogue": [
+    {
+      "available": true,
+      "currency": "EUR",
+      "hourlyMicros": 8800,
+      "lastSeenAt": "2026-10-15T22:16:36.452Z",
+      "provider": "hetzner",
+      "runtime": "vm",
+      "sourceActive": true,
+      "type": "cx23"
+    },
+    {
+      "available": true,
+      "currency": "EUR",
+      "hourlyMicros": 13600,
+      "lastSeenAt": "2026-10-15T22:16:36.452Z",
+      "provider": "hetzner",
+      "runtime": "vm",
+      "sourceActive": true,
+      "type": "cx33"
+    },
+    {
+      "available": true,
+      "currency": "EUR",
+      "hourlyMicros": 25600,
+      "lastSeenAt": "2026-10-15T22:16:36.452Z",
+      "provider": "hetzner",
+      "runtime": "vm",
+      "sourceActive": true,
+      "type": "cx43"
+    },
+    {
+      "available": true,
+      "currency": "EUR",
+      "hourlyMicros": 8800,
+      "lastSeenAt": "2026-10-15T22:16:36.452Z",
+      "provider": "hetzner",
+      "runtime": "vm",
+      "sourceActive": true,
+      "type": "cx23"
+    },
+    {
+      "available": true,
+      "currency": "EUR",
+      "hourlyMicros": 13600,
+      "lastSeenAt": "2026-10-15T22:16:36.452Z",
+      "provider": "hetzner",
+      "runtime": "vm",
+      "sourceActive": true,
+      "type": "cx33"
+    },
+    {
+      "available": true,
+      "currency": "EUR",
+      "hourlyMicros": 25600,
+      "lastSeenAt": "2026-10-15T22:16:36.452Z",
+      "provider": "hetzner",
+      "runtime": "vm",
+      "sourceActive": true,
+      "type": "cx43"
+    },
+    {
+      "available": true,
+      "currency": "EUR",
+      "hourlyMicros": 8800,
+      "lastSeenAt": "2026-10-15T22:16:36.452Z",
+      "provider": "hetzner",
+      "runtime": "vm",
+      "sourceActive": true,
+      "type": "cx23"
+    },
+    {
+      "available": true,
+      "currency": "EUR",
+      "hourlyMicros": 13600,
+      "lastSeenAt": "2026-10-15T22:16:36.452Z",
+      "provider": "hetzner",
+      "runtime": "vm",
+      "sourceActive": true,
+      "type": "cx33"
+    },
+    {
+      "available": true,
+      "currency": "EUR",
+      "hourlyMicros": 25600,
+      "lastSeenAt": "2026-10-15T22:16:36.452Z",
+      "provider": "hetzner",
+      "runtime": "vm",
+      "sourceActive": true,
+      "type": "cx43"
+    }
+  ],
+  "checks": {
+    "catalogueAvailable": true,
+    "cataloguePriced": true,
+    "claudeProfileBinding": true,
+    "firstCompleted": true,
+    "globalBoundRecoveryZero": true,
+    "globalVmZero": true,
+    "globalWarmClaimsZero": true,
+    "oldTargetPreservedSleeping": true,
+    "pool40Ready": true,
+    "projectActiveProspectiveDuplicatesZero": true,
+    "projectActiveRecoveryTasksZero": true,
+    "projectActiveRecoveryZero": false,
+    "projectIdentity": true,
+    "projectOwnerRepository": true,
+    "requiredAgentPin": true,
+    "requiredSnapshotsRetained": false,
+    "targetActiveWorkspacesZero": true,
+    "unexpiredProvisioningLeasesZero": true
+  },
+  "counts": {
+    "globalBoundRecoveryZero": 0,
+    "globalVmZero": 0,
+    "globalWarmClaimsZero": 0,
+    "projectActiveProspectiveDuplicatesZero": 0,
+    "projectActiveRecoveryTasksZero": 0,
+    "projectActiveRecoveryZero": 2,
+    "targetActiveWorkspacesZero": 0,
+    "unexpiredProvisioningLeasesZero": 0
+  },
+  "observedAtMs": 1792153493000,
+  "ok": false,
+  "planningCost": {
+    "activePlusTailVmMinutes": 85,
+    "excludes": "IP,tax,API,storage,provider-delay",
+    "maxComputeEur": 0.0512,
+    "minComputeEur": 0.0176,
+    "roundedHours": 2
+  },
+  "pool": {
+    "maxNodes": 3,
+    "revision": 40,
+    "strategy": "balanced"
+  },
+  "protectedSnapshots": [
+    {
+      "available": true,
+      "expiresBeyond90min": true,
+      "id": "01M50W0E50YKW8J3SJH77XX5RS",
+      "sessionId": "4e5282b9-0cd5-454f-a8f0-db160b9823fe",
+      "undegraded": true
+    },
+    {
+      "available": true,
+      "expiresBeyond90min": true,
+      "id": "01M51ABYW7654Y4RQWFZGAPJME",
+      "sessionId": "c6d9c7f5-cd33-415e-9b43-2662f5c99e60",
+      "undegraded": true
+    },
+    {
+      "available": true,
+      "expiresBeyond90min": true,
+      "id": "01M51CR5R42WFNG04VDS4P681F",
+      "sessionId": "1135ad88-96dd-4ec2-a1d1-5813d295d2a5",
+      "undegraded": true
+    },
+    {
+      "available": true,
+      "expiresBeyond90min": true,
+      "id": "01M51QM3Y0GPFEE2SMT1TT7374",
+      "sessionId": "f5f56c5b-e9fb-4218-b327-bd9d4b7e25e9",
+      "undegraded": true
+    },
+    {
+      "available": true,
+      "expiresBeyond90min": true,
+      "id": "01M5287TDXN6HBAVC2PYBEGPCE",
+      "sessionId": "8d0245f8-8799-40c1-9848-4650dd5b90d4",
+      "undegraded": true
+    }
+  ],
+  "workerDeployment": {
+    "createdOn": "2026-10-16T10:57:09.243572Z",
+    "id": "0193e7f9-f53e-46a0-9b10-0c72d3dbfc76",
+    "versions": [
+      {
+        "percentage": 100,
+        "version_id": "d7324082-aa20-490f-ba48-d67ef24fbccb"
+      }
+    ]
+  }
+}
