@@ -161,8 +161,20 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
    output={taskId:own.taskId,workspaceId:own.workspaceId,workspace404:true};
   }else if(op.kind==='sleep'){
    if(workspace.status!=='sleeping'){
-    await readState();if(!idle())throw new Error();await bind();
-    await request('/api/workspaces/'+own.workspaceId+'/sleep',{method:'POST',data:{}},v=>v?.status==='sleeping'
+    const terminalAt=task.status==='completed'?task.completedAt:null;
+    if(terminalAt!==null){
+     if(!when(terminalAt)||Date.parse(terminalAt)>Date.now())throw new Error();
+     // Exact owned retention only: completed evidence substitutes for a departed
+     // ACP identity, while any observable in-flight activity still blocks Sleep.
+     await request(sessionPath+'/state',{},v=>{
+      if(!v||typeof v!=='object')return false;
+      const x=v.state;if(x===null)return true;if(!x||typeof x!=='object')return false;
+      return (x.activity==null||x.activity==='idle')&&(x.runtimeWorkState==null||x.runtimeWorkState==='inactive')
+       &&(x.runtimeWorkCount==null||(Number.isSafeInteger(x.runtimeWorkCount)&&x.runtimeWorkCount===0));
+     });
+    }else{await readState();if(!idle())throw new Error();}
+    await bind();if(terminalAt!==null&&(task.status!=='completed'||task.completedAt!==terminalAt))throw new Error();
+    await request('/api/workspaces/'+own.workspaceId+'/sleep',{method:'POST',data:{},...(terminalAt!==null?{timeoutMs:30_000}:{})},v=>v?.status==='sleeping'
      &&v.workspaceId===own.workspaceId&&v.chatSessionId===own.sessionId&&when(v.snapshotExpiresAt));
    }
    output={taskId:own.taskId,sessionId:own.sessionId,retainedSleeping:true};
