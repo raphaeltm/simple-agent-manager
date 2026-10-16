@@ -17,13 +17,47 @@ MODES = ['setup', 'turn-check', 'wake-check', 'observe', 'protected-snapshot', '
 
 
 def save(root, name, value):
-    with (root / name).open('x') as stream:
+    fd = os.open(root / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'w') as stream:
         json.dump(value, stream, separators=(',', ':'), sort_keys=True)
-    (root / name).chmod(0o600)
+
+
+def restore_projection(rows, protected, own, mapping, wake, observed, started):
+    """Fixed bounded projection, never arbitrary response strings or errors."""
+    from datetime import datetime
+    row = rows[0] if len(rows) == 1 else {}
+    fields = ['id', 'snapshot_generation', 'recovery_status', 'recovery_task_id', 'recovery_workspace_id', 'restored_at']
+    types = {k: type(row.get(k)).__name__ if type(row.get(k)) in [str, int, float, bool, list, dict, type(None)] else 'other' for k in fields}
+    def ident(value):
+        return value if isinstance(value, str) and re.fullmatch('[0-9A-HJKMNP-TV-Z]{26}', value) else None
+    restored = row.get('restored_at'); restored_ms = None
+    if isinstance(restored, str) and len(restored) <= 40 and re.fullmatch('[0-9T:.Z+ -]+', restored):
+        try:
+            parsed = datetime.fromisoformat(restored.replace('Z', '+00:00'))
+            if parsed.tzinfo is not None: restored_ms = int(parsed.timestamp() * 1000)
+        except (ValueError, OverflowError): pass
+    wake_ms = wake.get('at') if isinstance(wake, dict) else None
+    valid_wake = type(wake_ms) is int and started <= wake_ms <= observed and set(wake) == {'taskId', 'sessionId', 'at'} and wake.get('taskId') == own['taskId'] and wake.get('sessionId') == own['sessionId']
+    generation = row.get('snapshot_generation')
+    canonical = {'snapshotId': ident(row.get('id')), 'generationSha256': hashlib.sha256(generation.encode()).hexdigest() if isinstance(generation, str) and len(generation) <= 256 else None,
+                 'recoveryStatus': row.get('recovery_status') if row.get('recovery_status') in ['waking', 'restored', 'failed', None] else 'other',
+                 'recoveryTaskId': ident(row.get('recovery_task_id')), 'recoveryWorkspaceId': ident(row.get('recovery_workspace_id')),
+                 'restoredAtMs': restored_ms, 'wakeSubmittedAtMs': wake_ms if valid_wake else None}
+    predicates = {'oneRow': len(rows) == 1, 'snapshotIdMatches': row.get('id') == protected.get('snapshotId'),
+                  'generationMatches': isinstance(generation, str) and generation == protected.get('snapshotGeneration'),
+                  'statusRestored': row.get('recovery_status') == 'restored', 'taskMatches': row.get('recovery_task_id') == own['taskId'],
+                  'workspaceMatches': row.get('recovery_workspace_id') == mapping['workspaceId'], 'restoredAtPresent': bool(restored),
+                  'restoredAtParseable': restored_ms is not None, 'wakeReceiptValid': bool(valid_wake),
+                  'restoredAfterWake': bool(valid_wake and restored_ms is not None and wake_ms <= restored_ms <= observed)}
+    return {'observedAt': observed, 'canonical': canonical, 'types': types, 'predicates': predicates}
 
 
 def main():
     stage = 'configuration'
+    root = config = own = None
+    mode = None
+    failure_source_sha = None
+    restore_evidence = None
     try:
         mode = sys.argv[1]
         assert mode in MODES
@@ -106,9 +140,15 @@ def main():
                 stage = 'restored-generation'
                 protected = json.loads((root / 'protected-snapshot.json').read_text())
                 rows = q('SELECT id,snapshot_generation,recovery_status,recovery_task_id,recovery_workspace_id,restored_at FROM session_snapshots WHERE chat_session_id=?', [own['sessionId']])
-                assert len(rows) == 1
+                try: wake = json.loads((root / 'wake-submitted.json').read_text())
+                except (OSError, ValueError): wake = {}
+                projection = restore_projection(rows, protected, own, mapping, wake, int(time.time() * 1000), config['started'])
+                save(root, 'wake-check-restore-source.json', projection)
+                raw_projection = (root / 'wake-check-restore-source.json').read_bytes()
+                failure_source_sha = hashlib.sha256(raw_projection).hexdigest()
+                restore_evidence = {'observedAt': projection['observedAt'], 'predicates': projection['predicates'], 'types': projection['types'], 'sourceEvidenceSha256': failure_source_sha}
+                assert all(projection['predicates'].values())
                 row = rows[0]
-                assert row['id'] == protected['snapshotId'] and row['snapshot_generation'] == protected['snapshotGeneration'] and row['recovery_status'] == 'restored' and row['recovery_task_id'] == own['taskId'] and row['recovery_workspace_id'] == workspace['id'] and row['restored_at']
                 from datetime import datetime
                 value['recoveredSnapshotId'] = row['id']
                 value['snapshotRestoreConfirmedAt'] = int(datetime.fromisoformat(row['restored_at'].replace('Z', '+00:00')).timestamp() * 1000)
@@ -122,7 +162,17 @@ def main():
         save(root, filename, value)
         print(json.dumps({'ok': True, 'stage': 'done', 'observedAt': observed}))
     except Exception:
-        print(json.dumps({'ok': False, 'stage': stage}))
+        # No grants or reconstructed success. Exclusive failure evidence is bound to
+        # this exact operation clock and lets the existing caller finally run early.
+        if root is not None and config is not None and own is not None and mode in MODES:
+            try:
+                save(root, mode + '-failure.json', {'mode': mode, 'taskId': own['taskId'], 'sessionId': own['sessionId'],
+                     'started': config['started'], 'hard': config['hard'], 'stage': stage,
+                     'observedAt': int(time.time() * 1000), 'sourceEvidenceSha256': failure_source_sha})
+            except Exception: pass
+        result = {'ok': False, 'stage': stage}
+        if restore_evidence is not None: result['diagnostic'] = restore_evidence
+        print(json.dumps(result))
 
 
 if __name__ == '__main__':

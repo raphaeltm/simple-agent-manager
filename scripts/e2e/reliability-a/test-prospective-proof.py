@@ -34,10 +34,12 @@ class ReaderTests(unittest.TestCase):
             for name, value in [(mode + '-mapping.json', {'taskId': own['taskId'], 'sessionId': own['sessionId'], 'workspaceId': workspace, 'nodeId': node, 'agentSessionId': '01M51AAAAAAAAAAAAAAAAAAAAA'}),
                                 ('protected-sleep.json', {'workspaceId': workspace}),
                                 ('observer-sleep.json', {'workspaceId': workspace}),
+                                ('wake-submitted.json', {'taskId': own['taskId'], 'sessionId': own['sessionId'], 'at': now - 5000}),
                                 ('protected-snapshot.json', {'snapshotId': snapshot, 'snapshotGeneration': 'generation1'})]:
                 if not (mode == 'protected-snapshot' and name == 'protected-snapshot.json'):
                     (root / name).write_text(json.dumps(value))
             runtime = 'cf-container' if mode in ['observe','observer-snapshot'] else 'vm'
+            if failure == 'missing-wake': (root / 'wake-submitted.json').unlink()
             task = {'id': own['taskId'], 'user_id': 'owner', 'project_id': reader.PROJECT, 'chat_session_id': own['sessionId'], 'workspace_id': workspace, 'output_branch': own['branch'], 'agent_profile_hint': own['agentProfileId'], 'status': 'completed' if mode == 'completion-runtime' else 'in_progress', 'claimed_warm_node_id': None, 'completed_at': None}
             queries = []
 
@@ -60,7 +62,13 @@ class ReaderTests(unittest.TestCase):
                 elif 'FROM workspaces WHERE id=' in sql: rows = [{'id': workspace, 'user_id': 'owner', 'project_id': reader.PROJECT, 'chat_session_id': own['sessionId'], 'node_id': node, 'branch': own['branch'], 'status': 'running'}]
                 elif 'FROM nodes WHERE id=' in sql: rows = [{'id': node, 'user_id': 'owner', 'runtime': runtime, 'agent_version': reader.VERSION, 'capacity_pool_revision': 40, 'status': 'running'}]
                 elif 'FROM agent_profiles' in sql: rows = [{'id': own['agentProfileId'], 'user_id': 'owner', 'project_id': reader.PROJECT, 'agent_type': 'wrong' if failure == 'wrong-profile' else ('openai-codex' if mode == 'observe' else 'claude-code'), 'runtime': runtime, 'vm_size_override': None}]
-                elif 'FROM session_snapshots' in sql: rows = [{'id': snapshot, 'user_id': 'owner', 'project_id': reader.PROJECT, 'chat_session_id': own['sessionId'], 'workspace_id': workspace, 'runtime': runtime, 'status': 'available', 'degradation': 'none', 'expires_at': '2026-12-01T00:00:00.000Z', 'sleeping_at': '2026-10-16T06:00:00.000Z', 'snapshot_generation': 'generation2' if failure == 'wrong-generation' else 'generation1', 'home_sha256': 'a'*64, 'wip_sha256': 'b'*64, 'recovery_status': 'restored', 'recovery_task_id': own['taskId'], 'recovery_workspace_id': workspace, 'restored_at': '2026-10-16T06:00:01.000Z'}]
+                elif 'FROM session_snapshots' in sql:
+                    from datetime import datetime, timezone
+                    restored = datetime.fromtimestamp((now - (6000 if failure == 'wrong-time' else 1000))/1000, timezone.utc).isoformat()
+                    rows = [{'id': snapshot, 'user_id': 'owner', 'project_id': reader.PROJECT, 'chat_session_id': own['sessionId'], 'workspace_id': workspace, 'runtime': runtime, 'status': 'available', 'degradation': 'none', 'expires_at': '2026-12-01T00:00:00.000Z', 'sleeping_at': '2026-10-16T06:00:00.000Z', 'snapshot_generation': 'generation2' if failure == 'wrong-generation' else 'generation1', 'home_sha256': 'a'*64, 'wip_sha256': 'b'*64, 'recovery_status': None if failure == 'wrong-status' else 'restored', 'recovery_task_id': own['taskId'], 'recovery_workspace_id': workspace, 'restored_at': restored}]
+                    if failure == 'private-row':
+                        rows[0].update(snapshot_generation=CANARY, recovery_status=CANARY, recovery_task_id=CANARY, recovery_workspace_id=CANARY, restored_at=CANARY, extra=CANARY)
+                    if failure == 'wrong-types': rows[0].update(snapshot_generation=7, restored_at=123)
                 else: raise AssertionError('unexpected fixed query')
                 return Response({'result': [{'results': rows}]})
             output = io.StringIO()
@@ -74,6 +82,31 @@ class ReaderTests(unittest.TestCase):
                 artifact = root / (mode + '.json' if mode in ['protected-snapshot', 'observer-snapshot', 'completion-runtime'] else mode + '-grant.json')
                 self.assertEqual(json.loads(artifact.read_text())['sourceEvidenceSha256'], hashlib.sha256(source).hexdigest())
                 self.assertNotIn(CANARY, source.decode())
+            elif mode == 'wake-check':
+                proof_file = root / 'wake-check-restore-source.json'
+                original = proof_file.read_bytes()
+                failure_file = root / 'wake-check-failure.json'
+                original_failure = failure_file.read_bytes()
+                proof = json.loads(original)
+                self.assertFalse(all(proof['predicates'].values()))
+                self.assertTrue(all(type(v) is bool for v in proof['predicates'].values()))
+                self.assertEqual(json.loads(original_failure)['sourceEvidenceSha256'], hashlib.sha256(original).hexdigest())
+                self.assertEqual(result['diagnostic']['sourceEvidenceSha256'], hashlib.sha256(original).hexdigest())
+                self.assertEqual(result['diagnostic']['predicates'], proof['predicates'])
+                self.assertEqual(proof_file.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(failure_file.stat().st_mode & 0o777, 0o600)
+                self.assertFalse((root / 'wake-check-grant.json').exists())
+                for path in root.iterdir():
+                    if path.is_file(): self.assertNotIn(CANARY, path.read_text())
+                # Later source capture becomes valid. Rerunning still cannot replace
+                # the failed original or mint a grant from the changed row.
+                failure = None
+                output = io.StringIO()
+                with patch.dict(os.environ, {'SAM_PROSPECTIVE_ROOT': folder, 'CF_ACCOUNT_ID': 'synthetic', 'CF_TOKEN': CANARY}), patch.object(reader.sys, 'argv', ['fixed', mode]), patch.object(reader.urllib.request, 'urlopen', request), contextlib.redirect_stdout(output): reader.main()
+                self.assertFalse(json.loads(output.getvalue())['ok'])
+                self.assertEqual(proof_file.read_bytes(), original)
+                self.assertEqual(failure_file.read_bytes(), original_failure)
+                self.assertFalse((root / 'wake-check-grant.json').exists())
             return result
 
     def test_pinned_source_contract(self):
@@ -98,7 +131,7 @@ class ReaderTests(unittest.TestCase):
             with self.subTest(mode=mode): self.invoke(mode)
 
     def test_concrete_failures(self):
-        for mode, failure, stage in [('setup', 'transport', 'settings'), ('setup', 'wrong-profile', 'mapping'), ('setup', 'foreign-claim', 'resource-guards'), ('wake-check', 'wrong-generation', 'restored-generation')]:
+        for mode, failure, stage in [('setup', 'transport', 'settings'), ('setup', 'wrong-profile', 'mapping'), ('setup', 'foreign-claim', 'resource-guards'), *[('wake-check', f, 'restored-generation') for f in ['wrong-generation','wrong-status','wrong-time','wrong-types','private-row','missing-wake']]]:
             with self.subTest(failure=failure): self.assertEqual(self.invoke(mode, failure)['stage'], stage)
 
 

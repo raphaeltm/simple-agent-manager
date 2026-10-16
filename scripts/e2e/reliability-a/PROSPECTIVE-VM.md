@@ -177,6 +177,23 @@ expiry, no degradation, and original source hash. Wake grant requires the SAME
 snapshotID AND generation, recovery_status restored, exact recovery task/workspace
 and actual restored_at after this wake. A new workspace alone proves no restore.
 
+The caller retains `wake-submitted.json` after the single accepted prompt, before
+waiting for recovery. Before evaluating the restore gate the producer exclusively
+creates `wake-check-restore-source.json` with observation time, fixed per-predicate
+booleans/types and bounded canonical fields (generation is a SHA, not raw text).
+Its SHA binds the fixed failure export; no arbitrary rows, errors or helper streams
+are emitted. Generation/status/time/type mismatches remain original failed proof.
+Later captures cannot overwrite the exclusive artifact or turn a repeated producer
+invocation into a grant. Preserve the historical failed run that lacked this proof;
+this fix cannot reconstruct or relabel it.
+
+Any producer failure writes an exclusive0600 `MODE-failure.json` bound to the exact
+task/session/start/hard clock. The caller recognizes only that bound signal while
+waiting for its grant/snapshot/runtime proof and enters its existing finally
+preservation/logout/browser-close path promptly. A foreign or stale-clock signal
+does not authorize an action. This is no grant, Stop/Delete or process-kill path,
+and neither changes the deadline nor permits another prompt, task or retry.
+
 At canonical completion the caller reads actual compact session message metadata
 through the SAME owner context, allowing only the two installed spellings of
 complete_task, fresh tool-role timestamp and status completed. It requires one
