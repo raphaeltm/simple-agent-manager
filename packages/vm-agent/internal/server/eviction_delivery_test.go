@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/resourcemon"
 )
@@ -176,84 +177,94 @@ func TestEvictionDeliverySurvivesRestartAndUsesFrozenIdentityWithFreshToken(t *t
 func TestEvictionDeliveryRetainsTransientAndAuthFailuresButRetiresGone(t *testing.T) {
 	for _, failure := range []int{http.StatusInternalServerError, http.StatusTooManyRequests, http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict} {
 		t.Run(http.StatusText(failure), func(t *testing.T) {
-			s := newEvictionTestServer()
-			initializeEvictionTestStore(t, s)
-			d := queueEvictionFixture(t, s, true)
-			var calls atomic.Int32
-			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if calls.Add(1) == 1 {
-					w.WriteHeader(failure)
-				} else {
-					w.WriteHeader(http.StatusGone)
-				}
-			}))
-			defer api.Close()
-			s.config.ControlPlaneURL = api.URL
-			now := time.Now()
-			if err := s.deliverPendingWorkspaceEvictionAt(context.Background(), d.ID, now); err == nil {
-				t.Fatal("failure was not retained")
-			}
-			if err := s.deliverPendingWorkspaceEvictionAt(context.Background(), d.ID, now.Add(time.Hour)); err != nil {
-				t.Fatal(err)
-			}
-			if calls.Load() != 2 {
-				t.Fatal("queued callback was lost")
-			}
-			if pending, err := s.store.ClaimEvictionDelivery(context.Background(), "", now.Add(2*time.Hour), time.Second, time.Minute, time.Second); err != nil || pending != nil {
-				t.Fatalf("terminal row retained: %#v %v", pending, err)
-			}
+			testEvictionDeliveryFailure(t, failure)
 		})
+	}
+}
+
+func testEvictionDeliveryFailure(t *testing.T, failure int) {
+	t.Helper()
+	s := newEvictionTestServer()
+	initializeEvictionTestStore(t, s)
+	d := queueEvictionFixture(t, s, true)
+	var calls atomic.Int32
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(failure)
+		} else {
+			w.WriteHeader(http.StatusGone)
+		}
+	}))
+	defer api.Close()
+	s.config.ControlPlaneURL = api.URL
+	now := time.Now()
+	if err := s.deliverPendingWorkspaceEvictionAt(context.Background(), d.ID, now); err == nil {
+		t.Fatal("failure was not retained")
+	}
+	if err := s.deliverPendingWorkspaceEvictionAt(context.Background(), d.ID, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 2 {
+		t.Fatal("queued callback was lost")
+	}
+	if pending, err := s.store.ClaimEvictionDelivery(context.Background(), "", now.Add(2*time.Hour), time.Second, time.Minute, time.Second); err != nil || pending != nil {
+		t.Fatalf("terminal row retained: %#v %v", pending, err)
 	}
 }
 
 func TestEvictionPreparedStopRecoversAfterAgentRestart(t *testing.T) {
 	for _, test := range []struct{ name, exit string }{{"crash-after-stop-before-mark", "0"}, {"failed-stop", "1"}} {
 		t.Run(test.name, func(t *testing.T) {
-			s := newEvictionTestServer()
-			path := initializeEvictionTestStore(t, s)
-			logPath := setupEvictionDocker(t, evictionTestContainerID)
-			t.Setenv("SAM_EVICTION_TEST_STOP_EXIT", test.exit)
-			if err := s.stopEvictedWorkspaceContainer(context.Background(), evictionTargetFixture(s)); (err != nil) != (test.exit == "1") {
-				t.Fatalf("initial stop: %v", err)
-			}
-			if s.workspaces["workspace-1"].Status != "running" {
-				t.Fatal("failed stop was announced as complete")
-			}
-			if err := s.store.Close(); err != nil {
-				t.Fatal(err)
-			}
-			restarted := newEvictionTestServer()
-			restarted.store = reopenEvictionTestStore(t, path)
-			restarted.workspaces = map[string]*WorkspaceRuntime{}
-			t.Setenv("SAM_EVICTION_TEST_STOP_EXIT", "0")
-			requests := make(chan map[string]interface{}, 1)
-			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var body map[string]interface{}
-				_ = json.NewDecoder(r.Body).Decode(&body)
-				requests <- body
-				w.WriteHeader(http.StatusNoContent)
-			}))
-			defer api.Close()
-			restarted.config.ControlPlaneURL = api.URL
-			if err := restarted.deliverPendingWorkspaceEvictionAt(context.Background(), "", time.Now().Add(time.Hour)); err != nil {
-				t.Fatal(err)
-			}
-			select {
-			case body := <-requests:
-				if body["containerStopped"] != true {
-					t.Fatalf("unconfirmed stop callback: %v", body)
-				}
-			default:
-				t.Fatal("recovered intent was not delivered")
-			}
-			calls, err := os.ReadFile(logPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if strings.Count(string(calls), "stop --time") != 2 || strings.Contains(string(calls), " rm ") {
-				t.Fatalf("stop was not safely retried: %s", calls)
-			}
+			testEvictionPreparedStopRecovery(t, test.exit)
 		})
+	}
+}
+
+func testEvictionPreparedStopRecovery(t *testing.T, exit string) {
+	t.Helper()
+	s := newEvictionTestServer()
+	path := initializeEvictionTestStore(t, s)
+	logPath := setupEvictionDocker(t, evictionTestContainerID)
+	t.Setenv("SAM_EVICTION_TEST_STOP_EXIT", exit)
+	if err := s.stopEvictedWorkspaceContainer(context.Background(), evictionTargetFixture(s)); (err != nil) != (exit == "1") {
+		t.Fatalf("initial stop: %v", err)
+	}
+	if s.workspaces["workspace-1"].Status != "running" {
+		t.Fatal("failed stop was announced as complete")
+	}
+	if err := s.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted := newEvictionTestServer()
+	restarted.store = reopenEvictionTestStore(t, path)
+	restarted.workspaces = map[string]*WorkspaceRuntime{}
+	t.Setenv("SAM_EVICTION_TEST_STOP_EXIT", "0")
+	requests := make(chan map[string]interface{}, 1)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		requests <- body
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer api.Close()
+	restarted.config.ControlPlaneURL = api.URL
+	if err := restarted.deliverPendingWorkspaceEvictionAt(context.Background(), "", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-requests:
+		if body["containerStopped"] != true {
+			t.Fatalf("unconfirmed stop callback: %v", body)
+		}
+	default:
+		t.Fatal("recovered intent was not delivered")
+	}
+	calls, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(calls), "stop --time") != 2 || strings.Contains(string(calls), " rm ") {
+		t.Fatalf("stop was not safely retried: %s", calls)
 	}
 }
 
@@ -360,5 +371,46 @@ func TestEvictionOutboxPersistsOnlyAllowlistedResultFields(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), secret) || strings.Contains(string(encoded), prompt) || strings.Contains(string(encoded), "workspace-callback-token") {
 		t.Fatal("sensitive values reached the durable outbox")
+	}
+}
+
+// Drive the real pre-stop capture, journal, completion and HTTP writer. A false
+// value must survive omitempty and the post-stop completion's unknown state.
+func TestEvictionIdleOwnershipReachesCallbackAfterStop(t *testing.T) {
+	s := newEvictionTestServer()
+	initializeEvictionTestStore(t, s)
+	session, _, err := s.agentSessions.Create("workspace-1", "agent-1", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.sessionHosts["workspace-1:"+session.ID] = acp.NewSessionHost(acp.SessionHostConfig{})
+	target := evictionTargetFixture(s)
+	if err := s.prepareWorkspaceEvictionStop(context.Background(), target); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the runtime disappearing after capture.
+	delete(s.sessionHosts, "workspace-1:"+session.ID)
+	d := s.workspaceEvictionDelivery(resourcemon.EvictionResult{Target: target, SnapshotCaptured: true, ContainerStopped: true})
+	if _, err := s.store.RecordWorkspaceEviction(context.Background(), d); err != nil {
+		t.Fatal(err)
+	}
+	var received *bool
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			InterruptedWork *bool `json:"interruptedWork"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		received = body.InterruptedWork
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer api.Close()
+	s.config.ControlPlaneURL = api.URL
+	if err := s.deliverPendingWorkspaceEvictionAt(context.Background(), "", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if received == nil || *received {
+		t.Fatal("callback lost captured idle ownership")
 	}
 }

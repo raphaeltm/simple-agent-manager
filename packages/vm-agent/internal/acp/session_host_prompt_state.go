@@ -45,7 +45,7 @@ func (h *SessionHost) beginPromptForDelivery(ctx context.Context, cancel context
 func (h *SessionHost) beginPromptForDeliveryWithMessageID(ctx context.Context, cancel context.CancelFunc, deliveryID, messageID string, observer PromptTerminalObserver) (*promptAttempt, bool) {
 	h.promptMu.Lock()
 	defer h.promptMu.Unlock()
-	if h.promptInFlight {
+	if h.promptInFlight || h.evictionPending {
 		return nil, false
 	}
 	h.promptInFlight = true

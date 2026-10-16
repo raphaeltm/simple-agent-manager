@@ -266,7 +266,7 @@ async function sendFromAlpha(text: string) {
   fireEvent.change(composer(), { target: { value: text } });
   fireEvent.click(screen.getByRole('button', { name: /send/i }));
   await waitFor(() =>
-    expect(mocks.sendFollowUpPrompt).toHaveBeenCalledWith(PROJECT_ID, ALPHA.id, text)
+    expect(mocks.sendFollowUpPrompt).toHaveBeenCalledWith(PROJECT_ID, ALPHA.id, text, [])
   );
   return delivery;
 }

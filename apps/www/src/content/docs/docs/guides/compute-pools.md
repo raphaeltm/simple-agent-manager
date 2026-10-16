@@ -8,8 +8,9 @@ start work, SAM looks at how much machine that work asks for, looks at the pool 
 and either reuses a machine you already have or provisions one of the specific instance types the
 pool permits.
 
-You may also see pools called **node pools** or **capacity pools** — same thing. The app labels
-them "Infrastructure Compute Pool".
+You may also see pools called **node pools** or **capacity pools** — same thing. The app shows
+them as **Your compute pool**, **Project compute pool**, or **Shared compute pool**, depending on
+where you are.
 
 :::note
 Most people never open this page in the product. If you have connected a cloud provider (or you
@@ -34,12 +35,14 @@ Pools exist at three **scopes**, each edited in a different place:
 
 | Scope               | Where to edit it                                                                                     |
 | ------------------- | ---------------------------------------------------------------------------------------------------- |
-| **Project**         | Project → Settings → Infrastructure. Owners and admins can edit; maintainers can view and reconcile. |
+| **Project**         | Project → Settings → Infrastructure. Owners and admins can edit; maintainers can view and refresh.   |
 | **User** (personal) | Settings → Infrastructure. Yours alone.                                                              |
 | **Installation**    | Admin → Infrastructure. Platform superadmins only.                                                   |
 
-Each panel shows the pool that is currently in effect for that context, the credentials feeding
-it, and the list of provider instance types it permits.
+Each panel sums the pool up in one sentence (which provider, which regions, the smallest and
+largest machine), lists its settings in plain words, and shows the machine types it allows with the
+regions each one is allowed in. **Edit** opens the same panel for changes, with a Save bar that stays
+on screen.
 
 You can also see the pool in effect without leaving your work: the **workspace sidebar** and a
 chat session's **infrastructure** section both show a "Current compute pool" line with the scope,
@@ -53,7 +56,7 @@ A project's **Infrastructure** tab holds three things, and it is worth knowing w
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | **Default Resources**           | How much machine work asks for, when nothing more specific says otherwise                                  |
 | **Scaling & Scheduling**        | The default provider and region, plus how densely nodes are packed and how long they stay warm             |
-| **Infrastructure Compute Pool** | Which concrete machines SAM may rent, and how it chooses between them — for workspaces and for deployments |
+| **Project compute pool**        | Which concrete machines SAM may rent, and how it chooses between them — for workspaces and for deployments |
 
 The first two feed the pool decisions described below, so they are covered here too.
 
@@ -107,10 +110,14 @@ that decision. If you want a project to use your personal pool, remove the proje
 than emptying it.
 :::
 
-The **Reconcile** button creates the pool for the scope you are viewing (from the credentials
-available to that scope) and refreshes it from the provider's live catalog. If you see a banner
-saying you are using a lower-scope fallback, reconciling the current scope is how you create an
-editable pool that takes precedence.
+Connecting, changing, or removing a cloud credential updates the pools that use it automatically.
+**Refresh** on the panel does the same on demand: it creates the pool for the scope you are viewing
+if one is missing, and re-reads the provider's machine list (for example after your provider
+launches a new machine type). A project without its own pool says which pool it uses and links to
+it; to give the project its own pool, connect a cloud account to the project.
+
+Without any pool of your own, the panel tells you whether shared machines from the installation
+are running your work, and links to connecting your own cloud account.
 
 ## What is inside a pool
 
@@ -127,7 +134,9 @@ from credentials you have already connected:
 - **Platform** credentials — installation-level credentials added by a superadmin.
 
 A pool with no active source cannot rent anything. The panel links straight to the right setup
-page when that is the case.
+page when that is the case. When a pool has more than one connection, the panel shows each one as
+its own section, named after where you manage it (for example **Cloud Provider settings** or
+**Connections**), so you can tell them apart without seeing credential ids.
 
 ### Allowed offerings
 
@@ -135,41 +144,38 @@ An **offering** is one concrete, provider-native machine: a specific instance ty
 region, with real vCPU, RAM, disk, and price. Not `small`/`medium`/`large` — the actual
 `cpx31`-style SKU your provider sells.
 
-When SAM reconciles a pool it discovers your provider's **full** catalog for each source and lists
-every offering in the editor. Each row is one of:
+When SAM refreshes a pool it discovers your provider's **full** catalog for each source. The
+editor shows one row per machine type (its vCPU, RAM, disk, and price) with a chip for every region
+your provider sells it in. Select a region to allow that machine there; select it again to stop.
+Each chip is one of:
 
-| State                  | Meaning                                                                   |
-| ---------------------- | ------------------------------------------------------------------------- |
-| **Allowed**            | SAM may provision this instance type                                      |
-| **Not selected**       | In the pool, but switched off — SAM will not use it                       |
-| **Removed**            | Explicitly removed from the pool                                          |
-| **Catalog only**       | Your provider sells it, but it has never been added to this pool          |
-| **Unavailable**        | Your provider is not currently offering it (region sold out, SKU retired) |
-| **Stale catalog data** | The last catalog refresh could not confirm it                             |
+| Chip                                     | Meaning                                                                                  |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------- |
+| ✓ **Allowed**                            | SAM may provision this machine type in this region                                       |
+| Plain                                    | Not allowed. SAM will not use it until you select it                                     |
+| Dashed, with a reason                    | Your provider does not offer it right now (region sold out, machine retired, not seen in the latest catalog). It cannot be allowed |
+| ⚠ Allowed, with a reason                 | Allowed, but your provider does not offer it right now. You can turn it off              |
 
-Only **Allowed** offerings are eligible for placement. The editor separates the offerings your
-pool allows from the ones it excludes and from the rest of the provider's catalog, so you can
-browse everything your provider sells and add a machine type without leaving the page.
+Only allowed machines are eligible for placement. Machine types the pool already allows are listed
+first; the rest of the provider's catalog is folded behind **Show more** and is searchable by name
+or region, so you can browse everything your provider sells without leaving the page.
 
-You can filter by provider, location, minimum vCPU, minimum RAM, maximum monthly price, and
-availability, then toggle individual offerings on or off.
+#### How refresh treats your choices
 
-#### How reconcile treats your choices
+Refresh updates catalog facts — prices, specs, availability, new machine types — without undoing
+your decisions:
 
-Reconcile refreshes catalog facts — prices, specs, availability, new SKUs — without undoing your
-decisions:
-
-- An offering you explicitly enabled or removed keeps the status you gave it.
-- A brand-new offering that appears in the catalog is added in the **Not selected** state, so
-  your provider adding a machine type never silently changes what SAM rents.
+- A machine you explicitly allowed or turned off keeps that setting.
+- A brand-new machine type that appears in the catalog starts out not allowed, so your provider
+  adding a machine type never silently changes what SAM rents.
 - On first creation, SAM enables the offerings that correspond to the machine sizes it has always
   supported, so a fresh pool works immediately.
 - A provider API failure during refresh is reported as a refresh error; SAM does not invent
   availability it could not confirm.
 - **Starting work never refreshes the catalog.** Placement reads the pool as it stands, so a
   submission is never delayed by a provider API call and a deliberately emptied pool is never
-  quietly repopulated. Refreshing is something you do — via **Reconcile** — not a side effect of
-  running a task. (The one exception is an installation upgraded from the old size presets, whose
+  quietly repopulated. Refreshing happens when you press **Refresh** or change a credential — not
+  as a side effect of running a task. (The one exception is an installation upgraded from the old size presets, whose
   pool is materialized into native offerings once.)
 
 :::note
@@ -206,24 +212,25 @@ example, _"Why this node: lowest projected utilization first"_.
 
 Agent workspaces and [app deployments](/docs/guides/app-deployments/) want opposite things — a
 workspace is bursty and short-lived, a deployment is steady and long-lived — so the pool carries a
-separate strategy for each. **Infrastructure Compute Pool → Edit** on whichever scope you own shows
-all four settings together:
+separate strategy for each. **Edit** on the compute pool panel of whichever scope you own shows
+all four settings together (the app's label, then the concept it sets):
 
-| Field                      | What it decides                                                  | Default      |
-| -------------------------- | ---------------------------------------------------------------- | ------------ |
-| **Workspace strategy**     | Machine ordering for agent sessions and tasks                    | Balanced     |
-| **Deployment strategy**    | Machine ordering for app deployment nodes                        | Smallest fit |
-| **Exhaustion policy**      | What happens when no permitted machine can be obtained           | Queue        |
-| **Maximum nodes per user** | How many managed workspace nodes one user may run from this pool | 3            |
+| Field                                                        | What it decides                                                   | Default        |
+| ------------------------------------------------------------ | ----------------------------------------------------------------- | -------------- |
+| **Placing agents** (workspace strategy)                      | Machine ordering for agent sessions and tasks                     | Balanced       |
+| **App deployments** (deployment strategy)                    | Machine ordering for app deployment nodes                         | Smallest fit   |
+| **If the provider is out of capacity** (exhaustion policy)   | What happens when no permitted machine can be obtained            | Wait and retry |
+| **Machine limit** (maximum nodes per user)                   | How many managed workspace machines one person may run from it    | 3              |
 
 The credentials, the allowed offerings, and the providers and regions are shared between the two
 workloads. You curate one list of machines; only the _ordering_ differs by workload. The
 **exhaustion policy** is workspace-only — deployment placement does not consult it, so setting
 **Queue** will not make a capacity-starved deployment park and retry.
 
-### Maximum nodes per user
+### Machine limit
 
-This is two things at once, and the second one surprises people:
+The **Machine limit** (stored as the pool's maximum nodes per user) is two things at once, and the
+second one surprises people:
 
 - **For Spread, it is the switch-over point.** Spread opens a new machine per workspace until a
   user's node count in the pool reaches the limit, then starts packing onto the machines already
@@ -257,11 +264,11 @@ Providers run out of capacity, regions sell out, and accounts hit server limits.
 policy** is what SAM does when no permitted machine can be obtained. New pools default to
 **Queue**.
 
-| Policy                | Behaviour                                                                                                                                                             |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Queue** _(default)_ | Park the work and keep retrying until capacity returns, up to a maximum visible wait (2 hours by default). Good when the work can wait and you would rather not fail. |
-| **Fail**              | Stop with a capacity error instead of waiting. Good when you would rather know at once than discover a task waited an hour. One exception, below.                     |
-| **Fallback chain**    | Try the pool's other allowed offerings, in ranked order, before giving up. Good when you have several acceptable machine types and just want _something_ that fits.   |
+| Policy (app label)                                 | Behaviour                                                                                                                                                             |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Queue** — "Wait and retry" _(default)_           | Park the work and keep retrying until capacity returns, up to a maximum visible wait (2 hours by default). Good when the work can wait and you would rather not fail. |
+| **Fail** — "Stop with an error"                    | Stop with a capacity error instead of waiting. Good when you would rather know at once than discover a task waited an hour. One exception, below.                     |
+| **Fallback chain** — "Try other allowed machines"  | Try the pool's other allowed offerings, in ranked order, before giving up. Good when you have several acceptable machine types and just want _something_ that fits.   |
 
 :::note
 Fallback chain only tries alternatives **from the same pool, on the same credential, in the same
@@ -285,7 +292,7 @@ work and retry until the overall capacity wait expires, even under **Fail**:
   that need fewer; the work waits only when none of those fits. Under **Fail** or **Queue** there is
   no chain to descend, so it waits straight away. Shared and dedicated vCPUs have separate limits
   on Hetzner, so reaching one does not rule out the other.
-- **The pool's [Maximum nodes per user](#maximum-nodes-per-user) is reached** and no running node
+- **The pool's [Machine limit](#machine-limit) is reached** and no running node
   can take the work. The fix is the limit, the requirements, or freeing a node.
 
 So **Fail** is not a guarantee of an immediate error in every capacity situation.
@@ -393,8 +400,8 @@ Node Scheduling**. Legacy workspace-count and memory-threshold values remain rea
 compatibility, but do not gate placement. The disk-pressure threshold is deployment-controlled.
 
 Managed workspace nodes are user-isolated, so **Spread** opens a separate node per workspace for
-that user until their node count in the pool reaches [**Maximum nodes per
-user**](#maximum-nodes-per-user), then packs further sessions onto those nodes. **Pack** takes the
+that user until their node count in the pool reaches the [**Machine
+limit**](#machine-limit), then packs further sessions onto those nodes. **Pack** takes the
 largest allowed offering and fills it densely; **Smallest fit** takes the smallest, then cheapest,
 sufficient offering.
 
@@ -454,16 +461,18 @@ individual _workspace_ that has gone quiet.
 
 ## Pool states and what to do about them
 
-The panel shows a state for the pool in effect. What each one means:
+The "Current compute pool" line in the workspace sidebar and chat infrastructure section names the
+state of the pool in effect. When a pool cannot start machines, the settings panel shows the same
+problem as a warning in plain words:
 
-| State                                     | What it means, and what to do                                                                                        |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| **Available**                             | Ready — active sources and at least one available allowed offering. Nothing to do.                                   |
-| **Not configured**                        | No pool exists at any scope. Connect a cloud credential, then **Reconcile**.                                         |
-| **Empty — no eligible offerings**         | The pool has no active source, or no offering is enabled. **Edit** it and allow an offering, or attach a credential. |
-| **Unavailable — compute source disabled** | The credential behind the pool was disabled, revoked, or deleted. Reconnect or re-enable it, then **Reconcile**.     |
-| **Unavailable — catalog refresh needed**  | Every allowed offering is currently unavailable at the provider. **Reconcile**, then allow one that is still sold.   |
-| **Migration in progress**                 | SAM is still upgrading this pool's stored configuration. Wait, then reload.                                          |
+| State                                     | Settings panel says                                                 | What to do                                                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **Available**                             | _(no warning)_                                                      | Nothing to do.                                                                                |
+| **Not configured**                        | "No machines yet" (or "You're using shared machines")               | Connect a cloud credential. The pool is created for you.                                      |
+| **Empty — no eligible offerings**         | "No machines are allowed, so SAM can't start any from this pool."   | **Edit** it and allow a machine, or attach a credential.                                      |
+| **Unavailable — compute source disabled** | "The cloud account behind this pool is turned off or was removed."  | Reconnect or re-enable the credential. The pool updates when you do.                         |
+| **Unavailable — catalog refresh needed**  | "SAM couldn't read the provider's machine list. Try Refresh."       | **Refresh**, then allow a machine that is still sold.                                         |
+| **Migration in progress**                 | "This pool is being updated. Try again in a minute."                | Wait, then reload.                                                                            |
 
 Remember that a project pool in any of the unhealthy states stays authoritative — fix it, or
 remove it so a lower scope applies.
@@ -474,16 +483,16 @@ remove it so a lower scope applies.
 | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | "Waiting for capacity" that never clears                               | The pool's allowed offerings are sold out in the chosen region. Allow more offerings or regions, or switch the policy to **Fallback chain**.                                                                                                                                  |
 | Work fails immediately with a capacity error                           | Exhaustion policy is **Fail**, or the pool has no allowed offering that satisfies the requirements.                                                                                                                                                                           |
-| "Capacity pool node limit (N) reached and no node can fit the request" | The user is at **Maximum nodes per user** for this pool and no running node has room. Raise the limit, lower the requirements so an existing node fits, or free a node.                                                                                                       |
+| "Capacity pool node limit (N) reached and no node can fit the request" | The user is at the pool's **Machine limit** and no running node has room. Raise the limit, lower the requirements so an existing node fits, or free a node.                                                                                                                    |
 | No offering satisfies the request                                      | Requirements exceed every allowed machine — remember the host memory reserve, so a 4 GiB offering tops out at a 3584 MiB reservation. Lower the requirements or allow a bigger instance type.                                                                                 |
-| A new machine is provisioned for every task                            | Requirements ask for an exclusive node, each request fills a machine, or **Spread** has not reached the pool's maximum-node limit.                                                                                                                                            |
+| A new machine is provisioned for every task                            | Requirements ask for an exclusive node, each request fills a machine, or **Spread** has not reached the pool's **Machine limit**.                                                                                                                                             |
 | Workspace machines are bigger or pricier than expected                 | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor. Then open **Resources** on a finished session to see what it actually used ([Session Resource History](/docs/guides/session-resources/)). |
 | A deployment machine is bigger than expected                           | Check the service CPU and memory limits in its deployment manifest, the pool's deployment strategy, and which smaller offerings the pool allows.                                                                                                                              |
-| Editing is disabled                                                    | Project pools need owner or admin (`secret:write`); maintainers can view and reconcile but not edit.                                                                                                                                                                          |
+| Editing is disabled                                                    | Project pools need owner or admin (`secret:write`); maintainers can view and refresh but not edit.                                                                                                                                                                            |
 | The project ignores your personal pool                                 | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                                                                                                               |
 | Everything lands on one cloud although the pool allows several         | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                                                                                                 |
-| Too many, or too few, workspaces share a machine                       | Adjust explicit CPU, memory, and disk requirements, use **Exclusive node** for isolation, or change the pool strategy and maximum-node limit. [Session Resource History](/docs/guides/session-resources/) is the evidence for what the requirements should be.                |
-| Work waits for capacity even though the policy is **Fail**             | The provider reported an account limit (server or vCPU core limit, the latter after trying smaller offerings under Fallback chain), or the pool's [Maximum nodes per user](#maximum-nodes-per-user) is reached. Both always wait.                                             |
+| Too many, or too few, workspaces share a machine                       | Adjust explicit CPU, memory, and disk requirements, use **Exclusive node** for isolation, or change the pool strategy and **Machine limit**. [Session Resource History](/docs/guides/session-resources/) is the evidence for what the requirements should be.                  |
+| Work waits for capacity even though the policy is **Fail**             | The provider reported an account limit (server or vCPU core limit, the latter after trying smaller offerings under Fallback chain), or the pool's [Machine limit](#machine-limit) is reached. Both always wait.                                             |
 
 ## Where to look when you want the details
 

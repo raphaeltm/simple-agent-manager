@@ -98,16 +98,9 @@ export async function abandonRecoveryHandoff(
   }
 }
 
-/**
- * What the woken agent does first. A conversation agent always waits for its user; only a
- * task agent whose runtime was lost mid-task has work to continue without a queued
- * message. VM-only: ensureSessionRecovery refuses an Instant snapshot, which wakes in place.
- */
-function recoveryNextStep(
-  taskMode: 'task' | 'conversation',
-  wakeCause: SessionRecoveryOptions['wakeCause']
-): SessionRecoveryNextStep {
-  return taskMode === 'task' && wakeCause === 'runtime_lost'
+// Mode describes the conversation, not whether its last turn was interrupted.
+function recoveryNextStep(options: SessionRecoveryOptions): SessionRecoveryNextStep {
+  return options.wakeCause === 'runtime_lost' && options.interruptedWork !== false
     ? 'continue_assigned_task'
     : 'answer_queued_message';
 }
@@ -137,7 +130,7 @@ export async function startRecoveryTask(
   const contract = parseSessionRuntimeContract(context.snapshot.runtimeContractJson);
   const taskMode =
     contract?.taskContext?.taskMode ?? (task.taskMode === 'task' ? 'task' : 'conversation');
-  const nextStep = recoveryNextStep(taskMode, options.wakeCause);
+  const nextStep = recoveryNextStep(options);
   const profile = task.agentProfileHint
     ? await db
         .select()

@@ -35,13 +35,14 @@ export function parseAstroCheckSummary(output: string): AstroCheckSummary | unde
   const plain = output.replace(ANSI_PATTERN, '');
   const result = /Result \(\d+ files\):([\s\S]*)/.exec(plain)?.[1];
   if (!result) return undefined;
+  // Astro prints "1 error" / "2 errors": accept the singular as well as the plural.
   const count = (label: string): number | undefined => {
-    const value = new RegExp(String.raw`-\s+(\d+)\s+${label}`).exec(result)?.[1];
+    const value = new RegExp(String.raw`-\s+(\d+)\s+${label}s?\b`).exec(result)?.[1];
     return value === undefined ? undefined : Number(value);
   };
-  const errors = count('errors');
-  const warnings = count('warnings');
-  const hints = count('hints');
+  const errors = count('error');
+  const warnings = count('warning');
+  const hints = count('hint');
   if (errors === undefined || warnings === undefined || hints === undefined) return undefined;
   return { errors, warnings, hints };
 }

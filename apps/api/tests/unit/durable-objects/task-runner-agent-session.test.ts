@@ -264,7 +264,7 @@ describe('TaskRunner agent-session helpers', () => {
     const prompt = buildTaskInitialPrompt(makeState());
 
     expect(prompt).toContain('Exercise the TaskRunner agent-session path.');
-    expect(prompt).toContain('/workspaces/.private/evidence.txt');
+    expect(prompt).toContain('/workspaces/.private/attachment-1/evidence.txt');
     expect(prompt).toContain('123 bytes, text/plain');
     expect(prompt).toContain('Use the backend implementation profile.');
     // The get_instructions reminder is now a SEPARATE origin="system" injected

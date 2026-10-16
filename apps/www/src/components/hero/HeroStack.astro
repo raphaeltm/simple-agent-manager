@@ -1,0 +1,324 @@
+---
+/**
+ * Desktop hero: real SAM UI layers in a 3D stack. It starts exploded (each layer labelled),
+ * assembles, streams the transcript, then raises "needs input" and "task completed".
+ * The resting markup is the final frame, so no-JS and reduced-motion visitors see it composed.
+ */
+import StreamingWindow from './StreamingWindow.astro';
+import { heroCrop, themedImage } from './layers';
+
+const nodes = heroCrop('nodes');
+const comment = heroCrop('comment');
+const placement = heroCrop('placement');
+const notifyInput = heroCrop('notifyInput');
+const notifyDone = heroCrop('notifyDone');
+---
+
+<div class="hero-stack" aria-hidden="true">
+  <div class="stage">
+    <div class="stack" data-hero-stack>
+      <div class="plane plane-nodes" data-hero-nodes>
+        <span class="fig">03 · Nodes in your cloud</span>
+        <div class="hero-img nodes-img" style={themedImage(nodes.files, nodes)}></div>
+      </div>
+      <div class="plane plane-app sam-glass sam-glass-rim sam-glass-sheen" data-hero-app>
+        <span class="fig">01 · Project chat</span>
+        <StreamingWindow name="desktop" class="app-window" />
+        <div class="hotspot"></div>
+      </div>
+      <div class="plane chip chip-comment sam-glass sam-glass-rim">
+        <span class="fig">02 · Comments, placement, signals</span>
+        <div class="hero-img" style={themedImage(comment.files, comment)}></div>
+      </div>
+      <div class="plane chip chip-place sam-glass sam-glass-rim">
+        <div class="hero-img" style={themedImage(placement.files, placement)}></div>
+      </div>
+      <div class="plane chip chip-notify chip-notify-input sam-glass sam-glass-rim">
+        <div class="hero-img" style={themedImage(notifyInput.files, notifyInput)}></div>
+      </div>
+      <div class="plane chip chip-notify chip-notify-done sam-glass sam-glass-rim">
+        <div class="hero-img" style={themedImage(notifyDone.files, notifyDone)}></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* Desktop layers load only where the stack is shown. */
+  @media (min-width: 700px) {
+    .hero-stack :global(.hero-img) {
+      background-image: var(--img-dark);
+    }
+
+    :global(html[data-theme='light']) .hero-stack :global(.hero-img) {
+      background-image: var(--img-light);
+    }
+  }
+
+  .hero-stack {
+    --ease-pose: cubic-bezier(0.16, 0.84, 0.22, 1);
+  }
+
+  .stage {
+    position: absolute;
+    top: 0;
+    left: var(--stage-left, 0);
+    width: 860px;
+    height: 800px;
+    perspective: 1900px;
+    perspective-origin: 34% 28%;
+    transform: scale(var(--stage-scale, 1));
+    transform-origin: 0 0;
+  }
+
+  .stack {
+    --sx: 14deg;
+    --sy: -20deg;
+    --sz: 2deg;
+    --sc: 1;
+    position: absolute;
+    left: 40px;
+    top: 92px;
+    width: 780px;
+    height: 569px;
+    transform-style: preserve-3d;
+    transform: rotateX(calc(var(--sx) + var(--rx, 0deg))) rotateY(calc(var(--sy) + var(--ry, 0deg)))
+      rotateZ(var(--sz)) scale(var(--sc));
+  }
+
+  .stack.is-posing {
+    transition: transform 1700ms var(--ease-pose);
+  }
+
+  .stack.is-exploded,
+  :global([data-motion='intro']) .stack {
+    --sx: 56deg;
+    --sy: 0deg;
+    --sz: -34deg;
+    --sc: 0.8;
+  }
+
+  .stack > .plane {
+    position: absolute;
+    transform-style: preserve-3d;
+    transition:
+      transform 1700ms var(--ease-pose),
+      opacity 600ms ease,
+      box-shadow 600ms ease;
+  }
+
+  /* ---- Nodes plane: the compute underneath ---- */
+  .plane-nodes {
+    left: -150px;
+    top: 392px;
+    width: 760px;
+    border-radius: 14px;
+    transform: translateZ(-110px);
+  }
+
+  .nodes-img {
+    border-radius: 14px;
+    filter: brightness(0.82) saturate(0.95);
+  }
+
+  :global(html[data-theme='light']) .nodes-img {
+    filter: none;
+    box-shadow: 0 0 0 1px rgb(17 39 29 / 0.12);
+  }
+
+  /* The nodes cast light on the floor around them. */
+  .plane-nodes::before {
+    content: '';
+    position: absolute;
+    inset: -30% -12%;
+    z-index: -1;
+    background:
+      radial-gradient(30% 45% at 28% 55%, rgb(34 197 94 / 0.32), transparent 70%),
+      radial-gradient(30% 45% at 74% 55%, rgb(34 197 94 / 0.26), transparent 70%);
+    filter: blur(18px);
+  }
+
+  :global(html[data-theme='light']) .plane-nodes::before {
+    opacity: 0.45;
+  }
+
+  .plane-nodes.is-pulsing::before {
+    animation: node-pulse 1.6s ease-out 1;
+  }
+
+  @keyframes node-pulse {
+    40% {
+      filter: blur(14px) brightness(1.7);
+    }
+  }
+
+  /* ---- App window ---- */
+  .plane-app {
+    left: 0;
+    top: 0;
+    width: 780px;
+    border-radius: 14px;
+    transform: translateZ(0);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.12),
+      0 0 0 1px rgb(34 197 94 / 0.16),
+      0 40px 90px -30px rgb(34 197 94 / 0.28),
+      var(--sam-glass-v2-depth);
+  }
+
+  .plane-app :global(.app-window) {
+    border-radius: 14px;
+  }
+
+  /* Specular highlight that follows the pointer. */
+  .hotspot {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    border-radius: inherit;
+    pointer-events: none;
+    background:
+      radial-gradient(560px circle at var(--mx, 30%) var(--my, 10%), rgb(255 255 255 / 0.07), transparent 46%),
+      linear-gradient(118deg, rgb(255 255 255 / 0.075) 0%, rgb(255 255 255 / 0.02) 20%, transparent 32%);
+    mix-blend-mode: screen;
+  }
+
+  :global(html[data-theme='light']) .hotspot {
+    display: none;
+  }
+
+  /* ---- Chips ---- */
+  .chip {
+    border-radius: 14px;
+  }
+
+  .chip > .hero-img {
+    border-radius: 13px;
+  }
+
+  .chip-comment {
+    left: -34px;
+    top: 250px;
+    width: 184px;
+    transform: translateZ(95px);
+  }
+
+  .chip-place {
+    left: 520px;
+    top: 430px;
+    width: 270px;
+    padding: 10px 6px 4px;
+    transform: translateZ(70px);
+  }
+
+  .chip-place > .hero-img {
+    border-radius: 0;
+  }
+
+  .chip-notify {
+    left: 250px;
+    top: -52px;
+    opacity: 0;
+    transform: translateZ(125px) translateY(10px);
+  }
+
+  .chip-notify-input {
+    width: 518px;
+  }
+
+  .chip-notify-done {
+    width: 389px;
+  }
+
+  /* The resting frame ends on "task completed"; the intro raises "needs input" first. */
+  .stack:not([data-notify]) .chip-notify-done,
+  .stack[data-notify='input'] .chip-notify-input,
+  .stack[data-notify='done'] .chip-notify-done {
+    opacity: 1;
+    transform: translateZ(125px);
+  }
+
+  :global([data-motion='intro']) .stack:not([data-notify]) .chip-notify-done {
+    opacity: 0;
+  }
+
+  .stack[data-notify='input'] .chip-notify-input {
+    box-shadow:
+      0 0 0 1px rgb(245 158 11 / 0.55),
+      0 0 42px -6px rgb(245 158 11 / 0.5),
+      var(--sam-glass-v2-depth);
+  }
+
+  .stack:not([data-notify='input']) .chip-notify-done {
+    box-shadow:
+      0 0 0 1px rgb(34 197 94 / 0.5),
+      0 0 42px -6px rgb(34 197 94 / 0.45),
+      var(--sam-glass-v2-depth);
+  }
+
+  /* ---- Exploded view ---- */
+  .stack.is-exploded .plane-nodes,
+  :global([data-motion='intro']) .plane-nodes {
+    transform: translateZ(-280px);
+  }
+
+  .stack.is-exploded .chip-comment,
+  :global([data-motion='intro']) .chip-comment {
+    transform: translateZ(260px);
+  }
+
+  /* Pulled in so the exploded fan stays inside the viewport at every width. */
+  .stack.is-exploded .chip-place,
+  :global([data-motion='intro']) .chip-place {
+    transform: translateZ(230px) translateX(-60px);
+  }
+
+  .fig {
+    position: absolute;
+    left: 18px;
+    top: -38px;
+    padding: 4px 9px;
+    border-radius: 8px;
+    border: 1px solid rgb(34 197 94 / 0.35);
+    background: rgb(5 10 8 / 0.75);
+    color: #b6f5cf;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    opacity: 0;
+    transform: translateZ(2px);
+    transition: opacity 500ms ease;
+  }
+
+  .chip-comment .fig {
+    left: 0;
+    top: -34px;
+  }
+
+  :global(html[data-theme='light']) .fig {
+    border-color: rgb(21 128 61 / 0.35);
+    background: rgb(248 252 249 / 0.88);
+    color: #14532d;
+  }
+
+  .stack.is-exploded .fig,
+  :global([data-motion='intro']) .fig {
+    opacity: 1;
+  }
+
+  /* Resetting or pausing snaps every layer to where it is heading. */
+  :global([data-motion-snap]) .stack,
+  :global([data-motion-snap]) .stack > .plane,
+  :global([data-motion-snap]) .fig {
+    transition: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .stack,
+    .stack > .plane,
+    .fig {
+      transition: none;
+    }
+  }
+</style>

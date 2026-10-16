@@ -37,7 +37,7 @@ const steps = [
       {steps.map((step, i) => (
         <div class="step animate-on-scroll" style={`transition-delay: ${i * 120}ms`}>
           <div class="step-number-col">
-            <span class="step-number">{step.number}</span>
+            <span class="step-number sam-glass sam-glass-rim">{step.number}</span>
             {i < steps.length - 1 && <div class="step-connector" />}
           </div>
           <div class="step-content">
@@ -80,30 +80,30 @@ const steps = [
     flex-shrink: 0;
   }
 
+  /* Each step is a lit node, like the tiles on the hero floor. */
   .step-number {
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
     width: 48px;
     height: 48px;
-    border-radius: 50%;
-    background: var(--glass-bg);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--glass-border);
-    box-shadow: var(--glass-shadow);
-    color: var(--color-accent);
+    border-radius: 12px;
+    color: var(--color-accent-strong);
     font-family: var(--font-mono);
     font-size: 0.875rem;
     font-weight: 600;
-    flex-shrink: 0;
+  }
+
+  :global(html[data-theme='light']) .step-number {
+    color: var(--color-accent);
   }
 
   .step-connector {
     width: 1px;
     flex: 1;
     min-height: 40px;
-    background: linear-gradient(to bottom, var(--color-border), transparent);
+    background: linear-gradient(to bottom, rgb(34 197 94 / 0.45), transparent);
   }
 
   .step-content {

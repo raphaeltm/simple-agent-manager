@@ -12,6 +12,7 @@
  *
  * Covered surfaces:
  *   A. sam-hero-live-session      — busy active project chat session (hero image)
+ *      sam-hero-phone             — same session on a phone (homepage mobile hero source)
  *   B. sam-session-sleeping       — sleeping session, Archive lifecycle control
  *      sam-session-waking         — same session mid-wake, phase progress banner
  *   C. sam-agents-orchestration   — task hierarchy modal (parent + dispatched subtasks)
@@ -976,21 +977,11 @@ const HERO_SESSION = {
   },
 };
 
-test('sam-hero-live-session', async ({ page }) => {
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') console.log('[console:error]', msg.text());
-  });
-  page.on('requestfailed', (req) => console.log('[requestfailed]', req.url()));
-
-  // The full stack (header + 8-session sidebar + tool rail + plan panel +
-  // 3 tool cards with the running Bash row fully clear of the completion
-  // dock) does not fit the shared 900px marketing viewport without either
-  // hiding the sidebar or clipping the last tool card — use a taller
-  // viewport for this capture only.
-  await page.setViewportSize({ width: 1440, height: 1050 });
-
-  await setupChatChromeMocks(page);
-
+/**
+ * Routes the hero session (detail, running tool output, open comment threads) on
+ * top of `setupChatChromeMocks`. Shared by the desktop hero and the phone hero.
+ */
+async function routeHeroSession(page: Page) {
   await page.route(
     new RegExp(`/api/projects/${PROJECT_ID}/sessions/${HERO_SESSION_ID}(?:\\?.*)?$`),
     (route: Route) =>
@@ -1025,6 +1016,23 @@ test('sam-hero-live-session', async ({ page }) => {
     `**/api/projects/${PROJECT_ID}/sessions/${HERO_SESSION_ID}/comments*`,
     (route: Route) => respond(route, 200, { comments: HERO_COMMENT_THREADS })
   );
+}
+
+test('sam-hero-live-session', async ({ page }) => {
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') console.log('[console:error]', msg.text());
+  });
+  page.on('requestfailed', (req) => console.log('[requestfailed]', req.url()));
+
+  // The full stack (header + 8-session sidebar + tool rail + plan panel +
+  // 3 tool cards with the running Bash row fully clear of the completion
+  // dock) does not fit the shared 900px marketing viewport without either
+  // hiding the sidebar or clipping the last tool card — use a taller
+  // viewport for this capture only.
+  await page.setViewportSize({ width: 1440, height: 1050 });
+
+  await setupChatChromeMocks(page);
+  await routeHeroSession(page);
 
   await gotoChat(page, HERO_SESSION_ID);
 
@@ -1096,6 +1104,27 @@ test('sam-hero-live-session', async ({ page }) => {
 
   await assertNoOverflow(page);
   await marketingShot(page, 'sam-hero-live-session');
+});
+
+// The same session on a phone: the source for the marketing homepage's mobile
+// hero (apps/www/scripts/build-hero-layers.ts crops its layers from it).
+test.describe('hero on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+
+  test('sam-hero-phone', async ({ page }) => {
+    await setupChatChromeMocks(page);
+    await routeHeroSession(page);
+    await gotoChat(page, HERO_SESSION_ID);
+
+    // The layer script crops the agent reply, the plan card, the running tool
+    // group and the Interrupt button from this capture — all must be on screen.
+    await expect(page.getByText("I'll add idempotency protection in four steps", { exact: false })).toBeVisible();
+    await expect(page.getByText('Update signature + replay tests to cover the new guard')).toBeVisible();
+    await expect(page.getByText('3 tool calls')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Interrupt agent' })).toBeVisible();
+    await assertNoOverflow(page);
+    await marketingShot(page, 'sam-hero-phone');
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -24,8 +24,11 @@ const mocks = vi.hoisted(() => ({
   getTranscribeApiUrl: vi.fn(() => 'https://api.test/api/transcribe'),
   resetIdleTimer: vi.fn(),
   sendFollowUpPrompt: vi.fn(),
+  wsSend: vi.fn(),
   cancelAgentPrompt: vi.fn(),
   uploadSessionFiles: vi.fn(),
+  requestAttachmentUpload: vi.fn(),
+  uploadAttachmentToR2: vi.fn(),
   startVerifyDecayTimer: vi.fn(),
   stopVerifyDecayTimer: vi.fn(),
   connectionState: 'connected' as 'connected' | 'disconnected',
@@ -48,6 +51,8 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   sendFollowUpPrompt: mocks.sendFollowUpPrompt,
   cancelAgentPrompt: mocks.cancelAgentPrompt,
   uploadSessionFiles: mocks.uploadSessionFiles,
+  requestAttachmentUpload: mocks.requestAttachmentUpload,
+  uploadAttachmentToR2: mocks.uploadAttachmentToR2,
 }));
 
 vi.mock('../../../src/hooks/useChatWebSocket', () => ({
@@ -58,7 +63,7 @@ vi.mock('../../../src/hooks/useChatWebSocket', () => ({
     mocks.wsOptions.push(options);
     return {
       connectionState: mocks.connectionState,
-      wsRef: { current: null },
+      wsRef: { current: { readyState: 1, send: mocks.wsSend } },
       retry: vi.fn(),
     };
   },
@@ -547,7 +552,8 @@ describe('useSessionLifecycle loading semantics', () => {
   });
 
   it('trims the cached transcripts to the most recently used when a chat opens', async () => {
-    const otherChat = (n: number) => chatQueryKeys.sessionMessages('user-1', 'proj-1', `other-${n}`);
+    const otherChat = (n: number) =>
+      chatQueryKeys.sessionMessages('user-1', 'proj-1', `other-${n}`);
     for (let n = 1; n <= CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS + 1; n += 1) {
       queryClient.setQueryData(otherChat(n), detail([msg(`o${n}`, n)], false), { updatedAt: n });
     }
@@ -630,6 +636,67 @@ describe('useSessionLifecycle loading semantics', () => {
     await waitFor(() => expect(mocks.sendFollowUpPrompt).toHaveBeenCalled());
     await waitFor(() => expect(mocks.getChatSession.mock.calls.length).toBeGreaterThan(2));
     expect(result.current.agentActivity).toBe('prompting');
+  });
+
+  it('stages files while sleeping and includes refs only when the message is submitted', async () => {
+    mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'sleeping'));
+    mocks.requestAttachmentUpload.mockResolvedValue({
+      uploadId: 'upload-1',
+      uploadUrl: 'https://upload.test',
+    });
+    mocks.uploadAttachmentToR2.mockResolvedValue(undefined);
+    mocks.sendFollowUpPrompt.mockResolvedValue({ accepted: true, status: 'queued' });
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
+    act(() =>
+      result.current.handleUploadFiles([new File(['hello'], 'context.txt', { type: 'text/plain' })])
+    );
+    await waitFor(() => expect(result.current.attachments[0]?.status).toBe('complete'));
+    expect(mocks.uploadSessionFiles).not.toHaveBeenCalled();
+    expect(mocks.sendFollowUpPrompt).not.toHaveBeenCalled();
+    act(() => result.current.setFollowUp('Read the file'));
+    await act(async () => result.current.handleSendFollowUp());
+    expect(mocks.sendFollowUpPrompt).toHaveBeenCalledWith('proj-1', 'sess-1', 'Read the file', [
+      {
+        uploadId: 'upload-1',
+        filename: 'context.txt',
+        size: 5,
+        contentType: 'text/plain',
+      },
+    ]);
+    expect(result.current.attachments).toEqual([]);
+    expect(mocks.wsSend).not.toHaveBeenCalled();
+  });
+
+  it('keeps staged refs after failed attachment-only submission and retries the same files', async () => {
+    mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'sleeping'));
+    mocks.requestAttachmentUpload.mockResolvedValue({
+      uploadId: 'retry-upload',
+      uploadUrl: 'https://upload.test',
+    });
+    mocks.uploadAttachmentToR2.mockResolvedValue(undefined);
+    mocks.sendFollowUpPrompt
+      .mockRejectedValueOnce(new Error('Unavailable'))
+      .mockResolvedValueOnce({ accepted: true });
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
+    act(() =>
+      result.current.handleUploadFiles([new File(['hello'], 'context.txt', { type: 'text/plain' })])
+    );
+    await waitFor(() => expect(result.current.attachments[0]?.status).toBe('complete'));
+    await act(async () => result.current.handleSendFollowUp());
+    expect(result.current.attachments[0]?.ref?.uploadId).toBe('retry-upload');
+    await act(async () => result.current.handleSendFollowUp());
+    expect(mocks.sendFollowUpPrompt.mock.calls[0]![2]).toBe('Please read the attached files.');
+    expect(mocks.sendFollowUpPrompt.mock.calls[1]![3]).toEqual(
+      mocks.sendFollowUpPrompt.mock.calls[0]![3]
+    );
+    expect(result.current.attachments).toEqual([]);
+    expect(mocks.wsSend).not.toHaveBeenCalled();
   });
 
   it('surfaces wake phase for a USER-TRIGGERED wake, through the stale-sleeping guard', async () => {

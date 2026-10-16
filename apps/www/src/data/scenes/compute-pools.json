@@ -1,0 +1,51 @@
+{
+  "slug": "compute-pools",
+  "description": "Animated preview of SAM's real compute pool editor with a sample project: machine types appear with the regions they can run in, a region is highlighted, then the placement decision and the Hetzner node it chose rise into view. Timing is simulated.",
+  "aspect": { "wide": 1.2, "narrow": 0.75 },
+  "beats": [0, 700, 1500, 2300, 3200],
+  "layers": [
+    {
+      "id": "window",
+      "source": "sam-compute-offerings-manager",
+      "box": { "x": 320, "y": 26, "w": 884, "h": 786 },
+      "outWidth": 884,
+      "place": { "wide": { "x": 2, "y": 2, "w": 60 }, "narrow": { "x": 1, "y": 1, "w": 98 } },
+      "depth": 0,
+      "fade": "right",
+      "tiles": [
+        { "box": { "x": 337, "y": 208, "w": 867, "h": 143 }, "at": 2 },
+        { "box": { "x": 337, "y": 362, "w": 867, "h": 175 }, "at": 2 },
+        { "box": { "x": 337, "y": 537, "w": 867, "h": 138 }, "at": 2 },
+        { "box": { "x": 337, "y": 675, "w": 867, "h": 137 }, "at": 2 }
+      ],
+      "rings": [
+        {
+          "tone": "mint",
+          "stops": [{ "at": 3, "box": { "x": 353, "y": 478, "w": 112, "h": 44 } }],
+          "until": 4
+        }
+      ]
+    },
+    {
+      "id": "placement",
+      "source": "sam-compute-placement-decision",
+      "box": { "x": 690, "y": 566, "w": 560, "h": 296 },
+      "outWidth": 560,
+      "place": { "wide": { "x": 50, "y": 30, "w": 44 }, "narrow": { "x": 26, "y": 42, "w": 70 } },
+      "depth": 70,
+      "at": 4,
+      "glow": "green"
+    },
+    {
+      "id": "node",
+      "source": "sam-nodes-multi-provider",
+      "box": { "x": 316, "y": 663, "w": 780, "h": 340 },
+      "outWidth": 780,
+      "place": { "wide": { "x": 6, "y": 62, "w": 46 }, "narrow": { "x": 2, "y": 72, "w": 66 } },
+      "depth": 110,
+      "at": 5,
+      "glow": "green"
+    }
+  ],
+  "lights": [{ "tone": "green", "at": 4 }]
+}

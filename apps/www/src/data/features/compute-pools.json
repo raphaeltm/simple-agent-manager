@@ -7,7 +7,7 @@
   "highlights": [
     "Pools are built from each connected credential’s live catalog — concrete SKUs like cx33 or PRO2-S with real vCPU, RAM, disk, and price",
     "Project, user, and installation scopes, resolved in that order",
-    "Strategy (Balanced, Pack, Spread, Smallest fit) and exhaustion policy (Queue, Fail, Fallback chain) per pool",
+    "How agents are placed (Balanced, Pack, Spread, Smallest fit) and what happens when a provider is out of capacity (wait and retry, try other allowed machines, or stop with an error), per pool",
     "Nodes are reused when they fit and stay warm for 30 minutes",
     "Settings → Usage tracks token spend by model and day against a monthly budget; Admin → Costs and Admin → Usage cover the whole installation"
   ],
@@ -16,18 +16,18 @@
   "screenshots": [
     {
       "src": "/images/features/sam-compute-pool-editor.png",
-      "alt": "Project Infrastructure compute pool editor showing a pool with strategy Pack, exhaustion policy Fallback Chain, three sources and seven allowed instances, with allowed offerings from Hetzner, Scaleway, and Vultr listing vCPU, RAM, disk, location, and monthly price, and a sold-out Hetzner offering marked unavailable",
+      "alt": "Project compute pool editor with agents placed by Pack, Try other allowed machines when a provider is out of capacity, and a machine limit of 3 per person, above the allowed machines for each connection: Hetzner cx23 allowed in Falkenstein, cx33, cpx31 and cx43 with their regions and monthly prices, a sold-out Falkenstein region marked unavailable, and Scaleway machine types below",
       "caption": "Choose exactly which machines SAM may rent, from every connected provider’s real catalog"
     }
   ],
   "details": [
     {
       "headline": "Real machines, not size labels",
-      "body": "A compute pool lists the actual provider-native offerings it is allowed to rent — cx33, PRO2-S, vc2-4c-8gb, and more — across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP, each with its real vCPU, RAM, disk, and price. Browse each provider’s full catalog, filter by provider, region, vCPU, RAM, or price, and add a machine type without leaving the page. You choose the strategy (Balanced, Pack, Spread, Smallest fit) and what happens when a provider runs out (Queue, Fail, Fallback chain).",
+      "body": "A compute pool lists the actual provider-native offerings it is allowed to rent — cx33, PRO2-S, vc2-4c-8gb, and more — across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP, each with its real vCPU, RAM, disk, and price. Every machine type a provider offers is listed with its regions: tap a region to let SAM start that machine there, or search by name or region. You choose how agents are placed (Balanced, Pack, Spread, Smallest fit) and what happens when a provider runs out of capacity (wait and retry, try other allowed machines, or stop with an error).",
       "screenshot": {
         "src": "/images/features/sam-compute-offerings-manager.png",
-        "alt": "Catalog filters for provider, region, minimum vCPU, minimum RAM, maximum price, and availability above the Add instances from catalog list, where Hetzner offerings are marked Already allowed, Region sold out, Catalog only with an Add button, or Not selected",
-        "caption": "Filter a provider’s live catalog and add the exact instance types you want in the pool"
+        "alt": "The allowed machines list: a search box, then Hetzner machine types with region buttons, cx23 allowed in Falkenstein, cx33 offered in Nuremberg, cpx31 in Helsinki, and cx43 whose Falkenstein region is sold out, followed by Scaleway machine types",
+        "caption": "Pick the regions where SAM may start each machine type, from every provider’s live catalog"
       }
     },
     {

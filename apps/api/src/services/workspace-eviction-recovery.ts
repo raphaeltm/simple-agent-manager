@@ -7,6 +7,7 @@ export interface WorkspaceEvictionRecoveryIdentity {
   chatSessionId: string;
   nodeId: string;
   generation: string | null;
+  interruptedWork?: boolean;
 }
 
 /**
@@ -134,5 +135,6 @@ export async function recoverWorkspaceAfterEviction(
     },
     // Eviction kills the runtime mid-work; no message is queued for the agent.
     wakeCause: 'runtime_lost',
+    interruptedWork: identity.interruptedWork,
   });
 }

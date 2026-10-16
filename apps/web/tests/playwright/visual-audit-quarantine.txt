@@ -51,7 +51,6 @@ global-audio-player-audit.spec.ts
 idea-detail-audit.spec.ts
 instant-runtime-recovery-audit.spec.ts
 knowledge-ui-audit.spec.ts
-landing-audit.spec.ts
 lazy-route-chunks-audit.spec.ts
 library-file-comments-audit.spec.ts
 library-ui-audit.spec.ts

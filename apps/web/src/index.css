@@ -1,4 +1,6 @@
 @import '@simple-agent-manager/ui/tokens/theme.css';
+/* Shared Glass v2 material, layered so Tailwind utilities still override it. */
+@import '@simple-agent-manager/ui/glass.css' layer(components);
 
 /* Tailwind v4 auto-detection skips node_modules (even symlinked workspace
    packages). Explicitly include acp-client so named group variants like

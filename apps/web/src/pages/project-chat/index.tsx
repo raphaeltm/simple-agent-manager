@@ -425,7 +425,7 @@ export function ProjectChat() {
           /* New chat / empty state */
           <div className="flex-1 flex flex-col min-h-0">
             <div
-              className={`flex-1 flex flex-col items-center gap-3 ${isMobile ? 'p-4 justify-end pb-8' : 'p-8 justify-center'}`}
+              className={`flex-1 min-h-0 overflow-y-auto flex flex-col items-center gap-3 ${isMobile ? 'p-4 justify-start pb-8' : 'p-8 justify-center'}`}
             >
               {state.provisioning ? (
                 <ProvisioningIndicator

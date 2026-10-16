@@ -18,7 +18,6 @@
  * storage key that callers can derive from their domain (e.g., messageId).
  */
 
-import { Agent } from '@mastra/core/agent';
 import {
   DEFAULT_TTS_CHUNK_SIZE,
   DEFAULT_TTS_CLEANUP_MAX_TOKENS,
@@ -35,7 +34,6 @@ import {
   DEFAULT_TTS_SUMMARY_THRESHOLD,
   DEFAULT_TTS_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
-import { createWorkersAI } from 'workers-ai-provider';
 
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
@@ -200,8 +198,11 @@ export async function cleanTextForSpeech(
   }
 
   try {
-    // Construct the agent once outside the retry loop to avoid
-    // re-instantiating the Workers AI binding wrapper on each attempt
+    // Load speech dependencies on demand; construct the agent once before retrying.
+    const [{ Agent }, { createWorkersAI }] = await Promise.all([
+      import('@mastra/core/agent'),
+      import('workers-ai-provider'),
+    ]);
     const workersAi = createWorkersAI({ binding: ai });
     const model = workersAi(cleanupModel as Parameters<typeof workersAi>[0]);
     const agent = new Agent({
@@ -266,8 +267,11 @@ export async function summarizeTextForSpeech(
   const retryBaseDelayMs = config.retryBaseDelayMs ?? DEFAULT_TTS_RETRY_BASE_DELAY_MS;
 
   try {
-    // Construct the agent once outside the retry loop to avoid
-    // re-instantiating the Workers AI binding wrapper on each attempt
+    // Load speech dependencies on demand; construct the agent once before retrying.
+    const [{ Agent }, { createWorkersAI }] = await Promise.all([
+      import('@mastra/core/agent'),
+      import('workers-ai-provider'),
+    ]);
     const workersAi = createWorkersAI({ binding: ai });
     const model = workersAi(cleanupModel as Parameters<typeof workersAi>[0]);
     const agent = new Agent({

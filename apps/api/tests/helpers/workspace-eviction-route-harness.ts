@@ -78,7 +78,11 @@ export function createEvictionApp(): Hono<{ Bindings: Env }> {
 }
 
 /** The VM agent's OOM eviction callback for workspace-1 on node-1, generation-1. */
-export function postEvictionCallback(app: Hono<{ Bindings: Env }>, env: Env): Promise<Response> {
+export function postEvictionCallback(
+  app: Hono<{ Bindings: Env }>,
+  env: Env,
+  interruptedWork?: boolean
+): Promise<Response> {
   return Promise.resolve(
     app.fetch(
       new Request('https://api.test/projects/project-1/workspaces/workspace-1/eviction', {
@@ -91,6 +95,7 @@ export function postEvictionCallback(app: Hono<{ Bindings: Env }>, env: Env): Pr
           snapshotCaptured: true,
           containerStopped: true,
           evictionGeneration: 'generation-1',
+          interruptedWork,
         }),
       }),
       env,

@@ -1,5 +1,5 @@
 ---
-import { existsSync } from 'node:fs';
+import { existsSync, openSync, readSync, closeSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 interface Props {
@@ -18,6 +18,25 @@ const publicDir = resolve(process.cwd(), 'public');
 const lightSrc = src.replace(/\.png$/, '-light.png');
 const hasLight = lightSrc !== src && existsSync(resolve(publicDir, `.${lightSrc}`));
 
+// Intrinsic size from the PNG header (IHDR: width and height at bytes 16-23), so the browser
+// reserves the right box before the image loads. A 24-byte synchronous read keeps this
+// component synchronous; the build scripts (optimize-feature-images, build-hero-layers) use
+// sharp because they decode and re-encode pixels anyway.
+const pngSize = (pngSrc: string): { width: number; height: number } | null => {
+  const path = resolve(publicDir, `.${pngSrc}`);
+  if (!existsSync(path)) return null;
+  const header = Buffer.alloc(24);
+  const fd = openSync(path, 'r');
+  try {
+    readSync(fd, header, 0, 24, 0);
+  } finally {
+    closeSync(fd);
+  }
+  return header.toString('ascii', 12, 16) === 'IHDR'
+    ? { width: header.readUInt32BE(16), height: header.readUInt32BE(20) }
+    : null;
+};
+
 const escapeAttribute = (value: string) =>
   value
     .replace(/&/g, '&amp;')
@@ -28,7 +47,9 @@ const escapeAttribute = (value: string) =>
 const picture = (pngSrc: string, className?: string) => {
   const webpSrc = pngSrc.replace(/\.png$/, '.webp');
   const classAttr = className ? ` class="${className}"` : '';
-  return `<picture${classAttr}><source srcset="${escapeAttribute(webpSrc)}" type="image/webp"><img src="${escapeAttribute(pngSrc)}" alt="${escapeAttribute(alt)}" loading="${loading}" decoding="async"></picture>`;
+  const size = pngSize(pngSrc);
+  const sizeAttr = size ? ` width="${size.width}" height="${size.height}"` : '';
+  return `<picture${classAttr}><source srcset="${escapeAttribute(webpSrc)}" type="image/webp"><img src="${escapeAttribute(pngSrc)}" alt="${escapeAttribute(alt)}"${sizeAttr} loading="${loading}" decoding="async"></picture>`;
 };
 
 const pictureHtml = hasLight

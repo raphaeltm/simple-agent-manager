@@ -1,0 +1,459 @@
+---
+/**
+ * A homepage feature section's animated real-UI preview, in the hero's glass language: a real
+ * SAM window tilted toward the copy, real UI chips floating in front of it, light with a source
+ * (green = working or done, amber = waiting on a person, mint = selection, blue = sleeping).
+ *
+ * Every image is cut from committed screenshots by scripts/build-feature-scenes.ts; the scene's
+ * story lives in src/data/scenes/<slug>.json and is played by scene-motion.ts. The markup below
+ * is the resting (final) frame, which is what no-JS and reduced-motion visitors see.
+ */
+import manifest from '../../data/feature-scenes.json';
+import { sceneFor, type SceneBox, type SceneLayer } from '../../data/scenes';
+import { themedImage } from '../../lib/themed-image';
+
+interface Props {
+  slug: string;
+  /** Which side of the copy the scene sits on; the window turns to face the copy. */
+  side: 'left' | 'right';
+  /** The feature page the preview links to, and the link's accessible name. */
+  href: string;
+  label: string;
+  /** Visible caption: the section's existing screenshot caption (src/data/features). */
+  caption: string;
+}
+
+interface LayerImages {
+  files: { dark: string; light: string };
+  width: number;
+  height: number;
+  tiles: { files: { dark: string; light: string }; box: { left: number; top: number; width: number; height: number } }[];
+  swap?: { files: { dark: string; light: string } };
+}
+
+const { slug, side, href, label, caption } = Astro.props;
+const scene = sceneFor(slug);
+const images = (manifest as Record<string, Record<string, LayerImages>>)[slug];
+if (!scene || !images) throw new Error(`No feature scene "${slug}" (src/data/scenes, src/data/feature-scenes.json)`);
+
+const pct = (value: number) => `${Math.round(value * 1000) / 1000}%`;
+
+/** A box inside the layer's crop, as percentages of the layer: [left, top, width, height]. */
+const within = (layer: SceneLayer, box: SceneBox): [number, number, number, number] => [
+  ((box.x - layer.box.x) / layer.box.w) * 100,
+  ((box.y - layer.box.y) / layer.box.h) * 100,
+  (box.w / layer.box.w) * 100,
+  (box.h / layer.box.h) * 100,
+];
+
+const layerStyle = (layer: SceneLayer, size: LayerImages) =>
+  [
+    `--x:${pct(layer.place.wide.x)}`,
+    `--y:${pct(layer.place.wide.y)}`,
+    `--w:${pct(layer.place.wide.w)}`,
+    `--nx:${pct(layer.place.narrow.x)}`,
+    `--ny:${pct(layer.place.narrow.y)}`,
+    `--nw:${pct(layer.place.narrow.w)}`,
+    `--depth:${layer.depth}px`,
+    `aspect-ratio:${size.width} / ${size.height}`,
+  ].join(';');
+
+const tileStyle = (tile: LayerImages['tiles'][number]) =>
+  [
+    themedImage(tile.files),
+    `left:${pct(tile.box.left)}`,
+    `top:${pct(tile.box.top)}`,
+    `width:${pct(tile.box.width)}`,
+    `height:${pct(tile.box.height)}`,
+  ].join(';');
+
+const layers = scene.layers.map((layer, index) => {
+  const size = images[layer.id];
+  if (!size) throw new Error(`Feature scene "${slug}" has no images for layer "${layer.id}"; run build:feature-scenes`);
+  // Tiles that appear together rise one after another.
+  const rank = new Map<number, number>();
+  const tiles = (layer.tiles ?? []).map((tile, i) => {
+    const order = rank.get(tile.at) ?? 0;
+    rank.set(tile.at, order + 1);
+    return { at: tile.at, order, style: tileStyle(size.tiles[i] ?? { files: size.files, box: { left: 0, top: 0, width: 0, height: 0 } }) };
+  });
+  // A highlight that moves is one element per stop, each shown until the next one takes over,
+  // so moving it only fades and scales (no layout per frame).
+  const rings = (layer.rings ?? []).flatMap((ring) =>
+    ring.stops.map((stop, i) => {
+      const [left, top, width, height] = within(layer, stop.box);
+      return {
+        tone: ring.tone,
+        at: stop.at,
+        until: ring.stops[i + 1]?.at ?? ring.until,
+        style: `left:${pct(left)};top:${pct(top)};width:${pct(width)};height:${pct(height)}`,
+      };
+    })
+  );
+  return { layer, index, size, tiles, rings };
+});
+---
+
+<figure
+  class="scene"
+  data-scene={slug}
+  data-side={side}
+  data-beats={JSON.stringify(scene.beats)}
+  style={`--aspect:${scene.aspect.wide};--aspect-narrow:${scene.aspect.narrow}`}
+>
+  <a class="scene-link" href={href} aria-label={label}>
+    <div class="scene-stage" aria-hidden="true">
+      <div class="scene-floor"></div>
+      {(scene.lights ?? []).map((light) => (
+        <div class={`scene-light tone-${light.tone}`} data-at={light.at} data-until={light.until} />
+      ))}
+      <div class="scene-stack" data-scene-stack>
+        {layers.map(({ layer, index, size, tiles, rings }) => (
+          <div
+            class:list={[
+              'scene-layer',
+              'sam-glass',
+              'sam-glass-rim',
+              index === 0 ? ['is-window', 'sam-glass-sheen'] : 'is-chip',
+              layer.glow && `glow-${layer.glow}`,
+              layer.fade && `fade-${layer.fade}`,
+            ]}
+            style={layerStyle(layer, size)}
+            data-at={layer.at}
+          >
+            <div class="scene-surface">
+              <div class="scene-img" style={themedImage(size.files)} />
+              {tiles.map((tile) => (
+                <div class="scene-img scene-tile" style={`${tile.style};--order:${tile.order}`} data-at={tile.at} />
+              ))}
+              {size.swap && layer.swap && (
+                <div class="scene-img scene-swap" style={themedImage(size.swap.files)} data-at={layer.swap.at} />
+              )}
+              {index === 0 && <div class="scene-hotspot" />}
+            </div>
+            {rings.map((ring) => (
+              <div class={`scene-ring tone-${ring.tone}`} style={ring.style} data-at={ring.at} data-until={ring.until} />
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  </a>
+  <figcaption class="scene-caption">
+    {caption}<span class="sr-only"> ({scene.description})</span>
+  </figcaption>
+</figure>
+
+<style>
+  /* ---- Stage ---- */
+  .scene {
+    --ease-pose: cubic-bezier(0.16, 0.84, 0.22, 1);
+    --ease-rise: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --pose-x: 6deg;
+    --pose-y: -11deg;
+    --spread: 1;
+    --radius: 12px;
+    --light-strength: 1;
+    container: scene / inline-size;
+    position: relative;
+    margin: 0;
+  }
+
+  .scene-link {
+    display: block;
+    border-radius: var(--radius-lg);
+  }
+
+  .scene-caption {
+    margin-top: 18px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+    text-align: center;
+    color: var(--color-fg-dim);
+  }
+
+  /* The window turns to face the copy beside it. */
+  .scene[data-side='left'] {
+    --pose-y: 11deg;
+  }
+
+  /* Intro: tilted further back, layers pulled apart; the story's first step assembles them. */
+  .scene[data-pose='exploded'] {
+    --pose-x: 20deg;
+    --pose-y: -24deg;
+    --spread: 2.6;
+  }
+
+  .scene[data-pose='exploded'][data-side='left'] {
+    --pose-y: 24deg;
+  }
+
+  .scene-stage {
+    position: relative;
+    aspect-ratio: var(--aspect);
+    perspective: 1800px;
+    perspective-origin: 50% 35%;
+  }
+
+  .scene-stack {
+    position: absolute;
+    inset: 0;
+    transform-style: preserve-3d;
+    transform: rotateX(calc(var(--pose-x) * var(--pose-scale, 1) + var(--tilt-x, 0deg)))
+      rotateY(calc(var(--pose-y) * var(--pose-scale, 1) + var(--tilt-y, 0deg)));
+    transition: transform 1300ms var(--ease-pose);
+  }
+
+  /* ---- Light: the floor glows under the window; states add their own colour ---- */
+  .scene-floor,
+  .scene-light {
+    position: absolute;
+    left: 2%;
+    right: 2%;
+    bottom: -14%;
+    height: 54%;
+    pointer-events: none;
+  }
+
+  /* Light is softer on the light theme; strength scales the colour, so opacity stays free for
+     the story. */
+  :global(html[data-theme='light']) .scene {
+    --light-strength: 0.55;
+  }
+
+  /* Soft falloff in the gradient itself, so the lights need no blur filter. */
+  .scene-floor {
+    background: radial-gradient(
+      closest-side,
+      rgb(34 197 94 / calc(0.2 * var(--light-strength))),
+      rgb(34 197 94 / calc(0.08 * var(--light-strength))) 50%,
+      transparent
+    );
+  }
+
+  .scene-light {
+    background: radial-gradient(
+      closest-side,
+      rgb(var(--tone) / calc(0.3 * var(--light-strength))),
+      rgb(var(--tone) / calc(0.12 * var(--light-strength))) 50%,
+      transparent
+    );
+    transition: opacity 700ms ease;
+  }
+
+  /* ---- Layers: real UI on glass, at depth ---- */
+  .scene-layer {
+    position: absolute;
+    left: var(--x);
+    top: var(--y);
+    width: var(--w);
+    border-radius: var(--radius);
+    transform-style: preserve-3d;
+    transform: translate3d(0, var(--lift, 0px), calc(var(--depth) * var(--spread) * var(--depth-scale, 1)));
+    /* Step transitions stay within STEP_SETTLE_MS (src/lib/motion.ts): layers 900 ms, tiles
+       520 ms plus stagger, lights and crossfade 700 ms, highlights 360 ms. Only the stack's
+       pose (1300 ms) runs longer, and only at the first step. */
+    transition:
+      transform 900ms var(--ease-pose),
+      opacity 500ms ease;
+  }
+
+  .scene-surface {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    border-radius: inherit;
+  }
+
+  .scene-img {
+    position: absolute;
+    inset: 0;
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+  }
+
+  /* Images load as the scene approaches the viewport, in the active theme only. */
+  .scene[data-near] .scene-img {
+    background-image: var(--img-dark);
+  }
+
+  :global(html[data-theme='light']) .scene[data-near] .scene-img {
+    background-image: var(--img-light);
+  }
+
+  .scene-tile {
+    inset: auto;
+  }
+
+  .is-window {
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.12),
+      0 0 0 1px rgb(34 197 94 / 0.16),
+      0 36px 80px -30px rgb(34 197 94 / 0.26),
+      var(--sam-glass-v2-depth);
+  }
+
+  .is-chip {
+    --radius: 11px;
+  }
+
+  .glow-green,
+  .glow-amber,
+  .glow-mint,
+  .glow-blue {
+    box-shadow:
+      0 0 0 1px rgb(var(--tone) / 0.45),
+      0 0 38px -8px rgb(var(--tone) / 0.5),
+      var(--sam-glass-v2-depth);
+  }
+
+  .fade-right {
+    -webkit-mask-image: linear-gradient(to right, #000 80%, transparent);
+    mask-image: linear-gradient(to right, #000 80%, transparent);
+  }
+
+  /* Specular light that follows the pointer across the window (dark theme only). */
+  .scene-hotspot {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(420px circle at var(--hot-x, 30%) var(--hot-y, 10%), rgb(255 255 255 / 0.06), transparent 46%);
+    mix-blend-mode: screen;
+  }
+
+  :global(html[data-theme='light']) .scene-hotspot {
+    display: none;
+  }
+
+  /* ---- Rings: a highlight around a real control; it moves by handing over to the next stop ---- */
+  .scene-ring {
+    position: absolute;
+    border-radius: 10px;
+    background: rgb(var(--tone) / 0.1);
+    box-shadow:
+      0 0 0 2px rgb(var(--tone) / 0.95),
+      0 0 22px 2px rgb(var(--tone) / 0.5);
+    pointer-events: none;
+    transition:
+      opacity 260ms ease,
+      transform 360ms var(--ease-rise);
+  }
+
+  .scene[data-playing] .scene-ring:not(.is-on) {
+    transform: scale(1.12);
+  }
+
+  /* ---- The story: while playing, things wait for their step ---- */
+  [data-until] {
+    opacity: 0;
+  }
+
+  .scene[data-playing] [data-at]:not(.is-on) {
+    opacity: 0;
+  }
+
+  .scene[data-playing] [data-until].is-on {
+    opacity: 1;
+  }
+
+  .scene[data-playing] .scene-layer[data-at]:not(.is-on) {
+    --lift: 18px;
+    transform: translate3d(0, var(--lift), calc((var(--depth) * var(--spread) + 70px) * var(--depth-scale, 1)));
+  }
+
+  .scene-tile {
+    transition:
+      opacity 420ms ease,
+      transform 520ms var(--ease-rise);
+    transition-delay: calc(var(--order, 0) * 110ms);
+  }
+
+  .scene[data-playing] .scene-tile:not(.is-on) {
+    transform: translateY(6%);
+  }
+
+  .scene-swap {
+    transition: opacity 700ms ease;
+  }
+
+  /* One light sweep along the window's rim as the scene assembles (keyframes in glass.css). */
+  .scene[data-playing]:not([data-step='0']) .is-window::after {
+    animation: sam-glass-sweep 1.8s cubic-bezier(0.2, 0.8, 0.2, 1) 0.4s 1 both;
+  }
+
+  .scene-light[data-at] {
+    transition: opacity 700ms ease;
+  }
+
+  /* Resetting or finishing jumps straight to the resting frame. */
+  .scene[data-motion-snap] *,
+  .scene[data-motion-snap] .scene-stack {
+    transition: none !important;
+  }
+
+  /* ---- Narrow: the phone composition (the scene's own width decides) ---- */
+  @container scene (max-width: 560px) {
+    .scene-stage {
+      aspect-ratio: var(--aspect-narrow);
+      perspective: 1200px;
+    }
+
+    /* Gentler angles and shallower depth on a phone: the window must stay readable, and
+       perspective must not push chips past the screen edge. */
+    .scene-stack {
+      --pose-scale: 0.5;
+      --depth-scale: 0.5;
+    }
+
+    .scene-layer {
+      --radius: 9px;
+      left: var(--nx);
+      top: var(--ny);
+      width: var(--nw);
+    }
+
+    .scene-ring {
+      border-radius: 7px;
+    }
+  }
+
+  /* Light colours: green = working or done, amber = waiting on a person, mint = selection,
+     blue = sleeping. */
+  .tone-green,
+  .glow-green {
+    --tone: 34 197 94;
+  }
+
+  .tone-amber,
+  .glow-amber {
+    --tone: 245 158 11;
+  }
+
+  .tone-mint,
+  .glow-mint {
+    --tone: 52 211 153;
+  }
+
+  .tone-blue,
+  .glow-blue {
+    --tone: 96 165 250;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .scene-stack,
+    .scene-layer,
+    .scene-img,
+    .scene-ring,
+    .scene-light {
+      transition: none;
+    }
+  }
+</style>
+
+<script>
+  import { initScenes } from './scene-motion';
+
+  initScenes(Array.from(document.querySelectorAll<HTMLElement>('[data-scene]')));
+</script>

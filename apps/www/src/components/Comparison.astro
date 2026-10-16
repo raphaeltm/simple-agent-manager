@@ -111,11 +111,11 @@ const rows = [
       </p>
     </div>
 
-    <div class="table-wrapper animate-on-scroll" tabindex="0" role="region" aria-label="Comparison table">
+    <div class="table-wrapper sam-glass sam-glass-rim animate-on-scroll" tabindex="0" role="region" aria-label="Comparison table">
       <table class="comparison-table">
         <thead>
           <tr>
-            <th class="col-label"></th>
+            <th class="col-label"><span class="sr-only">Capability</span></th>
             <th class="col-sam">
               <div class="col-header-content">
                 <img src="/images/sam-head.png" width="20" height="20" alt="" aria-hidden="true" style="border-radius: 4px;" />
@@ -171,12 +171,7 @@ const rows = [
   .table-wrapper {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    background: var(--glass-bg);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--glass-shadow), 0 0 60px rgba(22, 163, 74, 0.04);
+    border-radius: var(--radius-xl);
     padding: 8px;
   }
 
@@ -184,7 +179,8 @@ const rows = [
     width: 100%;
     max-width: 900px;
     margin: 0 auto;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 0.9375rem;
   }
 
@@ -195,6 +191,10 @@ const rows = [
     border-bottom: 1px solid var(--color-border-subtle);
   }
 
+  .comparison-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
   .comparison-table thead th {
     font-family: var(--font-display);
     font-weight: 600;
@@ -202,6 +202,44 @@ const rows = [
     color: var(--color-fg-primary);
     border-bottom: 1px solid var(--color-border);
     padding-bottom: 16px;
+  }
+
+  /* SAM's column is a raised, lit band rather than green text. */
+  .comparison-table .col-sam {
+    background: rgb(34 197 94 / 0.07);
+    box-shadow:
+      inset 1px 0 0 rgb(34 197 94 / 0.22),
+      inset -1px 0 0 rgb(34 197 94 / 0.22);
+  }
+
+  .comparison-table th.col-sam {
+    border-radius: 12px 12px 0 0;
+    box-shadow:
+      inset 1px 0 0 rgb(34 197 94 / 0.22),
+      inset -1px 0 0 rgb(34 197 94 / 0.22),
+      inset 0 1px 0 rgb(34 197 94 / 0.35);
+  }
+
+  .comparison-table tbody tr:last-child td.col-sam {
+    border-radius: 0 0 12px 12px;
+    box-shadow:
+      inset 1px 0 0 rgb(34 197 94 / 0.22),
+      inset -1px 0 0 rgb(34 197 94 / 0.22),
+      inset 0 -1px 0 rgb(34 197 94 / 0.35);
+  }
+
+  :global(html[data-theme='light']) .comparison-table .col-sam {
+    background: rgb(21 128 61 / 0.06);
+  }
+
+  /* Where SAM does not win, the band goes neutral so the column does not oversell. */
+  .comparison-table td.col-sam:not(.highlight) {
+    background: rgb(255 255 255 / 0.03);
+    color: var(--color-fg-muted);
+  }
+
+  :global(html[data-theme='light']) .comparison-table td.col-sam:not(.highlight) {
+    background: rgb(17 39 29 / 0.03);
   }
 
   .col-header-content {
@@ -268,6 +306,15 @@ const rows = [
       padding: 4px 0;
     }
 
+    .comparison-table .col-sam,
+    .comparison-table th.col-sam,
+    .comparison-table tbody tr:last-child td.col-sam {
+      margin: 4px -8px;
+      padding: 8px;
+      border-radius: 10px;
+      box-shadow: inset 0 0 0 1px rgb(34 197 94 / 0.22);
+    }
+
     .col-label {
       white-space: normal;
       font-family: var(--font-display);
@@ -297,12 +344,11 @@ const rows = [
   }
 
   .col-sam.highlight {
-    color: var(--color-accent);
     font-weight: 500;
   }
 
   .col-other {
-    color: var(--color-fg-dim);
+    color: var(--color-fg-muted);
   }
 
   .comparison-footnote {

@@ -7,6 +7,7 @@ export * from './Card';
 export * from './Dialog';
 export * from './DropdownMenu';
 export * from './EmptyState';
+export * from './GlassNodeField';
 export * from './Input';
 export * from './Popover';
 export * from './Select';

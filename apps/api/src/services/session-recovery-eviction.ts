@@ -10,9 +10,11 @@ export interface SessionRecoveryOptions {
   /**
    * Why the session wakes. A durable delivery wakes it to answer a queued message
    * (the default). `runtime_lost` means the runtime died mid-work and nothing is
-   * queued, so a task-mode agent is told to continue its task instead of waiting.
+   * queued, so interrupted work continues regardless of session mode.
    */
   wakeCause?: 'queued_message' | 'runtime_lost';
+  /** Pre-stop evidence. Missing on older agents: reconcile rather than silently strand work. */
+  interruptedWork?: boolean;
 }
 
 export async function evictionRecoveryFenceMatches(
