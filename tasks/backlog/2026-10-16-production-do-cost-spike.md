@@ -22,8 +22,8 @@ Understand October15 monitored usage spike, ship the smallest safe causal fix th
 - [x] Validate lint/typecheck/relevant suites/build and migration/security checks as applicable.
 - [x] Independent specialist/completion reviews; all findings resolved.
 - [x] Coordinate active owners2304/2305/reliability; staging on pinned SHA, verify behavior.
-- [ ] PR CI/Sonar/security and CodeRabbit request/wait; normal merge/deploy.
-- [ ] Verify deployed SHA/version, health, native per-call evidence and lagged comparable production usage; quantify remaining uncertainty.
+- [x] PR CI/Sonar/security and CodeRabbit request/wait; normal merge/deploy.
+- [x] Verify deployed SHA/version, health, native per-call evidence and lagged comparable production usage; quantify remaining uncertainty.
 
 ## Coordination
 Old coordinator01M50044HCHRVR12B4337721G5 failed; message rejected. Active owners01M52KPD9FDR724Z371666KAHE,01M4ZVWEGJ8WMFK69JNE7W7M5Y,2304owner01M52PEXV56VPD7H8541HP8EFJ,2305owner01M52PF30AYFJN0YM8KPQ8ME45 notified of owner incident priority. Accepted delivery is not acknowledgment.
@@ -57,3 +57,36 @@ PR2368 was reopened with correct3f1 head, causal description and evidence after 
 Latest production hourly refresh17:39 UTC includes complete16–17UTC with39min observation lag:188873884reads/188746writes/19627requests. Versus15–16 reads125713939/writes144331/requests~16543, reads rose50.2%, writes30.8%, requests18.6%. Equal complete3h14–17 versus11–14 reads498367400vs769496971(-35.2%), writes479007vs421724(+13.6%). Thus elevated usage fluctuates with a latest-hour rebound, not continuous decline or established sustained acceleration. No incident fix was live during either window.
 
 Monitoring remains proposal-only. User prefers deterministic alerts awakening an agent only for anomalies, with12h agent fallback. Existing authorized CF credential proved alert/catalog access and webhook eligibility; SQL catalog91datasets contains no DO dataset, and a successful D1 SQL query proves SQL access only, not DO eligibility. Existing DO GraphQL metrics support a deterministic checker fallback. CF generic `cf-webhook-auth` differs from SAM bearer ingress, so native alerts need an adapter. No monitor schedule/prompt, webhook credential, permission or security configuration changed.
+
+
+## Final release and lagged production verification (19:55 UTC)
+
+This section supersedes historical pending/blocked release statements above. PR2368 merged normally18:25:45 as main `761fe414d2fc621314651896e9b4d454dd2d7c69`. Exact-head CI38944175680/E2E38944176022 and Sonar117126708629 passed; CodeRabbit review5552028618 APPROVED18:24:02 without actionable findings. Main CI38947268453 and canonical automatic production38948978780 succeeded. No duplicate manual deployment or gate bypass.
+
+Production workflow exact checkout/DEPLOY_COMMIT761fe414 published Worker `0aab451b-b1dc-49bd-aa42-e362882a1df1`. CF API confirmed100% at19:05, upload18:53:27.547UTC; direct health200 healthy19:05:48.207. Production sequence explicitly returned to B19:06. B merged2358 as8778abe1 preserving this fix. Independent CF deployment history at19:54 confirms B subsequent intermediate19:32:40/final19:34:27 (876c3eed), outside the measurement window below.
+
+Read-only CF GraphQL collected19:54:51UTC returnedHTTP200/errorsnull. All-account raw SQLite row units and adaptive DO requests over equal complete15-minute windows:
+
+| UTC window | Reads | Writes | Requests | Reads/request |
+| --- | ---: | ---: | ---: | ---: |
+| Pre18:30–18:45 |45,774,315|36,686|4,404|10,393.8|
+| Post19:00–19:15 |3,403,359|15,889|2,315|1,470.1|
+
+Post window has39min51s reporting lag and serves only incident Worker0aab. Reads fell92.6%, writes56.7%, requests47.4%; reads/request fell85.9%. Traffic reduction alone does not explain read reduction. This is initial production reduction, not proof of sustained normalization or exact causal share per changed helper. Writes/request fell~17.6%; the change itself adds no writes. Raw usage is not cash overage: prior measured MTD12.79Breads/21.80Mwrites was under25B/50M allowances; no new full-invoice estimate is asserted.
+
+Natural root alarm counters also declined (equal10min18:40–18:50 vs18:55–19:05 mean14,045→4,489reads/alarm), but exclude scheduling work and have different workload. They are corroboration only. No destructive live tests, new VM, security/credential change, monitor disable or billing-monitor instruction/schedule modification.
+
+Monitor proposal remains awaiting user review: CF account available_alerts/destinations eligible returned200/webhook eligible; billing DO meter eligibility not enumerated. SQL catalog91datasets lacks DO SQLite dataset; D1 query success does not prove DO alerts. Generic CF cf-webhook-auth cannot directly satisfy SAM Authorization:Bearer webhook ingress. Prefer native exact-DO alert only if eligibility verified, else small deterministic15min GraphQL checker with30min lag, equal complete windows/baselines, persisted episode dedup/lease, bounded retries and anomaly-only agent wake through existing SAM admission;12h agent fallback. No configuration was applied.
+
+### Task completion validation
+
+| Check | Verdict | Evidence |
+| --- | --- | --- |
+| A Research→checklist |PASS|Three bounded helper fixes covered. MAX(sequence) broad index explicitly deferred outside this incident due9.096GB storage/write risk; not claimed fixed.|
+| B Checklist→diff |PASS|Three runtime helpers, two native Workers cost tests and task-wait unit regression; release/metrics criteria now have actual evidence.|
+| C Criteria→verification |PASS|Native retained-history/load/call-count assertions plus exact-runtime authenticated staging12tests, normal CI/reviews and lagged production units.|
+| D UI→backend |N/A|No UI/API contract change.|
+| E Multi-resource |PASS|Project discriminator and fully eligible foreign-project subscription/batch exclusion, missing-identity fallback tested.|
+| F Vertical slice |PASS|Real DO SQLite scheduler and100actual node-heartbeat calls; targeted parent cancellation; normal staging/production deployment evidence.|
+
+Verdict PASS for this bounded incident fix and initial production verification. Remaining uncertainty is sustained trajectory and workload/per-query attribution; do not present one window as a lasting cost guarantee. No monitoring implementation is included or authorized.

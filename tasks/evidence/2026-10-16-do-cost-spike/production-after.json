@@ -1,0 +1,30 @@
+{
+  "collectedAt": "2026-10-16T19:54:51Z",
+  "scope": "accountwide",
+  "pre": {
+    "start": "2026-10-16T18:30:00Z",
+    "end": "2026-10-16T18:45:00Z",
+    "rowsRead": 45774315,
+    "rowsWritten": 36686,
+    "requests": 4404
+  },
+  "post": {
+    "start": "2026-10-16T19:00:00Z",
+    "end": "2026-10-16T19:15:00Z",
+    "rowsRead": 3403359,
+    "rowsWritten": 15889,
+    "requests": 2315
+  },
+  "httpStatus": 200,
+  "graphqlErrors": null,
+  "incidentSha": "761fe414d2fc621314651896e9b4d454dd2d7c69",
+  "incidentWorkerVersion": "0aab451b-b1dc-49bd-aa42-e362882a1df1",
+  "incidentUploadAt": "2026-10-16T18:53:27.547255Z",
+  "nextWorkerUploadAt": "2026-10-16T19:32:40.638548Z",
+  "limitations": [
+    "One early complete15minute window, not sustained trend",
+    "Adaptive requests can revise",
+    "Exact per-helper causal share unmeasured",
+    "Raw units are not accrued overage"
+  ]
+}
