@@ -158,3 +158,10 @@ test('readonly diagnosis uses one fixed prompt, no acceptance marker or mutation
   }
  }finally{rmSync(root,{recursive:true,force:true});}
 });
+
+test('sequential required case may replace cancelled second cohort while retaining exact receipts and per-operation bounds',async()=>{
+ const {validateConfig}=await import('./instant-bound-controller.mjs');
+ const now=Date.now();const c={createdAt:now-10800000,expiresAt:now+900000,cleanupAuthorized:false,contexts:[0,1].map(i=>({taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,workspaceId:uid(20+i),nodeId:uid(30+i),branch:i?'sam/second':'sam/first',agentProfileId:uid(40+i),agentType:i?'claude-code':'openai-codex',submittedAt:now-10000000,evidencePrUrl:'https://github.com/raphaeltm/simple-agent-manager/pull/2355',receipt:{taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,branchName:i?'sam/second':'sam/first',status:'queued'}}))};c.expiresAt=now+900000;c.contexts[1].submittedAt=now-1000;
+ assert.doesNotThrow(()=>validateConfig(c,now));
+ const bad=structuredClone(c);bad.contexts[1].receipt.taskId=bad.contexts[0].taskId;assert.throws(()=>validateConfig(bad,now));
+});

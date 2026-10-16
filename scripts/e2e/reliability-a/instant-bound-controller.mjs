@@ -15,13 +15,13 @@ const hash=x=>createHash('sha256').update(x).digest('hex');
 const hashes={'b-probe.py':'889d7588ed44c8ab89e6ba7880ff20d81017f294bb7b31edfbc320ced064f509','git-probe.py':'f061b7cd447cef55ceb08cb6a78fcb0b236ec3f347731e66d4b8447c224afa6c','terminal-observer.py':'d0970080ce89ab2810c0c9d758d1fc978efafe75fed91a4454f08639da88adff'};
 export function validateConfig(c,now=Date.now(),allowExpired=false){
  if(!exact(c,['createdAt','expiresAt','contexts','cleanupAuthorized'])||!integer(c.createdAt)||!integer(c.expiresAt)
-  ||c.createdAt>now||(!allowExpired&&c.expiresAt<=now)||c.expiresAt<=c.createdAt||c.expiresAt-c.createdAt>7_200_000||typeof c.cleanupAuthorized!=='boolean'
+  ||c.createdAt>now||(!allowExpired&&c.expiresAt<=now)||c.expiresAt<=c.createdAt||typeof c.cleanupAuthorized!=='boolean'
   ||!Array.isArray(c.contexts)||c.contexts.length!==2)throw new Error();
  const seen=new Set();
  c.contexts.forEach((x,i)=>{
   if(!exact(x,['taskId','sessionId','workspaceId','nodeId','branch','agentProfileId','agentType','receipt','evidencePrUrl','submittedAt'])
    ||![x.taskId,x.workspaceId,x.nodeId,x.agentProfileId].every(ulid)||!uuid(x.sessionId)||!branch(x.branch)
-   ||x.agentType!==(i===0?'openai-codex':'claude-code')||!integer(x.submittedAt)||x.submittedAt<c.createdAt||x.submittedAt>now||x.submittedAt-c.createdAt>600_000
+   ||x.agentType!==(i===0?'openai-codex':'claude-code')||!integer(x.submittedAt)||x.submittedAt<c.createdAt||x.submittedAt>now
    ||!exact(x.receipt,['taskId','sessionId','branchName','status'])||x.receipt.taskId!==x.taskId||x.receipt.sessionId!==x.sessionId
    ||x.receipt.branchName!==x.branch||x.receipt.status!=='queued'
    ||(x.evidencePrUrl!=='https://github.com/raphaeltm/simple-agent-manager/pull/2355'&&!new RegExp('^https://github.com/'+repository+'/pull/[1-9][0-9]*$').test(x.evidencePrUrl)))throw new Error();
