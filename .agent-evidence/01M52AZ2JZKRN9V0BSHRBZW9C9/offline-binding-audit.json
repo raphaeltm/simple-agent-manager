@@ -1,0 +1,109 @@
+{
+  "cleanup": "Final failedcase originals Library01M52BJ5F62213X5XFZFN8NBWY verified beforehard; normal Sleep+AVAILABLE/authclosure complete, strictwarmnodeguard13:17 owned.",
+  "consumer": "scripts/e2e/reliability-a/prospective-vm.mjs:92-109",
+  "missingSafeDiagnostics": {
+    "implementationStatus": "Design only; root must authorize any instrumentation/fix after concrete review. Existing checks remain untouched.",
+    "negativeEvidence": "Explicit false predicate must be preserved before cleanup; distinguish read unavailable/schema invalid/assertion false/deadline categories.",
+    "perBinding": "Separate literal boolean for EACH assertion above, invocation before/after, safe elapsed/observed time integers; no raw body/URL/error/stack/profile name/secret/model content.",
+    "perRead": [
+      "attempted boolean",
+      "HTTP status bounded number/null",
+      "response-size bound boolean",
+      "JSON parse success boolean",
+      "disposal success boolean"
+    ],
+    "readiness": "No further compute proposal until full binding read path is diagnosable with fixed safe per-predicate evidence.",
+    "reads": [
+      "authSession",
+      "profile",
+      "profileList",
+      "task",
+      "session",
+      "workspace",
+      "state"
+    ]
+  },
+  "observedFailure": {
+    "before": false,
+    "cfSetupGrant": "actual PASS; does not prove browser binding predicates",
+    "exactPredicate": "UNKNOWN/unretained",
+    "initialRetention": "actual PASS",
+    "stage": "terminalPhase binding",
+    "terminalOpened": false
+  },
+  "preterminalAssertions": {
+    "grant": [
+      "globalVmCount bounded/runtime count",
+      "otherWorkspaceCount0",
+      "activeForeignClaimCount0",
+      "workspace/node/ACP identifier shape",
+      "grant expiry positive/future <=5min",
+      "stored profile ID/observation fresh <=4min",
+      "runtime enum/agent release/provenance equality",
+      "receipt exact keyset/scalars"
+    ],
+    "ownerProfile": [
+      "cookie user matches grant owner",
+      "profile ID",
+      "profile user matches expected profile owner",
+      "agent type",
+      "no vmSizeOverride",
+      "runtime null or selected runtime",
+      "project/global-owner scope",
+      "profile list envelope items",
+      "name unique"
+    ],
+    "session": [
+      "session ID",
+      "task ID",
+      "workspace ID",
+      "ACP session ID",
+      "agent type"
+    ],
+    "state": [
+      "ACP session ID",
+      "agent type",
+      "activity idle",
+      "runtimeWorkState inactive",
+      "runtimeWorkCount0",
+      "activityAt and runtimeWorkUpdatedAt safe ints",
+      "both timestamps <=now and >=phase started-60s"
+    ],
+    "task": [
+      "id",
+      "owner",
+      "project",
+      "output branch",
+      "workspace ID",
+      "public profile hint name-or-ID",
+      "status in_progress/completed"
+    ],
+    "workspace": [
+      "id",
+      "node",
+      "project",
+      "chat session",
+      "branch",
+      "repository",
+      "running status",
+      "hardware cloud provider matches runtime"
+    ]
+  },
+  "producerAnchors": {
+    "ownerProfile": "API e2 routes/agent-profiles.ts19-33/49-62 -> services/agent-profiles.ts121-170 -> toAgentProfile",
+    "session": "API e2 routes/chat.ts150-287: ProjectData getSession;271-278 enriches session with resolved ACP ID/type/task; DO sessions.ts workspace_id mapping",
+    "state": "API e2 routes/chat-state.ts20-36 -> resolveChatAgentState; state transition timestamps are returned; GET does not refresh them",
+    "task": "API e2 routes/tasks/crud.ts task detail + display profile hint resolver",
+    "workspace": "API e2 routes/workspaces/crud.ts92-108 -> lib/mappers.ts71-120 hardware cloudProvider/session/repo/branch"
+  },
+  "sourceFindingCandidate": {
+    "difference": "controller waitIdle permits timestamps >= immutable config.started; independent grant freshness is separate",
+    "kind": "temporal guarantee not established",
+    "knownTimes": "setup mapping at12:36:10.699; phase/CF grant around12:37:06-08",
+    "limit": "Original activityAt/runtimeWorkUpdatedAt browser values not retained, so this is NOT identification of actual failed predicate.",
+    "predicate": "state transition timestamps >= terminalPhase started-60000",
+    "requiredReview": "B source-only temporal producer comparison requested; no assertion loosened."
+  },
+  "sourceSha": "3bcc10761769b9a4e0999d59548e0d8b1e6cc7d5",
+  "status": "OFFLINE AUDIT ONLY; no code/live read/test/compute authorization"
+}
