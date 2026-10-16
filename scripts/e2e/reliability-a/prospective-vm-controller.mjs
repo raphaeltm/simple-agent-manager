@@ -13,6 +13,7 @@ const first='01M50VYZ60RQXXTGSVPXW6FRXD';
 const failed=new Set(['01M51CCMB1S684RXVNBNDQRDAS','01M516EKT5593YRAAG5WE886CK']);
 export async function run({requestSafe,logoutSafe,summary}){
  let root,c,browser,page,config,owner,sequence,stage='configuration',activeOwn=null,activeWorkspace=null,closed=false,auth=false;
+ let completionSubmittedAt=null;
  const result={ok:false,stage,authCleanup:false,browserClosed:false,retained:false};
  const save=async(name,value)=>writeFile(root+'/'+name,JSON.stringify(value),{mode:0o600,flag:'wx'});
  const read=async name=>JSON.parse(await readFile(root+'/'+name,'utf8'));
@@ -23,6 +24,9 @@ export async function run({requestSafe,logoutSafe,summary}){
   const t=await get(`/api/projects/${project}/tasks/${own.taskId}`),s=await get(`/api/projects/${project}/sessions/${own.sessionId}?limit=1`);
   const p=await get(`/api/projects/${project}/agent-profiles/${own.agentProfileId}`),profiles=await get(`/api/projects/${project}/agent-profiles`);if(p.id!==own.agentProfileId||p.agentType!==own.agentType||p.vmSizeOverride!=null||!(p.projectId===project||(p.projectId===null&&p.userId===owner))||!Array.isArray(profiles.items)||profiles.items.filter(x=>x.name===p.name).length!==1||t.agentProfileHint!==(p.userId===owner?p.name:p.id))throw 0;
   if(t.id!==own.taskId||t.taskMode!=='task'||t.userId!==owner||t.projectId!==project||t.outputBranch!==own.branch||s.session?.id!==own.sessionId||s.session.taskId!==own.taskId)throw 0;
+  if(own.taskId===config.own.taskId&&t.status==='completed'&&completionSubmittedAt===null){
+   await save('unexpected-completion.json',{taskId:t.id,status:'completed',completedAt:Number.isFinite(Date.parse(t.completedAt))?t.completedAt:null,completionEvidenceSha256:hash(JSON.stringify(t.completionEvidence??null)),observedAt:Date.now(),stage});throw 0;
+  }
   return t;
  };
  const waitIdle=async(own,since,until=action())=>{
@@ -43,7 +47,7 @@ export async function run({requestSafe,logoutSafe,summary}){
   live();const dir=root+'/'+name;await mkdir(dir,{mode:0o700});await save(name+'-mapping.json',{taskId:own.taskId,sessionId:own.sessionId,...mapping,at:Date.now()});
   const g=await grant(name+'-grant',own,mapping);live();const v=await terminalPhase({own,operation,originals,context:c,page,grant:g,evidenceDirectory:dir});await save(name+'-result.json',v);if(!v.ok)throw 0;return v;
  };
- const prompt=async(own,text)=>{live();await canonical(own);activeOwn=own;const at=Date.now();const r=await requestSafe(c,api,{path:`/api/projects/${project}/sessions/${own.sessionId}/prompt`,method:'POST',data:{content:text},timeoutMs:30000});if(r.category!=='ok'||r.status!==202)throw 0;return at;};
+ const prompt=async(own,text)=>{live();await canonical(own);activeOwn=own;const at=Date.now();const r=await requestSafe(c,api,{path:`/api/projects/${project}/sessions/${own.sessionId}/prompt`,method:'POST',data:{content:text},timeoutMs:30000});if(r.category!=='ok'||r.status!==202)throw 0;if(own.taskId===config.own.taskId&&text.startsWith('Call actual'))completionSubmittedAt=at;return at;};
  const preserve=async(own,label)=>{
   await waitIdle(own,config.started,config.hard-120000);
   const t=await canonical(own);if(t.workspaceId!==activeWorkspace)throw 0;

@@ -16,7 +16,7 @@ read-only guard remains owned by A. Never host/node DELETE or change the pool.
 
 ## One bounded plan
 
-Proposed limit, requiring coordinator acceptance: 45 minutes from the ONE normal
+Coordinator-approved planning limit (2b4e7a7c), not live authorization: 45 minutes from the ONE normal
 accepted task submission through observer Sleep and browser closure, including
 startup, setup, actual harness work, Sleep, normal recovery, completion and
 observation. Stop new actions 9 minutes before hard expiry (at most90sec terminal
@@ -195,6 +195,6 @@ written after auth/browser closure only, and cannot make a missing stage PASS.
 
 Tests also include `node scripts/e2e/reliability-a/test-prospective-controller.mjs`:
 actual lifecycle caller+ledger, simulated browser/terminal/independent producers;
-success, setup failure, wake-check failure, missing completion notes, and typed
+success, setup failure, wake-check failure, missing completion notes, unexpected early completion retained before any setup/prompt, and typed
 snapshot/tool negatives. Local PTY capsule tests separately exercise actual shell/
 Python/Git helper execution. These are offline evidence, not actual ACP/completion.
