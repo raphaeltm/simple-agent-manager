@@ -1,5 +1,13 @@
 # Prospective VM acceptance — offline tooling, no live authorization
 
+Coordinator 3e7af6bc authorizes a source-correct OFFLINE verifier correction only.
+Both historical attempts remain NOT PASS. The second run measured a different
+latest generation, but requiring its equality after READY/idle was unsupported:
+normal idle background checkpoint capture may rotate it while retaining restore
+identity/status/task/workspace/time. This does not identify the actual capture
+cause or prove restored bytes. No new runtime window, retry or handoff is granted
+by this correction; the existing 08:48 strict provider guard remains owned.
+
 ## Existing-case second restore — offline continuation plan
 
 Coordinator c0189e7e authorizes this tooling/plan, not another live attempt yet.
@@ -51,7 +59,9 @@ The sequence is:
    a NEW exclusive `resume-attempt-receipt.json` with actual202, submitted/accepted
    times, exact identity, fixed clock and protected snapshot/generation SHA. Wait
    for exact canonical restored mapping/ACP/literal idle. Run `wake-check` producer
-   once; retain original typed generation failure evidence before its assertions.
+   once; retain original typed restore-binding evidence before its assertions.
+   Protected and latest generation hashes are separate observations. Latest
+   equality is not required and consumedGenerationObserved is explicitly false.
 3. Only after the fresh restore grant, host-run original `check`, not `setup`:
    compare restored baseline bytes against the original host baseline and use
    the original expectation bytes/assets for original Git/index/dirty-work checks
@@ -237,7 +247,7 @@ SAM_PROSPECTIVE_ROOT set to the same approved directory, and one fixed mode argu
 `setup`, `turn-check`, `protected-snapshot`, `wake-check`, `completion-runtime`, or
 `observe`, or `observer-snapshot`. It cannot login, wake, submit, execute a command or mutate CF state. It
 uses account Worker settings and SELECT-only parameterized D1 queries, emits only
-fixed stage/status/time, and exclusively saves private typed source projections
+fixed stage/status/time and allowlisted failure predicates/types/SHA, and exclusively saves private typed source projections
 plus their SHA. There is no arbitrary SQL, endpoint or model-input interface.
 
 Run each producer ONLY after its corresponding caller `*-mapping.json` or
@@ -245,20 +255,36 @@ Run each producer ONLY after its corresponding caller `*-mapping.json` or
 mapping ACP is independently crosschecked by the normal API before AND after the
 terminal operation; D1 source proof does not independently authenticate ACP itself.
 The producer validates actual stored profileID, owner/session/branch/runtime/node,
-pin/pool/globalVM/claims/otherwork. Snapshot proof includes original generation,
-expiry, no degradation, and original source hash. Wake grant requires the SAME
-snapshotID AND generation, recovery_status restored, exact recovery task/workspace
-and actual restored_at after this wake. A new workspace alone proves no restore.
+pin/pool/globalVM/claims/otherwork. Snapshot proof includes the protected generation
+observation, expiry, no degradation, and original source hash. Wake grant requires
+the SAME snapshotID, recovery_status restored, exact recovery task/workspace and
+actual restored_at after this accepted wake. A normal post-wake idle checkpoint
+may replace the latest snapshot_generation while those restore fields remain.
+Retain protectedGenerationSha256 and latestGenerationSha256 separately, along with
+their comparison; do not make comparison equality an acceptance gate or claim
+it proves the consumed generation. consumedGenerationObserved is always false
+for this current-records verifier. The caller checks this limitation and both
+digest bindings, saves wake-restore-provenance.json, and still requires the
+ORIGINAL restored baseline BYTE equality plus all Git/index/dirty-work/ref/PR
+checks before completion. A new workspace or restore metadata alone proves no
+preservation. A type/ID/task/workspace/time/byte mismatch still fails closed.
 
 The caller retains `wake-submitted.json` after the single accepted prompt, before
 waiting for recovery. Before evaluating the restore gate the producer exclusively
 creates `wake-check-restore-source.json` with observation time, fixed per-predicate
 booleans/types and bounded canonical fields (generation is a SHA, not raw text).
-Its SHA binds the fixed failure export; no arbitrary rows, errors or helper streams
-are emitted. Generation/status/time/type mismatches remain original failed proof.
+Its SHA binds the fixed failure export; no arbitrary rows, generation text, errors
+or helper streams are emitted or stored in the wake restore projection, including
+on success. Generation difference is informational; status/time/type/binding
+mismatches remain original failed proof.
 Later captures cannot overwrite the exclusive artifact or turn a repeated producer
 invocation into a grant. Preserve the historical failed run that lacked this proof;
-this fix cannot reconstruct or relabel it.
+this fix cannot reconstruct or relabel it. Source-derived offline fixtures cover
+normal idle generation rotation, wrong snapshot/task/workspace/time, secret-like
+generation text suppression, and actual changed-baseline bytes rejected without
+reconstruction. The real Python producer feeds both a rotated-generation success
+and wrong-task failure into the real continuation caller under simulated external
+boundaries. Original-byte checking and completion/observer order remain mandatory.
 
 Any producer failure writes an exclusive0600 `MODE-failure.json` bound to the exact
 task/session/start/hard clock. The caller recognizes only that bound signal while

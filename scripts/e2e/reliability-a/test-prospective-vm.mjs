@@ -85,6 +85,12 @@ finally:
  for(const [n,patch]of [['foreign-receipt',{receipt:{...identity.receipt,taskId:'01M51VVVVVVVVVVVVVVVVVVVVV'}}],['undefined-expiry',{expiresAt:undefined}],['string-expiry',{expiresAt:'future'}],['infinite-expiry',{expiresAt:Infinity}],['undefined-observed',{storedProfileObservedAt:undefined}],['string-observed',{storedProfileObservedAt:'now'}],['zero-observed',{storedProfileObservedAt:0}]]){grantPatch=patch;assert(!(await invoke(n)).result.ok);}grantPatch={};
  expireAfterInput=true;const expired=await invoke('action-expired-close');assert(!expired.result.ok&&expired.result.terminalClosed&&expired.result.socketClosed);expireAfterInput=false;clockOverride=null;
  assert((await invoke('turn-check')).result.ok);assert((await invoke('wake-check')).result.ok);
+ // Same parsed JSON, different restored ORIGINAL bytes: never normalize/rebaseline.
+ const changedBaseline=Buffer.concat([originalBaseline,Buffer.from('\n')]);
+ await writeFile(join(repo,'.reliability-a/baseline.json'),changedBaseline);
+ assert(!(await invoke('changed-baseline-bytes')).result.ok);
+ assert.deepEqual(await readFile(join(repo,'.reliability-a/baseline.json')),changedBaseline);
+ await writeFile(join(repo,'.reliability-a/baseline.json'),originalBaseline);
  // Damaged original is rejected, never replaced from the copied host baseline.
  await writeFile(join(repo,'.reliability-a/untracked.txt'),'changed');assert(!(await invoke('damaged')).result.ok);assert.deepEqual(await readFile(join(repo,'.reliability-a/baseline.json')),originalBaseline);
  await writeFile(join(repo,'.reliability-a/untracked.txt'),'untracked preservation fixture\n');
