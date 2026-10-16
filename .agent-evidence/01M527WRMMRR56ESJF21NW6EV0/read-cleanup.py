@@ -14,6 +14,8 @@ try:
  out['activeSameSessionWorkspaces']=q("SELECT COUNT(*) n FROM workspaces WHERE chat_session_id=? AND status NOT IN ('deleted','stopped','sleeping')",['8d0245f8-8799-40c1-9848-4650dd5b90d4'])[0]['n']
  out['nodeActiveWorkspaces']=q("SELECT COUNT(*) n FROM workspaces WHERE node_id=? AND status NOT IN ('deleted','stopped','sleeping')",['01M527X0B4TBRSGZCZ13P4V4WG'])[0]['n']
  out['nodeWarmClaims']=q("SELECT COUNT(*) n FROM tasks WHERE claimed_warm_node_id=? AND status NOT IN ('completed','cancelled','failed')",['01M527X0B4TBRSGZCZ13P4V4WG'])[0]['n']
+ out['globalNondeletedVmCount']=q("SELECT COUNT(*) n FROM nodes WHERE runtime='vm' AND status!='deleted'")[0]['n']
+ out['globalNonterminalWarmClaims']=q("SELECT COUNT(*) n FROM tasks WHERE claimed_warm_node_id IS NOT NULL AND status NOT IN ('completed','cancelled','failed')")[0]['n']
  out['ok']=True
 except Exception:pass
 Path('/workspaces/simple-agent-manager/.agent-evidence/01M527WRMMRR56ESJF21NW6EV0/cleanup-canonical.json').write_text(json.dumps(out,sort_keys=True,indent=2)+'\n');print(json.dumps(out))
