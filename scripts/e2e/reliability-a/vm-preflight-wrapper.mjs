@@ -2,6 +2,7 @@ import {gzipSync} from 'node:zlib';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {run as queueRun} from './queue-controller.mjs';
+import {pythonInvocationBlock,probeStepsScript} from './python-invocation.mjs';
 const project='01KJNR9R3TEN3KX1ETE33852R8';
 const safeInteger=v=>typeof v==='string'&&/^\d{1,15}$/.test(v)&&Number.isSafeInteger(Number(v))?Number(v):null;
 export async function run(deps){
@@ -54,7 +55,17 @@ for n,b in a.items():(p/n).write_text(b)
 ok=all(hashlib.sha256((p/n).read_bytes()).hexdigest()==h for n,h in json.loads('${JSON.stringify(hashes)}').items())
 f=p/'asset-hashes.json';f.write_text(json.dumps({'checks':{'assetHashesMatch':ok},'statuses':{'hash':0 if ok else 1}}));f.chmod(0o600)
 if ok:
- with (p/'a-prepare.json').open('w') as out:subprocess.run([sys.executable,str(p/'git-probe.py'),'prepare','--disposable-repository'],stdout=out,stderr=subprocess.DEVNULL,timeout=60)
+ with (p/'a-prepare.json').open('w') as out:result=subprocess.run([sys.executable,str(p/'git-probe.py'),'prepare','--disposable-repository'],stdout=out,stderr=subprocess.DEVNULL,timeout=60)
  (p/'a-prepare.json').chmod(0o600)
+ if result.returncode!=0:raise SystemExit(result.returncode)
 `;
+}
+
+export const vmPrepareCommand=assets=>pythonInvocationBlock(vmPrepareScript(assets),'/workspaces/reliability-verification-assets','prepare');
+export function vmProbeCommand(phase,branch){
+ if(!['check-record','wake-check','complete'].includes(phase)||!/^sam\/[a-z0-9][a-z0-9/-]{0,150}$/.test(branch))throw new Error();
+ const folder='/workspaces/reliability-verification-assets';
+ const steps=[{script:folder+'/git-probe.py',args:['check'],output:folder+'/a-check.json'}];
+ if(phase==='check-record')steps.push({script:folder+'/terminal-observer.py',args:['record','--repository','serverspresentation2025/crewai','--branch',branch,'--baseline','.reliability-a/baseline.json','--expectations',folder+'/expectations.json'],output:folder+'/observer-record.json'});
+ return pythonInvocationBlock(probeStepsScript(steps),folder,phase);
 }
