@@ -3,14 +3,14 @@
   "node": [
     {
       "id": "01M527X0B4TBRSGZCZ13P4V4WG",
-      "runtime_termination_confirmed_at": null,
-      "status": "running",
-      "warm_since": "2026-10-16T11:42:17.394Z"
+      "runtime_termination_confirmed_at": "2026-10-16T12:20:49.773Z",
+      "status": "deleted",
+      "warm_since": null
     }
   ],
   "nodeActiveWorkspaces": 0,
   "nodeWarmClaims": 0,
-  "observedAtMs": 1792150943137,
+  "observedAtMs": 1792153355755,
   "ok": true,
   "rows": [
     {
@@ -19,12 +19,12 @@
       "claimed_warm_node_id": null,
       "id": "01M527WRMMRR56ESJF21NW6EV0",
       "node_id": "01M527X0B4TBRSGZCZ13P4V4WG",
-      "node_status": "running",
+      "node_status": "deleted",
       "runtime": "vm",
       "status": "sleeping",
-      "warm_since": "2026-10-16T11:42:17.394Z",
+      "warm_since": null,
       "workspace_id": "01M5285P40BBXJY3W97JBFQA21",
-      "workspace_status": "sleeping"
+      "workspace_status": "deleted"
     }
   ],
   "snapshots": [
