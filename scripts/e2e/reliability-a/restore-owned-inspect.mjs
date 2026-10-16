@@ -1,7 +1,6 @@
 import {readFile,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {inspectOwnedFixture} from './owner-terminal-inspect.mjs';
-import {idleLeaseEnded} from './queue-controller.mjs';
 const root='/tmp/reliability-vm-claude-owner-inspect',api='https://api.sammy.party';
 const project='01KJNR9R3TEN3KX1ETE33852R8',task='01M51CCMB1S684RXVNBNDQRDAS',session='1135ad88-96dd-4ec2-a1d1-5813d295d2a5',branch='sam/authorized-one-required-reliability-dqrdas',profile='01KRS7Z2R88JFC73ARA7DV9WTK';
 const id=v=>typeof v==='string'&&/^[0-9A-HJKMNP-TV-Z]{26}$/.test(v);
@@ -10,10 +9,14 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
 export function pendingRecovery(status,workspaceId,originalHttpStatus){
  return (status==='queued'&&workspaceId===null)||(workspaceId==='01M51CJ70CX1ZYQ3M8TDVGM885'&&originalHttpStatus===404&&['sleeping','queued'].includes(status));
 }
+export function literalIdle(s,since,now){
+ return s?.activity==='idle'&&s.runtimeWorkState==='inactive'&&s.runtimeWorkCount===0
+  &&[s.activityAt,s.runtimeWorkUpdatedAt].every(t=>Number.isSafeInteger(t)&&t>=since&&t>0&&t<=now);
+}
 const evidence=v=>({status:['sleeping','in_progress','completed'].includes(v.status)?v.status:'other',completedAt:v.completedAt??null,evidenceSha256:createHash('sha256').update(JSON.stringify(v.completionEvidence??null)).digest('hex')});
 export async function run({requestSafe,logoutSafe,summary}){
  let browser,c,page,owner,ws,lastState,restored=false,finished=false;
- const clock=JSON.parse(await readFile(root+'/clock.json','utf8')),hard=clock.hard,action=hard-360000;
+ const clock=JSON.parse(await readFile(root+'/clock.json','utf8')),hard=clock.hard,action=hard-450000;
  let out={stage:'login',ok:false,authCleanup:false,browserClosed:false,sleepAvailable:false};
  const save=async()=>writeFile(root+'/continuation-progress.json',JSON.stringify({...out,observedAt:Date.now()}),{mode:0o600});
  const get=async(path,subcheck,original404=false)=>{out.subcheck=subcheck;const r=await c.request.fetch(api+path,{headers:{Origin:api},timeout:10000,maxRedirects:0,failOnStatusCode:false});try{out.httpStatus=r.status();await save();if(r.status()===404&&original404)return null;if(r.status()!==200)throw 0;const b=await r.body();if(b.length>250000)throw 0;return JSON.parse(b.toString('utf8'));}finally{await r.dispose();}};
@@ -32,10 +35,11 @@ export async function run({requestSafe,logoutSafe,summary}){
   const a=await get(`/api/projects/${project}/sessions/${session}/state`,'runtime-state');
   lastState=a.state;
   out.taskStatus=evidence(t).status;out.workspaceId=ws?.id;out.nodeId=id(ws?.nodeId)?ws.nodeId:undefined;out.workspaceRunning=ws?.status==='running';out.agentSessionId=id(a.agentSessionId)?a.agentSessionId:undefined;out.agentClaude=a.agentType==='claude-code';
-  out.idle=idleLeaseEnded(a.state,clock.started,Date.now(),300000,1800000);await save();return t;
+  // No configured lease assumption: only literal inactive, fresh canonical idle is eligible.
+  out.idle=literalIdle(a.state,clock.started,Date.now());await save();return t;
  };
  try{
-  if(Date.now()>=action||hard-clock.started!==1500000)throw 0;
+  if(Date.now()>=action||clock.started!==1792125871407||hard!==1792127371407)throw 0;
   const {chromium}=await import('/tmp/reliability-browser-deps/node_modules/playwright/index.mjs');browser=await chromium.launch({headless:true});c=await browser.newContext();
   let r=await requestSafe(c,api,{path:'/api/auth/token-login',method:'POST',data:{token:process.env.SAM_PLAYWRIGHT_PRIMARY_USER}});delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;out.loginStatus=r.status;if(r.category!=='ok')throw 0;
   owner=(await get('/api/auth/get-session','owner'))?.user?.id;if(typeof owner!=='string'||!owner)throw 0;
@@ -48,18 +52,19 @@ export async function run({requestSafe,logoutSafe,summary}){
   out.stage='independent-grant';await save();
   let grant;
   while(Date.now()<action){try{grant=JSON.parse(await readFile(root+'/grant.json','utf8'));break;}catch{await pause(1000);}}
-  if(!grant||grant.workspaceId!==out.workspaceId||grant.nodeId!==out.nodeId||grant.agentSessionId!==out.agentSessionId||grant.ownerId!==owner)throw 0;
+  if(Date.now()>=action||!grant||grant.workspaceId!==out.workspaceId||grant.nodeId!==out.nodeId||grant.agentSessionId!==out.agentSessionId||grant.ownerId!==owner)throw 0;
   page=await c.newPage();await page.goto('https://app.sammy.party',{waitUntil:'domcontentloaded',timeout:20000});
+  if(Date.now()+90000>hard-360000)throw 0;
   out.stage='inspect';await save();
   // Owned page cancellation bounds the browser transport inside the caller's finite job.
   const transportDeadline=setTimeout(()=>{void page.close().catch(()=>{});},80000);
   let inspection;try{inspection=await inspectOwnedFixture({context:c,page,grant});}finally{clearTimeout(transportDeadline);}
   await writeFile(root+'/inspection.json',JSON.stringify(inspection),{mode:0o600,flag:'wx'});out.inspectionOk=inspection.ok;out.inspectionStage=inspection.stage;out.terminalClosed=inspection.terminalClosed;out.quiescence=inspection.quiescence;
-  await writeFile(root+'/task-after.json',JSON.stringify(evidence(await bind())),{mode:0o600,flag:'wx'});finished=true;
+  await writeFile(root+'/task-after.json',JSON.stringify(evidence(await bind())),{mode:0o600,flag:'wx'});finished=inspection.ok===true&&inspection.quiescence===true&&inspection.terminalClosed===true&&inspection.socketClosed===true;
  }catch{out.failedSubcheck=out.subcheck??'caller';out.failedHttpStatus=out.httpStatus??0;}finally{
   delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
   if(restored){
-   out.stage='preserve';await save();
+   out.stage='preserve';try{await save();}catch{}
    try{
     while(Date.now()<hard-120000){await readRuntime();if(out.idle&&ws?.status==='running'){
       const r=await requestSafe(c,api,{path:`/api/workspaces/${ws.id}/sleep`,method:'POST',data:{},timeoutMs:90000},v=>{out.sleepAvailable=v?.status==='sleeping'&&v.workspaceId===ws.id&&v.chatSessionId===session&&typeof v.snapshotExpiresAt==='string';return out.sleepAvailable;});out.sleepStatus=r.status;break;
@@ -69,6 +74,6 @@ export async function run({requestSafe,logoutSafe,summary}){
   if(c)try{const a=await logoutSafe(c,api),b=await requestSafe(c,api,{path:'/api/auth/get-session'},v=>v===null),d=await requestSafe(c,api,{path:'/api/nodes'});out.authCleanup=a.category==='ok'&&b.category==='ok'&&[401,403].includes(d.status);}catch{}
   if(browser)try{await browser.close();out.browserClosed=true;}catch{}
  }
- out.ok=finished&&out.sleepAvailable&&out.authCleanup&&out.browserClosed;out.stage='terminal';await save();
+ out.ok=finished&&out.sleepAvailable&&out.authCleanup&&out.browserClosed;out.stage='terminal';try{await save();}catch{out.ok=false;}
  return summary(out.ok?'ok':'controller',out.sleepStatus??out.loginStatus??0,out.ok);
 }
