@@ -73,7 +73,7 @@ Two independent things decide this, and it's worth knowing which is which:
 | The same, in **conversation** mode                                                 | Its own `sam/…` output branch | No                   |
 
 - **The branch depends on how the work was started.** Only a composer chat on an Instant profile skips branch creation, and only when it has no attachments and wasn't started with an idea's **Execute** button. Otherwise, as on any other profile, it's submitted as a task and gets one. Anything submitted as a task — or dispatched with `dispatch_task`, on either runtime — gets an output branch, whichever mode it runs in.
-- **The push depends on task mode.** Conversation mode has no git lifecycle at all. Selecting the Instant runtime on a profile sets conversation mode, and so does choosing the **Lightweight** workspace profile — so a Lightweight submitted task gets a branch with nothing pushed to it.
+- **The push depends on task mode.** Conversation mode doesn't auto-commit or push. Selecting the Instant runtime on a profile sets conversation mode, and so does choosing the **Lightweight** workspace profile — so a Lightweight submitted task gets a branch with nothing pushed to it.
 
 Instant clones the requested base branch before checking out a task's output branch. A new output branch starts at that base; an existing output branch keeps its remote commits.
 
