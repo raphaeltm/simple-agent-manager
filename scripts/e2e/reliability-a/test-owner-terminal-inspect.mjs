@@ -4,7 +4,8 @@ import {inspectOwnedFixture,inspectionCommand,browserTerminal} from './owner-ter
 const task='01M51CCMB1S684RXVNBNDQRDAS',session='1135ad88-96dd-4ec2-a1d1-5813d295d2a5',project='01KJNR9R3TEN3KX1ETE33852R8';
 const branch='sam/authorized-one-required-reliability-dqrdas',profile='01KRS7Z2R88JFC73ARA7DV9WTK',workspaceId='01M51CJ70CX1ZYQ3M8TDVGM885',nodeId='01M51CCV9A1D2BDK4NJDK1E3MC';
 const canary='PRIVATE_CANARY_DO_NOT_EMIT',now=Date.now();
-const grant={workspaceId,nodeId,ownerId:'owner',expiresAt:now+120000,storedProfileId:profile,storedProfileObservedAt:now,receipt:{taskId:task,sessionId:session,branchName:branch,status:'queued'}};
+const agentSessionId='01M51CP7439Z7BS26T7MZ2PDZ6';
+const grant={workspaceId,nodeId,ownerId:'owner',agentSessionId,runtime:'vm',agentVersion:'b467f389811eadeaf973960bb30f9fa7b9cb4678',expiresAt:now+120000,storedProfileId:profile,storedProfileObservedAt:now,receipt:{taskId:task,sessionId:session,branchName:branch,status:'queued'}};
 const state={checks:Object.fromEntries(['repositoryRoot','branchMatches','fixtureDirectory','baselineFile','expectationsFile','gitProbeHash','bProbeHash','observerHash'].map(k=>[k,true])),statuses:{gitRoot:0,gitBranch:0}};
 const bytes=Buffer.from(JSON.stringify(state)),digest=createHash('sha256').update(bytes).digest('hex');
 async function scenario(mode){
@@ -14,8 +15,10 @@ async function scenario(mode){
   let v,status=200;
   if(url.endsWith('/get-session'))v={user:{id:mode==='foreign-owner'?canary:'owner'}};
   else if(url.includes('/agent-profiles/'))v={id:profile,name:canary,agentType:'claude-code',runtime:'vm',projectId:project};
+  else if(url.endsWith('/agent-profiles'))v={items:[{id:profile,name:canary},...(mode==='profile-collision'?[{id:nodeId,name:canary}]:[])]};
   else if(url.includes('/tasks/'))v={id:task,projectId:project,userId:'owner',chatSessionId:session,outputBranch:branch,workspaceId,agentProfileHint:canary,status:'in_progress'};
-  else if(url.includes('/sessions/'))v={session:{id:session,taskId:task,workspaceId,agentType:'claude-code'}};
+  else if(url.endsWith('/state'))v={agentSessionId:mode==='wrong-acp'?nodeId:agentSessionId,agentType:'claude-code'};
+  else if(url.includes('/sessions/'))v={session:{id:session,taskId:task,workspaceId,agentType:'claude-code',agentSessionId}};
   else if(url.endsWith('/api/workspaces/'+workspaceId))v={id:workspaceId,nodeId:mode==='foreign-node'?'01M51CCV9A1D2BDK4NJDK1E3MD':nodeId,projectId:project,chatSessionId:session,branch,repository:'serverspresentation2025/crewai',status:'running',hardware:{cloudProvider:'hetzner'}};
   else if(url.endsWith('/terminal/token')){assert.deepEqual(options.data,{workspaceId});v={token:canary.repeat(3),expiresAt:new Date(now+300000).toISOString(),workspaceUrl:`https://ws-${workspaceId}.sammy.party`};}
   else if(url.includes('/files/download?')){
@@ -39,7 +42,7 @@ async function scenario(mode){
  else assert.equal(frames.length,0);
  if(mode==='wrong-receipt')assert.equal(reads,0);
 }
-for(const mode of ['success','foreign-owner','foreign-node','wrong-receipt','bad-manifest','timeout','wrong-close'])await scenario(mode);
+for(const mode of ['success','foreign-owner','foreign-node','wrong-receipt','profile-collision','wrong-acp','bad-manifest','timeout','wrong-close'])await scenario(mode);
 
 // Exercise the actual browser transport parser with arbitrary PTY canary, not a replacement parser.
 const original=globalThis.WebSocket;
@@ -56,4 +59,4 @@ try{
  await assert.rejects(browserTerminal({...page,url:()=> 'https://foreign.invalid'},'wss://example.invalid',id));
  const command=inspectionCommand(id);assert(Buffer.byteLength(command.command)<3800);assert(!command.command.includes(canary));
 }finally{globalThis.WebSocket=original;}
-console.log(JSON.stringify({protocolAndPrivacy:true,cases:9,liveCalls:0}));
+console.log(JSON.stringify({protocolAndPrivacy:true,cases:11,liveCalls:0}));

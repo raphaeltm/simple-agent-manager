@@ -22,10 +22,17 @@ export function inspectionCommand(runId){
 signal.alarm(25)
 p=pathlib.Path(${JSON.stringify(directory)});p.mkdir(parents=True,exist_ok=False,mode=0o700)
 def git(*args):
+ child=None
  try:
-  r=subprocess.run(['git',*args],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=5)
-  return r.returncode,r.stdout[:4096].decode('utf-8','replace').strip()
- except Exception:return 255,''
+  child=subprocess.Popen(['git',*args],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
+  data,_=child.communicate(timeout=5)
+  return child.returncode,data[:4096].decode('utf-8','replace').strip()
+ except Exception:
+  if child is not None:
+   try:os.killpg(child.pid,signal.SIGKILL)
+   except ProcessLookupError:pass
+   child.communicate(timeout=2)
+  return 255,''
 rs,root=git('rev-parse','--show-toplevel');bs,b=git('branch','--show-current')
 r=pathlib.Path(root) if rs==0 and root else pathlib.Path.cwd()
 a=pathlib.Path('/workspaces/reliability-verification-assets')
@@ -85,7 +92,7 @@ export async function inspectOwnedFixture({context,page,grant,open=browserTermin
   try{if(r.status()!==200)throw 0;const b=await r.body();if(b.length>200000)throw 0;return JSON.parse(b.toString('utf8'));}finally{await r.dispose();}
  };
  const bind=async()=>{
-  if(!exact(grant,['workspaceId','nodeId','ownerId','expiresAt','storedProfileId','storedProfileObservedAt','receipt'])||!ulid(grant.workspaceId)||!ulid(grant.nodeId)
+  if(!exact(grant,['workspaceId','nodeId','ownerId','agentSessionId','runtime','agentVersion','expiresAt','storedProfileId','storedProfileObservedAt','receipt'])||!ulid(grant.workspaceId)||!ulid(grant.nodeId)||!ulid(grant.agentSessionId)||grant.runtime!=='vm'||grant.agentVersion!=='b467f389811eadeaf973960bb30f9fa7b9cb4678'
    ||typeof grant.ownerId!=='string'||!grant.ownerId||grant.storedProfileId!==profile||!Number.isSafeInteger(grant.expiresAt)||grant.expiresAt<=now()||grant.expiresAt>started+300000
    ||!Number.isSafeInteger(grant.storedProfileObservedAt)||grant.storedProfileObservedAt>now()||now()-grant.storedProfileObservedAt>300000
    ||!exact(grant.receipt,['taskId','sessionId','branchName','status'])||grant.receipt.taskId!==task||grant.receipt.sessionId!==session||grant.receipt.branchName!==branch||grant.receipt.status!=='queued')throw 0;
@@ -93,9 +100,13 @@ export async function inspectOwnedFixture({context,page,grant,open=browserTermin
   const p=await json(`/api/projects/${project}/agent-profiles/${profile}`);
   if(p?.id!==profile||p.agentType!=='claude-code'||!(p.runtime===null||p.runtime==='vm')||p.vmSizeOverride!=null||typeof p.name!=='string'||!p.name
    ||!(p.projectId===project||(p.projectId===null&&p.userId===grant.ownerId)))throw 0;
+  const profiles=await json(`/api/projects/${project}/agent-profiles`);
+  if(!Array.isArray(profiles?.items)||profiles.items.filter(x=>x?.name===p.name).length!==1||!profiles.items.some(x=>x?.id===profile&&x.name===p.name))throw 0;
   const t=await json(`/api/projects/${project}/tasks/${task}`),s=await json(`/api/projects/${project}/sessions/${session}?limit=1`),w=await json(`/api/workspaces/${grant.workspaceId}`);
+  const runtime=await json(`/api/projects/${project}/sessions/${session}/state`);
   if(t?.id!==task||t.projectId!==project||t.userId!==grant.ownerId||t.chatSessionId!==session||t.outputBranch!==branch||t.workspaceId!==grant.workspaceId||t.agentProfileHint!==p.name
    ||!['in_progress','completed'].includes(t.status)||s?.session?.id!==session||s.session.taskId!==task||s.session.workspaceId!==grant.workspaceId||s.session.agentType!=='claude-code'
+   ||s.session.agentSessionId!==grant.agentSessionId||runtime?.agentSessionId!==grant.agentSessionId||runtime.agentType!=='claude-code'
    ||w?.id!==grant.workspaceId||w.nodeId!==grant.nodeId||w.projectId!==project||w.chatSessionId!==session||w.branch!==branch||w.repository!=='serverspresentation2025/crewai'||w.status!=='running'||w.hardware?.cloudProvider!=='hetzner')throw 0;
   return `https://ws-${grant.workspaceId}.sammy.party`;
  };
