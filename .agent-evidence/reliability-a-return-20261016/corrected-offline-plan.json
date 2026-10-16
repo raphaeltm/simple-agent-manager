@@ -1,0 +1,31 @@
+{
+  "case": "One new VM/Claude prospective case, exact source candidate/runtime/pool and task/session/branch/profile identities bound after coordinator authorization. No new task or clock until authorization and fresh admission.",
+  "durability": {
+    "failure": "Missing original bytes or failed verified retrieval blocks next phase; never reconstruct.",
+    "privacy": "Only allowlisted safe projections/artifacts. Never credentials, raw PTY/transcripts, arbitrary errors or secret-bearing config.",
+    "required": "Immutable task-scoped private project Library export plus snapshot-visible local bytes and SHA256 manifest verified by retrieval before each phase end; no /tmp-only originals"
+  },
+  "idleBaselineReturn": "Already COMPLETE PASS; coordinator notified f1303f51",
+  "priorEvidence": {
+    "firstWake": "UNKNOWN",
+    "original16": "not located in bounded search; no reconstruction or historical revalidation",
+    "secondRestore": "NOT PASS"
+  },
+  "scopeLimits": [
+    "One new VM/Claude fixture only; no retry/replacement/extension or Codex case.",
+    "Exact fresh resource/cost/window conditions require coordinator disposition.",
+    "No product/tooling changes or staging ownership granted by this plan."
+  ],
+  "sequence": [
+    "Authorize bounded slot and immutable window after fresh independent guards; preserve all old snapshots and prior completed evidence.",
+    "Create one prospective target through normal APIs; prepare tracked/untracked/staged/workflow/local-unpushed fixture and publication inventory using reviewed tooling.",
+    "BEFORE tested turn: persist exact allowlisted baseline/expectations, original bytes, identities, accepted receipt, clock and source hashes in task-scoped snapshot-visible private directory; immutable Library export+manifest; download and verify every required byte. Failure stops progression.",
+    "Run tested turn; check no automatic publication. Persist safe exact results and verified retrieval BEFORE phase end.",
+    "Normal Sleep and independently available snapshot, then one normal wake; verify restored ORIGINAL baseline bytes, Git index/dirty/workflow/local commits and unchanged refs/PR inventory. Persist safe evidence+manifest and verify retrieval BEFORE phase end.",
+    "Only if preservation checks pass: actual complete_task and canonical/tool/runtime proof, retaining publication expectations for NEW target. Export/verify retrieval before phase end.",
+    "Normally reopen retained FIRST as independent observer of NEW target publication expectations. FIRST old baseline comparator is NOT required. Keep prior FIRST completed evidence, record actual reopen honestly, do not rebaseline or rerun its original case. Verify unchanged NEW target remote refs and all-state PR inventory.",
+    "Normal Sleep/available snapshot/auth closure, bounded normal provider cleanup ownership; final durable safe export+verified retrieval. No historical PASS relabel."
+  ],
+  "status": "OFFLINE PROPOSAL; NO RUNTIME AUTHORIZATION",
+  "supersedes": "FIRST-old-baseline requirement in prior recovery proposal is withdrawn; it is not a gate for observer reopen."
+}
