@@ -12,6 +12,7 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DefaultCapacityPoolsPanel } from '../../../src/components/project-settings/DefaultCapacityPoolsPanel';
+import { ApiClientError } from '../../../src/lib/api/client';
 
 const mocks = vi.hoisted(() => ({
   fetchProjectDefaultCapacityPools: vi.fn(),
@@ -339,6 +340,12 @@ function response(
   };
 }
 
+const LONG_SKU = 'long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only';
+
+function chip(name: string) {
+  return screen.getByRole('button', { name, exact: true });
+}
+
 describe('DefaultCapacityPoolsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -412,116 +419,111 @@ describe('DefaultCapacityPoolsPanel', () => {
     }
   );
 
-  it('renders effective pool policy, sources, and provider-native allowed instances without secret fields', async () => {
+  it('describes the pool in plain language without internal ids or states', async () => {
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
       response('project', summary('project'))
     );
 
     renderPanel();
 
-    expect(await screen.findByText('project default pool')).toBeInTheDocument();
+    expect(await screen.findByText('Allowed machines (2)')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Project compute pool' })).toBeInTheDocument();
     expect(
-      screen.getByRole('heading', { name: 'Project Infrastructure Compute Pool' })
+      screen.getByText(
+        'SAM can start Hetzner machines in Nuremberg or Ashburn, from cx22 (2 vCPU, 4 GB RAM, €3.79/mo) to cpx31 (4 vCPU, 8 GB RAM, €13.10/mo).'
+      )
     ).toBeInTheDocument();
-    expect(screen.getByText('Project default applies to this context.')).toBeInTheDocument();
-    expect(screen.getByText('Balanced')).toBeInTheDocument();
-    expect(screen.getByText('Queue')).toBeInTheDocument();
-    expect(screen.getByText('Hetzner · Project')).toBeInTheDocument();
-    expect(screen.getByText('credentials:credential-project')).toBeInTheDocument();
+    expect(
+      screen.getByText('New agents go to the least busy machine.', { exact: false })
+    ).toBeInTheDocument();
+    expect(screen.getByText('Wait and retry.')).toBeInTheDocument();
     expect(screen.getByText('cx22')).toBeInTheDocument();
     expect(screen.getByText('cpx31')).toBeInTheDocument();
-    expect(screen.getByText(/Hetzner · Nuremberg \(fsn1\) · DE/)).toBeInTheDocument();
-    expect(screen.getByText(/Hetzner · Ashburn \(ash\) · US/)).toBeInTheDocument();
-    expect(screen.getAllByText('2')[0]).toBeInTheDocument();
-    expect(screen.getByText('4 GB')).toBeInTheDocument();
     expect(screen.getByText('€13.10/mo')).toBeInTheDocument();
-    expect(screen.queryByText('small')).not.toBeInTheDocument();
-    expect(screen.queryByText('medium')).not.toBeInTheDocument();
-    expect(screen.queryByText(/encrypted/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/token/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Hidden outside this settings context/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Installation defaults require/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Uses this project's Hetzner account/)).toBeInTheDocument();
+    for (const internal of [
+      /credentials:credential-project/,
+      /revision/i,
+      /shared-vm/,
+      /not selected/i,
+      /reconcile/i,
+      /encrypted/i,
+      /token/i,
+      /^small$/,
+      /^medium$/,
+    ]) {
+      expect(screen.queryByText(internal)).not.toBeInTheDocument();
+    }
+    // The machine limit caps every strategy, so it is always shown.
+    expect(screen.getByText('Machine limit')).toBeInTheDocument();
+    expect(screen.getByText(/Up to 3 machines at once per person/)).toBeInTheDocument();
   });
 
-  it('shows project fallback read-only and guides users to project credential setup', async () => {
+  it('shows the personal pool read-only on a project without its own pool', async () => {
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
 
     renderPanel();
 
-    expect(await screen.findByText('user default pool')).toBeInTheDocument();
-    expect(screen.getByText('Using user fallback.', { exact: false })).toBeInTheDocument();
-    expect(screen.getByText('Create a project-scoped infrastructure pool')).toBeInTheDocument();
-    expect(screen.getByText(/a user connects and grants for this project/i)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Set up project credentials' })).toHaveAttribute(
+    expect(
+      await screen.findByText(/This project uses your personal compute pool/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Edit your pool' })).toHaveAttribute(
       'href',
-      '/projects/project-1/settings/connections'
+      '/settings/infrastructure'
     );
+    expect(
+      screen.getByRole('link', { name: 'connect a cloud account to the project' })
+    ).toHaveAttribute('href', '/projects/project-1/settings/connections');
+    expect(screen.getByText('Allowed machines (2)')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/Hidden outside this settings context/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Installation defaults require/i)).not.toBeInTheDocument();
   });
 
-  it('keeps a zero-active owned pool editable so offerings can be added back', async () => {
-    const disabledProject = summary('project');
-    disabledProject.pool = { ...disabledProject.pool, status: 'disabled' };
-    disabledProject.candidates = disabledProject.candidates.map((candidateItem, index) => ({
-      ...candidateItem,
-      status: index === 0 ? 'deleted' : 'disabled',
-    }));
-    disabledProject.activeCandidateCount = 0;
-    const disabledProjectResponse: ProjectDefaultCapacityPoolsResponse = {
-      effective: null,
-      effectiveScope: null,
-      defaults: [
-        {
-          scope: 'project',
-          visibility: 'visible',
-          visibilityReason: 'project-secret-read',
-          canReconcile: true,
-          summary: disabledProject,
-        },
-        {
-          scope: 'user',
-          visibility: 'visible',
-          visibilityReason: 'authenticated-user',
-          canReconcile: true,
-          summary: null,
-        },
-        {
-          scope: 'installation',
-          visibility: 'hidden',
-          visibilityReason: 'superadmin-required',
-          canReconcile: false,
-          summary: null,
-        },
-      ],
-      precedence: ['project', 'user', 'installation'],
-      reconciledScopes: [],
-      policyMutationSupported: true,
-    };
-    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(disabledProjectResponse);
-    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(disabledProjectResponse);
+  it('names the regions of a fallback pool without calling its machines unavailable', async () => {
+    // The project-scoped catalog request covers project credentials only, so the personal
+    // pool a project falls back to arrives without a catalog of its own (seen on staging).
+    mocks.providerCatalogs = [];
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
 
     renderPanel();
 
-    expect(await screen.findByText('No visible active default pool')).toBeInTheDocument();
     expect(
-      screen.getAllByText((_, element) =>
-        Boolean(
-          element?.textContent?.includes(
-            '0 allowed instances · workspaces Balanced · deployments Smallest Fit'
-          )
-        )
-      ).length
-    ).toBeGreaterThan(0);
+      await screen.findByText(/This project uses your personal compute pool/)
+    ).toBeInTheDocument();
     expect(
-      screen.queryByRole('link', { name: 'Set up project credentials' })
-    ).not.toBeInTheDocument();
+      screen.getByText(
+        'SAM can start Hetzner machines in Falkenstein or Ashburn, from cx22 (2 vCPU, 4 GB RAM, €3.79/mo) to cpx31 (4 vCPU, 8 GB RAM, €13.10/mo).'
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryAllByText(/not currently offered/i)).toHaveLength(0);
+  });
+
+  it('keeps an owned pool with no allowed machines editable so machines can be allowed again', async () => {
+    const empty = summary('project');
+    empty.pool = { ...empty.pool, status: 'disabled' };
+    empty.candidates = empty.candidates.map((candidateItem, index) => ({
+      ...candidateItem,
+      status: index === 0 ? 'deleted' : 'disabled',
+    }));
+    empty.activeCandidateCount = 0;
+    const emptyResponse: ProjectDefaultCapacityPoolsResponse = {
+      ...response(null, null),
+      defaults: response(null, null).defaults.map((item) =>
+        item.scope === 'project' ? { ...item, summary: empty } : item
+      ),
+    };
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(emptyResponse);
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(emptyResponse);
+
+    renderPanel();
+
+    expect(
+      await screen.findByText("No machines are allowed, so SAM can't start any from this pool.")
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Connect a cloud account/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    expect(screen.getByText('Not selected or removed instances')).toBeInTheDocument();
-    expect(screen.getAllByText('Not selected').length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole('button', { name: /Add back Hetzner fsn1 cx22/ }));
+    expect(chip('cx22 in Nuremberg')).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(chip('cx22 in Nuremberg'));
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() =>
@@ -531,7 +533,7 @@ describe('DefaultCapacityPoolsPanel', () => {
     );
   });
 
-  it('updates project-owned policy and add/remove offering statuses', async () => {
+  it('saves placement settings and machine changes for a project pool', async () => {
     const current = summary('project');
     current.candidates = [
       candidate({
@@ -545,112 +547,13 @@ describe('DefaultCapacityPoolsPanel', () => {
         location: 'ash',
         machineSize: 'medium',
         providerInstanceType: 'cpx31',
-        priority: 1,
-        candidateOrder: 1,
       }),
       candidate({
         id: 'candidate-project-hil-ccx33',
         location: 'hil',
         machineSize: 'large',
         providerInstanceType: 'ccx33',
-        priority: 2,
-        candidateOrder: 2,
         status: 'deleted',
-      }),
-    ];
-    current.activeCandidateCount = 2;
-    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
-    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(
-      response('project', {
-        ...current,
-        pool: {
-          ...current.pool,
-          strategy: 'pack',
-          deploymentStrategy: 'balanced',
-          revision: 4,
-        },
-        candidates: current.candidates.map((candidateItem) =>
-          candidateItem.id === 'candidate-project-ash-cpx31'
-            ? { ...candidateItem, status: 'deleted' }
-            : candidateItem.id === 'candidate-project-hil-ccx33'
-              ? { ...candidateItem, status: 'active' }
-              : candidateItem
-        ),
-        activeCandidateCount: 2,
-      })
-    );
-
-    renderPanel();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getByLabelText('Workspace strategy'), { target: { value: 'pack' } });
-    fireEvent.change(screen.getByLabelText('Deployment strategy'), {
-      target: { value: 'balanced' },
-    });
-    fireEvent.change(screen.getByRole('spinbutton', { name: /Maximum nodes/ }), {
-      target: { value: '5' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /Remove Hetzner ash cpx31/ }));
-    fireEvent.click(screen.getByRole('button', { name: /Add back Hetzner hil ccx33/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-
-    await waitFor(() =>
-      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
-        policy: { strategy: 'pack', deploymentStrategy: 'balanced', maxNodes: 5 },
-        candidates: [
-          { id: 'candidate-project-ash-cpx31', status: 'deleted' },
-          { id: 'candidate-project-hil-ccx33', status: 'active' },
-        ],
-      })
-    );
-    expect(mocks.toast.success).toHaveBeenCalledWith('Project default compute pool updated');
-  });
-
-  it('updates the deployment strategy independently from workspace placement', async () => {
-    const current = summary('project');
-    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
-    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(
-      response('project', {
-        ...current,
-        pool: { ...current.pool, deploymentStrategy: 'balanced', revision: 4 },
-      })
-    );
-
-    renderPanel();
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getByLabelText('Deployment strategy'), {
-      target: { value: 'balanced' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-
-    await waitFor(() =>
-      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
-        policy: { deploymentStrategy: 'balanced' },
-      })
-    );
-  });
-
-  it('filters catalog offerings and applies bulk add/remove through candidate statuses', async () => {
-    const current = summary('project');
-    current.candidates = [
-      candidate({
-        id: 'candidate-project-fsn1-cx22',
-        location: 'fsn1',
-        machineSize: 'small',
-        providerInstanceType: 'cx22',
-      }),
-      candidate({
-        id: 'candidate-project-ash-cpx31',
-        location: 'ash',
-        machineSize: 'medium',
-        providerInstanceType: 'cpx31',
-        status: 'deleted',
-      }),
-      candidate({
-        id: 'candidate-project-hil-ccx33',
-        location: 'hil',
-        machineSize: 'large',
-        providerInstanceType: 'ccx33',
       }),
     ];
     current.activeCandidateCount = 2;
@@ -660,21 +563,150 @@ describe('DefaultCapacityPoolsPanel', () => {
     renderPanel();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getByLabelText('Filter region or location'), {
-      target: { value: 'ash' },
+    fireEvent.change(screen.getByLabelText('Placing agents'), { target: { value: 'spread' } });
+    expect(screen.getByText(/With Spread, each agent gets its own machine/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Machine limit per person'), {
+      target: { value: '5' },
     });
-    expect(screen.getByText(/1 matching offering across 1 region/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Add filtered' }));
+    fireEvent.change(screen.getByLabelText('App deployments'), { target: { value: 'balanced' } });
+    fireEvent.click(chip('cpx31 in Ashburn'));
+    fireEvent.click(screen.getByRole('button', { name: /Show 2 more machine types/ }));
+    fireEvent.click(chip('ccx33 in Hillsboro'));
+    expect(screen.getByText('5 unsaved changes')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() =>
       expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
-        candidates: [{ id: 'candidate-project-ash-cpx31', status: 'active' }],
+        policy: { strategy: 'spread', deploymentStrategy: 'balanced', maxNodes: 5 },
+        candidates: [
+          { id: 'candidate-project-ash-cpx31', status: 'deleted' },
+          { id: 'candidate-project-hil-ccx33', status: 'active' },
+        ],
+      })
+    );
+    expect(mocks.toast.success).toHaveBeenCalledWith('Compute pool saved');
+  });
+
+  it('turns a region off and back on when a legacy size row shares it', async () => {
+    // Staging pools keep a legacy "small" row beside the native cx22 row in the same region.
+    // The server refuses to activate the legacy row, so re-allowing must leave it out.
+    const pool = summary('project');
+    pool.candidates = [
+      candidate({
+        id: 'candidate-project-cx22',
+        machineSize: 'small',
+        providerInstanceType: 'cx22',
+        catalogAvailability: 'available',
+        providerInstanceCatalogSource: 'api',
+      }),
+      candidate({
+        id: 'candidate-project-small',
+        machineSize: 'small',
+        providerInstanceType: null,
+        status: 'disabled',
+        catalogAvailability: 'last-known-unavailable',
+        providerInstanceCatalogSource: null,
+      }),
+    ];
+    const blocked = structuredClone(pool);
+    blocked.candidates[0] = { ...blocked.candidates[0]!, status: 'deleted' };
+    mocks.providerCatalogs = [providerCatalog()];
+    mocks.providerCatalogs[0]!.offerings![0] = {
+      ...mocks.providerCatalogs[0]!.offerings![0]!,
+      machineSize: 'small',
+    };
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', pool));
+    mocks.updateProjectDefaultCapacityPools
+      .mockResolvedValueOnce(response('project', blocked))
+      .mockResolvedValueOnce(response('project', pool));
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(chip('cx22 in Nuremberg'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenNthCalledWith(1, 'project-1', {
+        candidates: [{ id: 'candidate-project-cx22', status: 'deleted' }],
+      })
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    expect(chip('cx22 in Nuremberg')).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(chip('cx22 in Nuremberg'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenNthCalledWith(2, 'project-1', {
+        candidates: [{ id: 'candidate-project-cx22', status: 'active' }],
       })
     );
   });
 
-  it('keeps same provider location and SKU rows distinct by credential source', async () => {
+  it('lets the machine limit be cleared and retyped, and saves only whole numbers', async () => {
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
+      response('project', summary('project'))
+    );
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(
+      response('project', summary('project'))
+    );
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    const limit = screen.getByLabelText('Machine limit per person');
+    fireEvent.change(limit, { target: { value: '' } });
+    // The field stays empty while editing instead of snapping back to the saved value.
+    expect(limit).toHaveValue(null);
+    fireEvent.change(limit, { target: { value: '2.5' } });
+    expect(screen.getByText('No changes yet')).toBeInTheDocument();
+    fireEvent.blur(limit);
+    // Leaving the field shows the value that would be saved.
+    expect(limit).toHaveValue(3);
+    fireEvent.change(limit, { target: { value: '1e3' } });
+    fireEvent.blur(limit);
+    expect(limit).toHaveValue(1000);
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
+        policy: { maxNodes: 1000 },
+      })
+    );
+  });
+
+  it('saves the deployment strategy on its own', async () => {
+    const current = summary('project');
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
+
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('App deployments'), { target: { value: 'balanced' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
+        policy: { deploymentStrategy: 'balanced' },
+      })
+    );
+  });
+
+  it('cancel discards changes without saving', async () => {
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
+      response('project', summary('project'))
+    );
+
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(chip('cx22 in Nuremberg'));
+    expect(screen.getByText('1 unsaved change')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.getByText('Allowed machines (2)')).toBeInTheDocument();
+    expect(mocks.updateProjectDefaultCapacityPools).not.toHaveBeenCalled();
+  });
+
+  it('keeps two connections to the same provider separate', async () => {
     mocks.providerCatalogs = [
       providerCatalog('credential-alpha'),
       providerCatalog('credential-beta'),
@@ -699,17 +731,13 @@ describe('DefaultCapacityPoolsPanel', () => {
         id: 'candidate-alpha-ash-cpx31',
         capacitySourceId: 'source-alpha',
         location: 'ash',
-        machineSize: 'medium',
         providerInstanceType: 'cpx31',
       }),
       candidate({
         id: 'candidate-beta-ash-cpx31',
         capacitySourceId: 'source-beta',
         location: 'ash',
-        machineSize: 'medium',
         providerInstanceType: 'cpx31',
-        candidateOrder: 1,
-        priority: 1,
       }),
     ];
     current.activeCandidateCount = 2;
@@ -718,18 +746,26 @@ describe('DefaultCapacityPoolsPanel', () => {
 
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
     expect(
-      screen.getAllByText(/Source: Project credential credential-alpha/).length
-    ).toBeGreaterThan(0);
+      await screen.findByRole('heading', { name: 'Hetzner · Project credentials' })
+    ).toBeInTheDocument();
     expect(
-      screen.getAllByText(/Source: Project credential credential-beta/).length
-    ).toBeGreaterThan(0);
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: /Remove Hetzner ash cpx31 via Project credential credential-alpha/,
-      })
+      screen.getByRole('heading', { name: 'Hetzner · Project credentials (2)' })
+    ).toBeInTheDocument();
+    // Each section title links to where that connection is managed.
+    expect(screen.getAllByRole('link', { name: /^Hetzner · Project credentials/ })).toHaveLength(2);
+    expect(screen.getByRole('link', { name: 'Hetzner · Project credentials' })).toHaveAttribute(
+      'href',
+      '/projects/project-1/settings/connections'
     );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const [alphaChip, betaChip] = screen.getAllByRole('button', {
+      name: 'cpx31 in Ashburn',
+      exact: true,
+    });
+    expect(betaChip).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(alphaChip!);
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() =>
@@ -739,31 +775,21 @@ describe('DefaultCapacityPoolsPanel', () => {
     );
   });
 
-  it('keeps unavailable removed offerings visible without enabling add-back', async () => {
-    const longSku = 'long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only';
+  it('does not let machines the provider stopped offering be allowed again', async () => {
     const current = summary('project');
     current.candidates = [
+      candidate({ id: 'candidate-project-fsn1-cx22', providerInstanceType: 'cx22' }),
       candidate({
-        id: 'candidate-project-fsn1-cx22',
-        location: 'fsn1',
-        machineSize: 'small',
-        providerInstanceType: 'cx22',
-      }),
-      candidate({
-        id: 'candidate-project-hel1-long-unavailable',
+        id: 'candidate-project-hel1-long',
         location: 'hel1',
         machineSize: null,
-        providerInstanceType: longSku,
-        providerInstanceDisplayName: 'Long catalog-only SKU',
+        providerInstanceType: LONG_SKU,
         providerInstanceVcpuCount: 16,
         providerInstanceMemoryMb: 65_536,
         providerInstanceDiskGb: 480,
         providerInstancePriceDisplay: '€220.00/mo',
         providerInstancePriceMonthlyCents: 22_000,
-        providerInstancePriceHourlyMicros: null,
         status: 'deleted',
-        priority: 1,
-        candidateOrder: 1,
       }),
     ];
     current.activeCandidateCount = 1;
@@ -772,24 +798,56 @@ describe('DefaultCapacityPoolsPanel', () => {
     renderPanel();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-
-    expect(screen.getAllByText(longSku).length).toBeGreaterThan(0);
-    expect(
-      screen.queryByRole('button', {
-        name: new RegExp(`Add back Hetzner hel1 ${longSku}`),
-      })
-    ).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Unavailable' })[0]).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /Show \d+ more machine types?/ }));
+    expect(screen.getByText(LONG_SKU)).toBeInTheDocument();
+    expect(chip(`${LONG_SKU} in Helsinki (temporarily unavailable)`)).toBeDisabled();
   });
 
-  it('routes user and installation edits to their owned default APIs', async () => {
+  it('adds catalog machines the pool has no row for', async () => {
+    const catalogWithAvailableRow = providerCatalog();
+    catalogWithAvailableRow.offerings = catalogWithAvailableRow.offerings?.map((offering) =>
+      offering.providerInstanceType === LONG_SKU
+        ? { ...offering, available: true, status: null }
+        : offering
+    );
+    mocks.providerCatalogs = [catalogWithAvailableRow];
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
+      response('project', summary('project'))
+    );
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(
+      response('project', summary('project'))
+    );
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: /Show 2 more machine types/ }));
+    fireEvent.click(chip(`${LONG_SKU} in Helsinki`));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
+        catalogAdditions: [
+          {
+            sourceId: 'source-project',
+            provider: 'hetzner',
+            location: 'hel1',
+            providerInstanceType: LONG_SKU,
+            providerInstanceSku: null,
+          },
+        ],
+      })
+    );
+  });
+
+  it('routes user and installation edits to their own APIs', async () => {
     mocks.fetchUserDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
     mocks.updateUserDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
 
     const userRender = renderPanel({ scope: 'user' });
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.click(screen.getByRole('button', { name: /Remove Hetzner fsn1 cx22/ }));
+    fireEvent.click(chip('cx22 in Nuremberg'));
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() =>
@@ -808,8 +866,9 @@ describe('DefaultCapacityPoolsPanel', () => {
 
     renderPanel({ scope: 'installation' });
 
+    expect(await screen.findByRole('heading', { name: 'Shared compute pool' })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.click(screen.getByRole('button', { name: /Remove Hetzner fsn1 cx22/ }));
+    fireEvent.click(chip('cx22 in Nuremberg'));
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() =>
@@ -823,26 +882,26 @@ describe('DefaultCapacityPoolsPanel', () => {
     {
       props: { projectId: 'project-1' } as const,
       fetchMock: () => mocks.fetchProjectDefaultCapacityPools,
-      title: 'Project compute credentials are required',
-      action: 'Set up project credentials',
+      title: 'No machines for this project yet',
+      action: 'Connect a cloud account to this project',
       href: '/projects/project-1/settings/connections',
     },
     {
       props: { scope: 'user' } as const,
       fetchMock: () => mocks.fetchUserDefaultCapacityPools,
-      title: 'Personal compute credentials are required',
-      action: 'Set up cloud provider',
+      title: 'No machines yet',
+      action: 'Connect a cloud account',
       href: '/settings/cloud-provider',
     },
     {
       props: { scope: 'installation' } as const,
       fetchMock: () => mocks.fetchInstallationDefaultCapacityPools,
-      title: 'Platform compute credentials are required',
-      action: 'Set up platform credentials',
+      title: 'No platform cloud account yet',
+      action: 'Add a platform credential',
       href: '/admin/credentials',
     },
   ])(
-    'renders scoped credential setup guidance for $title',
+    'guides $props.scope scope without a pool: $title',
     async ({ props, fetchMock, title, action, href }) => {
       fetchMock().mockResolvedValue(response(null, null));
 
@@ -853,57 +912,58 @@ describe('DefaultCapacityPoolsPanel', () => {
     }
   );
 
-  it('reconciles defaults and replaces the stale summary', async () => {
+  it('tells people without a pool that shared machines are running their work', async () => {
+    mocks.fetchUserDefaultCapacityPools.mockResolvedValue({
+      ...response(null, null),
+      effectiveSummary: {
+        scope: 'installation',
+        state: 'configured-ready',
+        strategy: 'balanced',
+        exhaustionPolicy: 'queue',
+        availableCandidateCount: 1,
+        nativeOfferings: [
+          {
+            provider: 'hetzner',
+            location: 'fsn1',
+            providerInstanceType: 'cx23',
+            displayName: 'cx23',
+            vcpu: 2,
+            memoryMb: 4096,
+            diskGb: 40,
+            price: '€4.49/mo',
+          },
+        ],
+      },
+    });
+
+    renderPanel({ scope: 'user' });
+
+    expect(await screen.findByText("You're using shared machines")).toBeInTheDocument();
+    expect(screen.getByText(/Hetzner cx23 in Falkenstein/)).toBeInTheDocument();
+    expect(screen.queryByText(/required/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Connect a cloud account' })).toHaveAttribute(
+      'href',
+      '/settings/cloud-provider'
+    );
+  });
+
+  it('refreshes the machine list and shows the result', async () => {
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response(null, null));
     mocks.reconcileProjectDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
 
     renderPanel();
 
-    expect(await screen.findByText('No visible active default pool')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Reconcile' }));
+    expect(await screen.findByText('No machines for this project yet')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh machine list' }));
 
-    expect(await screen.findByText('user default pool')).toBeInTheDocument();
+    expect(
+      await screen.findByText(/This project uses your personal compute pool/)
+    ).toBeInTheDocument();
     expect(mocks.reconcileProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1');
-    expect(mocks.toast.success).toHaveBeenCalledWith('Project default compute pool reconciled');
+    expect(mocks.toast.success).toHaveBeenCalledWith('Machine list refreshed');
   });
 
-  it('renders and reconciles the user default pool variant', async () => {
-    mocks.fetchUserDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
-    mocks.reconcileUserDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
-
-    renderPanel({ scope: 'user' });
-
-    expect(await screen.findByText('Your Infrastructure Compute Pool')).toBeInTheDocument();
-    expect(screen.getByText(/personal infrastructure pool/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Reconcile' }));
-
-    await waitFor(() => expect(mocks.reconcileUserDefaultCapacityPools).toHaveBeenCalledTimes(1));
-    expect(mocks.toast.success).toHaveBeenCalledWith('User default compute pool reconciled');
-  });
-
-  it('renders and reconciles the installation default pool variant', async () => {
-    mocks.fetchInstallationDefaultCapacityPools.mockResolvedValue(
-      response('installation', summary('installation'))
-    );
-    mocks.reconcileInstallationDefaultCapacityPools.mockResolvedValue(
-      response('installation', summary('installation'))
-    );
-
-    renderPanel({ scope: 'installation' });
-
-    expect(await screen.findByText('Installation Infrastructure Compute Pool')).toBeInTheDocument();
-    expect(screen.getByText(/platform-admin pool/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Reconcile' }));
-
-    await waitFor(() =>
-      expect(mocks.reconcileInstallationDefaultCapacityPools).toHaveBeenCalledTimes(1)
-    );
-    expect(mocks.toast.success).toHaveBeenCalledWith(
-      'Installation default compute pool reconciled'
-    );
-  });
-
-  it('renders all active provider-native offerings in the bounded list', async () => {
+  it('lists every allowed machine type', async () => {
     const many = summary('project');
     many.candidates = Array.from({ length: 13 }, (_, index) =>
       candidate({
@@ -920,68 +980,24 @@ describe('DefaultCapacityPoolsPanel', () => {
 
     renderPanel();
 
-    expect(await screen.findByText('provider-sku-with-a-long-name-0')).toBeInTheDocument();
+    expect(await screen.findByText('Allowed machines (13)')).toBeInTheDocument();
+    expect(screen.getByText('provider-sku-with-a-long-name-0')).toBeInTheDocument();
     expect(screen.getByText('provider-sku-with-a-long-name-12')).toBeInTheDocument();
-    expect(screen.queryByText(/\+\d+ more provider\/region groups/)).not.toBeInTheDocument();
   });
 
-  it('submits provider-native catalog-only offerings as catalog additions', async () => {
-    const catalogWithAvailableNativeRow = providerCatalog();
-    catalogWithAvailableNativeRow.offerings = catalogWithAvailableNativeRow.offerings?.map(
-      (offering) =>
-        offering.providerInstanceType ===
-        'long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only'
-          ? { ...offering, available: true, status: null }
-          : offering
-    );
-    mocks.providerCatalogs = [catalogWithAvailableNativeRow];
-    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
-      response('project', summary('project'))
-    );
-    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(
-      response('project', summary('project'))
+  it('explains a permission error in plain words', async () => {
+    mocks.fetchProjectDefaultCapacityPools.mockRejectedValue(
+      new ApiClientError('FORBIDDEN', 'Project capability is required', 403)
     );
 
     renderPanel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    const catalogOnlySku = 'long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only';
-    expect(screen.getByText(catalogOnlySku)).toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: new RegExp(`Add Hetzner hel1 ${catalogOnlySku}`),
-      })
-    );
-    expect(screen.getAllByRole('button', { name: 'Pending add' })[0]).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-
-    await waitFor(() =>
-      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
-        catalogAdditions: [
-          {
-            sourceId: 'source-project',
-            provider: 'hetzner',
-            location: 'hel1',
-            providerInstanceType: catalogOnlySku,
-            providerInstanceSku: null,
-          },
-        ],
-      })
-    );
-  });
-
-  it('shows unavailable provider-native catalog-only offerings without enabling add', async () => {
-    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
-      response('project', summary('project'))
-    );
-
-    renderPanel();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
     expect(
-      screen.getByText('long-provider-native-sku-name-that-needs-to-wrap-cleanly-catalog-only')
+      await screen.findByText(
+        "You don't have access to this project's compute pool. Ask a project owner or admin."
+      )
     ).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Unavailable' })[0]).toBeDisabled();
+    expect(screen.queryByText('Project capability is required')).not.toBeInTheDocument();
   });
 
   it('shows a deterministic error state', async () => {

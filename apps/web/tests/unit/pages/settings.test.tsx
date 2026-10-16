@@ -143,7 +143,7 @@ describe('Settings shell', () => {
       expect(mocks.listCredentials).toHaveBeenCalled();
     });
 
-    expect(screen.getByRole('heading', { name: 'Infrastructure' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Infrastructure' })).toBeInTheDocument();
     expect(screen.getByTestId('default-capacity-pools-panel')).toBeInTheDocument();
   });
 

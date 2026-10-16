@@ -182,10 +182,10 @@
             "light": "/images/scenes/compute-pools-window-tile0-light.webp"
           },
           "box": {
-            "left": 1.81,
-            "top": 10.1781,
-            "width": 98.19,
-            "height": 25.1908
+            "left": 1.9231,
+            "top": 23.1552,
+            "width": 98.0769,
+            "height": 18.1934
           }
         },
         {
@@ -194,10 +194,10 @@
             "light": "/images/scenes/compute-pools-window-tile1-light.webp"
           },
           "box": {
-            "left": 1.81,
-            "top": 35.369,
-            "width": 98.19,
-            "height": 25.1908
+            "left": 1.9231,
+            "top": 42.7481,
+            "width": 98.0769,
+            "height": 22.2646
           }
         },
         {
@@ -206,10 +206,10 @@
             "light": "/images/scenes/compute-pools-window-tile2-light.webp"
           },
           "box": {
-            "left": 1.81,
-            "top": 60.5598,
-            "width": 98.19,
-            "height": 25.1908
+            "left": 1.9231,
+            "top": 65.0127,
+            "width": 98.0769,
+            "height": 17.5573
           }
         },
         {
@@ -218,10 +218,10 @@
             "light": "/images/scenes/compute-pools-window-tile3-light.webp"
           },
           "box": {
-            "left": 1.81,
-            "top": 85.7506,
-            "width": 98.19,
-            "height": 12.7226
+            "left": 1.9231,
+            "top": 82.57,
+            "width": 98.0769,
+            "height": 17.43
           }
         }
       ]

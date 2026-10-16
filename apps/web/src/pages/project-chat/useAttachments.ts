@@ -1,11 +1,14 @@
 import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { TaskAttachmentRef } from '../../lib/api';
 import { requestAttachmentUpload, uploadAttachmentToR2 } from '../../lib/api';
 import { formatFileSize } from '../../lib/file-utils';
 
+export const DEFAULT_ATTACHMENT_MESSAGE = 'Please read the attached files.';
+
 export interface AttachmentUploadState {
+  id: string;
   file: File;
   uploadId: string | null;
   progress: number;
@@ -14,15 +17,34 @@ export interface AttachmentUploadState {
   ref?: TaskAttachmentRef;
 }
 
-export function useAttachments(projectId: string, setSubmitError: (e: string | null) => void) {
-  const [chatAttachments, setChatAttachments] = useState<AttachmentUploadState[]>([]);
+export function useAttachments(
+  projectId: string,
+  setSubmitError: (e: string | null) => void,
+  scopeId = projectId
+) {
+  const [chatAttachments, setState] = useState<AttachmentUploadState[]>([]);
+  const queueRef = useRef<AttachmentUploadState[]>([]);
+  const setChatAttachments = useCallback(
+    (
+      update:
+        AttachmentUploadState[] | ((previous: AttachmentUploadState[]) => AttachmentUploadState[])
+    ) => {
+      queueRef.current = typeof update === 'function' ? update(queueRef.current) : update;
+      setState(queueRef.current);
+    },
+    []
+  );
+  useEffect(() => {
+    setChatAttachments([]);
+    setSubmitError(null);
+  }, [projectId, scopeId, setChatAttachments, setSubmitError]);
   const chatFileInputRef = useRef<HTMLInputElement>(null);
   const chatUploading = chatAttachments.some(
     (a) => a.status === 'uploading' || a.status === 'pending'
   );
 
   const handleChatFileUpload = useCallback(
-    async (file: File, index: number) => {
+    async (file: File, id: string) => {
       try {
         const presigned = await requestAttachmentUpload(
           projectId,
@@ -31,13 +53,13 @@ export function useAttachments(projectId: string, setSubmitError: (e: string | n
           file.type || 'application/octet-stream'
         );
         setChatAttachments((prev) =>
-          prev.map((a, i) =>
-            i === index ? { ...a, uploadId: presigned.uploadId, status: 'uploading' as const } : a
+          prev.map((a) =>
+            a.id === id ? { ...a, uploadId: presigned.uploadId, status: 'uploading' as const } : a
           )
         );
         await uploadAttachmentToR2(presigned.uploadUrl, file, (loaded, total) => {
           const progress = Math.round((loaded / total) * 100);
-          setChatAttachments((prev) => prev.map((a, i) => (i === index ? { ...a, progress } : a)));
+          setChatAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, progress } : a)));
         });
         const ref: TaskAttachmentRef = {
           uploadId: presigned.uploadId,
@@ -46,14 +68,14 @@ export function useAttachments(projectId: string, setSubmitError: (e: string | n
           contentType: file.type || 'application/octet-stream',
         };
         setChatAttachments((prev) =>
-          prev.map((a, i) =>
-            i === index ? { ...a, status: 'complete' as const, progress: 100, ref } : a
+          prev.map((a) =>
+            a.id === id ? { ...a, status: 'complete' as const, progress: 100, ref } : a
           )
         );
       } catch (err) {
         setChatAttachments((prev) =>
-          prev.map((a, i) =>
-            i === index
+          prev.map((a) =>
+            a.id === id
               ? {
                   ...a,
                   status: 'error' as const,
@@ -64,28 +86,34 @@ export function useAttachments(projectId: string, setSubmitError: (e: string | n
         );
       }
     },
-    [projectId]
+    [projectId, setChatAttachments]
   );
 
   const handleChatFilesSelected = useCallback(
-    (files: FileList | null) => {
+    (files: FileList | File[] | null) => {
       if (!files || files.length === 0) return;
+      setSubmitError(null);
+      const current = queueRef.current;
       const maxFiles = ATTACHMENT_DEFAULTS.MAX_FILES;
       const maxBytes = ATTACHMENT_DEFAULTS.UPLOAD_MAX_BYTES;
       const batchMax = ATTACHMENT_DEFAULTS.UPLOAD_BATCH_MAX_BYTES;
       const newFiles: AttachmentUploadState[] = [];
-      const currentTotal = chatAttachments.reduce((sum, a) => sum + a.file.size, 0);
+      const currentTotal = current.reduce((sum, a) => sum + a.file.size, 0);
       let runningTotal = currentTotal;
       for (const file of Array.from(files)) {
-        if (chatAttachments.length + newFiles.length >= maxFiles) {
+        if (current.length + newFiles.length >= maxFiles) {
           setSubmitError(`Maximum ${maxFiles} files allowed`);
           break;
+        }
+        if (file.size === 0) {
+          setSubmitError(`${file.name} is empty`);
+          continue;
         }
         if (file.size > maxBytes) {
           setSubmitError(`${file.name} exceeds ${formatFileSize(maxBytes)} limit`);
           continue;
         }
-        if (!SAFE_FILENAME_REGEX.test(file.name)) {
+        if (!SAFE_FILENAME_REGEX.test(file.name) || ['.', '..'].includes(file.name)) {
           setSubmitError(`${file.name} has invalid characters`);
           continue;
         }
@@ -94,26 +122,35 @@ export function useAttachments(projectId: string, setSubmitError: (e: string | n
           break;
         }
         runningTotal += file.size;
-        newFiles.push({ file, uploadId: null, progress: 0, status: 'pending' });
+        newFiles.push({
+          id: crypto.randomUUID(),
+          file,
+          uploadId: null,
+          progress: 0,
+          status: 'pending',
+        });
       }
       if (newFiles.length === 0) return;
-      const startIndex = chatAttachments.length;
       setChatAttachments((prev) => [...prev, ...newFiles]);
-      for (const [i, newFile] of newFiles.entries()) {
-        void handleChatFileUpload(newFile.file, startIndex + i);
+      for (const newFile of newFiles) {
+        void handleChatFileUpload(newFile.file, newFile.id);
       }
     },
-    [chatAttachments, handleChatFileUpload, setSubmitError]
+    [handleChatFileUpload, setSubmitError, setChatAttachments]
   );
 
-  const handleRemoveChatAttachment = useCallback((index: number) => {
-    setChatAttachments((prev) => prev.filter((_, i) => i !== index));
-  }, []);
+  const handleRemoveChatAttachment = useCallback(
+    (index: number) => {
+      setChatAttachments((prev) => prev.filter((_, i) => i !== index));
+    },
+    [setChatAttachments]
+  );
 
   const clearAttachments = useCallback(() => {
     setChatAttachments([]);
     if (chatFileInputRef.current) chatFileInputRef.current.value = '';
-  }, []);
+    setSubmitError(null);
+  }, [setChatAttachments, setSubmitError]);
 
   return {
     chatAttachments,

@@ -192,7 +192,7 @@ async function agentOnVm(taskMode: TaskMode) {
 }
 
 /** The VM agent's OOM eviction callback, through the real route and callback auth. */
-async function evict(f: Fixture): Promise<void> {
+async function evict(f: Fixture, interruptedWork?: boolean): Promise<void> {
   const token = await signNodeCallbackToken(f.nodeId, testEnv);
   const response = await SELF.fetch(
     `https://api.test.example.com/api/projects/${f.projectId}/workspaces/${f.workspaceId}/eviction`,
@@ -204,6 +204,7 @@ async function evict(f: Fixture): Promise<void> {
         workspaceId: f.workspaceId,
         reason: 'oom_kill',
         snapshotCaptured: true,
+        interruptedWork,
         containerStopped: true,
         evictionGeneration: EVICTION_GENERATION,
       }),
@@ -369,117 +370,126 @@ async function agentSessionOf(workspaceId: string): Promise<string> {
   return row!.id;
 }
 
-describe('a task-mode agent recovered after an eviction', () => {
-  it('receives the continue prompt once its restored session is handed off, exactly once', async () => {
-    const f = await agentOnVm('task');
-    await evict(f);
-    expect(await taskRow(f.taskId)).toMatchObject({ status: 'queued' });
-    expect(await runnerConfig(f.taskId)).toMatchObject({
-      taskDescription: SESSION_RECOVERY_CONTINUE_TASK_PROMPT,
-      restoredSessionPrompt: SESSION_RECOVERY_CONTINUE_TASK_PROMPT,
-      resumeSnapshotChatSessionId: f.chatSessionId,
-    });
+describe('an agent recovered after an eviction', () => {
+  it.each(['task', 'conversation'] as const)(
+    'delivers the interrupted %s continuation exactly once after restore',
+    async (mode) => {
+      const f = await agentOnVm(mode);
+      await evict(f, true);
+      expect(await taskRow(f.taskId)).toMatchObject({ status: 'queued' });
+      expect(await runnerConfig(f.taskId)).toMatchObject({
+        taskDescription: SESSION_RECOVERY_CONTINUE_TASK_PROMPT,
+        restoredSessionPrompt: SESSION_RECOVERY_CONTINUE_TASK_PROMPT,
+        resumeSnapshotChatSessionId: f.chatSessionId,
+      });
 
-    const replacement = await provisionReplacementWorkspace(f);
-    const vm = installReplacementVm(replacement.nodeId, replacement.workspaceId, 'restored');
-    const hold = holdAgentStartedWrite(f);
-    const alarm = runInDurableObject(taskRunner(f.taskId), (instance) => instance.alarm());
-    await hold.reached();
+      const replacement = await provisionReplacementWorkspace(f);
+      const vm = installReplacementVm(replacement.nodeId, replacement.workspaceId, 'restored');
+      const hold = holdAgentStartedWrite(f);
+      const alarm = runInDurableObject(taskRunner(f.taskId), (instance) => instance.alarm());
+      await hold.reached();
 
-    // The midpoint: the prompt is queued for the restored session, the handoff is not committed.
-    const agentSessionId = await agentSessionOf(replacement.workspaceId);
-    expect(await continuationRows(f)).toEqual([
-      {
-        id: restoredSessionPromptDeliveryId(agentSessionId),
-        delivery_state: 'queued',
-        content: SESSION_RECOVERY_CONTINUE_TASK_PROMPT,
-        source_task_id: f.taskId,
-      },
-    ]);
-    expect(await taskRow(f.taskId)).toMatchObject({ status: 'delegated' });
-    // Queued after the wake re-pointed the chat: the prompt's message activity belongs to the
-    // replacement, and no idle tracking was re-created for the evicted workspace.
-    expect(
-      await sqlRows(
-        f.stub,
-        'SELECT workspace_id FROM workspace_activity WHERE session_id = ?',
-        f.chatSessionId
-      )
-    ).toEqual([{ workspace_id: replacement.workspaceId }]);
-    const midpoint = await runDueDelivery(f);
-    expect(midpoint).toMatchObject({
-      kind: 'retry',
-      reason: 'not_ready',
-      error: expect.stringContaining('agent handoff not committed'),
-    });
-    expect(vm.prompts()).toEqual([]);
+      // The midpoint: the prompt is queued for the restored session, the handoff is not committed.
+      const agentSessionId = await agentSessionOf(replacement.workspaceId);
+      expect(await continuationRows(f)).toEqual([
+        {
+          id: restoredSessionPromptDeliveryId(agentSessionId),
+          delivery_state: 'queued',
+          content: SESSION_RECOVERY_CONTINUE_TASK_PROMPT,
+          source_task_id: f.taskId,
+        },
+      ]);
+      expect(await taskRow(f.taskId)).toMatchObject({ status: 'delegated' });
+      // Queued after the wake re-pointed the chat: the prompt's message activity belongs to the
+      // replacement, and no idle tracking was re-created for the evicted workspace.
+      expect(
+        await sqlRows(
+          f.stub,
+          'SELECT workspace_id FROM workspace_activity WHERE session_id = ?',
+          f.chatSessionId
+        )
+      ).toEqual([{ workspace_id: replacement.workspaceId }]);
+      const midpoint = await runDueDelivery(f);
+      expect(midpoint).toMatchObject({
+        kind: 'retry',
+        reason: 'not_ready',
+        error: expect.stringContaining('agent handoff not committed'),
+      });
+      expect(vm.prompts()).toEqual([]);
 
-    hold.release();
-    await alarm;
-    expect(await taskRow(f.taskId)).toEqual({ status: 'in_progress', execution_step: 'running' });
-    await waitForWakeReadiness(f);
-    expect(await runDueDelivery(f)).toMatchObject({ kind: 'accepted' });
+      hold.release();
+      await alarm;
+      expect(await taskRow(f.taskId)).toEqual({ status: 'in_progress', execution_step: 'running' });
+      await waitForWakeReadiness(f);
+      expect(await runDueDelivery(f)).toMatchObject({ kind: 'accepted' });
 
-    expect(vm.starts()).toEqual([]);
-    expect(vm.prompts()).toEqual([
-      expect.objectContaining({
-        path: expect.stringContaining(`/agent-sessions/${agentSessionId}/prompt`),
-        body: expect.objectContaining({
-          prompt: SESSION_RECOVERY_CONTINUE_TASK_PROMPT,
-          deliveryId: restoredSessionPromptDeliveryId(agentSessionId),
+      expect(vm.starts()).toEqual([]);
+      expect(vm.prompts()).toEqual([
+        expect.objectContaining({
+          path: expect.stringContaining(`/agent-sessions/${agentSessionId}/prompt`),
+          body: expect.objectContaining({
+            prompt: SESSION_RECOVERY_CONTINUE_TASK_PROMPT,
+            deliveryId: restoredSessionPromptDeliveryId(agentSessionId),
+          }),
         }),
-      }),
-    ]);
-    expect(await continuationRows(f)).toEqual([
-      expect.objectContaining({ delivery_state: 'acked' }),
-    ]);
-    // Nothing else is due: the prompt went out once.
-    expect(await runDueDelivery(f, Date.now() + config.retryMaxMs)).toBeNull();
-  });
+      ]);
+      expect(await continuationRows(f)).toEqual([
+        expect.objectContaining({ delivery_state: 'acked' }),
+      ]);
+      // Nothing else is due: the prompt went out once.
+      expect(await runDueDelivery(f, Date.now() + config.retryMaxMs)).toBeNull();
+    }
+  );
 
-  it('gets the continue prompt once as its initial prompt when the restore starts it fresh', async () => {
-    const f = await agentOnVm('task');
-    await evict(f);
-    const replacement = await provisionReplacementWorkspace(f);
-    const vm = installReplacementVm(replacement.nodeId, replacement.workspaceId, 'degraded');
+  it.each(['task', 'conversation'] as const)(
+    'continues interrupted %s work when restore starts fresh',
+    async (mode) => {
+      const f = await agentOnVm(mode);
+      await evict(f, true);
+      const replacement = await provisionReplacementWorkspace(f);
+      const vm = installReplacementVm(replacement.nodeId, replacement.workspaceId, 'degraded');
 
-    await runInDurableObject(taskRunner(f.taskId), (instance) => instance.alarm());
-    expect(await taskRow(f.taskId)).toEqual({ status: 'in_progress', execution_step: 'running' });
-    await waitForWakeReadiness(f);
+      await runInDurableObject(taskRunner(f.taskId), (instance) => instance.alarm());
+      expect(await taskRow(f.taskId)).toEqual({ status: 'in_progress', execution_step: 'running' });
+      await waitForWakeReadiness(f);
 
-    expect(vm.starts()).toEqual([
-      expect.objectContaining({
-        body: expect.objectContaining({ initialPrompt: SESSION_RECOVERY_CONTINUE_TASK_PROMPT }),
-      }),
-    ]);
-    expect(await continuationRows(f)).toEqual([]);
-    expect(await runDueDelivery(f, Date.now() + config.retryMaxMs)).toBeNull();
-    expect(vm.prompts()).toEqual([]);
-  });
+      expect(vm.starts()).toEqual([
+        expect.objectContaining({
+          body: expect.objectContaining({ initialPrompt: SESSION_RECOVERY_CONTINUE_TASK_PROMPT }),
+        }),
+      ]);
+      expect(await continuationRows(f)).toEqual([]);
+      expect(await runDueDelivery(f, Date.now() + config.retryMaxMs)).toBeNull();
+      expect(vm.prompts()).toEqual([]);
+    }
+  );
 
-  it('leaves a conversation-mode agent waiting for its user after the restore', async () => {
-    const f = await agentOnVm('conversation');
-    await evict(f);
-    expect(await runnerConfig(f.taskId)).toMatchObject({
-      taskDescription: SESSION_RECOVERY_INITIAL_PROMPT,
-      restoredSessionPrompt: null,
-    });
-    const replacement = await provisionReplacementWorkspace(f);
-    const vm = installReplacementVm(replacement.nodeId, replacement.workspaceId, 'restored');
+  it.each(['task', 'conversation'] as const)(
+    'leaves an idle %s agent waiting after restore',
+    async (mode) => {
+      const f = await agentOnVm(mode);
+      await evict(f, false);
+      expect(await runnerConfig(f.taskId)).toMatchObject({
+        taskDescription: SESSION_RECOVERY_INITIAL_PROMPT,
+        restoredSessionPrompt: null,
+      });
+      const replacement = await provisionReplacementWorkspace(f);
+      const vm = installReplacementVm(replacement.nodeId, replacement.workspaceId, 'restored');
 
-    await runInDurableObject(taskRunner(f.taskId), (instance) => instance.alarm());
-    expect(await taskRow(f.taskId)).toEqual({ status: 'in_progress', execution_step: 'running' });
-    await waitForWakeReadiness(f);
+      await runInDurableObject(taskRunner(f.taskId), (instance) => instance.alarm());
+      expect(await taskRow(f.taskId)).toEqual({ status: 'in_progress', execution_step: 'running' });
+      await waitForWakeReadiness(f);
 
-    // Liveness: the wake did complete and resumed the saved session.
-    expect(
-      await sqlRows(f.stub, 'SELECT status FROM chat_sessions WHERE id = ?', f.chatSessionId)
-    ).toEqual([{ status: 'active' }]);
-    expect(await continuationRows(f)).toEqual([]);
-    expect(await runDueDelivery(f, Date.now() + config.retryMaxMs)).toBeNull();
-    expect(vm.starts()).toEqual([]);
-    expect(vm.prompts()).toEqual([]);
-  });
+      // Liveness: the wake did complete and resumed the saved session.
+      expect(
+        await sqlRows(f.stub, 'SELECT status FROM chat_sessions WHERE id = ?', f.chatSessionId)
+      ).toEqual([{ status: 'active' }]);
+      expect(await continuationRows(f)).toEqual([]);
+      expect(await runDueDelivery(f, Date.now() + config.retryMaxMs)).toBeNull();
+      expect(vm.starts()).toEqual([]);
+      expect(vm.prompts()).toEqual([]);
+    }
+  );
 });
 
 describe('a continuation that outlives its wake', () => {

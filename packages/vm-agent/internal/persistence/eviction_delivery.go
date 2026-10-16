@@ -23,10 +23,12 @@ type EvictionDelivery struct {
 	Reason           string
 	SnapshotCaptured bool
 	ContainerStopped bool
-	OccurredAt       time.Time
-	Attempts         int
-	PayloadRevision  int
-	NextAttemptAt    time.Time
+	// First pre-stop observation is immutable; nil means an older/unknown runtime.
+	InterruptedWork *bool
+	OccurredAt      time.Time
+	Attempts        int
+	PayloadRevision int
+	NextAttemptAt   time.Time
 }
 
 func EvictionDeliveryID(workspaceID, generation, containerID string) string {
@@ -58,6 +60,11 @@ func migrateV17(db *sql.DB) error {
 	return err
 }
 
+func migrateV19(db *sql.DB) error {
+	_, err := db.Exec(`ALTER TABLE eviction_deliveries ADD COLUMN interrupted_work INTEGER CHECK(interrupted_work IN (0, 1))`)
+	return err
+}
+
 // RecordWorkspaceEviction atomically fences recovery as evicted and queues the
 // callback. A stale generation cannot enqueue or overwrite a successor's state.
 func (s *Store) RecordWorkspaceEviction(ctx context.Context, delivery EvictionDelivery) (bool, error) {
@@ -86,8 +93,8 @@ func (s *Store) RecordWorkspaceEviction(ctx context.Context, delivery EvictionDe
 		return false, nil
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO eviction_deliveries
-		(id, workspace_id, project_id, node_id, container_id, generation, reason, snapshot_captured, container_stopped, occurred_at, next_attempt_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET
+		(id, workspace_id, project_id, node_id, container_id, generation, reason, snapshot_captured, container_stopped, occurred_at, next_attempt_at, interrupted_work)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET
 		container_stopped=MAX(eviction_deliveries.container_stopped, excluded.container_stopped),
 		snapshot_captured=MAX(eviction_deliveries.snapshot_captured, excluded.snapshot_captured),
 		payload_revision=eviction_deliveries.payload_revision + CASE
@@ -100,7 +107,7 @@ func (s *Store) RecordWorkspaceEviction(ctx context.Context, delivery EvictionDe
 			THEN MIN(eviction_deliveries.next_attempt_at, excluded.next_attempt_at)
 			ELSE eviction_deliveries.next_attempt_at END`,
 		delivery.ID, delivery.WorkspaceID, delivery.ProjectID, delivery.NodeID, delivery.ContainerID, delivery.Generation,
-		delivery.Reason, delivery.SnapshotCaptured, delivery.ContainerStopped, delivery.OccurredAt.UnixMilli(), delivery.OccurredAt.UnixMilli())
+		delivery.Reason, delivery.SnapshotCaptured, delivery.ContainerStopped, delivery.OccurredAt.UnixMilli(), delivery.OccurredAt.UnixMilli(), delivery.InterruptedWork)
 	if err != nil {
 		return false, fmt.Errorf("queue workspace eviction: %w", err)
 	}
@@ -128,10 +135,10 @@ func (s *Store) ClaimEvictionDelivery(ctx context.Context, id string, now time.T
 	var d EvictionDelivery
 	var occurredAt, nextAt int64
 	err = tx.QueryRowContext(ctx, `SELECT id, workspace_id, project_id, node_id, container_id, generation, reason,
-		snapshot_captured, container_stopped, occurred_at, attempts, payload_revision, next_attempt_at
+		snapshot_captured, container_stopped, occurred_at, attempts, payload_revision, next_attempt_at, interrupted_work
 		FROM eviction_deliveries WHERE next_attempt_at <= ? AND (? = '' OR id = ?) ORDER BY next_attempt_at, id LIMIT 1`,
 		now.UnixMilli(), id, id).Scan(&d.ID, &d.WorkspaceID, &d.ProjectID, &d.NodeID, &d.ContainerID, &d.Generation, &d.Reason,
-		&d.SnapshotCaptured, &d.ContainerStopped, &occurredAt, &d.Attempts, &d.PayloadRevision, &nextAt)
+		&d.SnapshotCaptured, &d.ContainerStopped, &occurredAt, &d.Attempts, &d.PayloadRevision, &nextAt, &d.InterruptedWork)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

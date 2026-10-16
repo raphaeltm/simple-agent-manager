@@ -107,9 +107,11 @@ export function sessionSleepBlockedNotice(
 ): string {
   const reason = record.blockedReason ?? 'retry_ceiling';
   if (reason === 'runtime_changed') {
-    return 'SAM blocked the old sleep attempt because this workspace runtime changed. ' +
+    return (
+      'SAM blocked the old sleep attempt because this workspace runtime changed. ' +
       'The replacement runtime has been left alone, and the previous checkpoint is retained. ' +
-      'Check the current workspace before sleeping or restarting the session again.';
+      'Check the current workspace before sleeping or restarting the session again.'
+    );
   }
   if (reason === 'teardown_unconfirmed') {
     return [
@@ -144,13 +146,15 @@ const NO_EXTERNAL_REPLAY =
   'Do not repeat actions with effects outside this workspace that the transcript shows already happened, such as pushes, pull requests, deployments, messages, or API calls. If you cannot tell whether one happened, check first';
 
 /**
- * The first prompt of a task-mode wake that nothing queued: the runtime was lost
+ * The first prompt for interrupted work after runtime loss: the runtime was lost
  * mid-task (an eviction), so the agent must carry on with its task, not wait.
  */
 export const SESSION_RECOVERY_CONTINUE_TASK_PROMPT = [
-  'Resume your assigned task from the persisted transcript. Use get_session_messages for this chat session before relying on memory.',
+  'Resume your interrupted work from the persisted transcript. Use get_session_messages for this chat session before relying on memory.',
   '',
-  'Your previous workspace was stopped while you were working, and no new message is queued for you. Continue the task from where the transcript ends, without redoing work it shows is finished.',
+  'Your previous workspace was stopped. Continue the task from where the transcript ends, without redoing work it shows is finished. Follow any newer human directions in the transcript before continuing.',
+  '',
+  'Check the saved transcript and workspace first. If the work already finished or control had returned to the human with nothing still in flight, do not invent new work; wait for their next message.',
   '',
   `${NO_EXTERNAL_REPLAY}.`,
 ].join('\n');
@@ -164,7 +168,7 @@ export type SessionRecoveryNextStep = 'answer_queued_message' | 'continue_assign
 /**
  * The prompt for a wake whose snapshot restore resumed the saved agent session (LoadSession).
  * That session never receives the fresh-start prompt below. A queued message is already its
- * prompt and a conversation waits for its user, so only a task whose runtime was lost needs one,
+ * prompt; interrupted work in either session mode needs a continuation,
  * queued through durable prompt delivery (`services/restored-session-prompt.ts`).
  */
 export function sessionRecoveryRestoredPrompt(nextStep: SessionRecoveryNextStep): string | null {

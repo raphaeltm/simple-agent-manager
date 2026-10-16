@@ -4,9 +4,6 @@ import type {
   UpdateProjectRequest,
 } from '@simple-agent-manager/shared';
 import {
-  DEFAULT_NODE_WARM_TIMEOUT_MS,
-  MAX_NODE_IDLE_TIMEOUT_MS,
-  MIN_NODE_IDLE_TIMEOUT_MS,
   PROVIDER_DEFAULT_LOCATIONS,
   PROVIDER_LABELS,
   PROVIDER_LOCATIONS,
@@ -106,7 +103,6 @@ export function ScalingSettings({
   reload: () => Promise<void>;
 }) {
   const toast = useToast();
-  const nodeIdleTimeoutId = useId();
 
   // Provider & Location state
   const [selectedProvider, setSelectedProvider] = useState<CredentialProvider | null>(
@@ -133,11 +129,7 @@ export function ScalingSettings({
     }
     return initial;
   });
-  const [nodeIdleTimeoutMs, setNodeIdleTimeoutMs] = useState<number | null>(
-    project.nodeIdleTimeoutMs ?? null
-  );
   const [savingScaling, setSavingScaling] = useState(false);
-
 
   // Sync from project prop
   useEffect(() => {
@@ -148,7 +140,6 @@ export function ScalingSettings({
       updated[p.key] = (project[p.key as keyof Project] as number | null) ?? null;
     }
     setScalingValues(updated);
-    setNodeIdleTimeoutMs(project.nodeIdleTimeoutMs ?? null);
   }, [project]);
 
   const handleSaveProviderLocation = useCallback(async () => {
@@ -171,7 +162,7 @@ export function ScalingSettings({
   const handleSaveScaling = useCallback(async () => {
     setSavingScaling(true);
     try {
-      const update: UpdateProjectRequest = { ...scalingValues, nodeIdleTimeoutMs };
+      const update: UpdateProjectRequest = { ...scalingValues };
       await updateProject(projectId, update);
       await reload();
       toast.success('Scaling settings saved');
@@ -181,7 +172,7 @@ export function ScalingSettings({
       setSavingScaling(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
-  }, [projectId, scalingValues, nodeIdleTimeoutMs, reload]);
+  }, [projectId, scalingValues, reload]);
 
   const locations = selectedProvider ? (PROVIDER_LOCATIONS[selectedProvider] ?? []) : [];
 
@@ -197,11 +188,7 @@ export function ScalingSettings({
   );
   // Node scheduling params
   const nodeParams = SCALING_PARAMS.filter((p) =>
-    [
-      'warmNodeTimeoutMs',
-      'nodeCpuThresholdPercent',
-      'nodeMemoryThresholdPercent',
-    ].includes(p.key)
+    ['warmNodeTimeoutMs', 'nodeCpuThresholdPercent', 'nodeMemoryThresholdPercent'].includes(p.key)
   );
 
   return (
@@ -301,40 +288,6 @@ export function ScalingSettings({
             disabled={savingScaling}
           />
         ))}
-        {/* Node Idle Timeout — existing dead column, now wired up */}
-        <div className="flex items-center gap-2">
-          <label htmlFor={nodeIdleTimeoutId} className="text-xs text-fg-muted flex-1 min-w-0">
-            Node Idle Timeout
-          </label>
-          <input
-            id={nodeIdleTimeoutId}
-            type="number"
-            min={MIN_NODE_IDLE_TIMEOUT_MS}
-            max={MAX_NODE_IDLE_TIMEOUT_MS}
-            placeholder={formatMs(DEFAULT_NODE_WARM_TIMEOUT_MS)}
-            value={nodeIdleTimeoutMs ?? ''}
-            onChange={(e) => {
-              const raw = e.target.value;
-              setNodeIdleTimeoutMs(raw === '' ? null : Number(raw));
-            }}
-            disabled={savingScaling}
-            className="w-24 py-1 px-2 border border-border-default rounded-sm bg-inset text-fg-primary text-xs font-[inherit] tabular-nums text-right"
-          />
-          {nodeIdleTimeoutMs != null && (
-            <>
-              <span className="text-xs text-fg-muted min-w-[3rem]">
-                {formatMs(nodeIdleTimeoutMs)}
-              </span>
-              <button
-                type="button"
-                onClick={() => setNodeIdleTimeoutMs(null)}
-                className="text-xs text-fg-muted hover:text-fg-primary underline"
-              >
-                Reset
-              </button>
-            </>
-          )}
-        </div>
       </div>
 
       <Button variant="primary" size="sm" onClick={handleSaveScaling} disabled={savingScaling}>

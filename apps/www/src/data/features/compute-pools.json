@@ -7,7 +7,7 @@
   "highlights": [
     "Pools are built from each connected credential’s live catalog — concrete SKUs like cx33 or PRO2-S with real vCPU, RAM, disk, and price",
     "Project, user, and installation scopes, resolved in that order",
-    "Strategy (Balanced, Pack, Spread, Smallest fit) and exhaustion policy (Queue, Fail, Fallback chain) per pool",
+    "How agents are placed (Balanced, Pack, Spread, Smallest fit) and what happens when a provider is out of capacity (wait and retry, try other allowed machines, or stop with an error), per pool",
     "Nodes are reused when they fit and stay warm for 30 minutes",
     "Settings → Usage tracks token spend by model and day against a monthly budget; Admin → Costs and Admin → Usage cover the whole installation"
   ],
@@ -16,23 +16,23 @@
   "screenshots": [
     {
       "src": "/images/features/sam-compute-pool-editor.png",
-      "alt": "Project Infrastructure compute pool editor showing a pool with strategy Pack, exhaustion policy Fallback Chain, three sources and seven allowed instances, with allowed offerings from Hetzner, Scaleway, and Vultr listing vCPU, RAM, disk, location, and monthly price, and a sold-out Hetzner offering marked unavailable",
+      "alt": "Project compute pool editor with agents placed by Pack, Try other allowed machines when a provider is out of capacity, and a machine limit of 3 per person, above the allowed machines for each connection: Hetzner cx23 allowed in Falkenstein, cx33, cpx31 and cx43 with their regions and monthly prices, a sold-out Falkenstein region marked unavailable, and Scaleway machine types below",
       "caption": "Choose exactly which machines SAM may rent, from every connected provider’s real catalog"
     }
   ],
   "homepage": {
     "headline": "Choose which machines agents may use",
-    "body": "Pick machine types from Hetzner's live catalog, or standard sizes at the other providers, with estimated prices. SAM can run several agents on each server, so you don't rent one per task.",
-    "caption": "The catalog you pick from, then the server SAM chose for a task"
+    "body": "Pick machine types and regions from Hetzner's live catalog, or standard sizes at the other providers, with estimated prices. SAM can run several agents on each server, so you don't rent one per task.",
+    "caption": "The machine types and regions you allow, then the server SAM chose for a task"
   },
   "details": [
     {
-      "headline": "Choose the exact machine types",
-      "body": "A compute pool lists the machine types SAM may rent, such as cx33 at Hetzner or PRO2-S at Scaleway, with each one’s vCPU, RAM, disk, and estimated price. Browse Hetzner’s live catalog or the standard sizes at the other six providers, filter by region, size, or price, and add a machine type without leaving the page. You also choose how SAM spreads work across servers, and what it does when no allowed machine is available: wait for one, stop with an error, or try your other allowed machine types in order.",
+      "headline": "Choose exact machine types and regions",
+      "body": "A compute pool lists the machine types SAM may rent, such as cx33 at Hetzner or PRO2-S at Scaleway, with each one’s vCPU, RAM, disk, and estimated price. Every machine type a provider offers is listed with its regions: tap a region to let SAM start that machine there, or search by name or region. You also choose how agents are placed on servers (Balanced, Pack, Spread, or Smallest fit) and what SAM does when a provider is out of capacity: wait and retry, try other allowed machines, or stop with an error.",
       "screenshot": {
         "src": "/images/features/sam-compute-offerings-manager.png",
-        "alt": "Catalog filters for provider, region, minimum vCPU, minimum RAM, maximum price, and availability above the Add instances from catalog list, where Hetzner offerings are marked Already allowed, Region sold out, Catalog only with an Add button, or Not selected",
-        "caption": "Filter Hetzner’s live catalog and add the machine types you want in the pool"
+        "alt": "The allowed machines list: a search box, then Hetzner machine types with region buttons, cx23 allowed in Falkenstein, cx33 offered in Nuremberg, cpx31 in Helsinki, and cx43 whose Falkenstein region is sold out, followed by Scaleway machine types",
+        "caption": "Pick the regions where SAM may start each machine type"
       }
     },
     {

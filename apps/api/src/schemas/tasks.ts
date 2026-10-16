@@ -43,7 +43,7 @@ const GitPushResultSchema = v.object({
   error: v.nullable(v.string()),
 });
 
-const TaskAttachmentSchema = v.object({
+export const TaskAttachmentSchema = v.object({
   uploadId: v.string(),
   filename: v.string(),
   size: v.number(),

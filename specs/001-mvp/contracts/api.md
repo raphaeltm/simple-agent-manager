@@ -708,3 +708,16 @@ Private node-management-authenticated VM endpoints:
 These endpoints are control-plane transport, not browser/public APIs. Responses contain `jobId`, `status`, `stdout`, `stderr`, `exitCode`, `timedOut`, `redacted`, `truncated`, and `execution` (`containerId`, `user`, `cwd`, `environmentMode`, optional selected `secretNames`, actor/session/workspace/project/task IDs, command mode/fingerprint and lifecycle timestamps for private audit). Statuses are `running`, `completed`, `failed`, `cancelled`, `timed_out`, and `interrupted`. Running output is empty. Cancel can initially return running; poll until terminal. Exact selected values are redacted before persistence and response. Restart interrupts active jobs without replaying them. Existing active session environments are not restarted/migrated; results disclose legacy env-file state.
 
 Fresh agent-process startup overlays current session env assets on both runtimes; VM runtime files retain bootstrap delivery. Managed protected keys cannot regain harness/Git values: separate auth files remain usable, otherwise a collision fails startup clearly. Accepted jobs renew finite `sam_secret_exec` runtime-work activity through the existing session callback and clear/cancel their lease on completion or explicit session/workspace stop. Secret execution transport uses no-wake and disables timeout-driven container recovery.
+
+### Follow-up chat attachments
+
+`POST /api/projects/:projectId/sessions/:sessionId/prompt` accepts
+`{ content, attachments?: [{ uploadId, filename, size, contentType }] }`.
+Upload each file first using the existing task `request-upload` endpoint and its
+presigned R2 URL. The caller must own the session and staged objects. Acceptance
+persists attachment references with the durable message (202); the delivery
+worker wakes the workspace, transfers files to
+`/workspaces/.private/<uploadId>/<filename>`, then submits the prompt with those
+absolute paths. Upload failures prevent prompt submission and remain retryable.
+Staged objects remain available for delivery retries until the configured R2
+`temp-uploads/` lifecycle expiry. Attachment messages require durable prompt delivery.

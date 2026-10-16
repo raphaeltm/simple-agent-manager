@@ -40,6 +40,7 @@ const WorkspaceEvictionCallbackSchema = v.object({
   reason: v.picklist(['memory_pressure', 'oom_kill']),
   snapshotCaptured: v.boolean(),
   containerStopped: v.boolean(),
+  interruptedWork: v.optional(v.boolean()),
   evictionGeneration: v.optional(v.nullable(v.pipe(v.string(), v.minLength(1)))),
 });
 
@@ -181,6 +182,7 @@ async function recoverEvictedWorkspace(
     chatSessionId: workspace.chatSessionId,
     nodeId: body.nodeId,
     generation: body.evictionGeneration ?? null,
+    interruptedWork: body.interruptedWork,
   });
   if (recovery.status === 'unavailable') {
     log.warn('workspace_eviction.recovery_deferred', {

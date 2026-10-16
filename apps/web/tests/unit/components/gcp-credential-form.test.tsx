@@ -174,9 +174,11 @@ describe('GcpCredentialForm', () => {
           defaultZone: 'europe-west3-a',
         });
       });
-      expect(onUpdate).toHaveBeenCalled();
-      expect(screen.queryByDisplayValue(json)).not.toBeInTheDocument();
-      expect(screen.queryByText('secret-value')).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(onUpdate).toHaveBeenCalled();
+        expect(screen.queryByDisplayValue(json)).not.toBeInTheDocument();
+        expect(screen.queryByText('secret-value')).not.toBeInTheDocument();
+      });
     });
 
     it('reads a selected local JSON file into the unsaved form', async () => {
