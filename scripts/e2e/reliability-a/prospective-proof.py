@@ -11,9 +11,22 @@ import time
 import urllib.request
 
 PROJECT = '01KJNR9R3TEN3KX1ETE33852R8'
-VERSION = 'b467f389811eadeaf973960bb30f9fa7b9cb4678'
-RELEASE_PROVENANCE = {'apiSource': 'e2c81c045fa16490c7515fa80573418e60ef4017', 'agentSource': VERSION, 'publishedBinarySha256': 'a59a4850337fe7af588267c481dee046db5baba4d3f705c85f19f85ded09e06f', 'rawHostShaObserved': False}
 MODES = ['setup', 'turn-check', 'wake-check', 'observe', 'protected-snapshot', 'observer-snapshot', 'completion-runtime', 'resume-snapshot']
+
+
+def validate_release_pin(value):
+    assert type(value) is dict and set(value) == {'apiSource', 'agentSource', 'publishedBinarySha256', 'rawHostShaObserved', 'capacityPoolRevision'}
+    assert all(isinstance(value[k], str) and re.fullmatch('[0-9a-f]{40}', value[k]) for k in ['apiSource', 'agentSource'])
+    assert isinstance(value['publishedBinarySha256'], str) and re.fullmatch('[0-9a-f]{64}', value['publishedBinarySha256'])
+    assert value['rawHostShaObserved'] is False
+    assert type(value['capacityPoolRevision']) is int and 1 <= value['capacityPoolRevision'] <= 9007199254740991
+    return value
+
+
+def restore_gate(predicates):
+    # Idle capture may rotate the mutable generation after a successful restore.
+    # Equality remains an observation, never proof of the exact consumed generation.
+    return all(v for k, v in predicates.items() if k != 'generationMatches')
 
 
 def save(root, name, value):
@@ -64,6 +77,9 @@ def main():
         root = Path(os.environ['SAM_PROSPECTIVE_ROOT'])
         assert root.is_absolute() and root.is_dir() and not root.is_symlink()
         config = json.loads((root / 'config.json').read_text())
+        pin = validate_release_pin(json.loads((root / 'release-pin.json').read_text()))
+        version = pin['agentSource']
+        release_provenance = {k: v for k, v in pin.items() if k != 'capacityPoolRevision'}
         own = config['observer' if mode in ['observe','observer-snapshot'] else 'own']
         assert re.fullmatch('[0-9A-HJKMNP-TV-Z]{26}', own['taskId'])
         assert re.fullmatch('[0-9a-f-]{36}', own['sessionId'])
@@ -76,7 +92,7 @@ def main():
             with urllib.request.urlopen(urllib.request.Request(base + path, headers=headers, data=None if data is None else json.dumps(data).encode()), timeout=15) as response:
                 return json.load(response)
         bindings = req('/workers/scripts/sam-api-staging/settings')['result']['bindings']
-        assert next(x.get('text') for x in bindings if x.get('name') == 'VM_AGENT_REQUIRED_VERSION') == VERSION
+        assert next(x.get('text') for x in bindings if x.get('name') == 'VM_AGENT_REQUIRED_VERSION') == version
         database = next(x['id'] for x in bindings if x.get('name') == 'DATABASE')
 
         def q(sql, params):
@@ -134,7 +150,7 @@ def main():
             runtime = 'cf-container' if mode == 'observe' else 'vm'
             assert node['user_id'] == owner and node['runtime'] == runtime and node['status'] == 'running'
             if runtime == 'vm':
-                assert node['agent_version'] == VERSION and node['capacity_pool_revision'] == 40 and len(nodes) == 1 and nodes[0]['id'] == node['id']
+                assert node['agent_version'] == version and node['capacity_pool_revision'] == pin['capacityPoolRevision'] and len(nodes) == 1 and nodes[0]['id'] == node['id']
             rows = q('SELECT id,user_id,project_id,agent_type,runtime,vm_size_override FROM agent_profiles WHERE id=?', [own['agentProfileId']])
             assert len(rows) == 1
             profile = rows[0]
@@ -144,8 +160,9 @@ def main():
             source.update(workspace=workspace, node=node, profile=profile)
             value = {'workspaceId': workspace['id'], 'nodeId': node['id'], 'ownerId': owner, 'expectedProfileOwnerId': profile['user_id'], 'agentSessionId': mapping['agentSessionId'], 'runtime': runtime, 'agentVersion': node['agent_version'], 'storedProfileId': profile['id'], 'storedProfileObservedAt': observed, 'expiresAt': observed + 240000, 'receipt': own['receipt'], 'globalVmCount': len(nodes), 'otherWorkspaceCount': 0, 'activeForeignClaimCount': 0}
             if runtime == 'vm':
-                value['releaseProvenance'] = RELEASE_PROVENANCE
-                source['reviewedPublicationReference'] = RELEASE_PROVENANCE
+                value['releaseProvenance'] = release_provenance
+                value['capacityPoolRevision'] = node['capacity_pool_revision']
+                source['reviewedPublicationReference'] = release_provenance
             if mode == 'wake-check':
                 stage = 'restored-generation'
                 protected = json.loads((root / 'protected-snapshot.json').read_text())
@@ -157,7 +174,7 @@ def main():
                 raw_projection = (root / 'wake-check-restore-source.json').read_bytes()
                 failure_source_sha = hashlib.sha256(raw_projection).hexdigest()
                 restore_evidence = {'observedAt': projection['observedAt'], 'predicates': projection['predicates'], 'types': projection['types'], 'sourceEvidenceSha256': failure_source_sha}
-                assert all(projection['predicates'].values())
+                assert restore_gate(projection['predicates'])
                 row = rows[0]
                 from datetime import datetime
                 value['recoveredSnapshotId'] = row['id']

@@ -14,7 +14,12 @@ try{
  const modules=join(root,'modules');await mkdir(modules);
  for(const name of ['prospective-vm.mjs','owner-terminal-inspect.mjs','queue-controller.mjs','git-probe.py','b-probe.py','terminal-observer.py'])await copyFile(new URL(name,source),join(modules,name));
  await copyFile(new URL('prospective-capsule.py',source),join(modules,'prospective-capsule.py'));
- const {terminalPhase,AcceptanceSequence,capsule,releaseProvenance}=await import(pathToFileURL(join(modules,'prospective-vm.mjs')));
+ const {terminalPhase,AcceptanceSequence,capsule,validateReleasePin}=await import(pathToFileURL(join(modules,'prospective-vm.mjs')));
+ const pin={apiSource:'c'.repeat(40),agentSource:'d'.repeat(40),publishedBinarySha256:'e'.repeat(64),rawHostShaObserved:false,capacityPoolRevision:73};
+ process.env.SAM_PROSPECTIVE_ROOT=root;await writeFile(join(root,'release-pin.json'),JSON.stringify(pin));
+ const {capacityPoolRevision,...releaseProvenance}=pin;
+ for(const bad of [{},{...pin,extra:true},{...pin,agentSource:'bad'},{...pin,publishedBinarySha256:'f'.repeat(40)},{...pin,rawHostShaObserved:true},{...pin,capacityPoolRevision:true},{...pin,capacityPoolRevision:0}])assert.throws(()=>validateReleasePin(bad));
+ assert.deepEqual(validateReleasePin(pin),pin);
  const realGit=exec('which',['git']).toString().trim(),remote=join(root,'remote.git'),repo=join(root,'repo'),bin=join(root,'bin');await mkdir(bin);
  exec(realGit,['init','--bare','--initial-branch=main',remote]);exec(realGit,['init','--initial-branch=main',repo]);
  await writeFile(join(repo,'seed'),'seed');exec(realGit,['add','seed'],repo);exec(realGit,['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-m','seed'],repo);
@@ -52,7 +57,7 @@ finally:
  let invalidProvenance=false,grantPatch={},clockOverride=null,expireAfterInput=false;
  let identity=own,operation='setup',originals={},downloadCorrupt=false,closed=false,disposed=false,targetReads=0;const payloads=[];
  const workspace='01M51YYYYYYYYYYYYYYYYYYYYY',node='01M51XXXXXXXXXXXXXXXXXXXXX',acp='01M51WWWWWWWWWWWWWWWWWWWWW';
- const grant=()=>({releaseProvenance:invalidProvenance?{...releaseProvenance,rawHostShaObserved:true}:releaseProvenance,globalVmCount:1,otherWorkspaceCount:0,activeForeignClaimCount:0,workspaceId:workspace,nodeId:node,agentSessionId:acp,ownerId:'owner',expectedProfileOwnerId:'owner',runtime:identity===own?'vm':'cf-container',agentVersion:'b467f389811eadeaf973960bb30f9fa7b9cb4678',expiresAt:Date.now()+200000,storedProfileId:identity.agentProfileId,storedProfileObservedAt:Date.now(),receipt:Object.fromEntries(Object.entries(identity.receipt).sort(([a],[b])=>a.localeCompare(b))),...grantPatch});
+ const grant=()=>({releaseProvenance:invalidProvenance?{...releaseProvenance,rawHostShaObserved:true}:releaseProvenance,globalVmCount:1,otherWorkspaceCount:0,activeForeignClaimCount:0,workspaceId:workspace,nodeId:node,agentSessionId:acp,ownerId:'owner',expectedProfileOwnerId:'owner',runtime:identity===own?'vm':'cf-container',agentVersion:pin.agentSource,capacityPoolRevision,expiresAt:Date.now()+200000,storedProfileId:identity.agentProfileId,storedProfileObservedAt:Date.now(),receipt:Object.fromEntries(Object.entries(identity.receipt).sort(([a],[b])=>a.localeCompare(b))),...grantPatch});
  const response=(v,status=200)=>{const b=Buffer.isBuffer(v)?v:Buffer.from(JSON.stringify(v));return {status:()=>status,body:async()=>b,headers:async()=>({'content-length':String(b.length)}),dispose:async()=>{}};};
  const context={request:{fetch:async(url,options)=>{
   assert.equal(options.maxRedirects,0);
@@ -82,7 +87,7 @@ finally:
  const setup=await invoke('setup');assert(setup.result.ok&&setup.result.hostBytesRetained&&closed&&disposed);assert((await readFile(join(setup.dir,'done.json'))).length>100);
  originals={baseline:await readFile(join(setup.dir,'baseline.json')),expectations:await readFile(join(setup.dir,'expectations.json'))};
  const originalBaseline=Buffer.from(originals.baseline);operation='check';invalidProvenance=true;assert(!(await invoke('invented-host-proof')).result.ok);invalidProvenance=false;
- for(const [n,patch]of [['foreign-receipt',{receipt:{...identity.receipt,taskId:'01M51VVVVVVVVVVVVVVVVVVVVV'}}],['undefined-expiry',{expiresAt:undefined}],['string-expiry',{expiresAt:'future'}],['infinite-expiry',{expiresAt:Infinity}],['undefined-observed',{storedProfileObservedAt:undefined}],['string-observed',{storedProfileObservedAt:'now'}],['zero-observed',{storedProfileObservedAt:0}]]){grantPatch=patch;assert(!(await invoke(n)).result.ok);}grantPatch={};
+ for(const [n,patch]of [['wrong-release',{agentVersion:'a'.repeat(40)}],['wrong-pool',{capacityPoolRevision:74}],['foreign-receipt',{receipt:{...identity.receipt,taskId:'01M51VVVVVVVVVVVVVVVVVVVVV'}}],['undefined-expiry',{expiresAt:undefined}],['string-expiry',{expiresAt:'future'}],['infinite-expiry',{expiresAt:Infinity}],['undefined-observed',{storedProfileObservedAt:undefined}],['string-observed',{storedProfileObservedAt:'now'}],['zero-observed',{storedProfileObservedAt:0}]]){grantPatch=patch;assert(!(await invoke(n)).result.ok);}grantPatch={};
  expireAfterInput=true;const expired=await invoke('action-expired-close');assert(!expired.result.ok&&expired.result.terminalClosed&&expired.result.socketClosed);expireAfterInput=false;clockOverride=null;
  assert((await invoke('turn-check')).result.ok);assert((await invoke('wake-check')).result.ok);
  // Damaged original is rejected, never replaced from the copied host baseline.

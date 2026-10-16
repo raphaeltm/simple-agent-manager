@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('prospective_proof', ROOT / 'prospective-proof.py')
 reader = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(reader)
+PIN = {'apiSource': 'c'*40, 'agentSource': 'd'*40, 'publishedBinarySha256': 'e'*64, 'rawHostShaObserved': False, 'capacityPoolRevision': 73}
 CANARY = 'PRIVATE_SYNTHETIC_CF_CANARY'
 
 
@@ -32,6 +33,9 @@ class ReaderTests(unittest.TestCase):
             config = {'own': own, 'observer': observer, 'started': now - 10000, 'hard': now + 2700000}
             if mode == 'resume-snapshot': config['resume']={'kind':'second-prospective-restore','originalEvidenceSha256':'9715d238b6fcf5cc1e45e065ea041e87e8b72b38b6776664827467a6e74c14d2'}
             (root / 'config.json').write_text(json.dumps(config))
+            (root / 'release-pin.json').write_text(json.dumps(PIN))
+            if failure == 'missing-pin': (root / 'release-pin.json').unlink()
+            if failure == 'malformed-pin': (root / 'release-pin.json').write_text('{}')
             workspace, node, snapshot = '01M51YYYYYYYYYYYYYYYYYYYYY', '01M51XXXXXXXXXXXXXXXXXXXXX', '01M51SSSSSSSSSSSSSSSSSSSSS'
             for name, value in [(mode + '-mapping.json', {'taskId': own['taskId'], 'sessionId': own['sessionId'], 'workspaceId': workspace, 'nodeId': node, 'agentSessionId': '01M51AAAAAAAAAAAAAAAAAAAAA'}),
                                 ('protected-sleep.json', {'workspaceId': workspace}),
@@ -54,7 +58,7 @@ class ReaderTests(unittest.TestCase):
             def request(req, timeout):
                 if failure == 'transport': raise ValueError(CANARY)
                 if req.full_url.endswith('/settings'):
-                    return Response({'result': {'bindings': [{'name': 'DATABASE', 'id': 'database'}, {'name': 'VM_AGENT_REQUIRED_VERSION', 'text': reader.VERSION}]}})
+                    return Response({'result': {'bindings': [{'name': 'DATABASE', 'id': 'database'}, {'name': 'VM_AGENT_REQUIRED_VERSION', 'text': 'a'*40 if failure == 'wrong-release' else PIN['agentSource']}]}})
                 body = json.loads(req.data);sql = body['sql'];queries.append(sql)
                 self.assertTrue(sql.startswith('SELECT '))
                 if 'FROM tasks WHERE id=' in sql: rows = [task]
@@ -63,7 +67,7 @@ class ReaderTests(unittest.TestCase):
                 elif 'FROM workspaces WHERE project_id=' in sql: rows = []
                 elif 'FROM workspaces WHERE node_id=' in sql: rows = []
                 elif 'FROM workspaces WHERE id=' in sql: rows = [{'id': workspace, 'user_id': 'owner', 'project_id': reader.PROJECT, 'chat_session_id': own['sessionId'], 'node_id': node, 'branch': own['branch'], 'status': 'running'}]
-                elif 'FROM nodes WHERE id=' in sql: rows = [{'id': node, 'user_id': 'owner', 'runtime': runtime, 'agent_version': reader.VERSION, 'capacity_pool_revision': 40, 'status': 'running'}]
+                elif 'FROM nodes WHERE id=' in sql: rows = [{'id': node, 'user_id': 'owner', 'runtime': runtime, 'agent_version': PIN['agentSource'], 'capacity_pool_revision': 74 if failure == 'wrong-pool' else PIN['capacityPoolRevision'], 'status': 'running'}]
                 elif 'FROM agent_profiles' in sql: rows = [{'id': own['agentProfileId'], 'user_id': 'owner', 'project_id': reader.PROJECT, 'agent_type': 'wrong' if failure == 'wrong-profile' else ('openai-codex' if mode == 'observe' else 'claude-code'), 'runtime': runtime, 'vm_size_override': None}]
                 elif 'FROM session_snapshots' in sql:
                     from datetime import datetime, timezone
@@ -79,8 +83,12 @@ class ReaderTests(unittest.TestCase):
                 reader.main()
             self.assertNotIn(CANARY, output.getvalue())
             result = json.loads(output.getvalue())
-            self.assertEqual(result['ok'], failure is None)
-            if failure is None:
+            self.assertEqual(result['ok'], failure in [None, 'wrong-generation'])
+            if failure in [None, 'wrong-generation']:
+                if failure == 'wrong-generation':
+                    projection = json.loads((root / 'wake-check-restore-source.json').read_text())
+                    self.assertFalse(projection['predicates']['generationMatches'])
+                    self.assertTrue(reader.restore_gate(projection['predicates']))
                 source = (root / (mode + '-source.json')).read_bytes()
                 artifact = root / (mode + '.json' if mode in ['protected-snapshot', 'observer-snapshot', 'resume-snapshot', 'completion-runtime'] else mode + '-grant.json')
                 self.assertEqual(json.loads(artifact.read_text())['sourceEvidenceSha256'], hashlib.sha256(source).hexdigest())
@@ -141,8 +149,18 @@ class ReaderTests(unittest.TestCase):
         for mode in reader.MODES:
             with self.subTest(mode=mode): self.invoke(mode)
 
+    def test_rotated_generation_is_observed_not_gated(self):
+        self.assertTrue(self.invoke('wake-check', 'wrong-generation')['ok'])
+
+    def test_release_pin_validation(self):
+        self.assertEqual(reader.validate_release_pin(PIN), PIN)
+        for patch in [{'extra': True}, {'agentSource': 'bad'}, {'publishedBinarySha256': 'a'*40}, {'rawHostShaObserved': True}, {'capacityPoolRevision': True}, {'capacityPoolRevision': 0}]:
+            with self.subTest(patch=patch), self.assertRaises(AssertionError):
+                reader.validate_release_pin({**PIN, **patch})
+        with self.assertRaises(AssertionError): reader.validate_release_pin({})
+
     def test_concrete_failures(self):
-        for mode, failure, stage in [('setup', 'transport', 'settings'), ('setup', 'wrong-profile', 'mapping'), ('setup', 'foreign-claim', 'resource-guards'), *[('wake-check', f, 'restored-generation') for f in ['wrong-generation','wrong-status','wrong-time','wrong-types','private-row','missing-wake']]]:
+        for mode, failure, stage in [('setup', 'missing-pin', 'configuration'), ('setup', 'malformed-pin', 'configuration'), ('setup', 'wrong-release', 'settings'), ('setup', 'wrong-pool', 'mapping'), ('setup', 'transport', 'settings'), ('setup', 'wrong-profile', 'mapping'), ('setup', 'foreign-claim', 'resource-guards'), *[('wake-check', f, 'restored-generation') for f in ['wrong-status','wrong-time','wrong-types','private-row','missing-wake']]]:
             with self.subTest(failure=failure): self.assertEqual(self.invoke(mode, failure)['stage'], stage)
         for failure in ['resume-vm-present','resume-foreign-task','resume-pending-claim','resume-retained-claim']:
             with self.subTest(failure=failure): self.assertEqual(self.invoke('resume-snapshot',failure)['stage'],'snapshot')

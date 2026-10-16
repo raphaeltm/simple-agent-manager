@@ -7,14 +7,21 @@ import {gzipSync} from 'node:zlib';
 import {browserTerminal} from './owner-terminal-inspect.mjs';
 import {baselineArtifact,expectationsArtifact,probeArtifact} from './queue-controller.mjs';
 export const project='01KJNR9R3TEN3KX1ETE33852R8',repository='serverspresentation2025/crewai';
-export const version='b467f389811eadeaf973960bb30f9fa7b9cb4678';
-export const releaseProvenance=Object.freeze({apiSource:'e2c81c045fa16490c7515fa80573418e60ef4017',agentSource:version,publishedBinarySha256:'a59a4850337fe7af588267c481dee046db5baba4d3f705c85f19f85ded09e06f',rawHostShaObserved:false});
 export const assetHashes={'git-probe.py':'f061b7cd447cef55ceb08cb6a78fcb0b236ec3f347731e66d4b8447c224afa6c','b-probe.py':'889d7588ed44c8ab89e6ba7880ff20d81017f294bb7b31edfbc320ced064f509','terminal-observer.py':'d0970080ce89ab2810c0c9d758d1fc978efafe75fed91a4454f08639da88adff'};
 const api='https://api.sammy.party',app='https://app.sammy.party';
 const sha=b=>createHash('sha256').update(b).digest('hex');
 const ulid=v=>typeof v==='string'&&/^[0-9A-HJKMNP-TV-Z]{26}$/.test(v);
 const uuid=v=>typeof v==='string'&&/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(v);
 const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join()===keys.slice().sort().join();
+export function validateReleasePin(v){
+ if(!exact(v,['apiSource','agentSource','publishedBinarySha256','rawHostShaObserved','capacityPoolRevision'])||![v.apiSource,v.agentSource].every(x=>typeof x==='string'&&/^[0-9a-f]{40}$/.test(x))||typeof v.publishedBinarySha256!=='string'||!/^[0-9a-f]{64}$/.test(v.publishedBinarySha256)||v.rawHostShaObserved!==false||!Number.isSafeInteger(v.capacityPoolRevision)||v.capacityPoolRevision<1)throw Error('release-pin');
+ return Object.freeze({...v});
+}
+export async function loadReleasePin(){
+ const root=process.env.SAM_PROSPECTIVE_ROOT;
+ if(typeof root!=='string'||!root.startsWith('/'))throw Error('release-pin');
+ return validateReleasePin(JSON.parse(await readFile(root+'/release-pin.json','utf8')));
+}
 export function identity(own){
  if(!exact(own,['taskId','sessionId','branch','agentProfileId','agentType','receipt'])||![own.taskId,own.agentProfileId].every(ulid)||!uuid(own.sessionId)
   ||!/^sam\/[a-z0-9][a-z0-9/-]{0,150}$/.test(own.branch)||!['claude-code','openai-codex'].includes(own.agentType)
@@ -94,8 +101,9 @@ export async function terminalPhase({own,operation,originals,context,page,grant,
  const out={ok:false,stage:'binding',before:false,after:false,manifest:false,hostBytesRetained:false,terminalClosed:false,socketClosed:false,quiescence:false};
  const live=()=>{if(now()>=deadline)throw Error('deadline');};
  const get=async(path,method='GET',data)=>{live();const r=await context.request.fetch(api+path,{method,data,headers:{Origin:app},timeout:5000,maxRedirects:0,failOnStatusCode:false});try{if(r.status()!==200)throw 0;const b=await r.body();if(b.length>250000)throw 0;return JSON.parse(b);}finally{await r.dispose();}};
+ let version,releaseProvenance,capacityPoolRevision;
  const bind=async()=>{
-  if(!grant||!Number.isSafeInteger(grant.globalVmCount)||grant.globalVmCount<0||grant.globalVmCount>1||(grant.runtime==='vm'&&grant.globalVmCount!==1)||grant.otherWorkspaceCount!==0||grant.activeForeignClaimCount!==0||!ulid(grant.workspaceId)||!ulid(grant.nodeId)||!(ulid(grant.agentSessionId)||uuid(grant.agentSessionId))||!Number.isSafeInteger(grant.expiresAt)||grant.expiresAt<=0||grant.expiresAt<=now()||grant.expiresAt>now()+300000||grant.storedProfileId!==own.agentProfileId||!Number.isSafeInteger(grant.storedProfileObservedAt)||grant.storedProfileObservedAt<=0||grant.storedProfileObservedAt>now()||grant.storedProfileObservedAt<now()-240000||!['vm','cf-container'].includes(grant.runtime)||(grant.runtime==='vm'&&(grant.agentVersion!==version||!exact(grant.releaseProvenance,Object.keys(releaseProvenance))||Object.keys(releaseProvenance).some(k=>grant.releaseProvenance[k]!==releaseProvenance[k]))))throw 0;
+  if(!grant||!Number.isSafeInteger(grant.globalVmCount)||grant.globalVmCount<0||grant.globalVmCount>1||(grant.runtime==='vm'&&grant.globalVmCount!==1)||grant.otherWorkspaceCount!==0||grant.activeForeignClaimCount!==0||!ulid(grant.workspaceId)||!ulid(grant.nodeId)||!(ulid(grant.agentSessionId)||uuid(grant.agentSessionId))||!Number.isSafeInteger(grant.expiresAt)||grant.expiresAt<=0||grant.expiresAt<=now()||grant.expiresAt>now()+300000||grant.storedProfileId!==own.agentProfileId||!Number.isSafeInteger(grant.storedProfileObservedAt)||grant.storedProfileObservedAt<=0||grant.storedProfileObservedAt>now()||grant.storedProfileObservedAt<now()-240000||!['vm','cf-container'].includes(grant.runtime)||(grant.runtime==='vm'&&(grant.agentVersion!==version||grant.capacityPoolRevision!==capacityPoolRevision||!exact(grant.releaseProvenance,Object.keys(releaseProvenance))||Object.keys(releaseProvenance).some(k=>grant.releaseProvenance[k]!==releaseProvenance[k]))))throw 0;
   if(!exact(grant.receipt,Object.keys(own.receipt))||Object.keys(own.receipt).some(k=>grant.receipt[k]!==own.receipt[k]))throw 0;
   const u=await get('/api/auth/get-session'),p=await get(`/api/projects/${project}/agent-profiles/${own.agentProfileId}`),list=await get(`/api/projects/${project}/agent-profiles`);
   if(u?.user?.id!==grant.ownerId||p?.id!==own.agentProfileId||p.userId!==grant.expectedProfileOwnerId||p.agentType!==own.agentType||p.vmSizeOverride!=null||!(p.runtime===null||p.runtime===grant.runtime)||!(p.projectId===project||(p.projectId===null&&p.userId===grant.ownerId))||!Array.isArray(list.items)||list.items.filter(x=>x.name===p.name).length!==1)throw 0;
@@ -105,6 +113,7 @@ export async function terminalPhase({own,operation,originals,context,page,grant,
  };
  const wait=async(key,until)=>{while(now()<until){const s=await terminal.state();if(s.failed)throw 0;if(s[key])return;await pause(100);}throw 0;};
  try{
+  const pin=await loadReleasePin();version=pin.agentSource;capacityPoolRevision=pin.capacityPoolRevision;releaseProvenance=Object.fromEntries(Object.entries(pin).filter(([k])=>k!=='capacityPoolRevision'));
   const checkTarget=async()=>{if(operation==='observe'){identity(originals.target);const target=await get(`/api/projects/${project}/tasks/${originals.target.taskId}`);if(target.id!==originals.target.taskId||target.projectId!==project||target.userId!==grant.ownerId||target.outputBranch!==originals.target.branch||target.status!=='completed'||target.completedAt!==originals.completedAt||!target.completionEvidence||typeof target.completionEvidence!=='object'||Date.parse(target.completedAt)>now())throw 0;return {taskId:target.id,branch:target.outputBranch,completedAt:target.completedAt,completionEvidenceSha256:sha(JSON.stringify(target.completionEvidence))};}return null;};
   const url=await bind();out.before=true;const targetBefore=await checkTarget();
  const bundle=await capsule(operation==='observe'?originals.target:own,operation,originals);out.runId=bundle.runId;
