@@ -35,5 +35,13 @@ try{
  await writeFile(root+'/setup/done.json',JSON.stringify(done));await rm(root+'/setup/check.json');await symlink(root+'/setup/prepare.json',root+'/setup/check.json');await assert.rejects(phaseBundle(args),/path/);cases++;
  const alias=join(home,'alias');await symlink(base,alias);await assert.rejects(snapshotRoot(join(alias,own.taskId),own.taskId,alias),/path/);cases++;
  await assert.rejects(snapshotRoot(join(home,'tmp'),own.taskId),/path/);cases++;
+ // Real capsule observe manifests name the TARGET, while the active runtime is the observer.
+ const observer={...own,taskId:'01M52ZZZZZZZZZZZZZZZZZZZZZ',sessionId:'22222222-3333-4444-8555-666666666666'};observer.receipt={...own.receipt,taskId:observer.taskId,sessionId:observer.sessionId};
+ await mkdir(root+'/observe');const observeBytes={'asset-hashes.json':bytes['asset-hashes.json'],'observer.json':Buffer.from(JSON.stringify({checks:{remoteRefsUnchanged:true,taskBranchPrInventoryUnchanged:true,observedAfterTerminal:true},statuses:{remoteRefs:0,prInventory:0}}))};
+ const observeDone={...done,operation:'observe',files:Object.fromEntries(Object.entries(observeBytes).map(([n,b])=>[n,sha(b)]))};
+ for(const [n,b]of Object.entries(observeBytes))await writeFile(root+'/observe/'+n,b);await writeFile(root+'/observe/done.json',JSON.stringify(observeDone));
+ const observeArgs={...args,phase:'observe',own:observer};const observed=JSON.parse(await phaseBundle(observeArgs));assert.equal(observed.manifest.taskId,own.taskId);assert.equal(observed.manifest.observerTaskId,observer.taskId);cases++;
+ await writeFile(root+'/observe/done.json',JSON.stringify({...observeDone,taskId:observer.taskId,sessionId:observer.sessionId}));await assert.rejects(phaseBundle(observeArgs),/manifest/);cases++;
+ let ticking=args.started;mode='ok';const tickReceipt=await retainCheckpoint({...args,context,phase:'closing',proof:{},now:()=>ticking++});assert(tickReceipt.verifiedAt>args.started);cases++;
  assert.equal(advanced,false);console.log(`PASS ${cases} retention cases; external calls simulated; real filesystem/original bytes/hash verification`);
 }finally{process.chdir(cwd);await rm(home,{recursive:true,force:true});}

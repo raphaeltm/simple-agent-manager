@@ -19,8 +19,8 @@ export async function phaseBundle({root,phase,own,target,started,hard,sourceSha}
  identity(own);identity(target);const operation=phases[phase];if(!operation||!/^[0-9a-f]{40}$/.test(sourceSha)||!Number.isSafeInteger(started)||!Number.isSafeInteger(hard)||hard-started!==2700000)throw Error('retention-binding');
  const dir=root+'/'+phase;const ds=await lstat(dir);if(!ds.isDirectory()||ds.isSymbolicLink())throw Error('retention-path');
  const load=async n=>{const p=dir+'/'+n,s=await lstat(p);if(!s.isFile()||s.isSymbolicLink()||s.size>131072)throw Error('retention-path');const b=await readFile(p);if(b.length>131072)throw Error('retention-size');return b;};
- const original=await load('done.json'),done=JSON.parse(original);const files=names[operation];
- if(!exact(done,['taskId','sessionId','runId','operation','status','files'])||done.taskId!==own.taskId||done.sessionId!==own.sessionId||!/^[-0-9a-f]{36}$/.test(done.runId)||done.operation!==operation||done.status!==0||!exact(done.files,files))throw Error('retention-manifest');
+ const original=await load('done.json'),done=JSON.parse(original);const files=names[operation],producer=operation==='observe'?target:own;
+ if(!exact(done,['taskId','sessionId','runId','operation','status','files'])||done.taskId!==producer.taskId||done.sessionId!==producer.sessionId||!/^[-0-9a-f]{36}$/.test(done.runId)||done.operation!==operation||done.status!==0||!exact(done.files,files))throw Error('retention-manifest');
  const bytes={'done.json':original};for(const n of files){const b=await load(n);if(digest(b)!==done.files[n])throw Error('retention-hash');bytes[n]=b;}
  const probe=(n,p)=>{const v=probeArtifact(JSON.parse(bytes[n]),p);if(!Object.values(v.checks).every(x=>x===true)||!Object.values(v.statuses).every(x=>x===0))throw Error('retention-schema');};
  probe('asset-hashes.json','asset-hashes');
@@ -38,7 +38,7 @@ export function verifyBundle(actual,expected){
 }
 async function retainBytes({context,root,phase,target,started,hard,sourceSha,bytes,now=Date.now}){
  // No durable-message roundtrip. Same finite owner browser context, separate upload and retrieval.
- const until=Math.min(now()+90000,hard-540000);if(until-now()<90000)throw Error('retention-deadline');
+ const admittedAt=now(),until=Math.min(admittedAt+90000,hard-540000);if(until-admittedAt<90000)throw Error('retention-deadline');
  const left=()=>{const n=until-now();if(n<=0)throw Error('retention-deadline');return n;};
  await snapshotRoot(root,target.taskId);
  const filename=phase+'-'+digest(bytes)+'.json',directory='/engineering/reliability/'+target.taskId+'/'+sourceSha+'/';
