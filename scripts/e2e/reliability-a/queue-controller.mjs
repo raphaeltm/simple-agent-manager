@@ -113,10 +113,10 @@ function selector(path,method,project){
 export function idleLeaseEnded(s, since, now, lease, max) {
   const positive=v=>Number.isSafeInteger(v)&&v>0&&v<=now;
   if(!positive(now)||!positive(since)||!(Number.isSafeInteger(lease)&&lease>0)||!(Number.isSafeInteger(max)&&max>0)||s?.activity!=='idle'||s.runtimeWorkCount!==0||!positive(s.activityAt)||!positive(s.runtimeWorkUpdatedAt)||s.activityAt<since||s.runtimeWorkUpdatedAt<since)return false;
-  if(s.runtimeWorkProgressAt!=null&&(!positive(s.runtimeWorkProgressAt)))return false;
+  if(s.runtimeWorkProgressAt!=null&&s.runtimeWorkProgressAt!==0&&!positive(s.runtimeWorkProgressAt))return false;
   if(s.runtimeWorkState==='inactive')return true;
   if(!['active','settling'].includes(s.runtimeWorkState))return false;
-  return Math.min(s.runtimeWorkUpdatedAt+lease,(s.runtimeWorkProgressAt??s.runtimeWorkUpdatedAt)+max)<=now;
+  return Math.min(s.runtimeWorkUpdatedAt+lease,(s.runtimeWorkProgressAt>0?s.runtimeWorkProgressAt:s.runtimeWorkUpdatedAt)+max)<=now;
 }
 const pause=()=>new Promise(r=>setTimeout(r,100));
 export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSummary,privateState,resumeOwn,resumeCompletion}){
@@ -155,7 +155,7 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
       if(!exact(resumeOwn,['receipt','submittedAt'])||!exact(r,['taskId','sessionId','branchName','status'])||!ulid(r.taskId)||!uuid(r.sessionId)||!branch(r.branchName)||r.status!=='queued'||!Number.isSafeInteger(resumeOwn.submittedAt)||resumeOwn.submittedAt>Date.now())throw new Error();
       let owned;
       const t=await requestSafe(context,api,{path:`/api/projects/${project}/tasks/${r.taskId}`},v=>{
-        owned=v;return v?.id===r.taskId&&v.projectId===project&&v.outputBranch===r.branchName&&ulid(v.workspaceId)&&(['in_progress','delegated','blocked'].includes(v.status)||(v.status==='completed'&&exact(resumeCompletion,['taskId','branch','completedAt'])&&resumeCompletion.taskId===r.taskId&&resumeCompletion.branch===r.branchName&&when(resumeCompletion.completedAt)&&v.completedAt===resumeCompletion.completedAt&&v.completionEvidence&&typeof v.completionEvidence==='object'));
+        owned=v;return v?.id===r.taskId&&v.projectId===project&&v.outputBranch===r.branchName&&ulid(v.workspaceId)&&(['in_progress','delegated','blocked'].includes(v.status)||(v.status==='completed'&&exact(resumeCompletion,['taskId','branch','completedAt'])&&resumeCompletion.taskId===r.taskId&&resumeCompletion.branch===r.branchName&&when(resumeCompletion.completedAt)&&Date.parse(resumeCompletion.completedAt)<=Date.now()&&v.completedAt===resumeCompletion.completedAt&&v.completionEvidence&&typeof v.completionEvidence==='object'));
       });
       if(t.category!=='ok')throw new Error();
       const w=await requestSafe(context,api,{path:'/api/workspaces/'+owned.workspaceId},v=>v?.id===owned.workspaceId&&v.projectId===project&&v.chatSessionId===r.sessionId&&v.branch===r.branchName&&v.repository===repository&&ulid(v.nodeId));
