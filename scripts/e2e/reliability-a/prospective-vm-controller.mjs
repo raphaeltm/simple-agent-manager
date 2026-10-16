@@ -19,6 +19,12 @@ export async function run({requestSafe,logoutSafe,summary}){
  const read=async name=>JSON.parse(await readFile(root+'/'+name,'utf8'));
  const action=()=>config.hard-540000; // 90s terminal action plus >=6min preservation, no reset.
  const live=()=>{if(Date.now()>=action())throw 0;};
+ const producerFailed=async(mode,own)=>{
+  let f;try{f=await read(mode+'-failure.json');}catch{return;}
+  if(!exact(f,['mode','taskId','sessionId','started','hard','stage','observedAt','sourceEvidenceSha256'])||f.mode!==mode||f.taskId!==own.taskId||f.sessionId!==own.sessionId||f.started!==config.started||f.hard!==config.hard||!Number.isSafeInteger(f.observedAt)||f.observedAt<config.started||f.observedAt>Date.now()||!['configuration','settings','task','resource-guards','snapshot','mapping','restored-generation','completion-runtime','evidence'].includes(f.stage)||!(f.sourceEvidenceSha256===null||/^[0-9a-f]{64}$/.test(f.sourceEvidenceSha256)))return;
+  result.producerFailure={mode,stage:f.stage,observedAt:f.observedAt,sourceEvidenceSha256:f.sourceEvidenceSha256};
+  throw Error('producer-failed');
+ };
  const get=async path=>{const r=await c.request.fetch(api+path,{headers:{Origin:api},timeout:10000,maxRedirects:0,failOnStatusCode:false});try{if(r.status()!==200)throw 0;const b=await r.body();if(b.length>250000)throw 0;return JSON.parse(b);}finally{await r.dispose();}};
  const canonical=async own=>{
   const t=await get(`/api/projects/${project}/tasks/${own.taskId}`),s=await get(`/api/projects/${project}/sessions/${own.sessionId}?limit=1`);
@@ -41,7 +47,7 @@ export async function run({requestSafe,logoutSafe,summary}){
  };
  let protectedSnapshot=null,wakeSubmittedAt=null,lastSleep=null;
  const grant=async(name,own,mapping)=>{
-  while(Date.now()<action()){try{const g=await read(name+'.json');if(g.workspaceId!==mapping.workspaceId||g.nodeId!==mapping.nodeId||g.agentSessionId!==mapping.agentSessionId||g.ownerId!==owner||g.storedProfileId!==own.agentProfileId)throw Error('binding');if(name==='wake-check-grant'&&(!protectedSnapshot||g.recoveredSnapshotId!==protectedSnapshot.snapshotId||!Number.isSafeInteger(g.snapshotRestoreConfirmedAt)||g.snapshotRestoreConfirmedAt<wakeSubmittedAt||g.snapshotRestoreConfirmedAt>Date.now()))throw Error('binding');return g;}catch(e){if(e?.message==='binding')throw 0;}await pause(1000);}throw 0;
+  while(Date.now()<action()){await producerFailed(name.replace(/-grant$/,''),own);try{const g=await read(name+'.json');if(g.workspaceId!==mapping.workspaceId||g.nodeId!==mapping.nodeId||g.agentSessionId!==mapping.agentSessionId||g.ownerId!==owner||g.storedProfileId!==own.agentProfileId)throw Error('binding');if(name==='wake-check-grant'&&(!protectedSnapshot||g.recoveredSnapshotId!==protectedSnapshot.snapshotId||!Number.isSafeInteger(g.snapshotRestoreConfirmedAt)||g.snapshotRestoreConfirmedAt<wakeSubmittedAt||g.snapshotRestoreConfirmedAt>Date.now()))throw Error('binding');return g;}catch(e){if(e?.message==='binding')throw 0;}await pause(1000);}throw 0;
  };
  const phase=async(name,own,operation,originals,mapping)=>{
   live();const dir=root+'/'+name;await mkdir(dir,{mode:0o700});await save(name+'-mapping.json',{taskId:own.taskId,sessionId:own.sessionId,...mapping,at:Date.now()});
@@ -80,9 +86,9 @@ export async function run({requestSafe,logoutSafe,summary}){
   stage='turn-check';await phase('turn-check',config.own,'check',{baseline,expectations},mapping);sequence.append('turn-check',{ok:true},Date.now());
   stage='sleep';await preserve(config.own,'protected');
   // Independent snapshot AVAILABLE read is mandatory, never infer from Sleep HTTP200 alone.
-  let snapshot;while(Date.now()<action()){try{snapshot=snapshotProof(await read('protected-snapshot.json'),config.own,lastSleep.workspaceId,lastSleep.at,config.hard,Date.now());break;}catch{}await pause(1000);}if(!snapshot)throw 0;protectedSnapshot=snapshot;
+  let snapshot;while(Date.now()<action()){await producerFailed('protected-snapshot',config.own);try{snapshot=snapshotProof(await read('protected-snapshot.json'),config.own,lastSleep.workspaceId,lastSleep.at,config.hard,Date.now());break;}catch{}await pause(1000);}if(!snapshot)throw 0;protectedSnapshot=snapshot;
   sequence.append('sleep',{ok:true,snapshotAvailable:true,sleep200:true,snapshotId:snapshot.snapshotId},Date.now());
-  stage='wake';const wakeAt=await prompt(config.own,'Authorized normal snapshot recovery only. Do not edit, run tools, publish, complete or start background work. Return control with READY.');wakeSubmittedAt=wakeAt;mapping=await waitIdle(config.own,wakeAt);
+  stage='wake';const wakeAt=await prompt(config.own,'Authorized normal snapshot recovery only. Do not edit, run tools, publish, complete or start background work. Return control with READY.');wakeSubmittedAt=wakeAt;await save('wake-submitted.json',{taskId:config.own.taskId,sessionId:config.own.sessionId,at:wakeAt});mapping=await waitIdle(config.own,wakeAt);
   sequence.append('wake',{ok:true,actualHarness:true,freshInactive:true,prompt202:true},Date.now());
   stage='wake-check';await phase('wake-check',config.own,'check',{baseline,expectations},mapping);sequence.append('wake-check',{ok:true},Date.now());
   stage='complete';const completeAt=await prompt(config.own,`Call actual mcp__sam_mcp__complete_task now. No Bash/Git/publication/other writes. Use evidence.prUrl=${config.evidencePrUrl}, and evidence.notes containing the measured fixture commit ${JSON.parse(baseline).head}. Report that host preservation checks passed, without claiming unobserved stages.`);
@@ -91,6 +97,7 @@ export async function run({requestSafe,logoutSafe,summary}){
   await save('canonical-completed.json',{taskId:config.own.taskId,branch:config.own.branch,completedAt:completed.completedAt,completionEvidenceSha256:hash(JSON.stringify(completed.completionEvidence)),evidencePrUrl:config.evidencePrUrl});
   // An independent retained tool-result projection is required in addition to canonical completion.
   let tool;while(Date.now()<action()){
+   await producerFailed('completion-runtime',config.own);
    try{
     const metadata=completionMessages(await get(`/api/projects/${project}/sessions/${config.own.sessionId}/messages?limit=100&order=desc&compact=true`),config.own,completeAt,Date.now());
     const runtime=await read('completion-runtime.json');
@@ -107,7 +114,7 @@ export async function run({requestSafe,logoutSafe,summary}){
   await phase('observe',config.observer,'observe',{baseline,expectations,completedAt:completed.completedAt,target:config.own},mapping);
   sequence.append('observe',{ok:true,independentRuntime:true,originalBaseline:true,originalExpectations:true,afterCanonical:true,allRefsAllPrStates:true},Date.now());
   await preserve(config.observer,'observer');
-  let observerSnapshot;while(Date.now()<config.hard-120000){try{observerSnapshot=snapshotProof(await read('observer-snapshot.json'),config.observer,lastSleep.workspaceId,lastSleep.at,config.hard,Date.now(),'cf-container');break;}catch{}await pause(1000);}if(!observerSnapshot)throw 0;
+  let observerSnapshot;while(Date.now()<config.hard-120000){await producerFailed('observer-snapshot',config.observer);try{observerSnapshot=snapshotProof(await read('observer-snapshot.json'),config.observer,lastSleep.workspaceId,lastSleep.at,config.hard,Date.now(),'cf-container');break;}catch{}await pause(1000);}if(!observerSnapshot)throw 0;
   await save('observer-retained.json',{taskId:config.observer.taskId,snapshotId:observerSnapshot.snapshotId,originalCompletedAt:observerBefore.completedAt,reopenedStatus:'sleeping',observedAt:observerSnapshot.observedAt});
   result.ok=sequence.pass;stage='done';
  }catch{}finally{

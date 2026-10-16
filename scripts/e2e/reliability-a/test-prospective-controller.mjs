@@ -21,7 +21,7 @@ try{
  const observer={taskId:'01M50VYZ60RQXXTGSVPXW6FRXD',sessionId:'4e5282b9-0cd5-454f-a8f0-db160b9823fe',branch:'sam/bootstrap-only-authorized-reliability-w6frxd',agentProfileId:'01KYQ5YDHC1VS0BZ9F3NY97FNH',agentType:'openai-codex'};
  for(const x of [own,observer])x.receipt={taskId:x.taskId,sessionId:x.sessionId,branchName:x.branch,status:'queued'};
  let count=0;
- for(const mode of ['success','setup-failure','wake-check-failure','complete-missing-notes','early-complete']){
+ for(const mode of ['success','setup-failure','wake-check-failure','complete-missing-notes','early-complete','producer-failure','foreign-producer-failure','stale-producer-failure']){
   count++;const dir=join(root,mode);await mkdir(dir);process.env.SAM_PROSPECTIVE_ROOT=dir;process.env.SAM_PLAYWRIGHT_PRIMARY_USER='SYNTHETIC_PRIVATE_CANARY';
   const started=Date.now()-1000,hard=started+2700000,config={started,hard,own,observer,evidencePrUrl:'https://github.com/raphaeltm/simple-agent-manager/pull/2355'};
   await writeFile(join(dir,'config.json'),JSON.stringify(config));
@@ -31,7 +31,7 @@ try{
   const stages=[],prompts=[],slept=[];
   const mapping=(x)=>({workspaceId:x===observer?'01M51OOOOOOOOOOOOOOOOOOOOO':woken?'01M51YYYYYYYYYYYYYYYYYYYYY':'01M51XXXXXXXXXXXXXXXXXXXXX',nodeId:'01M51NNNNNNNNNNNNNNNNNNNNN',agentSessionId:'01M51AAAAAAAAAAAAAAAAAAAAA'});
   const snapId='01M51SSSSSSSSSSSSSSSSSSSSS';
-  for(const name of ['setup','turn-check','wake-check','observe']){const x=name==='observe'?observer:own;woken=name==='wake-check';await writeFile(join(dir,name+'-grant.json'),JSON.stringify({...mapping(x),ownerId:'owner',storedProfileId:x.agentProfileId,recoveredSnapshotId:snapId,snapshotRestoreConfirmedAt:Date.now()+5000}));}woken=false;
+  for(const name of ['setup','turn-check','wake-check','observe']){const x=name==='observe'?observer:own;woken=name==='wake-check';if(!(mode==='producer-failure'&&name==='wake-check'))await writeFile(join(dir,name+'-grant.json'),JSON.stringify({...mapping(x),ownerId:'owner',storedProfileId:x.agentProfileId,recoveredSnapshotId:snapId,snapshotRestoreConfirmedAt:Date.now()+5000}));}woken=false;
   // Grant timestamp is refreshed by the independently simulated producer at wake prompt.
   const response=v=>({status:()=>200,body:async()=>Buffer.from(JSON.stringify(v)),dispose:async()=>{}});
   const task=x=>({id:x.taskId,userId:'owner',projectId:'01KJNR9R3TEN3KX1ETE33852R8',outputBranch:x.branch,taskMode:'task',agentProfileHint:'safe-profile-'+x.agentProfileId,workspaceId:mapping(x).workspaceId,status:x===own?ownStatus:observerStatus,createdAt:new Date(started+100).toISOString(),completedAt:x===own?completedAt:new Date(started-10000).toISOString(),completionEvidence:x===own?(completedAt?{prUrl:config.evidencePrUrl,notes:mode==='complete-missing-notes'?'no commit':'measured '+ 'a'.repeat(40)}:null):{prUrl:config.evidencePrUrl}});
@@ -60,7 +60,10 @@ try{
    if(o.path.endsWith('/prompt')){
     prompts.push(o.data.content);const isObserver=o.path.includes(observer.sessionId);active=isObserver?observer:own;
     if(isObserver)observerStatus='in_progress';
-    if(o.data.content.includes('snapshot recovery')){woken=true;const f=join(dir,'wake-check-grant.json');const v=JSON.parse(await readFile(f));v.snapshotRestoreConfirmedAt=Date.now();await writeFile(f,JSON.stringify(v));}
+    if(o.data.content.includes('snapshot recovery')){
+     woken=true;if(mode!=='producer-failure'){const f=join(dir,'wake-check-grant.json');const v=JSON.parse(await readFile(f));v.snapshotRestoreConfirmedAt=Date.now();await writeFile(f,JSON.stringify(v));}
+     if(mode.includes('producer-failure'))await writeFile(join(dir,'wake-check-failure.json'),JSON.stringify({mode:'wake-check',taskId:mode==='foreign-producer-failure'?observer.taskId:own.taskId,sessionId:own.sessionId,started:mode==='stale-producer-failure'?started-1:started,hard,stage:'restored-generation',observedAt:Date.now(),sourceEvidenceSha256:'c'.repeat(64)}));
+    }
     if(o.data.content.startsWith('Call actual')){ownStatus='completed';completedAt=new Date().toISOString();await writeFile(join(dir,'completion-runtime.json'),JSON.stringify({taskId:own.taskId,sessionId:own.sessionId,tool:'mcp__sam_mcp__complete_task',status:'completed',createdAt:Date.now(),observedAt:Date.now(),originalEvidenceRetained:true,runtimeWorkTerminal:true,sourceEvidenceSha256:'b'.repeat(64)}));
      // Force this failure to terminate promptly through the original fixed action clock.
     }
@@ -74,13 +77,15 @@ try{
   };
   const result=await run({requestSafe,logoutSafe:async()=>{loggedOut=true;return {category:'ok'};},summary:(category,status,ok)=>({category,status,ok})});
   assert(loggedOut&&browserClosed);assert(!JSON.stringify(result).includes('CANARY'));
-  const final=JSON.parse(await readFile(join(dir,'final.json')));assert.equal(result.ok,mode==='success',JSON.stringify({mode,stage:final.stage,events:final.events.map(x=>x.kind)}));
-  if(mode==='success'){assert.equal(final.events.length,8);assert.equal(prompts.length,4);assert.equal(stages.length,4);assert.equal(slept.length,2);assert.equal(final.stage,'done');}
+  const success=['success','foreign-producer-failure','stale-producer-failure'].includes(mode);
+  const final=JSON.parse(await readFile(join(dir,'final.json')));assert.equal(result.ok,success,JSON.stringify({mode,stage:final.stage,events:final.events.map(x=>x.kind)}));
+  if(success){assert.equal(final.events.length,8);assert.equal(prompts.length,4);assert.equal(stages.length,4);assert.equal(slept.length,2);assert.equal(final.stage,'done');assert.equal(final.producerFailure,undefined);}
   else{assert(!final.ok);if(mode==='early-complete'){assert.equal(prompts.length,0);assert.equal(stages.length,0);assert(JSON.parse(await readFile(join(dir,'unexpected-completion.json'))).status==='completed');}else assert(slept.includes(own.taskId));if(mode!=='complete-missing-notes')assert(!prompts.some(p=>p.startsWith('Call actual')));else assert(!prompts.some(p=>p.startsWith('Authorized independent observer')));}
+  if(mode==='producer-failure'){assert.equal(final.stage,'wake-check');assert.equal(final.producerFailure.stage,'restored-generation');assert.equal(stages.length,2);assert.equal(prompts.length,2);assert.equal(slept.length,2);assert(final.at<hard-540000);assert(final.authCleanup&&final.browserClosed&&final.retained);assert.equal(virtualNow,null);assert(!stages.some(s=>s.includes('observer')));}
  }
  const now=Date.now(),s={taskId:own.taskId,sessionId:own.sessionId,workspaceId:'ws',snapshotId:'01M51SSSSSSSSSSSSSSSSSSSSS',status:'available',runtime:'vm',degradation:'none',expiresAt:new Date(now+10000).toISOString(),snapshotGeneration:'synthetic-generation',observedAt:now,sourceEvidenceSha256:'a'.repeat(64)};
  snapshotProof(s,own,'ws',now-1,now+1000,now);for(const patch of [{observedAt:undefined},{degradation:'partial'},{sessionId:observer.sessionId},{expiresAt:new Date(now-1).toISOString()}])assert.throws(()=>snapshotProof({...s,...patch},own,'ws',now-1,now+1000,now));
  assert.throws(()=>completionProof({taskId:own.taskId},own,now-1,new Date(now).toISOString(),now));
  await Promise.all(pendingWrites);
- console.log(JSON.stringify({ok:true,lifecycleCases:5,typedProofNegatives:5,missingCompletionNotesRejected:true,earlyCompletionRetained:true,liveCalls:0,limits:'browser/terminal/CF producers simulated; real caller+ledger'}));
+ console.log(JSON.stringify({ok:true,lifecycleCases:count,typedProofNegatives:5,producerFailurePreservedPromptly:true,foreignOrStaleSentinelIgnored:true,missingCompletionNotesRejected:true,earlyCompletionRetained:true,liveCalls:0,limits:'browser/terminal/CF producers simulated; real caller+ledger'}));
 }finally{await Promise.all(pendingWrites);delete globalThis.__prospectiveTest;delete process.env.SAM_PROSPECTIVE_ROOT;delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;await rm(root,{recursive:true,force:true});}
