@@ -19,12 +19,19 @@ try{
  let clock=1000000;const args={root,phase:'setup',own,target:own,started:clock,hard:clock+2700000,sourceSha:'d'.repeat(40),now:()=>clock};
  let uploaded,events=[],mode='ok';
  const response=(status,b)=>({status:()=>status,body:async()=>b,headers:async()=>({'content-length':String(b.length)}),dispose:async()=>{events.push('dispose');}});
- const context={request:{fetch:async(url,o)=>{events.push(o.method==='POST'?'upload':'download');if(o.method==='POST'){uploaded=o.multipart.file.buffer;assert.equal(o.headers.Origin,'https://api.sammy.party');assert(!JSON.stringify(o.multipart).includes('SAM_PLAYWRIGHT'));if(mode==='upload-fail')return response(500,Buffer.from('{}'));return response(201,Buffer.from(JSON.stringify({id:'01M523ZZZZZZZZZZZZZZZZZZZZ',filename:o.multipart.file.name,projectId:'01KJNR9R3TEN3KX1ETE33852R8',directory:o.multipart.directory,uploadTaskId:o.multipart.uploadTaskId,uploadSessionId:mode==='foreign-metadata'?'foreign':o.multipart.uploadSessionId,uploadSource:'agent',sizeBytes:uploaded.length,status:'ready',replacedAt:null})));}if(mode==='late')clock+=90001;return response(200,mode==='mismatch'?Buffer.from('changed'):uploaded);}}};
+ const context={request:{fetch:async(url,o)=>{events.push(o.method==='POST'?'upload':'download');if(mode==='transport-private')throw Error('PRIVATE_CANARY_HTTP_ERROR_NEVER_PERSIST');if(o.method==='POST'){uploaded=o.multipart.file.buffer;assert.equal(o.headers.Origin,'https://api.sammy.party');assert(!JSON.stringify(o.multipart).includes('SAM_PLAYWRIGHT'));if(mode==='upload-fail')return response(500,Buffer.from('{}'));// Exact APIe2 uploadFile new-row -> rowToProjectFile -> c.json shape:
+ // new row has no replacedAt; mapper's undefined property is omitted by JSON.
+ const newRow={id:'01M523ZZZZZZZZZZZZZZZZZZZZ',filename:o.multipart.file.name,projectId:'01KJNR9R3TEN3KX1ETE33852R8',directory:o.multipart.directory,uploadTaskId:o.multipart.uploadTaskId,uploadSessionId:mode==='foreign-metadata'?'foreign':o.multipart.uploadSessionId,uploadSource:'agent',sizeBytes:uploaded.length,status:'ready'};
+ const mapped={...newRow,replacedAt:newRow.replacedAt};
+ if(mode==='explicit-null')mapped.replacedAt=null;
+ if(mode==='replacement')mapped.replacedAt='2026-10-16T00:00:00.000Z';
+ if(mode==='replacement-false')mapped.replacedAt=false;
+ return response(201,Buffer.from(JSON.stringify(mapped)));}if(mode==='late')clock+=90001;return response(200,mode==='mismatch'?Buffer.from('changed'):uploaded);}}};
  await snapshotRoot(root,own.taskId);const bundle=await phaseBundle(args);assert.equal(verifyBundle(bundle,bundle),sha(bundle));const decoded=JSON.parse(bundle);assert(Buffer.from(decoded.originals['baseline.json'],'base64').equals(bytes['baseline.json']));cases++;
  const receipt=await retainPhase({...args,context});assert.equal(receipt.sha256,sha(uploaded));assert.deepEqual(events,['upload','dispose','download','dispose']);assert((await readFile(root+'/exports/setup-retrieved.json')).equals(uploaded));cases++;
  // Retention must finish before caller can perform the next action.
  let advanced=false;mode='upload-fail';await assert.rejects(async()=>{await retainCheckpoint({...args,context,phase:'sleep',proof:{}});advanced=true;});assert.equal(advanced,false);cases++;
- mode='foreign-metadata';await assert.rejects(retainCheckpoint({...args,context,phase:'observer-sleep',proof:{}}),/upload/);cases++;
+ mode='foreign-metadata';await assert.rejects(retainCheckpoint({...args,context,phase:'observer-sleep',proof:{}}),/metadata/);cases++;
  mode='mismatch';await assert.rejects(retainCheckpoint({...args,context,phase:'wake',proof:{}}),/retrieval/);cases++;
  mode='late';await assert.rejects(retainCheckpoint({...args,context,phase:'complete',proof:{}}),/deadline/);cases++;
  clock=args.started;mode='ok';const calls=events.length;await assert.rejects(retainCheckpoint({...args,context,phase:'closing',hard:clock+540001,proof:{}}));assert.equal(events.length,calls);cases++;
@@ -43,5 +50,24 @@ try{
  const observeArgs={...args,phase:'observe',own:observer};const observed=JSON.parse(await phaseBundle(observeArgs));assert.equal(observed.manifest.taskId,own.taskId);assert.equal(observed.manifest.observerTaskId,observer.taskId);cases++;
  await writeFile(root+'/observe/done.json',JSON.stringify({...observeDone,taskId:observer.taskId,sessionId:observer.sessionId}));await assert.rejects(phaseBundle(observeArgs),/manifest/);cases++;
  let ticking=args.started;mode='ok';const tickReceipt=await retainCheckpoint({...args,context,phase:'closing',proof:{},now:()=>ticking++});assert(tickReceipt.verifiedAt>args.started);cases++;
+ // Independently isolate source-shaped metadata cases and inspect only fixed diagnostics.
+ async function isolated(label,scenario){
+  const folder=join(home,label);await mkdir(folder);await mkdir(folder+'/.agent-evidence');const isolatedRoot=folder+'/.agent-evidence/'+own.taskId;await mkdir(isolatedRoot,{mode:0o700});process.chdir(folder);mode=scenario;clock=args.started;
+  try{return await retainCheckpoint({...args,root:isolatedRoot,context,phase:'start',proof:{}});}
+  finally{process.chdir(home);}
+ }
+ mode='ok';const serialized=JSON.parse(uploaded);assert(!JSON.stringify(serialized).includes('PRIVATE_CANARY'));cases++;
+ const nullReceipt=await isolated('explicit-null','explicit-null');assert(nullReceipt.fileId);cases++;
+ for(const scenario of ['replacement','replacement-false','foreign-metadata','upload-fail','mismatch','late','transport-private']){
+  await assert.rejects(isolated(scenario,scenario));
+  const diagnostic=JSON.parse(await readFile(join(home,scenario,'.agent-evidence',own.taskId,'exports/start-retention-failure.json')));
+  assert.deepEqual(Object.keys(diagnostic).sort(),['phase','stage','category','status','schema','deadlineExceeded'].sort());assert(!JSON.stringify(diagnostic).includes('PRIVATE_CANARY'));
+  if(scenario==='replacement'||scenario==='replacement-false'){assert.equal(diagnostic.category,'metadata');assert.equal(diagnostic.status.upload,201);assert.equal(diagnostic.status.download,null);assert.deepEqual(diagnostic.schema,{replacedAtPresent:true,replacedAtNull:false});}
+  if(scenario==='transport-private'){assert.equal(diagnostic.category,'upload');assert.equal(diagnostic.status.upload,null);}
+  if(scenario==='upload-fail'){assert.equal(diagnostic.category,'upload');assert.equal(diagnostic.status.upload,500);}
+  if(scenario==='mismatch'){assert.equal(diagnostic.category,'retrieval');assert.equal(diagnostic.status.download,200);}
+  if(scenario==='late'){assert.equal(diagnostic.category,'deadline');assert.equal(diagnostic.deadlineExceeded,true);}
+  cases++;
+ }
  assert.equal(advanced,false);console.log(`PASS ${cases} retention cases; external calls simulated; real filesystem/original bytes/hash verification`);
 }finally{process.chdir(cwd);await rm(home,{recursive:true,force:true});}

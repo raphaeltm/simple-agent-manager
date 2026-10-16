@@ -38,22 +38,40 @@ export function verifyBundle(actual,expected){
 }
 async function retainBytes({context,root,phase,target,started,hard,sourceSha,bytes,now=Date.now}){
  // No durable-message roundtrip. Same finite owner browser context, separate upload and retrieval.
- const admittedAt=now(),until=Math.min(admittedAt+90000,hard-540000);if(until-admittedAt<90000)throw Error('retention-deadline');
- const left=()=>{const n=until-now();if(n<=0)throw Error('retention-deadline');return n;};
  await snapshotRoot(root,target.taskId);
+ const admittedAt=now(),until=Math.min(admittedAt+90000,hard-540000);
+ const left=()=>{const n=until-now();if(n<=0)throw Error('retention-deadline');return n;};
  const filename=phase+'-'+digest(bytes)+'.json',directory='/engineering/reliability/'+target.taskId+'/'+sourceSha+'/';
- const exportDir=root+'/exports';await mkdir(exportDir,{mode:0o700,recursive:true});if((await lstat(exportDir)).isSymbolicLink())throw Error('retention-path');
- await writeFile(exportDir+'/'+filename,bytes,{mode:0o600,flag:'wx'});left();
- let r;try{
-  r=await context.request.fetch(api+'/api/projects/'+project+'/library/upload',{method:'POST',headers:{Origin:api},multipart:{file:{name:filename,mimeType:'application/json',buffer:bytes},directory,uploadSource:'agent',uploadTaskId:target.taskId,uploadSessionId:target.sessionId},timeout:left(),maxRedirects:0,failOnStatusCode:false});
-  if(r.status()!==201)throw Error('retention-upload');const body=await r.body();if(body.length>32768)throw Error('retention-upload');const v=JSON.parse(body);if(!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(v.id)||v.filename!==filename||v.projectId!==project||v.directory!==directory||v.uploadTaskId!==target.taskId||v.uploadSessionId!==target.sessionId||v.uploadSource!=='agent'||v.sizeBytes!==bytes.length||v.status!=='ready'||v.replacedAt!==null)throw Error('retention-upload');
+ const exportDir=root+'/exports';let r,stage='deadline';
+ const status={upload:null,download:null},schema={replacedAtPresent:false,replacedAtNull:false};
+ const statusOf=response=>{const n=response.status();return Number.isInteger(n)&&n>=100&&n<=599?n:null;};
+ try{
+  if(until-admittedAt<90000)throw Error('retention-deadline');
+  stage='local';await mkdir(exportDir,{mode:0o700,recursive:true});if((await lstat(exportDir)).isSymbolicLink())throw Error('retention-path');
+  await writeFile(exportDir+'/'+filename,bytes,{mode:0o600,flag:'wx'});left();
+  stage='upload';r=await context.request.fetch(api+'/api/projects/'+project+'/library/upload',{method:'POST',headers:{Origin:api},multipart:{file:{name:filename,mimeType:'application/json',buffer:bytes},directory,uploadSource:'agent',uploadTaskId:target.taskId,uploadSessionId:target.sessionId},timeout:left(),maxRedirects:0,failOnStatusCode:false});
+  status.upload=statusOf(r);if(status.upload!==201)throw Error('retention-upload');
+  stage='metadata';const body=await r.body();if(body.length>32768)throw Error('retention-upload');const v=JSON.parse(body);
+  schema.replacedAtPresent=Object.hasOwn(v,'replacedAt');schema.replacedAtNull=v.replacedAt===null;
+  // API e2's new fileRow omits replacedAt; mapper returns undefined, omitted by JSON.
+  // Explicit null is also supported. A present replacement value always rejects.
+  if(!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(v.id)||v.filename!==filename||v.projectId!==project||v.directory!==directory||v.uploadTaskId!==target.taskId||v.uploadSessionId!==target.sessionId||v.uploadSource!=='agent'||v.sizeBytes!==bytes.length||v.status!=='ready'||(v.replacedAt!==null&&v.replacedAt!==undefined))throw Error('retention-upload');
   await r.dispose();r=null;left();
-  r=await context.request.fetch(api+'/api/projects/'+project+'/library/'+v.id+'/download',{headers:{Origin:api},timeout:left(),maxRedirects:0,failOnStatusCode:false});
-  if(r.status()!==200)throw Error('retention-download');const cl=(await r.headers())['content-length'];if(cl!==undefined&&(!/^\d+$/.test(cl)||Number(cl)>1500000))throw Error('retention-size');const downloaded=await r.body();left();const sha256=verifyBundle(downloaded,bytes);
-  await writeFile(exportDir+'/'+phase+'-retrieved.json',downloaded,{mode:0o600,flag:'wx'});
+  stage='download';r=await context.request.fetch(api+'/api/projects/'+project+'/library/'+v.id+'/download',{headers:{Origin:api},timeout:left(),maxRedirects:0,failOnStatusCode:false});
+  status.download=statusOf(r);if(status.download!==200)throw Error('retention-download');
+  stage='retrieval';const cl=(await r.headers())['content-length'];if(cl!==undefined&&(!/^\d+$/.test(cl)||Number(cl)>1500000))throw Error('retention-size');const downloaded=await r.body();left();const sha256=verifyBundle(downloaded,bytes);
+  stage='receipt';await writeFile(exportDir+'/'+phase+'-retrieved.json',downloaded,{mode:0o600,flag:'wx'});
   const receipt={taskId:target.taskId,sessionId:target.sessionId,phase,sourceSha,started,hard,fileId:v.id,sha256,verifiedAt:now()};
-  await writeFile(exportDir+'/'+phase+'-receipt.json',JSON.stringify(receipt),{mode:0o600,flag:'wx'});left();return receipt;
- }finally{if(r)await r.dispose();}
+  await writeFile(exportDir+'/'+phase+'-receipt.json',JSON.stringify(receipt),{mode:0o600,flag:'wx'});left();await r.dispose();r=null;left();return receipt;
+ }catch{
+  const deadlineExceeded=now()>=until;
+  // Fixed categories/numbers/booleans only, never response bodies, messages or stacks.
+  try{
+   await mkdir(exportDir,{mode:0o700,recursive:true});if((await lstat(exportDir)).isSymbolicLink())throw 0;
+   await writeFile(exportDir+'/'+phase+'-retention-failure.json',JSON.stringify({phase,stage,category:deadlineExceeded?'deadline':stage,status,schema,deadlineExceeded}),{mode:0o600,flag:'wx'});
+  }catch{}
+  throw Error('retention-'+(deadlineExceeded?'deadline':stage));
+ }finally{if(r)try{await r.dispose();}catch{}}
 }
 
 export async function retainPhase(args){
