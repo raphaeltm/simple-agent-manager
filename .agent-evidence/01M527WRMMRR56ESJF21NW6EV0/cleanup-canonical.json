@@ -1,0 +1,19 @@
+{
+  "observedAtMs": 1792150604183,
+  "ok": true,
+  "rows": [
+    {
+      "agent_version": null,
+      "capacity_pool_revision": null,
+      "claimed_warm_node_id": null,
+      "id": "01M527WRMMRR56ESJF21NW6EV0",
+      "node_id": null,
+      "node_status": null,
+      "runtime": null,
+      "status": "queued",
+      "warm_since": null,
+      "workspace_id": null,
+      "workspace_status": null
+    }
+  ]
+}
