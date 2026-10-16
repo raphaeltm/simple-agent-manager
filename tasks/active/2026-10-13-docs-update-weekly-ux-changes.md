@@ -224,3 +224,16 @@ fork|retry --launch` behaves like `sam tasks submit`; the mention note's exact s
   - #2362: an interrupted agent continues after a memory-pressure move in a Task or a Chat.
   - #2332: **Secret** variables are placeholders in an agent's shell, so the webhook-token flow
     can't use a Secret credential for `wrangler`; noted in Triggers and Webhook Triggers.
+
+### Round 6
+
+- **User journeys:** 1 MEDIUM, 3 LOW, adopted: triggers saved before #2327 reached production
+  (13 Oct 14:41 UTC; self-hosted before v2026.10.14) keep a stale `created` action because no
+  migration repaired filters, so a caution says how to fix them; the GitHub field list now matches
+  #2327 (**Required labels** for comments, **Source branches**, `/sam` default, `ready_for_review`);
+  old-release `@` caution keeps the punctuated-name workaround; #2362 isn't in a release, so
+  self-hosted Chats still wait.
+- **Code fact-check:** 3 MEDIUM, 4 LOW; five overlapped the journey round, plus: self-hosters told
+  to update to v2026.10.15 also get #2332 (Secret variables become placeholders, v2026.10.14), and
+  only message-box Instant chats without attachments lack a branch. Push-trigger edit gap appended
+  to idea `01M4SRSG31V5SJNC8KCHP0KMH4`.

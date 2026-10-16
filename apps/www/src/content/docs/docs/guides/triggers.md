@@ -30,12 +30,25 @@ You can create triggers yourself, or ask an agent in the project to create them 
      **Push**), then narrow it down. **Actions** starts at the event's usual action (`opened` for
      issues and pull requests, `created` for issue comments; pushes have none). Add others separated
      by commas, such as `opened, labeled` to also catch labels added later, or clear it to match
-     every action; SAM refuses an action GitHub never sends for that event. **Ignore actors** skips
-     accounts such as `dependabot[bot]`, **Required labels** (issues and pull requests) needs every
-     listed label, **Command prefix** (issue comments) only reacts to comments starting with, say,
-     `/sam`, **Branches** (pull requests and pushes) limits the branch pushed to, or a pull request's
-     source branch, and **Text contains** (not for pushes) looks for a keyword in the title, body, or
-     comment. Draft pull requests are skipped unless you clear **Ignore draft pull requests**.
+     every action; SAM refuses an action GitHub never sends for that event. **Ignore actors** (starts
+     as `dependabot[bot]`) skips those accounts, **Required labels** (not for pushes; for a comment,
+     the issue's or pull request's labels) needs every listed label, **Command prefix** (issue
+     comments; starts as `/sam`, so clear it to react to every comment) only reacts to comments
+     starting with it, **Branches** (pushes) or **Source branches** (pull requests) limits the branch
+     pushed to, or the branch a pull request comes from, and **Text contains** (not for pushes) looks
+     for a keyword in the title, body, or comment. Draft pull requests are skipped unless you clear
+     **Ignore draft pull requests**; to start when a draft is marked ready, add `ready_for_review`
+     to **Actions**.
+
+     :::caution[GitHub triggers made before 13 October, 14:40 UTC]
+     The form used to keep `created` in **Actions** whatever the event, which issues, pull requests,
+     and pushes never send, and it didn't save a cleared **Ignore draft pull requests**. So a
+     trigger made before then (before v2026.10.14 on a self-hosted instance) may never run. Open
+     **Edit**, which shows what was saved, correct **Actions** and the drafts box, and save. A
+     **Push** trigger's **Actions** can't be edited, so ask an agent to update the trigger, or
+     delete it and create it again.
+     :::
+
    - **Webhook**: optional filters on the JSON the service sends. See
      [Webhook Triggers](/docs/guides/webhook-triggers/).
 4. Write the **Prompt Template**: the instructions the agent gets on every run. **Available

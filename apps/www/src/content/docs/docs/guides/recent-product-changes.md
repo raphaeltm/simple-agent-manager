@@ -82,6 +82,10 @@ Update to v2026.10.15 or later: two regressions affect the releases in between.
 There are no new secrets or Cloudflare token permissions; the new database migrations run in the
 deploy pipeline, and the deploy creates the Connector's storage.
 
+- **Variables marked Secret are no longer in the agent's shell** (from v2026.10.14). In a workspace
+  started after you update, the agent sees a placeholder instead of the value and runs commands that
+  need it with `exec_with_secrets`, which only nodes started after the update support.
+  → [Run commands with secrets](/docs/guides/secret-execution/)
 - **The SAM Connector is on after you update** (from v2026.10.10). To keep it off, switch off
   **Enable Connector** in **Admin → Integrations → Connector**, or set the `CONNECTOR_ENABLED`
   GitHub Environment variable to `false` before you deploy. Claude's and ChatGPT's servers must be
