@@ -3,6 +3,7 @@ package acp
 import (
 	"errors"
 	"strings"
+	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 )
@@ -12,12 +13,15 @@ import (
 // would either miss provider failures or let untrusted metadata spoof one.
 // MCP tool errors without explicit source evidence stay generic.
 func ClassifyPromptError(err error) string {
+	if limit := ClassifyProviderLimit(err, time.Now()); limit != nil {
+		return limit.Error()
+	}
 	if err == nil {
 		return ""
 	}
 	var requestError *acpsdk.RequestError
 	if errors.As(err, &requestError) {
-		if requestError.Code != -32603 || requestError.Message != "Internal error" {
+		if requestError.Code != -32603 {
 			return ""
 		}
 		data, ok := requestError.Data.(map[string]any)
@@ -53,7 +57,7 @@ func ClassifyPromptError(err error) string {
 func ClassifyPromptFailure(message string) string {
 	text := strings.ToLower(strings.TrimSpace(strings.SplitN(message, "\n", 2)[0]))
 	switch text {
-	case "model_provider_credential_missing", "model_provider_credential_rejected", "model_unavailable", "provider_overloaded", "agent_crash", "network_error":
+	case "model_provider_credential_missing", "model_provider_credential_rejected", "model_unavailable", "provider_overloaded", "provider_limit_reached", "agent_crash", "network_error":
 		return text
 	}
 	for _, marker := range []string{" url=", " schema=", " https://", " http://"} {

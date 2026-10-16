@@ -137,6 +137,20 @@ export async function validateAttachments(
 ): Promise<ValidationResult> {
   const errors: string[] = [];
 
+  for (const attachment of attachments) {
+    if (
+      !/^[a-zA-Z0-9_-]+$/.test(attachment.uploadId) ||
+      !SAFE_FILENAME_REGEX.test(attachment.filename) ||
+      ['.', '..'].includes(attachment.filename) ||
+      !Number.isSafeInteger(attachment.size) ||
+      attachment.size <= 0 ||
+      attachment.size > getMaxBytes(env)
+    ) {
+      errors.push('Invalid attachment reference');
+    }
+  }
+  if (errors.length > 0) return { valid: false, errors };
+
   // Check count limit
   const maxFiles = getMaxFiles(env);
   if (attachments.length > maxFiles) {

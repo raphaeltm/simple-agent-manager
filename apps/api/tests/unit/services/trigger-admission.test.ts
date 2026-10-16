@@ -1,7 +1,13 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
-import { tasks, triggerExecutions, type TriggerRow, triggers } from '../../../src/db/schema';
+import {
+  githubTriggerInbox,
+  tasks,
+  triggerExecutions,
+  type TriggerRow,
+  triggers,
+} from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { admitAndSubmitTriggerExecution } from '../../../src/services/trigger-admission';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -35,6 +41,7 @@ function makeTriggerRow(overrides: Partial<TriggerRow> = {}): TriggerRow {
     lastTriggeredAt: null,
     triggerCount: 0,
     nextExecutionSequence: 2,
+    autoPauseResetSequence: null,
     nextFireAt: null,
     credentialBlockedReason: null,
     credentialBlockedAt: null,
@@ -47,7 +54,7 @@ function makeTriggerRow(overrides: Partial<TriggerRow> = {}): TriggerRow {
 
 function setup(overrides: Partial<TriggerRow> = {}) {
   const sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [tasks, triggers, triggerExecutions]);
+  createSchemaTables(sqlite, [tasks, triggers, triggerExecutions, githubTriggerInbox]);
   const trigger = makeTriggerRow(overrides);
   sqlite
     .prepare(
@@ -140,6 +147,102 @@ describe('admitAndSubmitTriggerExecution', () => {
         userId: 'owner-user',
       })
     );
+  });
+
+  it('counts failed attempts across skipped deliveries but explicit resume preserves history and resets by sequence', async () => {
+    const { sqlite, env, trigger } = setup();
+    sqlite
+      .prepare(
+        `INSERT INTO trigger_executions (id, trigger_id, project_id, status, sequence_number, created_at) VALUES ('failed-old', ?, ?, 'failed', 1, ?), ('skip-old', ?, ?, 'skipped', 2, ?)`
+      )
+      .run(trigger.id, PROJECT_ID, BASE_TIME, trigger.id, PROJECT_ID, BASE_TIME);
+    sqlite.prepare('UPDATE triggers SET next_execution_sequence = 3').run();
+    expect(await admit(env, trigger)).toEqual({ outcome: 'inactive', reason: 'paused' });
+    // Same timestamp is intentionally used for both generations; sequence is authoritative.
+    sqlite
+      .prepare(
+        "UPDATE triggers SET status = 'active', auto_pause_reset_sequence = next_execution_sequence"
+      )
+      .run();
+    const submitter = vi.fn(async () => ({
+      taskId: 'task-resumed',
+      sessionId: 'session-resumed',
+      branchName: 'sam/resumed',
+    }));
+    expect(await admit(env, trigger, submitter)).toMatchObject({ outcome: 'submitted' });
+    expect(
+      sqlite
+        .prepare(
+          "SELECT COUNT(*) AS count FROM trigger_executions WHERE id IN ('failed-old', 'skip-old')"
+        )
+        .get()
+    ).toEqual({ count: 2 });
+    sqlite
+      .prepare(
+        "UPDATE trigger_executions SET status = 'failed', task_id = NULL, created_at = ? WHERE sequence_number = 3"
+      )
+      .run(BASE_TIME);
+    expect(await admit(env, trigger)).toEqual({ outcome: 'inactive', reason: 'paused' });
+  });
+
+  it.each([null, 1])(
+    'does not re-pause a concurrent resume from failure boundary %s',
+    async (boundary) => {
+      const { sqlite, env, trigger } = setup();
+      sqlite
+        .prepare('UPDATE triggers SET auto_pause_reset_sequence = ?, next_execution_sequence = 2')
+        .run(boundary);
+      sqlite
+        .prepare(
+          `INSERT INTO trigger_executions (id, trigger_id, project_id, status, sequence_number, created_at) VALUES ('old-failure', ?, ?, 'failed', 1, ?)`
+        )
+        .run(trigger.id, PROJECT_ID, BASE_TIME);
+      const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+      let resumed = false;
+      vi.spyOn(env.DATABASE, 'prepare').mockImplementation((sql) => {
+        if (sql.includes("UPDATE triggers SET status = 'paused'") && !resumed) {
+          // The real resume SQL commits after the failure SELECT but before its pause CAS.
+          sqlite
+            .prepare(
+              "UPDATE triggers SET status = 'active', auto_pause_reset_sequence = next_execution_sequence"
+            )
+            .run();
+          resumed = true;
+        }
+        return prepare(sql);
+      });
+      const submitter = vi.fn(async () => ({
+        taskId: 'resumed-task',
+        sessionId: 'resumed-session',
+        branchName: 'resumed',
+      }));
+      expect(await admit(env, trigger, submitter)).toMatchObject({ outcome: 'submitted' });
+      expect(resumed).toBe(true);
+      expect(submitter).toHaveBeenCalledTimes(1);
+      expect(
+        sqlite.prepare('SELECT status, auto_pause_reset_sequence AS boundary FROM triggers').get()
+      ).toEqual({ status: 'active', boundary: 2 });
+      expect(
+        sqlite.prepare("SELECT status FROM trigger_executions WHERE id = 'old-failure'").get()
+      ).toEqual({ status: 'failed' });
+    }
+  );
+
+  it('a cancelled attempt breaks a consecutive failure streak', async () => {
+    const { sqlite, env, trigger } = setup();
+    sqlite
+      .prepare(
+        `INSERT INTO trigger_executions (id, trigger_id, project_id, status, sequence_number, created_at) VALUES ('old-fail', ?, ?, 'failed', 1, ?), ('cancelled', ?, ?, 'cancelled', 2, ?)`
+      )
+      .run(trigger.id, PROJECT_ID, BASE_TIME, trigger.id, PROJECT_ID, BASE_TIME);
+    sqlite.prepare('UPDATE triggers SET next_execution_sequence = 3').run();
+    expect(
+      await admit(
+        env,
+        trigger,
+        vi.fn(async () => ({ taskId: 'new', sessionId: 'new', branchName: 'new' }))
+      )
+    ).toMatchObject({ outcome: 'submitted' });
   });
 
   it('keeps a failed execution with a live linked task active for admission and auto-pause', async () => {

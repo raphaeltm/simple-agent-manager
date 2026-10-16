@@ -2,9 +2,12 @@ import type {
   CreateProjectEventSubscriptionInput,
   ProjectEventAdmissionResult,
   ProjectEventAgentVisibility,
+  ProjectEventDeliveryPreference,
   ProjectEventJsonValue,
   ProjectEventRecord,
   ProjectEventSubscriptionMutationResult,
+  ProjectEventSubscriptionOwner,
+  ProjectEventSubscriptionState,
 } from './project-events';
 
 /** Reserved provenance. Agent input is always evidence, never wake instructions. */
@@ -129,4 +132,29 @@ export type SendAgentChannelMessageResult = {
   senderSubscriptionId: string | null;
   /** Managed subscriptions this send retired (could no longer wake, or idle and over the share). */
   retiredSubscriptionIds: string[];
+};
+
+/** Read-only metadata for filters matching canonical channel publications; not read receipts. */
+export type ProjectEventChannelSubscriber = {
+  subscriptionId: string;
+  owner: ProjectEventSubscriptionOwner;
+  target: NonNullable<ProjectEventDeliveryPreference['target']>;
+  state: ProjectEventSubscriptionState;
+  expiresAt: number | null;
+  createdAt: number;
+};
+
+export type ListProjectEventChannelSubscribersInput = {
+  projectId: string;
+  channel: string;
+  state?: ProjectEventSubscriptionState | 'any';
+  cursor?: string;
+  limit?: number;
+};
+
+export type ProjectEventChannelSubscriberList = {
+  channel: string;
+  subscribers: ProjectEventChannelSubscriber[];
+  hasMore: boolean;
+  nextCursor: string | null;
 };

@@ -5,6 +5,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { reconcileDiagnosisRuns } from '../services/diagnosis-runner';
 import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-reconciliation';
+import { runGitHubTriggerRecovery } from '../services/github-trigger-recovery';
 import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
@@ -122,6 +123,9 @@ export async function scheduled(
 
   // Every sweep is isolated so one failure cannot suppress later recovery work.
   const sweeps = createSweepIsolator(env);
+  const githubTriggerRecovery = await sweeps.isolate('github_trigger_recovery', () =>
+    runGitHubTriggerRecovery(env, ctx.waitUntil.bind(ctx))
+  );
   const diagnosisRecovery = await sweeps.isolate('diagnosis_reconcile', () =>
     reconcileDiagnosisRuns(env)
   );
@@ -280,6 +284,7 @@ export async function scheduled(
     stuckTaskDoHealthChecked: stuckTasks?.doHealthChecked,
     observabilityPurgedByAge: observabilityPurge?.deletedByAge,
     observabilityPurgedByCount: observabilityPurge?.deletedByCount,
+    githubTriggerRecovery,
     cronTriggersChecked: cronTriggers?.checked,
     cronTriggersFired: cronTriggers?.fired,
     cronTriggersSkipped: cronTriggers?.skipped,

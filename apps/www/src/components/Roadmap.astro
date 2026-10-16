@@ -1,79 +1,79 @@
 ---
 const phases = [
   {
-    title: 'Core Platform',
+    title: 'Cloud workspaces',
     status: 'complete',
-    description: 'Workspace management, GitHub OAuth, encrypted credentials, VM provisioning',
+    description: 'Sign in with GitHub, keep keys encrypted, and get a fresh workspace for each task',
   },
   {
-    title: 'Browser Terminal & Agent Chat',
+    title: 'Chat and terminal in the browser',
     status: 'complete',
-    description: 'WebSocket terminal, structured agent chat via ACP',
+    description: 'Talk to the agent, or open a terminal in its workspace',
   },
   {
-    title: 'Multi-Agent Support',
+    title: 'Six coding agents',
     status: 'complete',
     description: 'Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp',
   },
   {
-    title: 'Multi-Workspace Nodes',
+    title: 'Several agents per server',
     status: 'complete',
-    description: 'Multiple isolated workspaces per VM',
+    description: 'Isolated workspaces share one server, so you need fewer of them',
   },
   {
-    title: 'Project-First Architecture',
+    title: 'Projects',
     status: 'complete',
-    description: 'Projects, persistent chat, activity feeds, task-driven workflows',
+    description: 'Chats, tasks, and history organized around each repository',
   },
   {
-    title: 'Multi-Cloud & More',
+    title: 'More clouds and ways to work',
     status: 'complete',
-    description: 'Scaleway, GCP, Vultr, Infomaniak, DigitalOcean, UpCloud, notifications, voice input, conversation forking, warm pooling',
+    description: 'Six more cloud providers, phone notifications, and voice input',
   },
   {
-    title: 'Task Orchestration',
+    title: 'Agents that delegate',
     status: 'complete',
-    description: 'Missions, agent-to-agent dispatch, task dependencies, durable messaging',
+    description: 'An agent can start other agents, message them, and wait on their results',
   },
   {
-    title: 'CLI',
+    title: 'Command line',
     status: 'complete',
-    description: 'Auth, task submission, chat prompts, task status, and runner doctor commands',
+    description: 'Start tasks and chats and check on them from your terminal',
   },
   {
-    title: 'App Deployments',
+    title: 'App deployments',
     status: 'complete',
-    description: 'Deployment environments, agent policy gates, Compose releases, logs, config, and volumes',
+    description: 'Run what the agent built as an app, with environments, logs, and settings',
   },
   {
-    title: 'Teams & Collaboration',
+    title: 'Teams',
     status: 'complete',
-    description: 'Shared projects, invite links, access requests, roles, and credential attribution',
+    description: 'Shared projects, invite links, and roles',
   },
   {
     title: 'Comments',
     status: 'complete',
-    description: 'Threads on chat messages and library files, sent to the agent as context',
+    description: 'Comment on agent replies and documents in the project library',
   },
   {
-    title: 'Compute Pools',
+    title: 'Choose your servers',
     status: 'complete',
-    description: 'Multi-cloud offering catalogs, placement strategy, exhaustion policy, and cost reporting',
+    description: 'Pick machine types across providers and track server hours',
   },
   {
-    title: 'Event Streams & Triggers',
+    title: 'Schedules and triggers',
     status: 'complete',
-    description: 'Cron, GitHub, and webhook triggers, plus schedules, standing watches, and agent channels',
+    description: 'Start agents on a schedule, from GitHub events, or from a webhook',
   },
   {
-    title: 'More Providers (AWS)',
+    title: 'AWS',
     status: 'planned',
-    description: 'AWS and expanded provider coverage',
+    description: 'Run agents on Amazon Web Services',
   },
   {
-    title: 'Role assignment for project members',
+    title: 'More team roles',
     status: 'planned',
-    description: 'User-facing controls for assigning maintainer and viewer roles',
+    description: 'Give members maintainer or viewer access',
   },
 ];
 ---
@@ -82,9 +82,9 @@ const phases = [
   <div class="container">
     <div class="roadmap-header animate-on-scroll">
       <span class="section-label">Roadmap</span>
-      <h2 class="section-title">Built in the open, shipped fast</h2>
+      <h2 class="section-title">What's shipped and what's planned</h2>
       <p class="section-subtitle">
-        DigitalOcean and UpCloud are live. More providers are coming next.
+        SAM is built in public on GitHub.
       </p>
     </div>
 
@@ -99,7 +99,7 @@ const phases = [
             <div class="timeline-meta">
               <h3 class="timeline-title">{phase.title}</h3>
               <span class={`timeline-badge ${phase.status}`}>
-                {phase.status === 'complete' ? 'Complete' : phase.status === 'in-progress' ? 'In Progress' : 'Planned'}
+                {phase.status === 'complete' ? 'Shipped' : phase.status === 'in-progress' ? 'In Progress' : 'Planned'}
               </span>
             </div>
             <p class="timeline-desc">{phase.description}</p>
@@ -141,39 +141,45 @@ const phases = [
     width: 20px;
   }
 
+  /* Status markers are node tiles: lit green when shipped, amber in progress, outlined when planned. */
   .timeline-dot {
     width: 14px;
     height: 14px;
-    border-radius: 50%;
+    border-radius: 4px;
     flex-shrink: 0;
     margin-top: 4px;
   }
 
   .timeline-dot.complete {
-    background: var(--color-accent);
-    box-shadow: 0 0 8px rgba(22, 163, 74, 0.4), 0 0 16px rgba(22, 163, 74, 0.15);
+    background: linear-gradient(160deg, #4ade80, #16a34a);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.4),
+      0 0 10px rgb(34 197 94 / 0.4);
   }
 
   .timeline-dot.in-progress {
-    background: var(--color-warning);
-    box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
-    animation: glow-pulse 2s ease-in-out infinite;
+    background: linear-gradient(160deg, #fbbf24, #d97706);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.4),
+      0 0 10px rgb(245 158 11 / 0.35);
   }
 
   .timeline-dot.planned {
     background: transparent;
-    border: 2px solid var(--color-fg-dim);
+    border: 1.5px solid var(--color-fg-dim);
   }
 
   :global(html[data-theme='light']) .timeline-dot.complete {
-    box-shadow: 0 0 8px var(--shadow-accent-soft), 0 0 16px var(--color-accent-glow);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.4),
+      0 0 8px var(--shadow-accent-soft);
   }
 
   .timeline-line {
     width: 1px;
     flex: 1;
     min-height: 20px;
-    background: var(--color-border-subtle);
+    background: linear-gradient(to bottom, rgb(34 197 94 / 0.35), var(--color-border-subtle));
   }
 
   .timeline-content {

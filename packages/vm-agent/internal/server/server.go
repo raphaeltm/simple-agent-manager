@@ -134,14 +134,20 @@ type Server struct {
 	stopOnce               sync.Once
 	stopErrMu              sync.Mutex
 	stopErr                error
-	publishJobsMu          sync.Mutex
-	publishJobs            map[string]publishJobState
-	buildPublishRunner     func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error)
-	applyWatchdogMu        sync.Mutex
-	applyWatchdogs         map[string]chan struct{}
-	sessionSnapshotMu      sync.Mutex
-	sessionSnapshotLocks   map[string]sessionSnapshotLock
-	sessionSnapshotRunner  func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error)
+	secretExecMu           sync.Mutex
+	secretExecJobs         map[string]*secretExecState
+	// Optional external runtime observation hook for integration tests.
+	secretExecContextResolver func(context.Context, string, string) (string, string, string, error)
+	// Explicit base environment for local execution tests; nil uses the runtime environment.
+	secretExecBaseEnv     []string
+	publishJobsMu         sync.Mutex
+	publishJobs           map[string]publishJobState
+	buildPublishRunner    func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error)
+	applyWatchdogMu       sync.Mutex
+	applyWatchdogs        map[string]chan struct{}
+	sessionSnapshotMu     sync.Mutex
+	sessionSnapshotLocks  map[string]sessionSnapshotLock
+	sessionSnapshotRunner func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error)
 
 	workspaceLifecycleMu    sync.Mutex
 	workspaceLifecycleLocks map[string]*workspaceLifecycleEntry
@@ -1198,6 +1204,10 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish", s.handleMcpBuildAndPublish)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish-jobs/{jobId}/start", s.handleMcpBuildAndPublishJobStart)
 
+	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/secret-exec", s.handleMcpSecretExecStart)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/secret-exec/{jobId}", s.handleMcpSecretExecStatus)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/secret-exec/{jobId}/cancel", s.handleMcpSecretExecCancel)
+
 	// Boot log WebSocket (available during bootstrap for real-time streaming)
 	mux.HandleFunc("GET /boot-log/ws", s.handleBootLogWS)
 
@@ -1441,6 +1451,7 @@ func (a *messageReporterAdapter) Enqueue(entry acp.MessageReportEntry) error {
 // closure.
 func (s *Server) makeTaskCompletionCallback(
 	controlPlaneURL, projectID, taskID, workspaceID, taskMode string,
+	completion ...acp.PromptCompletionContext,
 ) func(stopReason string, promptErr error) {
 	callbackURL := fmt.Sprintf("%s/api/projects/%s/tasks/%s/status/callback",
 		strings.TrimRight(controlPlaneURL, "/"), projectID, taskID)
@@ -1466,14 +1477,28 @@ func (s *Server) makeTaskCompletionCallback(
 			return
 		}
 
+		if limit := acp.ClassifyProviderLimit(promptErr, time.Now()); limit != nil {
+			body := map[string]interface{}{"toStatus": "failed", "reason": "Provider usage limit rejected the prompt", "errorMessage": "provider_limit_reached"}
+			if limit.AgentSessionID != "" {
+				body["providerLimitAgentSessionId"] = limit.AgentSessionID
+				body["providerLimitCredentialGeneration"] = limit.CredentialGeneration
+				body["providerLimitPromptAttemptId"] = limit.PromptAttemptID
+			}
+			if limit.ResetsAt != nil {
+				body["providerLimitResetsAt"] = *limit.ResetsAt
+			}
+			s.postTaskCallback(callbackURL, taskID, s.callbackTokenForWorkspace(workspaceID), body)
+			return
+		}
+
 		if stopReason == fatalErrorStopReason {
 			reason := "Agent prompt failed"
 			errorMessage := taskCallbackErrorMessage(promptErr)
-			s.postTaskCallback(callbackURL, taskID, s.callbackTokenForWorkspace(workspaceID), map[string]interface{}{
+			s.postTaskCallback(callbackURL, taskID, s.callbackTokenForWorkspace(workspaceID), withPromptCompletionIdentity(map[string]interface{}{
 				"toStatus":     "failed",
 				"reason":       reason,
 				"errorMessage": errorMessage,
-			})
+			}, completion))
 			return
 		}
 
@@ -1481,17 +1506,17 @@ func (s *Server) makeTaskCompletionCallback(
 			if taskMode == config.TaskModeConversation {
 				body := awaitingFollowupCallbackBody(gitPushResult{})
 				body["errorMessage"] = taskCallbackErrorMessage(promptErr)
-				s.postTaskCallback(callbackURL, taskID, s.callbackTokenForWorkspace(workspaceID), body)
+				s.postTaskCallback(callbackURL, taskID, s.callbackTokenForWorkspace(workspaceID), withPromptCompletionIdentity(body, completion))
 				return
 			}
 
 			reason := "Agent prompt failed"
 			errorMessage := taskCallbackErrorMessage(promptErr)
-			s.postTaskCallback(callbackURL, taskID, s.callbackTokenForWorkspace(workspaceID), map[string]interface{}{
+			s.postTaskCallback(callbackURL, taskID, s.callbackTokenForWorkspace(workspaceID), withPromptCompletionIdentity(map[string]interface{}{
 				"toStatus":     "failed",
 				"reason":       reason,
 				"errorMessage": errorMessage,
-			})
+			}, completion))
 			return
 		}
 
@@ -1519,13 +1544,26 @@ func (s *Server) makeTaskCompletionCallback(
 		// Send executionStep=awaiting_followup with git push results.
 		// The task stays in running status, waiting for user follow-up.
 		// The idle timer (Phase 6) will eventually clean up if no follow-up.
-		s.postTaskCallback(
-			callbackURL,
-			taskID,
-			s.callbackTokenForWorkspace(workspaceID),
-			awaitingFollowupCallbackBody(pushResult),
-		)
+		body := awaitingFollowupCallbackBody(pushResult)
+		body["promptSucceeded"] = true
+		if len(completion) == 1 {
+			body["providerLimitAgentSessionId"] = completion[0].AgentSessionID
+			body["providerLimitCredentialGeneration"] = completion[0].CredentialGeneration
+			body["providerLimitPromptAttemptId"] = completion[0].PromptAttemptID
+			body["promptStartedAt"] = completion[0].StartedAt
+		}
+		s.postTaskCallback(callbackURL, taskID, s.callbackTokenForWorkspace(workspaceID), body)
 	}
+}
+
+// Fence ordinary terminal failures to the same immutable prompt source too.
+func withPromptCompletionIdentity(body map[string]interface{}, completion []acp.PromptCompletionContext) map[string]interface{} {
+	if len(completion) == 1 {
+		body["providerLimitAgentSessionId"] = completion[0].AgentSessionID
+		body["providerLimitCredentialGeneration"] = completion[0].CredentialGeneration
+		body["providerLimitPromptAttemptId"] = completion[0].PromptAttemptID
+	}
+	return body
 }
 
 func isPromptCancellation(stopReason string, promptErr error) bool {

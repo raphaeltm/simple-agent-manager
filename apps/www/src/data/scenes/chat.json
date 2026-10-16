@@ -1,0 +1,46 @@
+{
+  "slug": "chat",
+  "description": "Animated preview of SAM's real new-chat screen with a sample project: the starter prompts appear, then the agent picker rises and a highlight moves from Claude Code to Codex and Gemini CLI and back. Timing is simulated.",
+  "aspect": { "wide": 1.3, "narrow": 1.05 },
+  "beats": [0, 600, 1200, 1900, 2600, 3300, 4000],
+  "layers": [
+    {
+      "id": "window",
+      "source": "sam-chat-new-session",
+      "box": { "x": 680, "y": 330, "w": 1240, "h": 870 },
+      "outWidth": 1200,
+      "place": { "wide": { "x": 2, "y": 2, "w": 88 }, "narrow": { "x": 1, "y": 1, "w": 98 } },
+      "depth": 0,
+      "tiles": [
+        { "box": { "x": 1040, "y": 350, "w": 520, "h": 116 }, "at": 1 },
+        { "box": { "x": 920, "y": 484, "w": 380, "h": 70 }, "at": 2 },
+        { "box": { "x": 1300, "y": 484, "w": 378, "h": 70 }, "at": 2 },
+        { "box": { "x": 920, "y": 554, "w": 380, "h": 88 }, "at": 2 },
+        { "box": { "x": 1300, "y": 554, "w": 378, "h": 88 }, "at": 2 }
+      ]
+    },
+    {
+      "id": "profiles",
+      "source": "sam-chat-new-session",
+      "box": { "x": 692, "y": 1004, "w": 552, "h": 62 },
+      "outWidth": 552,
+      "place": { "wide": { "x": 8, "y": 80, "w": 60 }, "narrow": { "x": 4, "y": 76, "w": 90 } },
+      "depth": 70,
+      "at": 3,
+      "glow": "mint",
+      "rings": [
+        {
+          "tone": "mint",
+          "stops": [
+            { "at": 3, "box": { "x": 699, "y": 1012, "w": 200, "h": 46 } },
+            { "at": 4, "box": { "x": 905, "y": 1012, "w": 143, "h": 46 } },
+            { "at": 5, "box": { "x": 1053, "y": 1012, "w": 184, "h": 46 } },
+            { "at": 6, "box": { "x": 699, "y": 1012, "w": 200, "h": 46 } }
+          ],
+          "until": 7
+        }
+      ]
+    }
+  ],
+  "lights": [{ "tone": "green", "at": 1 }]
+}

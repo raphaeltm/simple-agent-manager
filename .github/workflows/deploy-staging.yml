@@ -8,6 +8,20 @@ on:
         required: false
         type: boolean
         default: false
+      github_trigger_audit:
+        description: 'Run one bounded signed GitHub-trigger staging admission audit'
+        required: false
+        type: boolean
+        default: false
+      github_trigger_audit_send_only:
+        description: 'Send the prepared audit fixture on the already deployed candidate; skip deployment'
+        required: false
+        type: boolean
+        default: false
+      github_trigger_audit_fixture:
+        description: 'Nonsecret prepared fixture JSON; no tokens or signatures'
+        required: false
+        type: string
 
 # Only one staging deployment at a time; queue (don't cancel) concurrent requests
 concurrency:
@@ -24,6 +38,7 @@ permissions:
 
 jobs:
   deploy:
+    if: ${{ !inputs.github_trigger_audit_send_only }}
     uses: ./.github/workflows/deploy-reusable.yml
     with:
       environment: staging
@@ -36,21 +51,22 @@ jobs:
   # Skipped if the token is not configured (new deployments before token setup).
   smoke-tests:
     needs: deploy
-    if: ${{ !inputs.dry_run }}
+    if: ${{ always() && !inputs.dry_run && (needs.deploy.result == 'success' || (inputs.github_trigger_audit && inputs.github_trigger_audit_send_only)) }}
     runs-on: ubuntu-latest
     environment: staging
     env:
-      SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
+      SMOKE_TEST_TOKEN: ${{ !inputs.github_trigger_audit_send_only && secrets.SMOKE_TEST_TOKEN || '' }}
       SMOKE_TEST_URL: https://app.${{ vars.BASE_DOMAIN }}
       SMOKE_TEST_API_URL: https://api.${{ vars.BASE_DOMAIN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
 
       - name: Install Playwright
+        if: ${{ !inputs.github_trigger_audit_send_only }}
         run: |
           mkdir -p /tmp/pw && cd /tmp/pw
           npm init -y > /dev/null 2>&1
@@ -63,9 +79,18 @@ jobs:
           ln -sf /tmp/pw/node_modules/.bin/playwright $GITHUB_WORKSPACE/node_modules/.bin/playwright
 
       - name: Run smoke tests
-        if: ${{ env.SMOKE_TEST_TOKEN != '' }}
+        if: ${{ !inputs.github_trigger_audit_send_only && env.SMOKE_TEST_TOKEN != '' }}
         run: npx playwright test --config=tests/smoke/playwright.config.ts
 
       - name: Skip notice (no token configured)
-        if: ${{ env.SMOKE_TEST_TOKEN == '' }}
+        if: ${{ !inputs.github_trigger_audit_send_only && env.SMOKE_TEST_TOKEN == '' }}
         run: echo "⚠ Smoke tests skipped — SMOKE_TEST_TOKEN not configured in staging environment secrets"
+
+      - name: Send prepared signed GitHub trigger fixture (opt-in)
+        if: ${{ inputs.github_trigger_audit && inputs.github_trigger_audit_send_only }}
+        env:
+          GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
+          GH_APP_ID: ${{ secrets.GH_APP_ID }}
+          GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          GITHUB_TRIGGER_AUDIT_FIXTURE: ${{ inputs.github_trigger_audit_fixture }}
+        run: node scripts/e2e/github-trigger-staging.mjs --phase=send

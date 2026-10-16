@@ -26,6 +26,12 @@ describe('Astro template validation ratchet', () => {
     ).toEqual({ errors: 6, warnings: 2, hints: 18 });
   });
 
+  it('parses singular totals, which Astro prints for exactly one diagnostic', () => {
+    expect(
+      parseAstroCheckSummary(`Result (83 files):\n- 1 error\n- 1 warning\n- 1 hint\n`)
+    ).toEqual({ errors: 1, warnings: 1, hints: 1 });
+  });
+
   it('passes equal/decreased debt and fails a net increase', () => {
     expect(exceedsAstroErrorBaseline({ errors: 6, warnings: 0, hints: 0 }, 6)).toBe(false);
     expect(exceedsAstroErrorBaseline({ errors: 5, warnings: 0, hints: 0 }, 6)).toBe(false);

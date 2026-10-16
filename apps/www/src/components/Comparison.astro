@@ -1,101 +1,101 @@
 ---
 const rows = [
   {
-    label: 'Your code runs on',
-    sam: 'Instant containers or your cloud (Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, GCP)',
-    managed: 'Their infrastructure',
+    label: 'Where your code runs',
+    sam: 'Your own cloud account (Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, GCP), or Instant workspaces on your Cloudflare account alone',
+    vendor: "The vendor's cloud",
     selfHosted: 'Your infra (AWS, GCP, K8s)',
     samWins: true,
   },
   {
-    label: 'Agent choice',
+    label: 'Which agents you can use',
     sam: 'Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp',
-    managed: 'Their proprietary agent',
+    vendor: "Only the vendor's own agent",
     selfHosted: 'Native agent with configurable LLM providers; third-party agents in workspaces',
     samWins: true,
   },
   {
     label: 'Open source',
-    sam: 'AGPL-3.0 license',
-    managed: 'Proprietary',
+    sam: 'Yes, AGPL-3.0',
+    vendor: 'No',
     selfHosted: 'Open-source core',
     samWins: true,
   },
   {
-    label: 'Control plane',
-    sam: 'Workers Paid base plan',
-    managed: 'Bundled into pricing',
+    label: 'Running the service',
+    sam: 'Your Cloudflare Workers Paid plan, from $5 a month',
+    vendor: 'A paid plan per person, from $20 a month',
     selfHosted: 'You host it (K8s / Docker)',
     samWins: true,
   },
   {
-    label: 'Infrastructure cost',
-    sam: 'Your cloud bill for BYOC VMs; hosted compute where available',
-    managed: 'From $20/mo (compute + inference)',
+    label: 'What you pay for compute',
+    sam: 'You pay your cloud provider directly for servers, and Cloudflare for Instant workspaces',
+    vendor: 'Included in the plan, with usage caps or token charges',
     selfHosted: 'Your cloud bill + license fees',
     samWins: true,
   },
   {
-    label: 'Self-hostable',
-    sam: 'Fully — control plane + VMs',
-    managed: 'Managed service; enterprise VPC deployment available',
-    selfHosted: 'Yes — standalone server, Docker, or K8s; Terraform workspaces',
+    label: 'Can you host it yourself?',
+    sam: 'Yes, on your own Cloudflare account and cloud servers',
+    vendor: 'No; Claude Code and Cursor offer self-hosted runners on some plans',
+    selfHosted: 'Yes: standalone server, Docker, or K8s; Terraform workspaces',
     samWins: true,
   },
   {
-    label: 'Shared projects & roles',
-    sam: 'Invite link, approval, owner/admin roles, credential attribution',
-    managed: 'Seat-based team plans',
+    label: 'Team projects',
+    sam: 'Invite links, approval, and owner and admin roles',
+    vendor: 'Team plans with shared environments',
     selfHosted: 'Workspace access control and read-only agent chat sharing',
-    samWins: true,
+    samWins: false,
   },
   {
-    label: 'Comments that become agent context',
-    sam: 'Comment on chat or files, send to agent, agent replies and resolves',
-    managed: 'Bundled or unavailable',
+    label: 'Comments the agent reads',
+    sam: 'Comment on agent replies and send the thread to the agent, which can answer and resolve it',
+    vendor: 'Pull request comments, for example @codex or @cursor',
     selfHosted: 'No agent-level comments',
-    samWins: true,
+    samWins: false,
   },
   {
-    label: 'Compute pools across clouds',
-    sam: '7 providers, real SKUs, strategy + exhaustion policy per pool',
-    managed: 'Single vendor, opaque sizing',
+    label: 'Mixing cloud providers',
+    sam: '7 providers; you pick the machine types and how work is spread',
+    vendor: "No; fixed machine sizes on the vendor's cloud",
     selfHosted: 'You wire it yourself',
     samWins: true,
   },
   {
-    label: 'Token & compute usage reporting',
-    sam: 'Per-user usage by model/day + monthly budget, node-hours, admin cost summary',
-    managed: 'Bundled into one bill',
+    label: 'Usage tracking',
+    sam: 'Server hours per person and an estimated cost summary for admins',
+    vendor: 'Usage dashboards, plan limits, and spend caps',
     selfHosted: 'AI usage reporting and licensed AI Gateway budgets',
-    samWins: true,
+    samWins: false,
   },
   {
-    label: 'Event triggers & webhooks',
-    sam: 'Cron, GitHub events, authenticated webhooks, standing watches',
-    managed: 'Schedules, GitHub/integration events, and custom webhooks',
+    label: 'Work that starts on its own',
+    sam: 'Schedules, GitHub events, and authenticated webhooks',
+    vendor: 'GitHub and Slack triggers; Claude Code and Cursor also run on schedules',
     selfHosted: 'Agent API for custom webhook and scheduled automation',
-    samWins: true,
+    samWins: false,
   },
   {
-    label: 'Durable sleep/wake sessions',
-    sam: '7-day snapshots; labelled transcript + Git fallback for idle VMs',
-    managed: 'Varies, usually opaque',
+    label: 'Picking up where you left off',
+    sam: 'Sessions sleep and wake with their branch and uncommitted changes for up to 7 days',
+    vendor: 'Chats are kept; how long workspaces last varies by vendor',
     selfHosted: 'Persistent agent chats; workspace storage depends on template',
-    samWins: true,
+    samWins: false,
   },
   {
     label: 'Setup effort',
-    sam: 'Deploy to Cloudflare; connect a cloud for BYOC VMs',
-    managed: 'Zero config',
+    sam: 'Deploy to your Cloudflare account; connect a cloud provider for your own servers',
+    vendor: 'Sign in and connect GitHub',
     selfHosted: 'Server deployment + Terraform workspace templates',
     samWins: false,
   },
   {
-    label: 'Data sovereignty',
-    sam: 'VM code runs on your cloud; Instant and control plane data use Cloudflare',
-    managed: 'Vendor-managed',
-    selfHosted: 'Full — your infrastructure',
+    label: 'Where your data lives',
+    sam: 'Workspaces run on your servers or your Cloudflare account, which also stores chats, session snapshots, and SAM data',
+    vendor: 'Stored by the vendor',
+    selfHosted: 'Full: your infrastructure',
     samWins: true,
   },
 ];
@@ -105,17 +105,17 @@ const rows = [
   <div class="container">
     <div class="comparison-header animate-on-scroll">
       <span class="section-label">Comparison</span>
-      <h2 class="section-title">How SAM stacks up</h2>
+      <h2 class="section-title">How SAM compares</h2>
       <p class="section-subtitle">
-        Own your infrastructure. Choose your agent. Pay cloud prices.
+        SAM runs the agent you choose on accounts you own, at your providers' prices.
       </p>
     </div>
 
-    <div class="table-wrapper animate-on-scroll" tabindex="0" role="region" aria-label="Comparison table">
+    <div class="table-wrapper sam-glass sam-glass-rim animate-on-scroll" tabindex="0" role="region" aria-label="Comparison table">
       <table class="comparison-table">
         <thead>
           <tr>
-            <th class="col-label"></th>
+            <th class="col-label"><span class="sr-only">Capability</span></th>
             <th class="col-sam">
               <div class="col-header-content">
                 <img src="/images/sam-head.png" width="20" height="20" alt="" aria-hidden="true" style="border-radius: 4px;" />
@@ -124,13 +124,13 @@ const rows = [
             </th>
             <th class="col-other">
               <div class="col-header-content col-header-managed">
-                Managed AI Platforms
-                <span class="col-examples">Devin</span>
+                Vendor cloud agents
+                <span class="col-examples">Claude Code on the web, Codex cloud, Cursor Cloud Agents</span>
               </div>
             </th>
             <th class="col-other">
               <div class="col-header-content col-header-selfhosted">
-                Self-Hosted CDEs
+                Self-hosted dev environments
                 <span class="col-examples">Coder</span>
               </div>
             </th>
@@ -141,8 +141,8 @@ const rows = [
             <tr>
               <td class="col-label">{row.label}</td>
               <td class={`col-sam ${row.samWins ? 'highlight' : ''}`} data-label="SAM">{row.sam}</td>
-              <td class="col-other" data-label="Managed AI Platforms">{row.managed}</td>
-              <td class="col-other" data-label="Self-Hosted CDEs">{row.selfHosted}</td>
+              <td class="col-other" data-label="Vendor cloud agents">{row.vendor}</td>
+              <td class="col-other" data-label="Self-hosted dev environments">{row.selfHosted}</td>
             </tr>
           ))}
         </tbody>
@@ -150,9 +150,13 @@ const rows = [
     </div>
 
     <p class="comparison-footnote animate-on-scroll">
-      Compute costs exclude AI inference — connect agent credentials or use SAM-managed AI where configured.
-      Managed platform pricing bundles compute and model inference.
-      Read the <a href="/compare/paseo/">SAM vs Paseo comparison</a>.
+      What SAM costs in practice: its maintainer uses it heavily and pays $5 to $10 a month on Cloudflare
+      plus $20 to $40 on Hetzner (October 2026). A month without use costs the $5 Workers Paid minimum.
+      AI usage is extra and goes on your own key or plan.
+    </p>
+    <p class="comparison-footnote animate-on-scroll">
+      Vendor plans and features as listed on October 15, 2026. For a local alternative, read
+      <a href="/compare/paseo/">how SAM compares with Paseo</a>, a local-first app for coding agents.
     </p>
   </div>
 </section>
@@ -171,12 +175,7 @@ const rows = [
   .table-wrapper {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    background: var(--glass-bg);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--glass-shadow), 0 0 60px rgba(22, 163, 74, 0.04);
+    border-radius: var(--radius-xl);
     padding: 8px;
   }
 
@@ -184,7 +183,8 @@ const rows = [
     width: 100%;
     max-width: 900px;
     margin: 0 auto;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 0.9375rem;
   }
 
@@ -195,6 +195,10 @@ const rows = [
     border-bottom: 1px solid var(--color-border-subtle);
   }
 
+  .comparison-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
   .comparison-table thead th {
     font-family: var(--font-display);
     font-weight: 600;
@@ -202,6 +206,44 @@ const rows = [
     color: var(--color-fg-primary);
     border-bottom: 1px solid var(--color-border);
     padding-bottom: 16px;
+  }
+
+  /* SAM's column is a raised, lit band rather than green text. */
+  .comparison-table .col-sam {
+    background: rgb(34 197 94 / 0.07);
+    box-shadow:
+      inset 1px 0 0 rgb(34 197 94 / 0.22),
+      inset -1px 0 0 rgb(34 197 94 / 0.22);
+  }
+
+  .comparison-table th.col-sam {
+    border-radius: 12px 12px 0 0;
+    box-shadow:
+      inset 1px 0 0 rgb(34 197 94 / 0.22),
+      inset -1px 0 0 rgb(34 197 94 / 0.22),
+      inset 0 1px 0 rgb(34 197 94 / 0.35);
+  }
+
+  .comparison-table tbody tr:last-child td.col-sam {
+    border-radius: 0 0 12px 12px;
+    box-shadow:
+      inset 1px 0 0 rgb(34 197 94 / 0.22),
+      inset -1px 0 0 rgb(34 197 94 / 0.22),
+      inset 0 -1px 0 rgb(34 197 94 / 0.35);
+  }
+
+  :global(html[data-theme='light']) .comparison-table .col-sam {
+    background: rgb(21 128 61 / 0.06);
+  }
+
+  /* Where SAM does not win, the band goes neutral so the column does not oversell. */
+  .comparison-table td.col-sam:not(.highlight) {
+    background: rgb(255 255 255 / 0.03);
+    color: var(--color-fg-muted);
+  }
+
+  :global(html[data-theme='light']) .comparison-table td.col-sam:not(.highlight) {
+    background: rgb(17 39 29 / 0.03);
   }
 
   .col-header-content {
@@ -268,6 +310,15 @@ const rows = [
       padding: 4px 0;
     }
 
+    .comparison-table .col-sam,
+    .comparison-table th.col-sam,
+    .comparison-table tbody tr:last-child td.col-sam {
+      margin: 4px -8px;
+      padding: 8px;
+      border-radius: 10px;
+      box-shadow: inset 0 0 0 1px rgb(34 197 94 / 0.22);
+    }
+
     .col-label {
       white-space: normal;
       font-family: var(--font-display);
@@ -297,12 +348,11 @@ const rows = [
   }
 
   .col-sam.highlight {
-    color: var(--color-accent);
     font-weight: 500;
   }
 
   .col-other {
-    color: var(--color-fg-dim);
+    color: var(--color-fg-muted);
   }
 
   .comparison-footnote {
@@ -314,6 +364,10 @@ const rows = [
     margin-left: auto;
     margin-right: auto;
     line-height: 1.5;
+  }
+
+  .comparison-footnote + .comparison-footnote {
+    margin-top: 8px;
   }
 
   .comparison-footnote a {

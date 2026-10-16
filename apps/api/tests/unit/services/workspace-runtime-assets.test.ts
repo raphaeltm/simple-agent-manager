@@ -8,7 +8,10 @@ vi.mock('../../../src/services/encryption', () => ({
   decrypt: mocks.decrypt,
 }));
 
-import { getWorkspaceRuntimeAssets } from '../../../src/services/workspace-runtime-assets';
+import {
+  getSecretExecutionEnv,
+  getWorkspaceRuntimeAssets,
+} from '../../../src/services/workspace-runtime-assets';
 
 function makeDbWithLimitAwareness(rowsBySelect: unknown[][]) {
   let selectCall = 0;
@@ -48,10 +51,16 @@ describe('workspace runtime asset resolver', () => {
 
     expect(assets).toEqual({
       workspaceId: 'ws-1',
-      envVars: [{ key: 'API_TOKEN', value: 'decrypted-secret', isSecret: true }],
+      envVars: [
+        {
+          key: 'API_TOKEN',
+          value: '__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__API_TOKEN__',
+          isSecret: true,
+        },
+      ],
       files: [{ path: '.env.local', content: 'FOO=bar', isSecret: false }],
     });
-    expect(mocks.decrypt).toHaveBeenCalledWith('encrypted-token', 'iv', 'enc-key');
+    expect(mocks.decrypt).not.toHaveBeenCalled();
   });
 
   it('merges project, task profile, and skill runtime assets with skill precedence', async () => {
@@ -267,5 +276,68 @@ describe('workspace runtime asset resolver', () => {
         'enc-key'
       )
     ).rejects.toMatchObject({ statusCode: 403 });
+  });
+});
+
+describe('selected secret resolution', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.decrypt.mockResolvedValue('synthetic-selected');
+  });
+  const workspace = { id: 'ws', userId: 'user', projectId: 'project', agentProfileHint: null };
+  const session = {
+    id: 'session',
+    workspaceId: 'ws',
+    userId: 'user',
+    profileId: 'profile',
+    skillId: 'skill',
+  };
+  it('merges before decrypting and decrypts only the winning selected row', async () => {
+    const db = makeDbWithLimitAwareness([
+      [workspace],
+      [session],
+      [{ id: 'profile' }],
+      [{ id: 'skill' }],
+      [
+        { key: 'SELECTED', storedValue: 'project-cipher', valueIv: 'iv', isSecret: true },
+        { key: 'OTHER', storedValue: 'invalid', valueIv: null, isSecret: true },
+      ],
+      [{ key: 'SELECTED', storedValue: 'profile-cipher', valueIv: 'iv', isSecret: true }],
+      [{ key: 'SELECTED', storedValue: 'skill-cipher', valueIv: 'iv', isSecret: true }],
+    ]);
+    const result = await getSecretExecutionEnv(
+      db as never,
+      { workspaceId: 'ws', agentSessionId: 'session' },
+      'key',
+      ['SELECTED']
+    );
+    expect(result.envVars).toEqual([
+      { key: 'SELECTED', value: 'synthetic-selected', isSecret: true },
+      { key: 'OTHER', value: '__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__OTHER__', isSecret: true },
+    ]);
+    expect(mocks.decrypt).toHaveBeenCalledExactlyOnceWith('skill-cipher', 'iv', 'key');
+  });
+  it('rejects an unrecognized name without decrypting', async () => {
+    const db = makeDbWithLimitAwareness([
+      [workspace],
+      [{ ...session, profileId: null, skillId: null }],
+      [],
+    ]);
+    await expect(
+      getSecretExecutionEnv(db as never, { workspaceId: 'ws', agentSessionId: 'session' }, 'key', [
+        'MISSING',
+      ])
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(mocks.decrypt).not.toHaveBeenCalled();
+  });
+  it('rejects a session from another workspace before reading secrets', async () => {
+    const db = makeDbWithLimitAwareness([[workspace], [{ ...session, workspaceId: 'other' }]]);
+    await expect(
+      getSecretExecutionEnv(db as never, { workspaceId: 'ws', agentSessionId: 'session' }, 'key', [
+        'SELECTED',
+      ])
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(db.select).toHaveBeenCalledTimes(2);
+    expect(mocks.decrypt).not.toHaveBeenCalled();
   });
 });

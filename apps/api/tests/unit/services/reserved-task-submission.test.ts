@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -6,6 +7,8 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import type { startTaskRunnerDO } from '../../../src/services/task-runner-do';
+import { admitAndSubmitTriggerExecution } from '../../../src/services/trigger-admission';
+import { TriggerTaskSubmissionPendingError } from '../../../src/services/trigger-submission';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const projectDataBoundary = vi.hoisted(() => {
@@ -834,6 +837,222 @@ From that information, derive the repository change request and append a short n
     });
     expectOneSubmission(fixture);
   });
+
+  it('signed GitHub ingress retries overlapping leases through real task submission once', async () => {
+    const [
+      { Hono },
+      { createHmac },
+      { handleGitHubWebhook },
+      recovery,
+      runner,
+      title,
+      repository,
+      producer,
+    ] = await Promise.all([
+      import('hono'),
+      import('node:crypto'),
+      import('../../../src/routes/github-webhook'),
+      import('../../../src/services/github-trigger-recovery'),
+      import('../../../src/services/task-runner-do'),
+      import('../../../src/services/task-title'),
+      import('../../../src/routes/projects/_helpers'),
+      import('../../../src/services/github-project-event-producer'),
+    ]);
+    const fixture = seedReservedFixture('signed-github');
+    fixture.env.GITHUB_WEBHOOK_SECRET = 'synthetic-signed-secret';
+    fixture.sqlite.prepare('DELETE FROM trigger_executions WHERE id=?').run(fixture.executionId);
+    fixture.sqlite
+      .prepare('UPDATE github_installations SET external_installation_id=?')
+      .run('12345');
+    fixture.sqlite
+      .prepare("UPDATE projects SET github_repo_id=9876, repository='acme/synthetic'")
+      .run();
+    fixture.sqlite
+      .prepare(
+        "UPDATE triggers SET source_type='github',next_execution_sequence=1,max_concurrent=1,skip_if_running=1,trigger_count=0"
+      )
+      .run();
+    fixture.sqlite
+      .prepare(
+        "INSERT INTO github_trigger_configs(id,trigger_id,event_type,filters_json) VALUES('config',?,'issues','{}')"
+      )
+      .run(fixture.triggerId);
+    fixture.sqlite.exec(
+      'DROP TABLE github_trigger_inbox; ALTER TABLE trigger_executions DROP COLUMN github_delivery_id; ALTER TABLE trigger_executions DROP COLUMN admission_snapshot_json; ALTER TABLE trigger_executions DROP COLUMN submission_recorded_at;'
+    );
+    const { readFileSync } = await import('node:fs');
+    fixture.sqlite.exec(
+      readFileSync(
+        new URL('../../../src/db/migrations/0195_github_trigger_recovery.sql', import.meta.url),
+        'utf8'
+      )
+    );
+    const started = new Set<string>();
+    let unblock!: () => void;
+    const suspended = new Promise<void>((resolve) => {
+      unblock = resolve;
+    });
+    let entered!: () => void;
+    const boundary = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let physicalStarts = 0;
+    const startSpy = vi
+      .spyOn(runner, 'startTaskRunnerDO')
+      .mockImplementation(async (_env, input) => {
+        physicalStarts++;
+        started.add(input.taskId);
+        entered();
+        await suspended;
+      });
+    const ensureSpy = vi
+      .spyOn(runner, 'ensureTaskRunnerStarted')
+      .mockImplementation(async (_env, id) => started.has(id));
+    const titleSpy = vi
+      .spyOn(title, 'generateTaskTitle')
+      .mockResolvedValue('Synthetic trigger test');
+    const accessSpy = vi
+      .spyOn(repository, 'requireRepositoryOwnerAccess')
+      .mockResolvedValue(undefined);
+    const producerSpy = vi
+      .spyOn(producer, 'handleGitHubProjectEventAdmission')
+      .mockResolvedValue(undefined);
+    const app = new Hono<{ Bindings: Env }>();
+    app.post('/api/github/webhook', handleGitHubWebhook);
+    const payload = JSON.stringify({
+      action: 'opened',
+      installation: { id: 12345 },
+      repository: { id: 9876, full_name: 'acme/synthetic' },
+      sender: { login: 'synthetic', type: 'User' },
+      issue: { number: 1, title: 'Synthetic only', body: null, labels: [] },
+    });
+    const pending: Promise<unknown>[] = [];
+    try {
+      const response = await app.request(
+        '/api/github/webhook',
+        {
+          method: 'POST',
+          headers: {
+            'x-github-event': 'issues',
+            'x-github-delivery': 'signed-overlap',
+            'x-hub-signature-256': `sha256=${createHmac('sha256', fixture.env.GITHUB_WEBHOOK_SECRET).update(payload).digest('hex')}`,
+          },
+          body: payload,
+        },
+        fixture.env,
+        { waitUntil: (p) => pending.push(p), passThroughOnException: () => {} }
+      );
+      expect(response.status).toBe(200);
+      await boundary;
+      fixture.sqlite.prepare("UPDATE github_trigger_inbox SET lease_until='2000-01-01'").run();
+      await recovery.runGitHubTriggerRecovery(fixture.env);
+      expect(physicalStarts).toBe(1);
+      unblock();
+      await Promise.all(pending);
+      expect(scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM tasks')).toBe(1);
+      expect(scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM trigger_executions')).toBe(1);
+      expect(
+        scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM task_submission_checkpoints')
+      ).toBe(1);
+      expect(
+        fixture.sqlite.prepare('SELECT state,payload_json FROM github_trigger_inbox').get()
+      ).toEqual({ state: 'completed', payload_json: null });
+      expect(scalar(fixture.sqlite, 'SELECT trigger_count AS value FROM triggers')).toBe(1);
+    } finally {
+      unblock();
+      await Promise.allSettled(pending);
+      startSpy.mockRestore();
+      ensureSpy.mockRestore();
+      titleSpy.mockRestore();
+      accessSpy.mockRestore();
+      producerSpy.mockRestore();
+      fixture.sqlite.close();
+    }
+  });
+
+  it.each(['afterD1Commit', 'afterProjectDataCommit', 'afterRunnerStartConfirmed'] as const)(
+    'GitHub keyed admission reuses actual task/checkpoint after %s crash',
+    async (hook) => {
+      const fixture = seedReservedFixture(`github-${hook}`);
+      fixture.sqlite.prepare('DELETE FROM trigger_executions WHERE id=?').run(fixture.executionId);
+      fixture.sqlite
+        .prepare(
+          'CREATE UNIQUE INDEX github_execution_identity ON trigger_executions(github_delivery_id,trigger_id) WHERE github_delivery_id IS NOT NULL'
+        )
+        .run();
+      fixture.sqlite
+        .prepare(
+          'UPDATE triggers SET next_execution_sequence=1,max_concurrent=1,skip_if_running=1,trigger_count=0 WHERE id=?'
+        )
+        .run(fixture.triggerId);
+      const [trigger] = await drizzle(fixture.env.DATABASE, { schema })
+        .select()
+        .from(schema.triggers)
+        .where(eq(schema.triggers.id, fixture.triggerId));
+      const base = createSubmissionDependencies();
+      let failOnce = true;
+      const deps = {
+        ...base.deps,
+        [hook]: () => {
+          if (failOnce) {
+            failOnce = false;
+            throw new Error('synthetic crash');
+          }
+        },
+      };
+      const submitter: Parameters<typeof admitAndSubmitTriggerExecution>[2] = async (
+        _env,
+        input
+      ) => {
+        const result = await submitReservedTask(
+          fixture.env,
+          {
+            ...fixture.input,
+            identities: reservedIdentitiesForTriggerExecution(input.triggerExecutionId),
+            prompt: input.renderedPrompt,
+            source: {
+              ...fixture.input.source,
+              sourceExecutionId: input.triggerExecutionId,
+              triggerExecutionId: input.triggerExecutionId,
+            },
+          },
+          deps
+        );
+        if (result.outcome === 'admitted')
+          return {
+            taskId: result.taskId,
+            sessionId: result.sessionId,
+            branchName: result.branchName,
+          };
+        if (result.outcome === 'pending')
+          throw new TriggerTaskSubmissionPendingError({
+            taskId: result.taskId,
+            sessionId: result.sessionId,
+            branchName: result.branchName,
+          });
+        throw new Error(result.outcome);
+      };
+      const input = {
+        trigger: trigger!,
+        githubDeliveryId: 'synthetic-delivery',
+        eventType: 'github.issues.opened',
+        triggeredBy: 'github' as const,
+        renderPrompt: () => fixture.input.prompt,
+      };
+      const first = await admitAndSubmitTriggerExecution(fixture.env, input, submitter);
+      expect(first.outcome).toBe('failed');
+      const retry = await admitAndSubmitTriggerExecution(fixture.env, input, submitter);
+      expect(retry.outcome).toBe('submitted');
+      expect(scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM trigger_executions')).toBe(1);
+      expect(scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM tasks')).toBe(1);
+      expect(
+        scalar(fixture.sqlite, 'SELECT COUNT(*) AS value FROM task_submission_checkpoints')
+      ).toBe(1);
+      expect(base.startInputs).toHaveLength(1);
+      expect(scalar(fixture.sqlite, 'SELECT trigger_count AS value FROM triggers')).toBe(1);
+      fixture.sqlite.close();
+    }
+  );
 
   it.each([
     ['D1 commit', 'afterD1Commit'],

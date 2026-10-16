@@ -8,7 +8,13 @@ import { TASK_STATUSES, type TaskStatus } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { tasks, triggerExecutions, type TriggerRow, triggers } from '../../../src/db/schema';
+import {
+  githubTriggerInbox,
+  tasks,
+  triggerExecutions,
+  type TriggerRow,
+  triggers,
+} from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { admitAndSubmitTriggerExecution } from '../../../src/services/trigger-admission';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -43,7 +49,7 @@ afterEach(() => {
 function setup(skipIfRunning: boolean) {
   const sqlite = new Database(':memory:');
   databases.push(sqlite);
-  createSchemaTables(sqlite, [tasks, triggers, triggerExecutions]);
+  createSchemaTables(sqlite, [tasks, triggers, triggerExecutions, githubTriggerInbox]);
   sqlite
     .prepare(
       `INSERT INTO triggers
@@ -153,6 +159,36 @@ describe('trigger run slot by previous-run state', () => {
     expect(result).toMatchObject({ outcome: 'skipped', reason: 'still_running' });
     expect(submitter).not.toHaveBeenCalled();
   });
+
+  it.each(['pending', 'processing'])(
+    'only recoverable failed reservations hold slots while intake is %s',
+    async (state) => {
+      for (const executionStatus of ['skipped', 'completed', 'failed']) {
+        for (const taskStatus of [null, 'completed'] as const) {
+          const { sqlite, env, trigger } = setup(true);
+          previousRun(sqlite, {
+            executionStatus,
+            taskId: taskStatus ? 'previous-task' : null,
+            ...(taskStatus ? { taskStatus } : {}),
+          });
+          sqlite
+            .prepare(
+              "UPDATE trigger_executions SET github_delivery_id='unfinished-delivery' WHERE id='previous'"
+            )
+            .run();
+          sqlite
+            .prepare(
+              "INSERT INTO github_trigger_inbox (id,event_type,state,available_at,created_at,expires_at) VALUES ('unfinished-delivery','issues',?,?,?,?)"
+            )
+            .run(state, NOW, NOW, NOW);
+          const { result } = await nextFire(env, trigger);
+          expect(result.outcome).toBe(
+            executionStatus === 'failed' && taskStatus === null ? 'skipped' : 'submitted'
+          );
+        }
+      }
+    }
+  );
 
   it('releases the slot for a running execution whose task went to sleep', async () => {
     const { sqlite, env, trigger } = setup(true);

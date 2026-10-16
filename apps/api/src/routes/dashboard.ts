@@ -134,6 +134,7 @@ dashboardRoutes.get('/active-tasks', async (c) => {
       triggeredBy: row.triggeredBy,
       connectorClientName: row.connectorClientName,
       title: row.title,
+      ...(row.providerLimitReason ? { providerLimitReason: row.providerLimitReason } : {}),
       status: row.status as TaskStatus,
       executionStep: (row.executionStep as TaskExecutionStep) ?? null,
       projectId: row.projectId,

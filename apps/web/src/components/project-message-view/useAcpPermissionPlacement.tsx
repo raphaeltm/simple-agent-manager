@@ -6,6 +6,19 @@ import { AcpPermissionCard } from './AcpPermissionCard';
 import { AcpUrlCard } from './AcpUrlCard';
 import type { DisplayItem } from './tool-call-groups';
 
+/** Locate history without turning old receipts into permanent footer notices. */
+function historicalRowId(items: DisplayItem[], createdAt: number): string | undefined {
+  let nearest: DisplayItem | undefined;
+  for (const item of items) {
+    // Plan updates can replace a row in place with a newer timestamp, so display
+    // order is not necessarily timestamp order.
+    if (item.timestamp <= createdAt && (!nearest || item.timestamp >= nearest.timestamp)) {
+      nearest = item;
+    }
+  }
+  return nearest?.id;
+}
+
 function placeInteractions(
   displayItems: DisplayItem[],
   interactions: AcpInteractionSnapshotItem[]
@@ -22,11 +35,18 @@ function placeInteractions(
   const anchored = new Map<string, AcpInteractionSnapshotItem[]>();
   const unanchored: AcpInteractionSnapshotItem[] = [];
   for (const interaction of interactions) {
-    const rowId = interaction.toolCallId
+    const toolRowId = interaction.toolCallId
       ? rowIdByToolCallId.get(interaction.toolCallId)
       : undefined;
+    const rowId =
+      toolRowId ??
+      (interaction.state === 'pending'
+        ? undefined
+        : historicalRowId(displayItems, interaction.createdAt));
     if (!rowId) {
-      unanchored.push(interaction);
+      // Only requests that still need an answer belong at the live tail.
+      // Settled requests older than the loaded page reappear with their history.
+      if (interaction.state === 'pending') unanchored.push(interaction);
       continue;
     }
     const rowInteractions = anchored.get(rowId);

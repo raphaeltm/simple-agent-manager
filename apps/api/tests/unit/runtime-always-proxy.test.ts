@@ -307,7 +307,11 @@ beforeEach(async () => {
   mockKvGet.mockReset();
   queryCount = 0;
   mockKvGet.mockResolvedValue(null);
-  const attribution = await createAgentCredentialAttributionFixture('test-workspace', 'user1');
+  const attribution = await createAgentCredentialAttributionFixture('test-workspace', 'user1', {
+    nodeId: 'node1',
+    projectId: 'proj1',
+    chatSessionId: 'session1',
+  });
   attributionSqlite = attribution.sqlite;
   mockEnv.DATABASE = attribution.database;
 });

@@ -101,6 +101,32 @@ ask them (the session list shows who started it).
 If an agent keeps asking about every command when you don't want it to, see
 [An agent asks when you don't expect it](/docs/guides/agents/#an-agent-asks-when-you-dont-expect-it).
 
+## Waiting for a provider limit reset
+
+When using personal or project provider credentials, if Claude Code reaches a
+session or weekly subscription limit, Codex reaches a plan limit, or an API
+provider rejects a prompt with a reset time, SAM pauses the task instead of
+marking it failed. The chat and task card show the reset time in UTC. New tasks
+using the same rejected credential wait too. A limit discovered while a new
+workspace is being prepared holds it before the first agent prompt. That
+prepared workspace can remain allocated until retry; its normal runtime time
+limits still apply.
+
+Provider limits in SAM mode keep the existing task-failure behavior.
+
+SAM saves the session through its normal sleep process and schedules a continuation just
+after the reset. The agent checks the retained task, transcript and workspace before
+continuing, so an operation that may already have run is not blindly repeated. SAM does
+not switch the model, profile or credential to work around a limit.
+
+Automatic waiting is bounded. An unknown reset uses a short backoff; after three
+consecutive waits the task stays visibly blocked for review. A reset beyond the saved
+snapshot's safe lifetime also blocks automatic recovery and says that a fresh start will
+be needed after the limit resets. Automatic retry stays disabled for that blocked task,
+including after cancelling and rerunning it. Review the retained work, then cancel it and
+start a replacement task after the limit resets. If saving the session fails, the existing sleep recovery
+notice explains what was retained.
+
 ## SAM paused automatic check-ins
 
 Your work is safe: pausing check-ins doesn't stop the task, the workspace, or anything the agent

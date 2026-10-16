@@ -40,6 +40,7 @@ export interface AgentActivityTask {
   title: string;
   status: string;
   executionStep: string | null;
+  providerLimitReason?: string | null;
   projectId: string;
   projectName: string;
   userId: string;
@@ -63,6 +64,7 @@ interface AgentActivitySqlRow {
   title: string;
   status: string;
   executionStep: string | null;
+  providerLimitReason?: string | null;
   projectId: string;
   projectName: string;
   userId: string;
@@ -277,6 +279,7 @@ export async function listAgentActivityTasks(
       t.title AS title,
       t.status AS status,
       t.execution_step AS executionStep,
+      CASE WHEN t.admission_state IN ('provider_limit_waiting','provider_limit_blocked') THEN t.admission_reason ELSE NULL END AS providerLimitReason,
       t.project_id AS projectId,
       p.name AS projectName,
       t.user_id AS userId,
@@ -326,6 +329,7 @@ export async function listAgentActivityTasks(
     title: row.title,
     status: row.status,
     executionStep: row.executionStep,
+    ...(row.providerLimitReason ? { providerLimitReason: row.providerLimitReason } : {}),
     projectId: row.projectId,
     projectName: row.projectName,
     userId: row.userId,

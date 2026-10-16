@@ -66,6 +66,7 @@ func (s *Server) stopSessionHost(workspaceID, sessionID string) {
 	delete(s.sessionTaskCtx, hostKey)
 	delete(s.sessionManualInteractionConfig, hostKey)
 	s.sessionHostMu.Unlock()
+	s.cancelSecretExecutionsForOwner(workspaceID, sessionID)
 
 	// Clean up persisted MCP servers (best-effort).
 	if s.store != nil {
@@ -112,6 +113,7 @@ func (s *Server) removeWorkspaceContainer(workspaceID string) {
 }
 
 func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
+	s.cancelSecretExecutionsForOwner(workspaceID, "")
 	prefix := workspaceID + ":"
 
 	var hosts []*acp.SessionHost
@@ -859,6 +861,7 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.cancelSecretExecutionsForOwner(workspaceID, "")
 	runtime.PTY.CloseAllSessions()
 
 	sessions := s.agentSessions.List(workspaceID)

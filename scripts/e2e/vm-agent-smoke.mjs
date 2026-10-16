@@ -130,6 +130,18 @@ function startControlPlaneMock(publicJwk) {
       return;
     }
 
+    if (req.method === 'GET' && url.pathname === `/api/workspaces/${WORKSPACE_ID}/runtime-assets`) {
+      res.setHeader('content-type', 'application/json');
+      if (req.headers.authorization !== `Bearer ${CALLBACK_TOKEN}`) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'unauthorized', message: 'Invalid callback token' }));
+        return;
+      }
+      res.writeHead(200);
+      res.end(JSON.stringify({ envVars: [], files: [] }));
+      return;
+    }
+
     if (req.method === 'POST' && url.pathname === `/api/workspaces/${WORKSPACE_ID}/agent-key`) {
       const auth = req.headers.authorization ?? '';
       let body = '';

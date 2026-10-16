@@ -30,6 +30,7 @@ import type {
   GetProjectEventSubscriptionInput,
   LibraryFileCommentMutationResponse,
   ListProjectEventChannelsInput,
+  ListProjectEventChannelSubscribersInput,
   ListProjectEventDeliveryAttemptsInput,
   ListProjectEventDeliveryBatchesInput,
   ListProjectEventSubscriptionEventsInput,
@@ -44,6 +45,7 @@ import type {
   ProjectEventChannelHistory,
   ProjectEventChannelHistoryInput,
   ProjectEventChannelList,
+  ProjectEventChannelSubscriberList,
   ProjectEventDeliveryAckResult,
   ProjectEventDeliveryAttemptListResult,
   ProjectEventDeliveryAttemptMutationResult,
@@ -428,6 +430,9 @@ type ProjectDataEventRpc = {
   sendAgentChannelMessage(
     input: SendAgentChannelMessageInput
   ): Promise<SendAgentChannelMessageResult>;
+  listProjectEventChannelSubscribers(
+    input: ListProjectEventChannelSubscribersInput
+  ): Promise<ProjectEventChannelSubscriberList>;
   listProjectEventChannels(input: ListProjectEventChannelsInput): Promise<ProjectEventChannelList>;
   getProjectEventChannelHistory(
     input: ProjectEventChannelHistoryInput
@@ -1883,6 +1888,14 @@ export function sendAgentChannelMessage(
   input: ProjectDataEventInput<SendAgentChannelMessageInput>
 ) {
   return callProjectDataEvent(env, projectId, 'sendAgentChannelMessage', input);
+}
+
+export function listProjectEventChannelSubscribers(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ListProjectEventChannelSubscribersInput>
+) {
+  return callProjectDataEvent(env, projectId, 'listProjectEventChannelSubscribers', input);
 }
 
 export function listProjectEventChannels(

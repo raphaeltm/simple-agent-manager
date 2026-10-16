@@ -155,12 +155,13 @@ async function resolveCandidateProjectId(
   sql: SqlStorage
 ): Promise<string | null> {
   const taskRow = await env.DATABASE.prepare(
-    `SELECT task_mode, status, project_id, workspace_id, chat_session_id
+    `SELECT task_mode, status, project_id, workspace_id, chat_session_id, admission_state
      FROM tasks WHERE id = ? LIMIT 1`
   )
     .bind(taskId)
     .first<{
       task_mode: string | null;
+      admission_state?: string | null;
       status: string;
       project_id: string | null;
       workspace_id: string | null;
@@ -190,6 +191,8 @@ async function resolveCandidateProjectId(
   }
   if (
     taskRow.task_mode !== 'task' ||
+    taskRow.admission_state === 'provider_limit_waiting' ||
+    taskRow.admission_state === 'provider_limit_blocked' ||
     (TASK_TERMINAL_STATUSES as readonly string[]).includes(taskRow.status)
   ) {
     excludeReconciliationCandidateForTask(sql, sessionId, taskId);

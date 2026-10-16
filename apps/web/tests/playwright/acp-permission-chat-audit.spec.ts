@@ -776,3 +776,35 @@ for (const viewport of ['iPhone SE (375x667)', 'Desktop (1280x800)']) {
     );
   });
 }
+
+test('settled unanchored permissions stay before newer conversation activity', async ({ page }) => {
+  const backend = createPermissionBackend();
+  const now = Date.now();
+  const historical = {
+    ...backend.snapshot.pending[1]!,
+    state: 'delivery_confirmed',
+    createdAt: MOCK_MESSAGES[MOCK_MESSAGES.length - 1]!.createdAt - 1_500,
+    updatedAt: now - 1_000,
+    deliveryState: 'confirmed',
+  };
+  backend.snapshot = { ...backend.snapshot, pending: [], settled: [historical] };
+  await setupPermissionMocks(page, true, backend);
+  await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+  const card = page.getByTestId(`acp-permission-${UNANCHORED_ID}`);
+  await expect(card).toHaveAttribute('data-interaction-state', 'delivery_confirmed');
+  // The request predates the newest tool call; it belongs to history, not Footer.
+  await expect(card.locator('xpath=ancestor::*[@data-conversation-item-id]')).toHaveCount(1);
+  await card.scrollIntoViewIfNeeded();
+  const row = card.locator('xpath=ancestor::*[@data-conversation-item-id][1]');
+  await expect(row).toHaveAttribute('data-conversation-item-id', 'history-29');
+  await expect(card.getByText('Delivered to agent', { exact: true })).toBeVisible();
+  const toolRow = page.locator('[data-conversation-item-id="tool-start"]');
+  await expect(toolRow).toBeAttached();
+  const cardBox = await card.boundingBox();
+  const toolBox = await toolRow.boundingBox();
+  expect(cardBox).not.toBeNull();
+  expect(toolBox).not.toBeNull();
+  expect(cardBox!.y + cardBox!.height).toBeLessThanOrEqual(toolBox!.y + 1);
+  await assertNoOverflow(page);
+  await screenshot(page, `acp-permission-history-${page.viewportSize()!.width}`);
+});

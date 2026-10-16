@@ -41,6 +41,7 @@ import {
   setTaskStatus,
   updateTaskExecutionStepFromCallback,
 } from './_helpers';
+import { handleProviderLimitCallback } from './provider-limit-callback';
 
 /**
  * Task callback route — mounted BEFORE projectsRoutes in index.ts
@@ -98,6 +99,11 @@ taskCallbackRoute.post(
     );
     const revalidateWorkspace = () =>
       assertWorkspaceCallbackIdentityCurrent(c.env, workspaceSnapshot, 'task_status');
+
+    if (!body.toStatus) {
+      const handled = await handleProviderLimitCallback(c.env, task, body, revalidateWorkspace);
+      if (handled) return c.json(toTaskResponse(handled));
+    }
 
     // --- Execution-step-only update (no status transition) ---
     // When executionStep is provided without toStatus, update the step and
@@ -255,6 +261,10 @@ taskCallbackRoute.post(
       return c.json(toTaskResponse(refreshed, blocked));
     }
 
+    // Delayed old-agent errors cannot terminalize a task after its verified sleep.
+    if (task.status === 'sleeping' && body.toStatus === 'failed')
+      return c.json(toTaskResponse(task));
+
     // --- Standard status transition ---
     if (!isTaskStatus(body.toStatus)) {
       throw errors.badRequest('Invalid toStatus value');
@@ -281,10 +291,7 @@ taskCallbackRoute.post(
       return c.json(toTaskResponse(task, blocked));
     }
 
-    if (
-      task.status === body.toStatus &&
-      callbackTerminalStatus
-    ) {
+    if (task.status === body.toStatus && callbackTerminalStatus) {
       await revalidateWorkspace();
       await cleanupTerminalTaskResourcesOrThrow(c.env, taskId, {
         status: callbackTerminalStatus,
@@ -351,6 +358,11 @@ taskCallbackRoute.post(
         const blocked = await computeBlockedForTask(db, task.id);
         return c.json(toTaskResponse(task, blocked));
       }
+    }
+
+    if (body.toStatus === 'failed') {
+      const handled = await handleProviderLimitCallback(c.env, task, body, revalidateWorkspace);
+      if (handled) return c.json(toTaskResponse(handled));
     }
 
     const updatedTask = await setTaskStatus(

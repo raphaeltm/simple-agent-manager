@@ -29,10 +29,11 @@ export interface GitHubWebhookEvent {
     body?: string;
     labels?: Array<{ name: string }>;
     draft?: boolean;
-    head?: { ref: string };
+    head?: { ref: string; sha?: string };
     base?: { ref: string };
   };
   comment?: { body?: string };
+  after?: string;
   ref?: string; // for push events: 'refs/heads/main'
   head_commit?: { id: string; message?: string };
 }
@@ -113,8 +114,8 @@ export function evaluateFilters(
     if (!branch) {
       return { matched: false, reason: 'no branch found in event' };
     }
-    const branchSet = new Set(filters.branches.map((b: string) => b.toLowerCase()));
-    if (!branchSet.has(branch.toLowerCase())) {
+    const branchSet = new Set(filters.branches);
+    if (!branchSet.has(branch)) {
       return {
         matched: false,
         reason: `branch '${branch}' not in [${filters.branches.join(', ')}]`,
@@ -172,7 +173,7 @@ const LabelsFieldSchema = v.fallback(
   undefined
 );
 
-const GitHubWebhookRefSchema = v.object({ ref: RequiredStringSchema });
+const GitHubWebhookRefSchema = v.object({ ref: RequiredStringSchema, sha: OptionalStringSchema });
 const RefFieldSchema = v.fallback(v.optional(GitHubWebhookRefSchema), undefined);
 
 const GitHubWebhookSenderSchema = v.object({
@@ -220,6 +221,7 @@ const GitHubWebhookPayloadSchema = v.object({
   pull_request: v.fallback(v.optional(GitHubWebhookPullRequestSchema), undefined),
   comment: v.fallback(v.optional(GitHubWebhookCommentSchema), undefined),
   ref: OptionalStringSchema,
+  after: OptionalStringSchema,
   head_commit: v.fallback(v.optional(GitHubWebhookHeadCommitSchema), undefined),
 });
 

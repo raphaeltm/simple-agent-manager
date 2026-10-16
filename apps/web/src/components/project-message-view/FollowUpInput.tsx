@@ -2,7 +2,10 @@ import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
-import { ProjectChatComposer } from '../project-chat/ProjectChatComposer';
+import {
+  ProjectChatComposer,
+  type ProjectChatComposerAttachment,
+} from '../project-chat/ProjectChatComposer';
 
 /** Follow-up message input for active, idle, or sleeping resumable sessions. */
 export function FollowUpInput({
@@ -12,6 +15,9 @@ export function FollowUpInput({
   onUploadFiles,
   sending,
   uploading,
+  attachments,
+  onRemoveAttachment,
+  uploadError,
   placeholder,
   transcribeApiUrl,
   slashCommands,
@@ -20,9 +26,12 @@ export function FollowUpInput({
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
-  onUploadFiles?: (files: FileList) => void;
+  onUploadFiles?: (files: FileList | File[]) => void;
   sending: boolean;
   uploading?: boolean;
+  attachments?: ProjectChatComposerAttachment[];
+  onRemoveAttachment?: (index: number) => void;
+  uploadError?: string | null;
   placeholder: string;
   transcribeApiUrl: string;
   slashCommands?: SlashCommand[];
@@ -32,12 +41,19 @@ export function FollowUpInput({
 
   return (
     <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
+      {uploadError && (
+        <p role="alert" className="text-danger text-sm">
+          {uploadError}
+        </p>
+      )}
       <ProjectChatComposer
         value={value}
         onChange={onChange}
         onSend={onSend}
         sending={sending}
         uploading={uploading}
+        attachments={attachments}
+        onRemoveAttachment={onRemoveAttachment}
         placeholder={placeholder}
         transcribeApiUrl={transcribeApiUrl}
         slashCommands={slashCommands}

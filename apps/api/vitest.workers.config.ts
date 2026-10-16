@@ -165,4 +165,12 @@ export default defineConfig({
     // of runtimes concurrently and losing the pool to worker exits.
     fileParallelism: false,
   },
+  // Test-only producer bridge. This constant is absent from production builds.
+  define: {
+    __PROVIDER_LIMIT_CALLBACKS__: process.env.TEST_PROVIDER_LIMIT_CALLBACK_OUTPUT
+      ? await (
+          await import('node:fs/promises')
+        ).readFile(process.env.TEST_PROVIDER_LIMIT_CALLBACK_OUTPUT, 'utf8')
+      : 'null',
+  },
 });

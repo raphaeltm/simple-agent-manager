@@ -12,7 +12,10 @@ import type {
 import * as activity from './activity';
 import { invalidCheckpointContinuationTarget } from './checkpoint-continuation-delivery';
 import type { DurableExecutionConfig } from './durable-execution-config';
-import { invalidScheduledDeliveryTarget } from './project-event-schedules-delivery';
+import {
+  invalidScheduledDeliveryTarget,
+  releaseAcceptedProviderLimitSchedule,
+} from './project-event-schedules-delivery';
 import {
   advanceProjectEventPromptAttemptCheckpoint,
   invalidProjectEventWakeDeliveryTargetResult,
@@ -156,6 +159,28 @@ export async function runPromptDeliveryClaim(
     };
   }
 
+  if (result.kind === 'accepted') {
+    try {
+      await releaseAcceptedProviderLimitSchedule(sql, env, hooks.projectId, claim, result);
+    } catch {
+      result = {
+        kind: 'ambiguous',
+        reason: 'receipt_unavailable',
+        error: 'Provider continuation acceptance checkpoint unavailable',
+        runtimeIdentity: result.runtimeIdentity,
+        capabilities: result.capabilities,
+        receipt: result.receipt,
+      };
+      // Keep the submitted claim leased so the existing reconcile mode reads
+      // the receipt; terminal ambiguity would strand this accepted continuation.
+      log.warn('provider_continuation.checkpoint_retry', {
+        messageId: claim.message.id,
+        attemptId: claim.attemptId,
+      });
+      await hooks.recalculateAlarm();
+      return result;
+    }
+  }
   const applied = applyPromptDeliveryResult(sql, claim, result, config);
   if (applied) {
     advanceProjectEventPromptAttemptCheckpoint(sql, hooks.projectId, claim, result);

@@ -1241,3 +1241,112 @@ test.describe('Trigger Form — Desktop', () => {
     await verifyWebhookCreation(page, 'trigger-webhook-credential-desktop');
   });
 });
+
+// Actual GitHub drawer controls, stress text and submitted event configuration.
+test.describe('GitHub trigger contract form', () => {
+  test('defaults and event switches', async ({ page }, testInfo) => {
+    await setupApiMocks(page, { triggers: [] });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.getByText('Create your first trigger').click();
+    await page.getByRole('button', { name: /GitHub event/ }).click();
+    await page
+      .getByLabel('Name', { exact: true })
+      .fill('Review GitHub issue 🐙 ' + 'A long repository automation description '.repeat(6));
+    await page.getByLabel('GitHub event', { exact: true }).selectOption('issues');
+    await expect(page.getByLabel('Actions', { exact: true })).toHaveValue('opened');
+    await page.getByLabel('Required labels').fill('bug, needs-agent');
+    await page
+      .getByLabel('Prompt template', { exact: true })
+      .fill(
+        'Review {{github.title}} ' + 'Untrusted issue text <script> is shown literally. '.repeat(12)
+      );
+    await page
+      .getByLabel('GitHub event', { exact: true })
+      .evaluate((element) => element.scrollIntoView({ block: 'start' }));
+    await screenshot(
+      page,
+      `github-trigger-issues-${testInfo.project.name.includes('Desktop') ? 'desktop' : 'mobile'}`
+    );
+    await assertNoOverflow(page);
+    await page.getByLabel('GitHub event', { exact: true }).selectOption('pull_request');
+    await expect(page.getByLabel('Required labels')).toHaveValue('bug, needs-agent');
+    await page.getByLabel('Source branches').fill('feature/A, release/compatibility');
+    await page.getByLabel('Ignore draft pull requests').uncheck();
+    await page
+      .getByLabel('GitHub event', { exact: true })
+      .evaluate((element) => element.scrollIntoView({ block: 'start' }));
+    await screenshot(
+      page,
+      `github-trigger-pr-${testInfo.project.name.includes('Desktop') ? 'desktop' : 'mobile'}`
+    );
+    await assertNoOverflow(page);
+    await page.getByLabel('GitHub event', { exact: true }).selectOption('push');
+    await expect(page.getByLabel('Actions', { exact: true })).toBeDisabled();
+    await expect(page.getByLabel('Actions', { exact: true })).toHaveValue('');
+    await expect(page.getByLabel('Branches', { exact: true })).toHaveValue(
+      'feature/A, release/compatibility'
+    );
+    await page
+      .getByLabel('GitHub event', { exact: true })
+      .evaluate((element) => element.scrollIntoView({ block: 'start' }));
+    await screenshot(
+      page,
+      `github-trigger-push-${testInfo.project.name.includes('Desktop') ? 'desktop' : 'mobile'}`
+    );
+    await assertNoOverflow(page);
+  });
+  test('saved configuration remains editable with empty actions and draft preference', async ({
+    page,
+  }, testInfo) => {
+    const trigger = makeTrigger({
+      id: 'github-edit',
+      name: 'Review PR with long source branch names',
+      sourceType: 'github',
+      githubConfig: {
+        eventType: 'pull_request',
+        filters: { actions: [], ignoreDrafts: false, branches: ['feature/CaseSensitive'] },
+      },
+    });
+    await setupApiMocks(page, { triggers: [trigger], triggerDetail: trigger });
+    await page.goto('/projects/proj-test-1/triggers/github-edit');
+    await page.getByRole('button', { name: /edit trigger/i }).click();
+    await expect(page.getByLabel('Actions', { exact: true })).toHaveValue('');
+    await expect(page.getByLabel('Actions', { exact: true })).toBeEnabled();
+    await expect(page.getByLabel('Ignore draft pull requests')).not.toBeChecked();
+    await page
+      .getByLabel('GitHub event', { exact: true })
+      .evaluate((element) => element.scrollIntoView({ block: 'start' }));
+    await page.getByLabel('Actions', { exact: true }).focus();
+    await page.keyboard.press('Tab');
+    await expect(page.getByLabel('Ignore actors')).toBeFocused();
+    await screenshot(
+      page,
+      `github-trigger-edit-${testInfo.project.name.includes('Desktop') ? 'desktop' : 'mobile'}`
+    );
+    await assertNoOverflow(page);
+    await page.setViewportSize({ width: 320, height: 667 });
+    await assertNoOverflow(page);
+  });
+});
+
+test('audit signed session cookie shares approved API and app hosts only', async ({ context }) => {
+  const { smokeSessionCookie } =
+    await import('../../../../scripts/e2e/github-trigger-audit-fixture.mjs');
+  const signedValue = `${crypto.randomUUID()}.${crypto.randomUUID()}=`;
+  await context.addCookies([
+    smokeSessionCookie(
+      `__Secure-better-auth.session_token=${encodeURIComponent(signedValue)}; Path=/; HttpOnly; Secure`
+    ),
+  ]);
+  for (const host of ['https://api.sammy.party', 'https://app.sammy.party']) {
+    const cookies = await context.cookies(host);
+    expect(cookies).toHaveLength(1);
+    expect(cookies[0]).toMatchObject({
+      value: signedValue,
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None',
+    });
+  }
+  expect(await context.cookies('https://unrelated.example')).toHaveLength(0);
+});

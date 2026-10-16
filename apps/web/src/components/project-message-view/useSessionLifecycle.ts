@@ -17,6 +17,7 @@ import {
   sendFollowUpPrompt,
 } from '../../lib/api';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
+import { DEFAULT_ATTACHMENT_MESSAGE } from '../../pages/project-chat/useAttachments';
 import { useSessionDraft } from './session-drafts';
 import type { FilePanelState } from './session-lifecycle-helpers';
 import { parsePlanContent } from './session-lifecycle-helpers';
@@ -51,15 +52,14 @@ export function useSessionLifecycle(
     () => transcript.detail?.session.task ?? null
   );
 
-  const appendOptimisticMessage = useCallback(
-    (message: ChatMessageResponse) => appendMessages([message]),
-    [appendMessages]
-  );
-  const { uploading, handleUploadFiles } = useSessionFileUpload({
-    projectId,
-    sessionId,
-    onOptimisticMessage: appendOptimisticMessage,
-  });
+  const {
+    uploading,
+    handleUploadFiles,
+    attachments,
+    removeAttachment,
+    clearAttachments,
+    uploadError,
+  } = useSessionFileUpload({ projectId, sessionId });
 
   const { workspace, node } = useSessionInfrastructure(session?.workspaceId);
   const draft = useSessionDraft(sessionId);
@@ -329,8 +329,9 @@ export function useSessionLifecycle(
 
   // ── Send follow-up via REST API ──
   const handleSendFollowUp = async () => {
-    const trimmed = followUp.trim();
-    if (!trimmed || sendingFollowUp) return;
+    const trimmed = followUp.trim() || (attachments.length > 0 ? DEFAULT_ATTACHMENT_MESSAGE : '');
+    if (!trimmed || sendingFollowUp || attachments.some((a) => a.status !== 'complete')) return;
+    const attachmentRefs = attachments.flatMap((a) => (a.ref ? [a.ref] : []));
 
     const wakingSleepingSession = sessionState === 'sleeping';
     if (wakingSleepingSession) sleepingWakePendingRef.current = true;
@@ -369,11 +370,17 @@ export function useSessionLifecycle(
         toolMetadata: null,
         createdAt: Date.now(),
       };
-      appendMessages([optimisticMessage]);
+      // Attachment display includes canonical workspace paths; durable acceptance
+      // persists and broadcasts it once, avoiding a second plain-text WS copy.
+      if (attachmentRefs.length === 0) appendMessages([optimisticMessage]);
       draft.sending(trimmed);
 
       // Persist via DO WebSocket
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      if (
+        attachmentRefs.length === 0 &&
+        wsRef.current &&
+        wsRef.current.readyState === WebSocket.OPEN
+      ) {
         wsRef.current.send(
           JSON.stringify({
             type: 'message.send',
@@ -388,7 +395,12 @@ export function useSessionLifecycle(
       // cleared only when delivery is confirmed (onDelivered); a failed resume
       // or delivery resets the working state and keeps the typed text as the
       // manual-retry affordance (onFailed).
-      if (sessionState === 'idle' && session?.workspaceId && session?.agentSessionId) {
+      if (
+        attachmentRefs.length === 0 &&
+        sessionState === 'idle' &&
+        session?.workspaceId &&
+        session?.agentSessionId
+      ) {
         recovery.resumeAndSend(trimmed, {
           onDelivered: () => {
             draft.delivered(trimmed);
@@ -401,7 +413,8 @@ export function useSessionLifecycle(
       } else {
         // Forward prompt to the running agent via REST API
         try {
-          await sendFollowUpPrompt(projectId, sessionId, trimmed);
+          await sendFollowUpPrompt(projectId, sessionId, trimmed, attachmentRefs);
+          clearAttachments();
           // Delivery confirmed — clear any stale recovery banner and the composer.
           recovery.clearResumeError();
           draft.delivered(trimmed);
@@ -480,6 +493,9 @@ export function useSessionLifecycle(
     cancelError,
     handleSendFollowUp,
     handleUploadFiles,
+    attachments,
+    removeAttachment,
+    uploadError,
     loadMore: transcript.loadMore,
     loadUntil: transcript.loadUntil,
     loadingMore: transcript.loadingMore,

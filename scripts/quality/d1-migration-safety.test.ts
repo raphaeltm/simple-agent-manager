@@ -316,6 +316,15 @@ describe('D1 migration safety gates', () => {
     expect(() => parseAllowlist('{not-json')).toThrow();
   });
 
+  it('recognizes terminal GitHub recovery inbox retention without widening other selectors', () => {
+    expect(parseChurningTableSelectors('DATABASE.github_trigger_inbox')).toEqual([
+      'DATABASE.github_trigger_inbox',
+    ]);
+    expect(() => parseChurningTableSelectors('DATABASE.github_trigger_inbox_unreviewed')).toThrow(
+      /not a reviewed churning/
+    );
+  });
+
   it('validates configurable churning-table selectors and decrease thresholds', () => {
     expect(parseChurningTableSelectors(undefined)).toEqual(
       expect.arrayContaining([

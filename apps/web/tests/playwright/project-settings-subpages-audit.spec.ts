@@ -6,7 +6,6 @@ import {
   makeMockUser,
   screenshot,
   screenshotNearHeading,
-  screenshotSectionNearHeading,
   setupAuditRoutes,
 } from './audit-helpers';
 
@@ -510,81 +509,61 @@ test.describe('Project settings sub-pages', () => {
     page,
   }) => {
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure`);
-    await expect(
-      page.getByRole('heading', { name: 'Project Infrastructure Compute Pool' })
-    ).toBeVisible();
-    await expect(page.getByText('Project default applies to this context.')).toBeVisible();
-    await expect(page.getByText(/Hetzner · Falkenstein \(fsn1\)/)).toBeVisible();
-    await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
-    await expect(page.getByText(/Installation defaults require/i)).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Project compute pool' })).toBeVisible();
+    await expect(page.getByText('Allowed machines (5)')).toBeVisible();
+    await expect(page.getByText(/^SAM can start Hetzner machines in/)).toBeVisible();
+    await expect(page.getByText('(not currently offered)')).toBeVisible();
+    await expect(page.getByText(/credentials:credential-project-default/)).toHaveCount(0);
     await expectCompactTabs(page);
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-normal');
     await screenshotNearHeading(
       page,
-      'Project Infrastructure Compute Pool',
+      'Project compute pool',
       'project-settings-default-compute-pool-normal-focused'
     );
 
     await page.getByRole('button', { name: 'Edit' }).click();
-    await expect(page.getByRole('heading', { name: 'Edit project default' })).toBeVisible();
-    await page.getByRole('button', { name: /Remove Hetzner ash cpx31/ }).click();
-    await page.getByRole('button', { name: /Remove Hetzner hil ccx33/ }).click();
+    await expect(page.getByRole('heading', { name: 'Allowed machines', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'cpx31 in Ashburn', exact: true }).click();
+    await page
+      .getByRole('button', { name: 'ccx33 in Hillsboro (not currently offered)', exact: true })
+      .click();
+    await expect(page.getByText('2 unsaved changes')).toBeVisible();
     await screenshotNearHeading(
       page,
-      'Edit project default',
+      'Allowed machines',
       'project-settings-default-compute-pool-edit-focused'
     );
-    await page.getByLabel('Filter provider').selectOption('hetzner');
-    await page.getByLabel('Filter region or location').fill('hil');
-    await page.getByLabel('Minimum vCPU').fill('8');
-    await page.getByLabel('Minimum RAM in GB').fill('32');
-    await page.getByLabel('Maximum monthly price').fill('250');
-    await page.getByLabel('Filter availability').selectOption('stale');
-    await expect(page.getByText('1 matching offering across 1 region.')).toBeVisible();
-    await expect(page.getByText('Stale catalog data').first()).toBeVisible();
-    await screenshotSectionNearHeading(
-      page,
-      'Catalog filters',
-      'project-settings-default-compute-pool-catalog-filters-focused'
-    );
-    await expect(page.getByRole('button', { name: /Add Hetzner hil ccx33/ })).toBeVisible();
-    await page
-      .getByRole('heading', { name: 'Add instances from catalog' })
-      .evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'nearest' }));
+    await page.getByRole('searchbox', { name: 'Search machine types' }).fill('hil');
+    await expect(page.getByText('ccx33', { exact: true })).toBeVisible();
     await screenshotNearHeading(
       page,
-      'Add instances from catalog',
-      'project-settings-default-compute-pool-catalog-results-focused'
+      'Allowed machines',
+      'project-settings-default-compute-pool-search-focused'
     );
     await page.getByRole('button', { name: 'Save changes' }).click();
-    await expect(page.getByText(/3 allowed · 2 not selected\/removed/)).toBeVisible();
-    await expect(
-      page.getByRole('heading', { name: 'Not selected or removed instances' })
-    ).toBeVisible();
-    await expect(page.getByText(/Hetzner · Ashburn \(ash\)/).first()).toBeVisible();
-    await expect(page.getByText(/Hetzner · Hillsboro \(hil\)/).first()).toBeVisible();
+    await expect(page.getByText('Allowed machines (3)')).toBeVisible();
     await assertNoOverflow(page);
 
     capacityDefaultsBody = capacityDefaults(userCapacitySummary());
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=fallback`);
-    await expect(page.getByText('Using user fallback.', { exact: false })).toBeVisible();
+    await expect(page.getByText(/This project uses your personal compute pool/)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
-    await expect(page.getByText(/Hidden outside this settings context/i)).toHaveCount(0);
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-user-fallback');
     await screenshotNearHeading(
       page,
-      'Project Infrastructure Compute Pool',
+      'Project compute pool',
       'project-settings-default-compute-pool-user-fallback-focused'
     );
     await assertNoOverflow(page);
 
     capacityDefaultsBody = capacityDefaults(null);
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=empty`);
-    await expect(page.getByText('No visible active default pool')).toBeVisible();
+    await expect(page.getByText('No machines for this project yet')).toBeVisible();
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-empty');
     await screenshotNearHeading(
       page,
-      'Project Infrastructure Compute Pool',
+      'Project compute pool',
       'project-settings-default-compute-pool-empty-focused'
     );
     await assertNoOverflow(page);
@@ -604,14 +583,15 @@ test.describe('Project settings sub-pages', () => {
       })
     );
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=many`);
+    // 36 regions across the six machine types in the fixture.
+    await expect(page.getByText('Allowed machines (6)')).toBeVisible();
     await expect(
-      page.getByText('Hetzner · region-with-a-very-long-location-name-and-special-marker-ß')
+      page.getByText(/region-with-a-very-long-location-name-and-special-marker-ß/)
     ).toBeVisible();
-    await expect(page.getByText(/\+\d+ more provider\/region groups/)).toHaveCount(0);
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-many');
     await screenshotNearHeading(
       page,
-      'Project Infrastructure Compute Pool',
+      'Project compute pool',
       'project-settings-default-compute-pool-many-focused'
     );
     await assertNoOverflow(page);
@@ -622,11 +602,15 @@ test.describe('Project settings sub-pages', () => {
       message: 'Project capability is required',
     };
     await page.goto(`/projects/${PROJECT_ID}/settings/infrastructure?case=error`);
-    await expect(page.getByText('Project capability is required')).toBeVisible();
+    await expect(
+      page.getByText(
+        "You don't have access to this project's compute pool. Ask a project owner or admin."
+      )
+    ).toBeVisible();
     await screenshot(page, 'project-settings-infrastructure-capacity-pool-error');
     await screenshotNearHeading(
       page,
-      'Project Infrastructure Compute Pool',
+      'Project compute pool',
       'project-settings-default-compute-pool-error-focused'
     );
     await assertNoOverflow(page);

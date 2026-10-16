@@ -135,8 +135,8 @@ describe('recovery prompt chosen by the wake cause', () => {
       .run(contract, slept ? new Date().toISOString() : null, slept ? 'sleeping' : null);
   }
 
-  async function evict() {
-    const response = await postEvictionCallback(app, env);
+  async function evict(interruptedWork?: boolean) {
+    const response = await postEvictionCallback(app, env, interruptedWork);
     expect(response.status, await response.text()).toBe(204);
   }
 
@@ -227,15 +227,36 @@ describe('recovery prompt chosen by the wake cause', () => {
     });
   });
 
-  it('keeps the conversation-mode wording after an eviction', async () => {
+  it.each(['task', 'conversation'] as const)(
+    'continues interrupted %s work after eviction',
+    async (taskMode) => {
+      seed({ taskMode, lifecycle: 'evictable' });
+      await evict(true);
+      expect(recoveryStart()).toMatchObject({
+        taskMode,
+        taskDescription: SESSION_RECOVERY_CONTINUE_TASK_PROMPT,
+        restoredSessionPrompt: SESSION_RECOVERY_CONTINUE_TASK_PROMPT,
+      });
+    }
+  );
+
+  it.each(['task', 'conversation'] as const)(
+    'leaves an idle %s session waiting for its human',
+    async (taskMode) => {
+      seed({ taskMode, lifecycle: 'evictable' });
+      await evict(false);
+      expect(recoveryStart()).toMatchObject({
+        taskMode,
+        taskDescription: SESSION_RECOVERY_INITIAL_PROMPT,
+        restoredSessionPrompt: null,
+      });
+    }
+  );
+
+  it('reconciles legacy conversation eviction when pre-stop evidence is unavailable', async () => {
     seed({ taskMode: 'conversation', lifecycle: 'evictable' });
     await evict();
-
-    expect(recoveryStart()).toMatchObject({
-      taskMode: 'conversation',
-      taskDescription: SESSION_RECOVERY_INITIAL_PROMPT,
-      restoredSessionPrompt: null,
-    });
+    expect(recoveryStart().restoredSessionPrompt).toBe(SESSION_RECOVERY_CONTINUE_TASK_PROMPT);
   });
 
   it('keeps the answer-the-follow-up wording when a queued user message wakes a task', async () => {

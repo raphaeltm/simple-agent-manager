@@ -74,7 +74,8 @@ func TestMigrationV18KeepsExistingMcpServerRows(t *testing.T) {
 	// Rewind the database to its pre-V18 shape and write a row the old agent would have.
 	for _, stmt := range []string{
 		"ALTER TABLE session_mcp_servers DROP COLUMN headers",
-		"DELETE FROM schema_version WHERE version = 18",
+		"ALTER TABLE eviction_deliveries DROP COLUMN interrupted_work",
+		"DELETE FROM schema_version WHERE version >= 18",
 		"INSERT INTO session_mcp_servers (workspace_id, session_id, sort_order, url, token, name) " +
 			"VALUES ('ws-1', 'sess-1', 0, 'https://mcp.zapier.com/x', 'zap-token', 'zapier')",
 	} {

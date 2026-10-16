@@ -2,7 +2,7 @@
  * Integration tests for handleGitHubEventForTriggers.
  *
  * These tests mock D1 and trigger admission at the boundary to verify:
- * - Delivery deduplication
+ * - Routing decisions (durable intake/dedup is covered by signed ingress integration)
  * - Feature flag gating
  * - Non-matching events do not start tasks
  * - Matching events reach the submission boundary with correct payloads
@@ -79,7 +79,7 @@ function makeIssuesPayload(action: string = 'labeled') {
   return {
     action,
     sender: { login: 'contributor', type: 'User' },
-    repository: { full_name: 'org/repo', default_branch: 'main' },
+    repository: { id: 9876, full_name: 'org/repo', default_branch: 'main' },
     installation: { id: 12345 },
     issue: {
       number: 10,
@@ -152,22 +152,6 @@ describe('handleGitHubEventForTriggers', () => {
     expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
   });
 
-  // --- Delivery deduplication ---
-  it('deduplicates deliveries when INSERT OR IGNORE returns 0 changes', async () => {
-    const { env, mockStmt } = createMockEnv();
-    // Simulate the INSERT OR IGNORE returning 0 changes (duplicate)
-    mockStmt.run.mockResolvedValueOnce({ meta: { changes: 0 } });
-
-    const result = await handleGitHubEventForTriggers(env, {
-      deliveryId: 'already-processed',
-      eventType: 'issues',
-      payload: makeIssuesPayload(),
-    });
-    expect(result.processed).toBe(false);
-    expect(result.reason).toBe('duplicate');
-    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
-  });
-
   // --- No repository in payload ---
   it('returns no_repository when payload lacks repository', async () => {
     const { env, mockStmt } = createMockEnv();
@@ -180,7 +164,7 @@ describe('handleGitHubEventForTriggers', () => {
       payload: { action: 'opened', sender: { login: 'user' } },
     });
     expect(result.processed).toBe(false);
-    expect(result.reason).toBe('no_repository');
+    expect(result.reason).toBe('invalid_scope');
     expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
   });
 

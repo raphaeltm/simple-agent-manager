@@ -39,7 +39,7 @@ describe('trigger run slots after the previous run sleeps', () => {
       activityAt: START.getTime(),
     }));
     ({ sqlite, env } = fixture);
-    createSchemaTables(sqlite, [schema.triggers]);
+    createSchemaTables(sqlite, [schema.triggers, schema.githubTriggerInbox]);
     sqlite
       .prepare(
         `INSERT INTO triggers

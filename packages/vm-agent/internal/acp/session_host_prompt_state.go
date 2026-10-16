@@ -45,7 +45,7 @@ func (h *SessionHost) beginPromptForDelivery(ctx context.Context, cancel context
 func (h *SessionHost) beginPromptForDeliveryWithMessageID(ctx context.Context, cancel context.CancelFunc, deliveryID, messageID string, observer PromptTerminalObserver) (*promptAttempt, bool) {
 	h.promptMu.Lock()
 	defer h.promptMu.Unlock()
-	if h.promptInFlight {
+	if h.promptInFlight || h.evictionPending {
 		return nil, false
 	}
 	h.promptInFlight = true
@@ -60,6 +60,10 @@ func (h *SessionHost) beginPromptForDeliveryWithMessageID(ctx context.Context, c
 		done:       make(chan struct{}),
 		rpcDone:    make(chan struct{}),
 		observer:   observer,
+	}
+	if attr, ok := h.credentialAttributionSnapshot(); ok {
+		attempt.credentialGeneration = attr.CredentialGeneration
+		attempt.credentialReference = attr.CredentialReference
 	}
 	h.promptAttempt = attempt
 

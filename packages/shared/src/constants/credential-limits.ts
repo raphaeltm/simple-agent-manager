@@ -35,12 +35,14 @@ export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_SOURCES = [
   'claude-acp.rate_limit',
   'claude-acp.usage_update',
   'vm-agent.acp_usage_update',
+  'task-prompt.limit_rejection',
   'vm-agent.codex_rollout',
   'vm-agent.opencode_go_usage',
 ] as const;
 
 /** Window identifiers accepted from credential-limit telemetry. */
 export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES = [
+  'provider.prompt_rejection',
   'anthropic.input-tokens',
   'anthropic.output-tokens',
   'anthropic.priority-input-tokens',

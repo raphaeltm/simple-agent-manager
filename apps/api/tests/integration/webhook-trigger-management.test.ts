@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -138,6 +140,18 @@ describe('webhook trigger management vertical slice', () => {
   beforeEach(async () => {
     sqlite = new Database(':memory:');
     sqlite.exec(SCHEMA);
+    sqlite.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0194_trigger_auto_pause_reset.sql', import.meta.url),
+        'utf8'
+      )
+    );
+    sqlite.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0195_github_trigger_recovery.sql', import.meta.url),
+        'utf8'
+      )
+    );
     sqlite.pragma('foreign_keys = ON');
     authState.userId = 'user-1';
     admissionState.renderedPrompt = '';

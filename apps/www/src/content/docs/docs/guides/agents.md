@@ -183,6 +183,8 @@ When work starts, the agent is resolved in this order:
 2. The project's default profile
 3. The platform default (`DEFAULT_TASK_AGENT_TYPE`, `opencode` in the checked-in Worker config)
 
+Type `@` in a chat message to choose a profile from the mention list. Mentions are optional hints to the receiving agent: unknown names leave your message unchanged. Names such as `@gcp-deployer`, `@release.bot`, and `@部署` are supported; names with spaces use quotes, such as `@"Code Reviewer"`. The mention list handles quoting and escaping for you. Email addresses and npm scopes such as `@types/node` stay ordinary text. Selecting the profile that runs a chat remains strict: an invalid selection is rejected.
+
 ### Choosing a model
 
 The profile's model picker lists the models SAM knows each agent supports. The list is bundled with
@@ -403,6 +405,8 @@ A chat has at most one event notification waiting to reach its agent. Once the a
 To wait on a pull request without polling, subscribe and end the turn: use source `github` with subjectType `pull_request` and subjectId set to the PR number for reviews, review comments, PR comments and PR events. CI events (`check_run`, `check_suite`, `workflow_run`) are keyed by commit, so use subjectType `commit` with the head SHA. A PR comment waking an idle, live chat has been verified end to end; waking a sleeping chat and CI or review delivery have not, so keep one bounded fallback check and say when you relied on it.
 
 To coordinate several agents on one feature, publish a short kickoff to a project channel and pass it as `coordinationChannel` to `dispatch_task`. Children and their descendants inherit it and are told to publish findings, decisions, blockers and completion evidence with `publish_channel_event`, and to read it with `get_channel_history` or follow it with `follow_event_channel`. A publication never wakes its own author.
+
+To see who subscribes to a project channel, use `list_channel_subscribers` with its name. It returns owner and target identities, subscription state and expiry. Follow `nextCursor` for more results; use `state: "any"` to include cancelled or expired subscriptions. A subscription means its filter matches that channel's messages—it does not prove the agent read or acknowledged them.
 
 Claude Code and Codex get these tools on both the VM and [Instant](/docs/guides/instant-sessions/) runtimes. If a Codex session is handed an MCP server without a usable token, it fails to start with an explicit error rather than launching a tool-less agent.
 

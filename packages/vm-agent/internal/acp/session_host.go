@@ -155,6 +155,12 @@ type SessionHost struct {
 	// Agent state (guarded by mu)
 	mu                       sync.RWMutex
 	process                  agentProcess
+	secretExecContainerID    string
+	secretWorkMu             sync.Mutex
+	secretWork               map[string]secretExecutionWork
+	secretWorkObserved       bool
+	secretWorkProgressAt     time.Time
+	secretWorkReporterCancel context.CancelFunc
 	acpConn                  *acpsdk.ClientSideConnection
 	agentType                string
 	codexC2SelectionMu       sync.Mutex // independent: startup can hold mu
@@ -229,6 +235,7 @@ type SessionHost struct {
 	credKind          string // "api-key" or "oauth-token"
 
 	usageReportMu           sync.Mutex
+	rejectedUsageLimit      *observedProviderLimit
 	usageReportPending      map[string]usageReportPendingEntry
 	usageReportOrder        []string
 	usageReportNextSeq      uint64
@@ -260,9 +267,10 @@ type SessionHost struct {
 
 	// Prompt lifecycle state.
 	// promptMu guards promptInFlight (serialization gate only).
-	promptMu       sync.Mutex
-	promptInFlight bool
-	promptSeq      uint64
+	promptMu        sync.Mutex
+	promptInFlight  bool
+	evictionPending bool // promptMu: durable eviction owns this runtime; reject new work
+	promptSeq       uint64
 	// promptAttempt remains attached until the next accepted prompt so late
 	// terminal signals from the same runtime are absorbed by its exact-once
 	// arbiter instead of reaching the control plane twice.
@@ -571,6 +579,7 @@ func (h *SessionHost) Stop() {
 		h.mu.Unlock()
 		return
 	}
+	h.cancelSecretExecutionWork()
 	h.closeUsageReportIngress()
 	h.setStatusLocked(HostStopped)
 	h.statusErr = ""
@@ -747,7 +756,7 @@ func (h *SessionHost) IsPrompting() bool {
 func (h *SessionHost) isPromptingOrRecovering() bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.status == HostPrompting || h.status == HostStarting || h.crashRecoveryInProgress
+	return h.status == HostPrompting || h.status == HostStarting || h.crashRecoveryInProgress || h.hasSecretExecutionWork()
 }
 
 // OnPromptCompleteCallback returns the OnPromptComplete callback, if configured.
@@ -787,4 +796,12 @@ func (h *SessionHost) loadMirroredStatus() SessionHostStatus {
 		return v
 	}
 	return HostIdle
+}
+
+// SecretExecutionContext returns the live process container and configured session
+// identity without resolving/recreating a container or waking the session.
+func (h *SessionHost) SecretExecutionContext() (containerID, user, workDir string, active bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.secretExecContainerID, h.config.ContainerUser, h.config.ContainerWorkDir, h.process != nil
 }

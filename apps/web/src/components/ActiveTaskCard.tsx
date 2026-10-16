@@ -31,6 +31,7 @@ function getStepLabel(task: DashboardTask): string | null {
 }
 
 function getTaskGlowClass(task: DashboardTask): string {
+  if (task.providerLimitReason) return '';
   if (task.status === 'failed')
     return 'shadow-[0_0_0_1px_rgba(239,68,68,0.28),0_0_24px_rgba(239,68,68,0.18)]';
   if (task.agentActivityState === 'working' && (task.status === 'in_progress' || task.isActive)) {
@@ -44,6 +45,12 @@ function getActivityIndicator(task: DashboardTask): {
   dotClassName: string;
   textClassName: string;
 } {
+  if (task.providerLimitReason)
+    return {
+      label: task.providerLimitReason.startsWith('Blocked:') ? 'Blocked' : 'Waiting',
+      dotClassName: 'bg-info-fg',
+      textClassName: 'text-info-fg',
+    };
   switch (task.agentActivityState) {
     case 'sleeping':
       return {
@@ -129,7 +136,11 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
         </div>
 
         {/* Execution step (if provisioning) or failed indicator */}
-        {task.status === 'failed' ? (
+        {task.providerLimitReason ? (
+          <p className="sam-type-caption text-info-fg mb-2 break-words" role="status">
+            {task.providerLimitReason}
+          </p>
+        ) : task.status === 'failed' ? (
           <div className="sam-type-caption text-danger-fg mb-2 overflow-hidden text-ellipsis whitespace-nowrap">
             {stepLabel ? `Failed at: ${stepLabel}` : 'Task failed'}
           </div>

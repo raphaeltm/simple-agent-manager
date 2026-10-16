@@ -1,4 +1,5 @@
 import { PROJECT_SCHEDULE_TOOLS } from './tool-definitions-project-schedule-tools';
+import { SECRET_EXEC_TOOLS } from './tool-definitions-secret-exec';
 /**
  * MCP tool definitions — the schema for all tools exposed via the MCP server.
  *
@@ -59,6 +60,7 @@ import { TRIGGER_TOOLS } from './tool-definitions-trigger-tools';
 import { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 
 export const MCP_TOOLS = [
+  ...SECRET_EXEC_TOOLS,
   ...TASK_LIFECYCLE_TOOLS,
   ...PROJECT_AWARENESS_TOOLS,
   ...SESSION_IDEA_TOOLS,

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -24,8 +26,7 @@ function createTestD1(sqlite: Database.Database): D1Database {
     },
     async first(col?: string) {
       const row = sqlite.prepare(sql).get(...normalize(params)) as
-        | Record<string, unknown>
-        | undefined;
+        Record<string, unknown> | undefined;
       if (col != null) return row ? (row[col] ?? null) : null;
       return row ?? null;
     },
@@ -102,6 +103,7 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
         resource_requirements_json TEXT,
         max_concurrent INTEGER,
         next_fire_at TEXT,
+        next_execution_sequence INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -110,6 +112,13 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
       CREATE TABLE github_trigger_configs (id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL, event_type TEXT NOT NULL, filters_json TEXT NOT NULL);
       CREATE TABLE trigger_executions (id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL, project_id TEXT NOT NULL, status TEXT NOT NULL);
     `);
+
+    sqlite.exec(
+      readFileSync(
+        new URL('../../../src/db/migrations/0194_trigger_auto_pause_reset.sql', import.meta.url),
+        'utf8'
+      )
+    );
 
     env = {
       DATABASE: createTestD1(sqlite),

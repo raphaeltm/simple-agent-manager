@@ -303,6 +303,7 @@ export async function handleUpdateTrigger(
       updates.push('next_fire_at = ?');
       values.push(null);
     } else if (existingTrigger.status === 'paused' || existingTrigger.status === 'disabled') {
+      updates.push('auto_pause_reset_sequence = next_execution_sequence');
       recomputeNextFire = true;
     }
   }

@@ -1,8 +1,8 @@
 {
   "slug": "events",
-  "label": "Event Streams & Triggers",
-  "title": "Automation your team\ncan see.",
-  "subtitle": "Cron schedules, GitHub events, and authenticated webhooks all start work through one trigger system — with delivery history, one-off schedules, standing watches, and an activity stream of everything that happened.",
+  "label": "Schedules & Triggers",
+  "title": "Run agents nightly or on new GitHub issues",
+  "subtitle": "Webhooks from other services can start work too. SAM logs every run, so your team can see what ran and when.",
   "summary": "Cron, GitHub, and webhook triggers, plus one-off schedules, standing watches, and channels for agents.",
   "highlights": [
     "Three trigger sources: cron schedules, GitHub events, and authenticated JSON webhooks",
@@ -20,6 +20,11 @@
       "caption": "Every trigger source in one list, with its schedule and who is paying for it"
     }
   ],
+  "homepage": {
+    "headline": "All your triggers in one list",
+    "body": "Each trigger shows what starts it and its recent runs. In shared projects, SAM warns you when a trigger runs on one person's key.",
+    "caption": "A scheduled dependency audit finishes and tells you"
+  },
   "details": [
     {
       "headline": "Three ways to start work",

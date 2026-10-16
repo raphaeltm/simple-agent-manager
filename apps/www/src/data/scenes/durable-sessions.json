@@ -1,0 +1,48 @@
+{
+  "slug": "durable-sessions",
+  "description": "Animated preview of SAM's real chat with a sample project: a finished session is sleeping with its transcript intact, a message is sent from the composer, and the session wakes while SAM recreates its workspace. Timing is simulated.",
+  "aspect": { "wide": 1.25, "narrow": 0.95 },
+  "beats": [0, 800, 1700, 2600, 3500],
+  "layers": [
+    {
+      "id": "window",
+      "source": "sam-session-sleeping",
+      "box": { "x": 680, "y": 0, "w": 1178, "h": 1200 },
+      "outWidth": 1100,
+      "place": { "wide": { "x": 25, "y": 3, "w": 70 }, "narrow": { "x": 14, "y": 1, "w": 85 } },
+      "depth": 0,
+      "swap": { "source": "sam-session-waking", "at": 4 },
+      "rings": [
+        {
+          "tone": "blue",
+          "stops": [{ "at": 2, "box": { "x": 846, "y": 56, "w": 86, "h": 28 } }],
+          "until": 3
+        },
+        {
+          "tone": "mint",
+          "stops": [{ "at": 3, "box": { "x": 768, "y": 1100, "w": 970, "h": 56 } }],
+          "until": 4
+        }
+      ]
+    },
+    {
+      "id": "sessions",
+      "source": "sam-session-sleeping",
+      "box": { "x": 296, "y": 205, "w": 380, "h": 218 },
+      "outWidth": 380,
+      "place": { "wide": { "x": 3, "y": 22, "w": 24 }, "narrow": { "x": 1, "y": 34, "w": 40 } },
+      "depth": 70,
+      "rings": [
+        {
+          "tone": "blue",
+          "stops": [{ "at": 2, "box": { "x": 298, "y": 278, "w": 378, "h": 70 } }],
+          "until": 4
+        }
+      ]
+    }
+  ],
+  "lights": [
+    { "tone": "blue", "at": 1, "until": 4 },
+    { "tone": "green", "at": 4 }
+  ]
+}

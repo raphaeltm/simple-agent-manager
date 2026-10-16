@@ -41,4 +41,4 @@ export async function expectNoOverflowOrSeriousAxeViolations(page: Page): Promis
 }
 
 export { expect };
-export type { Page } from '@playwright/test';
+export type { Locator, Page } from '@playwright/test';

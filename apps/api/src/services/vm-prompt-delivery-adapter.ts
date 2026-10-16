@@ -14,6 +14,7 @@ import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
 import { commitContainerWake } from './container-wake-commit';
 import { NodeAgentHttpError, sendPromptToAgentOnNode } from './node-agent';
+import { transferPromptAttachments } from './prompt-attachments';
 import { SubmitResponseSchema } from './vm-prompt-delivery-adapter-schemas';
 import {
   checkpointVmPromptSubmission,
@@ -158,6 +159,23 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     );
     if (prepared.kind !== 'prepared') return prepared;
     const { target, capabilities } = prepared;
+    // File transfer has its own bounded transport timeout. Do not squeeze it
+    // into the short capability/readiness probe deadline.
+    try {
+      await transferPromptAttachments(this.env, input.claim, target, async () => {
+        const denied = await this.runSideEffectGuard(input);
+        if (denied) throw new PromptDeliveryGuardError(denied);
+      });
+    } catch (error) {
+      if (error instanceof PromptDeliveryGuardError) return error.result;
+      return {
+        kind: 'retry',
+        reason: 'not_ready',
+        error: `Attachment transfer failed: ${errorMessage(error)}`,
+        runtimeIdentity: target.runtimeIdentity,
+        capabilities,
+      };
+    }
     const checkpointFailure = checkpointVmPromptSubmission(input.beforeSubmit, capabilities);
     if (checkpointFailure) return checkpointFailure;
     try {

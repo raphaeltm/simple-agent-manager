@@ -52,4 +52,8 @@ export * from './runtime-validation';
 export * from './resource-requirements';
 
 // Chat message pagination cursors (web client ↔ API contract)
+export * from './github-trigger-contract';
+export type { MentionMatch } from './mentions';
+export { extractMentions, formatMentionName, getMentionQuery } from './mentions';
 export * from './message-cursor';
+export * from './secret-exec';

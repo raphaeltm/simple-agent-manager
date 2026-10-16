@@ -38,4 +38,19 @@ describe('buildGitHubFilters', () => {
       commandPrefix: '/sam',
     });
   });
+  it('drops hidden filters for push and preserves explicit false draft preference', () => {
+    expect(
+      buildGitHubFilters({
+        ...BASE_INPUT,
+        eventType: 'push',
+        labels: 'bug',
+        bodyContains: 'critical',
+        commandPrefix: '/sam',
+        branches: 'main',
+      })
+    ).toEqual({ ignoreActors: ['dependabot[bot]'], branches: ['main'] });
+    expect(
+      buildGitHubFilters({ ...BASE_INPUT, eventType: 'pull_request', ignoreDrafts: false })
+    ).toEqual({ actions: ['opened'], ignoreActors: ['dependabot[bot]'], ignoreDrafts: false });
+  });
 });

@@ -2,6 +2,11 @@
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Route protocol tests mock D1; real pin enforcement is covered by provider-limit-platform-attribution.test.ts.
+vi.mock('../../src/services/provider-limit-credential-pin', () => ({
+  assertProviderLimitCredentialPin: vi.fn(async () => {}),
+}));
+
 // --- Mock dependencies ---
 
 const mockVerifyAIProxyAuth = vi.fn();

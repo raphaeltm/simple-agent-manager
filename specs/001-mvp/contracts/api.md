@@ -649,6 +649,16 @@ cache headers for a published archive. Installers must verify the pinned SHA-256
 before extraction or execution. This public binary endpoint grants no workspace
 access and does not enable ACP features.
 
+## MCP Channel Subscriber Roster
+
+`list_channel_subscribers` accepts `{ channel, state?, cursor?, limit? }` for the verified MCP token's current project. An active task-backed agent/session with existing project `task:read` membership is required; caller-supplied project/owner/target overrides are rejected. No new credential scope or cross-owner mutation authority is granted.
+
+The MCP text content wraps `{ result: { channel, subscribers, hasMore, nextCursor }, eventReadFence }`. Each subscriber contains only `subscriptionId`, `owner` (type/id/name), `target` (session/task/runtime/agent IDs), effective `state`, `expiresAt` and `createdAt`. Reasons, private filters, idempotency keys, payloads and delivery receipts are excluded. Subscription presence is not proof of reading, acknowledgment or action.
+
+Filters must match all canonical channel publication dimensions: source `sam.agent_channel`, type `agent.channel.published`, subject type `agent_channel`, stable channel name and severity `info`, including exact, set and omitted dimensions. This is filter eligibility, not a guarantee that routing or wake delivery will occur. State defaults to `active`; `expired`, `cancelled` and `any` are supported. Elapsed expiry makes stored-active rows effectively expired without a write or cleanup sweep; cancelled rows remain cancelled.
+
+SQL applies matching and state filtering before the configured event page cap (including default limits), fetches one lookahead row and orders by immutable subscription ID. `nextCursor` binds project/channel/state and the last returned ID; callers continue it unchanged with the same channel/state. Pages reflect current state, not a frozen snapshot. Invalid cursors and arguments return JSON-RPC invalid-params errors; revoked caller authority fails before disclosing results. Existing subscription get/cancel remains own-only.
+
 ## MCP Webhook Credential Claim
 
 `create_trigger` accepts `sourceType: "webhook"`, an explicit project-local `agentProfileId`, and `webhookConfig`. It returns safe `webhookClaim` metadata (`claimUrl`, ISO `expiresAt`, `endpointUrl`, `headerName`, `method`, handling instructions), never a plaintext credential. REST creation and rotation continue returning credentials once.
@@ -670,3 +680,44 @@ Missing/revoked authentication returns 401; missing project capability returns 4
 ## Scoped CLI project workflows
 
 CLI public contracts are in `apps/api/src/openapi/sam-cli.ts` and `cli-workflows.ts`, generated as `apps/api/openapi/sam-cli.openapi.json`. `GET /api/projects/:projectId/operation-receipts` inspects the authenticated actor's keyed submit/prompt receipt. `POST /api/projects/:projectId/cli/profiles|skills` creates name/description metadata; `PATCH /api/projects/:projectId/cli/profiles|skills/:id` and `/cli/settings` accept only name/description plus `expectedUpdatedAt`. Unknown/mixed sensitive fields fail at the runtime schema boundary; updates use an atomic compare-and-set. Scoped profile/skill writes reject global targets. Keyed task submit and prompt delivery replay accepted responses and retain unknown reservations rather than resubmitting after a crash. See `docs/reference/cli-project-workflows` on the documentation website for operation effects, error and pagination contracts.
+
+## Provider-limit task callbacks
+
+`POST /api/projects/:projectId/tasks/:taskId/status/callback` retains workspace JWT authentication and current-workspace fencing. New VM agents report `errorMessage: "provider_limit_reached"` with optional `providerLimitResetsAt` (UTC epoch milliseconds), `providerLimitAgentSessionId`, `providerLimitCredentialGeneration`, and `providerLimitPromptAttemptId`. The additive `toStatus: "failed"` request remains readable by earlier control planes; the current control plane admits a durable provider wait instead of a terminal failure. It returns the current task with `admissionState`, `admissionReason`, and `admissionNextRetryAt`. Actual `sleeping` status follows verified sleep teardown, never precedes it.
+
+For older agents, `agent_prompt_failed` only receives this treatment with a just-observed rejected window for the same unambiguous session credential. Auth rejection and ordinary failures retain their existing classification. A stale explicit session/generation callback is ignored. A late failed callback after verified task sleep does not terminalize retained work.
+
+`promptSucceeded: true` on an error-free `executionStep: "awaiting_followup"` callback ends the consecutive wait episode and retires its scheduled continuation only when its immutable session, credential generation and prompt attempt identify the sole current running session and matching credential. `promptStartedAt` (UTC epoch milliseconds captured at acceptance) must be later than the rejection's observation, and the wait must not be blocked. Cancellation, checkpoint preemption and crash recovery do not send that success signal. Pending or admitted provider schedules are checked against the task's active wait identity before delivery; an obsolete continuation is not replayed.
+
+Admission reads the existing credential-limit windows and holds before VM placement using the TaskRunner alarm. Credential selection is never changed; a retained recovery pin is checked at the authenticated agent-key injection boundary. A mismatched, absent or malformed recovery pin cannot return a substitute credential and blocks for review. No new Worker environment bindings or production fault-injection controls are added. `pnpm test:e2e:provider-limits` uses only test processes and transport fixtures.
+
+Admission rechecks immediately before the initial agent start. A rejection observed after provisioning uses a visible bounded in-place hold, retrying the same unstarted step after reset; its allocated runtime remains subject to the normal absolute compute ceiling. The existing VM start protocol requires a nonempty prompt and cannot create a snapshot-ready idle harness without delivering it. This late-admission fallback is an explicit verification/rollout gap; no new no-prompt VM protocol is implied. Durable indexed task wait intents close the admission gap while a credential observation write is pending or capacity-bound.
+
+## Managed secret execution (MCP and VM Agent)
+
+MCP tools `exec_with_secrets`, `exec_with_secrets_status`, and `exec_with_secrets_cancel` require a verified token with project, user, workspace and agent-session identity. `exec_with_secrets` accepts exactly literal `argv` or `command` plus explicit `bash`/`sh`, selected managed `secretNames`, optional absolute `cwd`, nonsecret `env`, positive `timeoutMs`, and optional `idempotencyKey`. It never accepts a caller-selected user, container, workspace or session.
+
+The Worker checks session ownership and merges project → profile → skill stored env rows before decrypting selected secrets. Ordinary runtime-assets responses return `__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__NAME__` for managed secret env entries. Runtime files keep existing delivery semantics.
+
+Private node-management-authenticated VM endpoints:
+
+- `POST /workspaces/:workspaceId/mcp/secret-exec` starts an idempotent, persisted job.
+- `GET /workspaces/:workspaceId/mcp/secret-exec/:jobId?agentSessionId=...` reads its same-session snapshot.
+- `POST /workspaces/:workspaceId/mcp/secret-exec/:jobId/cancel?agentSessionId=...` requests cancellation.
+
+These endpoints are control-plane transport, not browser/public APIs. Responses contain `jobId`, `status`, `stdout`, `stderr`, `exitCode`, `timedOut`, `redacted`, `truncated`, and `execution` (`containerId`, `user`, `cwd`, `environmentMode`, optional selected `secretNames`, actor/session/workspace/project/task IDs, command mode/fingerprint and lifecycle timestamps for private audit). Statuses are `running`, `completed`, `failed`, `cancelled`, `timed_out`, and `interrupted`. Running output is empty. Cancel can initially return running; poll until terminal. Exact selected values are redacted before persistence and response. Restart interrupts active jobs without replaying them. Existing active session environments are not restarted/migrated; results disclose legacy env-file state.
+
+Fresh agent-process startup overlays current session env assets on both runtimes; VM runtime files retain bootstrap delivery. Managed protected keys cannot regain harness/Git values: separate auth files remain usable, otherwise a collision fails startup clearly. Accepted jobs renew finite `sam_secret_exec` runtime-work activity through the existing session callback and clear/cancel their lease on completion or explicit session/workspace stop. Secret execution transport uses no-wake and disables timeout-driven container recovery.
+
+### Follow-up chat attachments
+
+`POST /api/projects/:projectId/sessions/:sessionId/prompt` accepts
+`{ content, attachments?: [{ uploadId, filename, size, contentType }] }`.
+Upload each file first using the existing task `request-upload` endpoint and its
+presigned R2 URL. The caller must own the session and staged objects. Acceptance
+persists attachment references with the durable message (202); the delivery
+worker wakes the workspace, transfers files to
+`/workspaces/.private/<uploadId>/<filename>`, then submits the prompt with those
+absolute paths. Upload failures prevent prompt submission and remain retryable.
+Staged objects remain available for delivery retries until the configured R2
+`temp-uploads/` lifecycle expiry. Attachment messages require durable prompt delivery.

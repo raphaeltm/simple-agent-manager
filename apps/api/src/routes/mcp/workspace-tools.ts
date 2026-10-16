@@ -117,7 +117,8 @@ async function fetchVmAgentJson(
   method: 'GET' | 'POST',
   headers: Record<string, string>,
   body: unknown,
-  timeoutMs: number
+  timeoutMs: number,
+  controls?: { noWakeContainer: boolean; recoverContainerOnTimeout: boolean }
 ): Promise<unknown> {
   if (body) {
     headers['Content-Type'] = 'application/json';
@@ -132,7 +133,9 @@ async function fetchVmAgentJson(
     fetchOpts.body = JSON.stringify(body);
   }
 
-  const res = await fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs);
+  const res = controls
+    ? await fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs, controls)
+    : await fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs);
 
   if (!res.ok) {
     const errText = await res.text().catch(() => 'unknown error');
@@ -413,4 +416,40 @@ export async function handleGetWorkspaceDiffSummary(
       `Failed to get diff summary: ${e instanceof Error ? e.message : String(e)}`
     );
   }
+}
+
+/** Private same-session execution transport; never expose raw upstream errors. */
+export async function proxySecretExecOnVm(
+  env: Env,
+  caller: McpTokenData,
+  operation: 'start' | 'status' | 'cancel',
+  jobId: string,
+  body?: unknown
+): Promise<unknown> {
+  const workspace = await lookupWorkspaceForVmAgent(env, caller.workspaceId, caller.projectId);
+  const { token } = await signNodeManagementToken(
+    caller.userId,
+    workspace.nodeId,
+    workspace.id,
+    env
+  );
+  const base = `/workspaces/${encodeURIComponent(workspace.id)}/mcp/secret-exec`;
+  const path =
+    operation === 'start'
+      ? base
+      : `${base}/${encodeURIComponent(jobId)}${operation === 'cancel' ? '/cancel' : ''}?agentSessionId=${encodeURIComponent(caller.agentSessionId ?? '')}`;
+  return fetchVmAgentJson(
+    env,
+    workspace.nodeId,
+    vmAgentUrlForPath(env, workspace.nodeId, path),
+    operation === 'status' ? 'GET' : 'POST',
+    {
+      Authorization: `Bearer ${token}`,
+      'X-SAM-Node-Id': workspace.nodeId,
+      'X-SAM-Workspace-Id': workspace.id,
+    },
+    body,
+    getWorkspaceToolTimeout(env),
+    { noWakeContainer: true, recoverContainerOnTimeout: false }
+  );
 }

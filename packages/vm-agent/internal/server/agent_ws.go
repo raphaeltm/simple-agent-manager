@@ -271,6 +271,7 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 		cfg.ProjectID = strings.TrimSpace(runtime.ProjectID)
 	}
 	cfg.OnPromptComplete = nil
+	cfg.OnPromptCompleteWithContext = nil
 
 	cfg.GitTokenFetcher = s.gitHubTokenFetcherForWorkspace(workspaceID)
 	var runtimeAssetsProvider acp.RuntimeAssetsProvider
@@ -345,13 +346,16 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 		cfg.ProjectID = strings.TrimSpace(s.config.ProjectID)
 	}
 	if hasTaskCtx && s.config != nil && taskCtx.ProjectID != "" && taskCtx.TaskID != "" && taskCtx.WorkspaceID != "" {
-		cfg.OnPromptComplete = s.makeTaskCompletionCallback(
-			s.config.ControlPlaneURL,
-			taskCtx.ProjectID,
-			taskCtx.TaskID,
-			taskCtx.WorkspaceID,
-			taskCtx.TaskMode,
-		)
+		cfg.OnPromptComplete = s.makeTaskCompletionCallback(s.config.ControlPlaneURL, taskCtx.ProjectID, taskCtx.TaskID, taskCtx.WorkspaceID, taskCtx.TaskMode)
+		cfg.OnPromptCompleteWithContext = func(reason string, err error, completion acp.PromptCompletionContext) {
+			s.makeTaskCompletionCallback(
+				s.config.ControlPlaneURL,
+				taskCtx.ProjectID,
+				taskCtx.TaskID,
+				taskCtx.WorkspaceID,
+				taskCtx.TaskMode, completion,
+			)(reason, err)
+		}
 		slog.Info("Task completion callback bound to session",
 			"workspace", workspaceID,
 			"sessionId", sessionID,

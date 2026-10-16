@@ -124,7 +124,7 @@ func (p *AcceptedPrompt) Run() {
 	// snapshot lets finishPromptWithError still begin LoadSession recovery.
 	recovery := h.captureCrashRecoveryPrerequisites()
 	h.markPromptStarted(p.attempt, p.request.sessionID, len(p.request.blocks), p.viewerID)
-	resp, err := h.promptWithTransientRetry(p.ctx, p.request, p.attempt.startedAt)
+	resp, err := h.promptWithTransientRetry(p.ctx, p.request, p.attempt.startedAt, credentialAttribution{CredentialReference: p.attempt.credentialReference, CredentialGeneration: p.attempt.credentialGeneration})
 
 	if !h.isPromptActive(p.attempt.id) {
 		return
@@ -147,6 +147,7 @@ func (h *SessionHost) promptWithTransientRetry(
 	promptCtx context.Context,
 	promptReq preparedPromptRequest,
 	startedAt time.Time,
+	accepted ...credentialAttribution,
 ) (acpsdk.PromptResponse, error) {
 	// Retrying is limited to hard Prompt() errors before an ACP response is
 	// accepted. User-message persistence and synthetic broadcasts happen once
@@ -178,7 +179,7 @@ func (h *SessionHost) promptWithTransientRetry(
 		if err == nil {
 			return resp, nil
 		}
-		if !h.shouldRetryPromptError(promptCtx, err, attempt, totalAttempts) {
+		if !h.shouldRetryPromptError(promptCtx, err, attempt, totalAttempts, accepted...) {
 			return resp, err
 		}
 
@@ -191,7 +192,7 @@ func (h *SessionHost) promptWithTransientRetry(
 	return resp, err
 }
 
-func (h *SessionHost) shouldRetryPromptError(promptCtx context.Context, err error, attempt, totalAttempts int) bool {
+func (h *SessionHost) shouldRetryPromptError(promptCtx context.Context, err error, attempt, totalAttempts int, accepted ...credentialAttribution) bool {
 	if attempt >= totalAttempts {
 		return false
 	}
@@ -199,6 +200,9 @@ func (h *SessionHost) shouldRetryPromptError(promptCtx context.Context, err erro
 		return false
 	}
 	if isCrashPromptError(err) {
+		return false
+	}
+	if h.promptProviderLimit(err, accepted...) != nil {
 		return false
 	}
 	return isTransientProviderPromptError(err)
@@ -657,6 +661,11 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 		return
 	}
 
+	if limit := h.promptProviderLimit(err, credentialAttribution{CredentialReference: attempt.credentialReference, CredentialGeneration: attempt.credentialGeneration}); limit != nil {
+		limit.PromptAttemptID = attempt.id
+		limit.CredentialGeneration = attempt.credentialGeneration
+		err = limit
+	}
 	errMsg := "agent_prompt_failed"
 	if reasonCode := ClassifyPromptError(err); reasonCode != "" {
 		errMsg = reasonCode
@@ -689,6 +698,10 @@ func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID jso
 			startedAt: info.startedAt,
 			done:      make(chan struct{}),
 			rpcDone:   make(chan struct{}),
+		}
+		if attr, ok := h.credentialAttributionSnapshot(); ok {
+			attempt.credentialGeneration = attr.CredentialGeneration
+			attempt.credentialReference = attr.CredentialReference
 		}
 		h.promptAttempt = attempt
 	}

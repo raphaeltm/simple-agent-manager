@@ -25,6 +25,20 @@ const TARGET_SHA = 'b'.repeat(64);
 
 
 
+/** Finish this fixture's queued summary write before a later global sweep isolates D1. */
+async function settleFixtureSummary(source: DurableObjectStub<ProjectDataTestDouble>): Promise<void> {
+  await runInDurableObject(source, (instance) => {
+    const owned = instance as unknown as {
+      summarySyncTimer: ReturnType<typeof setTimeout> | null;
+    };
+    if (owned.summarySyncTimer !== null) clearTimeout(owned.summarySyncTimer);
+    owned.summarySyncTimer = null;
+  });
+  // The existing RPC awaits the same serialized path as the production callback,
+  // including any sync that had already started before the timer was cancelled.
+  await source.runSummarySyncForTest();
+}
+
 async function seedProjectGraph(projectId: string): Promise<void> {
   await seedUser(OWNER);
   await seedInstallation(INSTALLATION, OWNER);
@@ -547,6 +561,7 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
       threw: true,
       code: 'PROJECT_DATA_TRANSCRIPT_WRITE_FENCED',
     });
+    await settleFixtureSummary(source);
   });
   it('migrates a session larger than one hash page through the real DO, streaming every terminal-version proof', async () => {
     const projectId = `archive-multipage-${crypto.randomUUID()}`;
@@ -1012,6 +1027,56 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
         });
       }
     );
+  });
+
+  it('settles an earlier fixture before a queued summary callback can repopulate sweep inputs', async () => {
+    const previous = await newArchiveProject('archive-queued-summary');
+    const debounceMs = parseInt(testEnv.DO_SUMMARY_SYNC_DEBOUNCE_MS || '5000', 10);
+    await runInDurableObject(previous.source, async (instance) => {
+      const owned = instance as unknown as {
+        summarySyncTimer: ReturnType<typeof setTimeout> | null;
+        heldSummaryCallback?: () => Promise<void>;
+      };
+      const schedule = globalThis.setTimeout;
+      globalThis.setTimeout = ((callback: () => Promise<void>, delay?: number) => {
+        if (delay === debounceMs) {
+          owned.heldSummaryCallback = callback;
+          return schedule(() => undefined, 60_000);
+        }
+        return schedule(callback, delay);
+      }) as typeof setTimeout;
+      try {
+        const sessionId = await instance.createSession(null, 'Earlier fixture');
+        await instance.persistMessage(sessionId, 'user', 'earlier transcript', null);
+        await instance.stopSession(sessionId);
+      } finally {
+        globalThis.setTimeout = schedule;
+      }
+      expect(owned.heldSummaryCallback).toBeTypeOf('function');
+      expect(owned.summarySyncTimer).not.toBeNull();
+    });
+    await settleFixtureSummary(previous.source);
+    const current = await newArchiveProject('archive-isolated-summary');
+    await seedTerminalSession(current.source, 'only target', 1);
+    await settleFixtureSummary(current.source);
+    await isolateSweepFixture(current.projectId);
+    // Release the actual production debounce callback after isolation only if teardown
+    // left it queued. No wall-clock sleep decides whether the unrelated row reappears.
+    await runInDurableObject(previous.source, async (instance) => {
+      const owned = instance as unknown as {
+        summarySyncTimer: ReturnType<typeof setTimeout> | null;
+        heldSummaryCallback?: () => Promise<void>;
+      };
+      if (owned.summarySyncTimer !== null) {
+        clearTimeout(owned.summarySyncTimer);
+        await owned.heldSummaryCallback!();
+      }
+      delete owned.heldSummaryCallback;
+    });
+    const rows = await env.DATABASE.prepare('SELECT project_id FROM session_summaries').all<{
+      project_id: string;
+    }>();
+    expect(rows.results).toEqual([{ project_id: current.projectId }]);
   });
 
   it('stops reporting succeeded after consecutive sweeps that can afford nothing, and resets once one lands', async () => {

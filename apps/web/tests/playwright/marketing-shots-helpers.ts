@@ -176,10 +176,11 @@ export async function marketingShot(
   const fileName = `${name}${MARKETING_THEME === 'light' ? '-light' : ''}.png`;
   if (process.env.MARKETING_SHOTS) {
     mkdirSync(FEATURE_IMAGE_DIR, { recursive: true });
-    await target.screenshot({ path: `${FEATURE_IMAGE_DIR}/${fileName}` });
+    // Frozen animations (spinners, the Interrupt ring) keep re-captures identical.
+    await target.screenshot({ path: `${FEATURE_IMAGE_DIR}/${fileName}`, animations: 'disabled' });
     return;
   }
   const tmp = resolve(process.cwd(), '../../.codex/tmp/playwright-screenshots');
   mkdirSync(tmp, { recursive: true });
-  await target.screenshot({ path: `${tmp}/${fileName}` });
+  await target.screenshot({ path: `${tmp}/${fileName}`, animations: 'disabled' });
 }

@@ -51,6 +51,7 @@ import { putTaskRunnerState, taskRunnerAttemptContext } from './attempt-storage'
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
 import { recordRunnerPhase } from './phase-timings';
+import { holdTaskForProviderLimit } from './provider-limit-admission';
 import {
   assertCurrentRecoveryAttempt,
   assertRecoveryAuthority,
@@ -394,6 +395,7 @@ export class TaskRunner extends DurableObject<Env> {
 
     try {
       await this.assertRecoveryAuthority(state);
+      if (await holdTaskForProviderLimit(state, rc)) return;
       switch (state.currentStep) {
         case 'node_selection':
           await handleNodeSelection(state, rc);

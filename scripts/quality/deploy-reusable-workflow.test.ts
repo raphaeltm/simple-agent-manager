@@ -823,7 +823,11 @@ describe('deploy reusable workflow', () => {
     for (const envVar of extractOptionalWorkerEnvVars().filter(
       (name) => name !== 'VM_AGENT_REQUIRED_VERSION'
     )) {
-      const mapping = `${envVar}: \${{ vars.${envVar} }}`;
+      // GitHub reserves GITHUB_* configuration-variable names; the Worker keeps its runtime name.
+      const githubVar = envVar.startsWith('GITHUB_TRIGGER_RECOVERY_')
+        ? envVar.replace(/^GITHUB_/, 'GH_')
+        : envVar;
+      const mapping = `${envVar}: \${{ vars.${githubVar} }}`;
       expect(initialSync).toContain(mapping);
       expect(firstDeployResync).toContain(mapping);
     }

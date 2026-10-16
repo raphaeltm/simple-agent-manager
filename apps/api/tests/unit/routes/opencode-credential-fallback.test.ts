@@ -74,8 +74,23 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
   // query is skipped. The user-scoped credential query consumes response #1
   // (after the workspace lookup) and the platform credential query consumes #2.
   function queueLimitResponses(...responses: unknown[][]): void {
-    const queued = [...responses];
-    mockDB.limit.mockImplementation(() => queued.shift() ?? []);
+    const queued = responses.slice(1); // Workspace identity reads use the real SQLite fixture.
+    let workspaceRead = false;
+    mockDB.select.mockImplementation((columns?: Record<string, unknown>) => {
+      workspaceRead = Boolean(columns && 'workspaceId' in columns && 'nodeStatus' in columns);
+      return mockDB;
+    });
+    mockDB.limit.mockImplementation(() =>
+      workspaceRead
+        ? [
+            attribution.sqlite
+              .prepare(
+                `SELECT w.id AS workspaceId,w.user_id AS userId,w.project_id AS projectId,w.chat_session_id AS chatSessionId,w.status,w.node_id AS nodeId,n.status AS nodeStatus FROM workspaces w JOIN nodes n ON n.id=w.node_id WHERE w.id='ws-123'`
+              )
+              .get(),
+          ]
+        : (queued.shift() ?? [])
+    );
   }
 
   beforeEach(async () => {
@@ -166,7 +181,10 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
       ],
       [{ userId: 'user-1', status: 'stopping', nodeId: 'node-1', nodeStatus: 'running' }]
     );
-    mockDecrypt.mockResolvedValueOnce('must-not-be-returned');
+    mockDecrypt.mockImplementationOnce(async () => {
+      attribution.sqlite.exec("UPDATE workspaces SET status='stopping' WHERE id='ws-123'");
+      return 'must-not-be-returned';
+    });
 
     const resp = await postAgentKey({ agentType: 'opencode' });
 

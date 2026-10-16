@@ -1,0 +1,131 @@
+{
+  "windows": {
+    "desktop": {
+      "base": {
+        "files": {
+          "dark": "/images/hero/desktop.webp",
+          "light": "/images/hero/desktop-light.webp"
+        },
+        "width": 1560,
+        "height": 1138
+      },
+      "strip": {
+        "files": {
+          "dark": "/images/hero/desktop-strip.webp",
+          "light": "/images/hero/desktop-strip-light.webp"
+        },
+        "width": 957,
+        "height": 1531,
+        "offsets": [
+          -1.38,
+          -13.5881,
+          -25.7962,
+          -30.8386,
+          -35.3503,
+          -40.552
+        ],
+        "maskStop": 3.2143
+      },
+      "stop": {
+        "files": {
+          "dark": "/images/hero/desktop-stop.webp",
+          "light": "/images/hero/desktop-stop-light.webp"
+        }
+      },
+      "view": {
+        "left": 35.3646,
+        "top": 7.5714,
+        "width": 61.3542,
+        "height": 80
+      },
+      "stopBox": {
+        "left": 66.0417,
+        "top": 85.5,
+        "width": 3.125
+      }
+    },
+    "phone": {
+      "base": {
+        "files": {
+          "dark": "/images/hero/phone.webp",
+          "light": "/images/hero/phone-light.webp"
+        },
+        "width": 780,
+        "height": 1688
+      },
+      "strip": {
+        "files": {
+          "dark": "/images/hero/phone-strip.webp",
+          "light": "/images/hero/phone-strip-light.webp"
+        },
+        "width": 688,
+        "height": 1811,
+        "offsets": [
+          -1.1044,
+          -30.0939,
+          -37.9901
+        ],
+        "maskStop": 1.0686
+      },
+      "stop": {
+        "files": {
+          "dark": "/images/hero/phone-stop.webp",
+          "light": "/images/hero/phone-stop-light.webp"
+        }
+      },
+      "view": {
+        "left": 0,
+        "top": 20.6161,
+        "width": 88.2051,
+        "height": 66.5284
+      },
+      "stopBox": {
+        "left": 44.7436,
+        "top": 84.7749,
+        "width": 10.5128
+      }
+    }
+  },
+  "crops": {
+    "nodes": {
+      "files": {
+        "dark": "/images/hero/nodes.webp",
+        "light": "/images/hero/nodes-light.webp"
+      },
+      "width": 1520,
+      "height": 517
+    },
+    "comment": {
+      "files": {
+        "dark": "/images/hero/comment.webp",
+        "light": "/images/hero/comment-light.webp"
+      },
+      "width": 398,
+      "height": 576
+    },
+    "placement": {
+      "files": {
+        "dark": "/images/hero/placement.webp",
+        "light": "/images/hero/placement-light.webp"
+      },
+      "width": 560,
+      "height": 360
+    },
+    "notifyInput": {
+      "files": {
+        "dark": "/images/hero/notifyInput.webp",
+        "light": "/images/hero/notifyInput-light.webp"
+      },
+      "width": 1150,
+      "height": 108
+    },
+    "notifyDone": {
+      "files": {
+        "dark": "/images/hero/notifyDone.webp",
+        "light": "/images/hero/notifyDone-light.webp"
+      },
+      "width": 864,
+      "height": 108
+    }
+  }
+}

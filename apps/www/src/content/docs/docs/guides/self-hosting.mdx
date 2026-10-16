@@ -306,7 +306,13 @@ GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot 
 :::
 
 :::note
-Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`) and `TRIAL_CLAIM_TOKEN_SECRET` are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets. No manual setup required.
+Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`) and `TRIAL_CLAIM_TOKEN_SECRET` are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets. No manual setup required. Generated `RandomId` key encodings (`b64Std`, `b64Url`, `dec`, `hex`) are marked secret, but Pulumi cannot encrypt the special resource ID through secret-output annotations; that ID is the same key bytes encoded as unpadded base64url. Keep the state backend and backups private. Annotation updates preserve existing keys and do not rotate credentials.
+:::
+
+:::note[Generated-key metadata preview]
+The **Pulumi State Repair** workflow's `secret-metadata-preview` action previews the four existing generated key resources without applying changes, refreshing resources, or exporting state. It uses the selected GitHub Environment's existing secrets and approval controls. Only operation counts, resource types, and identity/input/protection/secret booleans are logged; raw preview output is discarded even on failure. Verification fails if a key is missing or changed, any resource operation would mutate, or expected secret declarations are absent. Pulumi's default preview contains pre-step metadata, so `same` operations establish preservation while new resource IDs/output markers can still be unknown; secret booleans verify annotation intent, not persisted state. A separate `persistedSecretMetadataVerified` boolean checks only the old state's regular secret markers, allowing safe verification after an authorized apply. Post-apply acceptance requires both `verified` and `persistedSecretMetadataVerified` to be true. This does not encrypt the special resource ID or verify unrelated infrastructure.
+
+Optional GitHub Environment variables `PULUMI_METADATA_PREVIEW_TIMEOUT_MS` (default `600000`) and `PULUMI_METADATA_PREVIEW_MAX_BYTES` (default `16777216`) bound each runner subprocess and captured preview output. Unset or empty values use the defaults; nonpositive or invalid values fail safely. No additional secrets or permissions are required.
 :::
 
 :::note[Provider resource ownership]
@@ -520,7 +526,7 @@ The Workers Paid plan ($5/month) is required for Durable Objects and Cloudflare 
 
 VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP. The example prices below cover the built-in Hetzner, Scaleway, Vultr, DigitalOcean, and UpCloud size mappings; Infomaniak and GCP pricing depend on the selected region and machine configuration.
 
-When Infrastructure Compute Pools are enabled, the editor uses the provider-native catalog for the
+When compute pools are enabled, the pool editor uses the provider-native catalog for the
 project, user, or platform credential in scope. The small/medium/large prices below remain useful as
 legacy provider examples, but pool editing is based on concrete provider instance types. Deprecated
 legacy size labels are translated into workload slices for compatibility; they do not choose a

@@ -1,8 +1,8 @@
 {
   "slug": "chat",
-  "label": "Chat-First Development",
-  "title": "Describe what you want.\nWatch it happen.",
-  "subtitle": "Talk to your agents like teammates. Pick the right model for the job, attach files, and watch them write code, run tests, and open PRs — all from a single chat.",
+  "label": "Agent Chat",
+  "title": "Assign tasks to agents from your browser or phone",
+  "subtitle": "The agent works in its own copy of your repo and can push its work to a branch. Follow each step as it runs, and stop it at any time.",
   "summary": "Talk to your agents like teammates — pick a profile, describe the task, and watch every tool call stream live.",
   "highlights": [
     "Switch between Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, and Amp without leaving the chat",
@@ -19,6 +19,11 @@
       "caption": "A live project chat — plan, tool calls, comments, infrastructure, and task status in one view"
     }
   ],
+  "homepage": {
+    "headline": "Use the agent that fits the job",
+    "body": "Pick Claude Code, Codex, Gemini CLI, or another agent for each new chat. Bring your Claude or ChatGPT plan, or an API key.",
+    "caption": "The new-chat screen, with starter prompts and the agent picker"
+  },
   "details": [
     {
       "headline": "Multiple agents, one interface",

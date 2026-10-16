@@ -147,6 +147,7 @@ func (h *SessionHost) enqueueUsageReportFromActiveCallback(request usageReportRe
 
 func (h *SessionHost) enqueueUsageReportRequest(request usageReportRequest, allowClosedGrace bool) {
 	h.usageReportMu.Lock()
+	h.observeProviderLimitLocked(request.payload)
 	if h.usageReportClosed && (!allowClosedGrace || !h.usageReportCloseGrace) {
 		h.recordUsageReportFailureLocked("usage report ingress closed")
 		h.usageReportMu.Unlock()

@@ -1,0 +1,46 @@
+{
+  "slug": "events",
+  "description": "Animated preview of SAM's real triggers page with a sample project: trigger cards appear, a highlight moves from a cron schedule to a GitHub issues trigger to a Datadog webhook trigger and back to the schedule, as a task-completed notification for the nightly dependency audit rises. Timing is simulated.",
+  "aspect": { "wide": 1.15, "narrow": 0.95 },
+  "beats": [0, 600, 1300, 1900, 2500, 3200, 3900],
+  "layers": [
+    {
+      "id": "window",
+      "source": "sam-triggers-sources",
+      "box": { "x": 316, "y": 70, "w": 1584, "h": 1320 },
+      "outWidth": 1200,
+      "place": { "wide": { "x": 2, "y": 2, "w": 84 }, "narrow": { "x": 1, "y": 1, "w": 98 } },
+      "depth": 0,
+      "tiles": [
+        { "box": { "x": 336, "y": 190, "w": 1542, "h": 305 }, "at": 2 },
+        { "box": { "x": 336, "y": 495, "w": 1542, "h": 222 }, "at": 2 },
+        { "box": { "x": 336, "y": 717, "w": 1542, "h": 222 }, "at": 2 },
+        { "box": { "x": 336, "y": 939, "w": 1542, "h": 222 }, "at": 2 },
+        { "box": { "x": 336, "y": 1161, "w": 1542, "h": 226 }, "at": 2 }
+      ],
+      "rings": [
+        {
+          "tone": "mint",
+          "stops": [
+            { "at": 3, "box": { "x": 438, "y": 269, "w": 264, "h": 36 } },
+            { "at": 4, "box": { "x": 438, "y": 800, "w": 156, "h": 36 } },
+            { "at": 5, "box": { "x": 438, "y": 1245, "w": 246, "h": 36 } },
+            { "at": 6, "box": { "x": 438, "y": 269, "w": 264, "h": 36 } }
+          ],
+          "until": 7
+        }
+      ]
+    },
+    {
+      "id": "done",
+      "source": "sam-notifications-feed",
+      "box": { "x": 317, "y": 826, "w": 990, "h": 106 },
+      "outWidth": 990,
+      "place": { "wide": { "x": 28, "y": 83, "w": 64 }, "narrow": { "x": 2, "y": 81, "w": 94 } },
+      "depth": 90,
+      "at": 6,
+      "glow": "green"
+    }
+  ],
+  "lights": [{ "tone": "green", "at": 6 }]
+}

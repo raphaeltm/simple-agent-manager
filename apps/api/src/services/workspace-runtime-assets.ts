@@ -280,3 +280,59 @@ export async function getWorkspaceRuntimeAssets(
     files: mergedAssets.files,
   };
 }
+
+/** Merge stored rows before decrypting: overridden and unselected secrets never decrypt. */
+export async function getSecretExecutionEnv(
+  db: Db,
+  input: RuntimeAssetContextInput,
+  encryptionKey: string,
+  secretNames: readonly string[]
+): Promise<{
+  context: RuntimeAssetContext;
+  envVars: import('@simple-agent-manager/shared').WorkspaceRuntimeEnvVar[];
+}> {
+  if (!input.agentSessionId) throw errors.forbidden('An active agent session is required');
+  const context = await resolveWorkspaceRuntimeAssetContext(db, input);
+  const scopes = [
+    {
+      table: schema.projectRuntimeEnvVars,
+      id: schema.projectRuntimeEnvVars.projectId,
+      value: context.projectId,
+    },
+    {
+      table: schema.profileRuntimeEnvVars,
+      id: schema.profileRuntimeEnvVars.profileId,
+      value: context.agentProfileId,
+    },
+    {
+      table: schema.skillRuntimeEnvVars,
+      id: schema.skillRuntimeEnvVars.skillId,
+      value: context.skillId,
+    },
+  ];
+  const merged = new Map<
+    string,
+    { key: string; storedValue: string; valueIv: string | null; isSecret: boolean }
+  >();
+  for (const scope of scopes) {
+    if (!scope.value) continue;
+    const rows = await db
+      .select({
+        key: scope.table.envKey,
+        storedValue: scope.table.storedValue,
+        valueIv: scope.table.valueIv,
+        isSecret: scope.table.isSecret,
+      })
+      .from(scope.table)
+      .where(eq(scope.id, scope.value));
+    for (const row of rows) merged.set(row.key, row);
+  }
+  for (const name of secretNames) {
+    if (!merged.get(name)?.isSecret)
+      throw errors.badRequest('Selected name is not a managed secret');
+  }
+  return {
+    context,
+    envVars: await resolveRuntimeEnvRows([...merged.values()], encryptionKey, new Set(secretNames)),
+  };
+}

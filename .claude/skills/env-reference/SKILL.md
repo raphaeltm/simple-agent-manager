@@ -45,7 +45,7 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Secret   | `TRIAL_CLAIM_TOKEN_SECRET`                         | No (auto-generated)                                                |
 | Variable | `ORIGIN_CA_CERT_VALIDITY_DAYS`                     | No (default: 7)                                                    |
 
-`D1_MIGRATION_CHURNING_TABLES` is a comma-separated `<binding>.<table>` subset of the reviewed defaults: `DATABASE.deployment_releases`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. It may narrow but cannot expand this list; unset uses all reviewed defaults. `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` accepts `0`–`100`; a decrease exactly at the configured limit is accepted and a larger decrease blocks.
+`D1_MIGRATION_CHURNING_TABLES` is a comma-separated `<binding>.<table>` subset of the reviewed defaults: `DATABASE.deployment_releases`, `DATABASE.diagnostic_reconciliation_state`, `DATABASE.github_trigger_inbox`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.vm_provisioning_leases`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. It may narrow but cannot expand this list; unset uses all reviewed defaults. `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` accepts `0`–`100`; a decrease exactly at the configured limit is accepted and a larger decrease blocks.
 
 `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` are legacy rotation inputs for nodes provisioned before per-node Origin CA CSR signing. They are not required for new node provisioning.
 
@@ -904,11 +904,49 @@ OAuth public endpoints additionally use `CONNECTOR_OAUTH_REQUEST_MAX_BYTES` (163
 
 Connector protocol overrides (optional GitHub environment variables are forwarded by both deployment sync steps; omitted values use runtime defaults):
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `CONNECTOR_REQUEST_MAX_BYTES` | 262144 | MCP request body bound |
-| `CONNECTOR_CLIENT_NAME_MAX_LENGTH` | 200 | Dynamic registration name length |
-| `CONNECTOR_REDIRECT_URI_MAX_COUNT` | 10 | Dynamic registration redirect count |
-| `CONNECTOR_INBOX_SESSION_LIMIT` | 5 | Maximum session/interaction-store fanout per inbox page |
+| Variable                           | Default | Purpose                                                 |
+| ---------------------------------- | ------- | ------------------------------------------------------- |
+| `CONNECTOR_REQUEST_MAX_BYTES`      | 262144  | MCP request body bound                                  |
+| `CONNECTOR_CLIENT_NAME_MAX_LENGTH` | 200     | Dynamic registration name length                        |
+| `CONNECTOR_REDIRECT_URI_MAX_COUNT` | 10      | Dynamic registration redirect count                     |
+| `CONNECTOR_INBOX_SESSION_LIMIT`    | 5       | Maximum session/interaction-store fanout per inbox page |
 
 `CONNECTOR_REGISTRATION_PER_IP_PER_HOUR` is a shared-egress abuse bound, not a user quota. Operators serving many clients behind vendor/NAT egress should size this and the atomic `CONNECTOR_REGISTRATION_GLOBAL_PER_HOUR` backstop for expected connection volume. All `CONNECTOR_*` environment fallbacks are forwarded into deployed Workers when explicitly configured; Admin settings remain higher-priority overrides.
+
+### Managed secret command execution (VM Agent)
+
+The `exec_with_secrets` job supervisor reads these VM-agent process environment overrides (not Worker bindings):
+
+| Variable                         | Default   | Purpose                                                            |
+| -------------------------------- | --------- | ------------------------------------------------------------------ |
+| `SECRET_EXEC_TIMEOUT_MS`         | `600000`  | Default command deadline                                           |
+| `SECRET_EXEC_MAX_TIMEOUT_MS`     | `3600000` | Maximum caller deadline                                            |
+| `SECRET_EXEC_OUTPUT_BYTES`       | `65536`   | Returned/persisted bytes per output stream                         |
+| `SECRET_EXEC_MAX_ACTIVE`         | `8`       | Concurrent secret execution jobs per VM-agent process              |
+| `SECRET_EXEC_BODY_BYTES`         | `1048576` | Private start request body limit                                   |
+| `SECRET_EXEC_TRANSPORT_GRACE_MS` | `2000`    | Additional host transport cleanup grace after in-container cleanup |
+| `SECRET_EXEC_GRACE_MS`           | `1000`    | TERM-to-KILL grace for the in-container process group              |
+
+Positive integer values override defaults. These are local VM-agent service/container configuration; generated cloud-init does not forward additional Worker variables for them. Existing `WORKSPACE_TOOL_TIMEOUT_MS` bounds start/status/cancel transport calls, not the accepted job lifetime. Project/profile/skill managed `isSecret` env values are placeholders in fresh ordinary delivery. Harness credentials and runtime secret files retain existing paths.
+
+## Durable GitHub trigger recovery
+
+Optional Worker variables; GitHub Environment configuration variables use the corresponding `GH_TRIGGER_RECOVERY_*` names. The reusable deployment workflow maps these to `GITHUB_TRIGGER_RECOVERY_*` Worker variables in both sync/deploy phases. GitHub reserves the `GITHUB_` prefix for configuration variables as well as secrets; no secrets are added.
+
+| Variable                                       | Default      | Purpose                                                                                            |
+| ---------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------- |
+| `GITHUB_TRIGGER_RECOVERY_MAX_WALL_TIME_MS`     | `20000`      | Serial background processing budget checked between candidates; one submission may finish after it |
+| `GITHUB_TRIGGER_RECOVERY_LEASE_MS`             | `60000`      | Processing lease; overlapping retries reuse one execution                                          |
+| `GITHUB_TRIGGER_RECOVERY_RETRY_BASE_MS`        | `30000`      | Initial retry backoff                                                                              |
+| `GITHUB_TRIGGER_RECOVERY_RETRY_MAX_MS`         | `900000`     | Maximum exponential backoff (at least base)                                                        |
+| `GITHUB_TRIGGER_RECOVERY_MAX_ATTEMPTS`         | `12`         | Automatic attempt budget including crashed claims                                                  |
+| `GITHUB_TRIGGER_RECOVERY_BATCH_SIZE`           | `25`         | Maximum recovery/expiry/retention rows per sweep                                                   |
+| `GITHUB_TRIGGER_RECOVERY_PAYLOAD_MAX_BYTES`    | `262144`     | Maximum verified trigger intake payload bytes                                                      |
+| `GITHUB_TRIGGER_RECOVERY_PAYLOAD_RETENTION_MS` | `86400000`   | Pending payload expiry threshold (cleanup may lag)                                                 |
+| `GITHUB_TRIGGER_RECOVERY_DEDUP_RETENTION_MS`   | `7776000000` | Dedup tombstone/audit age; at least payload retention                                              |
+
+Signed supported GitHub trigger events are stored before ACK. Intake storage failure returns non-success. Existing cron retries with exponential backoff and execution-derived task identities; kill switches continue to apply. Payloads are erased on completion/exhaustion and when the payload age budget is reached and bounded cleanup processes the row. Tombstones protect against same-ID replay during the configured dedup window; events replayed after retention are outside that guarantee. Old pre-upgrade audit IDs are never automatically replayed. Recovery cannot restore historical payloads that were never retained.
+
+Payload expiry and tombstone purge run in bounded batches on enabled cron ticks; backlog or a disabled operational loop can delay actual deletion beyond the configured age threshold.
+
+Recovery submissions run in one serial `waitUntil` loop so other operational sweeps are not delayed. Exhausted attempts/expired payloads use the existing throttled superadmin notification path with safe generic metadata.

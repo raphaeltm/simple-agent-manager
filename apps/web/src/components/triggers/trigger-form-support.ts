@@ -133,14 +133,74 @@ export function buildGitHubFilters(input: {
   const labels = splitList(input.labels);
   const ignoreActors = splitList(input.ignoreActors);
   const branches = splitList(input.branches);
-  if (actions) filters.actions = actions;
-  if (labels) filters.labels = labels;
+  if (input.eventType !== 'push' && actions) filters.actions = actions;
+  if (input.eventType !== 'push' && labels) filters.labels = labels;
   if (ignoreActors) filters.ignoreActors = ignoreActors;
   if (input.eventType === 'issue_comment' && input.commandPrefix.trim()) {
     filters.commandPrefix = input.commandPrefix.trim();
   }
-  if (input.bodyContains.trim()) filters.bodyContains = input.bodyContains.trim();
-  if (branches) filters.branches = branches;
-  if (input.eventType === 'pull_request' && input.ignoreDrafts) filters.ignoreDrafts = true;
+  if (input.eventType !== 'push' && input.bodyContains.trim())
+    filters.bodyContains = input.bodyContains.trim();
+  if ((input.eventType === 'push' || input.eventType === 'pull_request') && branches)
+    filters.branches = branches;
+  if (input.eventType === 'pull_request') filters.ignoreDrafts = input.ignoreDrafts;
   return filters;
+}
+
+/** Build a patch without round-tripping untouched stored filter values through CSV. */
+export function buildGitHubConfigForForm(
+  input: Parameters<typeof buildGitHubFilters>[0],
+  original?: { eventType: GitHubTriggerEventType; filters: GitHubTriggerFilters }
+) {
+  if (!original) return { eventType: input.eventType, filters: buildGitHubFilters(input) };
+  const initial = {
+    eventType: original.eventType,
+    actions: joinList(original.filters.actions),
+    labels: joinList(original.filters.labels),
+    ignoreActors: joinList(original.filters.ignoreActors),
+    commandPrefix: original.filters.commandPrefix ?? '',
+    bodyContains: original.filters.bodyContains ?? '',
+    branches: joinList(original.filters.branches),
+    ignoreDrafts: original.filters.ignoreDrafts ?? true,
+  };
+  if (
+    (Object.keys(initial) as Array<keyof typeof initial>).every(
+      (key) => input[key] === initial[key]
+    )
+  )
+    return undefined;
+  const filters: GitHubTriggerFilters = { ...original.filters };
+  const eventChanged = input.eventType !== original.eventType;
+  const updateList = (
+    key: 'actions' | 'labels' | 'ignoreActors' | 'branches',
+    applies: boolean
+  ) => {
+    if (eventChanged && !applies) {
+      delete filters[key];
+      return;
+    }
+    if (input[key] === initial[key]) return;
+    const value = applies ? splitList(input[key]) : undefined;
+    if (value) filters[key] = value;
+    else delete filters[key];
+  };
+  const updateText = (key: 'commandPrefix' | 'bodyContains', applies: boolean) => {
+    if (eventChanged && !applies) {
+      delete filters[key];
+      return;
+    }
+    if (input[key] === initial[key]) return;
+    const value = applies ? input[key].trim() : '';
+    if (value) filters[key] = value;
+    else delete filters[key];
+  };
+  updateList('actions', input.eventType !== 'push');
+  updateList('labels', input.eventType !== 'push');
+  updateList('ignoreActors', true);
+  updateList('branches', input.eventType === 'pull_request' || input.eventType === 'push');
+  updateText('commandPrefix', input.eventType === 'issue_comment');
+  updateText('bodyContains', input.eventType !== 'push');
+  if (eventChanged && input.eventType !== 'pull_request') delete filters.ignoreDrafts;
+  else if (input.ignoreDrafts !== initial.ignoreDrafts) filters.ignoreDrafts = input.ignoreDrafts;
+  return { eventType: input.eventType, filters };
 }

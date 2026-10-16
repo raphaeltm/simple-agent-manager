@@ -1728,6 +1728,13 @@ export class ProjectData extends DurableObject<Env> {
     return result;
   }
 
+  listProjectEventChannelSubscribers(
+    input: eventChannels.ListProjectEventChannelSubscribersInput
+  ): eventChannels.ProjectEventChannelSubscriberList {
+    this.ensureProjectId(input.projectId);
+    return eventChannels.listChannelSubscribers(this.sql, this.env, this.getProjectId(), input);
+  }
+
   listProjectEventChannels(
     input: eventChannels.ListProjectEventChannelsInput
   ): eventChannels.ProjectEventChannelList {

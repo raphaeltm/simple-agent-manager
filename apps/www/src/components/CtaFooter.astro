@@ -5,17 +5,17 @@ const currentYear = new Date().getFullYear();
 
 <section class="cta-section">
   <div class="container">
-    <div class="cta-content animate-on-scroll">
-      <h2 class="cta-title">Ready to run multi-agent workflows at scale?</h2>
+    <div class="cta-content sam-glass sam-glass-rim animate-on-scroll">
+      <h2 class="cta-title">Get your coding agents off your laptop</h2>
       <p class="cta-subtitle">
-        Self-host on low-cost Cloudflare Workers. Bring your own cloud. Your agents, your infrastructure.
+        SAM is open source. Deploy it to your Cloudflare account and connect your agent. Add a cloud provider when you want full environments on your own servers.
       </p>
       <div class="cta-actions">
-        <a href={getStartedUrl} class="btn-cta btn-cta-primary">
-          Get Started
+        <a href={getStartedUrl} class="sam-btn sam-btn--primary">
+          Deploy SAM
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
         </a>
-        <a href="https://github.com/raphaeltm/simple-agent-manager" class="btn-cta btn-cta-secondary" target="_blank" rel="noopener noreferrer">
+        <a href="https://github.com/raphaeltm/simple-agent-manager" class="sam-btn sam-btn--glass" target="_blank" rel="noopener noreferrer">
           Star on GitHub
         </a>
       </div>
@@ -58,16 +58,33 @@ const currentYear = new Date().getFullYear();
   }
 
   .cta-content {
-    text-align: center;
     max-width: 600px;
     margin: 0 auto;
-    background: var(--glass-bg);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-xl);
-    box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 80px rgba(22, 163, 74, 0.06);
     padding: 48px 32px;
+    border-radius: var(--radius-xl);
+    text-align: center;
+  }
+
+  /* A pool of light under the card, like the dock and the feature frames. */
+  .cta-section .container {
+    position: relative;
+  }
+
+  .cta-section .container::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: -48px;
+    width: min(680px, 90%);
+    height: 140px;
+    transform: translateX(-50%);
+    background: radial-gradient(closest-side, rgb(34 197 94 / 0.2), transparent 75%);
+    filter: blur(10px);
+    pointer-events: none;
+  }
+
+  :global(html[data-theme='light']) .cta-section .container::before {
+    opacity: 0.55;
   }
 
   .cta-title {
@@ -91,65 +108,6 @@ const currentYear = new Date().getFullYear();
     justify-content: center;
     flex-wrap: wrap;
     gap: 12px;
-  }
-
-  .btn-cta {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-family: var(--font-body);
-    font-size: 0.9375rem;
-    font-weight: 500;
-    padding: 14px 32px;
-    border-radius: var(--radius-md);
-    transition: all 0.2s;
-  }
-
-  .btn-cta-primary {
-    background: var(--color-accent);
-    color: white;
-    box-shadow: 0 0 20px rgba(22, 163, 74, 0.3), 0 0 60px rgba(22, 163, 74, 0.1);
-  }
-
-  .btn-cta-primary:hover {
-    background: var(--color-accent-hover);
-    color: white;
-    transform: translateY(-1px);
-    box-shadow: 0 0 30px rgba(22, 163, 74, 0.4), 0 0 80px rgba(22, 163, 74, 0.15);
-  }
-
-  .btn-cta-secondary {
-    background: var(--glass-bg);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    color: var(--color-fg-primary);
-    border: 1px solid var(--glass-border);
-  }
-
-  .btn-cta-secondary:hover {
-    background: var(--glass-bg-subtle);
-    color: var(--color-fg-primary);
-    border-color: var(--glass-border-hover);
-  }
-
-  :global(html[data-theme='light']) .cta-content {
-    box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 0 70px rgba(21, 128, 61, 0.06);
-  }
-
-  :global(html[data-theme='light']) .btn-cta-primary {
-    box-shadow: 0 0 20px var(--shadow-accent-soft), 0 0 60px var(--color-accent-glow);
-  }
-
-  :global(html[data-theme='light']) .btn-cta-primary:hover {
-    box-shadow: 0 0 30px var(--shadow-accent-strong), 0 0 80px var(--color-accent-glow);
-  }
-
-  :global(html[data-theme='light']) .btn-cta-secondary {
-    border-color: var(--color-border);
-  }
-
-  :global(html[data-theme='light']) .btn-cta-secondary:hover {
-    border-color: var(--color-accent);
   }
 
   /* Footer */

@@ -2966,7 +2966,11 @@ func buildProjectRuntimeEnvScript(envVars []ProjectRuntimeEnvVar) (string, error
 		if !projectEnvKeyPattern.MatchString(key) {
 			return "", fmt.Errorf("invalid project env var key %q", envVar.Key)
 		}
-		sb.WriteString(fmt.Sprintf("export %s=%s\n", key, shellSingleQuote(envVar.Value)))
+		value := envVar.Value
+		if envVar.IsSecret {
+			value = "__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__" + key + "__"
+		}
+		sb.WriteString(fmt.Sprintf("export %s=%s\n", key, shellSingleQuote(value)))
 	}
 
 	return sb.String(), nil

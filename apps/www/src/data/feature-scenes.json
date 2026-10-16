@@ -1,0 +1,424 @@
+{
+  "chat": {
+    "window": {
+      "files": {
+        "dark": "/images/scenes/chat-window.webp",
+        "light": "/images/scenes/chat-window-light.webp"
+      },
+      "width": 1200,
+      "height": 842,
+      "tiles": [
+        {
+          "files": {
+            "dark": "/images/scenes/chat-window-tile0.webp",
+            "light": "/images/scenes/chat-window-tile0-light.webp"
+          },
+          "box": {
+            "left": 29,
+            "top": 2.2565,
+            "width": 42,
+            "height": 13.4204
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/chat-window-tile1.webp",
+            "light": "/images/scenes/chat-window-tile1-light.webp"
+          },
+          "box": {
+            "left": 19.3333,
+            "top": 17.696,
+            "width": 30.6667,
+            "height": 8.076
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/chat-window-tile2.webp",
+            "light": "/images/scenes/chat-window-tile2-light.webp"
+          },
+          "box": {
+            "left": 50,
+            "top": 17.696,
+            "width": 30.5,
+            "height": 8.076
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/chat-window-tile3.webp",
+            "light": "/images/scenes/chat-window-tile3-light.webp"
+          },
+          "box": {
+            "left": 19.3333,
+            "top": 25.6532,
+            "width": 30.6667,
+            "height": 10.2138
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/chat-window-tile4.webp",
+            "light": "/images/scenes/chat-window-tile4-light.webp"
+          },
+          "box": {
+            "left": 50,
+            "top": 25.6532,
+            "width": 30.5,
+            "height": 10.2138
+          }
+        }
+      ]
+    },
+    "profiles": {
+      "files": {
+        "dark": "/images/scenes/chat-profiles.webp",
+        "light": "/images/scenes/chat-profiles-light.webp"
+      },
+      "width": 552,
+      "height": 62,
+      "tiles": []
+    }
+  },
+  "multiplayer": {
+    "window": {
+      "files": {
+        "dark": "/images/scenes/multiplayer-window.webp",
+        "light": "/images/scenes/multiplayer-window-light.webp"
+      },
+      "width": 1048,
+      "height": 940,
+      "tiles": [
+        {
+          "files": {
+            "dark": "/images/scenes/multiplayer-window-tile0.webp",
+            "light": "/images/scenes/multiplayer-window-tile0-light.webp"
+          },
+          "box": {
+            "left": 1.5267,
+            "top": 60.2128,
+            "width": 96.9466,
+            "height": 16.9149
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/multiplayer-window-tile1.webp",
+            "light": "/images/scenes/multiplayer-window-tile1-light.webp"
+          },
+          "box": {
+            "left": 1.5267,
+            "top": 77.1277,
+            "width": 96.9466,
+            "height": 21.1702
+          }
+        }
+      ]
+    },
+    "invite": {
+      "files": {
+        "dark": "/images/scenes/multiplayer-invite.webp",
+        "light": "/images/scenes/multiplayer-invite-light.webp"
+      },
+      "width": 812,
+      "height": 292,
+      "tiles": []
+    },
+    "request": {
+      "files": {
+        "dark": "/images/scenes/multiplayer-request.webp",
+        "light": "/images/scenes/multiplayer-request-light.webp"
+      },
+      "width": 888,
+      "height": 516,
+      "tiles": []
+    }
+  },
+  "comments": {
+    "window": {
+      "files": {
+        "dark": "/images/scenes/comments-window.webp",
+        "light": "/images/scenes/comments-window-light.webp"
+      },
+      "width": 1200,
+      "height": 591,
+      "tiles": []
+    },
+    "thread": {
+      "files": {
+        "dark": "/images/scenes/comments-thread.webp",
+        "light": "/images/scenes/comments-thread-light.webp"
+      },
+      "width": 476,
+      "height": 366,
+      "tiles": [
+        {
+          "files": {
+            "dark": "/images/scenes/comments-thread-tile0.webp",
+            "light": "/images/scenes/comments-thread-tile0-light.webp"
+          },
+          "box": {
+            "left": 2.521,
+            "top": 52.459,
+            "width": 95.7983,
+            "height": 45.3552
+          }
+        }
+      ]
+    }
+  },
+  "compute-pools": {
+    "window": {
+      "files": {
+        "dark": "/images/scenes/compute-pools-window.webp",
+        "light": "/images/scenes/compute-pools-window-light.webp"
+      },
+      "width": 884,
+      "height": 786,
+      "tiles": [
+        {
+          "files": {
+            "dark": "/images/scenes/compute-pools-window-tile0.webp",
+            "light": "/images/scenes/compute-pools-window-tile0-light.webp"
+          },
+          "box": {
+            "left": 1.9231,
+            "top": 23.1552,
+            "width": 98.0769,
+            "height": 18.1934
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/compute-pools-window-tile1.webp",
+            "light": "/images/scenes/compute-pools-window-tile1-light.webp"
+          },
+          "box": {
+            "left": 1.9231,
+            "top": 42.7481,
+            "width": 98.0769,
+            "height": 22.2646
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/compute-pools-window-tile2.webp",
+            "light": "/images/scenes/compute-pools-window-tile2-light.webp"
+          },
+          "box": {
+            "left": 1.9231,
+            "top": 65.0127,
+            "width": 98.0769,
+            "height": 17.5573
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/compute-pools-window-tile3.webp",
+            "light": "/images/scenes/compute-pools-window-tile3-light.webp"
+          },
+          "box": {
+            "left": 1.9231,
+            "top": 82.57,
+            "width": 98.0769,
+            "height": 17.43
+          }
+        }
+      ]
+    },
+    "placement": {
+      "files": {
+        "dark": "/images/scenes/compute-pools-placement.webp",
+        "light": "/images/scenes/compute-pools-placement-light.webp"
+      },
+      "width": 560,
+      "height": 296,
+      "tiles": []
+    },
+    "node": {
+      "files": {
+        "dark": "/images/scenes/compute-pools-node.webp",
+        "light": "/images/scenes/compute-pools-node-light.webp"
+      },
+      "width": 780,
+      "height": 340,
+      "tiles": []
+    }
+  },
+  "events": {
+    "window": {
+      "files": {
+        "dark": "/images/scenes/events-window.webp",
+        "light": "/images/scenes/events-window-light.webp"
+      },
+      "width": 1200,
+      "height": 1000,
+      "tiles": [
+        {
+          "files": {
+            "dark": "/images/scenes/events-window-tile0.webp",
+            "light": "/images/scenes/events-window-tile0-light.webp"
+          },
+          "box": {
+            "left": 1.25,
+            "top": 9,
+            "width": 97.4167,
+            "height": 23.2
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/events-window-tile1.webp",
+            "light": "/images/scenes/events-window-tile1-light.webp"
+          },
+          "box": {
+            "left": 1.25,
+            "top": 32.1,
+            "width": 97.4167,
+            "height": 17
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/events-window-tile2.webp",
+            "light": "/images/scenes/events-window-tile2-light.webp"
+          },
+          "box": {
+            "left": 1.25,
+            "top": 49,
+            "width": 97.4167,
+            "height": 16.9
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/events-window-tile3.webp",
+            "light": "/images/scenes/events-window-tile3-light.webp"
+          },
+          "box": {
+            "left": 1.25,
+            "top": 65.8,
+            "width": 97.4167,
+            "height": 16.9
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/events-window-tile4.webp",
+            "light": "/images/scenes/events-window-tile4-light.webp"
+          },
+          "box": {
+            "left": 1.25,
+            "top": 82.6,
+            "width": 97.4167,
+            "height": 17.2
+          }
+        }
+      ]
+    },
+    "done": {
+      "files": {
+        "dark": "/images/scenes/events-done.webp",
+        "light": "/images/scenes/events-done-light.webp"
+      },
+      "width": 990,
+      "height": 106,
+      "tiles": []
+    }
+  },
+  "durable-sessions": {
+    "window": {
+      "files": {
+        "dark": "/images/scenes/durable-sessions-window.webp",
+        "light": "/images/scenes/durable-sessions-window-light.webp"
+      },
+      "width": 1100,
+      "height": 1121,
+      "tiles": [],
+      "swap": {
+        "files": {
+          "dark": "/images/scenes/durable-sessions-window-swap.webp",
+          "light": "/images/scenes/durable-sessions-window-swap-light.webp"
+        }
+      }
+    },
+    "sessions": {
+      "files": {
+        "dark": "/images/scenes/durable-sessions-sessions.webp",
+        "light": "/images/scenes/durable-sessions-sessions-light.webp"
+      },
+      "width": 380,
+      "height": 218,
+      "tiles": []
+    }
+  },
+  "agent-context": {
+    "window": {
+      "files": {
+        "dark": "/images/scenes/agent-context-window.webp",
+        "light": "/images/scenes/agent-context-window-light.webp"
+      },
+      "width": 1200,
+      "height": 868,
+      "tiles": [
+        {
+          "files": {
+            "dark": "/images/scenes/agent-context-window-tile0.webp",
+            "light": "/images/scenes/agent-context-window-tile0-light.webp"
+          },
+          "box": {
+            "left": 1,
+            "top": 22.1198,
+            "width": 97.8333,
+            "height": 13.2488
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/agent-context-window-tile1.webp",
+            "light": "/images/scenes/agent-context-window-tile1-light.webp"
+          },
+          "box": {
+            "left": 1,
+            "top": 35.2535,
+            "width": 97.8333,
+            "height": 13.1336
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/agent-context-window-tile2.webp",
+            "light": "/images/scenes/agent-context-window-tile2-light.webp"
+          },
+          "box": {
+            "left": 1,
+            "top": 73.0415,
+            "width": 97.8333,
+            "height": 13.2488
+          }
+        },
+        {
+          "files": {
+            "dark": "/images/scenes/agent-context-window-tile3.webp",
+            "light": "/images/scenes/agent-context-window-tile3-light.webp"
+          },
+          "box": {
+            "left": 1,
+            "top": 86.1751,
+            "width": 97.8333,
+            "height": 13.2488
+          }
+        }
+      ]
+    },
+    "policy": {
+      "files": {
+        "dark": "/images/scenes/agent-context-policy.webp",
+        "light": "/images/scenes/agent-context-policy-light.webp"
+      },
+      "width": 760,
+      "height": 196,
+      "tiles": []
+    }
+  }
+}

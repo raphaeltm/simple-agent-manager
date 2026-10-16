@@ -11,6 +11,10 @@ import type {
   WebhookCredential,
   WebhookTriggerFilter,
 } from '@simple-agent-manager/shared';
+import {
+  areGitHubTriggerActionsValid,
+  GITHUB_TRIGGER_DEFAULT_ACTIONS,
+} from '@simple-agent-manager/shared';
 import { Button, Spinner, useModalInteraction } from '@simple-agent-manager/ui';
 import { X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
@@ -33,7 +37,7 @@ import {
 import { GitHubTriggerFields } from './GitHubTriggerFields';
 import { SchedulePicker } from './SchedulePicker';
 import {
-  buildGitHubFilters,
+  buildGitHubConfigForForm,
   CRON_TEMPLATE_VARIABLES,
   FOCUS_RING,
   GITHUB_TEMPLATE_VARIABLES,
@@ -167,12 +171,10 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
         setCronExpression(editTrigger.cronExpression ?? '0 9 * * *');
         setCronTimezone(editTrigger.cronTimezone);
         setGitHubEventType(editTrigger.githubConfig?.eventType ?? 'issue_comment');
-        setGitHubActions(joinList(editTrigger.githubConfig?.filters.actions) || 'created');
+        setGitHubActions(joinList(editTrigger.githubConfig?.filters.actions));
         setGitHubLabels(joinList(editTrigger.githubConfig?.filters.labels));
-        setGitHubIgnoreActors(
-          joinList(editTrigger.githubConfig?.filters.ignoreActors) || 'dependabot[bot]'
-        );
-        setGitHubCommandPrefix(editTrigger.githubConfig?.filters.commandPrefix ?? '/sam');
+        setGitHubIgnoreActors(joinList(editTrigger.githubConfig?.filters.ignoreActors));
+        setGitHubCommandPrefix(editTrigger.githubConfig?.filters.commandPrefix ?? '');
         setGitHubBodyContains(editTrigger.githubConfig?.filters.bodyContains ?? '');
         setGitHubBranches(joinList(editTrigger.githubConfig?.filters.branches));
         setGitHubIgnoreDrafts(editTrigger.githubConfig?.filters.ignoreDrafts ?? true);
@@ -259,6 +261,30 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
       return;
     }
 
+    const githubConfig =
+      sourceType === 'github'
+        ? buildGitHubConfigForForm(
+            {
+              eventType: githubEventType,
+              actions: githubActions,
+              labels: githubLabels,
+              ignoreActors: githubIgnoreActors,
+              commandPrefix: githubCommandPrefix,
+              bodyContains: githubBodyContains,
+              branches: githubBranches,
+              ignoreDrafts: githubIgnoreDrafts,
+            },
+            isEdit ? editTrigger?.githubConfig : undefined
+          )
+        : undefined;
+    if (
+      githubConfig &&
+      !areGitHubTriggerActionsValid(githubConfig.eventType, githubConfig.filters.actions)
+    ) {
+      toast.error('Actions must be valid for the selected GitHub event');
+      return;
+    }
+
     const resErrors = validateResourceState(resourceReqs);
     setResourceErrors(resErrors);
     if (hasValidationErrors(resErrors)) {
@@ -271,6 +297,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
       let credential: WebhookCredential | undefined;
       if (isEdit && editTrigger) {
         const data: UpdateTriggerRequest = {
+          ...(githubConfig ? { githubConfig } : {}),
           name: name.trim(),
           description: description.trim() || null,
           cronExpression: sourceType === 'cron' ? cronExpression : undefined,
@@ -308,22 +335,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
           resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
           taskMode,
           agentProfileId: agentProfileId || undefined,
-          githubConfig:
-            sourceType === 'github'
-              ? {
-                  eventType: githubEventType,
-                  filters: buildGitHubFilters({
-                    eventType: githubEventType,
-                    actions: githubActions,
-                    labels: githubLabels,
-                    ignoreActors: githubIgnoreActors,
-                    commandPrefix: githubCommandPrefix,
-                    bodyContains: githubBodyContains,
-                    branches: githubBranches,
-                    ignoreDrafts: githubIgnoreDrafts,
-                  }),
-                }
-              : undefined,
+          githubConfig,
           webhookConfig:
             sourceType === 'webhook'
               ? {
@@ -502,7 +514,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
               bodyContains={githubBodyContains}
               branches={githubBranches}
               commandPrefix={githubCommandPrefix}
-              disabled={isEdit}
+              disabled={false}
               eventType={githubEventType}
               ignoreActors={githubIgnoreActors}
               ignoreDrafts={githubIgnoreDrafts}
@@ -511,7 +523,15 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
               onBodyContainsChange={setGitHubBodyContains}
               onBranchesChange={setGitHubBranches}
               onCommandPrefixChange={setGitHubCommandPrefix}
-              onEventTypeChange={setGitHubEventType}
+              onEventTypeChange={(eventType) => {
+                setGitHubEventType(eventType);
+                setGitHubActions(GITHUB_TRIGGER_DEFAULT_ACTIONS[eventType]);
+                if (eventType === 'push') {
+                  setGitHubLabels('');
+                  setGitHubBodyContains('');
+                }
+                if (eventType !== 'push' && eventType !== 'pull_request') setGitHubBranches('');
+              }}
               onIgnoreActorsChange={setGitHubIgnoreActors}
               onIgnoreDraftsChange={setGitHubIgnoreDrafts}
               onLabelsChange={setGitHubLabels}
@@ -535,7 +555,10 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
             onOpenChange={setAdvancedOpen}
             onSkipIfRunningChange={setSkipIfRunning}
             onTaskModeChange={setTaskMode}
-            onResourceReqsChange={(next) => { setResourceReqs(next); setResourceErrors({}); }}
+            onResourceReqsChange={(next) => {
+              setResourceReqs(next);
+              setResourceErrors({});
+            }}
             onClearLegacy={() => setVmSizeOverride('')}
             open={advancedOpen}
             profiles={profiles}

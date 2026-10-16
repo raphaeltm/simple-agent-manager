@@ -8,11 +8,10 @@
  * queued-message delivery down to the TaskRunner start it requests.
  */
 import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/migrations';
 import {
   type DurabilityFoundationHooks,
   finalizeAcceptedPromptDelivery,
@@ -32,12 +31,11 @@ import {
   runProjectEventWakeMaterializationBatch,
   selectProjectEventWakeMaterializationCandidates,
 } from '../../src/durable-objects/project-data/project-events-materialization';
-import { sleepSession as sleepChatSession } from '../../src/durable-objects/project-data/sessions';
 import type { Env } from '../../src/env';
 import { isSessionRecoverySourceTaskGuardValid } from '../../src/services/session-recovery-authority';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep';
+import { createSleepProjectDataFixture } from '../helpers/session-sleep-project-data-fixture';
 import { createSchemaTables } from '../helpers/sqlite-d1';
-import { createSqlStorage } from '../unit/durable-objects/sql-storage-test-utils';
 
 const recovery = vi.hoisted(() => ({ ensure: vi.fn(), report: vi.fn() }));
 vi.mock('../../src/services/session-recovery', () => ({
@@ -70,6 +68,7 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
   let sql: SqlStorage;
   let hooks: DurabilityFoundationHooks;
   let deliveries: Promise<unknown>[];
+  let assertSleeping: () => void;
 
   beforeEach(() => {
     fixture = createSessionSleepFixture('in_progress', () => ({
@@ -82,59 +81,14 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
       PROJECT_EVENT_WAKE_ENABLED: 'true',
     });
     createSchemaTables(d1, [schema.users]);
-    d1.prepare("INSERT INTO users (id, status) VALUES (?, 'active')").run(USER);
-    d1.prepare(
-      "INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, 'maintainer', 'active')"
-    ).run(PROJECT, USER);
-    d1.prepare('UPDATE projects SET user_id = ? WHERE id = ?').run(USER, PROJECT);
-    // A VM task submission links its chat; the fixture's snapshot row predates the VM runtime.
-    d1.prepare("UPDATE tasks SET chat_session_id = ?, task_mode = 'task' WHERE id = ?").run(
-      CHAT,
-      TASK
-    );
-    d1.prepare("UPDATE session_snapshots SET runtime = 'vm' WHERE chat_session_id = ?").run(CHAT);
-
-    doDb = new Database(':memory:');
-    sql = createSqlStorage(doDb);
-    runMigrations(sql);
-    sql.exec(
-      `INSERT INTO chat_sessions
-        (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
-       VALUES (?, 'workspace-1', ?, 'Task conversation', 'active', 1, ?, ?, ?)`,
-      CHAT,
-      TASK,
-      START.getTime(),
-      START.getTime(),
-      START.getTime()
-    );
-    // The VM teardown reads and transitions the chat through the real ProjectData functions.
-    mocks.getSession.mockImplementation((_env: Env, _projectId: string, sessionId: string) => {
-      const row = doDb
-        .prepare(
-          'SELECT id, status, task_id AS taskId, workspace_id AS workspaceId FROM chat_sessions WHERE id = ?'
-        )
-        .get(sessionId);
-      return Promise.resolve(row ?? null);
-    });
-    mocks.sleepSession.mockImplementation(
-      (_env: Env, _projectId: string, sessionId: string, options?: object) =>
-        Promise.resolve(sleepChatSession(sql, sessionId, options))
-    );
+    ({ doDb, sql, hooks, deliveries, assertSleeping } = createSleepProjectDataFixture(d1, mocks, {
+      projectId: PROJECT,
+      userId: USER,
+      chatId: CHAT,
+      taskId: TASK,
+      startedAt: START,
+    }));
     recovery.ensure.mockResolvedValue({ status: 'waking', taskId: TASK });
-
-    deliveries = [];
-    hooks = {
-      getProjectId: () => PROJECT,
-      transactionSync: <T>(fn: () => T): T => doDb.transaction(fn)(),
-      waitUntil: (promise) => {
-        deliveries.push(promise);
-      },
-      recalculateAlarm: vi.fn(async () => undefined),
-      scheduleSummarySync: vi.fn(),
-      broadcastEvent: vi.fn(),
-      armIdleCleanup: vi.fn(),
-      nudgeDeliveries: vi.fn(() => 0),
-    };
   });
 
   afterEach(() => {
@@ -148,15 +102,7 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
       userId: USER,
       reason: 'agent ended its turn and went idle',
     });
-    expect(d1.prepare('SELECT status FROM tasks WHERE id = ?').get(TASK)).toEqual({
-      status: 'sleeping',
-    });
-    expect(d1.prepare('SELECT status FROM workspaces WHERE id = ?').get('workspace-1')).toEqual({
-      status: 'sleeping',
-    });
-    expect(doDb.prepare('SELECT status FROM chat_sessions WHERE id = ?').get(CHAT)).toEqual({
-      status: 'sleeping',
-    });
+    assertSleeping();
   }
 
   async function runDeliveryAlarm() {

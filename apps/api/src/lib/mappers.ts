@@ -234,7 +234,7 @@ export function toTaskResponse(
     agentProfileHint: displayAgentProfileHint,
     skillId: task.skillId ?? null,
     skillHint: task.skillHint ?? null,
-    blocked,
+    blocked: blocked || task.admissionState === 'provider_limit_blocked',
     triggeredBy: task.triggeredBy ?? 'user',
     connectorClientName: task.connectorClientName ?? null,
     triggerId: task.triggerId ?? null,

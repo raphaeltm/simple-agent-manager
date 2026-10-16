@@ -35,7 +35,7 @@ export function buildGitHubContext(
       comment: event.comment?.body ?? '',
       labels: labels.join(', '),
       branch,
-      sha: event.head_commit?.id ?? '',
+      sha: event.pull_request?.head?.sha ?? event.after ?? event.head_commit?.id ?? '',
     },
     trigger: {
       id: trigger.id,

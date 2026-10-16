@@ -1,0 +1,92 @@
+---
+/**
+ * A real SAM screenshot whose transcript "streams": a strip of the real transcript (with an
+ * empty band above it) slides up inside the transcript area, revealing each real row in turn.
+ * Without JavaScript, or under reduced motion, the strip rests on the real frame.
+ */
+import { heroWindow, type HeroWindowName, themedImage } from './layers';
+
+interface Props {
+  name: HeroWindowName;
+  class?: string;
+}
+
+const { name, class: className } = Astro.props;
+const win = heroWindow(name);
+const { view, stopBox, strip } = win;
+const pct = (value: number) => `${value}%`;
+const viewStyle = [
+  `left:${pct(view.left)}`,
+  `top:${pct(view.top)}`,
+  `width:${pct(view.width)}`,
+  `height:${pct(view.height)}`,
+  `--sw-mask:${pct(strip.maskStop)}`,
+].join(';');
+const stripStyle = [
+  themedImage(strip.files, strip),
+  `--sw-start:${pct(strip.offsets[0] ?? 0)}`,
+  `--sw-final:${pct(strip.offsets.at(-1) ?? 0)}`,
+].join(';');
+const stopStyle = [
+  themedImage(win.stop.files),
+  `left:${pct(stopBox.left)}`,
+  `top:${pct(stopBox.top)}`,
+  `width:${pct(stopBox.width)}`,
+].join(';');
+---
+
+<div
+  class:list={['streaming-window', 'hero-img', className]}
+  style={themedImage(win.base.files, win.base)}
+  data-streaming-window={name}
+  data-offsets={JSON.stringify(strip.offsets)}
+>
+  <div class="sw-view" style={viewStyle}>
+    <div class="sw-strip hero-img" style={stripStyle} data-sw-strip></div>
+  </div>
+  <div class="sw-stop hero-img" style={stopStyle}></div>
+</div>
+
+<style>
+  .streaming-window {
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* The top rows (under the session header's shadow) come from the base image. */
+  .sw-view {
+    position: absolute;
+    z-index: 1;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--sw-mask));
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--sw-mask));
+  }
+
+  .sw-strip {
+    width: 100%;
+    transform: translateY(var(--sw-offset, var(--sw-final)));
+    transition: transform 640ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  :global([data-motion='intro']) .sw-strip {
+    --sw-offset: var(--sw-start);
+  }
+
+  :global([data-motion-snap]) .sw-strip {
+    transition: none;
+  }
+
+  /* The Interrupt button pokes up into the transcript; keep it above the strip. */
+  .sw-stop {
+    position: absolute;
+    z-index: 2;
+    aspect-ratio: 1;
+    clip-path: circle(44% at 50% 50%);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sw-strip {
+      transition: none;
+    }
+  }
+</style>

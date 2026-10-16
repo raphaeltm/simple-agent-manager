@@ -1,160 +1,184 @@
 ---
-import NodeGrid from './NodeGrid.astro';
-import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
+import HeroBackdrop from './hero/HeroBackdrop.astro';
+import HeroPhone from './hero/HeroPhone.astro';
+import HeroStack from './hero/HeroStack.astro';
 import { proofStrip } from '../data/proof-strip';
+
+const getStartedUrl = 'https://www.simple-agent-manager.org/self-host/';
+const githubUrl = 'https://github.com/raphaeltm/simple-agent-manager';
 ---
 
-<section class="hero">
-  <NodeGrid />
-  <div class="hero-glow" aria-hidden="true"></div>
-  <div class="container hero-content">
-    <div class="hero-badge animate-on-scroll">
-      <span class="badge-dot"></span>
-      Open Source & Self-Hosted
-    </div>
+<section class="hero" data-hero data-motion="still" aria-labelledby="hero-title">
+  <!-- Pre-paint: start from the exploded intro frame unless the visitor prefers reduced motion. -->
+  <script is:inline>
+    (function (hero) {
+      if (hero && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) hero.dataset.motion = 'intro';
+    })(document.currentScript && document.currentScript.parentElement);
+  </script>
+  <HeroBackdrop />
 
-    <h1 class="hero-title animate-on-scroll">
-      The open-source platform for<br /><span class="gradient-text">multi-agent workflows</span>
+  <div class="hero-copy">
+    <span class="hero-badge sam-glass sam-glass--chrome sam-glass-rim">
+      <span class="badge-dot" aria-hidden="true"></span>
+      Open Source & Self-Hosted
+    </span>
+
+    <h1 id="hero-title" class="hero-title">
+      Run AI coding agents <span class="gradient-text">in parallel</span> on your own cloud
     </h1>
 
-    <p class="hero-subtitle animate-on-scroll">
-      Use coding agents as a team, with shared context, and collaborative tools and controls.
-      Agents run in isolated Instant containers or VM workspaces, with hosted compute and BYOC
-      options. SAM handles provisioning, scheduling, and cleanup.
+    <p class="hero-subtitle">
+      Simple Agent Manager gives every task its own cloud workspace with the agent you already use,
+      like Claude Code or Codex. Close your laptop and answer the agent's questions from your phone.
     </p>
 
-    <div class="hero-actions animate-on-scroll">
-      <a href="https://www.simple-agent-manager.org/self-host/" class="btn-hero btn-hero-primary">
-        Get Started
+    <div class="hero-actions">
+      <a href={getStartedUrl} class="sam-btn sam-btn--primary">
+        Deploy SAM
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
       </a>
-      <a href="https://github.com/raphaeltm/simple-agent-manager" class="btn-hero btn-hero-secondary" target="_blank" rel="noopener noreferrer">
+      <a href={githubUrl} class="sam-btn sam-btn--glass" target="_blank" rel="noopener noreferrer">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
         View on GitHub
       </a>
     </div>
 
-    <div class="hero-proof animate-on-scroll">
+    <p class="hero-proof">
       {proofStrip.map((item, i) => (
         <>
           {i > 0 && <span class="hero-proof-dot" aria-hidden="true">·</span>}
           <span class="hero-proof-item">{item}</span>
         </>
       ))}
-    </div>
+    </p>
 
-    <!-- App screenshot -->
-    <div class="screenshot-preview animate-on-scroll">
-      <OptimizedFeatureImage
-        src="/images/features/sam-hero-live-session.png"
-        alt="A busy SAM project chat showing a user prompt, the agent’s plan, grouped tool calls, header chips for comments, infrastructure, and task status, a profile bar, and a session sidebar with several topics"
-        loading="eager"
-      />
+    <div class="hero-note">
+      <span aria-hidden="true"><b>Real SAM interface</b> · sample project · timing simulated</span>
+      <button type="button" class="hero-toggle sam-glass sam-glass--chrome sam-glass-rim" data-hero-toggle data-paused="false" hidden>
+        <svg class="icon-pause" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+        <svg class="icon-play" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></svg>
+        <span data-hero-toggle-label>Pause animation</span>
+      </button>
     </div>
   </div>
+
+  <figure class="hero-figure">
+    <HeroStack />
+    <HeroPhone />
+    <figcaption class="sr-only">
+      Animated preview of SAM's real interface with a sample project: a project chat streams an
+      agent's plan and tool calls while it adds idempotency keys to a refund webhook, beside a comment
+      thread, the server SAM picked for the work, and the servers running the workspaces.
+      Notifications show one agent needing input and the task completing. Timing is simulated.
+    </figcaption>
+  </figure>
 </section>
+
+<script>
+  import { initHero } from './hero/hero-motion';
+
+  for (const hero of document.querySelectorAll<HTMLElement>('[data-hero]')) initHero(hero);
+</script>
 
 <style>
   .hero {
+    --hero-bg: #050a08;
     position: relative;
-    padding: 160px 0 80px;
-    overflow: hidden;
+    isolation: isolate;
+    overflow: clip;
+    min-height: 900px;
+    padding: calc(var(--header-height) + 92px) 0 96px;
+    background: var(--hero-bg);
   }
 
-  @media (min-width: 768px) {
-    .hero {
-      padding: 180px 0 120px;
-    }
+  :global(html[data-theme='light']) .hero {
+    --hero-bg: var(--color-bg-body);
   }
 
-  .hero-glow {
+  /* Blend the hero into the page below it. */
+  .hero::after {
+    content: '';
     position: absolute;
-    top: -200px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 1000px;
-    height: 700px;
-    background: radial-gradient(ellipse at center, rgba(22, 163, 74, 0.2) 0%, rgba(22, 163, 74, 0.06) 40%, transparent 70%);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 3;
+    height: 140px;
+    background: linear-gradient(to bottom, transparent, var(--color-bg-body));
     pointer-events: none;
-    animation: glow-pulse 6s ease-in-out infinite;
   }
 
-  .hero-content {
+  /* ---- Copy ---- */
+  .hero-copy {
     position: relative;
-    z-index: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
+    z-index: 5;
+    display: grid;
+    gap: 22px;
+    justify-items: start;
+    width: 500px;
+    margin-left: max(48px, calc(50% - 624px));
   }
 
   .hero-badge {
     display: inline-flex;
     align-items: center;
     gap: 8px;
+    padding: 6px 14px 6px 10px;
+    border-radius: 999px;
     font-family: var(--font-mono);
-    font-size: 0.8125rem;
+    font-size: 0.78125rem;
     color: var(--color-fg-muted);
-    padding: 6px 16px;
-    background: var(--glass-bg-subtle);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--glass-border);
-    border-radius: 100px;
-    margin-bottom: 32px;
   }
 
   .badge-dot {
-    width: 6px;
-    height: 6px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
-    background: var(--color-accent);
-    animation: glow-pulse 2s ease-in-out infinite;
+    background: var(--color-accent-strong);
+    box-shadow: 0 0 10px rgb(34 197 94 / 0.8);
   }
 
   .hero-title {
     font-family: var(--font-display);
-    font-size: clamp(2.25rem, 6vw, 4rem);
+    font-size: clamp(2.375rem, 4.6vw, 3.75rem);
     font-weight: 600;
-    line-height: 1.1;
-    letter-spacing: -0.03em;
+    line-height: 1.02;
+    letter-spacing: -0.035em;
     color: var(--color-fg-primary);
-    margin-bottom: 24px;
+    /* Even line lengths, so no word is left alone on the last line. */
+    text-wrap: balance;
   }
 
   .gradient-text {
-    background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-success) 100%);
+    background: linear-gradient(100deg, #22c55e 0%, #6ee7a8 45%, #22c55e 70%, #16a34a 100%);
     -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
     background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  :global(html[data-theme='light']) .gradient-text {
+    background-image: linear-gradient(100deg, #166534 0%, #15803d 50%, #166534 100%);
   }
 
   .hero-subtitle {
-    font-size: clamp(1rem, 2vw, 1.25rem);
+    font-size: 1.125rem;
+    line-height: 1.6;
     color: var(--color-fg-muted);
-    max-width: 600px;
-    line-height: 1.7;
-    margin-bottom: 40px;
   }
 
   .hero-actions {
     display: flex;
     flex-wrap: wrap;
-    justify-content: center;
     gap: 12px;
-    margin-bottom: 28px;
   }
 
   .hero-proof {
     display: flex;
-    align-items: center;
-    justify-content: center;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px 10px;
     font-family: var(--font-mono);
-    font-size: 0.8125rem;
+    font-size: 0.78125rem;
     color: var(--color-fg-dim);
-    margin-bottom: 56px;
   }
 
   .hero-proof-item {
@@ -165,86 +189,202 @@ import { proofStrip } from '../data/proof-strip';
     color: var(--color-accent);
   }
 
-  .btn-hero {
+  /* ---- Figure ---- */
+  /* Real-UI layers are themed backgrounds (see hero/layers.ts). */
+  .hero :global(.hero-img) {
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+  }
+
+  /* The stage starts just right of the copy column and is scaled per width band so the
+     resting frame always fits the viewport (rule 56: the hero clips, so nothing may rely on
+     content spilling past it). The copy column is max(48px, 50% - 624px) + its width. */
+  .hero-figure {
+    --copy-width: 500px;
+    --stage-scale: 1;
+    position: absolute;
+    z-index: 4;
+    top: 84px;
+    left: calc(max(48px, 50% - 624px) + var(--copy-width) + 20px);
+    width: 860px;
+    height: 800px;
+    margin: 0;
+  }
+
+  .hero-figure :global(.hero-stack) {
+    position: absolute;
+    inset: 0;
+  }
+
+  .hero-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+    font-family: var(--font-mono);
+    font-size: 0.71875rem;
+    letter-spacing: 0.04em;
+    color: var(--color-fg-dim);
+  }
+
+  .hero-note b {
+    font-weight: 500;
+    color: var(--color-fg-muted);
+  }
+
+  .hero-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    font-family: var(--font-body);
-    font-size: 0.9375rem;
-    font-weight: 500;
-    padding: 12px 28px;
-    border-radius: var(--radius-md);
-    transition: all 0.2s;
-    border: none;
+    gap: 7px;
+    min-height: 32px;
+    padding: 6px 12px;
+    border: 0;
+    border-radius: 10px;
+    font: inherit;
+    letter-spacing: 0.02em;
+    color: var(--color-fg-muted);
     cursor: pointer;
   }
 
-  .btn-hero-primary {
-    background: var(--color-accent);
-    color: white;
-    box-shadow: 0 0 20px rgba(22, 163, 74, 0.3), 0 0 60px rgba(22, 163, 74, 0.1);
-  }
-
-  .btn-hero-primary:hover {
-    background: var(--color-accent-hover);
-    color: white;
-    transform: translateY(-1px);
-    box-shadow: 0 0 30px rgba(22, 163, 74, 0.4), 0 0 80px rgba(22, 163, 74, 0.15);
-  }
-
-  .btn-hero-secondary {
-    background: var(--glass-bg);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
+  .hero-toggle:hover {
     color: var(--color-fg-primary);
-    border: 1px solid var(--glass-border);
   }
 
-  .btn-hero-secondary:hover {
-    background: var(--glass-bg-subtle);
-    color: var(--color-fg-primary);
-    border-color: var(--glass-border-hover);
+  .hero-toggle .icon-play,
+  .hero-toggle[data-paused='true'] .icon-pause {
+    display: none;
   }
 
-  /* App screenshot */
-  .screenshot-preview {
-    width: 100%;
-    max-width: 960px;
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      var(--glass-shadow),
-      0 0 60px rgba(22, 163, 74, 0.12),
-      0 0 120px rgba(22, 163, 74, 0.06);
-  }
-
-  .screenshot-preview picture,
-  .screenshot-preview img {
+  .hero-toggle[data-paused='true'] .icon-play {
     display: block;
   }
 
-  .screenshot-preview img {
-    width: 100%;
-    height: auto;
+  .hero-toggle[hidden] {
+    display: none;
   }
 
-  :global(html[data-theme='light']) .hero-glow {
-    background: radial-gradient(ellipse at center, rgba(21, 128, 61, 0.12) 0%, rgba(21, 128, 61, 0.05) 40%, transparent 70%);
+  .hero-figure :global(.hero-phone) {
+    display: none;
   }
 
-  :global(html[data-theme='light']) .btn-hero-primary {
-    box-shadow: 0 0 20px var(--shadow-accent-soft), 0 0 60px var(--color-accent-glow);
+  /* ---- Laptop: same composition, smaller stage ---- */
+  @media (max-width: 1599.98px) {
+    .hero-figure {
+      --stage-scale: 0.94;
+    }
   }
 
-  :global(html[data-theme='light']) .btn-hero-primary:hover {
-    box-shadow: 0 0 30px var(--shadow-accent-strong), 0 0 80px var(--color-accent-glow);
+  @media (max-width: 1439.98px) {
+    .hero-copy {
+      width: 460px;
+    }
+
+    .hero-figure {
+      --copy-width: 460px;
+      --stage-scale: 0.9;
+    }
   }
 
-  :global(html[data-theme='light']) .screenshot-preview {
-    box-shadow:
-      var(--glass-shadow),
-      0 0 50px rgba(21, 128, 61, 0.08),
-      0 0 100px rgba(21, 128, 61, 0.04);
+  @media (max-width: 1359.98px) {
+    .hero-figure {
+      --stage-scale: 0.84;
+    }
+  }
+
+  @media (max-width: 1279.98px) {
+    .hero-figure {
+      --stage-scale: 0.76;
+    }
+  }
+
+  /* ---- Tablet: copy above, stage below ---- */
+  @media (max-width: 1199.98px) {
+    .hero {
+      min-height: 0;
+      padding-bottom: 72px;
+    }
+
+    .hero-copy {
+      width: auto;
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 0 32px;
+      justify-items: center;
+      text-align: center;
+    }
+
+    .hero-actions,
+    .hero-proof,
+    .hero-note {
+      justify-content: center;
+    }
+
+    .hero-figure {
+      --stage-scale: 0.9;
+      --stage-left: calc(50% - 430px * var(--stage-scale));
+      position: relative;
+      top: auto;
+      left: auto;
+      width: 100%;
+      height: calc(760px * var(--stage-scale));
+      margin-top: 24px;
+    }
+  }
+
+  @media (max-width: 959.98px) {
+    .hero-figure {
+      --stage-scale: 0.74;
+    }
+  }
+
+  /* ---- Phone: the session on SAM's mobile UI ---- */
+  @media (max-width: 699.98px) {
+    .hero {
+      padding-top: calc(var(--header-height) + 28px);
+      padding-bottom: 40px;
+    }
+
+    .hero-copy {
+      gap: 16px;
+      padding: 0 22px;
+      justify-items: start;
+      text-align: left;
+    }
+
+    .hero-actions,
+    .hero-proof,
+    .hero-note {
+      justify-content: flex-start;
+    }
+
+    .hero-toggle {
+      min-height: 44px;
+    }
+
+    .hero-actions {
+      flex-wrap: nowrap;
+      gap: 10px;
+    }
+
+    .hero-actions :global(.sam-btn) {
+      padding: 11px 16px;
+    }
+
+    .hero-subtitle {
+      font-size: 1rem;
+    }
+
+    .hero-figure {
+      height: auto;
+      margin-top: 34px;
+    }
+
+    .hero-figure :global(.hero-stack) {
+      display: none;
+    }
+
+    .hero-figure :global(.hero-phone) {
+      display: block;
+    }
   }
 </style>

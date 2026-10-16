@@ -42,9 +42,7 @@ export const MentionPalette = forwardRef<MentionPaletteHandle, MentionPalettePro
     const [selectedIndex, setSelectedIndex] = useState(0);
     const listRef = useRef<HTMLUListElement>(null);
 
-    const filtered = profiles.filter((p) =>
-      p.name.toLowerCase().startsWith(filter.toLowerCase())
-    );
+    const filtered = profiles.filter((p) => p.name.toLowerCase().startsWith(filter.toLowerCase()));
 
     // Reset selection when filter or visibility changes
     useEffect(() => {
@@ -66,13 +64,16 @@ export const MentionPalette = forwardRef<MentionPaletteHandle, MentionPalettePro
       if (profile) onSelect(profile);
     }, [filtered, selectedIndex, onSelect]);
 
-    const moveSelection = useCallback((direction: 1 | -1) => {
-      setSelectedIndex((prev) => {
-        const lastIndex = filtered.length - 1;
-        if (direction < 0) return prev <= 0 ? lastIndex : prev - 1;
-        return prev >= lastIndex ? 0 : prev + 1;
-      });
-    }, [filtered.length]);
+    const moveSelection = useCallback(
+      (direction: 1 | -1) => {
+        setSelectedIndex((prev) => {
+          const lastIndex = filtered.length - 1;
+          if (direction < 0) return prev <= 0 ? lastIndex : prev - 1;
+          return prev >= lastIndex ? 0 : prev + 1;
+        });
+      },
+      [filtered.length]
+    );
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent): boolean => {
@@ -144,9 +145,7 @@ export const MentionPalette = forwardRef<MentionPaletteHandle, MentionPalettePro
                 style={{
                   minHeight: 44,
                   backgroundColor:
-                    idx === selectedIndex
-                      ? 'var(--sam-color-bg-surface-hover)'
-                      : 'transparent',
+                    idx === selectedIndex ? 'var(--sam-color-bg-surface-hover)' : 'transparent',
                 }}
                 onClick={() => onSelect(profile)}
                 onKeyDown={(e) => handleOptionKeyDown(e, profile)}
@@ -156,7 +155,7 @@ export const MentionPalette = forwardRef<MentionPaletteHandle, MentionPalettePro
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span
-                      className="font-mono text-sm font-medium shrink-0"
+                      className="font-mono text-sm font-medium min-w-0 whitespace-normal [overflow-wrap:anywhere]"
                       style={{ color: 'var(--sam-color-fg-primary)' }}
                     >
                       @{profile.name}

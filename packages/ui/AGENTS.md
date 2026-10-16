@@ -14,6 +14,9 @@ Design system tokens and shared UI components for the control plane app. Provide
 | `src/primitives/` | Layout primitives (Container, PageLayout, Typography) |
 | `src/hooks/` | Shared UI hooks |
 | `src/styles.css` | Base styles imported by consumers |
+| `src/glass/glass.css` | Glass v2 material (`.sam-glass`, `--chrome`, `-rim`, `-sheen`, `-live`), shared by the app and the marketing site; follows `[data-ui-theme]` and `html[data-theme]` |
+| `src/glass/node-field.ts` | Framework-agnostic canvas renderer of SAM's node/workspace network as lit glass tiles (`createGlassNodeField`); `field-model.ts` holds its pure geometry and lifecycle |
+| `src/components/GlassNodeField.tsx` | React wrapper for the node field (decorative background) |
 
 ## Commands
 
@@ -33,6 +36,12 @@ pnpm --filter @simple-agent-manager/ui lint        # ESLint
 - Storybook files use `.stories.tsx` suffix (co-located with components)
 
 ## Gotchas
+
+- Glass and the node field are exported as source subpaths (`./glass.css`, `./glass/node-field`) so the Astro marketing site can import them without React. The marketing site's CI and deploy workflows watch `src/glass/**` and `package.json`.
+- The package barrel re-exports only the renderer's types. `GlassNodeField` imports the renderer when it mounts, so app routes that never show the field never download it; do not add a static `export *` of `glass/node-field` to `src/index.ts`.
+- Three glass vocabularies exist on purpose: the app's utility glass (`.glass-chrome`, `.glass-surface`, `.glass-modal` in `apps/web/src/index.css`, tokens `--sam-glass-*` in `theme.css`) for app chrome and overlays; the marketing site's older `--glass-*` tokens in `apps/www/src/styles/global.css`, still used by its inner pages; and Glass v2 here (`.sam-glass*`, `--sam-glass-v2-*`) for brand surfaces lit by a light source (marketing homepage, app sign-in). Use v2 for new brand-forward surfaces; do not mix vocabularies on one element.
+- `glass.css` material rules use `:where()` (zero specificity) so consumer layout and surface rules win; the rim/sheen pseudo-elements need a positioned host. The app imports it into `@layer components` so Tailwind utilities can still override it.
+- The node field paints one settled frame under `prefers-reduced-motion`, pauses offscreen and in hidden tabs, caps at 30fps, and is a no-op without a 2D canvas context (jsdom).
 
 - UI changes here trigger mandatory Playwright visual audit on mobile (375px) + desktop (1280px) per rule 17
 - Tailwind v4 uses `@tailwindcss/vite` plugin — config is in the consumer's vite config, not a `tailwind.config.js`

@@ -2,23 +2,23 @@
 const steps = [
   {
     number: '01',
-    title: 'Connect Your Runtime',
-    description: 'Use Instant containers with no cloud setup, hosted compute where available, or add your own Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP credentials to a compute pool.',
+    title: 'Deploy SAM to your Cloudflare account',
+    description: 'A guided setup walks you through it. You need a Cloudflare Workers Paid plan ($5 a month minimum), a domain on Cloudflare, and a GitHub account.',
   },
   {
     number: '02',
-    title: 'Create a Project, Invite Your Team',
-    description: 'Link a GitHub repo and invite teammates with a link. SAM organizes tasks, chats, and workspaces per project, shared by everyone who is approved.',
+    title: 'Connect your repo, team, and servers',
+    description: "Link a GitHub repository and invite your team. For quick jobs, Instant workspaces run on your Cloudflare account alone. For full environments built from your repo's dev container, connect a cloud provider such as Hetzner or GCP.",
   },
   {
     number: '03',
-    title: 'Describe Your Task, or Let a Trigger Start It',
-    description: 'Type what you need, or let a cron schedule, GitHub event, or webhook start it for you. SAM starts an Instant workspace or provisions a VM from the pool, then runs the agent.',
+    title: 'Give an agent a task',
+    description: 'Type what you need, or have a schedule, a GitHub event, or a webhook start it. SAM sets up a fresh workspace and runs your agent there. For bigger jobs, an agent can start helper agents and check on them.',
   },
   {
     number: '04',
-    title: 'Watch It Build, Comment, Iterate',
-    description: 'Stream agent output in real time. Comment on a message to steer the agent, and get notified when it needs input or finishes.',
+    title: 'Follow along from anywhere',
+    description: 'Watch the agent work and comment to steer it. Turn on phone notifications to hear when a task finishes or an agent flags that it needs you.',
   },
 ];
 ---
@@ -27,17 +27,14 @@ const steps = [
   <div class="container">
     <div class="hiw-header animate-on-scroll">
       <span class="section-label">How It Works</span>
-      <h2 class="section-title">From zero to coding agents in minutes</h2>
-      <p class="section-subtitle">
-        Four steps to coding agents working through your backlog in isolated workspaces.
-      </p>
+      <h2 class="section-title">From deploy to your first agent task</h2>
     </div>
 
     <div class="steps">
       {steps.map((step, i) => (
         <div class="step animate-on-scroll" style={`transition-delay: ${i * 120}ms`}>
           <div class="step-number-col">
-            <span class="step-number">{step.number}</span>
+            <span class="step-number sam-glass sam-glass-rim">{step.number}</span>
             {i < steps.length - 1 && <div class="step-connector" />}
           </div>
           <div class="step-content">
@@ -54,11 +51,6 @@ const steps = [
   .hiw-header {
     text-align: center;
     margin-bottom: 64px;
-  }
-
-  .hiw-header .section-subtitle {
-    margin-left: auto;
-    margin-right: auto;
   }
 
   .steps {
@@ -80,30 +72,30 @@ const steps = [
     flex-shrink: 0;
   }
 
+  /* Each step is a lit node, like the tiles on the hero floor. */
   .step-number {
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
     width: 48px;
     height: 48px;
-    border-radius: 50%;
-    background: var(--glass-bg);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--glass-border);
-    box-shadow: var(--glass-shadow);
-    color: var(--color-accent);
+    border-radius: 12px;
+    color: var(--color-accent-strong);
     font-family: var(--font-mono);
     font-size: 0.875rem;
     font-weight: 600;
-    flex-shrink: 0;
+  }
+
+  :global(html[data-theme='light']) .step-number {
+    color: var(--color-accent);
   }
 
   .step-connector {
     width: 1px;
     flex: 1;
     min-height: 40px;
-    background: linear-gradient(to bottom, var(--color-border), transparent);
+    background: linear-gradient(to bottom, rgb(34 197 94 / 0.45), transparent);
   }
 
   .step-content {

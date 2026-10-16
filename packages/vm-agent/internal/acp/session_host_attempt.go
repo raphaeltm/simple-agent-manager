@@ -12,8 +12,18 @@ import (
 // Implementations must return quickly; notification runs asynchronously.
 type PromptTerminalObserver func(stopReason string, promptErr error)
 
+// PromptCompletionContext is immutable categorical attribution captured before release.
+type PromptCompletionContext struct {
+	AgentSessionID       string
+	CredentialGeneration int64
+	PromptAttemptID      uint64
+	StartedAt            int64
+}
+
 type promptAttempt struct {
-	id uint64
+	id                   uint64
+	credentialGeneration int64
+	credentialReference  string
 	// ctx is the exact outgoing Prompt attempt lifetime. The ACP SDK creates
 	// inbound RequestPermission contexts from the connection instead, so nested
 	// permission work must explicitly inherit this context.
@@ -146,12 +156,15 @@ func (a *promptAttempt) publishCompletion(h *SessionHost, stopReason string, pro
 	// Release the admission gate before publishing the terminal status. The
 	// public AcceptPrompt path also requires HostReady, so the intermediate
 	// prompting/starting/error status cannot admit a new prompt.
+	completion := PromptCompletionContext{AgentSessionID: h.config.SessionID, CredentialGeneration: a.credentialGeneration, PromptAttemptID: a.id, StartedAt: a.startedAt.UnixMilli()}
 	h.releasePrompt(a)
 	if finalize != nil {
 		finalize()
 	}
 	close(a.done)
-	if cb := h.config.OnPromptComplete; cb != nil {
+	if cb := h.config.OnPromptCompleteWithContext; cb != nil {
+		go cb(stopReason, promptErr, completion)
+	} else if cb := h.config.OnPromptComplete; cb != nil {
 		go cb(stopReason, promptErr)
 	}
 	if a.observer != nil {

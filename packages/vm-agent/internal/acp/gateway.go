@@ -264,7 +264,8 @@ type GatewayConfig struct {
 	// OnPromptComplete is called after a prompt finishes (success or failure).
 	// Used by task-driven workspaces to report completion back to the control plane.
 	// When nil, no callback fires. The string arg is the stop reason (e.g. "end_turn", "error").
-	OnPromptComplete func(stopReason string, promptErr error)
+	OnPromptComplete            func(stopReason string, promptErr error)
+	OnPromptCompleteWithContext func(string, error, PromptCompletionContext)
 	// SAMEnvFallback provides fallback SAM environment variables (KEY=value pairs)
 	// injected into ACP sessions when the bootstrap-written /etc/sam/env file is
 	// missing or incomplete. Built from the vm-agent's own config at startup.

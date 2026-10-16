@@ -6,13 +6,13 @@
  *
  * Flow:
  * 1. Check GitHub trigger enablement
- * 2. Deduplicate by X-GitHub-Delivery ID
+ * 2. Reuse a reserved execution per delivery/trigger (intake owns delivery dedup)
  * 3. Find the project linked to the webhook's repository
  * 4. Find active GitHub triggers for that project matching the event type
  * 5. Evaluate filters for each trigger
  * 6. For matching triggers, create execution records and submit tasks
  */
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -46,11 +46,17 @@ export interface HandleGitHubEventResult {
  * Handle a verified GitHub webhook event for trigger matching.
  *
  * This is called after webhook signature verification succeeds.
- * It's a best-effort operation — errors are logged but don't fail the webhook response.
+ * Intake/lease ownership and retry live in github-trigger-recovery.ts.
+ * Errors propagate so its durable attempt remains retryable.
  */
 export async function handleGitHubEventForTriggers(
   env: Env,
-  input: HandleGitHubEventInput
+  input: HandleGitHubEventInput,
+  recovery: {
+    scheduledAt?: string;
+    processingToken?: string;
+    beforeSubmit?: (executionId: string) => Promise<void>;
+  } = {}
 ): Promise<HandleGitHubEventResult> {
   const { deliveryId, eventType, payload } = input;
 
@@ -72,96 +78,131 @@ export async function handleGitHubEventForTriggers(
   }
 
   const db = drizzle(env.DATABASE, { schema });
-  const now = new Date().toISOString();
+  const now = recovery.scheduledAt ?? new Date().toISOString();
 
-  // Atomic deduplication: INSERT OR IGNORE the delivery record immediately.
-  // If the row already exists (duplicate delivery), the insert is silently ignored
-  // and we detect it via the returned row count. This prevents race conditions
-  // where concurrent Workers both pass a SELECT-based dedup check.
   try {
-    const dedupResult = await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO github_webhook_deliveries (id, event_type, decision, decision_reason, created_at)
-       VALUES (?, ?, 'processing', 'pending', ?)`
-    )
-      .bind(deliveryId, eventType, now)
-      .run();
-
-    if (!dedupResult.meta.changes || dedupResult.meta.changes === 0) {
-      log.info('github_triggers.duplicate_delivery', { deliveryId, eventType });
-      return { processed: false, deliveryId, matchedTriggers: 0, reason: 'duplicate' };
+    // Parse event
+    const event = parseWebhookPayload(eventType, payload);
+    const repoFullName = event.repository?.full_name?.toLowerCase();
+    const installation = payload.installation as Record<string, unknown> | null;
+    const externalId =
+      installation && typeof installation === 'object' ? installation.id : undefined;
+    const installationId =
+      typeof externalId === 'number' && Number.isSafeInteger(externalId) && externalId > 0
+        ? String(externalId)
+        : undefined;
+    const repository = payload.repository as Record<string, unknown> | null;
+    const repositoryId = repository && typeof repository === 'object' ? repository.id : undefined;
+    if (
+      !installationId ||
+      typeof repositoryId !== 'number' ||
+      !Number.isSafeInteger(repositoryId) ||
+      repositoryId <= 0
+    ) {
+      await updateDeliveryDecision(db, deliveryId, {
+        decision: 'no_match',
+        decisionReason: 'invalid_installation_or_repository_id',
+      });
+      return { processed: false, deliveryId, matchedTriggers: 0, reason: 'invalid_scope' };
     }
-  } catch (err) {
-    log.warn('github_triggers.dedup_check_failed', {
-      deliveryId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    throw err;
-  }
 
-  // Parse event
-  const event = parseWebhookPayload(eventType, payload);
-  const repoFullName = event.repository?.full_name?.toLowerCase();
-  const installationId =
-    typeof payload.installation === 'object' && payload.installation !== null
-      ? String((payload.installation as Record<string, unknown>).id ?? '')
-      : undefined;
+    if (!repoFullName) {
+      await updateDeliveryDecision(db, deliveryId, {
+        action: event.action,
+        installationId,
+        senderLogin: event.sender?.login,
+        decision: 'no_match',
+        decisionReason: 'no_repository_in_payload',
+      });
+      return { processed: false, deliveryId, matchedTriggers: 0, reason: 'no_repository' };
+    }
 
-  if (!repoFullName) {
+    // Find projects linked to this repository
+    const projects = await db
+      .select({ id: schema.projects.id, name: schema.projects.name })
+      .from(schema.projects)
+      .innerJoin(
+        schema.githubInstallations,
+        eq(schema.projects.installationId, schema.githubInstallations.id)
+      )
+      .where(
+        and(
+          eq(schema.projects.status, 'active'),
+          eq(schema.projects.repoProvider, 'github'),
+          eq(
+            sql`COALESCE(NULLIF(${schema.githubInstallations.externalInstallationId}, ''), ${schema.githubInstallations.installationId})`,
+            installationId
+          ),
+          or(
+            eq(schema.projects.githubRepoId, repositoryId),
+            and(
+              isNull(schema.projects.githubRepoId),
+              eq(sql`LOWER(${schema.projects.repository})`, repoFullName)
+            )
+          )
+        )
+      );
+
+    if (projects.length === 0) {
+      await updateDeliveryDecision(db, deliveryId, {
+        action: event.action,
+        installationId,
+        repositoryFullName: repoFullName,
+        senderLogin: event.sender?.login,
+        decision: 'no_match',
+        decisionReason: 'no_project_for_repository',
+      });
+      return { processed: false, deliveryId, matchedTriggers: 0, reason: 'no_project' };
+    }
+
+    let totalMatched = 0;
+
+    for (const project of projects) {
+      const matched = await processTriggersForProject(
+        env,
+        db,
+        project,
+        event,
+        deliveryId,
+        installationId,
+        {
+          scheduledAt: now,
+          beforeSubmit: recovery.beforeSubmit,
+          processingToken: recovery.processingToken,
+        }
+      );
+      totalMatched += matched;
+    }
+
+    if (totalMatched > 0) {
+      await updateDeliveryDecision(db, deliveryId, {
+        action: event.action,
+        installationId,
+        repositoryFullName: repoFullName,
+        senderLogin: event.sender?.login,
+        decision: 'matched',
+        decisionReason: `matched_triggers:${totalMatched}`,
+      });
+    }
+    if (totalMatched === 0) {
+      await updateDeliveryDecision(db, deliveryId, {
+        action: event.action,
+        installationId,
+        repositoryFullName: repoFullName,
+        senderLogin: event.sender?.login,
+        decision: 'no_match',
+        decisionReason: 'no_triggers_matched',
+      });
+    }
+
+    return { processed: totalMatched > 0, deliveryId, matchedTriggers: totalMatched };
+  } catch (error) {
     await updateDeliveryDecision(db, deliveryId, {
-      action: event.action,
-      installationId,
-      senderLogin: event.sender?.login,
-      decision: 'no_match',
-      decisionReason: 'no_repository_in_payload',
+      decision: 'error',
+      decisionReason: 'trigger_routing_failed',
     });
-    return { processed: false, deliveryId, matchedTriggers: 0, reason: 'no_repository' };
+    throw error;
   }
-
-  // Find projects linked to this repository
-  const projects = await db
-    .select({ id: schema.projects.id, name: schema.projects.name })
-    .from(schema.projects)
-    .where(eq(schema.projects.repository, repoFullName));
-
-  if (projects.length === 0) {
-    await updateDeliveryDecision(db, deliveryId, {
-      action: event.action,
-      installationId,
-      repositoryFullName: repoFullName,
-      senderLogin: event.sender?.login,
-      decision: 'no_match',
-      decisionReason: 'no_project_for_repository',
-    });
-    return { processed: false, deliveryId, matchedTriggers: 0, reason: 'no_project' };
-  }
-
-  let totalMatched = 0;
-
-  for (const project of projects) {
-    const matched = await processTriggersForProject(
-      env,
-      db,
-      project,
-      event,
-      deliveryId,
-      installationId,
-      now
-    );
-    totalMatched += matched;
-  }
-
-  if (totalMatched === 0) {
-    await updateDeliveryDecision(db, deliveryId, {
-      action: event.action,
-      installationId,
-      repositoryFullName: repoFullName,
-      senderLogin: event.sender?.login,
-      decision: 'no_match',
-      decisionReason: 'no_triggers_matched',
-    });
-  }
-
-  return { processed: totalMatched > 0, deliveryId, matchedTriggers: totalMatched };
 }
 
 async function processTriggersForProject(
@@ -171,8 +212,13 @@ async function processTriggersForProject(
   event: GitHubWebhookEvent,
   deliveryId: string,
   installationId: string | undefined,
-  now: string
+  recovery: {
+    scheduledAt: string;
+    beforeSubmit?: (executionId: string) => Promise<void>;
+    processingToken?: string;
+  }
 ): Promise<number> {
+  const { scheduledAt: now, beforeSubmit, processingToken } = recovery;
   // Find active GitHub triggers for this project
   const triggers = await db
     .select()
@@ -249,17 +295,23 @@ async function processTriggersForProject(
 
     const result = await admitAndSubmitTriggerExecution(env, {
       trigger,
+      githubDeliveryId: deliveryId,
+      beforeSubmit,
+      githubProcessingToken: processingToken,
       eventType: `github.${event.event}.${event.action ?? 'unknown'}`,
       triggeredBy: 'github',
       scheduledAt: now,
-      renderPrompt: (executionId, sequenceNumber) =>
+      renderPrompt: (executionId, sequenceNumber, reservedTrigger = trigger) =>
         renderTemplate(
-          trigger.promptTemplate,
-          buildGitHubContext(event, trigger, project, executionId, sequenceNumber)
+          reservedTrigger.promptTemplate,
+          buildGitHubContext(event, reservedTrigger, project, executionId, sequenceNumber)
         ).rendered,
     });
 
-    if (result.outcome === 'submitted' || result.outcome === 'pending') {
+    if (result.outcome === 'pending') throw new Error('GitHub trigger startup requires recovery');
+    if (result.outcome === 'failed') throw new Error('GitHub trigger submission requires recovery');
+
+    if (result.outcome === 'submitted') {
       await recordDelivery(db, {
         id: `${deliveryId}:${trigger.id}`,
         eventType: event.event,
@@ -269,8 +321,7 @@ async function processTriggersForProject(
         senderLogin: event.sender?.login,
         matchedTriggerId: trigger.id,
         decision: 'matched',
-        decisionReason:
-          result.outcome === 'pending' ? `task:${result.taskId}:pending` : `task:${result.taskId}`,
+        decisionReason: `task:${result.taskId}`,
         createdAt: now,
       });
 
@@ -279,14 +330,14 @@ async function processTriggersForProject(
         deliveryId,
         executionId: result.executionId,
         taskId: result.taskId,
-        submissionPending: result.outcome === 'pending',
+        submissionPending: false,
         eventType: event.event,
         action: event.action,
       });
 
       matched++;
     } else {
-      const reason = result.outcome === 'failed' ? result.error : result.reason;
+      const reason = result.reason;
       await recordDelivery(db, {
         id: `${deliveryId}:${trigger.id}`,
         eventType: event.event,
@@ -295,7 +346,7 @@ async function processTriggersForProject(
         repositoryFullName: event.repository?.full_name,
         senderLogin: event.sender?.login,
         matchedTriggerId: trigger.id,
-        decision: result.outcome === 'failed' ? 'error' : 'skipped',
+        decision: 'skipped',
         decisionReason: reason,
         createdAt: now,
       });
