@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {inspectOwnedFixture,inspectionCommand,browserTerminal} from './owner-terminal-inspect.mjs';
+import {pendingRecovery} from './restore-owned-inspect.mjs';
 const task='01M51CCMB1S684RXVNBNDQRDAS',session='1135ad88-96dd-4ec2-a1d1-5813d295d2a5',project='01KJNR9R3TEN3KX1ETE33852R8';
 const branch='sam/authorized-one-required-reliability-dqrdas',profile='01KRS7Z2R88JFC73ARA7DV9WTK',workspaceId='01M51CJ70CX1ZYQ3M8TDVGM885',nodeId='01M51CCV9A1D2BDK4NJDK1E3MC';
 const canary='PRIVATE_CANARY_DO_NOT_EMIT',now=Date.now();
@@ -60,4 +61,9 @@ try{
  await assert.rejects(browserTerminal({...page,url:()=> 'https://foreign.invalid'},'wss://example.invalid',id));
  const command=inspectionCommand(id);assert(Buffer.byteLength(command.command)<3800);assert(!command.command.includes(canary));
 }finally{globalThis.WebSocket=original;}
-console.log(JSON.stringify({protocolAndPrivacy:true,cases:20,liveCalls:0}));
+assert(pendingRecovery('queued',null,null));
+assert(pendingRecovery('sleeping',workspaceId,404));
+assert(!pendingRecovery('queued',workspaceId,403));
+assert(!pendingRecovery('queued',nodeId,404));
+assert(!pendingRecovery('in_progress',null,null));
+console.log(JSON.stringify({protocolAndPrivacy:true,cases:25,liveCalls:0}));
