@@ -1,0 +1,2325 @@
+{
+  "collectedAt": "2026-10-16T15:54:29Z",
+  "source": "Cloudflare GraphQL durableObjectsPeriodicGroups; production account; UTC",
+  "note": "Oct16 partial; estimate excludes invoice rounding, storage and unmonitored components. Namespace mapping verified via Cloudflare namespace API.",
+  "dailyNamespaceUsage": [
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "144cffd6a0934262a54635db91acb597"
+      },
+      "sum": {
+        "duration": 280.952598144,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 45126,
+        "storageWriteUnits": 10236
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e"
+      },
+      "sum": {
+        "duration": 5.7992002560000016,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5"
+      },
+      "sum": {
+        "duration": 6.947771007999998,
+        "rowsRead": 2102,
+        "rowsWritten": 90,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41"
+      },
+      "sum": {
+        "duration": 3.4934405119999994,
+        "rowsRead": 226524,
+        "rowsWritten": 761,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584"
+      },
+      "sum": {
+        "duration": 98.66541119999998,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b"
+      },
+      "sum": {
+        "duration": 0.21878131199999998,
+        "rowsRead": 10,
+        "rowsWritten": 7,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2"
+      },
+      "sum": {
+        "duration": 35.72849472,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 2145,
+        "storageWriteUnits": 582
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777"
+      },
+      "sum": {
+        "duration": 4746.69471616,
+        "rowsRead": 163981785,
+        "rowsWritten": 1044058,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "144cffd6a0934262a54635db91acb597"
+      },
+      "sum": {
+        "duration": 282.96066303999993,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 55007,
+        "storageWriteUnits": 13244
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e"
+      },
+      "sum": {
+        "duration": 4.9374397440000015,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5"
+      },
+      "sum": {
+        "duration": 1.5972748799999998,
+        "rowsRead": 852,
+        "rowsWritten": 81,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41"
+      },
+      "sum": {
+        "duration": 1.8796165120000001,
+        "rowsRead": 257265,
+        "rowsWritten": 877,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584"
+      },
+      "sum": {
+        "duration": 135.02375769600002,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b"
+      },
+      "sum": {
+        "duration": 0.32711232,
+        "rowsRead": 36,
+        "rowsWritten": 19,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2"
+      },
+      "sum": {
+        "duration": 34.85076876800001,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 1592,
+        "storageWriteUnits": 601
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "d8a27edd68d3439db179c95281c63a47"
+      },
+      "sum": {
+        "duration": 381.013515904,
+        "rowsRead": 241,
+        "rowsWritten": 149,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "e739dfcb17cb4c7f854f6302d5b40cfc"
+      },
+      "sum": {
+        "duration": 1.250665728,
+        "rowsRead": 84,
+        "rowsWritten": 32,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777"
+      },
+      "sum": {
+        "duration": 5266.975829632,
+        "rowsRead": 160795171,
+        "rowsWritten": 1002861,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "144cffd6a0934262a54635db91acb597"
+      },
+      "sum": {
+        "duration": 381.9831008,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 55968,
+        "storageWriteUnits": 13229
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e"
+      },
+      "sum": {
+        "duration": 4.393964671999999,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5"
+      },
+      "sum": {
+        "duration": 2.7050895360000005,
+        "rowsRead": 1600,
+        "rowsWritten": 160,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41"
+      },
+      "sum": {
+        "duration": 1.8722357760000001,
+        "rowsRead": 240029,
+        "rowsWritten": 813,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584"
+      },
+      "sum": {
+        "duration": 58.23763507199999,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b"
+      },
+      "sum": {
+        "duration": 0.15488563200000002,
+        "rowsRead": 10,
+        "rowsWritten": 7,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2"
+      },
+      "sum": {
+        "duration": 29.462671103999995,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 1634,
+        "storageWriteUnits": 694
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "d8a27edd68d3439db179c95281c63a47"
+      },
+      "sum": {
+        "duration": 0.123012736,
+        "rowsRead": 25,
+        "rowsWritten": 5,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777"
+      },
+      "sum": {
+        "duration": 3233.9258700800005,
+        "rowsRead": 304369874,
+        "rowsWritten": 1258935,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "144cffd6a0934262a54635db91acb597"
+      },
+      "sum": {
+        "duration": 228.62176857599997,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 33051,
+        "storageWriteUnits": 7394
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e"
+      },
+      "sum": {
+        "duration": 6.858375296000001,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5"
+      },
+      "sum": {
+        "duration": 3.6358252799999993,
+        "rowsRead": 1623,
+        "rowsWritten": 90,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41"
+      },
+      "sum": {
+        "duration": 2.816401663999999,
+        "rowsRead": 330695,
+        "rowsWritten": 1142,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584"
+      },
+      "sum": {
+        "duration": 105.234785408,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b"
+      },
+      "sum": {
+        "duration": 0.28849804800000006,
+        "rowsRead": 19,
+        "rowsWritten": 11,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2"
+      },
+      "sum": {
+        "duration": 25.002685312,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 989,
+        "storageWriteUnits": 388
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777"
+      },
+      "sum": {
+        "duration": 5912.814507904001,
+        "rowsRead": 655353035,
+        "rowsWritten": 1486389,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "144cffd6a0934262a54635db91acb597"
+      },
+      "sum": {
+        "duration": 279.85950784000005,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 38496,
+        "storageWriteUnits": 9029
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e"
+      },
+      "sum": {
+        "duration": 5.819703424000001,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5"
+      },
+      "sum": {
+        "duration": 4.329178752,
+        "rowsRead": 1735,
+        "rowsWritten": 130,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "41a08e279c7d45e7a5cf9eea57dae9ad"
+      },
+      "sum": {
+        "duration": 0.11711936,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 2,
+        "storageWriteUnits": 2
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41"
+      },
+      "sum": {
+        "duration": 2.218264192,
+        "rowsRead": 332936,
+        "rowsWritten": 1138,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584"
+      },
+      "sum": {
+        "duration": 76.36548492800001,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b"
+      },
+      "sum": {
+        "duration": 0.22496448,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2"
+      },
+      "sum": {
+        "duration": 34.734088447999994,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 1226,
+        "storageWriteUnits": 490
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777"
+      },
+      "sum": {
+        "duration": 5393.701778816001,
+        "rowsRead": 516602280,
+        "rowsWritten": 1233288,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "144cffd6a0934262a54635db91acb597"
+      },
+      "sum": {
+        "duration": 380.55437542400006,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 82460,
+        "storageWriteUnits": 22138
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e"
+      },
+      "sum": {
+        "duration": 4.903554816000001,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5"
+      },
+      "sum": {
+        "duration": 3.694129536,
+        "rowsRead": 2665,
+        "rowsWritten": 150,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41"
+      },
+      "sum": {
+        "duration": 2.484055168,
+        "rowsRead": 246982,
+        "rowsWritten": 829,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584"
+      },
+      "sum": {
+        "duration": 56.844605056,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b"
+      },
+      "sum": {
+        "duration": 0.091405824,
+        "rowsRead": 6,
+        "rowsWritten": 5,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2"
+      },
+      "sum": {
+        "duration": 27.933022336,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 1059,
+        "storageWriteUnits": 416
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777"
+      },
+      "sum": {
+        "duration": 3622.238849792,
+        "rowsRead": 495980679,
+        "rowsWritten": 960360,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "144cffd6a0934262a54635db91acb597"
+      },
+      "sum": {
+        "duration": 357.54133363200003,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 52067,
+        "storageWriteUnits": 12487
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e"
+      },
+      "sum": {
+        "duration": 11.999734656,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5"
+      },
+      "sum": {
+        "duration": 5.62926272,
+        "rowsRead": 4463,
+        "rowsWritten": 236,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41"
+      },
+      "sum": {
+        "duration": 4.646152831999999,
+        "rowsRead": 398839,
+        "rowsWritten": 1361,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584"
+      },
+      "sum": {
+        "duration": 191.80559232000004,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b"
+      },
+      "sum": {
+        "duration": 1.4870338559999996,
+        "rowsRead": 121,
+        "rowsWritten": 57,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2"
+      },
+      "sum": {
+        "duration": 34.842851968000005,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 1491,
+        "storageWriteUnits": 584
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "e739dfcb17cb4c7f854f6302d5b40cfc"
+      },
+      "sum": {
+        "duration": 0.002629504,
+        "rowsRead": 24,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777"
+      },
+      "sum": {
+        "duration": 5828.225376,
+        "rowsRead": 2230149580,
+        "rowsWritten": 2527103,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "144cffd6a0934262a54635db91acb597"
+      },
+      "sum": {
+        "duration": 430.25548569600005,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 53402,
+        "storageWriteUnits": 13290
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e"
+      },
+      "sum": {
+        "duration": 10.984973056,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5"
+      },
+      "sum": {
+        "duration": 0.7686228479999999,
+        "rowsRead": 880,
+        "rowsWritten": 100,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41"
+      },
+      "sum": {
+        "duration": 3.276363776,
+        "rowsRead": 279358,
+        "rowsWritten": 946,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584"
+      },
+      "sum": {
+        "duration": 208.885876736,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b"
+      },
+      "sum": {
+        "duration": 0.326347776,
+        "rowsRead": 19,
+        "rowsWritten": 11,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2"
+      },
+      "sum": {
+        "duration": 33.919474304,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "storageReadUnits": 1680,
+        "storageWriteUnits": 663
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777"
+      },
+      "sum": {
+        "duration": 5366.168473600001,
+        "rowsRead": 3427059592,
+        "rowsWritten": 2368591,
+        "storageReadUnits": 0,
+        "storageWriteUnits": 0
+      }
+    }
+  ],
+  "projectDataInvocations": [
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 58
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 2273
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 226
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 1209
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 196964
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 83937
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 542
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 8963
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 24425
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 450
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 268
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 2379
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 4578
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 293
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 241
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 80
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 14
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 72
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 837
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 77108
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 1933
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 275
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 2253
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "41a08e279c7d45e7a5cf9eea57dae9ad",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 1
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 11252
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 2029
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 4508
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 159
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 106
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 185
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 74
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 17
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 332
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 148
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 503
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 2354
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 12
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 3007
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 297
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 58690
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "d8a27edd68d3439db179c95281c63a47",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 97
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 665
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 55
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 767
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 8464
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "e739dfcb17cb4c7f854f6302d5b40cfc",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 1
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 87
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 16
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 430
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 288
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 40
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 165
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 1653
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 27094
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 70
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 80
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 1701
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 33317
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 3125
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 8902
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 190
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 192485
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 2644
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 24
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 541
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 581
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 12027
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 1008
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 578
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 2842
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 38
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 260
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 135
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 85
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 100
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 28031
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 31539
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 516
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 340
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 2691
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 10
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "d8a27edd68d3439db179c95281c63a47",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 44
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 68
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 489
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 61
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 846
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 66375
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 716
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 68
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 469
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 2119
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "d8a27edd68d3439db179c95281c63a47",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 6
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 6976
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "aa8a3328617e4b5ebf7f3264ddda3e6b",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 20
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 89
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "d8a27edd68d3439db179c95281c63a47",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 5
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 224
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 1516
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 53510
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 69
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 13803
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "e739dfcb17cb4c7f854f6302d5b40cfc",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 15
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 167
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 73817
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 1312
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 56
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "b2118d007dc64bb7bdaede6be5f5afb2",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 66
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 8064
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 76
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 598
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 1100
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 62
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 4
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 3276
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 156
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 50658
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "2e14ab245bab47ddb4ba343b8ce5ae6e",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 35983
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 1123
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 103
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-15",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 205
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-11",
+        "namespaceId": "fb36fe2173534537b0f0a9a0efb17777",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 58264
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "3a017fb54e2c441cbd5f692da1dd26b5",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 321
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-16",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 1168
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "hibernation"
+      },
+      "sum": {
+        "requests": 1645
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-09",
+        "namespaceId": "9f3e6e63953c4dffbd76b2e884bb3d41",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 306
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-13",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 1562
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-14",
+        "namespaceId": "a3b85cc25aa14cc0b7d95d6e3ba21584",
+        "scriptName": "sam-api-prod",
+        "type": "http"
+      },
+      "sum": {
+        "requests": 1197
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-10",
+        "namespaceId": "e739dfcb17cb4c7f854f6302d5b40cfc",
+        "scriptName": "sam-api-prod",
+        "type": "alarm"
+      },
+      "sum": {
+        "requests": 3
+      }
+    },
+    {
+      "dimensions": {
+        "date": "2026-10-12",
+        "namespaceId": "144cffd6a0934262a54635db91acb597",
+        "scriptName": "sam-api-prod",
+        "type": "jsrpc"
+      },
+      "sum": {
+        "requests": 1048
+      }
+    }
+  ]
+}
