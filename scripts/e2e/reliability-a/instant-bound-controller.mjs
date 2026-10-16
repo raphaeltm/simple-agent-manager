@@ -92,8 +92,9 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
   for(const name of ['config.json','operation.json'])if((await stat(join(root,name))).mode&0o077)throw new Error();
   const op=JSON.parse(await readFile(join(root,'operation.json'),'utf8'));
   const c=validateConfig(JSON.parse(await readFile(join(root,'config.json'),'utf8')),Date.now(),op.kind==='cleanup');
-  if(!exact(op,op.kind==='observe'?['kind','contextSlot','target']:['kind','contextSlot'])
-   ||![0,1].includes(op.contextSlot)||!['prepare','check-record','wake-check','complete','observe','sleep','sleep-preflight','cleanup','bootstrap-assets','readonly-state','resume-incomplete'].includes(op.kind)||(op.kind==='bootstrap-assets'&&op.contextSlot!==1)||(['readonly-state','resume-incomplete'].includes(op.kind)&&op.contextSlot!==0))throw new Error();
+  const observing=['observe','own-observe'].includes(op.kind);
+  if(!exact(op,observing?['kind','contextSlot','target']:['kind','contextSlot'])
+   ||![0,1].includes(op.contextSlot)||!['prepare','check-record','wake-check','complete','observe','own-observe','sleep','sleep-preflight','cleanup','bootstrap-assets','readonly-state','resume-incomplete'].includes(op.kind)||(op.kind==='bootstrap-assets'&&op.contextSlot!==1)||(['readonly-state','resume-incomplete','own-observe'].includes(op.kind)&&op.contextSlot!==0))throw new Error();
   sleepTelemetry=['sleep','sleep-preflight'].includes(op.kind);
   const own=c.contexts[op.contextSlot],now=Date.now();let end=Math.min(c.expiresAt,now+(op.kind==='readonly-state'?180_000:240_000));
   const ownPath=`/api/projects/${project}/tasks/${own.taskId}`,sessionPath=`/api/projects/${project}/sessions/${own.sessionId}`;
@@ -192,13 +193,17 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
    output={taskId:own.taskId,sessionId:own.sessionId,...(op.kind==='sleep'?{retainedSleeping:true}:{preflightPassed:true})};
   }else{
    if(task.status==='completed'){
-    if(op.kind!=='observe')throw new Error();await requireOriginalCompletion();
-    await privateJson(own.taskId+'-before-reopen.json',{taskId:own.taskId,branch:own.branch,completedAt:task.completedAt,reopened:true});
+    if(!observing)throw new Error();
+    if(op.kind==='own-observe'){
+     const original=JSON.parse(await readFile(join(root,'canonical-completed-original.json'),'utf8'));
+     if(!exact(original,['taskId','branch','completedAt'])||original.taskId!==own.taskId||original.branch!==own.branch||!when(original.completedAt)||original.completedAt!==task.completedAt||!task.completionEvidence||typeof task.completionEvidence!=='object')throw new Error();
+     await privateJson(own.taskId+'-before-reopen.json',{...original,status:'completed',promptAccepted:false});
+    }else{await requireOriginalCompletion();await privateJson(own.taskId+'-before-reopen.json',{taskId:own.taskId,branch:own.branch,completedAt:task.completedAt,reopened:true});}
    }
    let target,baseline,expectations,completedAt;
-   if(op.kind==='observe'){
+   if(observing){
     target=op.target;
-    if(!exact(target,['taskId','branch','baseline','expectations'])||!ulid(target.taskId)||target.taskId===own.taskId||!branch(target.branch))throw new Error();
+    if(!exact(target,['taskId','branch','baseline','expectations'])||!ulid(target.taskId)||(op.kind==='own-observe'?target.taskId!==own.taskId||target.branch!==own.branch||task.status!=='completed':target.taskId===own.taskId)||!branch(target.branch))throw new Error();
     baseline=baselineArtifact(target.baseline,target.branch);expectations=expectationsArtifact(target.expectations,baseline,repository);
     await request(`/api/projects/${project}/tasks/${target.taskId}`,{},v=>{
      completedAt=v?.completedAt;return v?.id===target.taskId&&v.projectId===project&&v.outputBranch===target.branch&&v.status==='completed'
@@ -217,12 +222,12 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
    const assets={};for(const [name,expected] of Object.entries(hashes)){
     const bytes=await readFile(new URL('./'+name,import.meta.url));if(hash(bytes)!==expected)throw new Error();assets[name]=bytes.toString('utf8');
    }
-   if(op.kind==='observe'){assets['baseline.json']=JSON.stringify(baseline);assets['expectations.json']=JSON.stringify(expectations);}
+   if(observing){assets['baseline.json']=JSON.stringify(baseline);assets['expectations.json']=JSON.stringify(expectations);}
    const assetHashes=Object.fromEntries(Object.entries(assets).map(([name,bytes])=>[name,hash(bytes)]));
    const bundle=gzipSync(JSON.stringify(assets)).toString('base64');
    const folder='/workspaces/reliability-observer-assets/'+(target?.taskId??own.taskId);
    let instructions;
-   if(op.kind==='observe')instructions=`Run ONLY ${folder}/terminal-observer.py check --repository ${repository} --branch ${target.branch} --baseline ${folder}/baseline.json --expectations ${folder}/expectations.json --terminal-completed-at ${completedAt} --pr-limit ${expectations.prLimit}. Use exact baseline.json and expectations.json from the same validated bundle outside Git. Redirect only observer stdout to ${folder}/observer-check.json, stderr PRIVATE. Upload original file bytes to a NEW task-scoped Library directory; report fileID only. No git-probe check of observer's own old fixture.`;
+   if(observing)instructions=`Run ONLY ${folder}/terminal-observer.py check --repository ${repository} --branch ${target.branch} --baseline ${folder}/baseline.json --expectations ${folder}/expectations.json --terminal-completed-at ${completedAt} --pr-limit ${expectations.prLimit}. Use exact baseline.json and expectations.json from the same validated bundle outside Git. Redirect only observer stdout to ${folder}/observer-check.json, stderr PRIVATE. Upload original file bytes to a NEW task-scoped Library directory; report fileID only. No git-probe check of observer's own old fixture.`;
    else if(op.kind==='resume-incomplete')instructions=`NEW acceptance attempt first-guarded-resume-1; prior original attempt FAILED and remains recorded. From canonical repository root ONLY run ${folder}/git-probe.py resume-incomplete --disposable-repository, stdout alone ${folder}/a-prepare.json, stderr PRIVATE. This refuses any ambiguity before writes and resumes only the exact known FIRST tracked-only partial fixture. It uses command-local synthetic author identity for the explicit named fixture commit; NEVER configure user/global identity. Upload ORIGINAL new phase stdout and ORIGINAL new .reliability-a/baseline.json separately to NEW task-scoped directory labeled first-guarded-resume-1. No delete/reset/rebase/reprepare or remote publication. Return idle; no completion.`;
    else if(op.kind==='prepare')instructions=`From canonical repository root ONLY run ${folder}/git-probe.py prepare --disposable-repository (the probe supplies command-local synthetic identity ONLY for its explicit fixture commit; NEVER configure user/global identity), stdout alone ${folder}/a-prepare.json, stderr PRIVATE. Upload ORIGINAL phase stdout and ORIGINAL .reliability-a/baseline.json separately. Return idle; no completion.`;
    else if(op.kind==='check-record')instructions=`From canonical repository root run ONLY ${folder}/git-probe.py check to ${folder}/a-check.json; then ${folder}/terminal-observer.py record --repository ${repository} --branch ${own.branch} --baseline .reliability-a/baseline.json --expectations ${folder}/expectations.json to ${folder}/observer-record.json. Stdout only, stderr PRIVATE. Upload all three original files separately, no reformatted JSON. Return idle.`;
@@ -232,8 +237,10 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
    if(content.length>16000)throw new Error();
    if(workspace.status!=='sleeping'&&task.status!=='completed'){await readState();if(!idle())throw new Error();}
    await bind();
+   if(op.kind==='own-observe'&&(task.status!=='completed'||task.completedAt!==completedAt))throw new Error();
    const submittedAt=Date.now();
-   await request(sessionPath+'/prompt',{method:'POST',data:{content}},v=>v?.accepted===true&&v.status==='queued');let done=false;
+   await request(sessionPath+'/prompt',{method:'POST',data:{content}},v=>v?.accepted===true&&v.status==='queued');
+   if(op.kind==='own-observe')await privateJson('own-observe-prompt-receipt.json',{accepted:true,submittedAt,originalCompletedAt:completedAt});let done=false;
    while(Date.now()<end){
     if(op.kind==='complete'){
      await request(ownPath,{},v=>{task=v;return v?.id===own.taskId&&v.projectId===project&&v.outputBranch===own.branch;});
@@ -246,7 +253,7 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
     await new Promise(resolve=>setTimeout(resolve,1000));
    }
    if(!done)throw new Error();
-   if(op.kind==='observe'){
+   if(observing){
     // Caller supplies only the independently located task-scoped upload ID; never raw model output.
     let artifact;
     while(Date.now()<end){try{artifact=JSON.parse(await readFile(join(root,'observer-artifact.json'),'utf8'));break;}catch{await new Promise(resolve=>setTimeout(resolve,500));}}
@@ -256,7 +263,12 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
      proof=probeArtifact(v,'observer-check');return Object.values(proof.checks).every(Boolean)&&Object.values(proof.statuses).every(x=>x===0);
     });
     output={taskId:target.taskId,branch:target.branch,completedAt,...proof};
-    await privateJson(target.taskId+'-independent-proof.json',output);
+    if(op.kind==='own-observe'){
+     await bind();
+     await privateJson('own-observe-after.json',{taskId:own.taskId,status:['completed','in_progress','queued','sleeping','cancelled','failed'].includes(task.status)?task.status:'other',originalCompletedAt:completedAt});
+     output={...output,sameContext:true,independentRuntime:false};
+     await privateJson(target.taskId+'-same-context-proof.json',output);
+    }else await privateJson(target.taskId+'-independent-proof.json',output);
     await bind();await readState();if(!idle())throw new Error();
     await request('/api/workspaces/'+own.workspaceId+'/sleep',{method:'POST',data:{}},v=>v?.status==='sleeping'&&v.workspaceId===own.workspaceId&&v.chatSessionId===own.sessionId&&when(v.snapshotExpiresAt));
    }else{
