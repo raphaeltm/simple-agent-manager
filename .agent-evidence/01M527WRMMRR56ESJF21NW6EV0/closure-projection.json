@@ -1,0 +1,18 @@
+{
+  "allFiniteJobsTerminal": true,
+  "authLogoutNullSessionProtectedDenial": true,
+  "browserClosed": true,
+  "caseAcceptance": "NOT PASS",
+  "cleanupJobId": "sx-f62513171a6d538047164471d6d6e7438fcbfb7f28640dd9e299c3cae09c36c6",
+  "exportPreparedAt": 1792150976044,
+  "hard": 1792153178018,
+  "initialFailureCause": "UNKNOWN; original HTTP predicate/status not retained",
+  "nodeId": "01M527X0B4TBRSGZCZ13P4V4WG",
+  "normalSleep200": true,
+  "providerCleanupOwnership": "ACTIVE; exact node running warm11:42:17.394; strict canonical deleted+separate stamp required",
+  "providerTerminationConfirmed": false,
+  "snapshotAvailable": true,
+  "snapshotId": "01M5287TDXN6HBAVC2PYBEGPCE",
+  "taskId": "01M527WRMMRR56ESJF21NW6EV0",
+  "testedTurnExecuted": false
+}
