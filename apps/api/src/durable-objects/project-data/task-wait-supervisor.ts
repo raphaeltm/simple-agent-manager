@@ -171,6 +171,10 @@ export async function processTaskWaits(
   }
   const candidates = taskWaits.listTaskWaitCandidates(sql, config, now, options.childTaskId);
   result.checked = candidates.length;
+  // No state changed, so there is no new deadline to publish. The enclosing
+  // alarm recalculates once after consuming its sections. A child terminal
+  // notification still needs the delivery-cancellation path below.
+  if (candidates.length === 0 && !options.childTaskId) return result;
 
   const taskIds = [
     ...new Set([

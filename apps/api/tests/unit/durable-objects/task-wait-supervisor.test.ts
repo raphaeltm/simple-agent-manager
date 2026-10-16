@@ -70,6 +70,29 @@ describe('task wait supervisor concurrency and prompt safety', () => {
 
   afterEach(() => db.close());
 
+  it('does not query D1 or recompute the project schedule when no waits are due', async () => {
+    sql.exec("UPDATE task_wait_subscriptions SET next_reconcile_at = 30_000 WHERE id = 'wait-1'");
+    const prepare = vi.fn();
+    const recalculateAlarm = vi.fn();
+    const acceptPromptDelivery = vi.fn();
+    const result = await processTaskWaits(
+      sql,
+      { DATABASE: { prepare } } as unknown as Env,
+      {
+        getProjectId: () => 'project-1',
+        transactionSync: (callback) => callback(),
+        acceptPromptDelivery,
+        recalculateAlarm,
+      },
+      { now: 1 }
+    );
+    expect(result.checked).toBe(0);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(recalculateAlarm).not.toHaveBeenCalled();
+    expect(acceptPromptDelivery).not.toHaveBeenCalled();
+    expect(getTaskWait(sql, 'wait-1')?.state).toBe('active');
+  });
+
   it('revalidates through a barrier and cancels when the parent terminalizes before enqueue', async () => {
     let queryCount = 0;
     let releaseSecond!: (value: { results: ReturnType<typeof rows> }) => void;

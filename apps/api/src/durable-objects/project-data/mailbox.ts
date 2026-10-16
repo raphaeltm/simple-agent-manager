@@ -457,16 +457,16 @@ export function runDeliverySweep(
  * Returns null if no messages need attention.
  */
 export function computeMailboxAlarmTime(sql: SqlStorage, pollIntervalMs: number): number | null {
-  // Check if there are any queued or delivered messages that need attention
+  // Scheduling needs existence, not a count. Retained delivered messages can
+  // number in the thousands, and every heartbeat recalculates this schedule.
   const [row] = sql
     .exec(
-      `SELECT COUNT(*) as cnt FROM session_inbox
-       WHERE delivery_state IN ('queued', 'delivered')`
+      `SELECT 1 FROM session_inbox
+       WHERE delivery_state IN ('queued', 'delivered') LIMIT 1`
     )
     .toArray();
 
-  const count = (row as { cnt: number })?.cnt ?? 0;
-  if (count === 0) return null;
+  if (!row) return null;
 
   return Date.now() + pollIntervalMs;
 }
