@@ -62,15 +62,15 @@ Note that the **Full** workspace profile does not override this: workspace profi
 
 ## What happens to your work
 
-**SAM does not commit or push an Instant chat's work for you.** Nothing is auto-committed when the agent finishes, and no pull request is opened. A chat you start from the message box without attachments gets no branch either: its workspace sits on your project's default branch, and anything the agent changed stays in that container.
+**SAM does not commit or push an Instant chat's work for you.** Nothing is auto-committed when the agent finishes, and no pull request is opened. A chat you send from the message box with no attachments, and not with an idea's **Execute** button, gets no branch either: its workspace sits on your project's default branch, and anything the agent changed stays in that container.
 
 Two independent things decide this, and it's worth knowing which is which:
 
-| How you started it                                        | Branch                        | Auto-commit and push |
-| --------------------------------------------------------- | ----------------------------- | -------------------- |
-| A composer chat on an **Instant** profile, no attachments | None — your default branch    | No                   |
-| A submitted task or `dispatch_task`, in **task** mode     | Its own `sam/…` output branch | Yes, then a PR       |
-| The same, in **conversation** mode                        | Its own `sam/…` output branch | No                   |
+| How you started it                                                                 | Branch                        | Auto-commit and push |
+| ---------------------------------------------------------------------------------- | ----------------------------- | -------------------- |
+| A message-box chat on an **Instant** profile, no attachments, not from **Execute** | None — your default branch    | No                   |
+| A submitted task or `dispatch_task`, in **task** mode                              | Its own `sam/…` output branch | Yes, then a PR       |
+| The same, in **conversation** mode                                                 | Its own `sam/…` output branch | No                   |
 
 - **The branch depends on how the work was started.** Only a composer chat on an Instant profile skips branch creation, and only when it has no attachments and wasn't started with an idea's **Execute** button. Otherwise, as on any other profile, it's submitted as a task and gets one. Anything submitted as a task — or dispatched with `dispatch_task`, on either runtime — gets an output branch, whichever mode it runs in.
 - **The push depends on task mode.** Conversation mode has no git lifecycle at all. Selecting the Instant runtime on a profile sets conversation mode, and so does choosing the **Lightweight** workspace profile — so a Lightweight submitted task gets a branch with nothing pushed to it.

@@ -251,3 +251,11 @@ fork|retry --launch` behaves like `sam tasks submit`; the mention note's exact s
   gets the placeholder without `exec_with_secrets`" — placement only reuses nodes whose agent build
   matches `VM_AGENT_REQUIRED_VERSION` (`node-selection.ts`), and #2332 changed the VM agent, so
   older nodes don't receive new workspaces.
+
+### Round 8 (combined lenses)
+
+- 2 MEDIUM, 2 LOW, adopted: the Instant no-branch rule (message-box chat, no attachments, not from
+  **Execute**) is now stated fully in `instant-sessions.md` and `session-troubleshooting.md`, and
+  `concepts.mdx`, `idea-execution.md` (including both step lists) and `chat-features.md` link to
+  it instead of restating it; forks get a branch unless they're Instant chats without
+  attachments; the old `@` parser accepted only a–z, A–Z, digits and `_`.

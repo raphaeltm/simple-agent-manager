@@ -411,8 +411,9 @@ Fork and Retry both start a new chat linked to the one you're in, and both open 
 | Use it to       | Try a different direction, or carry on from a chat that can't be woken | Run a failed or stopped request again, perhaps with another model |
 
 Neither copies the original workspace's files: the new chat starts from your default branch in a
-new workspace, and on a VM it also gets a new `sam/…` branch of its own. Forking works for any chat, whether it started
-from an idea, a task, or a quick question, and SAM records the new chat's parent.
+new workspace, and gets a new `sam/…` branch of its own unless it's an Instant chat without
+attachments ([which chats get one](/docs/guides/instant-sessions/#what-happens-to-your-work)). Forking works for any chat, whether it started from an
+idea, a task, or a quick question, and SAM records the new chat's parent.
 
 ### How to Fork
 
@@ -424,9 +425,9 @@ from an idea, a task, or a quick question, and SAM records the new chat's parent
    chat's title and its project, session, and task IDs.
 4. Add what to do next at the end of the message, keeping the IDs, and send it. To build on what
    the original agent pushed, say so, for example "continue from the original chat's branch". If
-   the original ran on a VM, the new agent can look the branch up from the parent task ID; a chat
-   started from the message box on an Instant profile, without attachments and not from an idea's
-   **Execute** button, has no branch of its own, so name the branch its agent pushed to.
+   the original had a `sam/…` branch of its own
+   ([which chats do](/docs/guides/instant-sessions/#what-happens-to-your-work)), the new agent can
+   look it up from the parent task ID; otherwise, name the branch its agent pushed to.
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/chat-fork-composer-mobile.png 2x" />

@@ -67,9 +67,9 @@ classify the failure. Treat it like the interrupted case: check before you resen
 
 Several sections below say to check GitHub for anything the agent pushed. Work started as a task
 runs on its own `sam/…` [output branch](/docs/guides/idea-execution/#where-the-work-lands), and the
-project **Files** tab shows its diff without opening a workspace. A chat started in the composer on
-an Instant profile, without attachments, has no branch of its own, and pushes only what you ask the
-agent to push.
+project **Files** tab shows its diff without opening a workspace. A chat sent from the message box
+on an Instant profile, without attachments and not from an idea's **Execute** button, has no branch
+of its own, and pushes only what you ask the agent to push.
 
 A **Task** keeps its task completion and git delivery behavior after sleep and wake;
 a **Chat** remains a Chat. [Wake settings](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
@@ -372,10 +372,9 @@ To carry on, select **Fork conversation**. The new chat's agent can read this co
 expired workspace's files can't be restored: anything the agent pushed is still on GitHub, and
 anything it didn't push, including commits it made only in the workspace, is gone. The new chat
 starts from your default branch, not the original's, so to build on what was pushed, tell it to
-continue from the original chat's branch. If the original ran on a VM, the new agent can look the
-branch up from the parent task ID in the message; for a chat started from the message box on an
-Instant profile without attachments, and not from an idea's **Execute** button, name the branch its
-agent pushed to. **Retry** isn't offered for an expired chat.
+continue from the original chat's branch. If the original had a `sam/…` branch of its own
+([which chats do](/docs/guides/instant-sessions/#what-happens-to-your-work)), the new agent can look it up from the parent task ID in the message;
+otherwise, name the branch its agent pushed to. **Retry** isn't offered for an expired chat.
 
 ## Wake failed
 
@@ -541,7 +540,7 @@ profile names, with **Agent profile not found**, so it never reaches the agent. 
 addresses (`bob@example.com`), package names (`@types/node`), code with decorators or annotations
 (`@dataclass`, `@Override`), and text SAM fills in for you, such as the chat title Fork quotes.
 Picking a profile from the list doesn't help when its name has no spaces but has a character other
-than an unaccented letter, a digit, or `_` (such as `-`, `.`, or `é`): the list inserts
+than a letter a–z or A–Z, a digit, or `_` (such as `-`, `.`, `é`, or `д`): the list inserts
 `@code-reviewer`, which these releases read as `@code`, so type `@"code-reviewer"` instead.
 Update to v2026.10.15 or later. Until then, write the `@` so a word doesn't directly follow it, for
 example `bob at example.com` or `@ dataclass`. The hosted service was fixed on 14 October.
