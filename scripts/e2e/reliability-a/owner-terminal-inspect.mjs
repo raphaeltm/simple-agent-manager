@@ -83,7 +83,7 @@ export async function browserTerminal(page,url,id){
  * Supervisor must bound this call to 90s; no automatic retry on incomplete command/PTY closure.
  */
 export async function inspectOwnedFixture({context,page,grant,open=browserTerminal,now=Date.now,pause=ms=>new Promise(r=>setTimeout(r,ms))}){
- const result={ok:false,stage:'binding',before:false,after:false,manifest:false,terminalClosed:false,quiescence:false};
+ const result={ok:false,stage:'binding',before:false,after:false,manifest:false,terminalClosed:false,socketClosed:false,quiescence:false};
  let terminal,created=false,token;
  const runId=randomUUID(),started=now(),deadline=started+60000;
  const live=()=>{if(now()>=deadline)throw new Error('deadline');};
@@ -98,7 +98,7 @@ export async function inspectOwnedFixture({context,page,grant,open=browserTermin
    ||!exact(grant.receipt,['taskId','sessionId','branchName','status'])||grant.receipt.taskId!==task||grant.receipt.sessionId!==session||grant.receipt.branchName!==branch||grant.receipt.status!=='queued')throw 0;
   const owner=await json('/api/auth/get-session');if(owner?.user?.id!==grant.ownerId)throw 0;
   const p=await json(`/api/projects/${project}/agent-profiles/${profile}`);
-  if(p?.id!==profile||p.agentType!=='claude-code'||!(p.runtime===null||p.runtime==='vm')||p.vmSizeOverride!=null||typeof p.name!=='string'||!p.name
+  if(p?.id!==profile||p.userId!==grant.ownerId||p.agentType!=='claude-code'||!(p.runtime===null||p.runtime==='vm')||p.vmSizeOverride!=null||typeof p.name!=='string'||!p.name
    ||!(p.projectId===project||(p.projectId===null&&p.userId===grant.ownerId)))throw 0;
   const profiles=await json(`/api/projects/${project}/agent-profiles`);
   if(!Array.isArray(profiles?.items)||profiles.items.filter(x=>x?.name===p.name).length!==1||!profiles.items.some(x=>x?.id===profile&&x.name===p.name))throw 0;
@@ -127,14 +127,15 @@ export async function inspectOwnedFixture({context,page,grant,open=browserTermin
   if(!exact(done,['taskId','sessionId','runId','operation','status','stateSha256'])||done.taskId!==task||done.sessionId!==session||done.runId!==runId||done.operation!=='read-state'||done.status!==0||!/^[a-f0-9]{64}$/.test(done.stateSha256))throw 0;
   const bytes=await download('state.json');if(!bytes||sha(bytes)!==done.stateSha256)throw 0;const state=JSON.parse(bytes.toString('utf8'));
   if(!exact(state,['checks','statuses'])||!exact(state.checks,checkKeys)||Object.values(state.checks).some(v=>typeof v!=='boolean')||!exact(state.statuses,['gitRoot','gitBranch'])||Object.values(state.statuses).some(v=>!Number.isInteger(v)||v<0||v>255))throw 0;
-  result.manifest=true;result.quiescence=true;result.state=state;result.stage='canonical-after';await bind();result.after=true;
+  result.manifest=true;result.state=state;result.stage='canonical-after';await bind();result.after=true;
  }catch{}finally{
   result.stage=result.after?'terminal-close':result.stage;
   if(terminal)try{if(created){await terminal.send({type:'close_session',data:{sessionId:runId}});await wait('closed');result.terminalClosed=true;}}catch{}
-  if(terminal)try{await terminal.dispose();}catch{}
+  if(terminal)try{await terminal.dispose();result.socketClosed=true;}catch{}
   token=undefined;
  }
- result.ok=result.before&&result.after&&result.manifest&&result.terminalClosed&&result.quiescence;
+ result.quiescence=result.before&&result.after&&result.manifest&&result.terminalClosed&&result.socketClosed;
+ result.ok=result.quiescence;
  if(result.ok)result.stage='done';
  // Fixed projection only; never forward exceptions, API bodies, names, JWTs, URLs or PTY output.
  return result;
