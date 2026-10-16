@@ -112,14 +112,14 @@ test('actual bootstrap capsule yields only fixed steps and booleans on success a
 test('readonly diagnosis uses one fixed prompt, no acceptance marker or mutation endpoint, and rejects other kinds/slots',()=>{
  const root=mkdtempSync(join(tmpdir(),'sam-readonly-state-'));
  try{
-  for(const mode of ['readonly-state','resume-incomplete','unknown-kind','wrong-slot']){
+  for(const mode of ['readonly-state','resume-incomplete','unknown-kind','wrong-slot','completed-sleep','completed-active']){
    const dir=join(root,mode);mkdirSync(dir,{mode:0o700});
    const contexts=[0,1].map(i=>({taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,workspaceId:uid(20+i),nodeId:uid(30+i),branch:i?'sam/second':'sam/first',agentProfileId:uid(40+i),agentType:i?'claude-code':'openai-codex',submittedAt:Date.now()-1000,evidencePrUrl:'https://github.com/raphaeltm/simple-agent-manager/pull/2355',receipt:{taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,branchName:i?'sam/second':'sam/first',status:'queued'}}));
    writeFileSync(join(dir,'config.json'),JSON.stringify({createdAt:Date.now()-2000,expiresAt:Date.now()+3600000,contexts,cleanupAuthorized:false}),{mode:0o600});
-   writeFileSync(join(dir,'operation.json'),JSON.stringify({kind:mode==='unknown-kind'?'arbitrary-prompt':mode==='resume-incomplete'?'resume-incomplete':'readonly-state',contextSlot:mode==='wrong-slot'?1:0}),{mode:0o600});
+   writeFileSync(join(dir,'operation.json'),JSON.stringify({kind:mode==='unknown-kind'?'arbitrary-prompt':mode.startsWith('completed-')?'sleep':mode==='resume-incomplete'?'resume-incomplete':'readonly-state',contextSlot:mode==='wrong-slot'?1:0}),{mode:0o600});
    for(const n of ['queue-controller.mjs','b-probe.py','git-probe.py','terminal-observer.py'])copyFileSync(join(here,n),join(dir,n));
    const mock=join(dir,'mock.mjs');
-   writeFileSync(mock,`const own=${JSON.stringify(contexts[0])},canary=${JSON.stringify(canary)};let prompted=false,asleep=true,loggedIn=true;
+   writeFileSync(mock,`const own=${JSON.stringify(contexts[0])},canary=${JSON.stringify(canary)},mode=${JSON.stringify(mode)};let prompted=false,asleep=!mode.startsWith('completed-'),loggedIn=true;
     export const chromium={launch:async()=>({newContext:async()=>({request:{fetch:async(url,o)=>{
      console.log(canary);console.error(canary);const p=new URL(url).pathname;let b={},s=200;
      if(o.maxRedirects!==0||o.headers.Origin!=='https://api.sammy.party')throw new Error(canary);
@@ -129,9 +129,9 @@ test('readonly diagnosis uses one fixed prompt, no acceptance marker or mutation
      else if(p==='/api/nodes')b=[{id:own.nodeId,cloudProvider:'cloudflare',providerInstanceType:'cf-container'}];
      else if(p.endsWith('/agent-profiles/'+own.agentProfileId))b=profile;
      else if(p.endsWith('/agent-profiles'))b={items:[profile]};
-     else if(p.endsWith('/tasks/'+own.taskId))b={id:own.taskId,projectId:${JSON.stringify(project)},userId:'owner',outputBranch:own.branch,agentProfileHint:profile.name,taskMode:'task',workspaceId:own.workspaceId,status:'in_progress'};
+     else if(p.endsWith('/tasks/'+own.taskId))b={id:own.taskId,projectId:${JSON.stringify(project)},userId:'owner',outputBranch:own.branch,agentProfileHint:profile.name,taskMode:'task',workspaceId:own.workspaceId,status:mode.startsWith('completed-')?'completed':'in_progress',completedAt:'2026-10-15T22:00:00.000Z'};
      else if(p==='/api/workspaces/'+own.workspaceId)b={id:own.workspaceId,projectId:${JSON.stringify(project)},chatSessionId:own.sessionId,nodeId:own.nodeId,branch:own.branch,repository:${JSON.stringify(repository)},workspaceProfile:'lightweight',status:asleep?'sleeping':'running'};
-     else if(p.endsWith('/state'))b={agentSessionId:'33333333-3333-4333-8333-333333333333',agentType:own.agentType,state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,activityAt:Date.now(),runtimeWorkUpdatedAt:Date.now()}};
+     else if(p.endsWith('/state'))b=mode.startsWith('completed-')?{agentSessionId:null,agentType:null,state:mode==='completed-active'?{activity:'prompting',runtimeWorkState:'active',runtimeWorkCount:1}:null}:{agentSessionId:'33333333-3333-4333-8333-333333333333',agentType:own.agentType,state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,activityAt:Date.now(),runtimeWorkUpdatedAt:Date.now()}};
      else if(p.endsWith('/prompt')){
       if(prompted||o.method!=='POST')throw new Error(canary);
       if(o.data.content.startsWith('Authorized bounded Reliability acceptance resume-incomplete')){
@@ -142,14 +142,14 @@ test('readonly diagnosis uses one fixed prompt, no acceptance marker or mutation
       if(script.includes("git('write-tree')")||script.includes("git('add'")||script.includes("git('commit'")||script.includes("git('push'")||script.includes('git-probe.py prepare'))throw new Error(canary);
       if(!script.includes('cwdMatchesRoot')||!script.includes('baselineFile')||!script.includes('gitNameConfigured')||!script.includes('bProbeHash'))throw new Error(canary);}
       prompted=true;asleep=false;b={accepted:true,status:'queued'};
-     }else if(p.endsWith('/sleep')){if(!prompted||o.method!=='POST')throw new Error(canary);asleep=true;b={status:'sleeping',workspaceId:own.workspaceId,chatSessionId:own.sessionId,snapshotExpiresAt:new Date(Date.now()+60000).toISOString()};}
+     }else if(p.endsWith('/sleep')){if((!prompted&&mode!=='completed-sleep')||o.method!=='POST')throw new Error(canary);asleep=true;b={status:'sleeping',workspaceId:own.workspaceId,chatSessionId:own.sessionId,snapshotExpiresAt:new Date(Date.now()+60000).toISOString()};}
      else throw new Error(canary);
      if(p==='/api/nodes'&&!loggedIn)s=403;
      return {status:()=>s,json:async()=>b,dispose:async()=>{}};
     }}}),close:async()=>{}})};`);
    const entry=join(dir,'entry.mjs');writeFileSync(entry,readFileSync(join(here,'instant-bound-controller.mjs'),'utf8').replace("'/tmp/reliability-browser-deps/node_modules/playwright/index.mjs'",JSON.stringify(pathToFileURL(mock).href)));
    const r=spawnSync(process.execPath,[join(here,'safe-controller.mjs'),entry,'3000'],{encoding:'utf8',timeout:5000,env:{...process.env,SAM_INSTANT_BOUND_ROOT:dir,SAM_PLAYWRIGHT_PRIMARY_USER:canary}});
-   assert.equal(r.status,0);assert.equal(r.stderr,'');assert.ok(!r.stdout.includes(canary));assert.equal(JSON.parse(r.stdout).category,['readonly-state','resume-incomplete'].includes(mode)?'ok':'controller',mode);
+   assert.equal(r.status,0);assert.equal(r.stderr,'');assert.ok(!r.stdout.includes(canary));assert.equal(JSON.parse(r.stdout).category,['readonly-state','resume-incomplete','completed-sleep'].includes(mode)?'ok':'controller',mode);
    assert.equal(existsSync(join(dir,contexts[0].taskId+'-phase-start.json')),mode==='resume-incomplete','only new acceptance resume creates a marker');
    if(mode==='resume-incomplete')assert.equal(JSON.parse(readFileSync(join(dir,'acceptance-attempt.json'),'utf8')).priorOutcome,'failed');
   }
