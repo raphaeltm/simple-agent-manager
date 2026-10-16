@@ -84,6 +84,8 @@ export function readonlyStatePrompt(own){
 }
 export async function run({requestSafe,logoutSafe,summary,safeSummary}){
  let browser,context,result=summary('controller'),output=null,loggedOut=false,root;
+ let sleepTelemetry=false,stage='setup',httpStatus=null,category='unknown',postAttempted=false,bindPass=0;
+ const stateChecks={stateNull:false,activityAllowed:false,workStateAllowed:false,workCountAllowed:false};
  try{
   root=process.env.SAM_INSTANT_BOUND_ROOT;
   if(!root||!isAbsolute(root)||(await stat(root)).mode&0o077)throw new Error();
@@ -91,12 +93,18 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
   const op=JSON.parse(await readFile(join(root,'operation.json'),'utf8'));
   const c=validateConfig(JSON.parse(await readFile(join(root,'config.json'),'utf8')),Date.now(),op.kind==='cleanup');
   if(!exact(op,op.kind==='observe'?['kind','contextSlot','target']:['kind','contextSlot'])
-   ||![0,1].includes(op.contextSlot)||!['prepare','check-record','wake-check','complete','observe','sleep','cleanup','bootstrap-assets','readonly-state','resume-incomplete'].includes(op.kind)||(op.kind==='bootstrap-assets'&&op.contextSlot!==1)||(['readonly-state','resume-incomplete'].includes(op.kind)&&op.contextSlot!==0))throw new Error();
+   ||![0,1].includes(op.contextSlot)||!['prepare','check-record','wake-check','complete','observe','sleep','sleep-preflight','cleanup','bootstrap-assets','readonly-state','resume-incomplete'].includes(op.kind)||(op.kind==='bootstrap-assets'&&op.contextSlot!==1)||(['readonly-state','resume-incomplete'].includes(op.kind)&&op.contextSlot!==0))throw new Error();
+  sleepTelemetry=['sleep','sleep-preflight'].includes(op.kind);
   const own=c.contexts[op.contextSlot],now=Date.now();let end=Math.min(c.expiresAt,now+(op.kind==='readonly-state'?180_000:240_000));
   const ownPath=`/api/projects/${project}/tasks/${own.taskId}`,sessionPath=`/api/projects/${project}/sessions/${own.sessionId}`;
   const privateJson=async(name,value)=>writeFile(join(root,name),JSON.stringify(value)+'\n',{flag:'wx',mode:0o600});
   const request=async(path,options={},accept)=>{
+   if(sleepTelemetry){
+    stage=path==='/api/auth/token-login'?'login':path.endsWith('/sleep')?'sleep-post':path.endsWith('/state')?'terminal-state':path.includes('/agent-profiles/')?'profile':path.endsWith('/agent-profiles')?'profile-list':path===ownPath?'task':path==='/api/nodes'?'node':'other';
+    if(stage==='sleep-post')postAttempted=true;httpStatus=null;category='unknown';
+   }
    const r=await requestSafe(context,api,{path,timeoutMs:10_000,...options},accept);
+   if(sleepTelemetry){httpStatus=Number.isInteger(r.status)&&r.status>=100&&r.status<=599?r.status:null;category=['ok','http','network','schema','timeout','controller'].includes(r.category)?r.category:'other';}
    if(r.category!=='ok')throw new Error();return r;
   };
   const token=process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
@@ -106,7 +114,7 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
   await request('/api/auth/token-login',{method:'POST',data:{token}});delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
   let task,workspace,state;
   const bind=async(allowAbsent=false)=>{
-   let expected;
+   bindPass++;let expected;
    await request(`/api/projects/${project}/agent-profiles/${own.agentProfileId}`,{},v=>{
     expected=v;return v?.id===own.agentProfileId&&(v.projectId===project||v.projectId===null)
      &&typeof v.userId==='string'&&v.userId.length>0&&typeof v.name==='string'&&v.name.length>0&&v.name.length<=256
@@ -117,9 +125,11 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
     &&v.items.some(x=>x?.id===own.agentProfileId&&x.name===expected.name&&x.userId===expected.userId));
    await request(ownPath,{},v=>{task=v;return v?.id===own.taskId&&v.projectId===project&&v.outputBranch===own.branch
     &&v.taskMode==='task'&&v.userId===expected.userId&&v.agentProfileHint===expected.name&&(v.workspaceId===own.workspaceId||(v.workspaceId===null&&['completed','sleeping','cancelled'].includes(v.status)));});
+   if(sleepTelemetry){stage='workspace';httpStatus=null;category='unknown';}
    const w=await requestSafe(context,api,{path:'/api/workspaces/'+own.workspaceId,timeoutMs:10_000},v=>{
     workspace=v;return v?.id===own.workspaceId&&v.projectId===project&&v.chatSessionId===own.sessionId&&v.nodeId===own.nodeId
      &&v.branch===own.branch&&v.repository===repository&&v.workspaceProfile==='lightweight';});
+   if(sleepTelemetry){httpStatus=Number.isInteger(w.status)&&w.status>=100&&w.status<=599?w.status:null;category=['ok','http','network','schema','timeout','controller'].includes(w.category)?w.category:'other';}
    if(allowAbsent&&w.status===404){workspace=null;return;}
    if(w.category!=='ok')throw new Error();
    await request('/api/nodes',{},v=>Array.isArray(v)&&v.filter(n=>n.id===own.nodeId).length===1
@@ -159,7 +169,7 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
     }
    }
    output={taskId:own.taskId,workspaceId:own.workspaceId,workspace404:true};
-  }else if(op.kind==='sleep'){
+  }else if(['sleep','sleep-preflight'].includes(op.kind)){
    if(workspace.status!=='sleeping'){
     const terminalAt=task.status==='completed'?task.completedAt:null;
     if(terminalAt!==null){
@@ -168,16 +178,18 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
      // ACP identity, while any observable in-flight activity still blocks Sleep.
      await request(sessionPath+'/state',{},v=>{
       if(!v||typeof v!=='object')return false;
-      const x=v.state;if(x===null)return true;if(!x||typeof x!=='object')return false;
-      return (x.activity==null||x.activity==='idle')&&(x.runtimeWorkState==null||x.runtimeWorkState==='inactive')
-       &&(x.runtimeWorkCount==null||(Number.isSafeInteger(x.runtimeWorkCount)&&x.runtimeWorkCount===0));
+      const x=v.state;stateChecks.stateNull=x===null;if(x===null)return true;if(!x||typeof x!=='object')return false;
+      stateChecks.activityAllowed=x.activity==null||x.activity==='idle';
+      stateChecks.workStateAllowed=x.runtimeWorkState==null||x.runtimeWorkState==='inactive';
+      stateChecks.workCountAllowed=x.runtimeWorkCount==null||(Number.isSafeInteger(x.runtimeWorkCount)&&x.runtimeWorkCount===0);
+      return stateChecks.activityAllowed&&stateChecks.workStateAllowed&&stateChecks.workCountAllowed;
      });
     }else{await readState();if(!idle())throw new Error();}
     await bind();if(terminalAt!==null&&(task.status!=='completed'||task.completedAt!==terminalAt))throw new Error();
-    await request('/api/workspaces/'+own.workspaceId+'/sleep',{method:'POST',data:{},...(terminalAt!==null?{timeoutMs:30_000}:{})},v=>v?.status==='sleeping'
+    if(op.kind==='sleep')await request('/api/workspaces/'+own.workspaceId+'/sleep',{method:'POST',data:{},...(terminalAt!==null?{timeoutMs:30_000}:{})},v=>v?.status==='sleeping'
      &&v.workspaceId===own.workspaceId&&v.chatSessionId===own.sessionId&&when(v.snapshotExpiresAt));
    }
-   output={taskId:own.taskId,sessionId:own.sessionId,retainedSleeping:true};
+   output={taskId:own.taskId,sessionId:own.sessionId,...(op.kind==='sleep'?{retainedSleeping:true}:{preflightPassed:true})};
   }else{
    if(task.status==='completed'){
     if(op.kind!=='observe')throw new Error();await requireOriginalCompletion();
@@ -267,6 +279,7 @@ export async function run({requestSafe,logoutSafe,summary,safeSummary}){
   }catch{loggedOut=false;}
   if(browser)try{await browser.close();}catch{loggedOut=false;}
  }
+ if(sleepTelemetry&&root)try{await writeFile(join(root,'sleep-telemetry.json'),JSON.stringify({stage,httpStatus,category,postAttempted,bindPass,stateChecks,authCleanup:loggedOut})+'\n',{flag:'wx',mode:0o600});}catch{}
  if(output&&loggedOut)try{await writeFile(join(root,'result.json'),JSON.stringify(output)+'\n',{flag:'wx',mode:0o600});return safeSummary(result);}catch{}
  return safeSummary(summary('controller'));
 }
