@@ -5,7 +5,11 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
+	"time"
+
 	"fmt"
+	"github.com/workspace/vm-agent/internal/config"
 	"io"
 	"log/slog"
 	"net"
@@ -234,35 +238,119 @@ func (s *Server) fetchGitTokenResponseForWorkspace(ctx context.Context, workspac
 		strings.TrimRight(s.config.ControlPlaneURL, "/"),
 		targetWorkspaceID,
 	)
+	total, attemptTimeout, attempts, delay := s.gitTokenRetryConfig()
+	ctx, cancel := context.WithTimeout(ctx, total)
+	defer cancel()
+	// Copy the configured client: retain test/custom transport, but prevent redirect
+	// replay of credential POSTs and bound each attempt independently of callbacks.
+	client := *s.controlPlaneHTTPClient(0)
+	client.Timeout = attemptTimeout
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	var last *gitTokenFetchError
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, gitTokenContextError(err)
+		}
+		payload, failure := fetchGitTokenAttempt(ctx, &client, endpoint, effectiveToken)
+		if failure == nil {
+			return payload, nil
+		}
+		last = failure
+		if err := ctx.Err(); err != nil {
+			return nil, gitTokenContextError(err)
+		}
+		slog.Warn("git_token.fetch_failed", "workspaceID", targetWorkspaceID,
+			"category", failure.category, "status", failure.status, "attempt", attempt,
+			"maxAttempts", attempts, "retryable", failure.retryable)
+		if !failure.retryable || attempt == attempts {
+			return nil, failure
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, gitTokenContextError(ctx.Err())
+		case <-timer.C:
+		}
+		// Saturate at the total budget to avoid duration overflow.
+		if delay < total/2 {
+			delay *= 2
+		} else {
+			delay = total
+		}
+	}
+	return nil, last
+}
+
+// No remote body, URL, token, or underlying transport error is included in
+// errors or telemetry. Provisioning propagates these errors to boot logs.
+type gitTokenFetchError struct {
+	category  string
+	status    int
+	retryable bool
+	cause     error
+}
+
+func (e *gitTokenFetchError) Error() string {
+	return fmt.Sprintf("git-token %s (HTTP %d); check control-plane availability or repository authorization", e.category, e.status)
+}
+func (e *gitTokenFetchError) Unwrap() error { return e.cause }
+func gitTokenContextError(err error) *gitTokenFetchError {
+	category := "cancelled"
+	if errors.Is(err, context.DeadlineExceeded) {
+		category = "budget_exhausted"
+	}
+	return &gitTokenFetchError{category: category, cause: err}
+}
+func (s *Server) gitTokenRetryConfig() (time.Duration, time.Duration, int, time.Duration) {
+	total, attempt, attempts, delay := s.config.GitTokenTimeout, s.config.GitTokenAttemptTimeout, s.config.GitTokenMaxAttempts, s.config.GitTokenRetryDelay
+	if total <= 0 {
+		total = config.DefaultGitTokenTimeout
+	}
+	if attempt <= 0 {
+		attempt = config.DefaultGitTokenAttemptTimeout
+	}
+	if attempts < 1 || attempts > config.MaxGitTokenAttempts {
+		attempts = config.DefaultGitTokenMaxAttempts
+	}
+	if delay <= 0 {
+		delay = config.DefaultGitTokenRetryDelay
+	}
+	return total, attempt, attempts, delay
+}
+func fetchGitTokenAttempt(ctx context.Context, client *http.Client, endpoint, token string) (*gitTokenResponse, *gitTokenFetchError) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader([]byte("{}")))
 	if err != nil {
-		return nil, fmt.Errorf("failed to build git-token request: %w", err)
+		return nil, &gitTokenFetchError{category: "configuration"}
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+effectiveToken)
-
-	res, err := s.controlPlaneHTTPClient(0).Do(req)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("git-token request failed: %w", err)
+		return nil, &gitTokenFetchError{category: "transport", retryable: true}
 	}
 	defer res.Body.Close()
-
+	// Classify status before reading: auth failures remain terminal even if their
+	// response body is truncated. Bodies can contain secrets; never log them.
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		retry := res.StatusCode == 408 || res.StatusCode == 429 || res.StatusCode >= 500
+		category := "request_rejected"
+		if retry {
+			category = "upstream_unavailable"
+		}
+		if res.StatusCode == 401 || res.StatusCode == 403 {
+			category = "authorization_denied"
+		}
+		return nil, &gitTokenFetchError{category: category, status: res.StatusCode, retryable: retry}
+	}
 	body, err := io.ReadAll(io.LimitReader(res.Body, 8*1024))
 	if err != nil {
-		return nil, fmt.Errorf("git-token: read response body: %w", err)
+		return nil, &gitTokenFetchError{category: "response_interrupted", retryable: true}
 	}
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("git-token endpoint returned HTTP %d (response body %d bytes)", res.StatusCode, len(body))
-	}
-
 	var payload gitTokenResponse
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("failed to decode git-token response: %w", err)
+	if json.Unmarshal(body, &payload) != nil || payload.Token == "" {
+		return nil, &gitTokenFetchError{category: "invalid_response"}
 	}
-	if payload.Token == "" {
-		return nil, fmt.Errorf("git-token response missing token")
-	}
-
 	return &payload, nil
 }
 

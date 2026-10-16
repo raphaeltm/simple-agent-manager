@@ -167,7 +167,8 @@ describe('requireRepositoryUserAccess', () => {
     expect(mocks.getUserInstallationRepositories).toHaveBeenCalledWith(
       'github-user-token',
       '120081765',
-      expect.objectContaining({ userId: 'user-1', repository: 'acme/allowed-private' })
+      expect.objectContaining({ userId: 'user-1', repository: 'acme/allowed-private' }),
+      expect.objectContaining({ repository: 'acme/allowed-private', onFound: expect.any(Function) })
     );
   });
 
@@ -239,12 +240,17 @@ describe('requireRepositoryUserAccess', () => {
     ).resolves.toMatchObject(INSTALLATION_ROW);
 
     // Intersection uses the user OAuth token + the installation's EXTERNAL id.
-    expect(getUserInstallationRepositories).toHaveBeenCalledWith('github-user-token', '120081765', {
-      flow: 'project-access',
-      userId: 'user-1',
-      installationId: '120081765',
-      repository: 'acme/allowed-private',
-    });
+    expect(getUserInstallationRepositories).toHaveBeenCalledWith(
+      'github-user-token',
+      '120081765',
+      {
+        flow: 'project-access',
+        userId: 'user-1',
+        installationId: '120081765',
+        repository: 'acme/allowed-private',
+      },
+      expect.objectContaining({ repository: 'acme/allowed-private', onFound: expect.any(Function) })
+    );
   });
 
   it('skips the drift check when the project has no bound githubRepoId (legacy project)', async () => {
@@ -290,7 +296,8 @@ describe('requireRepositoryUserAccess', () => {
     expect(getUserInstallationRepositories).toHaveBeenCalledWith(
       'admin-token',
       '120081765',
-      expect.objectContaining({ userId: 'admin-user' })
+      expect.objectContaining({ userId: 'admin-user' }),
+      expect.objectContaining({ repository: 'acme/allowed-private', onFound: expect.any(Function) })
     );
     expect(getGitHubUserAccessToken).toHaveBeenCalledWith(ctx, 'admin-user');
   });

@@ -745,7 +745,11 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 
 ### Git Operations
 
-- `GIT_CREDENTIAL_TIMEOUT` — Go duration for credential-helper callbacks to the local VM agent, such as `5s` or `1750ms` (default: `5s`)
+- `GIT_TOKEN_TIMEOUT` — total control-plane Git credential exchange budget, including retries (default: `25s`); caller cancellation/deadlines take precedence.
+- `GIT_TOKEN_ATTEMPT_TIMEOUT` — per-attempt HTTP budget (default: `10s`); shared transport also bounds response headers to `10s`.
+- `GIT_TOKEN_MAX_ATTEMPTS` — maximum attempts including the initial request (default: `3`, maximum: `10`).
+- `GIT_TOKEN_RETRY_DELAY` — initial exponential retry delay (default: `500ms`), capped by the total budget. Transport failures, interrupted bodies, HTTP 408/429/5xx retry; other 4xx and invalid responses fail immediately. Telemetry reports category/status/attempt counts without remote bodies or credential-bearing URLs.
+- `GIT_CREDENTIAL_TIMEOUT` — Go duration for credential-helper callbacks to the local VM agent, such as `30s` or `1750ms` (default: `30s`). Validation requires `GIT_TOKEN_ATTEMPT_TIMEOUT <= GIT_TOKEN_TIMEOUT < GIT_CREDENTIAL_TIMEOUT`, the attempt budget no greater than the shared 10s header deadline, and `GIT_TOKEN_RETRY_DELAY < GIT_TOKEN_TIMEOUT`. Inverted configurations fail startup with the relevant variable names; lower overrides must adjust all dependent budgets. Existing devcontainer helpers retain their rendered deadline until reinstalled/recreated; verify the installed script during rollout, not just the agent version.
 - `GIT_EXEC_TIMEOUT` — Timeout for git commands via docker exec (default: 30s)
 - `GIT_WORKTREE_TIMEOUT` — Timeout for git worktree create/remove (default: 30s)
 - `WORKTREE_CACHE_TTL` — Cache duration for parsed `git worktree list` results (default: 5s)

@@ -80,7 +80,7 @@ describe('assertRepositoryAccess', () => {
         userId: 'user-1',
         installationId: '120081765',
         repository: 'acme/private-repo',
-      }
+      }, expect.objectContaining({ repository: 'acme/private-repo' })
     );
   });
 
@@ -104,73 +104,46 @@ describe('assertRepositoryAccess', () => {
     expect(getUserInstallationRepositories).toHaveBeenCalledWith(
       'github-user-token',
       '120081765',
-      expect.objectContaining({ flow: 'branches' })
+      expect.objectContaining({ flow: 'branches' }), expect.objectContaining({ repository: 'acme/repo' })
     );
   });
 
-  it('returns a cached repository access result without calling GitHub', async () => {
-    const cached = {
-      id: 9,
-      nodeId: null,
-      fullName: 'acme/repo',
-      private: true,
-      defaultBranch: 'main',
-    };
-    const env = makeEnv(cached);
-
-    await expect(
-      assertRepositoryAccess(
-        'github-user-token',
-        '120081765',
-        'acme/repo',
-        'user-1',
-        'project-access',
-        env as never
-      )
-    ).resolves.toEqual(cached);
-
-    expect(getUserInstallationRepositories).not.toHaveBeenCalled();
-    expect(env.KV.put).not.toHaveBeenCalled();
+  it('ignores legacy positive cache and freshly checks the user token', async () => {
+    const env = makeEnv({ fullName: 'acme/repo', id: 9 });
+    mocks.getUserInstallationRepositories.mockResolvedValue([]);
+    await expect(assertRepositoryAccess('revoked', '123', 'acme/repo', 'u', 'project-access', env as never)).rejects.toThrow('Repository is not accessible');
+    expect(mocks.getUserInstallationRepositories).toHaveBeenCalledWith('revoked', '123', expect.anything(), expect.objectContaining({ pageHint: undefined }));
   });
 
-  it('writes successful repository access checks to KV with the configured TTL', async () => {
+  it('uses cache only for a nonauthoritative scoped page hint and writes valid KV TTL', async () => {
+    const env = makeEnv({ page: 4 });
+    mocks.getUserInstallationRepositories.mockImplementation(async (_token, _id, _diagnostics, lookup) => {
+      expect(lookup.pageHint).toBe(4);
+      await lookup.onFound(2);
+      return [{ id: 7, fullName: 'acme/repo' }];
+    });
+    await assertRepositoryAccess('current', '123', 'acme/repo', 'u', 'project-access', env as never);
+    expect(env.KV.get).toHaveBeenCalledWith('github-repo-page:v2:u:123:acme/repo', 'json');
+    expect(env.KV.put).toHaveBeenCalledWith('github-repo-page:v2:u:123:acme/repo', JSON.stringify({ page: 2 }), { expirationTtl: 60 });
+  });
+
+  it('cache read/write failure does not replace fresh authorization', async () => {
     const env = makeEnv();
-    mocks.getUserInstallationRepositories.mockResolvedValue([
-      { id: 7, nodeId: null, fullName: 'acme/repo', private: false, defaultBranch: 'main' },
-    ]);
-
-    await assertRepositoryAccess(
-      'github-user-token',
-      '120081765',
-      'acme/repo',
-      'user-1',
-      'project-access',
-      env as never
-    );
-
-    expect(env.KV.put).toHaveBeenCalledWith(
-      'github-repo-access:v1:user-1:120081765:acme/repo',
-      JSON.stringify({ id: 7, nodeId: null, fullName: 'acme/repo', private: false, defaultBranch: 'main' }),
-      { expirationTtl: 42 }
-    );
+    env.KV.get.mockRejectedValue(new Error('unavailable'));
+    env.KV.put.mockRejectedValue(new Error('unavailable'));
+    mocks.getUserInstallationRepositories.mockImplementation(async (_token, _id, _diagnostics, lookup) => {
+      await lookup.onFound(1);
+      return [{ id: 7, fullName: 'acme/repo' }];
+    });
+    await expect(assertRepositoryAccess('current', '123', 'acme/repo', 'u', 'project-access', env as never)).resolves.toMatchObject({ id: 7 });
   });
 
-  it('does not write successful repository access checks when the configured cache TTL is zero', async () => {
-    const env = makeEnv();
-    env.GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS = '0';
-    mocks.getUserInstallationRepositories.mockResolvedValue([
-      { id: 7, nodeId: null, fullName: 'acme/repo', private: false, defaultBranch: 'main' },
-    ]);
-
-    await assertRepositoryAccess(
-      'github-user-token',
-      '120081765',
-      'acme/repo',
-      'user-1',
-      'project-access',
-      env as never
-    );
-
+  it('does not write hints when TTL is zero', async () => {
+    const env = makeEnv(); env.GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS = '0';
+    mocks.getUserInstallationRepositories.mockImplementation(async (_token, _id, _diagnostics, lookup) => {
+      await lookup.onFound(1); return [{ id: 7, fullName: 'acme/repo' }];
+    });
+    await assertRepositoryAccess('current', '123', 'acme/repo', 'u', 'project-access', env as never);
     expect(env.KV.put).not.toHaveBeenCalled();
   });
 
