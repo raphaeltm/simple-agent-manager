@@ -259,3 +259,11 @@ fork|retry --launch` behaves like `sam tasks submit`; the mention note's exact s
   `concepts.mdx`, `idea-execution.md` (including both step lists) and `chat-features.md` link to
   it instead of restating it; forks get a branch unless they're Instant chats without
   attachments; the old `@` parser accepted only a–z, A–Z, digits and `_`.
+
+### Round 9 (combined lenses)
+
+- No HIGH or MEDIUM; rule and links verified in code. 3 LOW, adopted: the two step lists' title and
+  workspace steps now cover the Instant chat with no branch (it keeps a truncated title,
+  `chat-start.ts:177`, and starts a new container on the default branch); Troubleshooting states
+  both halves of the rule; an older changelog row now says "Tasks and most chats" with a link to
+  the rule.

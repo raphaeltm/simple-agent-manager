@@ -9,9 +9,9 @@ The main way to use SAM is the **project chat**: you describe what you want done
 
 Type your description in the project chat input and submit. Submitting a message both **creates** the work and **starts** it in one step — you don't need to pre-create an idea. SAM will:
 
-1. **Generate a title** — short messages are used as-is; longer ones get a concise AI-generated title
+1. **Generate a title** — short messages are used as-is; longer ones get a concise AI-generated title (an Instant chat that gets no branch keeps the start of your message as its title)
 2. **Create an output branch** — a descriptive `sam/`-prefixed name off your default branch (except for an Instant chat that [gets no branch](/docs/guides/instant-sessions/#what-happens-to-your-work))
-3. **Provision a workspace** — already checked out on that branch; reuses a warm environment if available
+3. **Provision a workspace** — already checked out on that branch; reuses a warm environment if available (an Instant chat that gets no branch starts a new container on your default branch instead)
 4. **Start the agent** — runs the agent from your selected profile (Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, or Amp) with your description
 5. **Stream output** — watch the agent work in real time in the chat
 

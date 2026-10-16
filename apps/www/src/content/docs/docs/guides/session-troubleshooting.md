@@ -65,11 +65,11 @@ your work is safe and what to do next. Everything here applies to both
 Anything else — including a message that delivery "could not be confirmed" — means SAM couldn't
 classify the failure. Treat it like the interrupted case: check before you resend.
 
-Several sections below say to check GitHub for anything the agent pushed. Work started as a task
+Several sections below say to check GitHub for anything the agent pushed. A chat sent from the
+message box on an Instant profile, without attachments and not from an idea's **Execute** button,
+has no branch of its own, and pushes only what you ask the agent to push. Any other chat or task
 runs on its own `sam/…` [output branch](/docs/guides/idea-execution/#where-the-work-lands), and the
-project **Files** tab shows its diff without opening a workspace. A chat sent from the message box
-on an Instant profile, without attachments and not from an idea's **Execute** button, has no branch
-of its own, and pushes only what you ask the agent to push.
+project **Files** tab shows its diff without opening a workspace.
 
 A **Task** keeps its task completion and git delivery behavior after sleep and wake;
 a **Chat** remains a Chat. [Wake settings](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
