@@ -23,8 +23,8 @@ async function scenario(mode){
   else if(url.endsWith('/agent-profiles'))v={items:[{id:profile,name:canary},...(mode==='profile-collision'?[{id:nodeId,name:canary}]:[])]};
   else if(url.includes('/tasks/'))v={id:task,projectId:project,userId:'owner',outputBranch:branch,workspaceId,agentProfileHint:mode==='project-shared-owner'?profile:canary,status:'in_progress'};
   else if(url.endsWith('/state'))v={agentSessionId:mode==='wrong-acp'?nodeId:agentSessionId,agentType:'claude-code'};
-  else if(url.includes('/sessions/'))v={session:{id:session,taskId:task,workspaceId,agentType:'claude-code',agentSessionId}};
-  else if(url.endsWith('/api/workspaces/'+workspaceId))v={id:workspaceId,nodeId:mode==='foreign-node'?'01M51CCV9A1D2BDK4NJDK1E3MD':nodeId,projectId:project,chatSessionId:session,branch,repository:'serverspresentation2025/crewai',status:'running',hardware:{cloudProvider:'hetzner'}};
+  else if(url.includes('/sessions/'))v={session:{id:session,taskId:mode==='wrong-session-task'?nodeId:task,workspaceId,agentType:'claude-code',agentSessionId}};
+  else if(url.endsWith('/api/workspaces/'+workspaceId))v={id:workspaceId,nodeId:mode==='foreign-node'?'01M51CCV9A1D2BDK4NJDK1E3MD':nodeId,projectId:project,chatSessionId:mode==='wrong-workspace-session'?'11111111-1111-4111-8111-111111111111':session,branch,repository:'serverspresentation2025/crewai',status:'running',hardware:{cloudProvider:'hetzner'}};
   else if(url.endsWith('/terminal/token')){assert.deepEqual(options.data,{workspaceId});v={token:canary.repeat(3),expiresAt:new Date(now+300000).toISOString(),workspaceUrl:`https://ws-${workspaceId}.sammy.party`};}
   else if(url.includes('/files/download?')){
    assert(input);assert(url.includes('token='+encodeURIComponent(canary.repeat(3))));
@@ -48,7 +48,7 @@ async function scenario(mode){
  if(mode==='wrong-receipt')assert.equal(reads,0);
  if(mode==='action-deadline'){assert.equal(r.terminalClosed,true);assert.equal(r.quiescence,false);}
 }
-for(const mode of ['success','project-shared-owner','shared-wrong-hint','wrong-project','global-foreign-owner','missing-length','bad-length','foreign-owner','foreign-profile-owner','foreign-node','wrong-receipt','profile-collision','wrong-acp','bad-manifest','timeout','action-deadline','wrong-close','dispose-failure'])await scenario(mode);
+for(const mode of ['success','project-shared-owner','shared-wrong-hint','wrong-project','global-foreign-owner','missing-length','bad-length','foreign-owner','foreign-profile-owner','foreign-node','wrong-session-task','wrong-workspace-session','wrong-receipt','profile-collision','wrong-acp','bad-manifest','timeout','action-deadline','wrong-close','dispose-failure'])await scenario(mode);
 
 // Exercise the actual browser transport parser with arbitrary PTY canary, not a replacement parser.
 const original=globalThis.WebSocket;
@@ -111,4 +111,4 @@ for(const mode of ['inspection-failure','cleanup-persistence-failure','clock-res
   else assert.deepEqual(calls,{logout:1,nullSession:1,protected:1,closed:1,login:1});
  }finally{delete globalThis.__restoreFake;await rm(directory,{recursive:true,force:true});}
 }
-console.log(JSON.stringify({protocolAndPrivacy:true,cases:32,liveCalls:0}));
+console.log(JSON.stringify({protocolAndPrivacy:true,cases:34,liveCalls:0}));
