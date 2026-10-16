@@ -27,3 +27,20 @@ Understand October15 monitored usage spike, ship the smallest safe causal fix th
 
 ## Coordination
 Old coordinator01M50044HCHRVR12B4337721G5 failed; message rejected. Active owners01M52KPD9FDR724Z371666KAHE,01M4ZVWEGJ8WMFK69JNE7W7M5Y,2304owner01M52PEXV56VPD7H8541HP8EFJ,2305owner01M52PF30AYFJN0YM8KPQ8ME45 notified of owner incident priority. Accepted delivery is not acknowledgment.
+
+
+## Refined evidence and scope (16:25 UTC)
+
+User refinement prioritizes factual hourly trajectory and accrued monitored costs; monitor changes are proposal-only. Complete lagged account windows09–12 versus12–15UTC show reads804.7M→624.1M(-22.4%) with requests53,434→53,021(-0.8%). Latest complete hourly rate fluctuates with a decline overall, not acceleration. October reported DO totals12.73Breads/21.74Mwrites remain under25B/50M allowances: row overage0USD so far. Covered monitored accrued estimate~3.1USD includes approximate R2GB-day storage; it is not an invoice or total account cost. Original82.29USD is a single-day monthly projection.
+
+**Attribution correction:** mailbox sweep9531reads does not establish9531eligible queued/delivered rows. Its other queries scan history. The mailbox fixture proves a scaling defect but its production share is unmeasured. Withdraw the earlier1.8B/day mailbox estimate as attribution; it depended on an unverified eligible-row count.
+
+Stronger repeated scan identified: `readProjectEventWakeLeaseUntil` filters subscription and delivery-batch history by target session without the project prefix required by existing indexes. `computeReconciliationAlarmTime` calls it for each active task on every schedule recalculation. Exact SQL against1kexpired subscriptions+1kexpired batches takes3019+3016SQLiteVMsteps; binding project_id uses existing target indexes and takes25+38steps with identical lease result.11active candidates revisit~22krows per recomputation, consistent with observed24522scheduler shape; exact production table counts remain unavailable through current read-only analytics access.
+
+Smallest additional fix: read immutable do_meta.projectId once inside the lease helper and bind it into both queries. Preserve original lookup if metadata is absent. No schema/index/storage migration, no cadence or security change. Cover the full scheduler with11active tasks and2kretained subscription/batch pairs,110lease queries, earliest pending/subscription lease, delivered read grace, strict expiry, cancellation and missing-metadata fallback in native Worker SQLite. Existing event-delivery tests retain end-to-end cancellation/authority coverage.
+
+- [ ] Project-scoped event-wake lease lookup reuses existing indexes for all callers.
+- [ ] Native11-active-task/retained-history row-bound and lease-semantic regressions pass.
+- [ ] Independent adversarial review confirms identity/fallback, expiry and cancellation behavior.
+
+The platform created premature PR2368 on turn-end autosave; it was converted to draft and closed pending proper staging. Workflow state is now untracked and locally excluded. Source/evidence are preserved. Local host ENOSPC forced remoteCI. First native fixture failed only a1mswall-clock equality; bounds now bracket before/after time without loosening polling semantics. No production change shipped.
