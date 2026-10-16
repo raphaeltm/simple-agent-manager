@@ -366,3 +366,47 @@ actual lifecycle caller+ledger, simulated browser/terminal/independent producers
 success, setup failure, wake-check failure, missing completion notes, unexpected early completion retained before any setup/prompt, and typed
 snapshot/tool negatives. Local PTY capsule tests separately exercise actual shell/
 Python/Git helper execution. These are offline evidence, not actual ACP/completion.
+
+## Offline retention delta (new fixtures only)
+
+New-fixture `prospective-vm-controller.run(context,false)` now requires its root
+at `<cwd>/.agent-evidence/<NEW taskId>` with real directory ancestors, and
+`SAM_VERIFICATION_SOURCE_SHA` set to the exact reviewed verification commit.
+Use the snapshot-supported repository as cwd. The old hardbound resume path is
+unchanged and cannot adopt a new fixture. Both Instant cells retain coordinator
+acceptance; the remaining cases are VM/Claude and, separately, VM/Codex.
+
+The same authenticated browser context calls the existing project Library
+`POST /upload` multipart endpoint and then a separate `GET /:fileId/download`.
+No MCP credential, new service, synchronous root message receipt, or framework is
+needed. Before the tested turn, and before later phase advance, exact allowlisted
+terminal original bytes plus their manifest are exported. Retrieval must match
+bytes, sizes and SHA256. Fixed typed lifecycle checkpoints are exported at start,
+snapshot sleep/wake, completion, observer sleep and pre-logout. Each export is
+exclusive, task/source scoped, locally 0600, with a 0700 export directory.
+
+Only existing reviewed baseline/expectations/probe schemas, original bounded
+capsule manifests, and fixed identifiers/times/digests are allowed. No arbitrary
+config, errors, raw PTY, transcripts, auth or environment values cross storage.
+Failed upload, schema/hash mismatch, path escape, or latency stops progression and
+enters the existing normal Sleep/auth cleanup. There is no retry loop. The whole
+upload/download operation has at most 90 seconds within the immutable action
+window; it may not begin with less than 90 seconds available. Hard remains
+presubmit+45min and action cutoff hard-9min; no new clock is created here.
+
+The pre-logout checkpoint is **not** proof of final logout/browser closure.
+After the finite runner returns, owner orchestration must export allowlisted
+`final.json` closure projection plus the phase receipts using supported MCP
+Library upload/download, validate actual retrieval, and hand the immutable IDs
+and manifest to the coordinator. This is possible without retaining browser auth
+or extracting MCP credentials. No full acceptance is claimed without that final
+verified export. Root independently downloads/reviews exports at readiness/final
+acceptance; it is not on the live per-phase critical path. If orchestration cannot
+finish final retention inside the original hard window, report incomplete and
+preserve work; do not extend, retry, or reclassify the run.
+
+Offline validation: `node scripts/e2e/reliability-a/test-retain-phase.mjs` exercises
+real original bytes/filesystem and simulated Library transport; the existing
+controller suite checks retention ordering and normal cleanup after failure.
+These do not prove live Library compatibility. No runtime authorization follows
+from this change; require explicit staging return plus fresh coordinator GO.

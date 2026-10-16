@@ -16,6 +16,7 @@ try{
  const library=await readFile(new URL('prospective-vm.mjs',source),'utf8');
  await writeFile(join(modules,'prospective-vm.mjs'),library.replace('export async function terminalPhase(', 'async function originalTerminalPhase(')+'\nexport const terminalPhase=(v)=>globalThis.__prospectiveTest.phase(v);\n');
  const playwright=join(root,'playwright.mjs');await writeFile(playwright,'export const chromium={launch:()=>globalThis.__prospectiveTest.browser};');
+ await writeFile(join(modules,'retain-phase.mjs'),"export const snapshotRoot=async()=>{};export const retainPhase=async p=>globalThis.__prospectiveTest.retain(p);export const retainCheckpoint=async p=>globalThis.__prospectiveTest.retain(p);\n");
  const caller=await readFile(new URL('prospective-vm-controller.mjs',source),'utf8');
  await writeFile(join(modules,'caller.mjs'),caller.replace('/tmp/reliability-browser-deps/node_modules/playwright/index.mjs',playwright).replaceAll('Date.now()', 'globalThis.__prospectiveTest.now()').replace('const pause=ms=>new Promise(r=>setTimeout(r,ms));','const pause=async()=>{await new Promise(r=>setTimeout(r,10));};'));
  const sha=b=>createHash('sha256').update(b).digest('hex');
@@ -67,17 +68,17 @@ reader.urllib.request.urlopen=request;reader.sys.argv=['actual','wake-check'];re
  const observer={taskId:'01M50VYZ60RQXXTGSVPXW6FRXD',sessionId:'4e5282b9-0cd5-454f-a8f0-db160b9823fe',branch:'sam/bootstrap-only-authorized-reliability-w6frxd',agentProfileId:'01KYQ5YDHC1VS0BZ9F3NY97FNH',agentType:'openai-codex'};
  for(const x of [baseOwn,observer])x.receipt={taskId:x.taskId,sessionId:x.sessionId,branchName:x.branch,status:'queued'};
  let count=0;
- for(const mode of ['success','setup-failure','wake-check-failure','complete-missing-notes','early-complete','producer-failure','foreign-producer-failure','stale-producer-failure','resume-success','resume-invalid-originals','resume-producer-failure','resume-invalid-fixture','resume-early-complete','resume-foreign-identity','resume-real-producer-failure','resume-checkpoint-rotation','resume-real-producer-rotation','resume-false-consumed-claim','resume-third-success','resume-unsupported-kind']){
+ for(const mode of ['success','retention-setup-failure','retention-turn-failure','setup-failure','wake-check-failure','complete-missing-notes','early-complete','producer-failure','foreign-producer-failure','stale-producer-failure','resume-success','resume-invalid-originals','resume-producer-failure','resume-invalid-fixture','resume-early-complete','resume-foreign-identity','resume-real-producer-failure','resume-checkpoint-rotation','resume-real-producer-rotation','resume-false-consumed-claim','resume-third-success','resume-unsupported-kind']){
   const resumed=mode.startsWith('resume-'),own=resumed?structuredClone(resumeOwn):baseOwn;
   if(mode==='resume-foreign-identity'){own.taskId=baseOwn.taskId;own.receipt.taskId=own.taskId;}
-  count++;const dir=join(root,mode);await mkdir(dir);process.env.SAM_PROSPECTIVE_ROOT=dir;process.env.SAM_PLAYWRIGHT_PRIMARY_USER='SYNTHETIC_PRIVATE_CANARY';
+  count++;const dir=join(root,mode);await mkdir(dir);process.env.SAM_PROSPECTIVE_ROOT=dir;process.env.SAM_VERIFICATION_SOURCE_SHA='d'.repeat(40);process.env.SAM_PLAYWRIGHT_PRIMARY_USER='SYNTHETIC_PRIVATE_CANARY';
   const started=Date.now()-1000,hard=started+2700000,config={started,hard,own,observer,evidencePrUrl:'https://github.com/raphaeltm/simple-agent-manager/pull/2355'};
   if(resumed)config.resume={kind:mode==='resume-third-success'?'third-prospective-restore':mode==='resume-unsupported-kind'?'fourth-prospective-restore':'second-prospective-restore',originalEvidenceSha256:evidenceSha};
   await writeFile(join(dir,'config.json'),JSON.stringify(config));
   let virtualNow=null;
   let woken=false,ownStatus=resumed?'sleeping':'in_progress',observerStatus='completed',completedAt,active=own,loggedOut=false,browserClosed=false;
   if(['early-complete','resume-early-complete'].includes(mode)){ownStatus='completed';completedAt=new Date().toISOString();}
-  const stages=[],prompts=[],slept=[];
+  const stages=[],prompts=[],slept=[],retainedPhases=[];
   const mapping=(x)=>({workspaceId:x===observer?'01M51OOOOOOOOOOOOOOOOOOOOO':woken?'01M51YYYYYYYYYYYYYYYYYYYYY':'01M51XXXXXXXXXXXXXXXXXXXXX',nodeId:'01M51NNNNNNNNNNNNNNNNNNNNN',agentSessionId:'01M51AAAAAAAAAAAAAAAAAAAAA'});
   const snapId='01M51SSSSSSSSSSSSSSSSSSSSS';
   for(const name of ['setup','turn-check','wake-check','observe']){const x=name==='observe'?observer:own;woken=name==='wake-check';if(!(['producer-failure','resume-producer-failure','resume-real-producer-failure','resume-real-producer-rotation'].includes(mode)&&name==='wake-check'))await writeFile(join(dir,name+'-grant.json'),JSON.stringify({...mapping(x),ownerId:'owner',storedProfileId:x.agentProfileId,recoveredSnapshotId:snapId,snapshotRestoreConfirmedAt:Date.now()+5000,restoreProvenance:{protectedGenerationSha256:sha('synthetic-generation'),latestGenerationSha256:sha(mode==='resume-checkpoint-rotation'?'later-generation':'synthetic-generation'),latestGenerationMatchesProtected:mode!=='resume-checkpoint-rotation',consumedGenerationObserved:mode==='resume-false-consumed-claim'}}));}woken=false;
@@ -97,7 +98,7 @@ reader.urllib.request.urlopen=request;reader.sys.argv=['actual','wake-check'];re
    if(url.endsWith('/state'))return response({...mapping(x),agentType:x.agentType,state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,activityAt:Date.now(),runtimeWorkUpdatedAt:Date.now()}});
    throw Error('route');
   }},newPage:async()=>({goto:async()=>{}})};
-  globalThis.__prospectiveTest={now:()=>virtualNow??Date.now(),browser:{newContext:async()=>context,close:async()=>{browserClosed=true;}},phase:async p=>{
+  globalThis.__prospectiveTest={retain:async p=>{retainedPhases.push(p.phase);if(mode==='retention-setup-failure'&&p.phase==='setup'||mode==='retention-turn-failure'&&p.phase==='turn-check')throw Error('retention');},now:()=>virtualNow??Date.now(),browser:{newContext:async()=>context,close:async()=>{browserClosed=true;}},phase:async p=>{
    stages.push(p.operation+':'+(p.own===observer?'observer':'own'));
    if(mode==='setup-failure'&&p.operation==='setup'||['wake-check-failure','resume-invalid-fixture'].includes(mode)&&p.evidenceDirectory.endsWith('wake-check'))return {ok:false};
    if(p.operation==='setup'){await writeFile(p.evidenceDirectory+'/baseline.json',JSON.stringify({head:'a'.repeat(40)}));await writeFile(p.evidenceDirectory+'/expectations.json','{}');}
@@ -138,6 +139,9 @@ reader.urllib.request.urlopen=request;reader.sys.argv=['actual','wake-check'];re
   assert(beforeBrowser?!loggedOut&&!browserClosed:loggedOut&&browserClosed,JSON.stringify({mode,loggedOut,browserClosed,final:JSON.parse(await readFile(join(dir,'final.json')))}));assert(!JSON.stringify(result).includes('CANARY'));
   const success=['success','foreign-producer-failure','stale-producer-failure','resume-success','resume-checkpoint-rotation','resume-real-producer-rotation','resume-third-success'].includes(mode);
   const final=JSON.parse(await readFile(join(dir,'final.json')));assert.equal(result.ok,success,JSON.stringify({mode,stage:final.stage,events:final.events.map(x=>x.kind)}));
+  if(mode==='retention-setup-failure'){assert.deepEqual(retainedPhases,['start','setup']);assert(!prompts.some(p=>p.startsWith('Authorized tested')));assert(final.authCleanup&&final.browserClosed);}
+  if(mode==='retention-turn-failure'){assert.deepEqual(retainedPhases,['start','setup','turn-check']);assert(!prompts.some(p=>p.startsWith('Authorized normal snapshot')));assert(final.authCleanup&&final.browserClosed);}
+  if(mode==='success')assert.deepEqual(retainedPhases,['start','setup','turn-check','sleep','wake','wake-check','complete','observe','observer-sleep','closing']);
   if(success){assert.equal(final.events.length,resumed?5:8);assert.equal(prompts.length,resumed?3:4);assert.equal(stages.length,resumed?2:4);assert.equal(slept.length,resumed?1:2);assert.equal(final.stage,'done');assert.equal(final.producerFailure,undefined);assert.equal(final.consumedGenerationObserved,false);assert.equal(final.originalRestoredBytesVerified,true);}
   else{assert(!final.ok);if(mode==='early-complete'||mode==='resume-early-complete'){assert.equal(prompts.length,0);assert.equal(stages.length,0);assert(JSON.parse(await readFile(join(dir,'unexpected-completion.json'))).status==='completed');}else if(!beforeBrowser)assert(slept.includes(own.taskId));if(mode!=='complete-missing-notes')assert(!prompts.some(p=>p.startsWith('Call actual')));else assert(!prompts.some(p=>p.startsWith('Authorized independent observer')));}
   if(mode==='producer-failure'){assert.equal(final.stage,'wake-check');assert.equal(final.producerFailure.stage,'restored-generation');assert.equal(stages.length,2);assert.equal(prompts.length,2);assert.equal(slept.length,2);assert(final.at<hard-540000);assert(final.authCleanup&&final.browserClosed&&final.retained);assert.equal(virtualNow,null);assert(!stages.some(s=>s.includes('observer')));}
@@ -149,4 +153,4 @@ reader.urllib.request.urlopen=request;reader.sys.argv=['actual','wake-check'];re
  assert.throws(()=>completionProof({taskId:own.taskId},own,now-1,new Date(now).toISOString(),now));
  await Promise.all(pendingWrites);
  console.log(JSON.stringify({ok:true,lifecycleCases:count,typedProofNegatives:5,producerFailurePreservedPromptly:true,foreignOrStaleSentinelIgnored:true,missingCompletionNotesRejected:true,earlyCompletionRetained:true,liveCalls:0,limits:'browser/terminal/CF producers simulated; real caller+ledger'}));
-}finally{await Promise.all(pendingWrites);delete globalThis.__prospectiveTest;delete process.env.SAM_PROSPECTIVE_ROOT;delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;await rm(root,{recursive:true,force:true});}
+}finally{await Promise.all(pendingWrites);delete globalThis.__prospectiveTest;delete process.env.SAM_PROSPECTIVE_ROOT;delete process.env.SAM_VERIFICATION_SOURCE_SHA;delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;await rm(root,{recursive:true,force:true});}
