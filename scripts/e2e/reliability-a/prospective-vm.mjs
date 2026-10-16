@@ -90,12 +90,12 @@ export async function capsule(own,operation,originals={},runId=randomUUID()){
 
 /** Exact owner+independent stored-ID grant. Baseline target for observe is separately canonical completed. */
 export async function terminalPhase({own,operation,originals,context,page,grant,evidenceDirectory,open=browserTerminal,now=Date.now,pause=ms=>new Promise(r=>setTimeout(r,ms))}){
- identity(own);let terminal,created=false,token;const started=now(),deadline=started+90000;
+ identity(own);let terminal,created=false,token;const started=now(),deadline=started+85000,cleanupHard=started+90000;
  const out={ok:false,stage:'binding',before:false,after:false,manifest:false,hostBytesRetained:false,terminalClosed:false,socketClosed:false,quiescence:false};
  const live=()=>{if(now()>=deadline)throw Error('deadline');};
  const get=async(path,method='GET',data)=>{live();const r=await context.request.fetch(api+path,{method,data,headers:{Origin:app},timeout:5000,maxRedirects:0,failOnStatusCode:false});try{if(r.status()!==200)throw 0;const b=await r.body();if(b.length>250000)throw 0;return JSON.parse(b);}finally{await r.dispose();}};
  const bind=async()=>{
-  if(!grant||!Number.isSafeInteger(grant.globalVmCount)||grant.globalVmCount<0||grant.globalVmCount>1||(grant.runtime==='vm'&&grant.globalVmCount!==1)||grant.otherWorkspaceCount!==0||grant.activeForeignClaimCount!==0||!ulid(grant.workspaceId)||!ulid(grant.nodeId)||!(ulid(grant.agentSessionId)||uuid(grant.agentSessionId))||grant.expiresAt<=now()||grant.expiresAt>now()+300000||grant.storedProfileId!==own.agentProfileId||grant.storedProfileObservedAt>now()||grant.storedProfileObservedAt<now()-240000||!['vm','cf-container'].includes(grant.runtime)||(grant.runtime==='vm'&&(grant.agentVersion!==version||!exact(grant.releaseProvenance,Object.keys(releaseProvenance))||Object.keys(releaseProvenance).some(k=>grant.releaseProvenance[k]!==releaseProvenance[k]))))throw 0;
+  if(!grant||!Number.isSafeInteger(grant.globalVmCount)||grant.globalVmCount<0||grant.globalVmCount>1||(grant.runtime==='vm'&&grant.globalVmCount!==1)||grant.otherWorkspaceCount!==0||grant.activeForeignClaimCount!==0||!ulid(grant.workspaceId)||!ulid(grant.nodeId)||!(ulid(grant.agentSessionId)||uuid(grant.agentSessionId))||!Number.isSafeInteger(grant.expiresAt)||grant.expiresAt<=0||grant.expiresAt<=now()||grant.expiresAt>now()+300000||grant.storedProfileId!==own.agentProfileId||!Number.isSafeInteger(grant.storedProfileObservedAt)||grant.storedProfileObservedAt<=0||grant.storedProfileObservedAt>now()||grant.storedProfileObservedAt<now()-240000||!['vm','cf-container'].includes(grant.runtime)||(grant.runtime==='vm'&&(grant.agentVersion!==version||!exact(grant.releaseProvenance,Object.keys(releaseProvenance))||Object.keys(releaseProvenance).some(k=>grant.releaseProvenance[k]!==releaseProvenance[k]))))throw 0;
   if(JSON.stringify(grant.receipt)!==JSON.stringify(own.receipt))throw 0;
   const u=await get('/api/auth/get-session'),p=await get(`/api/projects/${project}/agent-profiles/${own.agentProfileId}`),list=await get(`/api/projects/${project}/agent-profiles`);
   if(u?.user?.id!==grant.ownerId||p?.id!==own.agentProfileId||p.userId!==grant.expectedProfileOwnerId||p.agentType!==own.agentType||p.vmSizeOverride!=null||!(p.runtime===null||p.runtime===grant.runtime)||!(p.projectId===project||(p.projectId===null&&p.userId===grant.ownerId))||!Array.isArray(list.items)||list.items.filter(x=>x.name===p.name).length!==1)throw 0;
@@ -134,7 +134,7 @@ export async function terminalPhase({own,operation,originals,context,page,grant,
   for(const [name,b]of Object.entries(bytes))await writeFile(evidenceDirectory+'/'+name,b,{mode:0o600,flag:'wx'});
   out.manifest=true;out.hostBytesRetained=true;out.sourceManifestSha256=sha(raw);out.stage='canonical-after';await bind();const targetAfter=await checkTarget();if(operation==='observe'){if(JSON.stringify(targetAfter)!==JSON.stringify(targetBefore))throw 0;await writeFile(evidenceDirectory+'/target-terminal.json',JSON.stringify({before:targetBefore,after:targetAfter}),{mode:0o600,flag:'wx'});}out.after=true;
  }catch{}finally{
-  if(terminal)try{if(created){await terminal.send({type:'close_session',data:{sessionId:out.runId}});await wait('closed',Math.min(deadline,now()+5000));out.terminalClosed=true;}}catch{}
+  if(terminal)try{if(created){await terminal.send({type:'close_session',data:{sessionId:out.runId}});await wait('closed',Math.min(cleanupHard,now()+5000));out.terminalClosed=true;}}catch{}
   if(terminal)try{await terminal.dispose();out.socketClosed=true;}catch{}
  }
  out.quiescence=out.before&&out.after&&out.manifest&&out.hostBytesRetained&&out.terminalClosed&&out.socketClosed;out.ok=out.quiescence;return out;

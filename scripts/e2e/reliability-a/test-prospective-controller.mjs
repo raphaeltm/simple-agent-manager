@@ -4,6 +4,8 @@ import {mkdtemp,readFile,writeFile,mkdir,copyFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
+const pendingWrites=[];
+const deferJSON=(file,make)=>{const promise=new Promise((resolve,reject)=>setTimeout(()=>writeFile(file,JSON.stringify(make())).then(resolve,reject),5));pendingWrites.push(promise);return promise;};
 const root=await mkdtemp(join(tmpdir(),'sam-prospective-sequence-')),source=new URL('.',import.meta.url);
 try{
  const modules=join(root,'modules');await mkdir(modules);
@@ -66,7 +68,7 @@ try{
    }
    if(o.path.endsWith('/sleep')){
     slept.push(active.taskId);const body={status:'sleeping',workspaceId:mapping(active).workspaceId,chatSessionId:active.sessionId,snapshotExpiresAt:new Date(hard+86400000).toISOString()};assert(validate(body));
-    const sleeping=active;setTimeout(()=>writeFile(join(dir,sleeping===own?'protected-snapshot.json':'observer-snapshot.json'),JSON.stringify({taskId:sleeping.taskId,sessionId:sleeping.sessionId,workspaceId:body.workspaceId,snapshotId:snapId,status:'available',runtime:sleeping===own?'vm':'cf-container',degradation:'none',expiresAt:body.snapshotExpiresAt,snapshotGeneration:'synthetic-generation',observedAt:Date.now(),sourceEvidenceSha256:'b'.repeat(64)})),5);
+    const sleeping=active;deferJSON(join(dir,sleeping===own?'protected-snapshot.json':'observer-snapshot.json'),()=>({taskId:sleeping.taskId,sessionId:sleeping.sessionId,workspaceId:body.workspaceId,snapshotId:snapId,status:'available',runtime:sleeping===own?'vm':'cf-container',degradation:'none',expiresAt:body.snapshotExpiresAt,snapshotGeneration:'synthetic-generation',observedAt:Date.now(),sourceEvidenceSha256:'b'.repeat(64)}));
     return {category:'ok',status:200};
    }throw Error('request');
   };
@@ -79,5 +81,6 @@ try{
  const now=Date.now(),s={taskId:own.taskId,sessionId:own.sessionId,workspaceId:'ws',snapshotId:'01M51SSSSSSSSSSSSSSSSSSSSS',status:'available',runtime:'vm',degradation:'none',expiresAt:new Date(now+10000).toISOString(),snapshotGeneration:'synthetic-generation',observedAt:now,sourceEvidenceSha256:'a'.repeat(64)};
  snapshotProof(s,own,'ws',now-1,now+1000,now);for(const patch of [{observedAt:undefined},{degradation:'partial'},{sessionId:observer.sessionId},{expiresAt:new Date(now-1).toISOString()}])assert.throws(()=>snapshotProof({...s,...patch},own,'ws',now-1,now+1000,now));
  assert.throws(()=>completionProof({taskId:own.taskId},own,now-1,new Date(now).toISOString(),now));
+ await Promise.all(pendingWrites);
  console.log(JSON.stringify({ok:true,lifecycleCases:5,typedProofNegatives:5,missingCompletionNotesRejected:true,earlyCompletionRetained:true,liveCalls:0,limits:'browser/terminal/CF producers simulated; real caller+ledger'}));
-}finally{delete globalThis.__prospectiveTest;delete process.env.SAM_PROSPECTIVE_ROOT;delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;await rm(root,{recursive:true,force:true});}
+}finally{await Promise.all(pendingWrites);delete globalThis.__prospectiveTest;delete process.env.SAM_PROSPECTIVE_ROOT;delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;await rm(root,{recursive:true,force:true});}

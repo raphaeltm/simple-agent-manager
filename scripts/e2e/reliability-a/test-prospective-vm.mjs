@@ -49,10 +49,10 @@ finally:
  os.close(master)
 `);
 
- let invalidProvenance=false;
+ let invalidProvenance=false,grantPatch={},clockOverride=null,expireAfterInput=false;
  let identity=own,operation='setup',originals={},downloadCorrupt=false,closed=false,disposed=false,targetReads=0;const payloads=[];
  const workspace='01M51YYYYYYYYYYYYYYYYYYYYY',node='01M51XXXXXXXXXXXXXXXXXXXXX',acp='01M51WWWWWWWWWWWWWWWWWWWWW';
- const grant=()=>({releaseProvenance:invalidProvenance?{...releaseProvenance,rawHostShaObserved:true}:releaseProvenance,globalVmCount:1,otherWorkspaceCount:0,activeForeignClaimCount:0,workspaceId:workspace,nodeId:node,agentSessionId:acp,ownerId:'owner',expectedProfileOwnerId:'owner',runtime:identity===own?'vm':'cf-container',agentVersion:'b467f389811eadeaf973960bb30f9fa7b9cb4678',expiresAt:Date.now()+200000,storedProfileId:identity.agentProfileId,storedProfileObservedAt:Date.now(),receipt:identity.receipt});
+ const grant=()=>({releaseProvenance:invalidProvenance?{...releaseProvenance,rawHostShaObserved:true}:releaseProvenance,globalVmCount:1,otherWorkspaceCount:0,activeForeignClaimCount:0,workspaceId:workspace,nodeId:node,agentSessionId:acp,ownerId:'owner',expectedProfileOwnerId:'owner',runtime:identity===own?'vm':'cf-container',agentVersion:'b467f389811eadeaf973960bb30f9fa7b9cb4678',expiresAt:Date.now()+200000,storedProfileId:identity.agentProfileId,storedProfileObservedAt:Date.now(),receipt:identity.receipt,...grantPatch});
  const response=(v,status=200)=>{const b=Buffer.isBuffer(v)?v:Buffer.from(JSON.stringify(v));return {status:()=>status,body:async()=>b,headers:async()=>({'content-length':String(b.length)}),dispose:async()=>{}};};
  const context={request:{fetch:async(url,options)=>{
   assert.equal(options.maxRedirects,0);
@@ -75,13 +75,16 @@ finally:
   if(f.type==='input'){
    const command=f.data.data;assert(command.split('\n').every(x=>Buffer.byteLength(x)<3800));payloads.push(command);
    const commandFile=join(root,'command-'+payloads.length);await writeFile(commandFile,command.replaceAll('/workspaces/reliability-prospective',root+'/remote-phase'));
-   const output=exec('python3',[ptyRunner,commandFile,repo],repo,env);assert.equal(output.length,0);
+   const output=exec('python3',[ptyRunner,commandFile,repo],repo,env);assert.equal(output.length,0);if(expireAfterInput)clockOverride=Date.now()+85001;
   }if(f.type==='close_session')closed=true;
  },state:async()=>({created:true,closed,failed:false}),dispose:async()=>{disposed=true;}});
- const invoke=async(name)=>{cases++;const dir=join(root,name);await mkdir(dir);closed=false;disposed=false;const result=await terminalPhase({own:identity,operation,originals,context,page:{},grant:grant(),evidenceDirectory:dir,open});assert(!JSON.stringify(result).includes(canary));return {result,dir};};
+ const invoke=async(name)=>{cases++;const dir=join(root,name);await mkdir(dir);closed=false;disposed=false;const result=await terminalPhase({own:identity,operation,originals,context,page:{},grant:grant(),evidenceDirectory:dir,open,now:()=>clockOverride??Date.now()});assert(!JSON.stringify(result).includes(canary));return {result,dir};};
  const setup=await invoke('setup');assert(setup.result.ok&&setup.result.hostBytesRetained&&closed&&disposed);assert((await readFile(join(setup.dir,'done.json'))).length>100);
  originals={baseline:await readFile(join(setup.dir,'baseline.json')),expectations:await readFile(join(setup.dir,'expectations.json'))};
- const originalBaseline=Buffer.from(originals.baseline);operation='check';invalidProvenance=true;assert(!(await invoke('invented-host-proof')).result.ok);invalidProvenance=false;assert((await invoke('turn-check')).result.ok);assert((await invoke('wake-check')).result.ok);
+ const originalBaseline=Buffer.from(originals.baseline);operation='check';invalidProvenance=true;assert(!(await invoke('invented-host-proof')).result.ok);invalidProvenance=false;
+ for(const [n,patch]of [['undefined-expiry',{expiresAt:undefined}],['string-expiry',{expiresAt:'future'}],['infinite-expiry',{expiresAt:Infinity}],['undefined-observed',{storedProfileObservedAt:undefined}],['string-observed',{storedProfileObservedAt:'now'}],['zero-observed',{storedProfileObservedAt:0}]]){grantPatch=patch;assert(!(await invoke(n)).result.ok);}grantPatch={};
+ expireAfterInput=true;const expired=await invoke('action-expired-close');assert(!expired.result.ok&&expired.result.terminalClosed&&expired.result.socketClosed);expireAfterInput=false;clockOverride=null;
+ assert((await invoke('turn-check')).result.ok);assert((await invoke('wake-check')).result.ok);
  // Damaged original is rejected, never replaced from the copied host baseline.
  await writeFile(join(repo,'.reliability-a/untracked.txt'),'changed');assert(!(await invoke('damaged')).result.ok);assert.deepEqual(await readFile(join(repo,'.reliability-a/baseline.json')),originalBaseline);
  await writeFile(join(repo,'.reliability-a/untracked.txt'),'untracked preservation fixture\n');
@@ -94,5 +97,5 @@ finally:
  assert.throws(()=>new AcceptanceSequence(own,started,started+2700001));
  const capsuleSource=await readFile(new URL('prospective-capsule.py',source),'utf8');assert(!capsuleSource.includes('/etc/sam/')&&!capsuleSource.includes('/usr/local/bin/vm-agent'));
  const packed=await capsule(own,'setup');assert(packed.command.split('\n').every(x=>Buffer.byteLength(x)<3800));assert(!packed.command.includes(canary));
- console.log(JSON.stringify({ok:true,actualCapsuleCases:cases,sequenceAndDeadlineNegatives:true,originalBytesRetained:true,canarySuppressed:true,liveCalls:0,limits:'simulated HTTP/socket/node-release provenance; actual local PTY/Bash/Python/Git'}));
+ console.log(JSON.stringify({ok:true,cases,actualPtyExecutions:payloads.length,sequenceAndDeadlineNegatives:true,originalBytesRetained:true,canarySuppressed:true,liveCalls:0,limits:'simulated HTTP/socket/node-release provenance; actual local PTY/Bash/Python/Git'}));
 }finally{await rm(root,{recursive:true,force:true});}
