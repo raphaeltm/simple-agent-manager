@@ -8,6 +8,7 @@ import {browserTerminal} from './owner-terminal-inspect.mjs';
 import {baselineArtifact,expectationsArtifact,probeArtifact} from './queue-controller.mjs';
 export const project='01KJNR9R3TEN3KX1ETE33852R8',repository='serverspresentation2025/crewai';
 export const version='b467f389811eadeaf973960bb30f9fa7b9cb4678';
+export const releaseProvenance=Object.freeze({apiSource:'e2c81c045fa16490c7515fa80573418e60ef4017',agentSource:version,publishedBinarySha256:'a59a4850337fe7af588267c481dee046db5baba4d3f705c85f19f85ded09e06f',rawHostShaObserved:false});
 export const assetHashes={'git-probe.py':'f061b7cd447cef55ceb08cb6a78fcb0b236ec3f347731e66d4b8447c224afa6c','b-probe.py':'889d7588ed44c8ab89e6ba7880ff20d81017f294bb7b31edfbc320ced064f509','terminal-observer.py':'d0970080ce89ab2810c0c9d758d1fc978efafe75fed91a4454f08639da88adff'};
 const api='https://api.sammy.party',app='https://app.sammy.party';
 const sha=b=>createHash('sha256').update(b).digest('hex');
@@ -94,7 +95,7 @@ export async function terminalPhase({own,operation,originals,context,page,grant,
  const live=()=>{if(now()>=deadline)throw Error('deadline');};
  const get=async(path,method='GET',data)=>{live();const r=await context.request.fetch(api+path,{method,data,headers:{Origin:app},timeout:5000,maxRedirects:0,failOnStatusCode:false});try{if(r.status()!==200)throw 0;const b=await r.body();if(b.length>250000)throw 0;return JSON.parse(b);}finally{await r.dispose();}};
  const bind=async()=>{
-  if(!grant||!Number.isSafeInteger(grant.globalVmCount)||grant.globalVmCount<0||grant.globalVmCount>1||(grant.runtime==='vm'&&grant.globalVmCount!==1)||grant.otherWorkspaceCount!==0||grant.activeForeignClaimCount!==0||!ulid(grant.workspaceId)||!ulid(grant.nodeId)||!(ulid(grant.agentSessionId)||uuid(grant.agentSessionId))||grant.expiresAt<=now()||grant.expiresAt>now()+300000||grant.storedProfileId!==own.agentProfileId||grant.storedProfileObservedAt>now()||grant.storedProfileObservedAt<now()-240000||!['vm','cf-container'].includes(grant.runtime)||(grant.runtime==='vm'&&grant.agentVersion!==version))throw 0;
+  if(!grant||!Number.isSafeInteger(grant.globalVmCount)||grant.globalVmCount<0||grant.globalVmCount>1||(grant.runtime==='vm'&&grant.globalVmCount!==1)||grant.otherWorkspaceCount!==0||grant.activeForeignClaimCount!==0||!ulid(grant.workspaceId)||!ulid(grant.nodeId)||!(ulid(grant.agentSessionId)||uuid(grant.agentSessionId))||grant.expiresAt<=now()||grant.expiresAt>now()+300000||grant.storedProfileId!==own.agentProfileId||grant.storedProfileObservedAt>now()||grant.storedProfileObservedAt<now()-240000||!['vm','cf-container'].includes(grant.runtime)||(grant.runtime==='vm'&&(grant.agentVersion!==version||!exact(grant.releaseProvenance,Object.keys(releaseProvenance))||Object.keys(releaseProvenance).some(k=>grant.releaseProvenance[k]!==releaseProvenance[k]))))throw 0;
   if(JSON.stringify(grant.receipt)!==JSON.stringify(own.receipt))throw 0;
   const u=await get('/api/auth/get-session'),p=await get(`/api/projects/${project}/agent-profiles/${own.agentProfileId}`),list=await get(`/api/projects/${project}/agent-profiles`);
   if(u?.user?.id!==grant.ownerId||p?.id!==own.agentProfileId||p.userId!==grant.expectedProfileOwnerId||p.agentType!==own.agentType||p.vmSizeOverride!=null||!(p.runtime===null||p.runtime===grant.runtime)||!(p.projectId===project||(p.projectId===null&&p.userId===grant.ownerId))||!Array.isArray(list.items)||list.items.filter(x=>x.name===p.name).length!==1)throw 0;
@@ -116,12 +117,12 @@ export async function terminalPhase({own,operation,originals,context,page,grant,
   let raw;while(now()<deadline-15000){raw=await download('done.json');if(raw)break;await pause(1000);}if(!raw)throw 0;
   out.stage='capsule-result';const done=JSON.parse(raw);if(!exact(done,['taskId','sessionId','runId','operation','status','files'])||done.taskId!==bundle.config.taskId||done.sessionId!==bundle.config.sessionId||done.runId!==bundle.runId||done.operation!==operation||![0,1].includes(done.status))throw 0;
   if(done.status===1){if(!exact(done.files,[]))throw 0;await writeFile(evidenceDirectory+'/done.json',raw,{mode:0o600,flag:'wx'});out.capsuleStatus=1;throw 0;}
-  const names=operation==='setup'?['runtime.json','prepare.json','baseline.json','check.json','record.json','expectations.json']:operation==='check'?['runtime.json','check.json','publication.json']:['observer.json'];
+  const names=operation==='setup'?['asset-hashes.json','prepare.json','baseline.json','check.json','record.json','expectations.json']:operation==='check'?['asset-hashes.json','check.json','publication.json']:[ 'asset-hashes.json','observer.json'];
   if(!exact(done.files,names)||Object.values(done.files).some(v=>!/^[0-9a-f]{64}$/.test(v)))throw 0;
   const bytes={};for(const name of names){const b=await download(name);if(!b||sha(b)!==done.files[name])throw 0;bytes[name]=b;}
   const target=operation==='observe'?originals.target:own;
   const probePass=(b,phase)=>{const v=probeArtifact(JSON.parse(b),phase);if(!Object.values(v.checks).every(x=>x===true)||!Object.values(v.statuses).every(x=>x===0))throw 0;};
-  if(operation!=='observe'){const r=JSON.parse(bytes['runtime.json']);if(!exact(r,['checks','statuses'])||!exact(r.checks,['installedReleaseMatches','installedBinaryMatches'])||!exact(r.statuses,['proof'])||r.checks.installedReleaseMatches!==true||r.checks.installedBinaryMatches!==true||r.statuses.proof!==0)throw 0;}
+  probePass(bytes['asset-hashes.json'],'asset-hashes');
   if(operation==='setup'){
    const baseline=baselineArtifact(JSON.parse(bytes['baseline.json']),target.branch);expectationsArtifact(JSON.parse(bytes['expectations.json']),baseline,repository);
    probePass(bytes['prepare.json'],'a-prepare');probePass(bytes['record.json'],'observer-record');

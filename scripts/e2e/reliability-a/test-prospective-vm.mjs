@@ -13,12 +13,8 @@ let cases=0;
 try{
  const modules=join(root,'modules');await mkdir(modules);
  for(const name of ['prospective-vm.mjs','owner-terminal-inspect.mjs','queue-controller.mjs','git-probe.py','b-probe.py','terminal-observer.py'])await copyFile(new URL(name,source),join(modules,name));
- const version=join(root,'version.json'),binary=join(root,'binary');await writeFile(version,JSON.stringify({version:'b467f389811eadeaf973960bb30f9fa7b9cb4678'}));await writeFile(binary,'synthetic binary');
- const original=await readFile(new URL('prospective-capsule.py',source),'utf8');
- assert(original.includes("Path('/etc/sam/vm-agent-version.json')")&&original.includes("Path('/usr/local/bin/vm-agent')"));
- // Fixture substitutes physical file locations+synthetic binary digest ONLY. No live version proof.
- await writeFile(join(modules,'prospective-capsule.py'),original.replace("Path('/etc/sam/vm-agent-version.json')",'Path('+JSON.stringify(version)+')').replace("Path('/usr/local/bin/vm-agent')",'Path('+JSON.stringify(binary)+')').replace('a59a4850337fe7af588267c481dee046db5baba4d3f705c85f19f85ded09e06f',sha('synthetic binary')));
- const {terminalPhase,AcceptanceSequence,capsule}=await import(pathToFileURL(join(modules,'prospective-vm.mjs')));
+ await copyFile(new URL('prospective-capsule.py',source),join(modules,'prospective-capsule.py'));
+ const {terminalPhase,AcceptanceSequence,capsule,releaseProvenance}=await import(pathToFileURL(join(modules,'prospective-vm.mjs')));
  const realGit=exec('which',['git']).toString().trim(),remote=join(root,'remote.git'),repo=join(root,'repo'),bin=join(root,'bin');await mkdir(bin);
  exec(realGit,['init','--bare','--initial-branch=main',remote]);exec(realGit,['init','--initial-branch=main',repo]);
  await writeFile(join(repo,'seed'),'seed');exec(realGit,['add','seed'],repo);exec(realGit,['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-m','seed'],repo);
@@ -53,9 +49,10 @@ finally:
  os.close(master)
 `);
 
+ let invalidProvenance=false;
  let identity=own,operation='setup',originals={},downloadCorrupt=false,closed=false,disposed=false,targetReads=0;const payloads=[];
  const workspace='01M51YYYYYYYYYYYYYYYYYYYYY',node='01M51XXXXXXXXXXXXXXXXXXXXX',acp='01M51WWWWWWWWWWWWWWWWWWWWW';
- const grant=()=>({globalVmCount:1,otherWorkspaceCount:0,activeForeignClaimCount:0,workspaceId:workspace,nodeId:node,agentSessionId:acp,ownerId:'owner',expectedProfileOwnerId:'owner',runtime:identity===own?'vm':'cf-container',agentVersion:'b467f389811eadeaf973960bb30f9fa7b9cb4678',expiresAt:Date.now()+200000,storedProfileId:identity.agentProfileId,storedProfileObservedAt:Date.now(),receipt:identity.receipt});
+ const grant=()=>({releaseProvenance:invalidProvenance?{...releaseProvenance,rawHostShaObserved:true}:releaseProvenance,globalVmCount:1,otherWorkspaceCount:0,activeForeignClaimCount:0,workspaceId:workspace,nodeId:node,agentSessionId:acp,ownerId:'owner',expectedProfileOwnerId:'owner',runtime:identity===own?'vm':'cf-container',agentVersion:'b467f389811eadeaf973960bb30f9fa7b9cb4678',expiresAt:Date.now()+200000,storedProfileId:identity.agentProfileId,storedProfileObservedAt:Date.now(),receipt:identity.receipt});
  const response=(v,status=200)=>{const b=Buffer.isBuffer(v)?v:Buffer.from(JSON.stringify(v));return {status:()=>status,body:async()=>b,headers:async()=>({'content-length':String(b.length)}),dispose:async()=>{}};};
  const context={request:{fetch:async(url,options)=>{
   assert.equal(options.maxRedirects,0);
@@ -84,7 +81,7 @@ finally:
  const invoke=async(name)=>{cases++;const dir=join(root,name);await mkdir(dir);closed=false;disposed=false;const result=await terminalPhase({own:identity,operation,originals,context,page:{},grant:grant(),evidenceDirectory:dir,open});assert(!JSON.stringify(result).includes(canary));return {result,dir};};
  const setup=await invoke('setup');assert(setup.result.ok&&setup.result.hostBytesRetained&&closed&&disposed);assert((await readFile(join(setup.dir,'done.json'))).length>100);
  originals={baseline:await readFile(join(setup.dir,'baseline.json')),expectations:await readFile(join(setup.dir,'expectations.json'))};
- const originalBaseline=Buffer.from(originals.baseline);operation='check';assert((await invoke('turn-check')).result.ok);assert((await invoke('wake-check')).result.ok);
+ const originalBaseline=Buffer.from(originals.baseline);operation='check';invalidProvenance=true;assert(!(await invoke('invented-host-proof')).result.ok);invalidProvenance=false;assert((await invoke('turn-check')).result.ok);assert((await invoke('wake-check')).result.ok);
  // Damaged original is rejected, never replaced from the copied host baseline.
  await writeFile(join(repo,'.reliability-a/untracked.txt'),'changed');assert(!(await invoke('damaged')).result.ok);assert.deepEqual(await readFile(join(repo,'.reliability-a/baseline.json')),originalBaseline);
  await writeFile(join(repo,'.reliability-a/untracked.txt'),'untracked preservation fixture\n');
@@ -95,6 +92,7 @@ finally:
  for(const [kind,proof]of [['setup',{baselineOriginal:true,expectationsOriginal:true,hostBytesRetained:true}],['turn',{actualHarness:true,freshInactive:true,prompt202:true}],['turn-check',{}],['sleep',{snapshotAvailable:true,sleep200:true,snapshotId:'snapshot'}],['wake',{actualHarness:true,freshInactive:true,prompt202:true}],['wake-check',{}],['complete',{actualTool:true,canonicalCompletedAt:new Date().toISOString(),completionEvidence:true}],['observe',{independentRuntime:true,originalBaseline:true,originalExpectations:true,afterCanonical:true,allRefsAllPrStates:true}]])seq.append(kind,{ok:true,...proof},started+1000+seq.events.length);
  assert(seq.pass);assert.throws(()=>seq.append('setup',{ok:true},Date.now()));
  assert.throws(()=>new AcceptanceSequence(own,started,started+2700001));
+ const capsuleSource=await readFile(new URL('prospective-capsule.py',source),'utf8');assert(!capsuleSource.includes('/etc/sam/')&&!capsuleSource.includes('/usr/local/bin/vm-agent'));
  const packed=await capsule(own,'setup');assert(packed.command.split('\n').every(x=>Buffer.byteLength(x)<3800));assert(!packed.command.includes(canary));
- console.log(JSON.stringify({ok:true,actualCapsuleCases:cases,sequenceAndDeadlineNegatives:true,originalBytesRetained:true,canarySuppressed:true,liveCalls:0,limits:'simulated HTTP/socket; actual local PTY/Bash/Python/Git; synthetic runtime files'}));
+ console.log(JSON.stringify({ok:true,actualCapsuleCases:cases,sequenceAndDeadlineNegatives:true,originalBytesRetained:true,canarySuppressed:true,liveCalls:0,limits:'simulated HTTP/socket/node-release provenance; actual local PTY/Bash/Python/Git'}));
 }finally{await rm(root,{recursive:true,force:true});}

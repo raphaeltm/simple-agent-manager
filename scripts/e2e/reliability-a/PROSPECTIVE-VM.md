@@ -16,8 +16,8 @@ read-only guard remains owned by A. Never host/node DELETE or change the pool.
 
 ## One bounded plan
 
-Coordinator-approved planning limit (2b4e7a7c), not live authorization: 45 minutes from the ONE normal
-accepted task submission through observer Sleep and browser closure, including
+Coordinator-approved planning limit (2b4e7a7c), not live authorization: 45 minutes from the immutable clock BEFORE the ONE normal
+task submission through observer Sleep and browser closure, including
 startup, setup, actual harness work, Sleep, normal recovery, completion and
 observation. Stop new actions 9 minutes before hard expiry (at most90sec terminal
 operation, >=6min preservation plus transport margin). No clock reset, retry,
@@ -69,8 +69,11 @@ The reviewed supervisor owns terminal failure propagation and process closure.
    chatSessionId plus the independently checked stored-ID grant bind the relation.
    Public profile hint is caller-visible NAME for own profiles, ID for shared
    foreign-owned project profiles, with fresh profile GET and uniqueness check.
-   VM grant must confirm b467, pool40 and same owner; actual capsule independently
-   reads installed version and installed binary hash a59. No model reports proof.
+   VM grant must confirm actual node-reported b467, pool40 and same owner plus fresh
+   API pin. Compare to the already reviewed APIe2 -> b467/published binary a59
+   provenance. The PTY is inside the devcontainer: no host binary/metadata path
+   is assumed visible. Raw host binary SHA remains UNOBSERVED, explicitly recorded
+   in grant.releaseProvenance; no model or capsule reports a host-hash proof.
 2. Host terminal setup: actual configured APP-origin browser WebSocket, normal
    owner terminal/token, matching session-created and close acknowledgments.
    The trusted host chunks a hash-checked compressed package into <3800byte input
@@ -80,7 +83,7 @@ The reviewed supervisor owns terminal failure propagation and process closure.
    setup, public-helper reads, package installs or shell-command interface.
 3. Actual original git-probe prepare ONCE, only its explicit named local commit
    and fixture writes; then original check and original observer record. Export
-   ORIGINAL runtime/prepare/check/baseline/record/expectations files and ORIGINAL
+   ORIGINAL asset-hashes/prepare/check/baseline/record/expectations files and ORIGINAL
    typed manifest, not model summaries. Host validates original bytes/hash/schema
    and all checks/statuses, saves exclusive0600 files before the next turn.
    Baseline and expectations must predate the tested turn/completion. No reset,
@@ -147,7 +150,7 @@ strictnormal runtimeTerminationConfirmedAt; reuse/foreign claims prevent mutatio
 
 `node scripts/e2e/reliability-a/test-prospective-vm.mjs` executes actual fixed shell,
 Python capsule, original Git probe and observer in a disposable local Git repo.
-HTTP/browser socket are simulated; runtime metadata/binary files are synthetic.
+HTTP/browser socket are simulated; node-release provenance is simulated; no host filesystem binary proof is claimed.
 Canary helper streams are private. It proves no provider, ACP, snapshot durability,
 actual tool completion, live API compatibility or release acceptance. Existing
 pinned APIe2/b467 DTO/protocol tests remain required and are reused, not relabelled.

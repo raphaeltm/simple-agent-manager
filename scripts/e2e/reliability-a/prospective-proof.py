@@ -12,6 +12,7 @@ import urllib.request
 
 PROJECT = '01KJNR9R3TEN3KX1ETE33852R8'
 VERSION = 'b467f389811eadeaf973960bb30f9fa7b9cb4678'
+RELEASE_PROVENANCE = {'apiSource': 'e2c81c045fa16490c7515fa80573418e60ef4017', 'agentSource': VERSION, 'publishedBinarySha256': 'a59a4850337fe7af588267c481dee046db5baba4d3f705c85f19f85ded09e06f', 'rawHostShaObserved': False}
 MODES = ['setup', 'turn-check', 'wake-check', 'observe', 'protected-snapshot', 'observer-snapshot', 'completion-runtime']
 
 
@@ -98,6 +99,9 @@ def main():
             assert not others
             source.update(workspace=workspace, node=node, profile=profile)
             value = {'workspaceId': workspace['id'], 'nodeId': node['id'], 'ownerId': owner, 'expectedProfileOwnerId': profile['user_id'], 'agentSessionId': mapping['agentSessionId'], 'runtime': runtime, 'agentVersion': node['agent_version'], 'storedProfileId': profile['id'], 'storedProfileObservedAt': observed, 'expiresAt': observed + 240000, 'receipt': own['receipt'], 'globalVmCount': len(nodes), 'otherWorkspaceCount': 0, 'activeForeignClaimCount': 0}
+            if runtime == 'vm':
+                value['releaseProvenance'] = RELEASE_PROVENANCE
+                source['reviewedPublicationReference'] = RELEASE_PROVENANCE
             if mode == 'wake-check':
                 stage = 'restored-generation'
                 protected = json.loads((root / 'protected-snapshot.json').read_text())
