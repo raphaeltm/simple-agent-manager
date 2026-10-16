@@ -1,0 +1,37 @@
+{
+  "coverage": {
+    "InstantClaude": "Coordinator accepted; preserve accepted evidence; no rerun proposed. Earlier local conservative matrix was not a revocation of coordinator acceptance.",
+    "InstantCodex": "Coordinator accepted; FIRST may normally reopen as NEW-target observer without old FIRST baseline gate; preserve prior completed evidence and report reopen.",
+    "VMClaude": "Remaining postwake original-byte Git/index/dirty/workflow/local-unpushed preservation, actual completion and independent NEW-target publication observer.",
+    "VMCodex": "Same remaining coverage is separate required cell; Claude success cannot close it. Run only after Claude closure/strict provider cleanup and separate coordinator authorization."
+  },
+  "finiteBudget": {
+    "cleanup": "Reserve final9min for normal Sleep/AVAILABLE proof, logout/null-session/protected denial/browser closure; strict provider cleanup ownership continues read-only under durable scheduled guard until canonical deleted plus separate normal termination stamp. No force/delete shortcut.",
+    "clock": "Immutable PRESUBMIT start before login/task acceptance; hard=start+2700000; action cutoff=hard-540000; no extension/reset/retry/replacement.",
+    "exportLatency": "Each upload+download+root verification has at most90s total within action window; before starting any export or tested action require enough time for that bound plus remaining cleanup reserve. No phase advance without verified receipt before action cutoff. Any failure/timeout -> normal Sleep/auth cleanup immediately, no repeated upload loop.",
+    "perCellComputePlanning": "45active+40normal tail=85VMmin, conservatively2 rounded hours EUR0.0176-0.0512 using prior cx23/cx33/cx43 catalogue; refresh catalogue before runtime; compute only, excludes IP/tax/API/storage/provider delay.",
+    "perCellTotalMinutes": 45,
+    "twoCellsPlanning": "Two sequential separately authorized cells:170VMmin total,4 rounded hours EUR0.0352-0.1024 compute only at unchanged prior catalogue. Not a spending authorization or cap."
+  },
+  "history": "Original16 unavailable; first UNKNOWN/second NOTPASS unchanged. No reconstruction or old-case rebaseline.",
+  "privacy": {
+    "allowlistedOriginalBytes": "Reviewed synthetic fixture baseline/expectations/check/record/publication/asset hashes/done manifests; exact source identity, bounded numeric clocks/statuses, canonical completion metadata hash and approved target IDs. Preserve original bytes only after schema/size/key allowlist validates.",
+    "exclude": "Auth/cookies/tokens/env, raw PTY/tool transcript/errors, arbitrary filesystem content, unsanitized full config. Original synthetic baseline may contain bounded repository/ref paths by reviewed schema; no arbitrary source text.",
+    "manifest": "Sorted relative allowlisted names plus size and SHA256, bound task/session/phase/source SHA and immutable window. Exclusive0600 files inside0700 task-scoped snapshot-visible directory; no /tmp-only evidence.",
+    "rootIndependentVerification": "Owner uploads immutable phase archive to supported private Library; root independently downloads archive, validates safe names/types/sizes/schema and hashes, recomputes manifest digest, returns exact bound verification receipt; no owner attestation substitute. Root receipt retained in next phase export. Failed retrieval/verification blocks progress."
+  },
+  "runner": {
+    "entrypoint": "scripts/e2e/reliability-a/prospective-vm-controller.mjs exported run(context,false), through safe-controller supervision; caller-owned fresh accepted receipt",
+    "frozenRef": "6bb785b331a1fde01b86f9d2c1f8300603274d95",
+    "necessaryDelta": "Small verification-only retention hook after setup bytes and every phase, before next operation; invokes supported Library upload/download via host orchestration, waits for root independent digest verification receipt bound to exact task/session/phase/source/manifest/hard. Controller enforces timeout and fail-closed normal preservation/auth cleanup. Fresh config pins source hashes, never edits old resume identity. Existing terminal/capsule/CF proof logic reused.",
+    "review": "After implementation authorization: independent Sol source/security/privacy review of delta; focused retention-order/failure/identity/deadline tests only. No tests run absent delta.",
+    "source": [
+      "prospective-vm-controller.mjs:12 run(context,resume=false)",
+      "prospective-vm-controller.mjs:105-109 new-fixture setup then tested turn",
+      "prospective-vm.mjs:18-20 identity accepts claude-code/openai-codex",
+      "prospective-resume.mjs:7-19 hardbound OLD target and original16; DO NOT use for new fixture"
+    ]
+  },
+  "staging": "No lease/window/login/fixture/runtime now; PR2337 occupies staging. Require explicit return and fresh coordinator GO.",
+  "status": "CONCRETE OFFLINE DESIGN ONLY; implementation and runtime require coordinator authorization"
+}
