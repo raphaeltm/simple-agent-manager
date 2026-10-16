@@ -25,7 +25,7 @@ describe('mailbox alarm scheduling query cost', () => {
     const stub = env.PROJECT_DATA.get(
       env.PROJECT_DATA.newUniqueId()
     ) as DurableObjectStub<ProjectData>;
-    await runInDurableObject(stub, (_instance, state) => {
+    await runInDurableObject(stub, async (instance, state) => {
       const sql = state.storage.sql;
       const pollMs = 30_000;
       expect(computeMailboxAlarmTime(sql, pollMs)).toBeNull();
@@ -39,6 +39,8 @@ describe('mailbox alarm scheduling query cost', () => {
           'deliver', ?, 'system', 0 FROM history`,
         count, prefix, deliveryState
       );
+      sql.exec(`INSERT INTO acp_sessions (id, chat_session_id, node_id, status, created_at, updated_at)
+        VALUES ('fixture-acp', 'target', 'fixture-node', 'running', 1000, 1000)`);
       seed('first-', 1, 'delivered');
       const baseline = probe(sql);
       expect(computeProjectDataAlarmSectionTimes(baseline.sql, {}).mailbox_delivery_sweep)
@@ -48,13 +50,26 @@ describe('mailbox alarm scheduling query cost', () => {
       expect(computeProjectDataAlarmSectionTimes(loaded.sql, {}).mailbox_delivery_sweep)
         .toBe(Date.now() + pollMs);
       expect(loaded.rowsRead()).toBeLessThanOrEqual(baseline.rowsRead() + 10);
+      const holder = instance as unknown as { sql: SqlStorage };
+      const originalSql = holder.sql;
+      const heartbeats = probe(sql);
+      holder.sql = heartbeats.sql;
+      try {
+        for (let n = 0; n < 100; n++) {
+          expect(await instance.updateNodeHeartbeats('fixture-node')).toBeGreaterThan(0);
+        }
+      } finally {
+        holder.sql = originalSql;
+      }
+      expect(heartbeats.rowsRead()).toBeLessThanOrEqual(100 * (baseline.rowsRead() + 50));
+      expect(await state.storage.getAlarm()).not.toBeNull();
       const repeated = probe(sql);
       for (let n = 0; n < 100; n++) {
         expect(computeMailboxAlarmTime(repeated.sql, pollMs)).toBe(Date.now() + pollMs);
       }
       expect(repeated.rowsRead()).toBeLessThanOrEqual(200);
       console.log(JSON.stringify({ metric: 'mailbox_alarm_rows', baseline: baseline.rowsRead(),
-        loaded: loaded.rowsRead(), repeated100: repeated.rowsRead() }));
+        loaded: loaded.rowsRead(), heartbeat100: heartbeats.rowsRead(), repeated100: repeated.rowsRead() }));
       sql.exec("UPDATE session_inbox SET delivery_state = 'acked' WHERE delivery_state = 'delivered'");
       const terminal = probe(sql);
       expect(computeMailboxAlarmTime(terminal.sql, pollMs)).toBeNull();
