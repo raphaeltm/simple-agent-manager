@@ -1,0 +1,13 @@
+{
+  "exactNativeFailureOperation": "UNKNOWN outside fixed allowlist",
+  "historicalTerminalFailure": "preserved",
+  "kind": "supplemental readonly publication observation only",
+  "nativeExecutionReceiptObserved": false,
+  "nativeOutputArchiveObserved": false,
+  "originalTargetExpectedRefs": 149,
+  "originalTargetPrs": 0,
+  "providerCleanupSchedule": "c456206a-b4e8-4773-9b82-5ff9b193f718 due14:31:50",
+  "result": "NOT PASS",
+  "retryAttempted": false,
+  "toolFailures": 2
+}

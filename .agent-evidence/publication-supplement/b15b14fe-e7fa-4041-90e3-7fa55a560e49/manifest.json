@@ -1,0 +1,15 @@
+{
+  "capsule.command": "d3c3cf548ec826e48d6911f84d886b05724d0352ccaee2789d24581cdbebdb59",
+  "cleanup-canonical.json": "bf33985441a43e1ed36465548a7c61a5a4b2f67f9f7cb01e997c8e0f2fe185ef",
+  "clock.json": "ee937d957dfe8055eb9dfc4981319cf1d744cdc4b33d9ee44c1b8758f464db11",
+  "closure-projection.json": "c865cdaac58fa29e3c22a322a91a053414983454d9aa86e1c0e1e15e40c1bf60",
+  "identity.json": "4797abe5a41c729fc2f723d2b6467119ad0c9a68545a9712b2d111c4f731febd",
+  "input-library-receipt.json": "8787870bc14342bc6668898b351ec987910c026c780afb749c6af90da656b1e4",
+  "native-tool-metadata.json": "a17c726add6a1ccf02176b3bda0528d1bf6b2e1593a55c4a07b02b259cadcf62",
+  "owner-final.json": "57abda0e9eac23e3857e4b8ce7569debb1683aaee6894feb1951f7c339c730b6",
+  "owner-observation.mjs": "e5f3ee53a53f848a2ab31adcb7befd338ccbe862170561e94c08d139d2914320",
+  "package.json": "85985a4571c701ccb969691517ba090b2ba5cd0e59bcbf4e2275ef73bff8b750",
+  "prompt-receipt.json": "05084a60e2dd11730652728ab1dbffb37e05f21ddc95d6e2d1e4cace037af1fa",
+  "read-native-receipt.mjs": "ca23ac4bdb57f6b058f6e96d840dab4f71e45e998a7a7763d9de3391184cccb7",
+  "sleep-receipt.json": "89f0d23e42dfeaf7a42baac3af9dcb7c7edb705f3dc95a6cc810ef7c008c0048"
+}

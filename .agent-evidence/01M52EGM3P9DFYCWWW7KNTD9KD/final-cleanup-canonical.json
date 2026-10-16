@@ -12,7 +12,7 @@
   ],
   "nodeActiveWorkspaces": 0,
   "nodeWarmClaims": 0,
-  "observedAtMs": 1792158905974,
+  "observedAtMs": 1792160479440,
   "observer": [
     {
       "id": "01M50VYZ60RQXXTGSVPXW6FRXD",
@@ -29,9 +29,9 @@
   "observerSnapshots": [
     {
       "degradation": "none",
-      "expires_at": "2026-10-23T13:54:23.181Z",
+      "expires_at": "2026-10-23T14:16:18.195Z",
       "id": "01M50W0E50YKW8J3SJH77XX5RS",
-      "sleeping_at": "2026-10-16T13:54:23.181Z",
+      "sleeping_at": "2026-10-16T14:16:18.195Z",
       "status": "available"
     }
   ],
@@ -48,7 +48,7 @@
       "status": "completed",
       "warm_since": "2026-10-16T13:51:38.766Z",
       "workspace_id": "01M52FBT8C54MY6NNR2J4DTG3B",
-      "workspace_status": "sleeping"
+      "workspace_status": "deleted"
     }
   ],
   "snapshots": [
