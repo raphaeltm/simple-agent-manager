@@ -109,7 +109,9 @@ export async function inspectOwnedFixture({context,page,grant,open=browserTermin
   const runtime=await json(`/api/projects/${project}/sessions/${session}/state`);
   // Display lookup is caller-owned only: shared foreign-owned project IDs remain IDs.
   const publicHint=p.userId===grant.ownerId?p.name:profile;
-  if(t?.id!==task||t.projectId!==project||t.userId!==grant.ownerId||t.chatSessionId!==session||t.outputBranch!==branch||t.workspaceId!==grant.workspaceId||t.agentProfileHint!==publicHint
+  // Public Task DTO has no chatSessionId; session.taskId + workspace.chatSessionId
+  // and the independent stored task/session grant provide that association.
+  if(t?.id!==task||t.projectId!==project||t.userId!==grant.ownerId||t.outputBranch!==branch||t.workspaceId!==grant.workspaceId||t.agentProfileHint!==publicHint
    ||!['in_progress','completed'].includes(t.status)||s?.session?.id!==session||s.session.taskId!==task||s.session.workspaceId!==grant.workspaceId||s.session.agentType!=='claude-code'
    ||s.session.agentSessionId!==grant.agentSessionId||runtime?.agentSessionId!==grant.agentSessionId||runtime.agentType!=='claude-code'
    ||w?.id!==grant.workspaceId||w.nodeId!==grant.nodeId||w.projectId!==project||w.chatSessionId!==session||w.branch!==branch||w.repository!=='serverspresentation2025/crewai'||w.status!=='running'||w.hardware?.cloudProvider!=='hetzner')throw 0;

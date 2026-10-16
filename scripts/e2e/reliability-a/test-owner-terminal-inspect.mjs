@@ -21,7 +21,7 @@ async function scenario(mode){
   if(url.endsWith('/get-session'))v={user:{id:mode==='foreign-owner'?canary:'owner'}};
   else if(url.includes('/agent-profiles/'))v={id:profile,userId:['foreign-profile-owner','project-shared-owner','shared-wrong-hint','global-foreign-owner'].includes(mode)?'foreign':'owner',name:canary,agentType:'claude-code',runtime:'vm',projectId:mode==='global-foreign-owner'?null:mode==='wrong-project'?nodeId:project};
   else if(url.endsWith('/agent-profiles'))v={items:[{id:profile,name:canary},...(mode==='profile-collision'?[{id:nodeId,name:canary}]:[])]};
-  else if(url.includes('/tasks/'))v={id:task,projectId:project,userId:'owner',chatSessionId:session,outputBranch:branch,workspaceId,agentProfileHint:mode==='project-shared-owner'?profile:canary,status:'in_progress'};
+  else if(url.includes('/tasks/'))v={id:task,projectId:project,userId:'owner',outputBranch:branch,workspaceId,agentProfileHint:mode==='project-shared-owner'?profile:canary,status:'in_progress'};
   else if(url.endsWith('/state'))v={agentSessionId:mode==='wrong-acp'?nodeId:agentSessionId,agentType:'claude-code'};
   else if(url.includes('/sessions/'))v={session:{id:session,taskId:task,workspaceId,agentType:'claude-code',agentSessionId}};
   else if(url.endsWith('/api/workspaces/'+workspaceId))v={id:workspaceId,nodeId:mode==='foreign-node'?'01M51CCV9A1D2BDK4NJDK1E3MD':nodeId,projectId:project,chatSessionId:session,branch,repository:'serverspresentation2025/crewai',status:'running',hardware:{cloudProvider:'hetzner'}};
