@@ -101,7 +101,7 @@ crudRoutes.get('/:id', requireAuth(), requireApproved(), async (c) => {
 
   if (workspace.status === 'creating') {
     const { getBootLogs } = await import('../../services/boot-log');
-    response.bootLogs = await getBootLogs(c.env.KV, workspace.id);
+    response.bootLogs = await getBootLogs(c.env.KV, workspace.id, c.env);
   }
 
   return c.json(response);
