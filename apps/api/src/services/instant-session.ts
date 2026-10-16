@@ -42,6 +42,7 @@ export interface LaunchInstantSessionInput {
   project: schema.Project;
   userId: string;
   initialPrompt: string;
+  historicalContext?: string | null;
   displayMessage?: string | null;
   contextSummary?: string | null;
   agentType: string;
@@ -479,6 +480,7 @@ export async function continueInstantSessionLaunch(
       agentProfileId: input.agentProfileId ?? null,
       skillId: input.skillId ?? null,
       visibleInitialPrompt: input.initialPrompt,
+      historicalContext: input.historicalContext,
       promptKind: taskMode === 'task' ? 'task' : 'conversation',
       taskContext: { taskId: input.taskId, taskMode },
       overrides: input.overrides,

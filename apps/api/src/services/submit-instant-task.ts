@@ -103,12 +103,21 @@ export async function submitInstantTask(input: {
     project,
     userId,
     taskMode,
-    initialPrompt: buildVisibleInitialPrompt({
-      message: agentPrompt,
-      attachments: input.attachments,
-      systemPromptAppend: profile?.systemPromptAppend,
-    }),
+    initialPrompt: input.historicalContext
+      ? message
+      : buildVisibleInitialPrompt({
+          message: enrichedMessage,
+          attachments: input.attachments,
+          systemPromptAppend: profile?.systemPromptAppend,
+        }),
     displayMessage: message,
+    historicalContext: input.historicalContext
+      ? buildVisibleInitialPrompt({
+          message: input.historicalContext,
+          attachments: input.attachments,
+          systemPromptAppend: profile?.systemPromptAppend,
+        })
+      : undefined,
     contextSummary: input.contextSummary,
     agentType,
     agentProfileId: profile?.profileId,

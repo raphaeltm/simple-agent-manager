@@ -64,6 +64,8 @@ export interface TaskRunConfig {
   githubId: string | null;
   taskTitle: string;
   taskDescription: string | null;
+  /** Archived transcript data, delivered through the system-origin context block. */
+  historicalContext?: string | null;
   repository: string;
   installationId: string;
   outputBranch: string | null;

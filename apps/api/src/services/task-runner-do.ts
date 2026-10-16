@@ -129,6 +129,7 @@ export async function startTaskRunnerDO(
     githubId?: string | null;
     taskTitle: string;
     taskDescription?: string | null;
+    historicalContext?: string | null;
     repository: string;
     installationId: string;
     outputBranch?: string | null;
@@ -242,6 +243,7 @@ export async function startTaskRunnerDO(
       githubId: input.githubId ?? null,
       taskTitle: input.taskTitle,
       taskDescription: input.taskDescription ?? null,
+      historicalContext: input.historicalContext ?? null,
       repository: input.repository,
       installationId: input.installationId,
       outputBranch: input.outputBranch ?? null,

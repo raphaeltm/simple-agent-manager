@@ -162,6 +162,7 @@ describe('launchInstantSession', () => {
       initialPrompt: 'enriched prompt',
       displayMessage: 'clean prompt',
       contextSummary: 'fork context',
+      historicalContext: 'ARCHIVED_INSTANT_HISTORY_DATA',
       agentType: 'claude-code',
       agentProfileId: 'profile-1',
       skillId: 'skill-1',
@@ -314,6 +315,12 @@ describe('launchInstantSession', () => {
       persistedContract.acpInteractions
     );
     expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][4]).toBe('enriched prompt');
+    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][10]).toContain(
+      'ARCHIVED_INSTANT_HISTORY_DATA'
+    );
+    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][10]).not.toContain(
+      'enriched prompt'
+    );
     expect(mocks.container.launchVmAgentContainer).toHaveBeenCalledWith(
       expect.anything(),
       'node-1',

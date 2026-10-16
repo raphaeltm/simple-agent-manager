@@ -28,6 +28,9 @@ export function buildInjectedInstructions(): string {
 }
 
 function buildVisibleTaskInitialPrompt(state: TaskRunnerState): string {
+  if (state.config.historicalContext) {
+    return state.config.taskDescription || state.config.taskTitle;
+  }
   return buildVisibleInitialPrompt({
     message: state.config.taskDescription || state.config.taskTitle,
     attachments: state.config.attachments,
@@ -115,6 +118,13 @@ export async function handleAgentSession(
       label: buildTaskAgentSessionLabel(state.config.taskTitle),
       agentType,
       visibleInitialPrompt: buildVisibleTaskInitialPrompt(state),
+      historicalContext: state.config.historicalContext
+        ? buildVisibleInitialPrompt({
+            message: state.config.historicalContext,
+            attachments: state.config.attachments,
+            systemPromptAppend: state.config.systemPromptAppend,
+          })
+        : undefined,
       restoreSnapshotChatSessionId: state.config.resumeSnapshotChatSessionId,
       promptKind: 'task',
       taskContext: {

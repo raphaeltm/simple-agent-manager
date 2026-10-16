@@ -115,6 +115,20 @@ describe('startSamAwareAgentSession reports whether the first prompt was sent', 
     expect(vm.start.mock.calls[0]?.[4]).toBe(WAKE_PROMPT);
   });
 
+  it('keeps historical context in the system-origin instruction block, separate from the visible prompt', async () => {
+    await startSamAwareAgentSession(
+      db,
+      env(),
+      input({ historicalContext: 'HISTORICAL_DATA_ONLY' })
+    );
+    expect(vm.start).toHaveBeenCalledOnce();
+    expect(vm.start.mock.calls[0]?.[4]).toBe(WAKE_PROMPT);
+    const injected = vm.start.mock.calls[0]?.[10] as string;
+    expect(injected).toContain('HISTORICAL_DATA_ONLY');
+    expect(injected).toContain('get_instructions');
+    expect(injected).not.toContain(WAKE_PROMPT);
+  });
+
   it('does not send it when the restore resumes the saved session', async () => {
     await sleptTask();
     vm.restore.mockResolvedValueOnce({ status: 'restored' });

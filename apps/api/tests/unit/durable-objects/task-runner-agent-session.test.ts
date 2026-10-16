@@ -308,6 +308,22 @@ describe('handleAgentSession', () => {
     wakeSessionMock.mockResolvedValue(true);
   });
 
+  it('delivers archived context separately from the visible user prompt at the VM boundary', async () => {
+    const state = makeState();
+    state.config.historicalContext = 'ARCHIVED_HISTORY_DATA';
+    const { rc } = makeContext();
+    await handleAgentSession(state, rc);
+    const args = startAgentSessionOnNodeMock.mock.calls[0] as unknown as unknown[];
+    expect(args[4]).toBe(state.config.taskDescription);
+    expect(args[4]).not.toContain('ARCHIVED_HISTORY_DATA');
+    expect(args[4]).not.toContain('/workspaces/.private/attachment-1/evidence.txt');
+    expect(args[4]).not.toContain('Use the backend implementation profile.');
+    expect(args[10]).toContain('ARCHIVED_HISTORY_DATA');
+    expect(args[10]).toContain('/workspaces/.private/attachment-1/evidence.txt');
+    expect(args[10]).toContain('Use the backend implementation profile.');
+    expect(args[10]).not.toContain(state.config.taskDescription);
+  });
+
   it('creates the D1 agent-session row, starts the VM session, persists MCP token state, and transitions the task to running', async () => {
     const state = makeState();
     const { rc, statusEvents, storageWrites } = makeContext();

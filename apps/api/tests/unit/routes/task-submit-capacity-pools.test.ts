@@ -308,19 +308,20 @@ describe('task submit capacity-pool placement', () => {
       expect(task.parent_task_id).toBe('source-task');
       expect(task.output_branch).not.toBe('sam/prior');
       const runner = mocks.startTaskRunnerDO.mock.calls[0]![1];
-      expect(runner.taskDescription.split('New exact prompt')).toHaveLength(2);
-      expect(runner.taskDescription).toContain('Old request');
-      expect(runner.taskDescription).toContain('TRUNCATED');
-      expect(runner.taskDescription).toContain('source-chat');
-      expect(runner.taskDescription).toContain('unavailable');
-      expect(runner.taskDescription).toContain('verify the current repository');
+      expect(runner.taskDescription).toBe('New exact prompt');
+      expect(runner.historicalContext).not.toContain('New exact prompt');
+      expect(runner.historicalContext).toContain('Old request');
+      expect(runner.historicalContext).toContain('TRUNCATED');
+      expect(runner.historicalContext).toContain('source-chat');
+      expect(runner.historicalContext).toContain('unavailable');
+      expect(runner.historicalContext).toContain('verify the current repository');
       for (const secret of [
         'canary-secret-value',
         'ghp_' + 'a'.repeat(36),
         'NEVER_REPLAY_TOOL',
         'NEVER_REPLAY_APPROVAL',
       ])
-        expect(runner.taskDescription).not.toContain(secret);
+        expect(runner.historicalContext).not.toContain(secret);
       expect(mocks.persistMessage.mock.calls.filter((call) => call[3] === 'user')).toEqual([
         [env, 'project-1', 'session-1', 'user', 'New exact prompt', null],
       ]);
@@ -365,7 +366,7 @@ describe('task submit capacity-pool placement', () => {
         hasMore: false,
       });
       expect((await forkRequest(createApp(), env)).status).toBe(202);
-      const prompt = mocks.startTaskRunnerDO.mock.calls[0]![1].taskDescription as string;
+      const prompt = mocks.startTaskRunnerDO.mock.calls[0]![1].historicalContext as string;
       expect(prompt).not.toContain('OLDEST_MUST_BE_DROPPED');
       expect(prompt).toContain('latest [REDACTED]');
       expect(prompt.indexOf('middle')).toBeLessThan(prompt.indexOf('latest [REDACTED]'));
@@ -388,8 +389,8 @@ describe('task submit capacity-pool placement', () => {
       expect(new TextEncoder().encode(context).length).toBeLessThanOrEqual(65536);
       expect(context).toContain('TRUNCATED');
       expect(
-        mocks.startTaskRunnerDO.mock.calls[0]![1].taskDescription.split('New exact prompt')
-      ).toHaveLength(2);
+        mocks.startTaskRunnerDO.mock.calls[0]![1].historicalContext.split('New exact prompt')
+      ).toHaveLength(1);
     } finally {
       sqlite.close();
     }
@@ -411,7 +412,7 @@ describe('task submit capacity-pool placement', () => {
         hasMore: true,
       });
       expect((await forkRequest(createApp(), env)).status).toBe(202);
-      const prompt = mocks.startTaskRunnerDO.mock.calls[0]![1].taskDescription as string;
+      const prompt = mocks.startTaskRunnerDO.mock.calls[0]![1].historicalContext as string;
       for (const secret of [
         'UNCERTAIN_TOKEN_SUFFIX',
         'ghp_',
@@ -444,7 +445,7 @@ describe('task submit capacity-pool placement', () => {
         hasMore: false,
       });
       expect((await forkRequest(createApp(), env)).status).toBe(202);
-      const prompt = mocks.startTaskRunnerDO.mock.calls[0]![1].taskDescription;
+      const prompt = mocks.startTaskRunnerDO.mock.calls[0]![1].historicalContext;
       expect(prompt.split('Old visible prompt')).toHaveLength(2);
       expect(prompt).toContain('Prior result');
       expect(prompt).not.toContain('INJECTED_BOOTSTRAP_ENVELOPE');
@@ -480,7 +481,9 @@ describe('task submit capacity-pool placement', () => {
       );
       expect(response.status, await response.clone().text()).toBe(202);
       const launch = mocks.acceptInstantSession.mock.calls[0]![2];
-      expect(launch.initialPrompt).toContain('Old request');
+      expect(launch.initialPrompt).not.toContain('Old request');
+      expect(launch.historicalContext).toContain('Old request');
+      expect(launch.historicalContext).not.toContain('  Instant new prompt  ');
       expect(launch.initialPrompt.split('  Instant new prompt  ')).toHaveLength(2);
       expect(launch.displayMessage).toBe('  Instant new prompt  ');
       expect(launch.contextSummary).toContain('source-chat');
@@ -500,7 +503,7 @@ describe('task submit capacity-pool placement', () => {
         taskId: null,
       });
       expect((await forkRequest(createApp(), env)).status).toBe(202);
-      expect(mocks.startTaskRunnerDO.mock.calls[0]![1].taskDescription).toContain(
+      expect(mocks.startTaskRunnerDO.mock.calls[0]![1].historicalContext).toContain(
         '"sourceSessionId":"source-chat"'
       );
     } finally {

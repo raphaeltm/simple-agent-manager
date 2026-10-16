@@ -43,6 +43,8 @@ export interface SamAwareAgentStartInput {
   agentProfileId?: string | null;
   skillId?: string | null;
   visibleInitialPrompt: string;
+  /** Untrusted archived data; separate from the visible user prompt and permissions. */
+  historicalContext?: string | null;
   /** Strictly load the saved harness snapshot instead of creating a fresh session. */
   restoreSnapshotChatSessionId?: string | null;
   promptKind: McpInstructionContextType;
@@ -408,7 +410,12 @@ export async function startSamAwareAgentSession(
     }
 
     if (shouldStartFreshSession) {
-      const injectedInstructions = buildSamBootstrapInstructions({ contextType: input.promptKind });
+      const injectedInstructions = [
+        buildSamBootstrapInstructions({ contextType: input.promptKind }),
+        input.historicalContext,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
       await runMaybePhased(input, 'start_acp_session', () => {
         const args = [
           input.nodeId,
