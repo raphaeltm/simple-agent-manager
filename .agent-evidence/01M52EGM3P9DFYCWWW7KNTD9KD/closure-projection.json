@@ -1,0 +1,35 @@
+{
+  "authCleanup": true,
+  "browserClosed": true,
+  "completedPhases": [
+    "setup",
+    "turn",
+    "turn-check",
+    "sleep",
+    "wake",
+    "wake-check",
+    "complete"
+  ],
+  "failure": {
+    "allRecordedBindingPredicatesPass": true,
+    "exactTerminalTransportPredicate": "UNKNOWN/unretained",
+    "phase": "observe",
+    "replacementAttempted": false,
+    "stage": "terminal"
+  },
+  "hard": 1792160118259,
+  "historicalResults": "all old NOTPASS/UNKNOWN and both Instant acceptance unchanged",
+  "normalPreservation": true,
+  "providerOwnership": {
+    "dueAt": "2026-10-16T14:31:50Z",
+    "nodeId": "01M52EGVZFDCNPQ70G1MGVN2M4",
+    "scheduleId": "c456206a-b4e8-4773-9b82-5ff9b193f718",
+    "state": "ACTIVE/warm until canonicalDELETED plus separate normal termination timestamp"
+  },
+  "result": "NOT PASS",
+  "rootAudit": "required; no acceptance claimed",
+  "sessionId": "a9f622fa-f468-4826-9d8c-4db8a549d6f2",
+  "sourceSha": "6eaaf16b69f9b9b2a40acb68e80020eaff20ac48",
+  "started": 1792157418259,
+  "taskId": "01M52EGM3P9DFYCWWW7KNTD9KD"
+}

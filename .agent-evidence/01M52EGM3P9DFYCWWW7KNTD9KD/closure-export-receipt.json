@@ -1,0 +1,11 @@
+{
+  "acceptance": "NOT PASS; root independent audit required",
+  "allFourPhaseJournalsJsonCallerResultsVerified": true,
+  "allMembersVerified": true,
+  "closureExportPending": false,
+  "fileId": "01M52FYNJ8MVC7GTEEQ123CX53",
+  "hard": 1792160118259,
+  "sha256": "5155665a34af667138835ab194062dae68d067345d002dc89729f117b312b9e4",
+  "taskId": "01M52EGM3P9DFYCWWW7KNTD9KD",
+  "verifiedAt": 1792158974826
+}
