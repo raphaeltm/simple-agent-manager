@@ -26,21 +26,24 @@ class ReaderTests(unittest.TestCase):
             root = Path(folder)
             now = int(time.time() * 1000)
             own = {'taskId': '01M51ZZZZZZZZZZZZZZZZZZZZZ', 'sessionId': '11111111-2222-4333-8444-555555555555', 'branch': 'sam/prospective-claude', 'agentProfileId': '01KRS7Z2R88JFC73ARA7DV9WTK', 'agentType': 'claude-code'}
+            if mode == 'resume-snapshot' and failure != 'resume-foreign-task': own.update(taskId='01M51Q2J7AQEKAKZAKZ39NFXWP',sessionId='f5f56c5b-e9fb-4218-b327-bd9d4b7e25e9',branch='sam/authorized-one-clean-prospective-9nfxwp')
             own['receipt'] = {'taskId': own['taskId'], 'sessionId': own['sessionId'], 'branchName': own['branch'], 'status': 'queued'}
             observer = {**own, 'agentType': 'openai-codex'}
             config = {'own': own, 'observer': observer, 'started': now - 10000, 'hard': now + 2700000}
+            if mode == 'resume-snapshot': config['resume']={'kind':'second-prospective-restore','originalEvidenceSha256':'9715d238b6fcf5cc1e45e065ea041e87e8b72b38b6776664827467a6e74c14d2'}
             (root / 'config.json').write_text(json.dumps(config))
             workspace, node, snapshot = '01M51YYYYYYYYYYYYYYYYYYYYY', '01M51XXXXXXXXXXXXXXXXXXXXX', '01M51SSSSSSSSSSSSSSSSSSSSS'
             for name, value in [(mode + '-mapping.json', {'taskId': own['taskId'], 'sessionId': own['sessionId'], 'workspaceId': workspace, 'nodeId': node, 'agentSessionId': '01M51AAAAAAAAAAAAAAAAAAAAA'}),
                                 ('protected-sleep.json', {'workspaceId': workspace}),
                                 ('observer-sleep.json', {'workspaceId': workspace}),
                                 ('wake-submitted.json', {'taskId': own['taskId'], 'sessionId': own['sessionId'], 'at': now - 5000}),
+                                ('resume-snapshot-request.json', {'taskId':own['taskId'],'sessionId':own['sessionId'],'workspaceId':workspace,'at':now-1000}),
                                 ('protected-snapshot.json', {'snapshotId': snapshot, 'snapshotGeneration': 'generation1'})]:
                 if not (mode == 'protected-snapshot' and name == 'protected-snapshot.json'):
                     (root / name).write_text(json.dumps(value))
             runtime = 'cf-container' if mode in ['observe','observer-snapshot'] else 'vm'
             if failure == 'missing-wake': (root / 'wake-submitted.json').unlink()
-            task = {'id': own['taskId'], 'user_id': 'owner', 'project_id': reader.PROJECT, 'chat_session_id': own['sessionId'], 'workspace_id': workspace, 'output_branch': own['branch'], 'agent_profile_hint': own['agentProfileId'], 'status': 'completed' if mode == 'completion-runtime' else 'in_progress', 'claimed_warm_node_id': None, 'completed_at': None}
+            task = {'id': own['taskId'], 'user_id': 'owner', 'project_id': reader.PROJECT, 'chat_session_id': own['sessionId'], 'workspace_id': workspace, 'output_branch': own['branch'], 'agent_profile_hint': own['agentProfileId'], 'status': 'completed' if mode == 'completion-runtime' else 'sleeping' if mode == 'resume-snapshot' else 'in_progress', 'claimed_warm_node_id': None, 'completed_at': None}
             queries = []
 
             class Response:
@@ -55,7 +58,7 @@ class ReaderTests(unittest.TestCase):
                 body = json.loads(req.data);sql = body['sql'];queries.append(sql)
                 self.assertTrue(sql.startswith('SELECT '))
                 if 'FROM tasks WHERE id=' in sql: rows = [task]
-                elif 'FROM nodes WHERE user_id=' in sql: rows = [{'id': node}]
+                elif 'FROM nodes WHERE user_id=' in sql: rows = [] if mode == 'resume-snapshot' and failure != 'resume-vm-present' else [{'id': node}]
                 elif 'FROM tasks WHERE user_id=' in sql: rows = [{'id': 'foreign'}] if failure == 'foreign-claim' else []
                 elif 'FROM workspaces WHERE project_id=' in sql: rows = []
                 elif 'FROM workspaces WHERE node_id=' in sql: rows = []
@@ -79,7 +82,7 @@ class ReaderTests(unittest.TestCase):
             self.assertEqual(result['ok'], failure is None)
             if failure is None:
                 source = (root / (mode + '-source.json')).read_bytes()
-                artifact = root / (mode + '.json' if mode in ['protected-snapshot', 'observer-snapshot', 'completion-runtime'] else mode + '-grant.json')
+                artifact = root / (mode + '.json' if mode in ['protected-snapshot', 'observer-snapshot', 'resume-snapshot', 'completion-runtime'] else mode + '-grant.json')
                 self.assertEqual(json.loads(artifact.read_text())['sourceEvidenceSha256'], hashlib.sha256(source).hexdigest())
                 self.assertNotIn(CANARY, source.decode())
             elif mode == 'wake-check':
@@ -133,6 +136,8 @@ class ReaderTests(unittest.TestCase):
     def test_concrete_failures(self):
         for mode, failure, stage in [('setup', 'transport', 'settings'), ('setup', 'wrong-profile', 'mapping'), ('setup', 'foreign-claim', 'resource-guards'), *[('wake-check', f, 'restored-generation') for f in ['wrong-generation','wrong-status','wrong-time','wrong-types','private-row','missing-wake']]]:
             with self.subTest(failure=failure): self.assertEqual(self.invoke(mode, failure)['stage'], stage)
+        for failure in ['resume-vm-present','resume-foreign-task']:
+            with self.subTest(failure=failure): self.assertEqual(self.invoke('resume-snapshot',failure)['stage'],'snapshot')
 
 
 if __name__ == '__main__': unittest.main()

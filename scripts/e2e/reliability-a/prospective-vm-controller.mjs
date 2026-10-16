@@ -11,7 +11,7 @@ const exact=(v,k)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sor
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 const first='01M50VYZ60RQXXTGSVPXW6FRXD';
 const failed=new Set(['01M51CCMB1S684RXVNBNDQRDAS','01M516EKT5593YRAAG5WE886CK']);
-export async function run({requestSafe,logoutSafe,summary}){
+export async function run({requestSafe,logoutSafe,summary},resume=false){
  let root,c,browser,page,config,owner,sequence,stage='configuration',activeOwn=null,activeWorkspace=null,closed=false,auth=false;
  let completionSubmittedAt=null;
  const result={ok:false,stage,authCleanup:false,browserClosed:false,retained:false};
@@ -53,7 +53,7 @@ export async function run({requestSafe,logoutSafe,summary}){
   live();const dir=root+'/'+name;await mkdir(dir,{mode:0o700});await save(name+'-mapping.json',{taskId:own.taskId,sessionId:own.sessionId,...mapping,at:Date.now()});
   const g=await grant(name+'-grant',own,mapping);live();let v;const transportWatchdog=setTimeout(()=>{void page.close().catch(()=>{});},90000);try{v=await terminalPhase({own,operation,originals,context:c,page,grant:g,evidenceDirectory:dir});}finally{clearTimeout(transportWatchdog);}await save(name+'-result.json',v);if(!v.ok)throw 0;return v;
  };
- const prompt=async(own,text)=>{live();await canonical(own);activeOwn=own;const at=Date.now();const r=await requestSafe(c,api,{path:`/api/projects/${project}/sessions/${own.sessionId}/prompt`,method:'POST',data:{content:text},timeoutMs:30000});if(r.category!=='ok'||r.status!==202)throw 0;if(own.taskId===config.own.taskId&&text.startsWith('Call actual'))completionSubmittedAt=at;return at;};
+ const prompt=async(own,text)=>{live();const t=await canonical(own);if(resume&&own.taskId===config.own.taskId&&stage==='wake'&&(t.status!=='sleeping'||t.workspaceId!==protectedSnapshot.workspaceId))throw 0;activeOwn=own;const at=Date.now();const r=await requestSafe(c,api,{path:`/api/projects/${project}/sessions/${own.sessionId}/prompt`,method:'POST',data:{content:text},timeoutMs:30000});if(r.category!=='ok'||r.status!==202)throw 0;if(own.taskId===config.own.taskId&&text.startsWith('Call actual'))completionSubmittedAt=at;return at;};
  const preserve=async(own,label)=>{
   await waitIdle(own,config.started,config.hard-120000);
   const t=await canonical(own);if(t.workspaceId!==activeWorkspace)throw 0;
@@ -64,10 +64,17 @@ export async function run({requestSafe,logoutSafe,summary}){
  };
  try{
   root=process.env.SAM_PROSPECTIVE_ROOT;if(!isAbsolute(root)||root==='/')throw 0;const st=await lstat(root);if(!st.isDirectory()||st.isSymbolicLink())throw 0;
-  config=await read('config.json');if(!exact(config,['started','hard','own','observer','evidencePrUrl'])||config.evidencePrUrl!=='https://github.com/raphaeltm/simple-agent-manager/pull/2355')throw 0;
+  config=await read('config.json');if(!exact(config,['started','hard','own','observer','evidencePrUrl',...(resume?['resume']:[])])||config.evidencePrUrl!=='https://github.com/raphaeltm/simple-agent-manager/pull/2355')throw 0;
   identity(config.own);identity(config.observer);
   if(failed.has(config.own.taskId)||config.own.taskId===first||config.observer.taskId!==first||config.observer.agentType!=='openai-codex'||config.own.agentProfileId!==(config.own.agentType==='claude-code'?'01KRS7Z2R88JFC73ARA7DV9WTK':'01KXG9MJRZ36FFJX0RVNW67SWB'))throw 0;
-  sequence=new AcceptanceSequence(config.own,config.started,config.hard);live();if(config.started>Date.now())throw 0;
+  let original;
+  if(resume){
+   const retained=await import('./prospective-resume.mjs');retained.resumeIdentity(config.own);
+   if(!exact(config.resume,['kind','originalEvidenceSha256'])||config.resume.kind!=='second-prospective-restore'||config.resume.originalEvidenceSha256!==retained.originalEvidenceSha256)throw 0;
+   original=await retained.retainedOriginals(config.own);sequence=new retained.ContinuationSequence(config.own,config.started,config.hard);
+   result.coverage='second-prospective-restore';result.firstWakePass=false;
+  }else sequence=new AcceptanceSequence(config.own,config.started,config.hard);
+  live();if(config.started>Date.now())throw 0;
   await save('operation-start.json',{started:config.started,hard:config.hard,action:action(),taskId:config.own.taskId});
   const {chromium}=await import('/tmp/reliability-browser-deps/node_modules/playwright/index.mjs');browser=await chromium.launch({headless:true});c=await browser.newContext();
   stage='login';const login=await requestSafe(c,api,{path:'/api/auth/token-login',method:'POST',data:{token:process.env.SAM_PLAYWRIGHT_PRIMARY_USER}});delete process.env.SAM_PLAYWRIGHT_PRIMARY_USER;if(login.category!=='ok')throw 0;
@@ -76,10 +83,24 @@ export async function run({requestSafe,logoutSafe,summary}){
   // Do not reopen FIRST until AFTER target completion. Preserve its immutable original proof first.
   const observerBefore=await canonical(config.observer);if(observerBefore.status!=='completed'||!observerBefore.completedAt||!observerBefore.completionEvidence)throw 0;
   await save('observer-original-completed.json',{taskId:config.observer.taskId,completedAt:observerBefore.completedAt,evidenceSha256:hash(JSON.stringify(observerBefore.completionEvidence))});
-  const fixtureInitial=await canonical(config.own);if(!Number.isFinite(Date.parse(fixtureInitial.createdAt))||Date.parse(fixtureInitial.createdAt)<config.started||Date.parse(fixtureInitial.createdAt)>Date.now())throw 0;
-  activeOwn=config.own;stage='setup';let mapping=await waitIdle(config.own,config.started);
+  const fixtureInitial=await canonical(config.own);if(!Number.isFinite(Date.parse(fixtureInitial.createdAt))||(!resume&&Date.parse(fixtureInitial.createdAt)<config.started)||(resume&&Date.parse(fixtureInitial.createdAt)>=config.started)||Date.parse(fixtureInitial.createdAt)>Date.now())throw 0;
+  let baseline,expectations,mapping;
+  if(resume){
+   if(fixtureInitial.status!=='sleeping')throw 0;
+   baseline=original.baseline;expectations=original.expectations;
+   await save('retained-originals.json',original.proof);
+   sequence.append('retained-originals',{ok:true,hostBytesRetained:true,...original.proof},Date.now());
+   stage='resume-snapshot';await save('resume-snapshot-request.json',{taskId:config.own.taskId,sessionId:config.own.sessionId,workspaceId:fixtureInitial.workspaceId,at:Date.now()});
+   while(Date.now()<action()){
+    await producerFailed('resume-snapshot',config.own);
+    try{protectedSnapshot=snapshotProof(await read('resume-snapshot.json'),config.own,fixtureInitial.workspaceId,config.started,config.hard,Date.now());if(protectedSnapshot.observedAt<Date.now()-240000)throw 0;break;}catch{protectedSnapshot=null;}
+    await pause(1000);
+   }if(!protectedSnapshot)throw 0;
+   await save('protected-snapshot.json',protectedSnapshot);
+  }else{
+  activeOwn=config.own;stage='setup';mapping=await waitIdle(config.own,config.started);
   await phase('setup',config.own,'setup',{},mapping);
-  const baseline=await readFile(root+'/setup/baseline.json'),expectations=await readFile(root+'/setup/expectations.json');
+  baseline=await readFile(root+'/setup/baseline.json');expectations=await readFile(root+'/setup/expectations.json');
   sequence.append('setup',{ok:true,baselineOriginal:true,expectationsOriginal:true,hostBytesRetained:true},Date.now());
   stage='actual-turn';const at=await prompt(config.own,'Authorized tested harness turn. Do not edit, run tools, publish, complete, or start background work. Return control with READY.');mapping=await waitIdle(config.own,at);
   sequence.append('turn',{ok:true,actualHarness:true,freshInactive:true,prompt202:true},Date.now());
@@ -88,7 +109,10 @@ export async function run({requestSafe,logoutSafe,summary}){
   // Independent snapshot AVAILABLE read is mandatory, never infer from Sleep HTTP200 alone.
   let snapshot;while(Date.now()<action()){await producerFailed('protected-snapshot',config.own);try{snapshot=snapshotProof(await read('protected-snapshot.json'),config.own,lastSleep.workspaceId,lastSleep.at,config.hard,Date.now());break;}catch{}await pause(1000);}if(!snapshot)throw 0;protectedSnapshot=snapshot;
   sequence.append('sleep',{ok:true,snapshotAvailable:true,sleep200:true,snapshotId:snapshot.snapshotId},Date.now());
-  stage='wake';const wakeAt=await prompt(config.own,'Authorized normal snapshot recovery only. Do not edit, run tools, publish, complete or start background work. Return control with READY.');wakeSubmittedAt=wakeAt;await save('wake-submitted.json',{taskId:config.own.taskId,sessionId:config.own.sessionId,at:wakeAt});mapping=await waitIdle(config.own,wakeAt);
+  }
+  stage='wake';const wakeAt=await prompt(config.own,'Authorized normal snapshot recovery only. Do not edit, run tools, publish, complete or start background work. Return control with READY.');wakeSubmittedAt=wakeAt;await save('wake-submitted.json',{taskId:config.own.taskId,sessionId:config.own.sessionId,at:wakeAt});
+  if(resume)await save('resume-attempt-receipt.json',{kind:'second-prospective-restore',taskId:config.own.taskId,sessionId:config.own.sessionId,branch:config.own.branch,agentProfileId:config.own.agentProfileId,started:config.started,hard:config.hard,submittedAt:wakeAt,acceptedAt:Date.now(),promptStatus:202,snapshotId:protectedSnapshot.snapshotId,snapshotGenerationSha256:hash(protectedSnapshot.snapshotGeneration),originalEvidenceSha256:config.resume.originalEvidenceSha256});
+  mapping=await waitIdle(config.own,wakeAt);
   sequence.append('wake',{ok:true,actualHarness:true,freshInactive:true,prompt202:true},Date.now());
   stage='wake-check';await phase('wake-check',config.own,'check',{baseline,expectations},mapping);sequence.append('wake-check',{ok:true},Date.now());
   stage='complete';const completeAt=await prompt(config.own,`Call actual mcp__sam_mcp__complete_task now. No Bash/Git/publication/other writes. Use evidence.prUrl=${config.evidencePrUrl}, and evidence.notes containing the measured fixture commit ${JSON.parse(baseline).head}. Report that host preservation checks passed, without claiming unobserved stages.`);

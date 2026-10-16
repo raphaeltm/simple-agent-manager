@@ -1,5 +1,74 @@
 # Prospective VM acceptance — offline tooling, no live authorization
 
+## Existing-case second restore — offline continuation plan
+
+Coordinator c0189e7e authorizes this tooling/plan, not another live attempt yet.
+`prospective-resume.mjs` is bound to task01M51Q2J7AQEKAKZAKZ39NFXWP,
+sessionf5f56c5b-e9fb-4218-b327-bd9d4b7e25e9, original branch/profile, and the
+immutable originals in `/tmp/reliability-prospective-vm-claude-001`. It cannot
+submit a task or execute setup/prepare. SHA256 of the sorted 16-file evidence map
+is `9715d238b6fcf5cc1e45e065ea041e87e8b72b38b6776664827467a6e74c14d2`;
+baseline `d862cb6e82142a25dd92bfb448b3de8ab8b7efba9ef681714d5bdc4d69a8c190`,
+expectations `c419027ab5baee7150135e874db4645eb30cd777758ab195679e4514e404ce76`.
+The map also pins the original setup/turn-check manifests/results and failed
+first-attempt final/clock/config. The original failed first-wake cause stays
+UNKNOWN. A second restore does not retroactively pass the first 45-minute case.
+
+Before any runtime, require B's exact failure-evidence and resume-delta review,
+coordinator conditional runtime GO, prior node01M51Q2SRA strict DELETED plus
+separate normal termination stamp, and fresh original admission guards: staging
+slot, owner-wide VM0/claims0, exact-session recovery0, project duplicates0,
+owner/task/session/branch/profile ID, configured pool40-ready, pinb467/APIe2,
+catalogue/configuration, and protected snapshots AVAILABLE/undegraded/expiry.
+No new task, sizing, retry, replacement, extension or second VM. Retain the
+07:55 read-only cleanup ownership until actual terminal proof or guarded handoff.
+
+Only after those conditions publish a NEW immutable 45-minute window BEFORE the
+single restore prompt. Action cutoff is hard minus9min; the same approved active
+plus40min normal-tail planning estimate applies. Use a NEW private0700 operation
+directory (for example `/tmp/reliability-prospective-vm-claude-resume-001`, not yet
+created by this plan), normal config schema plus exactly
+`resume:{kind:'second-prospective-restore',originalEvidenceSha256:<map SHA above>}`.
+Keep the original task submit receipt as identity; do not relabel it a new task.
+Run the resume entrypoint under the unchanged safe-controller supervisor with
+only SAM_PLAYWRIGHT_PRIMARY_USER, remaining-hard timeout, no direct invocation.
+
+The sequence is:
+
+1. Validate every pinned original byte/schema locally before login. Fresh normal
+   owner canonical checks require the exact existing task Sleeping, created before
+   this attempt, and preserve FIRST's original completed proof. The caller writes
+   `resume-snapshot-request.json`. Run the actual fixed CF producer once in
+   `resume-snapshot` mode with only CF_TOKEN+CF_ACCOUNT_ID. It independently requires
+   VM0/claims0/recovery0, exact task/profile/branch/session and the current AVAILABLE
+   snapshot generation/expiry. Caller saves that proof as this attempt's protected
+   snapshot. It never reuses the old generation or imports old ledger events.
+2. ONE normal READY restore prompt, no tools/setup/publication/completion. Retain
+   a NEW exclusive `resume-attempt-receipt.json` with actual202, submitted/accepted
+   times, exact identity, fixed clock and protected snapshot/generation SHA. Wait
+   for exact canonical restored mapping/ACP/literal idle. Run `wake-check` producer
+   once; retain original typed generation failure evidence before its assertions.
+3. Only after the fresh restore grant, host-run original `check`, not `setup`:
+   compare restored baseline bytes against the original host baseline and use
+   the original expectation bytes/assets for original Git/index/dirty-work checks
+   and all-ref/all-state PR inventory. Only external private phase reports/assets
+   are written; no fixture changes, reprepare or expectation reconstruction.
+4. IFF that check passes, reuse the reviewed actual complete_task/retained tool
+   metadata/canonical completion/runtime-quiescence path. Then FIRST normal READY
+   and original independent target observer using this target's original baseline
+   and expectations AFTER canonical completion. Never FIRST's old comparator.
+5. Normal FIRST Sleep/independent AVAILABLE proof, logout/null/protected-denial/
+   browser closure and strict new-node cleanup ownership, all within the new hard
+   window. Any invalid/missing/mismatched proof stops downstream work and invokes
+   existing safe preservation/auth cleanup. No repair or another prompt attempt.
+
+The separate five-stage continuation ledger is retained-originals/wake/wake-check/
+complete/observe. Final coverage is explicitly `second-prospective-restore` with
+`firstWakePass:false`. Offline tests run the actual resume entrypoint/controller,
+actual Python producer on a simulated HTTP boundary, and actual failure sentinel
+to normal cleanup. They also reject changed originals/foreign identity/early
+completion and failed restored fixture. These are no live compatibility proof.
+
 This supersedes salvage of the failed VM Claude fixture only. Preserve task
 `01M51CCMB1S684RXVNBNDQRDAS`, its snapshot, original seven invalid artifacts,
 partial baseline, and all subsequent failed and successful diagnostic evidence.

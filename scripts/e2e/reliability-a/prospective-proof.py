@@ -13,7 +13,7 @@ import urllib.request
 PROJECT = '01KJNR9R3TEN3KX1ETE33852R8'
 VERSION = 'b467f389811eadeaf973960bb30f9fa7b9cb4678'
 RELEASE_PROVENANCE = {'apiSource': 'e2c81c045fa16490c7515fa80573418e60ef4017', 'agentSource': VERSION, 'publishedBinarySha256': 'a59a4850337fe7af588267c481dee046db5baba4d3f705c85f19f85ded09e06f', 'rawHostShaObserved': False}
-MODES = ['setup', 'turn-check', 'wake-check', 'observe', 'protected-snapshot', 'observer-snapshot', 'completion-runtime']
+MODES = ['setup', 'turn-check', 'wake-check', 'observe', 'protected-snapshot', 'observer-snapshot', 'completion-runtime', 'resume-snapshot']
 
 
 def save(root, name, value):
@@ -100,9 +100,15 @@ def main():
             work = q("SELECT id FROM workspaces WHERE project_id=? AND chat_session_id=? AND status NOT IN ('deleted','stopped','sleeping')", [PROJECT, own['sessionId']])
             assert not work
             value = {'taskId': own['taskId'], 'sessionId': own['sessionId'], 'runtimeWorkTerminal': True, 'observedAt': observed}
-        elif mode in ['protected-snapshot','observer-snapshot']:
+        elif mode in ['protected-snapshot','observer-snapshot','resume-snapshot']:
             stage = 'snapshot'
-            slept = json.loads((root / ('observer-sleep.json' if mode == 'observer-snapshot' else 'protected-sleep.json')).read_text())
+            slept = json.loads((root / ('resume-snapshot-request.json' if mode == 'resume-snapshot' else 'observer-sleep.json' if mode == 'observer-snapshot' else 'protected-sleep.json')).read_text())
+            if mode == 'resume-snapshot':
+                assert own['taskId'] == '01M51Q2J7AQEKAKZAKZ39NFXWP' and own['sessionId'] == 'f5f56c5b-e9fb-4218-b327-bd9d4b7e25e9' and own['agentProfileId'] == '01KRS7Z2R88JFC73ARA7DV9WTK' and own['branch'] == 'sam/authorized-one-clean-prospective-9nfxwp'
+                assert config['resume'] == {'kind': 'second-prospective-restore', 'originalEvidenceSha256': '9715d238b6fcf5cc1e45e065ea041e87e8b72b38b6776664827467a6e74c14d2'}
+                assert task['status'] == 'sleeping' and task['claimed_warm_node_id'] is None and not nodes
+                assert slept['taskId'] == own['taskId'] and slept['sessionId'] == own['sessionId'] and slept['workspaceId'] == task['workspace_id'] and config['started'] <= slept['at'] <= observed
+                assert not q("SELECT id FROM workspaces WHERE project_id=? AND chat_session_id=? AND status NOT IN ('deleted','stopped','sleeping')", [PROJECT, own['sessionId']])
             rows = q('SELECT id,user_id,project_id,chat_session_id,workspace_id,runtime,status,degradation,expires_at,sleeping_at,snapshot_generation,home_sha256,wip_sha256 FROM session_snapshots WHERE chat_session_id=?', [own['sessionId']])
             assert len(rows) == 1
             row = rows[0]
@@ -158,7 +164,7 @@ def main():
         digest = hashlib.sha256(raw.encode()).hexdigest()
         save(root, mode + '-source.json', source)
         value['sourceEvidenceSha256'] = digest
-        filename = mode + '.json' if mode in ['protected-snapshot', 'observer-snapshot', 'completion-runtime'] else mode + '-grant.json'
+        filename = mode + '.json' if mode in ['protected-snapshot', 'observer-snapshot', 'resume-snapshot', 'completion-runtime'] else mode + '-grant.json'
         save(root, filename, value)
         print(json.dumps({'ok': True, 'stage': 'done', 'observedAt': observed}))
     except Exception:
