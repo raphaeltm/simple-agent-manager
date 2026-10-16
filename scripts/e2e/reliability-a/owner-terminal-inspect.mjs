@@ -79,7 +79,9 @@ export async function browserTerminal(page,url,id){
 }
 
 /** grant is a run-specific, independently reviewed fresh host binding, NEVER API-derived adoption.
- * It includes separately verified stored profile ID; display-name matching alone is insufficient.
+ * It includes separately verified stored profile ID and fresh expected profile owner.
+ * Project capability permits a project profile owned by another user; global profiles remain own-only.
+ * Display-name matching alone is insufficient.
  * Supervisor must bound this call to 90s; no automatic retry on incomplete command/PTY closure.
  */
 export async function inspectOwnedFixture({context,page,grant,open=browserTerminal,now=Date.now,pause=ms=>new Promise(r=>setTimeout(r,ms))}){
@@ -92,13 +94,14 @@ export async function inspectOwnedFixture({context,page,grant,open=browserTermin
   try{if(r.status()!==200)throw 0;const b=await r.body();if(b.length>200000)throw 0;return JSON.parse(b.toString('utf8'));}finally{await r.dispose();}
  };
  const bind=async()=>{
-  if(!exact(grant,['workspaceId','nodeId','ownerId','agentSessionId','runtime','agentVersion','expiresAt','storedProfileId','storedProfileObservedAt','receipt'])||!ulid(grant.workspaceId)||!ulid(grant.nodeId)||!ulid(grant.agentSessionId)||grant.runtime!=='vm'||grant.agentVersion!=='b467f389811eadeaf973960bb30f9fa7b9cb4678'
+  if(!exact(grant,['workspaceId','nodeId','ownerId','expectedProfileOwnerId','agentSessionId','runtime','agentVersion','expiresAt','storedProfileId','storedProfileObservedAt','receipt'])||!ulid(grant.workspaceId)||!ulid(grant.nodeId)||!ulid(grant.agentSessionId)||grant.runtime!=='vm'||grant.agentVersion!=='b467f389811eadeaf973960bb30f9fa7b9cb4678'
+   ||typeof grant.expectedProfileOwnerId!=='string'||!grant.expectedProfileOwnerId||grant.expectedProfileOwnerId.length>128
    ||typeof grant.ownerId!=='string'||!grant.ownerId||grant.storedProfileId!==profile||!Number.isSafeInteger(grant.expiresAt)||grant.expiresAt<=now()||grant.expiresAt>started+300000
    ||!Number.isSafeInteger(grant.storedProfileObservedAt)||grant.storedProfileObservedAt>now()||now()-grant.storedProfileObservedAt>300000
    ||!exact(grant.receipt,['taskId','sessionId','branchName','status'])||grant.receipt.taskId!==task||grant.receipt.sessionId!==session||grant.receipt.branchName!==branch||grant.receipt.status!=='queued')throw 0;
   const owner=await json('/api/auth/get-session');if(owner?.user?.id!==grant.ownerId)throw 0;
   const p=await json(`/api/projects/${project}/agent-profiles/${profile}`);
-  if(p?.id!==profile||p.userId!==grant.ownerId||p.agentType!=='claude-code'||!(p.runtime===null||p.runtime==='vm')||p.vmSizeOverride!=null||typeof p.name!=='string'||!p.name
+  if(p?.id!==profile||p.userId!==grant.expectedProfileOwnerId||p.agentType!=='claude-code'||!(p.runtime===null||p.runtime==='vm')||p.vmSizeOverride!=null||typeof p.name!=='string'||!p.name
    ||!(p.projectId===project||(p.projectId===null&&p.userId===grant.ownerId)))throw 0;
   const profiles=await json(`/api/projects/${project}/agent-profiles`);
   if(!Array.isArray(profiles?.items)||profiles.items.filter(x=>x?.name===p.name).length!==1||!profiles.items.some(x=>x?.id===profile&&x.name===p.name))throw 0;
@@ -121,7 +124,7 @@ export async function inspectOwnedFixture({context,page,grant,open=browserTermin
   const {command,directory}=inspectionCommand(runId);result.stage='read-state';
   await terminal.send({type:'input',sessionId:runId,data:{data:command}});
   const download=async name=>{live();const r=await context.request.fetch(workspaceUrl+`/workspaces/${grant.workspaceId}/files/download?path=`+encodeURIComponent(directory+'/'+name)+'&token='+encodeURIComponent(token),{headers:{Origin:app},timeout:5000,maxRedirects:0,failOnStatusCode:false});
-   try{if(r.status()===404)return null;if(r.status()!==200)throw 0;const headers=await r.headers();if(!/^\d{1,5}$/.test(headers['content-length']??'')||Number(headers['content-length'])>16000)throw 0;const b=await r.body();if(b.length>16000||b.length!==Number(headers['content-length']))throw 0;return b;}finally{await r.dispose();}};
+   try{if(r.status()===404)return null;if(r.status()!==200)throw 0;const length=(await r.headers())['content-length'];if(length!==undefined&&(!/^\d{1,5}$/.test(length)||Number(length)>16000))throw 0;const b=await r.body();if(b.length>16000||(length!==undefined&&b.length!==Number(length)))throw 0;return b;}finally{await r.dispose();}};
   let done;
   for(let i=0;i<20;i++){const b=await download('done.json');if(b){done=JSON.parse(b.toString('utf8'));break;}await pause(1000);}
   if(!exact(done,['taskId','sessionId','runId','operation','status','stateSha256'])||done.taskId!==task||done.sessionId!==session||done.runId!==runId||done.operation!=='read-state'||done.status!==0||!/^[a-f0-9]{64}$/.test(done.stateSha256))throw 0;
