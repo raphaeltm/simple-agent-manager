@@ -45,7 +45,7 @@ export async function run({requestSafe,logoutSafe,summary}){
  };
  const phase=async(name,own,operation,originals,mapping)=>{
   live();const dir=root+'/'+name;await mkdir(dir,{mode:0o700});await save(name+'-mapping.json',{taskId:own.taskId,sessionId:own.sessionId,...mapping,at:Date.now()});
-  const g=await grant(name+'-grant',own,mapping);live();const v=await terminalPhase({own,operation,originals,context:c,page,grant:g,evidenceDirectory:dir});await save(name+'-result.json',v);if(!v.ok)throw 0;return v;
+  const g=await grant(name+'-grant',own,mapping);live();let v;const transportWatchdog=setTimeout(()=>{void page.close().catch(()=>{});},90000);try{v=await terminalPhase({own,operation,originals,context:c,page,grant:g,evidenceDirectory:dir});}finally{clearTimeout(transportWatchdog);}await save(name+'-result.json',v);if(!v.ok)throw 0;return v;
  };
  const prompt=async(own,text)=>{live();await canonical(own);activeOwn=own;const at=Date.now();const r=await requestSafe(c,api,{path:`/api/projects/${project}/sessions/${own.sessionId}/prompt`,method:'POST',data:{content:text},timeoutMs:30000});if(r.category!=='ok'||r.status!==202)throw 0;if(own.taskId===config.own.taskId&&text.startsWith('Call actual'))completionSubmittedAt=at;return at;};
  const preserve=async(own,label)=>{
