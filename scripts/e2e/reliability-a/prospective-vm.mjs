@@ -111,8 +111,9 @@ export async function capsule(own,operation,originals={},runId=randomUUID()){
 /** Exact owner+independent stored-ID grant. Baseline target for observe is separately canonical completed. */
 export async function terminalPhase({own,operation,originals,context,page,grant,evidenceDirectory,open=browserTerminal,now=Date.now,pause=ms=>new Promise(r=>setTimeout(r,ms))}){
  identity(own);let terminal,created=false,token;const started=now(),deadline=started+85000,cleanupHard=started+90000;
- const out={ok:false,stage:'binding',before:false,after:false,manifest:false,hostBytesRetained:false,terminalClosed:false,socketClosed:false,quiescence:false};
- const live=()=>{if(now()>=deadline)throw Error('deadline');};
+ const out={ok:false,stage:'binding',before:false,after:false,manifest:false,hostBytesRetained:false,terminalClosed:false,socketClosed:false,quiescence:false,diagnostics:{checkpoint:'binding',createAck:false,commandSent:false,downloadAttempts:0,lastDownloadHttp:0,timeout:false,terminalFailed:false}};
+ const diag=out.diagnostics;
+ const live=()=>{if(now()>=deadline){diag.timeout=true;throw Error('deadline');}};
  const get=async(path,method='GET',data)=>{live();const r=await context.request.fetch(api+path,{method,data,headers:{Origin:app},timeout:5000,maxRedirects:0,failOnStatusCode:false});try{if(r.status()!==200)throw 0;const b=await r.body();if(b.length>250000)throw 0;return JSON.parse(b);}finally{await r.dispose();}};
  let version,releaseProvenance,capacityPoolRevision;
  const bind=async()=>{
@@ -124,7 +125,7 @@ export async function terminalPhase({own,operation,originals,context,page,grant,
   if(t.id!==own.taskId||t.userId!==grant.ownerId||t.projectId!==project||t.outputBranch!==own.branch||t.workspaceId!==grant.workspaceId||t.agentProfileHint!==(p.userId===grant.ownerId?p.name:p.id)||!['in_progress','completed'].includes(t.status)||s.session?.taskId!==own.taskId||s.session.id!==own.sessionId||s.session.workspaceId!==w.id||s.session.agentSessionId!==grant.agentSessionId||s.session.agentType!==own.agentType||w.id!==grant.workspaceId||w.nodeId!==grant.nodeId||w.projectId!==project||w.chatSessionId!==own.sessionId||w.branch!==own.branch||w.repository!==repository||w.status!=='running'||w.hardware?.cloudProvider!==(grant.runtime==='vm'?'hetzner':'cloudflare')||a.agentSessionId!==grant.agentSessionId||a.agentType!==own.agentType||a.state?.activity!=='idle'||a.state.runtimeWorkState!=='inactive'||a.state.runtimeWorkCount!==0||![a.state.activityAt,a.state.runtimeWorkUpdatedAt].every(v=>Number.isSafeInteger(v)&&v>=started-60000&&v<=now()))throw 0;
   return `https://ws-${w.id}.sammy.party`;
  };
- const wait=async(key,until)=>{while(now()<until){const s=await terminal.state();if(s.failed)throw 0;if(s[key])return;await pause(100);}throw 0;};
+ const wait=async(key,until)=>{while(now()<until){const s=await terminal.state();if(s.failed){diag.terminalFailed=true;throw 0;}if(s[key])return;await pause(100);}diag.timeout=true;throw 0;};
  try{
   const pin=await loadReleasePin();version=pin.agentSource;capacityPoolRevision=pin.capacityPoolRevision;releaseProvenance=Object.fromEntries(Object.entries(pin).filter(([k])=>k!=='capacityPoolRevision'));
   const checkTarget=async()=>{if(operation==='observe'){identity(originals.target);const target=await get(`/api/projects/${project}/tasks/${originals.target.taskId}`);if(target.id!==originals.target.taskId||target.projectId!==project||target.userId!==grant.ownerId||target.outputBranch!==originals.target.branch||target.status!=='completed'||target.completedAt!==originals.completedAt||!target.completionEvidence||typeof target.completionEvidence!=='object'||Date.parse(target.completedAt)>now())throw 0;return {taskId:target.id,branch:target.outputBranch,completedAt:target.completedAt,completionEvidenceSha256:sha(JSON.stringify(target.completionEvidence))};}return null;};
@@ -132,12 +133,12 @@ export async function terminalPhase({own,operation,originals,context,page,grant,
  const bundle=await capsule(operation==='observe'?originals.target:own,operation,originals);out.runId=bundle.runId;
   const access=await get('/api/terminal/token','POST',{workspaceId:grant.workspaceId});
   if(access.workspaceUrl!==url||typeof access.token!=='string'||access.token.length<32||access.token.length>16000||!Number.isFinite(Date.parse(access.expiresAt))||Date.parse(access.expiresAt)<=now())throw 0;
-  token=access.token;out.stage='terminal';terminal=await open(page,url.replace('https:','wss:')+'/terminal/ws/multi?token='+encodeURIComponent(token),bundle.runId);
-  await terminal.send({type:'create_session',data:{sessionId:bundle.runId,rows:24,cols:80,name:'prospective verification'}});created=true;await wait('created',Math.min(deadline,now()+5000));
-  await terminal.send({type:'input',sessionId:bundle.runId,data:{data:bundle.command}});
-  const download=async name=>{live();const r=await context.request.fetch(url+`/workspaces/${grant.workspaceId}/files/download?path=`+encodeURIComponent(bundle.directory+'/'+name)+'&token='+encodeURIComponent(token),{headers:{Origin:app},timeout:5000,maxRedirects:0,failOnStatusCode:false});try{if(r.status()===404)return null;if(r.status()!==200)throw 0;const b=await r.body(),n=(await r.headers())['content-length'];if(b.length>131072||(n!==undefined&&(!/^\d+$/.test(n)||Number(n)!==b.length)))throw 0;return b;}finally{await r.dispose();}};
-  let raw;while(now()<deadline-15000){raw=await download('done.json');if(raw)break;await pause(1000);}if(!raw)throw 0;
-  out.stage='capsule-result';const done=JSON.parse(raw);if(!exact(done,['taskId','sessionId','runId','operation','status','files'])||done.taskId!==bundle.config.taskId||done.sessionId!==bundle.config.sessionId||done.runId!==bundle.runId||done.operation!==operation||![0,1].includes(done.status))throw 0;
+  token=access.token;out.stage='terminal';diag.checkpoint='terminal-open';terminal=await open(page,url.replace('https:','wss:')+'/terminal/ws/multi?token='+encodeURIComponent(token),bundle.runId);
+  diag.checkpoint='create-send';await terminal.send({type:'create_session',data:{sessionId:bundle.runId,rows:24,cols:80,name:'prospective verification'}});created=true;diag.checkpoint='create-wait';await wait('created',Math.min(deadline,now()+5000));diag.createAck=true;
+  diag.checkpoint='command-send';await terminal.send({type:'input',sessionId:bundle.runId,data:{data:bundle.command}});diag.commandSent=true;
+  const download=async name=>{diag.checkpoint='download';live();diag.downloadAttempts++;diag.lastDownloadHttp=0;const r=await context.request.fetch(url+`/workspaces/${grant.workspaceId}/files/download?path=`+encodeURIComponent(bundle.directory+'/'+name)+'&token='+encodeURIComponent(token),{headers:{Origin:app},timeout:5000,maxRedirects:0,failOnStatusCode:false});try{const status=r.status();diag.lastDownloadHttp=Number.isInteger(status)&&status>=100&&status<=599?status:0;if(r.status()===404)return null;if(r.status()!==200)throw 0;const b=await r.body(),n=(await r.headers())['content-length'];if(b.length>131072||(n!==undefined&&(!/^\d+$/.test(n)||Number(n)!==b.length)))throw 0;return b;}finally{await r.dispose();}};
+  let raw;while(now()<deadline-15000){raw=await download('done.json');if(raw)break;await pause(1000);}if(!raw){diag.timeout=true;throw 0;}
+  diag.checkpoint='manifest-parse';out.stage='capsule-result';const done=JSON.parse(raw);if(!exact(done,['taskId','sessionId','runId','operation','status','files'])||done.taskId!==bundle.config.taskId||done.sessionId!==bundle.config.sessionId||done.runId!==bundle.runId||done.operation!==operation||![0,1].includes(done.status))throw 0;
   if(done.status===1){if(!exact(done.files,[]))throw 0;await writeFile(evidenceDirectory+'/done.json',raw,{mode:0o600,flag:'wx'});out.capsuleStatus=1;throw 0;}
   const names=operation==='setup'?['asset-hashes.json','prepare.json','baseline.json','check.json','record.json','expectations.json']:operation==='check'?['asset-hashes.json','check.json','publication.json']:[ 'asset-hashes.json','observer.json'];
   if(!exact(done.files,names)||Object.values(done.files).some(v=>!/^[0-9a-f]{64}$/.test(v)))throw 0;
@@ -155,7 +156,7 @@ export async function terminalPhase({own,operation,originals,context,page,grant,
   await writeFile(evidenceDirectory+'/done.json',raw,{mode:0o600,flag:'wx'});
   for(const [name,b]of Object.entries(bytes))await writeFile(evidenceDirectory+'/'+name,b,{mode:0o600,flag:'wx'});
   out.manifest=true;out.hostBytesRetained=true;out.sourceManifestSha256=sha(raw);out.stage='canonical-after';await bind();const targetAfter=await checkTarget();if(operation==='observe'){if(JSON.stringify(targetAfter)!==JSON.stringify(targetBefore))throw 0;await writeFile(evidenceDirectory+'/target-terminal.json',JSON.stringify({before:targetBefore,after:targetAfter}),{mode:0o600,flag:'wx'});}out.after=true;
- }catch{}finally{
+ }catch(e){if(e?.name==='TimeoutError'||e?.code==='ETIMEDOUT')diag.timeout=true;}finally{
   if(terminal)try{if(created){await terminal.send({type:'close_session',data:{sessionId:out.runId}});await wait('closed',Math.min(cleanupHard,now()+5000));out.terminalClosed=true;}}catch{}
   if(terminal)try{await terminal.dispose();out.socketClosed=true;}catch{}
  }
