@@ -21,7 +21,7 @@ CANARY = 'PRIVATE_SYNTHETIC_CF_CANARY'
 
 
 class ReaderTests(unittest.TestCase):
-    def invoke(self, mode, failure=None):
+    def invoke(self, mode, failure=None, kind='second-prospective-restore'):
         with tempfile.TemporaryDirectory(prefix='sam-proof-reader-') as folder:
             root = Path(folder)
             now = int(time.time() * 1000)
@@ -30,7 +30,7 @@ class ReaderTests(unittest.TestCase):
             own['receipt'] = {'taskId': own['taskId'], 'sessionId': own['sessionId'], 'branchName': own['branch'], 'status': 'queued'}
             observer = {**own, 'agentType': 'openai-codex'}
             config = {'own': own, 'observer': observer, 'started': now - 10000, 'hard': now + 2700000}
-            if mode == 'resume-snapshot': config['resume']={'kind':'second-prospective-restore','originalEvidenceSha256':'9715d238b6fcf5cc1e45e065ea041e87e8b72b38b6776664827467a6e74c14d2'}
+            if mode == 'resume-snapshot': config['resume']={'kind':kind,'originalEvidenceSha256':'9715d238b6fcf5cc1e45e065ea041e87e8b72b38b6776664827467a6e74c14d2'}
             (root / 'config.json').write_text(json.dumps(config))
             workspace, node, snapshot = '01M51YYYYYYYYYYYYYYYYYYYYY', '01M51XXXXXXXXXXXXXXXXXXXXX', '01M51SSSSSSSSSSSSSSSSSSSSS'
             for name, value in [(mode + '-mapping.json', {'taskId': own['taskId'], 'sessionId': own['sessionId'], 'workspaceId': workspace, 'nodeId': node, 'agentSessionId': '01M51AAAAAAAAAAAAAAAAAAAAA'}),
@@ -80,7 +80,7 @@ class ReaderTests(unittest.TestCase):
                 reader.main()
             self.assertNotIn(CANARY, output.getvalue())
             result = json.loads(output.getvalue())
-            expected_ok = failure in [None,'postwake-checkpoint','private-generation']
+            expected_ok = failure in [None,'postwake-checkpoint','private-generation'] and (mode!='resume-snapshot' or kind in ['second-prospective-restore','third-prospective-restore'])
             self.assertEqual(result['ok'], expected_ok)
             if expected_ok:
                 source = (root / (mode + '-source.json')).read_bytes()
@@ -121,7 +121,7 @@ class ReaderTests(unittest.TestCase):
                 self.assertEqual(proof_file.read_bytes(), original)
                 self.assertEqual(failure_file.read_bytes(), original_failure)
                 self.assertFalse((root / 'wake-check-grant.json').exists())
-            if mode == 'resume-snapshot' and failure is not None:
+            if mode == 'resume-snapshot' and not expected_ok:
                 self.assertFalse((root / 'resume-snapshot.json').exists())
                 self.assertEqual(json.loads((root / 'resume-snapshot-failure.json').read_text())['stage'],'snapshot')
             return result
@@ -167,12 +167,14 @@ class ReaderTests(unittest.TestCase):
             with self.subTest(mode=mode): self.invoke(mode)
         for capture in ['postwake-checkpoint','private-generation']:
             with self.subTest(capture=capture):self.invoke('wake-check',capture)
+        self.invoke('resume-snapshot',kind='third-prospective-restore')
 
     def test_concrete_failures(self):
         for mode, failure, stage in [('setup', 'transport', 'settings'), ('setup', 'wrong-profile', 'mapping'), ('setup', 'foreign-claim', 'resource-guards'), *[('wake-check', f, 'restored-generation') for f in ['wrong-snapshot','wrong-task','wrong-workspace','wrong-status','wrong-time','wrong-types','wrong-generation-type','private-row','missing-wake']]]:
             with self.subTest(failure=failure): self.assertEqual(self.invoke(mode, failure)['stage'], stage)
         for failure in ['resume-vm-present','resume-foreign-task','resume-pending-claim','resume-retained-claim']:
             with self.subTest(failure=failure): self.assertEqual(self.invoke('resume-snapshot',failure)['stage'],'snapshot')
+        self.assertEqual(self.invoke('resume-snapshot',kind='fourth-prospective-restore')['stage'],'snapshot')
 
 
 if __name__ == '__main__': unittest.main()
