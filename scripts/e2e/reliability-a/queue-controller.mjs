@@ -110,8 +110,16 @@ function selector(path,method,project){
   if(/^\/api\/workspaces\/[0-9A-HJKMNP-TV-Z]{26}\/sleep$/u.test(path)&&method==='POST')return 'action';
   throw new Error();
 }
+export function idleLeaseEnded(s, since, now, lease, max) {
+  const positive=v=>Number.isSafeInteger(v)&&v>0&&v<=now;
+  if(!positive(now)||!positive(since)||!(Number.isSafeInteger(lease)&&lease>0)||!(Number.isSafeInteger(max)&&max>0)||s?.activity!=='idle'||s.runtimeWorkCount!==0||!positive(s.activityAt)||!positive(s.runtimeWorkUpdatedAt)||s.activityAt<since||s.runtimeWorkUpdatedAt<since)return false;
+  if(s.runtimeWorkProgressAt!=null&&s.runtimeWorkProgressAt!==0&&!positive(s.runtimeWorkProgressAt))return false;
+  if(s.runtimeWorkState==='inactive')return true;
+  if(!['active','settling'].includes(s.runtimeWorkState))return false;
+  return Math.min(s.runtimeWorkUpdatedAt+lease,(s.runtimeWorkProgressAt>0?s.runtimeWorkProgressAt:s.runtimeWorkUpdatedAt)+max)<=now;
+}
 const pause=()=>new Promise(r=>setTimeout(r,100));
-export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSummary,privateState,resumeOwn}){
+export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSummary,privateState,resumeOwn,resumeCompletion}){
   let browser,context,finishLogout,final=summary('ok',0,true),loggedOut=false;
   try{
     const root=process.env.SAM_VERIFICATION_ROOT;
@@ -147,7 +155,7 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
       if(!exact(resumeOwn,['receipt','submittedAt'])||!exact(r,['taskId','sessionId','branchName','status'])||!ulid(r.taskId)||!uuid(r.sessionId)||!branch(r.branchName)||r.status!=='queued'||!Number.isSafeInteger(resumeOwn.submittedAt)||resumeOwn.submittedAt>Date.now())throw new Error();
       let owned;
       const t=await requestSafe(context,api,{path:`/api/projects/${project}/tasks/${r.taskId}`},v=>{
-        owned=v;return v?.id===r.taskId&&v.projectId===project&&v.outputBranch===r.branchName&&ulid(v.workspaceId)&&['in_progress','delegated','blocked'].includes(v.status);
+        owned=v;return v?.id===r.taskId&&v.projectId===project&&v.outputBranch===r.branchName&&ulid(v.workspaceId)&&(['in_progress','delegated','blocked'].includes(v.status)||(v.status==='completed'&&exact(resumeCompletion,['taskId','branch','completedAt'])&&resumeCompletion.taskId===r.taskId&&resumeCompletion.branch===r.branchName&&when(resumeCompletion.completedAt)&&Date.parse(resumeCompletion.completedAt)<=Date.now()&&v.completedAt===resumeCompletion.completedAt&&v.completionEvidence&&typeof v.completionEvidence==='object'));
       });
       if(t.category!=='ok')throw new Error();
       const w=await requestSafe(context,api,{path:'/api/workspaces/'+owned.workspaceId},v=>v?.id===owned.workspaceId&&v.projectId===project&&v.chatSessionId===r.sessionId&&v.branch===r.branchName&&v.repository===repository&&ulid(v.nodeId));
@@ -203,7 +211,7 @@ export async function run({requestSafe,logoutSafe,screenshotSafe,summary,safeSum
                 const session=cmd.path.split('/').at(-2);
                 selected={stateAvailable:json.state!==null&&json.state!==undefined};
                 if(selected.stateAvailable){selected.state=entity(json.state,'state',privateState);if(json.agentSessionId!==null&&!agentIdentity(json.agentSessionId))throw new Error();if(json.agentSessionId!==null)selected.agentSessionId=json.agentSessionId;
-                  if(agentIdentity(json.agentSessionId)&&selected.state.activity==='idle'&&selected.state.runtimeWorkState==='inactive'&&selected.state.runtimeWorkCount===0&&selected.state.activityAt>=submittedAt.get(session)&&selected.state.runtimeWorkUpdatedAt>=submittedAt.get(session)&&selected.state.activityAt<=Date.now()&&selected.state.runtimeWorkUpdatedAt<=Date.now())idle.add(session);else{idle.delete(session);sleeping.delete(session);}}
+                  if(agentIdentity(json.agentSessionId)&&idleLeaseEnded(selected.state,submittedAt.get(session),Date.now(),Number(process.env.SAM_VERIFICATION_HARNESS_LEASE_MS),Number(process.env.SAM_VERIFICATION_HARNESS_MAX_MS)))idle.add(session);else{idle.delete(session);sleeping.delete(session);}}
               }else if(type==='action'||type==='prompt'){
                 selected={};
                 if(!json||typeof json!=='object')throw new Error();
