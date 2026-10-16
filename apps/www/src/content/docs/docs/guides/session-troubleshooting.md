@@ -70,7 +70,9 @@ message box on an Instant profile, without attachments and not from an idea's **
 has no branch of its own. Any other chat or task runs on its own `sam/…`
 [output branch](/docs/guides/idea-execution/#where-the-work-lands), and the project **Files** tab
 shows what was pushed to it without opening a workspace. Either way, a **Chat** pushes only what you
-ask the agent to push; only a **Task** is committed and pushed for you when it finishes.
+ask the agent to push. A **Task**'s work is committed and pushed for you when its agent finishes a
+turn without an error, not when a turn fails or is interrupted. The session list labels each session
+**Chat** or **Task** ([Chat or Task](/docs/guides/chat-features/#chat-or-task)).
 
 A **Task** keeps its task completion and git delivery behavior after sleep and wake;
 a **Chat** remains a Chat. [Wake settings](/docs/guides/agents/#after-a-chat-wakes-from-sleep)

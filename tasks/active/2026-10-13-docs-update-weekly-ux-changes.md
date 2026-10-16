@@ -274,3 +274,9 @@ fork|retry --launch` behaves like `sam tasks submit`; the mention note's exact s
   not it has a branch (push depends on task mode, `server.go:1527`), and **Files** shows what was
   pushed; the AI title section notes the no-branch Instant chat skips AI titles; "warm" reuse is
   VM-only (every Instant launch creates a new container).
+
+### Round 11 (combined lenses)
+
+- No HIGH or MEDIUM. 2 LOW on one sentence, adopted: a **Task** is only committed and pushed after a
+  turn that ends without an error (`server.go:1460-1530`), and the session list's **Chat**/**Task**
+  label shows which you have.
