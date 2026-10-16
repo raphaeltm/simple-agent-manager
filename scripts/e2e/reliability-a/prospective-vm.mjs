@@ -2,6 +2,7 @@
  * Full lifecycle is a reviewed ordered plan; caller supplies independently bound owner context.
  */
 import {readFile,writeFile} from 'node:fs/promises';
+import {writeFileSync,appendFileSync} from 'node:fs';
 import {createHash,randomUUID} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 import {browserTerminal} from './owner-terminal-inspect.mjs';
@@ -89,27 +90,78 @@ export async function capsule(own,operation,originals={},runId=randomUUID()){
 }
 
 /** Exact owner+independent stored-ID grant. Baseline target for observe is separately canonical completed. */
-export async function terminalPhase({own,operation,originals,context,page,grant,evidenceDirectory,open=browserTerminal,now=Date.now,pause=ms=>new Promise(r=>setTimeout(r,ms))}){
- identity(own);let terminal,created=false,token;const started=now(),deadline=started+85000,cleanupHard=started+90000;
+export async function terminalPhase({own,operation,originals,context,page,grant,evidenceDirectory,idleSince,open=browserTerminal,now=Date.now,pause=ms=>new Promise(r=>setTimeout(r,ms))}){
+ let terminal,created=false,token;const started=now(),deadline=started+85000,cleanupHard=started+90000;
  const out={ok:false,stage:'binding',before:false,after:false,manifest:false,hostBytesRetained:false,terminalClosed:false,socketClosed:false,quiescence:false};
- const live=()=>{if(now()>=deadline)throw Error('deadline');};
- const get=async(path,method='GET',data)=>{live();const r=await context.request.fetch(api+path,{method,data,headers:{Origin:app},timeout:5000,maxRedirects:0,failOnStatusCode:false});try{if(r.status()!==200)throw 0;const b=await r.body();if(b.length>250000)throw 0;return JSON.parse(b);}finally{await r.dispose();}};
+ // Fixed IDs, booleans and bounded categories only; never copy producer values/errors.
+ const diagnostics=[];let bindingPass='before',journalReady=false;
+ const check=(id,ok,httpCategory='not-applicable')=>{const row={predicateId:bindingPass+'.'+id,ok:!!ok,httpCategory};diagnostics.push(row);if(!journalReady)throw 0;appendFileSync(evidenceDirectory+'/binding-diagnostics.jsonl',JSON.stringify(row)+'\n',{mode:0o600});if(!ok)throw 0;};
+ const live=()=>{check('deadline',now()<deadline);};
+ const get=async(label,path,method='GET',data)=>{
+  live();let r,category='transport';
+  try{
+   r=await context.request.fetch(api+path,{method,data,headers:{Origin:app},timeout:5000,maxRedirects:0,failOnStatusCode:false});
+   const status=r.status();category=status===200?'ok':status===401?'unauthorized':status===403?'forbidden':status===404?'not-found':status>=400&&status<500?'client-error':status>=500&&status<600?'server-error':'other';
+   check(label+'.http',status===200,category);let b;try{b=await r.body();}catch{check(label+'.body',false,category);}check(label+'.body',true,category);check(label+'.size',b.length<=250000,category);
+   let value;try{value=JSON.parse(b);}catch{check(label+'.json',false,category);}check(label+'.json',true,category);return value;
+  }catch{if(!r)check(label+'.http',false,category);throw 0;}
+  finally{if(r){let disposed=false;try{await r.dispose();disposed=true;}finally{check(label+'.disposed',disposed,category);}}}
+ };
  const bind=async()=>{
-  if(!grant||!Number.isSafeInteger(grant.globalVmCount)||grant.globalVmCount<0||grant.globalVmCount>1||(grant.runtime==='vm'&&grant.globalVmCount!==1)||grant.otherWorkspaceCount!==0||grant.activeForeignClaimCount!==0||!ulid(grant.workspaceId)||!ulid(grant.nodeId)||!(ulid(grant.agentSessionId)||uuid(grant.agentSessionId))||!Number.isSafeInteger(grant.expiresAt)||grant.expiresAt<=0||grant.expiresAt<=now()||grant.expiresAt>now()+300000||grant.storedProfileId!==own.agentProfileId||!Number.isSafeInteger(grant.storedProfileObservedAt)||grant.storedProfileObservedAt<=0||grant.storedProfileObservedAt>now()||grant.storedProfileObservedAt<now()-240000||!['vm','cf-container'].includes(grant.runtime)||(grant.runtime==='vm'&&(grant.agentVersion!==version||!exact(grant.releaseProvenance,Object.keys(releaseProvenance))||Object.keys(releaseProvenance).some(k=>grant.releaseProvenance[k]!==releaseProvenance[k]))))throw 0;
-  if(!exact(grant.receipt,Object.keys(own.receipt))||Object.keys(own.receipt).some(k=>grant.receipt[k]!==own.receipt[k]))throw 0;
-  const u=await get('/api/auth/get-session'),p=await get(`/api/projects/${project}/agent-profiles/${own.agentProfileId}`),list=await get(`/api/projects/${project}/agent-profiles`);
-  if(u?.user?.id!==grant.ownerId||p?.id!==own.agentProfileId||p.userId!==grant.expectedProfileOwnerId||p.agentType!==own.agentType||p.vmSizeOverride!=null||!(p.runtime===null||p.runtime===grant.runtime)||!(p.projectId===project||(p.projectId===null&&p.userId===grant.ownerId))||!Array.isArray(list.items)||list.items.filter(x=>x.name===p.name).length!==1)throw 0;
-  const t=await get(`/api/projects/${project}/tasks/${own.taskId}`),s=await get(`/api/projects/${project}/sessions/${own.sessionId}?limit=1`),w=await get('/api/workspaces/'+grant.workspaceId),a=await get(`/api/projects/${project}/sessions/${own.sessionId}/state`);
-  if(t.id!==own.taskId||t.userId!==grant.ownerId||t.projectId!==project||t.outputBranch!==own.branch||t.workspaceId!==grant.workspaceId||t.agentProfileHint!==(p.userId===grant.ownerId?p.name:p.id)||!['in_progress','completed'].includes(t.status)||s.session?.taskId!==own.taskId||s.session.id!==own.sessionId||s.session.workspaceId!==w.id||s.session.agentSessionId!==grant.agentSessionId||s.session.agentType!==own.agentType||w.id!==grant.workspaceId||w.nodeId!==grant.nodeId||w.projectId!==project||w.chatSessionId!==own.sessionId||w.branch!==own.branch||w.repository!==repository||w.status!=='running'||w.hardware?.cloudProvider!==(grant.runtime==='vm'?'hetzner':'cloudflare')||a.agentSessionId!==grant.agentSessionId||a.agentType!==own.agentType||a.state?.activity!=='idle'||a.state.runtimeWorkState!=='inactive'||a.state.runtimeWorkCount!==0||![a.state.activityAt,a.state.runtimeWorkUpdatedAt].every(v=>Number.isSafeInteger(v)&&v>=started-60000&&v<=now()))throw 0;
+  check('grant.present',!!grant);
+  check('grant.vm-count',Number.isSafeInteger(grant.globalVmCount)&&grant.globalVmCount>=0&&grant.globalVmCount<=1);
+  check('grant.vm-exact',grant.runtime!=='vm'||grant.globalVmCount===1);
+  check('grant.other-workspaces',grant.otherWorkspaceCount===0);check('grant.foreign-claims',grant.activeForeignClaimCount===0);
+  check('grant.workspace',ulid(grant.workspaceId));check('grant.node',ulid(grant.nodeId));check('grant.agent-session',ulid(grant.agentSessionId)||uuid(grant.agentSessionId));
+  check('grant.expiry',Number.isSafeInteger(grant.expiresAt)&&grant.expiresAt>0&&grant.expiresAt>now()&&grant.expiresAt<=now()+300000);
+  check('grant.profile',grant.storedProfileId===own.agentProfileId);
+  check('grant.profile-observed',Number.isSafeInteger(grant.storedProfileObservedAt)&&grant.storedProfileObservedAt>0&&grant.storedProfileObservedAt<=now()&&grant.storedProfileObservedAt>=now()-240000);
+  check('grant.runtime',['vm','cf-container'].includes(grant.runtime));
+  check('grant.agent-version',grant.runtime!=='vm'||grant.agentVersion===version);
+  check('grant.release-shape',grant.runtime!=='vm'||exact(grant.releaseProvenance,Object.keys(releaseProvenance)));
+  for(const k of Object.keys(releaseProvenance))check('grant.release.'+k,grant.runtime!=='vm'||grant.releaseProvenance[k]===releaseProvenance[k]);
+  check('grant.receipt-shape',exact(grant.receipt,Object.keys(own.receipt)));
+  for(const k of Object.keys(own.receipt))check('grant.receipt.'+k,grant.receipt[k]===own.receipt[k]);
+  const u=await get('auth','/api/auth/get-session'),p=await get('profile',`/api/projects/${project}/agent-profiles/${own.agentProfileId}`),list=await get('profiles',`/api/projects/${project}/agent-profiles`);
+  check('auth.owner',u?.user?.id===grant.ownerId);check('profile.id',p?.id===own.agentProfileId);
+  check('profile.creator',p.userId===grant.expectedProfileOwnerId);check('profile.agent-type',p.agentType===own.agentType);
+  check('profile.size',p.vmSizeOverride==null);check('profile.runtime',p.runtime===null||p.runtime===grant.runtime);
+  check('profile.scope',p.projectId===project||(p.projectId===null&&p.userId===grant.ownerId));
+  check('profiles.items',Array.isArray(list?.items));check('profiles.unique-name',list.items.filter(x=>x?.name===p.name).length===1);
+  const t=await get('task',`/api/projects/${project}/tasks/${own.taskId}`),s=await get('session',`/api/projects/${project}/sessions/${own.sessionId}?limit=1`),w=await get('workspace','/api/workspaces/'+grant.workspaceId),a=await get('state',`/api/projects/${project}/sessions/${own.sessionId}/state`);
+  check('task.id',t?.id===own.taskId);check('task.owner',t.userId===grant.ownerId);check('task.project',t.projectId===project);
+  check('task.branch',t.outputBranch===own.branch);check('task.workspace',t.workspaceId===grant.workspaceId);
+  // Deployed display resolver maps owner profiles to NAME, shared project creators to ID.
+  check('task.profile-hint',t.agentProfileHint===(p.userId===grant.ownerId?p.name:p.id));check('task.status',['in_progress','completed'].includes(t.status));
+  check('session.task',s?.session?.taskId===own.taskId);check('session.id',s.session.id===own.sessionId);check('session.workspace',s.session.workspaceId===w?.id);
+  check('session.agent-session',s.session.agentSessionId===grant.agentSessionId);check('session.agent-type',s.session.agentType===own.agentType);
+  check('workspace.id',w?.id===grant.workspaceId);check('workspace.node',w.nodeId===grant.nodeId);check('workspace.project',w.projectId===project);
+  check('workspace.session',w.chatSessionId===own.sessionId);check('workspace.branch',w.branch===own.branch);check('workspace.repository',w.repository===repository);
+  check('workspace.status',w.status==='running');check('workspace.provider',w.hardware?.cloudProvider===(grant.runtime==='vm'?'hetzner':'cloudflare'));
+  check('state.agent-session',a?.agentSessionId===grant.agentSessionId);check('state.agent-type',a.agentType===own.agentType);
+  check('state.activity',a.state?.activity==='idle');check('state.work-state',a.state.runtimeWorkState==='inactive');check('state.work-count',a.state.runtimeWorkCount===0);
+  // These are persisted EVENT times, not GET observation times. Require the same
+  // setup/prompt lower bound already used by the caller's canonical waitIdle.
+  check('state.since',Number.isSafeInteger(idleSince)&&idleSince>0&&idleSince<=started);
+  check('state.activity-time',Number.isSafeInteger(a.state.activityAt)&&a.state.activityAt>=idleSince&&a.state.activityAt<=now());
+  check('state.work-time',Number.isSafeInteger(a.state.runtimeWorkUpdatedAt)&&a.state.runtimeWorkUpdatedAt>=idleSince&&a.state.runtimeWorkUpdatedAt<=now());
   return `https://ws-${w.id}.sammy.party`;
  };
  const wait=async(key,until)=>{while(now()<until){const s=await terminal.state();if(s.failed)throw 0;if(s[key])return;await pause(100);}throw 0;};
  try{
-  const checkTarget=async()=>{if(operation==='observe'){identity(originals.target);const target=await get(`/api/projects/${project}/tasks/${originals.target.taskId}`);if(target.id!==originals.target.taskId||target.projectId!==project||target.userId!==grant.ownerId||target.outputBranch!==originals.target.branch||target.status!=='completed'||target.completedAt!==originals.completedAt||!target.completionEvidence||typeof target.completionEvidence!=='object'||Date.parse(target.completedAt)>now())throw 0;return {taskId:target.id,branch:target.outputBranch,completedAt:target.completedAt,completionEvidenceSha256:sha(JSON.stringify(target.completionEvidence))};}return null;};
+  writeFileSync(evidenceDirectory+'/binding-diagnostics.jsonl','',{mode:0o600,flag:'wx'});journalReady=true;
+  let validIdentity=false;try{identity(own);validIdentity=true;}catch{}check('identity',validIdentity);
+  const checkTarget=async()=>{if(operation==='observe'){
+   let valid=false;try{identity(originals.target);valid=true;}catch{}check('target.identity',valid);
+   const target=await get('target',`/api/projects/${project}/tasks/${originals.target.taskId}`);
+   check('target.id',target?.id===originals.target.taskId);check('target.project',target.projectId===project);check('target.owner',target.userId===grant.ownerId);
+   check('target.branch',target.outputBranch===originals.target.branch);check('target.status',target.status==='completed');check('target.completed-at',target.completedAt===originals.completedAt);
+   check('target.evidence',!!target.completionEvidence&&typeof target.completionEvidence==='object');check('target.time',Date.parse(target.completedAt)<=now());
+   return {taskId:target.id,branch:target.outputBranch,completedAt:target.completedAt,completionEvidenceSha256:sha(JSON.stringify(target.completionEvidence))};}return null;};
   const url=await bind();out.before=true;const targetBefore=await checkTarget();
  const bundle=await capsule(operation==='observe'?originals.target:own,operation,originals);out.runId=bundle.runId;
-  const access=await get('/api/terminal/token','POST',{workspaceId:grant.workspaceId});
-  if(access.workspaceUrl!==url||typeof access.token!=='string'||access.token.length<32||access.token.length>16000||!Number.isFinite(Date.parse(access.expiresAt))||Date.parse(access.expiresAt)<=now())throw 0;
+  const access=await get('terminal-token','/api/terminal/token','POST',{workspaceId:grant.workspaceId});
+  check('terminal-token.workspace',access?.workspaceUrl===url);check('terminal-token.token',typeof access.token==='string'&&access.token.length>=32&&access.token.length<=16000);check('terminal-token.expiry',Number.isFinite(Date.parse(access.expiresAt))&&Date.parse(access.expiresAt)>now());
   token=access.token;out.stage='terminal';terminal=await open(page,url.replace('https:','wss:')+'/terminal/ws/multi?token='+encodeURIComponent(token),bundle.runId);
   await terminal.send({type:'create_session',data:{sessionId:bundle.runId,rows:24,cols:80,name:'prospective verification'}});created=true;await wait('created',Math.min(deadline,now()+5000));
   await terminal.send({type:'input',sessionId:bundle.runId,data:{data:bundle.command}});
@@ -132,10 +184,13 @@ export async function terminalPhase({own,operation,originals,context,page,grant,
   // Preserve ORIGINAL manifest and every downloaded ORIGINAL byte before any next phase.
   await writeFile(evidenceDirectory+'/done.json',raw,{mode:0o600,flag:'wx'});
   for(const [name,b]of Object.entries(bytes))await writeFile(evidenceDirectory+'/'+name,b,{mode:0o600,flag:'wx'});
-  out.manifest=true;out.hostBytesRetained=true;out.sourceManifestSha256=sha(raw);out.stage='canonical-after';await bind();const targetAfter=await checkTarget();if(operation==='observe'){if(JSON.stringify(targetAfter)!==JSON.stringify(targetBefore))throw 0;await writeFile(evidenceDirectory+'/target-terminal.json',JSON.stringify({before:targetBefore,after:targetAfter}),{mode:0o600,flag:'wx'});}out.after=true;
+  out.manifest=true;out.hostBytesRetained=true;out.sourceManifestSha256=sha(raw);out.stage='canonical-after';bindingPass='after';await bind();const targetAfter=await checkTarget();if(operation==='observe'){check('target.unchanged',JSON.stringify(targetAfter)===JSON.stringify(targetBefore));await writeFile(evidenceDirectory+'/target-terminal.json',JSON.stringify({before:targetBefore,after:targetAfter}),{mode:0o600,flag:'wx'});}out.after=true;
  }catch{}finally{
+  // Persist even failed binding before terminal/socket cleanup; controller also retains result.
+  out.bindingDiagnostics=diagnostics;
+  try{await writeFile(evidenceDirectory+'/binding-diagnostics.json',JSON.stringify(diagnostics),{mode:0o600,flag:'wx'});out.bindingDiagnosticsRetained=true;}catch{out.bindingDiagnosticsRetained=false;}
   if(terminal)try{if(created){await terminal.send({type:'close_session',data:{sessionId:out.runId}});await wait('closed',Math.min(cleanupHard,now()+5000));out.terminalClosed=true;}}catch{}
   if(terminal)try{await terminal.dispose();out.socketClosed=true;}catch{}
  }
- out.quiescence=out.before&&out.after&&out.manifest&&out.hostBytesRetained&&out.terminalClosed&&out.socketClosed;out.ok=out.quiescence;return out;
+ out.quiescence=out.bindingDiagnosticsRetained&&out.before&&out.after&&out.manifest&&out.hostBytesRetained&&out.terminalClosed&&out.socketClosed;out.ok=out.quiescence;return out;
 }

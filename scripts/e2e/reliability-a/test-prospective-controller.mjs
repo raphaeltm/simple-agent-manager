@@ -12,9 +12,9 @@ const deferJSON=(file,make)=>{const promise=new Promise((resolve,reject)=>setTim
 const root=await mkdtemp(join(tmpdir(),'sam-prospective-sequence-')),source=new URL('.',import.meta.url);
 try{
  const modules=join(root,'modules');await mkdir(modules);
- for(const n of ['owner-terminal-inspect.mjs','queue-controller.mjs'])await copyFile(new URL(n,source),join(modules,n));
+ for(const n of ['owner-terminal-inspect.mjs','queue-controller.mjs','git-probe.py','b-probe.py','terminal-observer.py','prospective-capsule.py'])await copyFile(new URL(n,source),join(modules,n));
  const library=await readFile(new URL('prospective-vm.mjs',source),'utf8');
- await writeFile(join(modules,'prospective-vm.mjs'),library.replace('export async function terminalPhase(', 'async function originalTerminalPhase(')+'\nexport const terminalPhase=(v)=>globalThis.__prospectiveTest.phase(v);\n');
+ await writeFile(join(modules,'prospective-vm.mjs'),library.replace('export async function terminalPhase(', 'async function originalTerminalPhase(')+'\nexport const terminalPhase=(v)=>globalThis.__prospectiveTest.phase(v);\nexport {originalTerminalPhase};\n');
  const playwright=join(root,'playwright.mjs');await writeFile(playwright,'export const chromium={launch:()=>globalThis.__prospectiveTest.browser};');
  await writeFile(join(modules,'retain-phase.mjs'),"export const snapshotRoot=async()=>{};export const retainPhase=async p=>globalThis.__prospectiveTest.retain(p);export const retainCheckpoint=async p=>globalThis.__prospectiveTest.retain(p);\n");
  const caller=await readFile(new URL('prospective-vm-controller.mjs',source),'utf8');
@@ -38,7 +38,7 @@ try{
  const {run}=await import(pathToFileURL(join(modules,'caller.mjs')));
  const {run:resumeRun,retainedOriginals:checkRetained}=await import(pathToFileURL(join(modules,'prospective-resume.mjs')));
  await checkRetained(resumeOwn);
- const {snapshotProof,completionProof}=await import(pathToFileURL(join(modules,'prospective-vm.mjs')));
+ const {snapshotProof,completionProof,originalTerminalPhase,releaseProvenance}=await import(pathToFileURL(join(modules,'prospective-vm.mjs')));
  const producerHarness=join(root,'actual-producer.py');
  await writeFile(producerHarness,`import sys,os,json,time,importlib.util,urllib.request
 from pathlib import Path
@@ -68,14 +68,14 @@ reader.urllib.request.urlopen=request;reader.sys.argv=['actual','wake-check'];re
  const observer={taskId:'01M50VYZ60RQXXTGSVPXW6FRXD',sessionId:'4e5282b9-0cd5-454f-a8f0-db160b9823fe',branch:'sam/bootstrap-only-authorized-reliability-w6frxd',agentProfileId:'01KYQ5YDHC1VS0BZ9F3NY97FNH',agentType:'openai-codex'};
  for(const x of [baseOwn,observer])x.receipt={taskId:x.taskId,sessionId:x.sessionId,branchName:x.branch,status:'queued'};
  let count=0;
- for(const mode of ['success','retention-setup-failure','retention-turn-failure','setup-failure','wake-check-failure','complete-missing-notes','early-complete','producer-failure','foreign-producer-failure','stale-producer-failure','resume-success','resume-invalid-originals','resume-producer-failure','resume-invalid-fixture','resume-early-complete','resume-foreign-identity','resume-real-producer-failure','resume-checkpoint-rotation','resume-real-producer-rotation','resume-false-consumed-claim','resume-third-success','resume-unsupported-kind']){
+ for(const mode of ['success','real-binding-failure','real-binding-old-idle','retention-setup-failure','retention-turn-failure','setup-failure','wake-check-failure','complete-missing-notes','early-complete','producer-failure','foreign-producer-failure','stale-producer-failure','resume-success','resume-invalid-originals','resume-producer-failure','resume-invalid-fixture','resume-early-complete','resume-foreign-identity','resume-real-producer-failure','resume-checkpoint-rotation','resume-real-producer-rotation','resume-false-consumed-claim','resume-third-success','resume-unsupported-kind']){
   const resumed=mode.startsWith('resume-'),own=resumed?structuredClone(resumeOwn):baseOwn;
   if(mode==='resume-foreign-identity'){own.taskId=baseOwn.taskId;own.receipt.taskId=own.taskId;}
   count++;const dir=join(root,mode);await mkdir(dir);process.env.SAM_PROSPECTIVE_ROOT=dir;process.env.SAM_VERIFICATION_SOURCE_SHA='d'.repeat(40);process.env.SAM_PLAYWRIGHT_PRIMARY_USER='SYNTHETIC_PRIVATE_CANARY';
   const started=Date.now()-1000,hard=started+2700000,config={started,hard,own,observer,evidencePrUrl:'https://github.com/raphaeltm/simple-agent-manager/pull/2355'};
   if(resumed)config.resume={kind:mode==='resume-third-success'?'third-prospective-restore':mode==='resume-unsupported-kind'?'fourth-prospective-restore':'second-prospective-restore',originalEvidenceSha256:evidenceSha};
   await writeFile(join(dir,'config.json'),JSON.stringify(config));
-  let virtualNow=null;
+  let virtualNow=null,inAdapter=false;
   let woken=false,ownStatus=resumed?'sleeping':'in_progress',observerStatus='completed',completedAt,active=own,loggedOut=false,browserClosed=false;
   if(['early-complete','resume-early-complete'].includes(mode)){ownStatus='completed';completedAt=new Date().toISOString();}
   const stages=[],prompts=[],slept=[],retainedPhases=[];
@@ -87,19 +87,26 @@ reader.urllib.request.urlopen=request;reader.sys.argv=['actual','wake-check'];re
   const response=v=>({status:()=>200,body:async()=>Buffer.from(JSON.stringify(v)),dispose:async()=>{}});
   const task=x=>({id:x.taskId,userId:'owner',projectId:'01KJNR9R3TEN3KX1ETE33852R8',outputBranch:x.branch,taskMode:'task',agentProfileHint:'safe-profile-'+x.agentProfileId,workspaceId:mapping(x).workspaceId,status:x===own?ownStatus:observerStatus,createdAt:new Date(resumed?started-100000:started+100).toISOString(),completedAt:x===own?completedAt:new Date(started-10000).toISOString(),completionEvidence:x===own?(completedAt?{prUrl:config.evidencePrUrl,notes:mode==='complete-missing-notes'?'no commit':'measured '+ 'a'.repeat(40)}:null):{prUrl:config.evidencePrUrl}});
   const context={request:{fetch:async url=>{
-   if(url.includes('/agent-profiles/')){const x=url.endsWith(own.agentProfileId)?own:observer;return response({id:x.agentProfileId,name:'safe-profile-'+x.agentProfileId,userId:'owner',projectId:'01KJNR9R3TEN3KX1ETE33852R8',agentType:x.agentType,vmSizeOverride:null});}
+   if(url.includes('/agent-profiles/')){const x=url.endsWith(own.agentProfileId)?own:observer;return response({id:x.agentProfileId,name:'safe-profile-'+x.agentProfileId,userId:'owner',projectId:'01KJNR9R3TEN3KX1ETE33852R8',agentType:x.agentType,vmSizeOverride:null,runtime:null});}
    if(url.endsWith('/agent-profiles'))return response({items:[own,observer].map(x=>({id:x.agentProfileId,name:'safe-profile-'+x.agentProfileId}))});
    if(url.includes('/messages?'))return response({messages:[{id:'fixed-tool-message',sessionId:own.sessionId,createdAt:Date.parse(completedAt),role:'tool',content:'SYNTHETIC_PRIVATE_CANARY',toolMetadata:{toolName:'mcp__sam_mcp__complete_task',status:'completed'}}],hasMore:false});
+   if(url.endsWith('/api/terminal/token'))return response({workspaceUrl:'https://ws-'+mapping(active).workspaceId+'.sammy.party',token:'SYNTHETIC_PRIVATE_CANARY'.repeat(3),expiresAt:new Date((virtualNow??Date.now())+200000).toISOString()});
    if(url.endsWith('/api/auth/get-session'))return response({user:{id:'owner'}});
    if(url.includes('/tasks/')){const x=url.endsWith(own.taskId)?own:observer;const v=task(x);if(mode==='complete-missing-notes'&&x===own&&ownStatus==='completed')virtualNow=hard-540000;return response(v);}
    const x=url.includes(observer.sessionId)?observer:url.includes(own.sessionId)?own:active;
-   if(url.includes('/sessions/')&&!url.endsWith('/state')){active=x;return response({session:{id:x.sessionId,taskId:x.taskId}});}
-   if(url.includes('/api/workspaces/'))return response({id:mapping(active).workspaceId,nodeId:mapping(active).nodeId,projectId:'01KJNR9R3TEN3KX1ETE33852R8',chatSessionId:active.sessionId,branch:active.branch,repository:'serverspresentation2025/crewai',status:'running'});
-   if(url.endsWith('/state'))return response({...mapping(x),agentType:x.agentType,state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,activityAt:Date.now(),runtimeWorkUpdatedAt:Date.now()}});
+   if(url.includes('/sessions/')&&!url.endsWith('/state')){active=x;return response({session:{id:x.sessionId,taskId:x.taskId,workspaceId:mapping(x).workspaceId,agentSessionId:mapping(x).agentSessionId,agentType:x.agentType}});}
+   if(url.includes('/api/workspaces/'))return response({id:mapping(active).workspaceId,nodeId:mapping(active).nodeId,projectId:'01KJNR9R3TEN3KX1ETE33852R8',chatSessionId:active.sessionId,branch:active.branch,repository:'serverspresentation2025/crewai',status:'running',hardware:{cloudProvider:'hetzner'}});
+   if(url.endsWith('/state'))return response({...mapping(x),agentType:x.agentType,state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:inAdapter?1:0,activityAt:Date.now(),runtimeWorkUpdatedAt:Date.now()}});
    throw Error('route');
   }},newPage:async()=>({goto:async()=>{}})};
   globalThis.__prospectiveTest={retain:async p=>{retainedPhases.push(p.phase);if(mode==='retention-setup-failure'&&p.phase==='setup'||mode==='retention-turn-failure'&&p.phase==='turn-check')throw Error('retention');},now:()=>virtualNow??Date.now(),browser:{newContext:async()=>context,close:async()=>{browserClosed=true;}},phase:async p=>{
    stages.push(p.operation+':'+(p.own===observer?'observer':'own'));
+   assert(Number.isSafeInteger(p.idleSince)&&p.idleSince>=started);
+   if(['real-binding-failure','real-binding-old-idle'].includes(mode)){
+    inAdapter=mode==='real-binding-failure';if(mode==='real-binding-old-idle')virtualNow=Date.now()+90000;
+    const g={...p.grant,globalVmCount:1,otherWorkspaceCount:0,activeForeignClaimCount:0,expectedProfileOwnerId:'owner',runtime:'vm',agentVersion:releaseProvenance.agentSource,releaseProvenance,expiresAt:(virtualNow??Date.now())+200000,storedProfileObservedAt:virtualNow??Date.now(),receipt:own.receipt};
+    try{return await originalTerminalPhase({...p,grant:g,now:()=>virtualNow??Date.now(),open:async()=>{assert.equal(mode,'real-binding-old-idle');throw Error('SYNTHETIC_PRIVATE_CANARY');}});}finally{inAdapter=false;}
+   }
    if(mode==='setup-failure'&&p.operation==='setup'||['wake-check-failure','resume-invalid-fixture'].includes(mode)&&p.evidenceDirectory.endsWith('wake-check'))return {ok:false};
    if(p.operation==='setup'){await writeFile(p.evidenceDirectory+'/baseline.json',JSON.stringify({head:'a'.repeat(40)}));await writeFile(p.evidenceDirectory+'/expectations.json','{}');}
    return {ok:true};
@@ -139,6 +146,13 @@ reader.urllib.request.urlopen=request;reader.sys.argv=['actual','wake-check'];re
   assert(beforeBrowser?!loggedOut&&!browserClosed:loggedOut&&browserClosed,JSON.stringify({mode,loggedOut,browserClosed,final:JSON.parse(await readFile(join(dir,'final.json')))}));assert(!JSON.stringify(result).includes('CANARY'));
   const success=['success','foreign-producer-failure','stale-producer-failure','resume-success','resume-checkpoint-rotation','resume-real-producer-rotation','resume-third-success'].includes(mode);
   const final=JSON.parse(await readFile(join(dir,'final.json')));assert.equal(result.ok,success,JSON.stringify({mode,stage:final.stage,events:final.events.map(x=>x.kind)}));
+  if(['real-binding-failure','real-binding-old-idle'].includes(mode)){
+   const diagnostic=JSON.parse(await readFile(join(dir,'setup/binding-diagnostics.json'))),phaseResult=JSON.parse(await readFile(join(dir,'setup-result.json')));
+   if(mode==='real-binding-failure')assert(diagnostic.some(x=>x.predicateId==='before.state.work-count'&&!x.ok));
+   else{assert(phaseResult.before&&phaseResult.stage==='terminal');assert(diagnostic.every(x=>x.ok));assert(virtualNow-Date.now()>60000);}
+   assert.deepEqual((await readFile(join(dir,'setup/binding-diagnostics.jsonl'),'utf8')).trim().split('\n').map(JSON.parse),diagnostic);assert.deepEqual(phaseResult.bindingDiagnostics,diagnostic);
+   assert(final.retained&&final.authCleanup&&final.browserClosed);assert.equal(prompts.length,0);assert.equal(slept.length,1);assert(!JSON.stringify(diagnostic).includes('CANARY'));
+  }
   if(mode==='retention-setup-failure'){assert.deepEqual(retainedPhases,['start','setup']);assert(!prompts.some(p=>p.startsWith('Authorized tested')));assert(final.authCleanup&&final.browserClosed);}
   if(mode==='retention-turn-failure'){assert.deepEqual(retainedPhases,['start','setup','turn-check']);assert(!prompts.some(p=>p.startsWith('Authorized normal snapshot')));assert(final.authCleanup&&final.browserClosed);}
   if(mode==='success')assert.deepEqual(retainedPhases,['start','setup','turn-check','sleep','wake','wake-check','complete','observe','observer-sleep','closing']);

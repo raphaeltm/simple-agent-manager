@@ -49,40 +49,71 @@ finally:
  os.close(master)
 `);
 
- let invalidProvenance=false,grantPatch={},clockOverride=null,expireAfterInput=false;
+ let invalidProvenance=false,grantPatch={},profileCreator='owner',profileRuntimeOverride=false,stateTime=null,idleSince=Date.now()-300000,responsePatch=null,httpFailure=null,opened=0,clockOverride=null,expireAfterInput=false;
  let identity=own,operation='setup',originals={},downloadCorrupt=false,closed=false,disposed=false,targetReads=0;const payloads=[];
  const workspace='01M51YYYYYYYYYYYYYYYYYYYYY',node='01M51XXXXXXXXXXXXXXXXXXXXX',acp='01M51WWWWWWWWWWWWWWWWWWWWW';
- const grant=()=>({releaseProvenance:invalidProvenance?{...releaseProvenance,rawHostShaObserved:true}:releaseProvenance,globalVmCount:1,otherWorkspaceCount:0,activeForeignClaimCount:0,workspaceId:workspace,nodeId:node,agentSessionId:acp,ownerId:'owner',expectedProfileOwnerId:'owner',runtime:identity===own?'vm':'cf-container',agentVersion:'b467f389811eadeaf973960bb30f9fa7b9cb4678',expiresAt:Date.now()+200000,storedProfileId:identity.agentProfileId,storedProfileObservedAt:Date.now(),receipt:Object.fromEntries(Object.entries(identity.receipt).sort(([a],[b])=>a.localeCompare(b))),...grantPatch});
- const response=(v,status=200)=>{const b=Buffer.isBuffer(v)?v:Buffer.from(JSON.stringify(v));return {status:()=>status,body:async()=>b,headers:async()=>({'content-length':String(b.length)}),dispose:async()=>{}};};
+ const grant=()=>({releaseProvenance:invalidProvenance?{...releaseProvenance,rawHostShaObserved:true}:releaseProvenance,globalVmCount:1,otherWorkspaceCount:0,activeForeignClaimCount:0,workspaceId:workspace,nodeId:node,agentSessionId:acp,ownerId:'owner',expectedProfileOwnerId:profileCreator,runtime:identity===own?'vm':'cf-container',agentVersion:'b467f389811eadeaf973960bb30f9fa7b9cb4678',expiresAt:Date.now()+200000,storedProfileId:identity.agentProfileId,storedProfileObservedAt:Date.now(),receipt:Object.fromEntries(Object.entries(identity.receipt).sort(([a],[b])=>a.localeCompare(b))),...grantPatch});
+ const response=(v,status=200)=>{if(responsePatch)v=responsePatch(v);const b=Buffer.isBuffer(v)?v:Buffer.from(JSON.stringify(v));return {status:()=>status,body:async()=>b,headers:async()=>({'content-length':String(b.length)}),dispose:async()=>{}};};
  const context={request:{fetch:async(url,options)=>{
-  assert.equal(options.maxRedirects,0);
+  assert.equal(options.maxRedirects,0);if(httpFailure&&url.endsWith('/api/auth/get-session')){if(httpFailure==='transport')throw Error(canary);return response(httpFailure==='json'?Buffer.from(canary):{},httpFailure==='json'?200:httpFailure);}
   if(url.endsWith('/api/auth/get-session'))return response({user:{id:'owner'}});
-  const profile={id:identity.agentProfileId,userId:'owner',projectId:'01KJNR9R3TEN3KX1ETE33852R8',name:canary,agentType:identity.agentType,runtime:identity===own?'vm':'cf-container',vmSizeOverride:null};
+  const profile={id:identity.agentProfileId,userId:profileCreator,projectId:'01KJNR9R3TEN3KX1ETE33852R8',name:canary,agentType:identity.agentType,runtime:profileRuntimeOverride?null:identity===own?'vm':'cf-container',vmSizeOverride:null};
   if(url.includes('/agent-profiles/'))return response(profile);
   if(url.endsWith('/agent-profiles'))return response({items:[profile]});
   if(url.includes('/tasks/')){
    if(identity!==own&&url.endsWith(own.taskId)){targetReads++;return response({id:own.taskId,projectId:'01KJNR9R3TEN3KX1ETE33852R8',userId:'owner',outputBranch:own.branch,status:'completed',completedAt:originals.completedAt,completionEvidence:{prUrl:'https://github.com/raphaeltm/simple-agent-manager/pull/2355'}});}
-   return response({id:identity.taskId,projectId:'01KJNR9R3TEN3KX1ETE33852R8',userId:'owner',outputBranch:identity.branch,status:'in_progress',workspaceId:workspace,agentProfileHint:canary});
+   return response({id:identity.taskId,projectId:'01KJNR9R3TEN3KX1ETE33852R8',userId:'owner',outputBranch:identity.branch,status:'in_progress',workspaceId:workspace,agentProfileHint:profileCreator==='owner'?canary:identity.agentProfileId});
   }
-  if(url.endsWith('/state'))return response({agentSessionId:acp,agentType:identity.agentType,state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,activityAt:Date.now(),runtimeWorkUpdatedAt:Date.now()}});
+  if(url.endsWith('/state'))return response({agentSessionId:acp,agentType:identity.agentType,state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,activityAt:stateTime??Date.now(),runtimeWorkUpdatedAt:stateTime??Date.now()}});
   if(url.includes('/sessions/'))return response({session:{id:identity.sessionId,taskId:identity.taskId,workspaceId:workspace,agentSessionId:acp,agentType:identity.agentType}});
   if(url.endsWith('/api/workspaces/'+workspace))return response({id:workspace,nodeId:node,projectId:'01KJNR9R3TEN3KX1ETE33852R8',chatSessionId:identity.sessionId,branch:identity.branch,repository:'serverspresentation2025/crewai',status:'running',hardware:{cloudProvider:identity===own?'hetzner':'cloudflare'}});
   if(url.endsWith('/api/terminal/token'))return response({workspaceUrl:'https://ws-'+workspace+'.sammy.party',token:canary.repeat(3),expiresAt:new Date(Date.now()+200000).toISOString()});
   if(url.includes('/files/download?')){const path=new URL(url).searchParams.get('path').replace('/workspaces/reliability-prospective',root+'/remote-phase');try{const b=await readFile(path);return response(downloadCorrupt&&path.endsWith('/done.json')?Buffer.from('{}'):b);}catch{return response({},404);}}
   throw Error('unexpected');
  }}};
- const open=async()=>({send:async f=>{
+ const open=async()=>{opened++;return {send:async f=>{
   if(f.type==='input'){
    const command=f.data.data;assert(command.split('\n').every(x=>Buffer.byteLength(x)<3800));payloads.push(command);
    const commandFile=join(root,'command-'+payloads.length);await writeFile(commandFile,command.replaceAll('/workspaces/reliability-prospective',root+'/remote-phase'));
    const output=exec('python3',[ptyRunner,commandFile,repo],repo,env);assert.equal(output.length,0);if(expireAfterInput)clockOverride=Date.now()+85001;
   }if(f.type==='close_session')closed=true;
- },state:async()=>({created:true,closed,failed:false}),dispose:async()=>{disposed=true;}});
- const invoke=async(name)=>{cases++;const dir=join(root,name);await mkdir(dir);closed=false;disposed=false;const result=await terminalPhase({own:identity,operation,originals,context,page:{},grant:grant(),evidenceDirectory:dir,open,now:()=>clockOverride??Date.now()});assert(!JSON.stringify(result).includes(canary));return {result,dir};};
+ },state:async()=>({created:true,closed,failed:false}),dispose:async()=>{disposed=true;}};};
+ const invoke=async(name)=>{cases++;const dir=join(root,name);await mkdir(dir);closed=false;disposed=false;const result=await terminalPhase({own:identity,operation,originals,context,page:{},grant:grant(),evidenceDirectory:dir,idleSince,open,now:()=>clockOverride??Date.now()});assert(!JSON.stringify(result).includes(canary));
+  const diagnostics=JSON.parse(await readFile(join(dir,'binding-diagnostics.json')));assert.deepEqual(diagnostics,result.bindingDiagnostics);assert.deepEqual((await readFile(join(dir,'binding-diagnostics.jsonl'),'utf8')).trim().split('\n').map(JSON.parse),diagnostics);assert(result.bindingDiagnosticsRetained);
+  for(const row of diagnostics){assert.deepEqual(Object.keys(row),['predicateId','ok','httpCategory']);assert.equal(typeof row.ok,'boolean');assert(/^(before|after)\.[a-zA-Z0-9.-]+$/.test(row.predicateId));assert(['not-applicable','transport','ok','unauthorized','forbidden','not-found','client-error','server-error','other'].includes(row.httpCategory));}
+  assert(!JSON.stringify(diagnostics).includes(canary));return {result,dir};};
  const setup=await invoke('setup');assert(setup.result.ok&&setup.result.hostBytesRetained&&closed&&disposed);assert((await readFile(join(setup.dir,'done.json'))).length>100);
  originals={baseline:await readFile(join(setup.dir,'baseline.json')),expectations:await readFile(join(setup.dir,'expectations.json'))};
  const originalBaseline=Buffer.from(originals.baseline);operation='check';invalidProvenance=true;assert(!(await invoke('invented-host-proof')).result.ok);invalidProvenance=false;
  for(const [n,patch]of [['foreign-receipt',{receipt:{...identity.receipt,taskId:'01M51VVVVVVVVVVVVVVVVVVVVV'}}],['undefined-expiry',{expiresAt:undefined}],['string-expiry',{expiresAt:'future'}],['infinite-expiry',{expiresAt:Infinity}],['undefined-observed',{storedProfileObservedAt:undefined}],['string-observed',{storedProfileObservedAt:'now'}],['zero-observed',{storedProfileObservedAt:0}]]){grantPatch=patch;assert(!(await invoke(n)).result.ok);}grantPatch={};
+ // Real terminalPhase failing paths retain only the precise fixed predicate, before open.
+ const fail=async(name,predicate)=>{const n=opened,v=await invoke(name);assert(!v.result.ok);assert.equal(opened,n);assert(v.result.bindingDiagnostics.some(x=>x.predicateId==='before.'+predicate&&!x.ok));};
+ for(const [status,category]of [[401,'unauthorized'],[403,'forbidden'],[404,'not-found'],[429,'client-error'],[503,'server-error'],[302,'other'],['transport','transport'],['json','ok']]){
+  httpFailure=status;await fail('http-'+status,status==='json'?'auth.json':'auth.http');const rows=JSON.parse(await readFile(join(root,'http-'+status,'binding-diagnostics.json')));assert(rows.some(x=>!x.ok&&x.httpCategory===category));
+ }httpFailure=null;
+ for(const [name,match,patch,predicate]of [
+  ['profile-id',v=>v?.name===canary,v=>({...v,id:'foreign'}),'profile.id'],
+  ['profile-creator',v=>v?.name===canary,v=>({...v,userId:'foreign'}),'profile.creator'],
+  ['profile-type',v=>v?.name===canary,v=>({...v,agentType:'foreign'}),'profile.agent-type'],
+  ['profile-size',v=>v?.name===canary,v=>({...v,vmSizeOverride:'cx43'}),'profile.size'],
+  ['profile-runtime',v=>v?.name===canary,v=>({...v,runtime:'other'}),'profile.runtime'],
+  ['profile-scope',v=>v?.name===canary,v=>({...v,projectId:'foreign'}),'profile.scope'],
+  ['profile-list',v=>Array.isArray(v?.items),v=>({...v,items:null}),'profiles.items'],
+  ['profile-ambiguous',v=>Array.isArray(v?.items),v=>({...v,items:[...v.items,...v.items]}),'profiles.unique-name'],
+  ['task-profile-id-v-name',v=>v?.outputBranch===identity.branch,v=>({...v,agentProfileHint:identity.agentProfileId}),'task.profile-hint'],
+  ['task-owner',v=>v?.outputBranch===identity.branch,v=>({...v,userId:'foreign'}),'task.owner'],
+  ['session-missing-acp',v=>!!v?.session,v=>({session:{...v.session,agentSessionId:undefined}}),'session.agent-session'],
+  ['workspace-provider',v=>!!v?.hardware,v=>({...v,hardware:{cloudProvider:'foreign'}}),'workspace.provider'],
+  ['state-active',v=>!!v?.state,v=>({...v,state:{...v.state,runtimeWorkState:'active'}}),'state.work-state'],
+  ['state-count',v=>!!v?.state,v=>({...v,state:{...v.state,runtimeWorkCount:1}}),'state.work-count'],
+ ]){responsePatch=v=>match(v)?patch(v):v;await fail(name,predicate);}responsePatch=null;
+ // Deployed optional null runtime and shared PROJECT creator are supported; no new owner gate.
+ profileCreator='project-collaborator';profileRuntimeOverride=true;stateTime=Date.now()-120000;
+ const shared=await invoke('shared-project-old-idle');assert(shared.result.ok);assert(stateTime<Date.now()-60000);
+ profileCreator='owner';profileRuntimeOverride=false;
+ stateTime=idleSince-1;await fail('before-setup-event','state.activity-time');
+ stateTime=Date.now()+300000;await fail('future-idle-event','state.activity-time');stateTime=null;
+ const oldSince=idleSince;idleSince=undefined;await fail('missing-caller-bound','state.since');idleSince=oldSince;
  expireAfterInput=true;const expired=await invoke('action-expired-close');assert(!expired.result.ok&&expired.result.terminalClosed&&expired.result.socketClosed);expireAfterInput=false;clockOverride=null;
  assert((await invoke('turn-check')).result.ok);assert((await invoke('wake-check')).result.ok);
  // Same parsed JSON, different restored ORIGINAL bytes: never normalize/rebaseline.
