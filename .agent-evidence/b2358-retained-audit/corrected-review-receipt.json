@@ -7,5 +7,7 @@
     "exit": 0,
     "ownedChildGone": true
   },
-  "independentReview": "pending"
+  "independentReview": "PASS9d2b4690 reported by release coordinator; exact source and aggregate test independently verified",
+  "sourceBytes": 9449,
+  "base64Bytes": 12600
 }
