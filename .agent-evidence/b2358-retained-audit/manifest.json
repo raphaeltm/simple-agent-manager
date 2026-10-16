@@ -1,8 +1,12 @@
 {
-  "B-ONLY-RUNBOOK.md": "343228279ad2a2b3788c6c099dcdfbb97670a73b43889d7c91e90c489127616f",
-  "HANDOFF.md": "8bd0ee306f12e909a24a9c5785b8d055a8e3fc3006486e08e03022b49f6594f5",
+  "B-ONLY-RUNBOOK.md": "28a5ace2172243fd907f6f167ee3c2eb986dc775a9497f408674b066cc512a5c",
+  "FINAL-PROMPT-TEMPLATE.txt": "c2ec0b67e697b69939a86161b42f398955c41d943fd5ae546a82bcb7444dec48",
+  "HANDOFF.md": "446acce3e149249e93ba5805af54a24208b716031776f4665ca412f94d875ad2",
   "b-probe-27e.py": "889d7588ed44c8ab89e6ba7880ff20d81017f294bb7b31edfbc320ced064f509",
+  "b-probe-bounded.py": "60d150c2ca6210907a134cedfc58f01fc8bf3420e666f06249668e9d7cff88b7",
   "cleanup-canonical.json": "d217349d5efdbf783582ee3b5c4b81702514126db2e4a01d5bfba8ae2c4bdfde",
+  "corrected-review-receipt.json": "9f399a1be2c88f6a5ab4d99cb926ef83cf3a1e0f16febc055c62028742cbc7a3",
   "probe-source.json": "f20a68de5a6ca6b63f040c96c79d14ea3386cc11ddffafecf7539892a5749077",
-  "reliability-instant-codex-retry-allowlisted.json": "e0b16ee93302b3b6cc468f18539ee0211554db487539fe7b27267f289fc1e794"
+  "reliability-instant-codex-retry-allowlisted.json": "e0b16ee93302b3b6cc468f18539ee0211554db487539fe7b27267f289fc1e794",
+  "test-aggregate.py": "0ff87dd92984770f9b43653828a60924dcc16222ddf409e4af4336ca34a61c9c"
 }

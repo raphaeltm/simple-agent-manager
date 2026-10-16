@@ -1,0 +1,11 @@
+{
+  "sourceSha256": "60d150c2ca6210907a134cedfc58f01fc8bf3420e666f06249668e9d7cff88b7",
+  "promptBytes": 13939,
+  "promptLimit": 16000,
+  "pendingFinalReleaseSubstitution": true,
+  "aggregateSignalTest": {
+    "exit": 0,
+    "ownedChildGone": true
+  },
+  "independentReview": "pending"
+}
