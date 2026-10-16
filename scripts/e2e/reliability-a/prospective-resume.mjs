@@ -1,4 +1,4 @@
-/** Verification-only second restore of ONE retained case. No submission/setup path. */
+/** Verification-only bounded restore continuations of ONE retained case. No submission/setup path. */
 import {readFile,lstat} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {run as lifecycle} from './prospective-vm-controller.mjs';

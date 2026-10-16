@@ -74,9 +74,9 @@ export async function run({requestSafe,logoutSafe,summary},resume=false){
   let original;
   if(resume){
    const retained=await import('./prospective-resume.mjs');retained.resumeIdentity(config.own);
-   if(!exact(config.resume,['kind','originalEvidenceSha256'])||config.resume.kind!=='second-prospective-restore'||config.resume.originalEvidenceSha256!==retained.originalEvidenceSha256)throw 0;
+   if(!exact(config.resume,['kind','originalEvidenceSha256'])||!['second-prospective-restore','third-prospective-restore'].includes(config.resume.kind)||config.resume.originalEvidenceSha256!==retained.originalEvidenceSha256)throw 0;
    original=await retained.retainedOriginals(config.own);sequence=new retained.ContinuationSequence(config.own,config.started,config.hard);
-   result.coverage='second-prospective-restore';result.firstWakePass=false;
+   result.coverage=config.resume.kind;result.restoreAttemptOrdinal=config.resume.kind==='third-prospective-restore'?3:2;result.firstWakePass=false;
   }else sequence=new AcceptanceSequence(config.own,config.started,config.hard);
   live();if(config.started>Date.now())throw 0;
   await save('operation-start.json',{started:config.started,hard:config.hard,action:action(),taskId:config.own.taskId});
@@ -115,7 +115,7 @@ export async function run({requestSafe,logoutSafe,summary},resume=false){
   sequence.append('sleep',{ok:true,snapshotAvailable:true,sleep200:true,snapshotId:snapshot.snapshotId},Date.now());
   }
   stage='wake';const wakeAt=await prompt(config.own,'Authorized normal snapshot recovery only. Do not edit, run tools, publish, complete or start background work. Return control with READY.');wakeSubmittedAt=wakeAt;await save('wake-submitted.json',{taskId:config.own.taskId,sessionId:config.own.sessionId,at:wakeAt});
-  if(resume)await save('resume-attempt-receipt.json',{kind:'second-prospective-restore',taskId:config.own.taskId,sessionId:config.own.sessionId,branch:config.own.branch,agentProfileId:config.own.agentProfileId,started:config.started,hard:config.hard,submittedAt:wakeAt,acceptedAt:Date.now(),promptStatus:202,snapshotId:protectedSnapshot.snapshotId,snapshotGenerationSha256:hash(protectedSnapshot.snapshotGeneration),originalEvidenceSha256:config.resume.originalEvidenceSha256});
+  if(resume)await save('resume-attempt-receipt.json',{kind:config.resume.kind,restoreAttemptOrdinal:result.restoreAttemptOrdinal,taskId:config.own.taskId,sessionId:config.own.sessionId,branch:config.own.branch,agentProfileId:config.own.agentProfileId,started:config.started,hard:config.hard,submittedAt:wakeAt,acceptedAt:Date.now(),promptStatus:202,snapshotId:protectedSnapshot.snapshotId,snapshotGenerationSha256:hash(protectedSnapshot.snapshotGeneration),originalEvidenceSha256:config.resume.originalEvidenceSha256});
   mapping=await waitIdle(config.own,wakeAt);
   sequence.append('wake',{ok:true,actualHarness:true,freshInactive:true,prompt202:true},Date.now());
   stage='wake-check';await phase('wake-check',config.own,'check',{baseline,expectations},mapping);result.originalRestoredBytesVerified=true;sequence.append('wake-check',{ok:true,originalRestoredBytesVerified:true,consumedGenerationObserved:false},Date.now());

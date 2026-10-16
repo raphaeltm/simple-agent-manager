@@ -1,5 +1,54 @@
 # Prospective VM acceptance — offline tooling, no live authorization
 
+## Third restore — concrete offline plan, no window yet
+
+Coordinator 0fa2d88a authorizes this plan and a minimal receipt/coverage enum delta.
+Keep the c983 source-correct proof gates and pinned original 16-file map below.
+The first failed final SHA is
+`67f597ddc74113cd0c20fc695822db6f28e201552b2cf8f3472a08289c7bca5a`;
+the second failed final SHA is
+`4234b8eb3063b9feb7656e766b73b9a28141ce54a6ab0c2b961aa9262bcdb54c`.
+Preserve both original directories, their clocks/receipts/projections and NOT PASS
+results. First-cause UNKNOWN and second measured current-generation difference /
+unsupported equality gate remain historical findings, never repaired evidence.
+
+The only prospective configuration difference is
+`resume.kind:'third-prospective-restore'`. The actual accepted202 receipt and final
+coverage retain that label plus restoreAttemptOrdinal3; second remains ordinal2.
+Only those two fixed labels are supported, not arbitrary attempts/adoption.
+The same exact existing task/session/branch/profile and original submit receipt
+remain bound. No new task, fixture, setup, rebaseline or evidence reconstruction.
+
+Do not create `/tmp/reliability-prospective-vm-claude-resume-002` or publish a new
+window yet. First require B's exact enum/receipt-delta review, strict termination
+of node01M51VFZKX2538207M5SGPRQ0B (canonical DELETED **and** separate normal
+runtimeTerminationConfirmedAt), the existing 08:48 read-only guard, and explicit
+coordinator resolution of the queued PR2337 staging slot with its parent. No new
+reservation, deploy, pin restoration or runtime is authorized by this document.
+
+After coordinator conditional runtime GO and ALL fresh guards pass, create one
+NEW private operation directory and publish an immutable 45-minute window BEFORE
+login/restore. Action cutoff is hard minus9min; supervisor/managed job share hard.
+Refresh owner-wide VM0/claims0, exact-session workspace/recovery/snapshot-claim0,
+project duplicates0, normal owner/profile/task/session/branch, current AVAILABLE /
+undegraded snapshot expiry beyond hard, pool40 configured-ready, b467 pin/APIe2,
+actual catalogue/configuration, staging reservation and absence of duplicates.
+Reuse approved45active+40tail85VMmin planning (two rounded hours EUR .0176–.0512
+compute only, IP/tax/API/storage/provider-delay exclusions; refresh prices first).
+No sizing, retry, replacement, extension, Codex case or second VM.
+
+Validate the pinned16 original bytes/schema BEFORE login; run the same reviewed
+resume entrypoint under safe-controller supervision. Independent resume-snapshot
+proof -> ONE normal READY restore/actual202 third-attempt receipt -> exact restored
+ID/status/task/workspace/accepted-wake/time proof with protected/latest generation
+hashes separately retained and consumedGenerationObserved:false -> ORIGINAL
+baseline BYTE equality plus all Git/index/dirty-work/ref/PR checks. IFF valid,
+actual complete_task/tool+canonical/runtime proof -> retained FIRST independent
+target observer -> FIRST normal Sleep/independent AVAILABLE proof/auth closure.
+Invalid means safe preservation and stop; no repair. Retain strict provider cleanup
+ownership afterward. All must fit that one published window. No previous events
+are imported as current PASS and no first/second result is relabeled.
+
 Coordinator 3e7af6bc authorizes a source-correct OFFLINE verifier correction only.
 Both historical attempts remain NOT PASS. The second run measured a different
 latest generation, but requiring its equality after READY/idle was unsupported:
