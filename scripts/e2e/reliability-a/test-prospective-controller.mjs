@@ -42,7 +42,7 @@ try{
  await writeFile(producerHarness,`import sys,os,json,time,importlib.util,urllib.request
 from pathlib import Path
 from datetime import datetime,timezone
-folder=Path(sys.argv[1]); config=json.loads((folder/'config.json').read_text()); own=config['own']; mapping=json.loads((folder/'wake-check-mapping.json').read_text())
+folder=Path(sys.argv[1]); pin=json.loads((folder/'release-pin.json').read_text()); config=json.loads((folder/'config.json').read_text()); own=config['own']; mapping=json.loads((folder/'wake-check-mapping.json').read_text())
 spec=importlib.util.spec_from_file_location('actual_reader',sys.argv[2]); reader=importlib.util.module_from_spec(spec);spec.loader.exec_module(reader)
 class Response:
  def __init__(self,v):self.v=v
@@ -50,15 +50,15 @@ class Response:
  def __exit__(self,*a):pass
  def read(self):return json.dumps(self.v).encode()
 def request(req,timeout):
- if req.full_url.endswith('/settings'):return Response({'result':{'bindings':[{'name':'DATABASE','id':'synthetic'},{'name':'VM_AGENT_REQUIRED_VERSION','text':reader.VERSION}]}})
+ if req.full_url.endswith('/settings'):return Response({'result':{'bindings':[{'name':'DATABASE','id':'synthetic'},{'name':'VM_AGENT_REQUIRED_VERSION','text':pin['agentSource']}]}})
  sql=json.loads(req.data)['sql']; assert sql.startswith('SELECT ')
  if 'FROM tasks WHERE id=' in sql:rows=[{'id':own['taskId'],'user_id':'owner','project_id':reader.PROJECT,'chat_session_id':own['sessionId'],'workspace_id':mapping['workspaceId'],'output_branch':own['branch'],'agent_profile_hint':own['agentProfileId'],'status':'in_progress','claimed_warm_node_id':None,'completed_at':None}]
  elif 'FROM nodes WHERE user_id=' in sql:rows=[{'id':mapping['nodeId']}]
  elif 'FROM tasks WHERE user_id=' in sql or 'FROM workspaces WHERE node_id=' in sql:rows=[]
  elif 'FROM workspaces WHERE id=' in sql:rows=[{'id':mapping['workspaceId'],'user_id':'owner','project_id':reader.PROJECT,'chat_session_id':own['sessionId'],'node_id':mapping['nodeId'],'branch':own['branch'],'status':'running'}]
- elif 'FROM nodes WHERE id=' in sql:rows=[{'id':mapping['nodeId'],'user_id':'owner','runtime':'vm','agent_version':reader.VERSION,'capacity_pool_revision':40,'status':'running'}]
+ elif 'FROM nodes WHERE id=' in sql:rows=[{'id':mapping['nodeId'],'user_id':'owner','runtime':'vm','agent_version':pin['agentSource'],'capacity_pool_revision':pin['capacityPoolRevision'],'status':'running'}]
  elif 'FROM agent_profiles' in sql:rows=[{'id':own['agentProfileId'],'user_id':'owner','project_id':reader.PROJECT,'agent_type':own['agentType'],'runtime':'vm','vm_size_override':None}]
- elif 'FROM session_snapshots' in sql:rows=[{'id':json.loads((folder/'protected-snapshot.json').read_text())['snapshotId'],'snapshot_generation':'different-generation','recovery_status':'restored','recovery_task_id':own['taskId'],'recovery_workspace_id':mapping['workspaceId'],'restored_at':datetime.now(timezone.utc).isoformat(),'ignoredPrivate':os.environ['CF_TOKEN']}]
+ elif 'FROM session_snapshots' in sql:rows=[{'id':json.loads((folder/'protected-snapshot.json').read_text())['snapshotId'],'snapshot_generation':'different-generation','recovery_status':'restored','recovery_task_id':own['taskId'],'recovery_workspace_id':'01M51OOOOOOOOOOOOOOOOOOOOO','restored_at':datetime.now(timezone.utc).isoformat(),'ignoredPrivate':os.environ['CF_TOKEN']}]
  else:raise AssertionError('fixed-query')
  return Response({'result':[{'results':rows}]})
 reader.urllib.request.urlopen=request;reader.sys.argv=['actual','wake-check'];reader.main()
@@ -74,6 +74,7 @@ reader.urllib.request.urlopen=request;reader.sys.argv=['actual','wake-check'];re
   const started=Date.now()-1000,hard=started+2700000,config={started,hard,own,observer,evidencePrUrl:'https://github.com/raphaeltm/simple-agent-manager/pull/2355'};
   if(resumed)config.resume={kind:'second-prospective-restore',originalEvidenceSha256:evidenceSha};
   await writeFile(join(dir,'config.json'),JSON.stringify(config));
+  await writeFile(join(dir,'release-pin.json'),JSON.stringify({apiSource:'c'.repeat(40),agentSource:'d'.repeat(40),publishedBinarySha256:'e'.repeat(64),rawHostShaObserved:false,capacityPoolRevision:73}));
   let virtualNow=null;
   let woken=false,ownStatus=resumed?'sleeping':'in_progress',observerStatus='completed',completedAt,active=own,loggedOut=false,browserClosed=false;
   if(['early-complete','resume-early-complete'].includes(mode)){ownStatus='completed';completedAt=new Date().toISOString();}
@@ -116,7 +117,7 @@ reader.urllib.request.urlopen=request;reader.sys.argv=['actual','wake-check'];re
      if(mode==='resume-real-producer-failure'){
       const pending=(async()=>{for(let n=0;n<100;n++){try{await readFile(join(dir,'wake-check-mapping.json'));break;}catch{await new Promise(r=>setTimeout(r,10));}}
        const child=await promisify(execFile)('python3',[producerHarness,dir,new URL('prospective-proof.py',source).pathname],{env:{...process.env,SAM_PROSPECTIVE_ROOT:dir,CF_TOKEN:'SYNTHETIC_PRIVATE_CANARY',CF_ACCOUNT_ID:'synthetic'},timeout:3000,maxBuffer:100000});
-       assert(!child.stdout.includes('CANARY')&&!child.stderr.includes('CANARY'));const output=JSON.parse(child.stdout);assert(!output.ok&&output.diagnostic.predicates.generationMatches===false);
+       assert(!child.stdout.includes('CANARY')&&!child.stderr.includes('CANARY'));const output=JSON.parse(child.stdout);assert(!output.ok&&output.diagnostic.predicates.generationMatches===false&&output.diagnostic.predicates.workspaceMatches===false);
       })();pendingWrites.push(pending);
      }
     }
