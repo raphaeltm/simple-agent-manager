@@ -1,0 +1,19 @@
+{
+  "observedAtMs": 1792154091051,
+  "ok": true,
+  "rows": [
+    {
+      "agent_version": "b467f389811eadeaf973960bb30f9fa7b9cb4678",
+      "capacity_pool_revision": 40,
+      "claimed_warm_node_id": null,
+      "id": "01M52AZ2JZKRN9V0BSHRBZW9C9",
+      "node_id": "01M52AZAP0751E1W2CSFZFA5T1",
+      "node_status": "running",
+      "runtime": "vm",
+      "status": "delegated",
+      "warm_since": null,
+      "workspace_id": "01M52B9VTEA73KBCWAFCH1SJKH",
+      "workspace_status": "creating"
+    }
+  ]
+}

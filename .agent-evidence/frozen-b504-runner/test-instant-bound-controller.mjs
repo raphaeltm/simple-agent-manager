@@ -1,0 +1,168 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,chmodSync,copyFileSync,existsSync,rmSync,statSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join,dirname} from 'node:path';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {spawnSync} from 'node:child_process';
+const here=dirname(fileURLToPath(import.meta.url)),canary='cookie=ghs_'+'S'.repeat(36),project='01KJNR9R3TEN3KX1ETE33852R8',repository='serverspresentation2025/crewai';
+const uid=n=>String(n).padStart(26,'0');
+function execute(binary,args,cwd,expected=0,env={}){
+ const r=spawnSync(binary,args,{cwd,encoding:'utf8',timeout:10000,env:{...process.env,GIT_AUTHOR_NAME:'Synthetic Fixture',GIT_AUTHOR_EMAIL:'fixture@example.invalid',GIT_COMMITTER_NAME:'Synthetic Fixture',GIT_COMMITTER_EMAIL:'fixture@example.invalid',...env}});
+ assert.equal(r.status,expected,'bounded actual command status');assert.equal(r.signal,null,'bounded command');return r.stdout;
+}
+test('actual supervised exact-context lifecycle preserves ownership, completion and ALL-ref sequencing without credential output',()=>{
+ const root=mkdtempSync(join(tmpdir(),'sam-bound-instant-'));
+ try{
+  const remote=join(root,'remote.git'),repo=join(root,'repo'),bin=join(root,'bin');mkdirSync(repo);mkdirSync(bin);
+  execute('git',['init','--bare','--quiet',remote],root);execute('git',['--git-dir='+remote,'symbolic-ref','HEAD','refs/heads/main'],root);execute('git',['init','--quiet','--initial-branch=main'],repo);
+  execute('git',['commit','--quiet','--allow-empty','-m','synthetic baseline'],repo);execute('git',['remote','add','origin',remote],repo);
+  execute('git',['push','--quiet','origin','main','HEAD:refs/heads/sam/first','HEAD:refs/heads/sam/final'],repo);
+  execute('git',['switch','--quiet','-c','sam/first'],repo);
+  execute('python3',[join(here,'git-probe.py'),'prepare','--disposable-repository'],repo);
+  const baseline=JSON.parse(readFileSync(join(repo,'.reliability-a/baseline.json'),'utf8'));
+  writeFileSync(join(bin,'git'),`#!/usr/bin/env python3\nimport os,sys\na=sys.argv[1:]\nsys.stderr.write(${JSON.stringify(canary)})\nif a==['ls-remote','--heads','https://github.com/${repository}.git']:a=['ls-remote','--heads',os.environ['TEST_REMOTE']]\nos.execv('/usr/bin/git',['git',*a])\n`);chmodSync(join(bin,'git'),0o700);
+  writeFileSync(join(bin,'gh'),`#!/bin/sh\nprintf '[]\\n'\nprintf '%s' '${canary}' >&2\n`);chmodSync(join(bin,'gh'),0o700);
+  const expectedPath=join(root,'expectations.json'),probeEnv={PATH:bin+':'+process.env.PATH,TEST_REMOTE:remote};
+  const observerArgs=[join(here,'terminal-observer.py'),'record','--repository',repository,'--branch','sam/first','--baseline',join(repo,'.reliability-a/baseline.json'),'--expectations',expectedPath];
+  execute('python3',observerArgs,repo,0,probeEnv);
+  const expectations=JSON.parse(readFileSync(expectedPath,'utf8')),completedAt=new Date().toISOString();
+  const checkArgs=[...observerArgs];checkArgs[1]='check';checkArgs.push('--terminal-completed-at',completedAt);
+  const good=JSON.parse(execute('python3',checkArgs,repo,0,probeEnv));
+  execute('git',['push','--quiet','origin','main:refs/heads/sam/future-vm'],repo);
+  const bad=JSON.parse(execute('python3',checkArgs,repo,1,probeEnv));
+  assert.equal(good.checks.remoteRefsUnchanged,true);assert.equal(bad.checks.remoteRefsUnchanged,false,'next startup branch invalidates old protected baseline');
+  for(const mode of ['own-observe','own-missing-proof','own-wrong-timestamp','ok','changed-refs','foreign-project','foreign-session','wrong-runtime','wrong-profile','wrong-branch','no-reopen-proof','reopen','pending-delete','cleanup','sleep','expired','expired-cleanup','prepare','check-record','wake-check','complete','missing-phase','null-state','late-phase','source-pr','wrong-source-pr','profile-missing','profile-wrong-id','profile-wrong-owner','profile-wrong-scope','profile-wrong-runtime','profile-collision','raw-id-hint','bootstrap-assets']){
+   const dir=join(root,mode);mkdirSync(dir,{mode:0o700});
+   const contexts=[0,1].map(i=>({taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,workspaceId:uid(20+i),nodeId:uid(30+i),branch:i?'sam/final':'sam/first',agentProfileId:uid(40+i),agentType:i?'claude-code':'openai-codex',submittedAt:Date.now()-2000,evidencePrUrl:`https://github.com/${repository}/pull/1`,receipt:{taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,branchName:i?'sam/final':'sam/first',status:'queued'}}));
+   if(['source-pr','wrong-source-pr'].includes(mode))contexts.forEach(x=>x.evidencePrUrl='https://github.com/raphaeltm/simple-agent-manager/pull/'+(mode==='source-pr'?'2355':'2356'));
+   const c={createdAt:Date.now()-3000,expiresAt:Date.now()+7_000_000,contexts,cleanupAuthorized:true};
+   if(['expired','expired-cleanup'].includes(mode))c.expiresAt=Date.now()-1;
+   const kind=mode.startsWith('own-')?'own-observe':mode==='source-pr'?'complete':['cleanup','pending-delete','expired-cleanup'].includes(mode)?'cleanup':mode==='sleep'?'sleep':['prepare','check-record','wake-check','complete','bootstrap-assets'].includes(mode)?mode:['missing-phase','late-phase'].includes(mode)?'wake-check':'observe';
+   const op={kind,contextSlot:kind==='own-observe'?0:1,...(['observe','own-observe'].includes(kind)?{target:{taskId:contexts[0].taskId,branch:'sam/first',baseline,expectations}}:{})};
+   writeFileSync(join(dir,'config.json'),JSON.stringify(c),{mode:0o600});writeFileSync(join(dir,'operation.json'),JSON.stringify(op),{mode:0o600});
+   if(['check-record','wake-check','complete','late-phase','source-pr'].includes(mode))writeFileSync(join(dir,contexts[1].taskId+'-phase-start.json'),JSON.stringify({startedAt:Date.now()-(mode==='late-phase'?781000:500)}),{mode:0o600});
+   if(kind==='own-observe'&&mode!=='own-missing-proof')writeFileSync(join(dir,'canonical-completed-original.json'),JSON.stringify({taskId:contexts[0].taskId,branch:contexts[0].branch,completedAt:mode==='own-wrong-timestamp'?'2026-10-14T00:00:00.000Z':completedAt}),{mode:0o600});
+   writeFileSync(join(dir,'observer-artifact.json'),JSON.stringify({artifactId:uid(50),taskId:contexts[op.contextSlot].taskId}),{mode:0o600});
+   if(mode==='reopen')writeFileSync(join(dir,'canonical-completed-original.json'),JSON.stringify({taskId:contexts[1].taskId,branch:contexts[1].branch,completedAt}),{mode:0o600});
+   for(const name of ['queue-controller.mjs','b-probe.py','git-probe.py','terminal-observer.py'])copyFileSync(join(here,name),join(dir,name));
+   const mock=join(dir,'mock.mjs');
+   writeFileSync(mock,`const own=${JSON.stringify(contexts[op.contextSlot])},target=${JSON.stringify(contexts[0])},mode=${JSON.stringify(mode)},kind=${JSON.stringify(kind)},completedAt=${JSON.stringify(completedAt)},canary=${JSON.stringify(canary)},probe=${JSON.stringify(mode==='changed-refs'?bad:good)};
+    let loggedIn=false,prompted=false,deleted=false;
+    export const chromium={launch:async()=>({newContext:async()=>({request:{fetch:async(url,options)=>{
+     console.log(canary);console.error(canary);
+     if(options.headers.Origin!=='https://api.sammy.party'||options.maxRedirects!==0)throw new Error(canary);
+     const path=new URL(url).pathname;let status=200,body={};const prof={id:mode==='profile-wrong-id'?'foreign':own.agentProfileId,userId:'owner',projectId:mode==='profile-wrong-scope'?'foreign':${JSON.stringify(project)},name:'Reviewed Display Name',agentType:own.agentType,runtime:mode==='profile-wrong-runtime'?'vm':'cf-container'};
+     if(path==='/api/auth/token-login')loggedIn=true;
+     else if(path==='/api/auth/sign-out')loggedIn=false;
+     else if(path==='/api/auth/get-session')body=null;
+     else if(path==='/api/nodes'){if(!loggedIn)status=403;else body=[{id:own.nodeId,cloudProvider:mode==='wrong-runtime'?'hetzner':'cloudflare',providerInstanceType:'cf-container'}];}
+     else if(path==='/api/projects/${project}/agent-profiles/'+own.agentProfileId){body=prof;if(mode==='profile-missing')status=404;}
+     else if(path==='/api/projects/${project}/agent-profiles')body={items:mode==='profile-collision'?[prof,{...prof,id:'foreign'}]:[prof]};
+     else if(path==='/api/projects/${project}/tasks/'+own.taskId)body={id:own.taskId,projectId:mode==='foreign-project'?'foreign':${JSON.stringify(project)},outputBranch:mode==='wrong-branch'?'sam/foreign':own.branch,userId:mode==='profile-wrong-owner'?'foreign':'owner',agentProfileHint:mode==='wrong-profile'?'foreign':mode==='raw-id-hint'?own.agentProfileId:'Reviewed Display Name',taskMode:'task',workspaceId:deleted?null:own.workspaceId,status:deleted?'cancelled':['complete','source-pr'].includes(mode)&&prompted?'completed':['reopen','no-reopen-proof','own-observe','own-missing-proof','own-wrong-timestamp'].includes(mode)&&!prompted?'completed':'in_progress',completedAt:['complete','source-pr'].includes(mode)&&prompted?new Date().toISOString():completedAt,completionEvidence:{notes:canary}};
+     else if(path==='/api/projects/${project}/tasks/'+target.taskId)body={id:target.taskId,projectId:${JSON.stringify(project)},outputBranch:target.branch,status:'completed',completedAt,completionEvidence:{notes:canary}};
+     else if(path==='/api/workspaces/'+own.workspaceId){
+      if(options.method==='DELETE'){if(mode==='pending-delete'){status=202;body={success:true,deletionStatus:'pending'};}else{deleted=true;body={success:true,deletionStatus:'confirmed'};}}
+      else if(deleted)status=404;
+      else body={id:own.workspaceId,projectId:${JSON.stringify(project)},chatSessionId:mode==='foreign-session'?target.sessionId:own.sessionId,nodeId:own.nodeId,branch:own.branch,repository:${JSON.stringify(repository)},workspaceProfile:'lightweight',status:'running',errorMessage:canary};
+     }else if(path==='/api/projects/${project}/sessions/'+own.sessionId+'/state')body={agentSessionId:mode==='null-state'?null:'33333333-3333-4333-8333-333333333333',agentType:own.agentType,state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,activityAt:Date.now(),runtimeWorkUpdatedAt:Date.now()}};
+     else if(path==='/api/projects/${project}/sessions/'+own.sessionId+'/prompt'){
+      if(options.method!=='POST'||!(['observe','own-observe'].includes(kind)?options.data.content.includes('/terminal-observer.py check')&&options.data.content.includes('sam/first'):(kind==='bootstrap-assets'?options.data.content.includes('targeted bootstrap finish')&&options.data.content.includes('mcp__sam_mcp__upload_to_library')&&options.data.content.includes('/opt/uv-python/'):options.data.content.includes('Reliability acceptance '+kind)))||options.data.content.includes('git push'))throw new Error(canary);
+      if(['foreign-project','foreign-session','wrong-runtime','wrong-profile','wrong-branch','no-reopen-proof','expired'].includes(mode))throw new Error(canary);
+      prompted=true;body={accepted:true,status:'queued'};
+     }else if(path==='/api/projects/${project}/sessions/'+own.sessionId+'/stop')body={status:'stopped',workspaceDeleted:true};
+     else if(path==='/api/workspaces/'+own.workspaceId+'/sleep')body={status:'sleeping',workspaceId:own.workspaceId,chatSessionId:own.sessionId,snapshotExpiresAt:new Date(Date.now()+60000).toISOString()};
+     else if(path==='/api/projects/${project}/library/${uid(50)}/download')body=probe;
+     else throw new Error(canary);
+     if(options.method==='DELETE'&&path!=='/api/workspaces/'+own.workspaceId)throw new Error(canary);
+     return {status:()=>status,json:async()=>body,dispose:async()=>{}};
+    }}}),close:async()=>{}})};`);
+   const source=readFileSync(join(here,'instant-bound-controller.mjs'),'utf8').replace("'/tmp/reliability-browser-deps/node_modules/playwright/index.mjs'",JSON.stringify(pathToFileURL(mock).href));
+   const entry=join(dir,'entry.mjs');writeFileSync(entry,source);
+   const r=spawnSync(process.execPath,[join(here,'safe-controller.mjs'),entry,'5000'],{encoding:'utf8',timeout:7000,env:{...process.env,SAM_INSTANT_BOUND_ROOT:dir,SAM_PLAYWRIGHT_PRIMARY_USER:canary}});
+   assert.equal(r.status,0,'supervised status');assert.equal(r.stderr,'','private stderr');assert.ok(!r.stdout.includes(canary),'private stdout');
+   const pass=['own-observe','ok','reopen','cleanup','sleep','expired-cleanup','prepare','check-record','wake-check','complete','source-pr','bootstrap-assets'].includes(mode);assert.equal(JSON.parse(r.stdout).category,pass?'ok':'controller','mode '+mode);
+   if(pass){const file=join(dir,'result.json');assert.ok(!readFileSync(file,'utf8').includes(canary),'safe sidecar');assert.equal(statSync(file).mode&0o777,0o600);}
+   else assert.equal(existsSync(join(dir,'result.json')),false,'no failed sidecar');
+   if(mode==='own-observe'){const proof=JSON.parse(readFileSync(join(dir,contexts[0].taskId+'-same-context-proof.json'),'utf8'));assert.equal(proof.independentRuntime,false);assert.equal(proof.sameContext,true);assert.equal(existsSync(join(dir,contexts[0].taskId+'-independent-proof.json')),false);assert.equal(JSON.parse(readFileSync(join(dir,contexts[0].taskId+'-before-reopen.json'),'utf8')).status,'completed');}
+   if(mode==='reopen'){const receipt=JSON.parse(readFileSync(join(dir,'observer-prompt-receipt.json'),'utf8'));assert.equal(receipt.accepted,true);assert.equal(receipt.observerOriginalCompletedAt,completedAt);}
+   if(mode==='reopen')assert.equal(JSON.parse(readFileSync(join(dir,contexts[1].taskId+'-before-reopen.json'),'utf8')).completedAt,completedAt,'preserved original completion');
+  }
+ }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('actual bootstrap capsule yields only fixed steps and booleans on success and injected network failure',async()=>{
+ const {bootstrapAssetsScript}=await import('./instant-bound-controller.mjs');
+ const root=mkdtempSync(join(tmpdir(),'sam-bootstrap-capsule-'));
+ try{
+  for(const fail of [false,true]){
+   const folder=join(root,fail?'failed':'ok');
+   const script=bootstrapAssetsScript(folder);
+   const prefix=`import pathlib,urllib.request,io,json\noriginal=pathlib.Path.read_text;originalBytes=pathlib.Path.read_bytes\ndef text(self,*a,**kw):\n if str(self)=='/etc/sam/vm-agent-version.json':return json.dumps({'version':'b467f389811eadeaf973960bb30f9fa7b9cb4678'})\n return original(self,*a,**kw)\ndef binary(self,*a,**kw):\n if str(self)=='/usr/local/bin/vm-agent':return b'synthetic-installed-binary'\n return originalBytes(self,*a,**kw)\npathlib.Path.read_text=text;pathlib.Path.read_bytes=binary\ndef fetch(url,timeout):\n ${fail?"raise OSError('private-canary-must-not-escape')":"return io.BytesIO(originalBytes(pathlib.Path("+JSON.stringify(here)+")/url.rsplit('/',1)[1]))"}\nurllib.request.urlopen=fetch\n`;
+   const {createHash}=await import('node:crypto');
+   const actual=script.replace('a59a4850337fe7af588267c481dee046db5baba4d3f705c85f19f85ded09e06f',createHash('sha256').update('synthetic-installed-binary').digest('hex'));
+   const r=spawnSync('python3',['-c',prefix+actual],{encoding:'utf8',timeout:5000});
+   assert.equal(r.status,0);assert.equal(r.stdout,'');assert.equal(r.stderr,'');
+   const proof=JSON.parse(readFileSync(join(folder,'asset-hashes.json'),'utf8'));
+   assert.equal(proof.checks.assetHashesMatch,!fail);
+   const step=JSON.parse(readFileSync(join(folder,'bootstrap-step.json'),'utf8'));
+   assert.equal(step.step,fail?'download-b-probe':'complete');assert.equal(step.ok,!fail);
+   assert.equal(statSync(join(folder,'bootstrap-step.json')).mode&0o777,0o600);
+  }
+ }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('readonly diagnosis uses one fixed prompt, no acceptance marker or mutation endpoint, and rejects other kinds/slots',()=>{
+ const root=mkdtempSync(join(tmpdir(),'sam-readonly-state-'));
+ try{
+  for(const mode of ['readonly-state','resume-incomplete','unknown-kind','wrong-slot','completed-sleep','completed-active','completed-preflight']){
+   const dir=join(root,mode);mkdirSync(dir,{mode:0o700});
+   const contexts=[0,1].map(i=>({taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,workspaceId:uid(20+i),nodeId:uid(30+i),branch:i?'sam/second':'sam/first',agentProfileId:uid(40+i),agentType:i?'claude-code':'openai-codex',submittedAt:Date.now()-1000,evidencePrUrl:'https://github.com/raphaeltm/simple-agent-manager/pull/2355',receipt:{taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,branchName:i?'sam/second':'sam/first',status:'queued'}}));
+   writeFileSync(join(dir,'config.json'),JSON.stringify({createdAt:Date.now()-2000,expiresAt:Date.now()+3600000,contexts,cleanupAuthorized:false}),{mode:0o600});
+   writeFileSync(join(dir,'operation.json'),JSON.stringify({kind:mode==='unknown-kind'?'arbitrary-prompt':mode==='completed-preflight'?'sleep-preflight':mode.startsWith('completed-')?'sleep':mode==='resume-incomplete'?'resume-incomplete':'readonly-state',contextSlot:mode==='wrong-slot'?1:0}),{mode:0o600});
+   for(const n of ['queue-controller.mjs','b-probe.py','git-probe.py','terminal-observer.py'])copyFileSync(join(here,n),join(dir,n));
+   const mock=join(dir,'mock.mjs');
+   writeFileSync(mock,`const own=${JSON.stringify(contexts[0])},canary=${JSON.stringify(canary)},mode=${JSON.stringify(mode)};let prompted=false,asleep=!mode.startsWith('completed-'),loggedIn=true;
+    export const chromium={launch:async()=>({newContext:async()=>({request:{fetch:async(url,o)=>{
+     console.log(canary);console.error(canary);const p=new URL(url).pathname;let b={},s=200;
+     if(o.maxRedirects!==0||o.headers.Origin!=='https://api.sammy.party')throw new Error(canary);
+     const profile={id:own.agentProfileId,userId:'owner',projectId:${JSON.stringify(project)},name:'Private display name',runtime:'cf-container',agentType:own.agentType};
+     if(p==='/api/auth/token-login'){}else if(p==='/api/auth/sign-out')loggedIn=false;
+     else if(p==='/api/auth/get-session')b=null;
+     else if(p==='/api/nodes')b=[{id:own.nodeId,cloudProvider:'cloudflare',providerInstanceType:'cf-container'}];
+     else if(p.endsWith('/agent-profiles/'+own.agentProfileId))b=profile;
+     else if(p.endsWith('/agent-profiles'))b={items:[profile]};
+     else if(p.endsWith('/tasks/'+own.taskId))b={id:own.taskId,projectId:${JSON.stringify(project)},userId:'owner',outputBranch:own.branch,agentProfileHint:profile.name,taskMode:'task',workspaceId:own.workspaceId,status:mode.startsWith('completed-')?'completed':'in_progress',completedAt:'2026-10-15T22:00:00.000Z'};
+     else if(p==='/api/workspaces/'+own.workspaceId)b={id:own.workspaceId,projectId:${JSON.stringify(project)},chatSessionId:own.sessionId,nodeId:own.nodeId,branch:own.branch,repository:${JSON.stringify(repository)},workspaceProfile:'lightweight',status:asleep?'sleeping':'running'};
+     else if(p.endsWith('/state'))b=mode.startsWith('completed-')?{agentSessionId:null,agentType:null,state:mode==='completed-active'?{activity:'prompting',runtimeWorkState:'active',runtimeWorkCount:1}:null}:{agentSessionId:'33333333-3333-4333-8333-333333333333',agentType:own.agentType,state:{activity:'idle',runtimeWorkState:'inactive',runtimeWorkCount:0,activityAt:Date.now(),runtimeWorkUpdatedAt:Date.now()}};
+     else if(p.endsWith('/prompt')){
+      if(prompted||o.method!=='POST')throw new Error(canary);
+      if(o.data.content.startsWith('Authorized bounded Reliability acceptance resume-incomplete')){
+       if(!o.data.content.includes('first-guarded-resume-1')||!o.data.content.includes('git-probe.py resume-incomplete --disposable-repository')||!o.data.content.includes('command-local synthetic author identity'))throw new Error(canary);
+      }else{
+      if(!o.data.content.startsWith('ONE separately bounded READ-ONLY diagnosis')||!o.data.content.includes('mcp__sam_mcp__upload_to_library'))throw new Error(canary);
+      const encoded=o.data.content.match(/exact base64 ([A-Za-z0-9+/=]+)/)[1];const script=Buffer.from(encoded,'base64').toString();
+      if(script.includes("git('write-tree')")||script.includes("git('add'")||script.includes("git('commit'")||script.includes("git('push'")||script.includes('git-probe.py prepare'))throw new Error(canary);
+      if(!script.includes('cwdMatchesRoot')||!script.includes('baselineFile')||!script.includes('gitNameConfigured')||!script.includes('bProbeHash'))throw new Error(canary);}
+      prompted=true;asleep=false;b={accepted:true,status:'queued'};
+     }else if(p.endsWith('/sleep')){if((!prompted&&mode!=='completed-sleep')||o.method!=='POST')throw new Error(canary);asleep=true;b={status:'sleeping',workspaceId:own.workspaceId,chatSessionId:own.sessionId,snapshotExpiresAt:new Date(Date.now()+60000).toISOString()};}
+     else throw new Error(canary);
+     if(p==='/api/nodes'&&!loggedIn)s=403;
+     return {status:()=>s,json:async()=>b,dispose:async()=>{}};
+    }}}),close:async()=>{}})};`);
+   const entry=join(dir,'entry.mjs');writeFileSync(entry,readFileSync(join(here,'instant-bound-controller.mjs'),'utf8').replace("'/tmp/reliability-browser-deps/node_modules/playwright/index.mjs'",JSON.stringify(pathToFileURL(mock).href)));
+   const r=spawnSync(process.execPath,[join(here,'safe-controller.mjs'),entry,'3000'],{encoding:'utf8',timeout:5000,env:{...process.env,SAM_INSTANT_BOUND_ROOT:dir,SAM_PLAYWRIGHT_PRIMARY_USER:canary}});
+   assert.equal(r.status,0);assert.equal(r.stderr,'');assert.ok(!r.stdout.includes(canary));assert.equal(JSON.parse(r.stdout).category,['readonly-state','resume-incomplete','completed-sleep','completed-preflight'].includes(mode)?'ok':'controller',mode);
+   assert.equal(existsSync(join(dir,contexts[0].taskId+'-phase-start.json')),mode==='resume-incomplete','only new acceptance resume creates a marker');
+   if(mode.startsWith('completed-')){const t=JSON.parse(readFileSync(join(dir,'sleep-telemetry.json'),'utf8'));assert.equal(t.authCleanup,true);assert.equal(t.postAttempted,mode==='completed-sleep');assert.ok(!JSON.stringify(t).includes(canary));if(mode==='completed-active'){assert.equal(t.stage,'terminal-state');assert.equal(t.stateChecks.activityAllowed,false);}if(mode==='completed-preflight'){assert.equal(t.bindPass,2);assert.equal(t.stateChecks.stateNull,true);}}
+   if(mode==='resume-incomplete')assert.equal(JSON.parse(readFileSync(join(dir,'acceptance-attempt.json'),'utf8')).priorOutcome,'failed');
+  }
+ }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('sequential required case may replace cancelled second cohort while retaining exact receipts and per-operation bounds',async()=>{
+ const {validateConfig}=await import('./instant-bound-controller.mjs');
+ const now=Date.now();const c={createdAt:now-10800000,expiresAt:now+900000,cleanupAuthorized:false,contexts:[0,1].map(i=>({taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,workspaceId:uid(20+i),nodeId:uid(30+i),branch:i?'sam/second':'sam/first',agentProfileId:uid(40+i),agentType:i?'claude-code':'openai-codex',submittedAt:now-10000000,evidencePrUrl:'https://github.com/raphaeltm/simple-agent-manager/pull/2355',receipt:{taskId:uid(10+i),sessionId:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,branchName:i?'sam/second':'sam/first',status:'queued'}}))};c.expiresAt=now+900000;c.contexts[1].submittedAt=now-1000;
+ assert.doesNotThrow(()=>validateConfig(c,now));
+ const bad=structuredClone(c);bad.contexts[1].receipt.taskId=bad.contexts[0].taskId;assert.throws(()=>validateConfig(bad,now));
+});

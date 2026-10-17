@@ -1,0 +1,21 @@
+{
+  "globalNondeletedVmCount": 1,
+  "globalNonterminalWarmClaims": 0,
+  "observedAtMs": 1792158170001,
+  "ok": true,
+  "rows": [
+    {
+      "agent_version": "b467f389811eadeaf973960bb30f9fa7b9cb4678",
+      "capacity_pool_revision": 40,
+      "claimed_warm_node_id": null,
+      "id": "01M52EGM3P9DFYCWWW7KNTD9KD",
+      "node_id": "01M52EGVZFDCNPQ70G1MGVN2M4",
+      "node_status": "running",
+      "runtime": "vm",
+      "status": "sleeping",
+      "warm_since": "2026-10-16T13:39:20.045Z",
+      "workspace_id": "01M52ES25BN3HWDHBAE8EG84D2",
+      "workspace_status": "sleeping"
+    }
+  ]
+}

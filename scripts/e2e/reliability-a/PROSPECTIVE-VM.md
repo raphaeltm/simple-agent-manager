@@ -1,0 +1,368 @@
+# Prospective VM acceptance — offline tooling, no live authorization
+
+## Third restore — concrete offline plan, no window yet
+
+Coordinator 0fa2d88a authorizes this plan and a minimal receipt/coverage enum delta.
+Keep the c983 source-correct proof gates and pinned original 16-file map below.
+The first failed final SHA is
+`67f597ddc74113cd0c20fc695822db6f28e201552b2cf8f3472a08289c7bca5a`;
+the second failed final SHA is
+`4234b8eb3063b9feb7656e766b73b9a28141ce54a6ab0c2b961aa9262bcdb54c`.
+Preserve both original directories, their clocks/receipts/projections and NOT PASS
+results. First-cause UNKNOWN and second measured current-generation difference /
+unsupported equality gate remain historical findings, never repaired evidence.
+
+The only prospective configuration difference is
+`resume.kind:'third-prospective-restore'`. The actual accepted202 receipt and final
+coverage retain that label plus restoreAttemptOrdinal3; second remains ordinal2.
+Only those two fixed labels are supported, not arbitrary attempts/adoption.
+The same exact existing task/session/branch/profile and original submit receipt
+remain bound. No new task, fixture, setup, rebaseline or evidence reconstruction.
+
+Do not create `/tmp/reliability-prospective-vm-claude-resume-002` or publish a new
+window yet. First require B's exact enum/receipt-delta review, strict termination
+of node01M51VFZKX2538207M5SGPRQ0B (canonical DELETED **and** separate normal
+runtimeTerminationConfirmedAt), the existing 08:48 read-only guard, and explicit
+coordinator resolution of the queued PR2337 staging slot with its parent. No new
+reservation, deploy, pin restoration or runtime is authorized by this document.
+
+After coordinator conditional runtime GO and ALL fresh guards pass, create one
+NEW private operation directory and publish an immutable 45-minute window BEFORE
+login/restore. Action cutoff is hard minus9min; supervisor/managed job share hard.
+Refresh owner-wide VM0/claims0, exact-session workspace/recovery/snapshot-claim0,
+project duplicates0, normal owner/profile/task/session/branch, current AVAILABLE /
+undegraded snapshot expiry beyond hard, pool40 configured-ready, b467 pin/APIe2,
+actual catalogue/configuration, staging reservation and absence of duplicates.
+Reuse approved45active+40tail85VMmin planning (two rounded hours EUR .0176–.0512
+compute only, IP/tax/API/storage/provider-delay exclusions; refresh prices first).
+No sizing, retry, replacement, extension, Codex case or second VM.
+
+Validate the pinned16 original bytes/schema BEFORE login; run the same reviewed
+resume entrypoint under safe-controller supervision. Independent resume-snapshot
+proof -> ONE normal READY restore/actual202 third-attempt receipt -> exact restored
+ID/status/task/workspace/accepted-wake/time proof with protected/latest generation
+hashes separately retained and consumedGenerationObserved:false -> ORIGINAL
+baseline BYTE equality plus all Git/index/dirty-work/ref/PR checks. IFF valid,
+actual complete_task/tool+canonical/runtime proof -> retained FIRST independent
+target observer -> FIRST normal Sleep/independent AVAILABLE proof/auth closure.
+Invalid means safe preservation and stop; no repair. Retain strict provider cleanup
+ownership afterward. All must fit that one published window. No previous events
+are imported as current PASS and no first/second result is relabeled.
+
+Coordinator 3e7af6bc authorizes a source-correct OFFLINE verifier correction only.
+Both historical attempts remain NOT PASS. The second run measured a different
+latest generation, but requiring its equality after READY/idle was unsupported:
+normal idle background checkpoint capture may rotate it while retaining restore
+identity/status/task/workspace/time. This does not identify the actual capture
+cause or prove restored bytes. No new runtime window, retry or handoff is granted
+by this correction; the existing 08:48 strict provider guard remains owned.
+
+## Existing-case second restore — offline continuation plan
+
+Coordinator c0189e7e authorizes this tooling/plan, not another live attempt yet.
+`prospective-resume.mjs` is bound to task01M51Q2J7AQEKAKZAKZ39NFXWP,
+sessionf5f56c5b-e9fb-4218-b327-bd9d4b7e25e9, original branch/profile, and the
+immutable originals in `/tmp/reliability-prospective-vm-claude-001`. It cannot
+submit a task or execute setup/prepare. SHA256 of the sorted 16-file evidence map
+is `9715d238b6fcf5cc1e45e065ea041e87e8b72b38b6776664827467a6e74c14d2`;
+baseline `d862cb6e82142a25dd92bfb448b3de8ab8b7efba9ef681714d5bdc4d69a8c190`,
+expectations `c419027ab5baee7150135e874db4645eb30cd777758ab195679e4514e404ce76`.
+The map also pins the original setup/turn-check manifests/results and failed
+first-attempt final/clock/config. The original failed first-wake cause stays
+UNKNOWN. A second restore does not retroactively pass the first 45-minute case.
+
+Before any runtime, require B's exact failure-evidence and resume-delta review,
+coordinator conditional runtime GO, prior node01M51Q2SRA strict DELETED plus
+separate normal termination stamp, and fresh original admission guards: staging
+slot, owner-wide VM0/claims0, exact-session recovery0, project duplicates0,
+owner/task/session/branch/profile ID, configured pool40-ready, pinb467/APIe2,
+catalogue/configuration, and protected snapshots AVAILABLE/undegraded/expiry.
+No new task, sizing, retry, replacement, extension or second VM. Retain the
+07:55 read-only cleanup ownership until actual terminal proof or guarded handoff.
+
+Only after those conditions publish a NEW immutable 45-minute window BEFORE the
+single restore prompt. Action cutoff is hard minus9min; the same approved active
+plus40min normal-tail planning estimate applies. Use a NEW private0700 operation
+directory (for example `/tmp/reliability-prospective-vm-claude-resume-001`, not yet
+created by this plan), normal config schema plus exactly
+`resume:{kind:'second-prospective-restore',originalEvidenceSha256:<map SHA above>}`.
+Keep the original task submit receipt as identity; do not relabel it a new task.
+Run the resume entrypoint under the unchanged safe-controller supervisor with
+only SAM_PLAYWRIGHT_PRIMARY_USER, remaining-hard timeout, no direct invocation.
+
+The sequence is:
+
+1. Validate every pinned original byte/schema locally before login. Fresh normal
+   owner canonical checks require the exact existing task Sleeping, created before
+   this attempt, and preserve FIRST's original completed proof. The caller writes
+   `resume-snapshot-request.json`. Run the actual fixed CF producer once in
+   `resume-snapshot` mode with only CF_TOKEN+CF_ACCOUNT_ID. It independently requires
+   VM0/claims0/recovery0, exact task/profile/branch/session and the current AVAILABLE
+   snapshot generation/expiry. Recovery0 also requires canonical snapshot status
+   null/restored/failed with recovery_claimed_at NULL: APIe2 takes a waking snapshot
+   claim before reactivating a Sleeping task. Historical restored task/workspace/
+   attempt/time fields do not themselves indicate an in-flight claim and remain
+   allowed. Caller saves that proof as this attempt's protected
+   snapshot. It never reuses the old generation or imports old ledger events.
+2. ONE normal READY restore prompt, no tools/setup/publication/completion. Retain
+   a NEW exclusive `resume-attempt-receipt.json` with actual202, submitted/accepted
+   times, exact identity, fixed clock and protected snapshot/generation SHA. Wait
+   for exact canonical restored mapping/ACP/literal idle. Run `wake-check` producer
+   once; retain original typed restore-binding evidence before its assertions.
+   Protected and latest generation hashes are separate observations. Latest
+   equality is not required and consumedGenerationObserved is explicitly false.
+3. Only after the fresh restore grant, host-run original `check`, not `setup`:
+   compare restored baseline bytes against the original host baseline and use
+   the original expectation bytes/assets for original Git/index/dirty-work checks
+   and all-ref/all-state PR inventory. Only external private phase reports/assets
+   are written; no fixture changes, reprepare or expectation reconstruction.
+4. IFF that check passes, reuse the reviewed actual complete_task/retained tool
+   metadata/canonical completion/runtime-quiescence path. Then FIRST normal READY
+   and original independent target observer using this target's original baseline
+   and expectations AFTER canonical completion. Never FIRST's old comparator.
+5. Normal FIRST Sleep/independent AVAILABLE proof, logout/null/protected-denial/
+   browser closure and strict new-node cleanup ownership, all within the new hard
+   window. Any invalid/missing/mismatched proof stops downstream work and invokes
+   existing safe preservation/auth cleanup. No repair or another prompt attempt.
+
+The separate five-stage continuation ledger is retained-originals/wake/wake-check/
+complete/observe. Final coverage is explicitly `second-prospective-restore` with
+`firstWakePass:false`. Offline tests run the actual resume entrypoint/controller,
+actual Python producer on a simulated HTTP boundary, and actual failure sentinel
+to normal cleanup. They also reject changed originals/foreign identity/early
+completion and failed restored fixture. These are no live compatibility proof.
+
+This supersedes salvage of the failed VM Claude fixture only. Preserve task
+`01M51CCMB1S684RXVNBNDQRDAS`, its snapshot, original seven invalid artifacts,
+partial baseline, and all subsequent failed and successful diagnostic evidence.
+Never recreate its expectations, alter its baseline, or call its historical
+preservation acceptance a PASS. No product, profile, pool, credential or API change
+is part of this plan. Product PR2355 remains unchanged.
+
+Coordinator directive 844656b7 authorizes offline tooling and a clean prospective
+fixture. B must review the exact implementation and plan before coordinator live
+GO. Current node01M51KP9CARTAN475GM6DDTR5P must first reach canonical DELETED **and**
+separate `runtimeTerminationConfirmedAt` through the strict normal deletion path.
+That source-supported guarantee is not a fresh provider GET. The existing 06:28:10
+read-only guard remains owned by A. Never host/node DELETE or change the pool.
+
+## One bounded plan
+
+Coordinator-approved planning limit (2b4e7a7c), not live authorization: 45 minutes from the immutable clock BEFORE the ONE normal
+task submission through observer Sleep and browser closure, including
+startup, setup, actual harness work, Sleep, normal recovery, completion and
+observation. Stop new actions 9 minutes before hard expiry (at most90sec terminal
+operation, >=6min preservation plus transport margin). No clock reset, retry,
+replacement fixture or extension. Observer uses the retained FIRST Instant Codex;
+no new observer task or VM. VM Claude first. VM Codex is a separate later case,
+only after Claude disposition, original publication observation and strict VM
+cleanup; it uses the same sequence/profile-specific canonical checks.
+
+Latest actual catalogue is EUR/hour cx23 .0088, cx33 .0136, cx43 .0256. Plan45active
+plus40normal-tail=85VMmin, prorated EUR .01247–.03627 or two rounded hours
+.0176–.0512 compute only. This excludes IP/tax/Instant/API/storage and provider
+cleanup delays; it is a planning estimate, not a billing cap. Refresh catalogue,
+configuration and reservation before live. Use normal pool40 without sizing or
+preferred-node overrides, max one VM, zero at rest.
+
+Pre-admission is the existing normal owner pathway, supervised separately:
+fresh exact pinb467, APIe2 provenance, pool40 configured-ready/candidates/cost,
+strict prior termination, globalVM0, userwide warmclaims0, exactsession recovery0,
+project duplicate0, no other active reliability writer, explicit staging slot.
+Submit ONE task through the unchanged `tasks/submit` path with the approved VM
+Claude profile01KRS7Z2R88JFC73ARA7DV9WTK (later Codex01KXG9MJRZ36FFJX0RVNW67SWB),
+omitting all sizing. Initial prompt: instructions, no tools/setup/publication/
+completion, return READY. Persist accepted `{taskId,sessionId,branchName,status}`
+and canonical creation time. The new task must be created after this fixed start,
+not a failed historical case. This controller deliberately cannot submit tasks.
+
+After receipt and normal bootstrap, use a NEW private0700 absolute directory with
+config.json0600. Exact config keys: `{started,hard,own,observer,evidencePrUrl}`.
+`started` is the immutable pre-submission epoch-ms clock; `hard-started<=2700000`.
+`own` and `observer` each have EXACT `{taskId,sessionId,branch,agentProfileId,
+agentType,receipt}`; receipt is the exact accepted projection above. Observer is
+FIRST01M50VYZ60RQXXTGSVPXW6FRXD on its original Codex profile/session/branch.
+The source evidence PR URL is exactly https://github.com/raphaeltm/simple-agent-manager/pull/2355,
+fixed before baseline, with all publication inventory checks scoped to the
+**disposable** repository serverspresentation2025/crewai. No PR creation occurs.
+
+Run only under safe-controller supervisor, selecting only
+SAM_PLAYWRIGHT_PRIMARY_USER via exec_with_secrets, setting SAM_PROSPECTIVE_ROOT to
+the operation directory. Supervisor deadline is remaining fixed hard time minus
+10sec, managed job timeout is bounded by the same hard clock. All child/helper/
+Playwright stdout and stderr stay private. Never invoke the controller directly.
+The reviewed supervisor owns terminal failure propagation and process closure.
+
+## Sequence and original evidence
+
+1. Fresh owner canonical task/project/branch/session/workspace/node/profile+fresh
+   literal inactive/count0/runtime clocks. An independent CF read supplies
+   setup-grant.json. No Task.chatSessionId assumption: session.taskId and workspace
+   chatSessionId plus the independently checked stored-ID grant bind the relation.
+   Public profile hint is caller-visible NAME for own profiles, ID for shared
+   foreign-owned project profiles, with fresh profile GET and uniqueness check.
+   VM grant must confirm actual node-reported b467, pool40 and same owner plus fresh
+   API pin. Compare to the already reviewed APIe2 -> b467/published binary a59
+   provenance. The PTY is inside the devcontainer: no host binary/metadata path
+   is assumed visible. Raw host binary SHA remains UNOBSERVED, explicitly recorded
+   in grant.releaseProvenance; no model or capsule reports a host-hash proof.
+2. Host terminal setup: actual configured APP-origin browser WebSocket, normal
+   owner terminal/token, matching session-created and close acknowledgments.
+   The trusted host chunks a hash-checked compressed package into <3800byte input
+   lines. Its Python capsule installs exactly THREE original pinned probe bytes
+   in a NEW task/run directory **outside Git**, verifies each hash, and uses the
+   same discovered absolute Python for every invocation. No model-transcribed
+   setup, public-helper reads, package installs or shell-command interface.
+3. Actual original git-probe prepare ONCE, only its explicit named local commit
+   and fixture writes; then original check and original observer record. Export
+   ORIGINAL asset-hashes/prepare/check/baseline/record/expectations files and ORIGINAL
+   typed manifest, not model summaries. Host validates original bytes/hash/schema
+   and all checks/statuses, saves exclusive0600 files before the next turn.
+   Baseline and expectations must predate the tested turn/completion. No reset,
+   rebaseline, resume-incomplete or blanket git add. Unrelated pre-existing dirty
+   files make the clean prospective fixture ineligible, not permission to delete.
+4. Actual Claude READY turn, no file/tool/publication work. Require canonical
+   Claude identity and fresh literal idle/inactive, then host original all-state
+   check plus independent all-ref/all-state-PR inventory against original record.
+5. Normal supported Sleep200, same task/session/workspace, then independently
+   observed snapshot AVAILABLE. Supply protected-snapshot.json, never infer
+   snapshot durability solely from HTTP200. Workspace normal stopped TTL is5min;
+   recovery can be delayed by pending deletion even before due. No manual Stop or
+   DELETE shortcut. Record actual Sleep/snapshot/TTL times, no inferred wake PASS.
+6. ONE normal followup READY prompt, no tools/setup. Follow canonical replacement
+   workspace only with exactowner/project/session/task/branch binding, waiting for
+   new Claude ACP and fresh inactive proof. Supply fresh wake-check-grant.json.
+   Re-transfer the same external probe bytes; check the EXISTING restored baseline
+   byte-for-byte against retained original. No prepare or reconstruction after
+   wake. Require original all-state check and all-ref/all-PR inventory unchanged.
+7. Actual harness `complete_task` call only after host checks. Require actual tool
+   success original evidence, canonical completedAt after the prompt, nonempty
+   completion evidence, preconfigured PR URL and measured baseline commit in notes.
+   The caller derives completion-tool.json from actual retained original typed tool
+   metadata; an independent CF completion-runtime proof gates runtime quiescence. Canonical
+   completion alone is not tool-result proof. Preserve canonical timestamp and a
+   digest of completion metadata; never persist arbitrary model content as logs.
+8. Only AFTER actual canonical completion reopen retained FIRST normally for
+   READY; preserve its original completion proof beforehand and report reopen
+   honestly. Do NOT run FIRST's old comparator. Supply observe-grant.json, then
+   host-run original terminal-observer against this NEW target's ORIGINAL baseline
+   and expectations/canonical completedAt. Check target canonical task again before
+   observation. All refs and all PR states, not only open/visible PRs. Download and
+   retain original observer result/manifest. Then normal FIRST Sleep+auth closure.
+   No next branch starts until this proof and cleanup disposition are retained.
+
+Grant files (`setup-grant`, `turn-check-grant`, `wake-check-grant`, `observe-grant`)
+are fresh independent CF capabilities, not model-authored or inventory adoption.
+They include exact workspace/node/ACP/owner/expectedProfileOwner/runtime/agentVersion,
+storedProfileId/storedProfileObservedAt, exact accepted receipt, expiresAt<=5min,
+globalVmCount<=1 (exactly1 for VM), otherWorkspaceCount0, activeForeignClaimCount0.
+Verify capacityPoolRevision40 and node status/ownership in the CF producer before
+writing grant. Observer runtime is cf-container; VM is hetzner. A single browser
+context performs all owner requests; no new finite caller is held between cases.
+Grants, snapshot and tool projections must come from separately checked canonical
+records. They are not authorization supplied by a fixture model.
+
+Every `terminalPhase` persists ORIGINAL done.json and each original downloaded
+file under an exclusive per-phase directory. setup-result/turn-check-result/
+wake-check-result/observe-result record run UUID and fixed booleans, allowing B
+independent original-byte verification. No RAM-only manifest proof this time.
+Raw PTY, headers, JWT, helper output, model text and arbitrary error bodies are
+never saved. Original typed baselines/expectations stay private; publish only
+safe hashes/IDs/times/status/booleans. Missing, corrupt, partial, stale, unknown,
+failed, timed-out or unobserved stages cannot be marked PASS.
+
+Finally normal Sleep on an unfinished owned context when safety permits, logout
+Origin/nullsession/protected-denial/browserclosed and durable job terminal. A
+failure to preserve is a reported failure and remains actively owned; no forced
+teardown. After canonical completion, retain target snapshot/originals and normal
+provider tail ownership. Read-only guard must observe canonicalDELETED + separate
+strictnormal runtimeTerminationConfirmedAt; reuse/foreign claims prevent mutation.
+
+## Offline verification boundaries
+
+`node scripts/e2e/reliability-a/test-prospective-vm.mjs` executes actual fixed shell,
+Python capsule, original Git probe and observer in a disposable local Git repo.
+HTTP/browser socket are simulated; node-release provenance is simulated; no host filesystem binary proof is claimed.
+Canary helper streams are private. It proves no provider, ACP, snapshot durability,
+actual tool completion, live API compatibility or release acceptance. Existing
+pinned APIe2/b467 DTO/protocol tests remain required and are reused, not relabelled.
+Review must cover the full caller sequence and independent evidence producers
+before runtime GO; no partial implementation may be presented as live-ready.
+
+## Fixed read-only evidence producer
+
+`prospective-proof.py` runs separately with ONLY selected CF_TOKEN and CF_ACCOUNT_ID,
+SAM_PROSPECTIVE_ROOT set to the same approved directory, and one fixed mode argument:
+`setup`, `turn-check`, `protected-snapshot`, `wake-check`, `completion-runtime`, or
+`observe`, or `observer-snapshot`. It cannot login, wake, submit, execute a command or mutate CF state. It
+uses account Worker settings and SELECT-only parameterized D1 queries, emits only
+fixed stage/status/time and allowlisted failure predicates/types/SHA, and exclusively saves private typed source projections
+plus their SHA. There is no arbitrary SQL, endpoint or model-input interface.
+
+Run each producer ONLY after its corresponding caller `*-mapping.json` or
+`protected-sleep.json` appears; no polling browser or guessed mapping. Caller
+mapping ACP is independently crosschecked by the normal API before AND after the
+terminal operation; D1 source proof does not independently authenticate ACP itself.
+The producer validates actual stored profileID, owner/session/branch/runtime/node,
+pin/pool/globalVM/claims/otherwork. Snapshot proof includes the protected generation
+observation, expiry, no degradation, and original source hash. Wake grant requires
+the SAME snapshotID, recovery_status restored, exact recovery task/workspace and
+actual restored_at after this accepted wake. A normal post-wake idle checkpoint
+may replace the latest snapshot_generation while those restore fields remain.
+Retain protectedGenerationSha256 and latestGenerationSha256 separately, along with
+their comparison; do not make comparison equality an acceptance gate or claim
+it proves the consumed generation. consumedGenerationObserved is always false
+for this current-records verifier. The caller checks this limitation and both
+digest bindings, saves wake-restore-provenance.json, and still requires the
+ORIGINAL restored baseline BYTE equality plus all Git/index/dirty-work/ref/PR
+checks before completion. A new workspace or restore metadata alone proves no
+preservation. A type/ID/task/workspace/time/byte mismatch still fails closed.
+
+The caller retains `wake-submitted.json` after the single accepted prompt, before
+waiting for recovery. Before evaluating the restore gate the producer exclusively
+creates `wake-check-restore-source.json` with observation time, fixed per-predicate
+booleans/types and bounded canonical fields (generation is a SHA, not raw text).
+Its SHA binds the fixed failure export; no arbitrary rows, generation text, errors
+or helper streams are emitted or stored in the wake restore projection, including
+on success. Generation difference is informational; status/time/type/binding
+mismatches remain original failed proof.
+Later captures cannot overwrite the exclusive artifact or turn a repeated producer
+invocation into a grant. Preserve the historical failed run that lacked this proof;
+this fix cannot reconstruct or relabel it. Source-derived offline fixtures cover
+normal idle generation rotation, wrong snapshot/task/workspace/time, secret-like
+generation text suppression, and actual changed-baseline bytes rejected without
+reconstruction. The real Python producer feeds both a rotated-generation success
+and wrong-task failure into the real continuation caller under simulated external
+boundaries. Original-byte checking and completion/observer order remain mandatory.
+
+Any producer failure writes an exclusive0600 `MODE-failure.json` bound to the exact
+task/session/start/hard clock. The caller recognizes only that bound signal while
+waiting for its grant/snapshot/runtime proof and enters its existing finally
+preservation/logout/browser-close path promptly. A foreign or stale-clock signal
+does not authorize an action. This is no grant, Stop/Delete or process-kill path,
+and neither changes the deadline nor permits another prompt, task or retry.
+
+At canonical completion the caller reads actual compact session message metadata
+through the SAME owner context, allowing only the two installed spellings of
+complete_task, fresh tool-role timestamp and status completed. It requires one
+matching result, rejects a failed result, and saves ORIGINAL selected metadata
+(ID/session/time/role/toolName/status), omitting all content/tool rawInput/errors.
+It does not claim retention of the full tool body. This metadata and canonical
+completion evidence together establish the actual tool invocation/result. A
+separate `completion-runtime` CF projection must confirm exact completed task,
+no owned warm claim, no active associated workspace and globalVM<=1. Until that
+proof arrives, no independent observer starts. Normal task/runtime teardown can
+therefore consume this phase's bounded time; absence is never assumed.
+
+The observer's own reopened status must be reported honestly; original completion
+proof remains preserved. Normal FIRST Sleep200 is independently followed by its
+canonical snapshot readback in the final resource/cleanup proof, without using
+FIRST's historical full-ref baseline. Provider cleanup ownership is retained even
+if caller finalization fails or the fixed action clock expires. `final.json` is
+written after auth/browser closure only, and cannot make a missing stage PASS.
+
+Tests also include `node scripts/e2e/reliability-a/test-prospective-controller.mjs`:
+actual lifecycle caller+ledger, simulated browser/terminal/independent producers;
+success, setup failure, wake-check failure, missing completion notes, unexpected early completion retained before any setup/prompt, and typed
+snapshot/tool negatives. Local PTY capsule tests separately exercise actual shell/
+Python/Git helper execution. These are offline evidence, not actual ACP/completion.

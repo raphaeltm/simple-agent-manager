@@ -1,0 +1,47 @@
+# Reviewed-controller integration candidate — no live authorization
+
+Use this exact entrypoint only through the matching `safe-controller.mjs` supervisor. All browser launch, managed login, queue execution, private validation, sign-out and close run inside its child with null stdout/stderr. The supervisor enforces a finite outer deadline. No tracing, HAR, video, storageState export or generic response/error logs are enabled. Do not reuse the old temporary controller. Independent review and coordinator GO remain required; staging ownership, pool revision and installed runtime must be reverified.
+
+The queue uses four-digit JSON filenames under `in/`. Public `ready.json` and `out/NNNN.json` contain only the boundary's reconstructed fixed summary. Validated metadata goes separately to `private/state/NNNN.json`; baseline and observer expectations go to `private/artifacts/`. Those directories must be outside the fixture repository. Unknown response fields, notes, descriptions, tool output, errors, headers, auth bodies and arbitrary non-JSON responses are never persisted. This runner intentionally has no raw session-message or tool-content operation. It cannot substitute model prose for actual script tool-result proof.
+
+Required non-secret environment configuration: absolute `SAM_VERIFICATION_ROOT`, project ULID `SAM_VERIFICATION_PROJECT_ID`, repository `SAM_VERIFICATION_REPOSITORY`, trusted HTTPS origins `SAM_VERIFICATION_API_ORIGIN` and `SAM_VERIFICATION_APP_ORIGIN`. Optional `SAM_VERIFICATION_PLAYWRIGHT_MODULE` selects the installed Playwright module; no dependency downloads occur. `SAM_VERIFICATION_DURATION_MS` defaults to 50 minutes and cannot exceed 55 minutes. Supply only `SAM_PLAYWRIGHT_PRIMARY_USER` via managed secret execution. Never place its value in a file or argv. A fresh queue root is mandatory. Existing result/private files or a prior start marker reject the run before login, preventing old commands from replaying. The controller logs in once and reuses one context; the managed env entry is deleted after login and during cleanup.
+
+Example invocation (configuration must already be set; this example performs no login itself):
+
+```sh
+node scripts/e2e/reliability-a/safe-controller.mjs /absolute/reviewed/queue-controller.mjs 3600000
+```
+
+Keep the supervisor deadline longer than the queue duration so normal sign-out/close can finish. A forced outer timeout does not prove remote fixture cleanup or sign-out. The coordinator must resolve those independently without claiming success or retrying a mutation blindly.
+
+Commands:
+
+- `{"op":"request","path":"/api/nodes"}`: typed state only. Routes are restricted to this project's task submit/read, session state/prompt/stop, workspace read/list/agent sessions/sleep/delete, and node list. No query strings, redirects, arbitrary URLs or generic response files. Submit accepts message/profile/task mode and optional lightweight workspace profile; it rejects resource sizing and unknown override fields.
+- Prompts require a previously observed canonical idle/inactive/count-zero state with a real agent-session ID. Every state read first invalidates the prior idle observation, including missing/error results. A prompt consumes that observation. Session prompts are restricted to sessions submitted through this context. Never queue an observer or follow-up before the original setup turn has ended with measured results. This guard does not itself prove the setup passed.
+- `{"op":"artifact","schema":"baseline","artifactId":"ULID","taskId":"ULID","branch":"sam/exact-task-branch"}` downloads a private library artifact through the existing authenticated context and validates the complete A schema before writing. The expectation variant uses `"schema":"expectations"`, requires the previously validated baseline, and binds repository, branch, all remote refs, full PR schema and page limit. Non-synthetic staged fixture contents or unexpected worktree paths fail closed. This is intentionally narrower than a generic download interface.
+- Supported wake uses the existing normal session prompt endpoint after an affirmative sleep result for this context's submitted session. There is no invented `/workspaces/:id/wake` or `/resume` endpoint. A successful sleep response must supply sleeping status, workspace/session IDs and snapshot expiry; it grants one wake prompt even when the sleeping session has no live runtime state. An active state observation cancels that permission. Actual restored A checks are still required after wake.
+- `{"op":"artifact","schema":"probe","probePhase":"a-prepare","artifactId":"ULID","taskId":"ULID","branch":"sam/exact-task-branch"}` accepts only the reviewed scripts' complete phase-specific boolean/status schema. Named phases are `a-prepare`, `a-check`, `b-inspect`, `b-publish`, `observer-record`, `observer-check` and `asset-hashes`. Arbitrary/empty/partial keys or diagnostic strings reject the download. Keep each phase's redirected scalar stdout private and upload through the supported private library path; do not upload stderr. The sink proves schema completeness/privacy, not provenance or acceptance: decoded pinned asset hashes and actual tool execution must be independently verified. Model prose is insufficient.
+- `{"op":"logout"}` performs supported same-context Origin-bearing sign-out, then requires get-session JSON null and a protected nodes read to return 401/403. It never reads or exports cookies. Final cleanup also signs out and closes the browser. Require the final supervisor result, not merely a queue stop acknowledgment, before claiming cleanup succeeded.
+- `{"op":"stop"}` ends queue processing and awaits normal cleanup.
+
+Prompt/action responses require affirmative route-specific results; explicit false/failure states reject acceptance. Any failed operation fixes the final job result as a failure and disables further fixture creation, prompts, sleep/wake and downloads. Only read-only reconciliation, explicit resource deletion/session stop, logout and controller stop remain available. The runner never repeats a mutation. The coordinator must stop dependent acceptance steps; a later successful cleanup does not convert the job to a PASS.
+
+Screenshots are disabled by default. Only an explicit coordinator-approved `SAM_VERIFICATION_SCREENSHOTS=completed-fixture-summary` enables them. The task must have been submitted through this context and subsequently read as completed. `{"op":"screenshot","taskId":"ULID"}` then navigates only to that exact fresh fixture chat; a changed URL or redirect blocks capture. Images remain private, and failed captures are removed. Pixels are not redacted: approval must cover that controlled completed-fixture surface, whose probes output only reviewed booleans/statuses. Do not enable this option for old incident sessions, arbitrary user content or generic app pages; do not upload images without the normal allowlist check.
+
+Synthetic-only tests, with no network, browser login or real credential:
+
+```sh
+node --test scripts/e2e/reliability-a/test-safe-controller.mjs scripts/e2e/reliability-a/test-queue-controller.mjs
+```
+
+They run the actual supervised queue entrypoint with fake async Playwright. Canary tests cover launch/native console streams, request exceptions/timeouts/non-JSON/malformed state, cleanup errors/hangs, prompt ordering, exact private artifact rejection, screenshot opt-in/redirect/capture failures, and normal Origin-bearing logout plus unauthenticated readback. They do not prove live sleep/wake, provider behavior, actual completion, screenshot content safety or release acceptance.
+
+Mutation scope is established only by a successful submit in this controller, followed by the exact canonical task read linking its workspace. Task/workspace response IDs must match requested IDs; a supplied task session must match the accepted submit. Sleep, session stop, and workspace delete reject unmatched targets before fetch. Broad inventory reads grant no authority. Confirmed associations remain available for cleanup after sleep/stop; they authorize only this run's fixtures, not pre-existing resources. Read the submitted task before workspace operations.
+
+Node DELETE is unconditionally unsupported, including a node canonically linked to this fixture. Configured pools may pack unrelated work onto it; hosting does not establish exclusive ownership. The coordinator must separately verify dedicated ownership before normal node cleanup. This controller scopes only session stop, workspace sleep and workspace deletion to accepted submissions and canonical task/workspace associations.
+
+Canonical startup state may exist before an ACP agent-session ID is assigned; a null ID is retained only as absent typed identity and never grants idle/prompt permission. Source-defined recovering/error activities are valid observations, never idle authorization. Unknown non-null identities and unknown activity values fail closed.
+
+The pinned source acceptance audit is recorded in SOURCE-CONTRACTS.md. Source-defined resource recovery/evicted/deleted statuses remain typed observations; they grant no mutation authority.
+
+Only the state endpoint agent identity permits canonical UUID or ULID. Real idle authorization requires positive activity/work report clocks observed since this controller submitted the session, not source fallback zeros. Workspace DELETE requires deletionStatus confirmed; success true with pending202 remains incomplete.

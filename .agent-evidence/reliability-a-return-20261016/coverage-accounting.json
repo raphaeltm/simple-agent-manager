@@ -1,0 +1,34 @@
+{
+  "coverage": [
+    {
+      "cell": "VM/Claude",
+      "evidence": "Prospective task01M51Q2J setup+tested-turn recorded; first wake gate failed, second restore NOT PASS; original16 absent after relocation.",
+      "remaining": "New prospective original-byte sleep/wake preservation plus actual completion and independent NEW-target publication observer. No old-case repair.",
+      "state": "INCOMPLETE"
+    },
+    {
+      "cell": "VM/Codex",
+      "evidence": "Earlier partial Library01M50QTPBTRPQ9A928GKQYZRNG records prepare/check, sleep200, wake202 without observed recovery; cleanup confirmed.",
+      "remaining": "Separate Codex VM case requires coordinator scope/authorization after Claude closure and strict provider cleanup; cannot infer from Claude.",
+      "state": "INCOMPLETE"
+    },
+    {
+      "cell": "Instant/Codex",
+      "evidence": "FIRST01M50VYZ recorded original a-check sleep/wake all8 TRUE, actual complete_task canonical00:06:55.157 and postcompletion check; retained historical independent observation incomplete; host originals now unavailable.",
+      "remaining": "FIRST reopen can independently observe NEW target expectations without FIRST old baseline. That observation does not revalidate old FIRST case or imply complete Instant/Codex acceptance.",
+      "state": "PARTIAL HISTORICAL EVIDENCE; full acceptance not claimed"
+    },
+    {
+      "cell": "Instant/Claude",
+      "evidence": "Prior bootstrap/observer/prepare attempts and Library diagnostic metadata; no full end-to-end acceptance established in durable state.",
+      "remaining": "Separate explicit coordinator accounting/disposition required for complete Instant/Claude preservation/publication coverage; one VMClaude proposal does not close this cell.",
+      "state": "INCOMPLETE; retained partial only"
+    }
+  ],
+  "minimalNextCase": "ONE VMClaude case only per existing corrected plan; Codex is later separate, no silent full-matrix claim. No new implementation, runtime, fixture, clock or lease.",
+  "planArchiveSha256": "c42cf751bbf1389c784c22183aae15c1abbdbf26180a97c37a5bd26117cc546a",
+  "planLibraryId": "01M523M93FQABREBSDRMHABV5Y",
+  "planRetrievalManifestVerified": true,
+  "staging": "Coordinator reports PR2337 writer lease10:20:05-11:50:05UTC; stay offline; expiry is not return authorization.",
+  "status": "OFFLINE ACCOUNTING ONLY; no implementation/runtime authorization"
+}
