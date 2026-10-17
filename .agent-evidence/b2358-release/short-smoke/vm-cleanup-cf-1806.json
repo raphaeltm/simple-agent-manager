@@ -1,0 +1,1 @@
+{"success": true, "rows": [[{"id": "01M52X33MXKNGA983F2KNY5K7V", "status": "running", "agent_version": "a3dc19311205f8a7983138ffca2c7fe3eeba8d44", "last_heartbeat_at": "2026-10-16T18:06:05.287Z", "warm_since": null, "runtime_termination_confirmed_at": null, "remaining_workspaces": 2, "active_vms": 1}]]}
