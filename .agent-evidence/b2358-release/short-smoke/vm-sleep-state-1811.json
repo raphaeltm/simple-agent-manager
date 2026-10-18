@@ -1,0 +1,1 @@
+{"success": true, "rows": [[{"id": "01M52XQECFK115RHDWN5HERMNE", "workspace_id": "01M52Y54DFE0J1QGSZ7PAQAVFF", "status": "available", "sleep_status": "stopping", "sleep_claimed_at": "2026-10-16T18:09:58.308Z", "sleep_stopping_since": "2026-10-16T18:09:58.308Z", "has_sleep_error": 0, "sleeping_at": null}]]}

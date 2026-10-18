@@ -1,0 +1,12 @@
+I’ll verify the exact Node script’s SHA256, run it once if it matches, and upload only the two original JSON receipts.The single run passed all assertions and closed with exit 0. Both JSON receipts were generated; their upload copies have identical SHA256 hashes. I’m uploading those two files now.PASS: all 14 steps returned 0. Native terminal session `58429` closed with numeric exit **0**.
+
+Both receipts uploaded once, bytes unchanged:
+
+- `b2358-standalone-node-original-probe.json`  
+  fileID: `01M530EKN8MD6F5XJG3DFHNVGJ`  
+  SHA256: `767180c037166c478b87dd9351904c3ca1884ade85f7c475893988824fa45480`
+- `b2358-standalone-node-exit.json`  
+  fileID: `01M530EMXV1VFPPFGRX9W34VEB`  
+  SHA256: `79447d29f942003458e8a854ab71cbfdd26c41e0e0649f97736a7337ace4f9ac`
+
+Script SHA256 matched `7d3dd6510f92cc3590d42e907ed3e5e3fd57f0af7a04c25b1933fdc8f266bc3f` before execution. No rerun or repair; `complete_task` not called.
