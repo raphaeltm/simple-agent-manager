@@ -436,6 +436,8 @@ describe('session recovery stable task identity', () => {
           )
           .run(at(Number(claimedMinutes)));
         const database = createSqliteD1(sqlite);
+        const continueConversation = () =>
+          ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1');
         let result;
         if (canWake) {
           let claimed!: () => void;
@@ -452,9 +454,9 @@ describe('session recovery stable task identity', () => {
             await held;
             return batch(statements);
           });
-          const first = wake(database);
+          const first = continueConversation();
           await ready;
-          const followers = await Promise.all([wake(database), wake(database)]);
+          const followers = await Promise.all([continueConversation(), continueConversation()]);
           release();
           result = await first;
           expect(followers).toEqual([
@@ -462,7 +464,7 @@ describe('session recovery stable task identity', () => {
             { status: 'waking', taskId: 'task-1' },
           ]);
         } else {
-          result = await wake(database);
+          result = await continueConversation();
         }
         if (canWake) {
           expect(result).toEqual({ status: 'waking', taskId: 'task-1' });
@@ -494,6 +496,48 @@ describe('session recovery stable task identity', () => {
               .get()
           ).toBe('chat-1');
         }
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it.each(['sleeping', 'cancelled'])(
+    'never reconciles an exhausted anchor for a source-guarded %s caller',
+    async (status) => {
+      const sqlite = new Database(':memory:');
+      try {
+        seedStableRecoveryFixture(sqlite);
+        sqlite.exec(`UPDATE workspaces SET status='deleted',chat_session_id=NULL,
+          runtime_deletion_confirmed_at='2026-08-15T01:00:00.000Z';
+          INSERT INTO workspaces (id,user_id,project_id,status,chat_session_id,runtime_deletion_confirmed_at)
+          VALUES ('retained','user-1','project-1','deleted','chat-1','confirmed');
+          UPDATE tasks SET workspace_id=NULL,error_message='UNIQUE constraint failed: workspaces.chat_session_id',
+            updated_at='2026-08-15T03:00:00.000Z' WHERE id='task-1';
+          UPDATE session_snapshots SET recovery_status='waking',recovery_task_id='task-1',
+            recovery_attempt_id='old-attempt',recovery_claimed_at='2026-08-15T02:00:00.000Z',
+            recovery_attempts=3,recovery_failed_at=NULL,recovery_workspace_id='workspace-1';`);
+        sqlite.prepare("UPDATE tasks SET status=? WHERE id='task-1'").run(status);
+        await expect(wake(createSqliteD1(sqlite))).resolves.toMatchObject({
+          status: 'unavailable',
+        });
+        expect(
+          sqlite
+            .prepare(
+              `SELECT recovery_failed_at,recovery_attempts,recovery_attempt_id
+          FROM session_snapshots`
+            )
+            .get()
+        ).toEqual({
+          recovery_failed_at: null,
+          recovery_attempts: 3,
+          recovery_attempt_id: 'old-attempt',
+        });
+        expect(
+          sqlite.prepare("SELECT chat_session_id FROM workspaces WHERE id='retained'").pluck().get()
+        ).toBe('chat-1');
+        expect(taskRow(sqlite)).toMatchObject({ status, workspace_id: null });
+        expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
       } finally {
         sqlite.close();
       }

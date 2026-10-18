@@ -318,7 +318,10 @@ export async function claimSessionSnapshotRecovery(
         );
       return { status: 'waking', taskId: snapshot.recoveryTaskId };
     }
+    // Reconstruct only for ordinary continuation. Automated source-guarded wakes
+    // retain their existing authority path and never mutate this missing anchor.
     if (
+      !input.sourceTaskGuard &&
       recoveryTask?.status === 'sleeping' &&
       snapshot.recoveryAttemptId &&
       !snapshot.recoveryFailedAt
