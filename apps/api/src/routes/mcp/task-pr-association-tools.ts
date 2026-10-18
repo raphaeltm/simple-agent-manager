@@ -7,6 +7,7 @@ import type { Env } from '../../env';
 import { AppError, errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { AGENT_ACTIVITY_ACTIVE_TASK_STATUSES } from '../../services/agent-activity';
+import { resolveProjectPullRequestHeadBranch } from '../../services/github-pull-request-branch';
 import {
   getMcpLimits,
   INTERNAL_ERROR,
@@ -110,8 +111,17 @@ export async function handleTaskPullRequestAssociation(
       : undefined;
     if (tool === 'associate_pull_request') {
       const args = v.parse(schemas.associate, params);
+      const currentBranch = await resolveProjectPullRequestHeadBranch(
+        env,
+        project,
+        token.userId,
+        canonicalPrUrl(args.prUrl, project.repository)
+      );
+      if (args.prHeadBranch !== currentBranch)
+        throw errors.badRequest('prHeadBranch does not match the current GitHub PR branch');
       await recordAssociation(env, token, {
         ...args,
+        prHeadBranch: currentBranch,
         prUrl: canonicalPrUrl(args.prUrl, project.repository),
       });
     }
@@ -202,10 +212,8 @@ async function recordAssociation(
   }
 ) {
   // One statement serializes competing claims and rechecks task state at write time.
-  // PR branch identity is not verified by this tool. A caller-provided hint must
-  // never bypass a branch-only writer: conservatively refuse any competing
-  // active branch evidence until that writer relinquishes responsibility.
-  // Even another explicit PR URL cannot prove all its branch work is unrelated.
+  // Branch identity comes from an authorized current GitHub read, not caller input.
+  // The same atomic check retains exact branch-only writers without blocking unrelated branches.
   // History is retained; a held predecessor cannot be silently promoted to a release.
   const active = AGENT_ACTIVITY_ACTIVE_TASK_STATUSES.map(() => '?').join(',');
   const result = await env.DATABASE.prepare(
@@ -220,7 +228,7 @@ async function recordAssociation(
         WHERE other.project_id = t.project_id AND other.id != t.id
           AND other.status IN (${active}) AND other.superseded_by_task_id IS NULL
           AND (lower(rtrim(other.output_pr_url, '/')) = ? OR instr(lower(other.description), lower(?)) > 0
-            OR NULLIF(other.output_branch, '') IS NOT NULL OR NULLIF(w.branch, '') IS NOT NULL OR EXISTS (
+            OR other.output_branch = ? OR w.branch = ? OR EXISTS (
             SELECT 1 FROM task_pull_request_associations a
             WHERE a.task_id = other.id AND a.project_id = t.project_id AND a.pr_url = ?
           ))
@@ -267,6 +275,8 @@ async function recordAssociation(
       ...AGENT_ACTIVITY_ACTIVE_TASK_STATUSES,
       args.prUrl,
       args.prUrl,
+      args.prHeadBranch,
+      args.prHeadBranch,
       args.prUrl,
       args.previousTaskId ?? null,
       args.prUrl,
@@ -295,6 +305,6 @@ async function recordAssociation(
   )
     return;
   throw errors.badRequest(
-    'Association refused: existing ownership, unverified competing active branch evidence, a hold, task state, or continuation evidence'
+    'Association refused: existing ownership, competing verified branch ownership, a hold, task state, or continuation evidence'
   );
 }

@@ -8,7 +8,7 @@ export const TASK_LIFECYCLE_TOOLS = [
   {
     name: 'associate_pull_request',
     description:
-      'Record an explicit PR association for the calling active task, including release artifacts assigned after dispatch. Multiple PRs are supported. Requires current project task:write access. Append-only evidence never grants merge or cleanup authority; held artifacts remain held. A continuation may name a terminal previousTaskId with exact prior PR evidence; active or held competing owners block reassignment. Unverified branch hints cannot rule out another active branch writer; such writers conservatively block association.',
+      'Record an explicit PR association for the calling active task, including release artifacts assigned after dispatch. Multiple PRs are supported. Requires current project task:write access. Append-only evidence never grants merge or cleanup authority; held artifacts remain held. A continuation may name a terminal previousTaskId with exact prior PR evidence; active or held competing owners block reassignment. Uses existing authorized GitHub access to verify the current PR head branch; missing access or a stale branch hint refuses the claim. Unrelated active branches remain independent.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -16,7 +16,7 @@ export const TASK_LIFECYCLE_TOOLS = [
         prHeadBranch: {
           type: 'string',
           description:
-            'Caller-reported PR branch hint, not verified identity. Any other active branch evidence conservatively blocks association regardless of this hint.',
+            'Expected current PR head branch. Must match a fresh authorized GitHub read; caller input is not ownership proof.',
         },
         disposition: {
           type: 'string',

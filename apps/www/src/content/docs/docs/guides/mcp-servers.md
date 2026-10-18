@@ -120,11 +120,14 @@ let agents create schedule, GitHub, and webhook triggers for their project; see
 When an agent takes responsibility for a PR after its task was dispatched, it can call
 `associate_pull_request` with the exact `prUrl`, caller-reported `prHeadBranch`, a `disposition` of `owned` or `held`,
 and a `reason` recording the assignment. One task can associate several PRs.
-The branch hint is not verified GitHub identity. Until another active task with branch evidence relinquishes responsibility, this tool
-conservatively refuses new associations across the project,
-even when the caller supplies a different branch or that task also owns another PR.
-A branch hint cannot bypass a writer. This conservative refusal can block unrelated
-PRs during concurrent branch work; it preserves safety without verified GitHub branch identity.
+The tool reuses current user and project-installation GitHub access to read the PR's
+current head branch. The supplied branch must match that read; missing access,
+failed reads and stale hints refuse the association without requesting grants or secrets.
+The atomic ownership check uses the verified branch, so an existing branch-only
+writer blocks its PR while unrelated active task/workspace branches remain independent.
+This read and the D1 write are not a cross-service transaction: associations remain
+responsibility evidence, and release actions still require fresh ordinary checks.
+The PR read uses the existing `SAM_GITHUB_TIMEOUT_MS` bound.
 URL, branch, predecessor and cursor fields use the configured MCP dispatch reference
 length bound; reasons use the configured activity message bound. Oversized inputs are rejected.
 `list_project_agents(prUrl)` includes these exact associations when finding active owners.

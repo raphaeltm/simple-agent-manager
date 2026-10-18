@@ -43,3 +43,11 @@ Astra design review found canonical URL case equivalence and new FK deletion reg
 - FK-enabled actual migration tests preserve task deletion/history/holds and deliberate project deletion cascade.
 - Follow-up focused+legacy tests:46 passed. Local Astra security/source review PASS with material operational limitation explicitly distinguished from connector product/release acceptance; specialist test/doc review PASS (18 independent tests).
 - Fresh main5cddddf45 and peer recovery00d2928b8/domain1312ad718 show no schema migration overlap before this follow-up commit. Recovery retains staging lease; no staging changes initiated.
+
+## Authorized GitHub branch verification (supersedes blanket refusal)
+
+The coordinating reviewer authorized reuse of existing GitHub read capability and identified ordinary parallel-work usability as material. Reused `requireRepositoryAccess` (current user ∩ project installation, repository identity) and `getInstallationToken`; one bounded GET of the canonical project PR validates returned base repository/PR number/head.ref. The supplied branch must match this fresh read; the atomic D1 predicate uses the verified branch. Missing/revoked access, failed/malformed/mismatched reads and stale hints fail closed, with no new grants, secrets, permission/config changes. Existing `SAM_GITHUB_TIMEOUT_MS` bounds the PR read. Listing remains local. GitHub read/D1 write are not cross-service atomic; association is responsibility evidence and release requires normal fresh checks.
+
+Practical regression: unrelated active output/workspace branches allow association; actual verified branch-only owners block even when they own another PR; wrong/stale hints cannot bypass. Authenticated real MCP→real resolver→GitHub fetch boundary→real SQLite test asserts project/user authorization arguments and final owner. Existing bounds, canonical URL/adjacent PR identity, held artifacts, deletion retention and terminal/research semantics are retained.57 focused/legacy testsPASS; independent security and local Astra source reviewsPASS. Coordinating Astra HOLD remains, no final review or release approval inferred. Fresh main5cddddf45 plus recovery/domain branches show no migration overlap before this revision;0198unchanged.
+
+GitHub contract: https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request

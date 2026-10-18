@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
@@ -19,6 +19,12 @@ import {
   createAllSchemaTables,
   createSqliteD1,
 } from '../../helpers/sqlite-d1';
+
+const github = vi.hoisted(() => ({ resolve: vi.fn() }));
+vi.mock('../../../src/services/github-pull-request-branch', () => ({
+  resolveProjectPullRequestHeadBranch: github.resolve,
+}));
+beforeEach(() => github.resolve.mockReset().mockResolvedValue('release-branch'));
 
 const pr = (n: number) => `https://github.com/owner/repo/pull/${n}`;
 function fixture() {
@@ -97,6 +103,7 @@ describe('explicit PR ownership vertical slice', () => {
     const tools = (discovery.result as { tools: { name: string }[] }).tools.map((t) => t.name);
     expect(tools).toContain('associate_pull_request');
     expect(tools).toContain('list_pull_request_associations');
+    github.resolve.mockResolvedValueOnce('release-18');
     const recorded = await callMcpTool(
       app,
       f.env,
@@ -230,12 +237,12 @@ describe('explicit PR ownership vertical slice', () => {
     f.sqlite.close();
   });
 
-  it('refuses wrong or stale caller branch hints while any active branch-only writer exists', async () => {
+  it('checks the verified current branch despite wrong/stale hints and permits unrelated active branches', async () => {
     const f = fixture();
     f.sqlite
-      .prepare("UPDATE tasks SET output_branch='actual-current-branch' WHERE id='next'")
-      .run();
-    for (const prHeadBranch of ['wrong-branch', 'stale-branch', 'actual-current-branch']) {
+      .prepare("UPDATE tasks SET output_branch='release-branch', output_pr_url=? WHERE id='next'")
+      .run(pr(999));
+    for (const prHeadBranch of ['wrong-branch', 'stale-branch', 'release-branch']) {
       expect(
         (
           await f.call('associate_pull_request', {
@@ -247,22 +254,10 @@ describe('explicit PR ownership vertical slice', () => {
         ).error
       ).toBeDefined();
     }
-    // Owning another explicit artifact cannot prove this branch belongs to it.
-    f.sqlite.prepare("UPDATE tasks SET output_pr_url=? WHERE id='next'").run(pr(999));
-    expect(
-      (
-        await f.call('associate_pull_request', {
-          prUrl: pr(40),
-          prHeadBranch: 'wrong-branch',
-          disposition: 'owned',
-          reason: 'Assigned',
-        })
-      ).error
-    ).toBeDefined();
     f.sqlite
       .prepare(
         `INSERT INTO workspaces (id,project_id,user_id,name,repository,branch,vm_size,vm_location)
-      VALUES ('competing-ws','p','u','Competitor','owner/repo','actual-workspace-branch','small','test')`
+      VALUES ('competing-ws','p','u','Competitor','owner/repo','release-branch','small','test')`
       )
       .run();
     f.sqlite
@@ -272,23 +267,59 @@ describe('explicit PR ownership vertical slice', () => {
       (
         await f.call('associate_pull_request', {
           prUrl: pr(40),
-          prHeadBranch: 'wrong-branch',
+          prHeadBranch: 'release-branch',
           disposition: 'owned',
           reason: 'Assigned',
         })
       ).error
     ).toBeDefined();
-    f.sqlite.prepare("UPDATE tasks SET status='completed' WHERE id='next'").run();
+    f.sqlite
+      .prepare("UPDATE tasks SET output_branch='unrelated-task-branch' WHERE id='next'")
+      .run();
+    f.sqlite.prepare("UPDATE workspaces SET branch='unrelated-workspace-branch'").run();
     expect(
       (
         await f.call('associate_pull_request', {
           prUrl: pr(40),
-          prHeadBranch: 'wrong-branch',
+          prHeadBranch: 'release-branch',
           disposition: 'owned',
           reason: 'Assigned',
         })
       ).error
     ).toBeUndefined();
+    expect(await f.owners(pr(40))).toEqual(['owner']);
+    expect(github.resolve).toHaveBeenCalledWith(
+      f.env,
+      expect.objectContaining({ id: 'p' }),
+      'u',
+      pr(40)
+    );
+    f.sqlite.close();
+  });
+
+  it('fails closed without a verified GitHub branch and does not read GitHub on unauthorized calls or listing', async () => {
+    const f = fixture();
+    github.resolve.mockRejectedValueOnce(new Error('Existing GitHub access unavailable'));
+    expect(
+      (
+        await f.call('associate_pull_request', {
+          prUrl: pr(41),
+          disposition: 'owned',
+          reason: 'Assigned',
+        })
+      ).error
+    ).toBeDefined();
+    expect(
+      f.sqlite.prepare('SELECT count(*) AS n FROM task_pull_request_associations').get()
+    ).toEqual({ n: 0 });
+    github.resolve.mockClear();
+    await f.call('list_pull_request_associations', {});
+    await f.call(
+      'associate_pull_request',
+      { prUrl: pr(41), disposition: 'owned', reason: 'Assigned' },
+      { ...f.token, taskId: 'old' }
+    );
+    expect(github.resolve).not.toHaveBeenCalled();
     f.sqlite.close();
   });
 
