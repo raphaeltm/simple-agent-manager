@@ -124,12 +124,24 @@ async function reactivateSleepingTask(
           chatSessionId,
           context.snapshot.workspaceId
         ),
+      // A failed later wake can retain the UNIQUE session binding on a different
+      // tombstone while the restorable snapshot still names its original workspace.
+      // Release only this conversation's confirmed-deleted predecessors; retain rows.
       database
         .prepare(
           `UPDATE workspaces
               SET chat_session_id = NULL, updated_at = ?
-            WHERE id = ?
-              AND chat_session_id = ?
+            WHERE chat_session_id = ?
+              AND project_id = ?
+              AND user_id = ?
+              AND (
+                id = ?
+                OR (status = 'deleted' AND (
+                  runtime_deletion_confirmed_at IS NOT NULL
+                  OR EXISTS (SELECT 1 FROM nodes node WHERE node.id = workspaces.node_id
+                    AND node.runtime_termination_confirmed_at IS NOT NULL)
+                ))
+              )
               AND EXISTS (
                 SELECT 1 FROM tasks task
                  WHERE task.id = ?
@@ -141,8 +153,10 @@ async function reactivateSleepingTask(
         )
         .bind(
           now,
-          context.snapshot.workspaceId,
           chatSessionId,
+          context.project.id,
+          context.snapshot.userId,
+          context.snapshot.workspaceId,
           taskId,
           chatSessionId,
           recoveryAttemptId
