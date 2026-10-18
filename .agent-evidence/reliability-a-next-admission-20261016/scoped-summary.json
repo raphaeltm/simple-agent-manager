@@ -1,0 +1,9 @@
+{
+  "allOtherCfChecksPass": true,
+  "assets47RematerializedExact": true,
+  "explicitFiveProtectedSnapshotsPass": true,
+  "historicalProjectRecoveryQualifier": "Two unrelated terminal-task stale waking records retained; current bound sessions and active recovery tasks zero. No mutation or false global zero.",
+  "noNewRuntimeAuthorization": true,
+  "snapshotScope": "Exact five previously retained reliability snapshots, including both accepted Instant cases and three failed VM cases. Broad task branch inventory also includes cancelled/bootstrap cases without snapshots; its count-equality helper is not a protected-snapshot absence proof. Original false helper result retained.",
+  "sourceSha": "3bcc10761769b9a4e0999d59548e0d8b1e6cc7d5"
+}

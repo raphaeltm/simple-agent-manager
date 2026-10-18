@@ -1,0 +1,7 @@
+{
+  "cf-guards.json": "c44e9aa7b44fd91b6079399632b29cdf6d588c4d10d5f27cae9f4bb1438f94c1",
+  "public-guards.json": "b1eb6ca7e27556b77013c60baecfb501e84be8ee1673cc5ca783aed37f6acb36",
+  "read-guards.py": "3e96c9fc052159852641232279c1e48d90f6150e937eb3af1f9f8c63aa2f4570",
+  "scoped-summary.json": "61f7e9dad43a94c051dfea6594f9d22863dbb4f185b8a824a8302ccfe08c0404",
+  "strict-cleanup.json": "5c4e74efa3b2c527d5929864a519897854b9ce4c68ee87147252fc3c555ea472"
+}

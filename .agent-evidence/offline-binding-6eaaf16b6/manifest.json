@@ -1,0 +1,21 @@
+{
+  "base": "3bcc10761769b9a4e0999d59548e0d8b1e6cc7d5",
+  "files": {
+    "BINDING-AUDIT.md": "9f7dc0325ab417b011c21312523e12a9226720aa5428e0f5cd15a2b5f396bf4b",
+    "change.bundle": "1423a6762c0a009aac6b4df7491b2028f7bb4c2117e0fb2e2e9af0a19ff8266d",
+    "prospective-vm-controller.mjs": "63d7a2ded74ad94c84b35720a7d8277fa29dac2edab645e8a4f43ef8757f6dde",
+    "prospective-vm.mjs": "5e2e8f6e1c0f883467c6d6d81f54bb59d123fac4945af5a83188da8ab0217076",
+    "test-prospective-controller.mjs": "8b6d1d96b285792ce4fc6b439db4cc150397735fbf437c4c10c700d51400bd69",
+    "test-prospective-vm.mjs": "9c9c2380f3afb78faeb0a4fe1c85d2a7f081e6d59e9e980ad9263350094f1a3d"
+  },
+  "head": "6eaaf16b69f9b9b2a40acb68e80020eaff20ac48",
+  "historicalFailureCause": "UNKNOWN",
+  "remotePush": false,
+  "validation": {
+    "actualPtyExecutions": 9,
+    "adapterCases": 42,
+    "controllerCases": 24,
+    "liveCalls": 0,
+    "retentionCases": 26
+  }
+}

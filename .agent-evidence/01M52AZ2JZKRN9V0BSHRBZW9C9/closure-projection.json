@@ -1,0 +1,18 @@
+{
+  "authCleanup": true,
+  "browserClosed": true,
+  "caseAcceptance": "NOT PASS",
+  "exactFailedPredicate": "UNKNOWN; not retained",
+  "exportPreparedAt": 1792154341949,
+  "failureStage": "setup/binding",
+  "fixturePrepared": false,
+  "hard": 1792156397454,
+  "independentSnapshotAvailable": true,
+  "initialRetentionVerified": true,
+  "normalAbortSleep": true,
+  "providerOwnership": "ACTIVE; normalwarmnode01M52AZAP",
+  "providerTerminationConfirmed": false,
+  "snapshotId": "01M52BCGZ92JC2FTGNPQKM5CZQ",
+  "terminalOpened": false,
+  "testedTurnExecuted": false
+}

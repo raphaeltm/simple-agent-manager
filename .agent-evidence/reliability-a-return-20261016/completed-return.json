@@ -1,0 +1,40 @@
+{
+  "checks": {
+    "agentPinMatches": true,
+    "firstAvailable": true,
+    "firstCompleted": true,
+    "ownActiveRecoveryAbsent": true,
+    "ownActiveWorkspaceAbsent": true,
+    "pool40Ready": true
+  },
+  "deployments": [
+    {
+      "createdOn": "2026-10-16T10:01:59.866461Z",
+      "id": "f2a82209-209d-4a52-bb2c-5260b4ae5010",
+      "versions": [
+        {
+          "percentage": 100,
+          "versionId": "4f0a08ad-76d9-4bff-97aa-941601c3f4c3"
+        }
+      ]
+    }
+  ],
+  "globalNondeletedVmCount": 0,
+  "globalNonterminalWarmClaims": 0,
+  "idleBaselineReturn": "PASS",
+  "listedLatestEightDeploymentRunsCompleted": true,
+  "observedAtMs": 1792145952978,
+  "ok": true,
+  "publishedBinaryMatches": true,
+  "publishedBinarySha256": "a59a4850337fe7af588267c481dee046db5baba4d3f705c85f19f85ded09e06f",
+  "runtimeAdmission": "BLOCKED: original16 unavailable",
+  "targetSnapshots": [
+    {
+      "available": true,
+      "claimAbsent": true,
+      "expiresAt": "2026-10-23T08:10:10.969Z",
+      "id": "01M51QM3Y0GPFEE2SMT1TT7374",
+      "undegraded": true
+    }
+  ]
+}
