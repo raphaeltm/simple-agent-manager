@@ -69,12 +69,29 @@ describe('authorized current GitHub PR branch read', () => {
         disposition: 'owned',
         reason: 'Assigned',
       });
+    mocks.fetch.mockResolvedValueOnce(new Response('not accessible', { status: 403 }));
+    expect((await claim('actual-current-branch')).error).toBeDefined();
+    expect(
+      sqlite.prepare('SELECT count(*) AS n FROM task_pull_request_associations').get()
+    ).toEqual({ n: 0 });
     expect((await claim('wrong-branch')).error).toBeDefined();
     expect((await claim('actual-current-branch')).error).toBeDefined();
+    // GitHub changes its head between attempts: each claim must read again.
+    mocks.fetch.mockImplementation(async () =>
+      Response.json({ ...payload(), head: { ref: 'changed-current-branch' } })
+    );
+    sqlite
+      .prepare("UPDATE tasks SET output_branch='changed-current-branch' WHERE id='competitor'")
+      .run();
+    expect((await claim('actual-current-branch')).error).toBeDefined();
+    expect((await claim('changed-current-branch')).error).toBeDefined();
+    expect(
+      sqlite.prepare('SELECT count(*) AS n FROM task_pull_request_associations').get()
+    ).toEqual({ n: 0 });
     sqlite
       .prepare("UPDATE tasks SET output_branch='unrelated-parallel-branch' WHERE id='competitor'")
       .run();
-    expect((await claim('actual-current-branch')).error).toBeUndefined();
+    expect((await claim('changed-current-branch')).error).toBeUndefined();
     expect(
       sqlite.prepare('SELECT task_id,pr_url FROM task_pull_request_associations').all()
     ).toEqual([{ task_id: 'owner', pr_url: url }]);
