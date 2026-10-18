@@ -30,7 +30,7 @@ export const TASK_LIFECYCLE_TOOLS = [
         previousTaskId: {
           type: 'string',
           description:
-            'Optional terminal predecessor with exact PR evidence, for an explicitly authorized continuation.',
+            'Optional same-user, same-project terminal predecessor with exact PR evidence, for an explicitly authorized continuation.',
         },
       },
       required: ['prUrl', 'prHeadBranch', 'disposition', 'reason'],

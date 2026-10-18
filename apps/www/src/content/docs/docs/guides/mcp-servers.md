@@ -126,7 +126,7 @@ Use `list_pull_request_associations(prUrl)` to inspect retained ownership eviden
 including completed owners and held artifacts. An association is evidence of responsibility,
 not permission to merge, close, or clean up a PR. A held artifact stays held.
 
-An explicitly authorized continuation can supply `previousTaskId` for a terminal task
+An explicitly authorized continuation can supply `previousTaskId` for a terminal task owned by the same user in the same project
 that has the same exact output PR or association. The predecessor stays terminal and
 its association history is retained. An active competing owner (including branch and description evidence) or a retained
 hold blocks reassignment. The tools derive identity from the agent token and recheck
