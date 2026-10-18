@@ -6,6 +6,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import type { SessionRecoverySourceTaskGuard } from './session-recovery-authority';
+import { reconcileSessionRecoveryBindingFailure } from './session-recovery-binding-failure';
 import {
   DEFAULT_SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS,
   isRestorableSnapshot,
@@ -275,6 +276,7 @@ export async function claimSessionSnapshotRecovery(
       expiresAt: schema.sessionSnapshots.expiresAt,
       recoveryStatus: schema.sessionSnapshots.recoveryStatus,
       recoveryTaskId: schema.sessionSnapshots.recoveryTaskId,
+      recoveryAttemptId: schema.sessionSnapshots.recoveryAttemptId,
       recoveryAttempts: schema.sessionSnapshots.recoveryAttempts,
       recoveryFailedAt: schema.sessionSnapshots.recoveryFailedAt,
       recoveryClaimedAt: schema.sessionSnapshots.recoveryClaimedAt,
@@ -315,6 +317,23 @@ export async function claimSessionSnapshotRecovery(
           )
         );
       return { status: 'waking', taskId: snapshot.recoveryTaskId };
+    }
+    // Reconstruct only for ordinary continuation. Automated source-guarded wakes
+    // retain their existing authority path and never mutate this missing anchor.
+    if (
+      !input.sourceTaskGuard &&
+      recoveryTask?.status === 'sleeping' &&
+      snapshot.recoveryAttemptId &&
+      !snapshot.recoveryFailedAt
+    ) {
+      snapshot.recoveryFailedAt = await reconcileSessionRecoveryBindingFailure(env.DATABASE, {
+        chatSessionId: input.chatSessionId,
+        userId: input.userId,
+        taskId: snapshot.recoveryTaskId,
+        recoveryAttemptId: snapshot.recoveryAttemptId,
+        staleBefore,
+        now: nowIso,
+      });
     }
     if (budgetAvailable(snapshot, maxAttempts, decayMs, now.getTime())) {
       const reclaimed = await db
