@@ -1079,6 +1079,29 @@ export const tasks = sqliteTable(
   })
 );
 
+/** Append-only PR ownership evidence; never grants merge or cleanup authority. */
+export const taskPullRequestAssociations = sqliteTable(
+  'task_pull_request_associations',
+  {
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id),
+    prUrl: text('pr_url').notNull(),
+    disposition: text('disposition', { enum: ['owned', 'held'] }).notNull(),
+    reason: text('reason').notNull(),
+    previousTaskId: text('previous_task_id').references(() => tasks.id),
+    recordedByUserId: text('recorded_by_user_id').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.taskId, table.prUrl] }),
+    projectUrl: index('idx_task_pr_associations_project_url').on(table.projectId, table.prUrl),
+  })
+);
+
 export const vmTaskAdmissions = sqliteTable(
   'vm_task_admissions',
   {

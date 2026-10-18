@@ -114,3 +114,22 @@ Tools from a connected MCP server run inside your agent's session, which already
 The servers on this page are third-party tools you give your agents. SAM's own built-in tools also
 let agents create schedule, GitHub, and webhook triggers for their project; see
 [Ask an agent to set one up](/docs/guides/triggers/#ask-an-agent-to-set-one-up).
+
+## Keep release PR ownership explicit
+
+When an agent takes responsibility for a PR after its task was dispatched, it can call
+`associate_pull_request` with the exact `prUrl`, current `prHeadBranch`, a `disposition` of `owned` or `held`,
+and a `reason` recording the assignment. One task can associate several PRs.
+`list_project_agents(prUrl)` includes these exact associations when finding active owners.
+
+Use `list_pull_request_associations(prUrl)` to inspect retained ownership evidence,
+including completed owners and held artifacts. An association is evidence of responsibility,
+not permission to merge, close, or clean up a PR. A held artifact stays held.
+
+An explicitly authorized continuation can supply `previousTaskId` for a terminal task
+that has the same exact output PR or association. The predecessor stays terminal and
+its association history is retained. An active competing owner (including branch and description evidence) or a retained
+hold blocks reassignment. The tools derive identity from the agent token and recheck
+current project access; they do not reopen tasks or make merging a condition of completing
+research or draft-only work. Association records are append-only; correcting a hold is
+outside this initial slice.

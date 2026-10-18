@@ -96,7 +96,7 @@ export const WORKSPACE_TOOLS = [
         prUrl: {
           type: 'string',
           description:
-            "A pull request's URL (https://github.com/<owner>/<repo>/pull/<number>). Returns only active tasks whose output PR URL is this URL or whose description cites it. With prHeadBranch, a task matching either is returned.",
+            "A pull request's URL (https://github.com/<owner>/<repo>/pull/<number>). Returns only active tasks whose output PR URL is this URL or whose description cites it, or whose explicit PR associations include this exact URL. Held associations are ownership evidence only and never authorize release. With prHeadBranch, a task matching either is returned.",
         },
       },
       additionalProperties: false,

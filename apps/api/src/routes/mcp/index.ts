@@ -1,3 +1,4 @@
+import { handleTaskPullRequestAssociation } from './task-pr-association-tools';
 /**
  * MCP Server Route
  *
@@ -513,6 +514,17 @@ mcpRoutes.post('/', async (c) => {
             return c.json(await handleExposePort(requestId, toolArgs, tokenData, c.env));
           case 'check_dns_status':
             return c.json(await handleCheckDnsStatus(requestId, tokenData, c.env));
+          case 'associate_pull_request':
+          case 'list_pull_request_associations':
+            return c.json(
+              await handleTaskPullRequestAssociation(
+                toolName,
+                requestId,
+                toolArgs,
+                tokenData,
+                c.env
+              )
+            );
           case 'list_project_agents':
             return c.json(await handleListProjectAgents(requestId, toolArgs, tokenData, c.env));
           case 'get_peer_agent_output':

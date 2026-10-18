@@ -77,6 +77,7 @@ describe('list_project_agents pull request owner filter', () => {
       schema.platformSettings,
       schema.projects,
       schema.tasks,
+      schema.taskPullRequestAssociations,
       schema.workspaces,
       schema.sessionSnapshots,
     ]);
