@@ -109,7 +109,12 @@ export function cloudflareRequest(token, fetcher = fetch) {
     const data = await response.json();
     // Do not echo API bodies: a failing service must not leak credential material.
     if (!response.ok || data.success !== true || data.result == null) {
-      throw new Error(`Cloudflare ${method} ${path} failed (HTTP ${response.status}).`);
+      const codes = Array.isArray(data.errors)
+        ? data.errors.map((error) => error.code).filter((code) => Number.isSafeInteger(code))
+        : [];
+      throw new Error(
+        `Cloudflare ${method} ${path} failed (HTTP ${response.status}; codes ${codes.join(',') || 'none'}).`
+      );
     }
     return data.result;
   };
