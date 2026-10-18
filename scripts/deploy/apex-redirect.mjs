@@ -48,23 +48,26 @@ export async function reconcileApexRedirect({
   zoneId,
   request,
   apply = false,
+  remove = false,
   report = () => {},
 }) {
   const desired = desiredApexRedirect(domain);
   const zonePath = `/zones/${validId(zoneId)}`;
   const zone = await request(zonePath);
   if (zone.name !== domain) throw new Error('CF_ZONE_ID does not match BASE_DOMAIN.');
-  const dns = await request(`${zonePath}/dns_records?name=${encodeURIComponent(domain)}`);
-  if (
-    !Array.isArray(dns) ||
-    !dns.some(
-      (record) =>
-        record.name === domain &&
-        record.proxied === true &&
-        ['A', 'AAAA', 'CNAME'].includes(record.type)
-    )
-  ) {
-    throw new Error('Apex must already have proxied DNS; no DNS changes will be made.');
+  if (!remove) {
+    const dns = await request(`${zonePath}/dns_records?name=${encodeURIComponent(domain)}`);
+    if (
+      !Array.isArray(dns) ||
+      !dns.some(
+        (record) =>
+          record.name === domain &&
+          record.proxied === true &&
+          ['A', 'AAAA', 'CNAME'].includes(record.type)
+      )
+    ) {
+      throw new Error('Apex must already have proxied DNS; no DNS changes will be made.');
+    }
   }
   const rulesets = await request(`${zonePath}/rulesets`);
   if (!Array.isArray(rulesets)) throw new Error('Invalid ruleset list response.');
@@ -83,10 +86,11 @@ export async function reconcileApexRedirect({
   const owned = (entry?.rules ?? []).filter((rule) => rule.ref === APEX_REDIRECT_REF);
   if (owned.length > 1) throw new Error('Ambiguous managed apex rules; inspect before applying.');
   const before = owned[0] ?? null;
-  if (before && before.action !== 'redirect')
+  if (before && (before.action !== 'redirect' || before.expression !== desired.expression))
     throw new Error('Refusing to replace a non-redirect rule or security settings.');
   // Never adopt/overwrite a separately managed exact apex rule.
   if (
+    !remove &&
     (entry?.rules ?? []).some(
       (rule) => rule.ref !== APEX_REDIRECT_REF && rule.expression === desired.expression
     )
@@ -94,22 +98,40 @@ export async function reconcileApexRedirect({
     throw new Error('Unmanaged apex redirect exists; inspect before applying.');
   }
   const plan = {
-    method: sameRule(before, desired) ? null : before ? 'PATCH' : 'POST',
+    method: remove
+      ? before
+        ? 'DELETE'
+        : null
+      : sameRule(before, desired)
+        ? null
+        : before
+          ? 'PATCH'
+          : 'POST',
     path: `${zonePath}/rulesets${entry ? `/${validId(entry.id)}/rules${before ? `/${validId(before.id)}` : ''}` : ''}`,
     before,
-    after: entry
-      ? desired
-      : { name: 'Marketing redirects', kind: 'zone', phase: REDIRECT_PHASE, rules: [desired] },
+    after: remove
+      ? null
+      : entry
+        ? desired
+        : { name: 'Marketing redirects', kind: 'zone', phase: REDIRECT_PHASE, rules: [desired] },
   };
   report(plan);
   if (apply && plan.method) {
-    const result = await request(plan.path, { method: plan.method, body: plan.after });
+    const result = await request(plan.path, {
+      method: plan.method,
+      ...(plan.after ? { body: plan.after } : {}),
+    });
     const confirmed = result?.rules?.filter((rule) => rule.ref === APEX_REDIRECT_REF) ?? [];
     if (
       result?.phase !== REDIRECT_PHASE ||
       result?.kind !== 'zone' ||
-      confirmed.length !== 1 ||
-      !sameRule(confirmed[0], desired)
+      (remove
+        ? confirmed.length !== 0
+        : confirmed.length !== 1 || !sameRule(confirmed[0], desired)) ||
+      !isDeepStrictEqual(
+        result.rules.filter((rule) => rule.ref !== APEX_REDIRECT_REF),
+        (entry?.rules ?? []).filter((rule) => rule.ref !== APEX_REDIRECT_REF)
+      )
     ) {
       throw new Error(
         'Cloudflare did not confirm the requested apex redirect; inspect before retrying.'
@@ -143,14 +165,18 @@ export function cloudflareRequest(token, fetcher = fetch) {
 
 async function main() {
   const args = process.argv.slice(2);
-  if (args.some((arg) => arg !== '--apply') || args.length > 1)
-    throw new Error('Usage: apex-redirect.mjs [--apply]');
+  if (
+    args.some((arg) => !['--apply', '--remove'].includes(arg)) ||
+    new Set(args).size !== args.length
+  )
+    throw new Error('Usage: apex-redirect.mjs [--apply] [--remove]');
   const apply = args.includes('--apply');
   await reconcileApexRedirect({
     domain: process.env.BASE_DOMAIN,
     zoneId: process.env.CF_ZONE_ID,
     request: cloudflareRequest(process.env.CF_API_TOKEN),
     apply,
+    remove: args.includes('--remove'),
     report: (plan) => {
       const output = JSON.stringify({ apply, ...plan }, null, 2);
       console.log(output);

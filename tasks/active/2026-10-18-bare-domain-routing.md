@@ -1,37 +1,53 @@
 # Bare-domain marketing routing
 
-Owner: SAM task 01M58JBASXK9S8WA29B8A9QHKY; idea 01M4ZAEM6HSQE0Q6VZ9R9W9GEE.
+Owner: SAM task 01M58JBASXK9S8WA29B8A9QHKY; idea 01M4ZAEM6HSQE0Q6VZ9R9W9GEE. Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2376 . Actual model setting: gpt-6.1-sol.
 
 ## Problem and research
 
-2026-10-18 public GET checks: HTTP/HTTPS simple-agent-manager.org and HTTPS /docs/?routing_probe=1 return 522; www and app / and API /health return 200. Canonical marketing URL is https://www.simple-agent-manager.org (apps/www/astro.config.ts; deploy-www.yml). Existing provision-www.yml already creates a proxied placeholder apex A record and intends a scheme-independent apex-only forwarding Page Rule to https://www.<domain>/$1 (301). Its only retained provisioning run 22300482327 failed; logs expired (410). Inline curl piped to jq can report success even for success:false, and lookup excludes disabled rules. Live CF inspection is currently unavailable: production debugging token zone-list 403, connected CF accounts return no matching zone. Do not assert the exact historical failure cause.
+2026-10-18 public GET checks: HTTP/HTTPS simple-agent-manager.org and HTTPS /docs/?routing_probe=1 return522; www and app / and API /health return200. Canonical marketing URL is https://www.simple-agent-manager.org (apps/www/astro.config.ts; deploy-www.yml). Existing provision-www.yml creates a proxied placeholder apex A record and intends an apex→www301 Page Rule. Its only retained historical run22300482327 failed, with logs expired410; historical exact failure cause is unproven.
 
-Prefer repairing the existing managed Page Rule, retaining existing DNS/TLS/firewall/Worker routes. Cloudflare documents that omitted scheme matches HTTP and HTTPS and trailing wildcard includes path/query: https://developers.cloudflare.com/rules/page-rules/reference/wildcard-matching/ . No new infrastructure product or credential scopes.
+Live read-only plan39173562569 passed zone/proxied-apex checks, skipped DNS/Pages mutations, and failed Page Rules GET400. Diagnostic plan39173638664 identified code1011. Official Cloudflare issue23256 and the account-token compatibility matrix confirm Page Rules are incompatible with account-owned tokens; Rulesets are supported. No token or permission changes were made.
+
+The final implementation uses one Single Redirect in the supported Rulesets `http_request_dynamic_redirect` zone phase, ref `sam_apex_to_www`, expression `(http.host eq "<baseDomain>")`, target `concat("https://www.<baseDomain>", http.request.uri.path)`, status301, preserve_query_string=true. Append/PATCH only the owned rule, or create an absent redirect entrypoint containing that rule. Never replace an existing whole ruleset. Zone, proxied DNS, phase, ownership and mutation responses are checked; unrelated rule definitions/order must remain intact. Existing teardown paths remove only the owned rule, preserving the entrypoint; no teardown is executed for this repair.
 
 ## Checklist
 
 - [x] Check current main and sole ownership; reproduce public symptom read-only.
-- [x] Implement bounded, fail-closed Page Rule reconciliation with default read-only plan.
-- [x] Add isolated plan/apply operations to existing workflow without DNS/Pages provisioning.
-- [x] Reuse reconciliation in existing marketing provision workflow.
-- [x] Regression tests: missing/inactive/current/ambiguous rule, API failures, HTTP+HTTPS path/query contract, unrelated routing untouched.
-- [x] Relevant lint, typecheck and tests; independent specialist review.
-- [ ] Draft PR and concrete design sent to Astra; CI and CodeRabbit gates.
-- [ ] Coordinate existing deployment lease; classify network risk before application.
-- [ ] Apply only after gates and any required exact approval; public smoke on apex/www/app/API.
+- [x] Implement bounded, fail-closed Single Redirect reconciliation with default read-only plan.
+- [x] Add isolated plan/apply operations to the existing workflow; gate DNS/Pages provisioning separately.
+- [x] Prepare narrow managed-rule teardown cleanup with existing confirmation/opt-in/dry-run protections.
+- [x] Regression tests: missing/existing/disabled/duplicate/foreign-owned rules, API failures, wrong zone, DNS preflight, HTTP+HTTPS path/query configuration, unrelated routing preserved, narrow teardown.
+- [x] Relevant local validation and independent final-design specialist reviews.
+- [x] Open draft PR and report concrete design for Astra review.
+- [ ] CI and remaining review gates, including Astra and CodeRabbit when otherwise ready.
+- [ ] Resolve existing-credential access blocker without unauthorized permission/credential changes.
+- [ ] Coordinate shared deployment lease before any apply.
+- [ ] Apply only after gates/required approval; public smoke apex/www/app/API; keep task active until verified.
 
-## Acceptance and safety
+## Validation and review evidence
 
-Both apex schemes permanently redirect to HTTPS www retaining paths/query; subdomains excluded. No unrelated DNS/firewall/TLS/credential/permission changes. Plan reports exact mutation. Application is manual, serialized, and fails on API errors/ambiguous ownership. No paid browser, no production authenticated journey, no held PR mutation. Keep task active until deployed and verified; preserve .do-state.md continuation.
+Local final config suite: 80 tests across apex-redirect, deployment-workflow-hardening and teardown-workflow files pass. Independent reviewer reran apex+teardown subset:19 tests/2 files pass. Pulumi infra:72 tests/9 files pass, including app/API/wildcard/VM exclusion routing; infra typecheck/lint pass. Deployment-script typecheck, focused ESLint, Node syntax and Prettier pass. These are config/adapter tests, not proof of live redirect behavior.
 
-## Preparation evidence
+Fresh final-design Cloudflare/security/constitution review PASS for safe preparation; tests/docs/completion review PASS after this task record correction. Exact owned-rule Single Redirect is ordinary public routing configuration, not an auth/security boundary change. Full provisioning is outside the repair scope. Deployment and final completion are explicitly pending.
 
-Local independent Cloudflare/security/constitution review PASS: exact apex forwarding_url301 is public routing repair without security-sensitive settings. Use only apply-redirect; never provision for this repair. Test/docs/completion review PASS for draft preparation; final completion remains pending application and public smoke. No production authenticated journey or VM lifecycle is relevant to this apex-only rule; any genuine gate conflict must be reported, not silently waived.
+## Application blocker and exact approval boundary
 
-Relevant checks: infra 9 files/72 tests pass, infra typecheck/lint pass; scripts/deploy typecheck, focused script lint and node syntax pass; marketing workflow/name/teardown regression suite passes. Contract tests do not substitute for real public smoke. Full historical root cause cannot be asserted from expired run logs.
+Supported read-only plan https://github.com/raphaeltm/simple-agent-manager/actions/runs/39173865292 at2fbf1b7b7cd9cf5531060ddb811bb2550d348d60 passed production zone and proxied-apex checks, then failed GET /zones/<production CF_ZONE_ID>/rulesets with HTTP403/code10000. DNS/Pages provisioning steps were skipped. No live mutation occurred. Existing deployment credential cannot inspect the required Rulesets surface.
 
-## Live finding and revised design
+Target: production simple-agent-manager.org, `http_request_dynamic_redirect` phase, only ref `sam_apex_to_www`. Intended diff: absent entrypoint→zone redirect entrypoint with one exact-apex301; or append/PATCH that rule in an existing entrypoint. Actual live before-state cannot be determined until read access succeeds. Original path and query retained; www/app/api/preview/workspace/VM hosts excluded. No DNS/TLS/firewall/security-phase changes.
 
-Read-only plan runs 39173562569 and 39173638664 passed zone/proxied-apex checks, skipped all DNS/Pages mutations, and failed Page Rules GET with HTTP400/code1011. Cloudflare's official issue https://github.com/cloudflare/cloudflare-docs/issues/23256 and account-owned token compatibility matrix identify Page Rules as unsupported for account-owned tokens. Increasing permissions would not fix that API incompatibility. No credentials or permissions changed.
+If no already-approved credential can perform this operation, explicit user approval is needed before granting the existing production deployment token `Zone > Dynamic URL Redirects > Edit`, scoped only to simple-agent-manager.org. That scope allows editing other dynamic redirects in the zone, so it is a persistent permission expansion despite the narrow code path. No new token, other scope or secret change is authorized. After approval/access: rerun plan, inspect exact live diff, recheck Astra/CI/CodeRabbit gates, acquire lease, apply-redirect only, then public smoke. Do not use provision or teardown for this repair.
 
-Superseding initial PageRule design: use one Single Redirect in the supported Rulesets `http_request_dynamic_redirect` phase, ref `sam_apex_to_www`, exact host expression, dynamic HTTPS www + original URI path and preserve_query_string=true. Create an absent entrypoint containing only this rule; otherwise append or PATCH only the owned rule. Never replace an existing whole ruleset, security phase or unrelated rule. Keep legacy teardown cleanup and add owned-rule cleanup to existing teardown paths; do not execute teardown. Re-review and live plan required before apply.
+Shared staging: recovery owner01M58JARRQQ01A3DB9JEDA2E9G has the next bounded validation slot by peer agreement; apex has no deployment reservation while blocked. No shared schema/migration changes or release dependencies.
+
+## References
+
+- https://developers.cloudflare.com/rules/url-forwarding/single-redirects/create-api/
+- https://developers.cloudflare.com/ruleset-engine/rulesets-api/add-rule/
+- https://developers.cloudflare.com/ruleset-engine/rulesets-api/update-rule/
+- https://developers.cloudflare.com/fundamentals/api/get-started/account-owned-tokens/
+- https://github.com/cloudflare/cloudflare-docs/issues/23256
+
+## Safety and completion
+
+No paid browser runs. Authenticated journeys are staging only; production gets basic public smoke only. No held PR mutations, raw production DB repair, new credentials, permission grants, sensitive network settings or financial commitments. User requested draft PR early, so draft precedes application. SAM isolated checkout/assigned branch reused; task record stays in this PR to avoid concurrent direct-main release writes. Keep .do-state.md and PR current; do not archive or complete task before verified outcome.

@@ -18,7 +18,11 @@ const desired = desiredApexRedirect(domain);
 const entry = (rules: unknown[]) => ({ id: rulesetId, kind: 'zone', phase: REDIRECT_PHASE, rules });
 function api(existing: ReturnType<typeof entry> | null = null, zone = domain) {
   return vi.fn(async (path: string, options?: { method?: string; body?: unknown }) => {
-    if (options?.method) return entry([{ id: ruleId, ...desired }]);
+    if (options?.method)
+      return entry([
+        ...(existing?.rules ?? []).filter((rule: any) => rule.ref !== APEX_REDIRECT_REF),
+        ...(options.method === 'DELETE' ? [] : [{ id: ruleId, ...desired }]),
+      ]);
     if (path === `/zones/${zoneId}`) return { name: zone };
     if (path.includes('/dns_records')) return [{ name: domain, proxied: true, type: 'A' }];
     if (path.endsWith('/rulesets')) return existing ? [existing] : [];
@@ -236,6 +240,51 @@ describe('managed apex Single Redirect', () => {
     await expect(
       reconcileApexRedirect({ domain, zoneId, request: mismatch, apply: true })
     ).rejects.toThrow(/did not confirm/);
+  });
+
+  it('teardown deletes only its exact owned rule and preserves unrelated rules and the entrypoint', async () => {
+    const unrelated = { id: 'd'.repeat(32), ref: 'other', action: 'redirect' };
+    const request = api(entry([unrelated, { id: ruleId, ...desired }]));
+    const plan = await reconcileApexRedirect({
+      domain,
+      zoneId,
+      request,
+      remove: true,
+      apply: true,
+    });
+    expect(plan).toMatchObject({
+      method: 'DELETE',
+      path: `/zones/${zoneId}/rulesets/${rulesetId}/rules/${ruleId}`,
+      after: null,
+    });
+    expect(request.mock.calls.filter(([, options]) => options?.method)).toEqual([
+      [plan.path, { method: 'DELETE' }],
+    ]);
+    expect(request.mock.calls.some(([path]) => path.includes('dns_records'))).toBe(false);
+    const missing = api();
+    expect(
+      await reconcileApexRedirect({ domain, zoneId, request: missing, remove: true, apply: true })
+    ).toMatchObject({ method: null });
+    expect(missing.mock.calls.every(([, options]) => !options?.method)).toBe(true);
+  });
+
+  it('keeps teardown confirmation, opt-in marketing and dry-run protection on managed redirect cleanup', () => {
+    const marketing = readFileSync(
+      new URL('../../.github/workflows/teardown-www.yml', import.meta.url),
+      'utf8'
+    );
+    const full = readFileSync(
+      new URL('../../.github/workflows/teardown.yml', import.meta.url),
+      'utf8'
+    );
+    expect(marketing).toContain("github.event.inputs.confirm == 'DELETE'");
+    expect(marketing).toContain('node scripts/deploy/apex-redirect.mjs --remove --apply');
+    const cleanup = full.match(
+      /- name: Delete Managed Apex Single Redirect[\s\S]*?(?=\n {6}- name:)/
+    )?.[0];
+    expect(cleanup).toContain('if: ${{ inputs.include_marketing }}');
+    expect(cleanup).toContain('if [ "$INPUT_DRY_RUN" = "true" ]; then');
+    expect(cleanup).toContain('node scripts/deploy/apex-redirect.mjs --remove\n');
   });
 
   it('uses isolated plan/apply operations and retains the existing www-infra lease', () => {
