@@ -28,10 +28,15 @@ const listArgs = v.strictObject({ prUrl: v.optional(text) });
 
 function canonicalPrUrl(value: string, repository: string): string {
   const match = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/([1-9][0-9]*)\/?$/.exec(value);
-  if (!match || match[1]!.toLowerCase() !== repository.toLowerCase()) {
+  const [, matchedRepository, number] = match ?? [];
+  if (
+    !matchedRepository ||
+    !number ||
+    matchedRepository.toLowerCase() !== repository.toLowerCase()
+  ) {
     throw errors.badRequest('prUrl must be an exact GitHub PR URL in this project repository');
   }
-  return `https://github.com/${repository.toLowerCase()}/pull/${match[2]}`;
+  return `https://github.com/${repository.toLowerCase()}/pull/${number}`;
 }
 
 /** Identity and current authority are always server-derived, never supplied in args. */
@@ -81,7 +86,10 @@ export async function handleTaskPullRequestAssociation(
       : undefined;
     if (tool === 'associate_pull_request') {
       const args = v.parse(associateArgs, params);
-      await recordAssociation(env, token, { ...args, prUrl: url! });
+      await recordAssociation(env, token, {
+        ...args,
+        prUrl: canonicalPrUrl(args.prUrl, project.repository),
+      });
     }
     const associations = await db
       .select({

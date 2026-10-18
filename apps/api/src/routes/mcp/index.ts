@@ -1,4 +1,3 @@
-import { handleTaskPullRequestAssociation } from './task-pr-association-tools';
 /**
  * MCP Server Route
  *
@@ -163,6 +162,7 @@ import {
   handleListSkills,
   handleUpdateSkill,
 } from './skill-tools';
+import { handleTaskPullRequestAssociation } from './task-pr-association-tools';
 import {
   handleCompleteTask,
   handleGetTaskDetails,
