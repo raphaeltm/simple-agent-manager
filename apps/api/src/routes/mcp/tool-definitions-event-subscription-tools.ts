@@ -40,7 +40,7 @@ const EVENT_FILTER_SCHEMA = {
     },
     eventType: {
       ...STRING_OR_STRING_ARRAY,
-      description: 'Exact event type value or bounded set of values.',
+      description: 'Exact event type value or bounded set of values; no prefix matching. GitHub CI completion types are check_run.completed, check_suite.completed, and workflow_run.completed.',
     },
     subjectType: {
       ...STRING_OR_STRING_ARRAY,
@@ -48,7 +48,7 @@ const EVENT_FILTER_SCHEMA = {
     },
     subjectId: {
       ...STRING_OR_STRING_ARRAY,
-      description: 'Exact event subject id value or bounded set of values.',
+      description: 'Exact event subject id value or bounded set of values. For GitHub commit subjects use the full 40-character head SHA, never an abbreviation.',
     },
     severity: {
       ...SEVERITY_OR_SEVERITY_ARRAY,
@@ -84,8 +84,9 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
     name: 'create_project_event_subscription',
     description:
       'Create or replay a short-lived ProjectData event subscription owned by the calling task agent. Project, owner, session, task, and agent identity are derived from the MCP token; do not provide projectId or owner. For existing_session_prompt, SAM may wake this same chat later with event IDs only after a matching event materializes; read wakeInstructions in the response, checkpoint local state before ending your turn, and use list_subscription_events/get_event/ack_event_delivery after wake or polling. ' +
-      'Waiting on a GitHub PR: filter source "github" with subjectType "pull_request" and subjectId = the PR number for review, review-comment, PR-comment and PR events; CI events (check_run, check_suite, workflow_run) use subjectType "commit" and subjectId = the head SHA. ' +
-      'Only a PR comment waking an idle, live chat has been verified end to end; keep one bounded fallback check (for example gh pr checks) and say when you used it.',
+      'Waiting on a GitHub PR: filter source "github" with subjectType "pull_request" and subjectId = the PR number for review, review-comment, PR-comment and PR events; CI completion events use eventType ["check_run.completed", "check_suite.completed", "workflow_run.completed"], subjectType "commit", and subjectId = the current full 40-character PR head SHA. Bare event names and abbreviated SHAs do not match. ' +
+      'Read current PR head and check states before subscribing, recheck after creation to close the completion race, and reconcile again after every wake. A completed event is a reconciliation signal, not proof that all required checks passed. Cancel obsolete subscriptions when the head changes or the wait finishes. ' +
+      'Expiry does not wake the agent. Inspect the returned expiresAt and wakeInstructions; checkpoint the PR, full head SHA, subscription ID, pending checks, and an independently supported bounded fallback check before expiry. If no fallback wake is available, report that limitation instead of assuming expiry resumes work. On fallback, reconcile current checks and subscription state before renewing a still-needed wait. Only a PR comment waking an idle, live chat has been verified end to end; report when a fallback was used.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -111,7 +112,7 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
         expiresAt: {
           type: 'integer',
           description:
-            'Optional future millisecond timestamp. Agent subscriptions are capped by the caller MCP token lifetime.',
+            'Optional future millisecond timestamp. Agent subscriptions are capped by the caller MCP token lifetime; inspect the returned expiry. Expiry does not schedule a wake or a recovery check.',
         },
       },
       required: ['idempotencyKey', 'filter', 'requestedDelivery'],
@@ -121,7 +122,7 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
   {
     name: 'list_project_event_subscriptions',
     description:
-      'List the calling task agent’s own ProjectData event subscriptions for the current session. Use this to recover the subscriptionId before list_subscription_events. Project and owner are derived from the MCP token.',
+      'List the calling task agent’s own ProjectData event subscriptions for the current session. Use this to recover the subscriptionId before list_subscription_events. Use state=any when recovering a stale wait so expired or cancelled subscriptions are visible; the default active filter can hide them. Project and owner are derived from the MCP token.',
     inputSchema: {
       type: 'object' as const,
       properties: {
