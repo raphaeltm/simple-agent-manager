@@ -48,10 +48,10 @@ describe('workspace-binding failure anchor on real D1', () => {
     await env.DATABASE.prepare(
       `INSERT INTO session_snapshots
       (id,project_id,user_id,workspace_id,node_id,chat_session_id,runtime,status,degradation,
-       snapshot_generation,sleeping_at,recovery_status,recovery_task_id,recovery_attempt_id,
+       manifest_r2_key,snapshot_generation,sleeping_at,recovery_status,recovery_task_id,recovery_attempt_id,
        recovery_claimed_at,recovery_attempts,expires_at,updated_at)
       VALUES ('binding-snapshot',?,?, 'binding-original','binding-node','binding-chat','vm',
-       'available','none','generation','2026-10-18T19:00:00.000Z','waking','binding-task',
+       'available','none','binding/manifest.json','generation','2026-10-18T19:00:00.000Z','waking','binding-task',
        'binding-attempt','2026-10-18T20:00:00.000Z',3,'2026-10-25T19:00:00.000Z',?)`
     )
       .bind(projectId, userId, '2026-10-18T20:10:00.000Z')

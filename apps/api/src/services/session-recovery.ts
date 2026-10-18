@@ -136,7 +136,7 @@ async function reactivateSleepingTask(
               AND user_id = ?
               AND (
                 id = ?
-                OR (status = 'deleted' AND (
+                OR (workspaces.status = 'deleted' AND (
                   runtime_deletion_confirmed_at IS NOT NULL
                   OR EXISTS (SELECT 1 FROM nodes node WHERE node.id = workspaces.node_id
                     AND node.runtime_termination_confirmed_at IS NOT NULL)
