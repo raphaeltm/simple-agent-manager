@@ -8,7 +8,7 @@ Owner: SAM task 01M58JBASXK9S8WA29B8A9QHKY; idea 01M4ZAEM6HSQE0Q6VZ9R9W9GEE. Dra
 
 Live read-only plan39173562569 passed zone/proxied-apex checks, skipped DNS/Pages mutations, and failed Page Rules GET400. Diagnostic plan39173638664 identified code1011. Official Cloudflare issue23256 and the account-token compatibility matrix confirm Page Rules are incompatible with account-owned tokens; Rulesets are supported. No token or permission changes were made.
 
-The final implementation uses one Single Redirect in the supported Rulesets `http_request_dynamic_redirect` zone phase, ref `sam_apex_to_www`, expression `(http.host eq "<baseDomain>")`, target `concat("https://www.<baseDomain>", http.request.uri.path)`, status301, preserve_query_string=true. Append/PATCH only the owned rule, or create an absent redirect entrypoint containing that rule. Never replace an existing whole ruleset. Zone, proxied DNS, phase, ownership and mutation responses are checked; unrelated rule definitions/order must remain intact. Existing teardown paths remove only the owned rule, preserving the entrypoint; no teardown is executed for this repair.
+The final implementation uses one Single Redirect in the supported Rulesets `http_request_dynamic_redirect` zone phase, ref `sam_apex_to_www`, expression `(http.host eq "<baseDomain>")`, target `concat("https://www.<baseDomain>", http.request.uri.path)`, status301, preserve_query_string=true. Append/PATCH only the owned rule, or create an absent redirect entrypoint containing that rule. Never replace an existing whole ruleset. The exact phase entrypoint is read directly (no paginated list inference); only exact endpoint404/code10003 means absent. Zone, proxied DNS, phase, ownership and mutation responses are checked; unrelated rule definitions/order must remain intact. Existing teardown paths remove only the owned rule, preserving the entrypoint; no teardown is executed for this repair.
 
 ## Checklist
 
@@ -26,7 +26,7 @@ The final implementation uses one Single Redirect in the supported Rulesets `htt
 
 ## Validation and review evidence
 
-Local final config suite: 80 tests across apex-redirect, deployment-workflow-hardening and teardown-workflow files pass. Independent reviewer reran apex+teardown subset:19 tests/2 files pass. Pulumi infra:72 tests/9 files pass, including app/API/wildcard/VM exclusion routing; infra typecheck/lint pass. Deployment-script typecheck, focused ESLint, Node syntax and Prettier pass. These are config/adapter tests, not proof of live redirect behavior.
+Local final config suite: 81 tests across apex-redirect, deployment-workflow-hardening and teardown-workflow files pass. Independent reviewer reran apex+teardown subset:19 tests/2 files pass. Pulumi infra:72 tests/9 files pass, including app/API/wildcard/VM exclusion routing; infra typecheck/lint pass. Deployment-script typecheck, focused ESLint, Node syntax and Prettier pass. These are config/adapter tests, not proof of live redirect behavior.
 
 Fresh final-design Cloudflare/security/constitution review PASS for safe preparation; tests/docs/completion review PASS after this task record correction. Exact owned-rule Single Redirect is ordinary public routing configuration, not an auth/security boundary change. Full provisioning is outside the repair scope. Deployment and final completion are explicitly pending.
 

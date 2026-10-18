@@ -25,8 +25,7 @@ function api(existing: ReturnType<typeof entry> | null = null, zone = domain) {
       ]);
     if (path === `/zones/${zoneId}`) return { name: zone };
     if (path.includes('/dns_records')) return [{ name: domain, proxied: true, type: 'A' }];
-    if (path.endsWith('/rulesets')) return existing ? [existing] : [];
-    if (path.endsWith(`/rulesets/${rulesetId}`)) return existing;
+    if (path.endsWith(`/rulesets/phases/${REDIRECT_PHASE}/entrypoint`)) return existing;
     throw new Error(`Unexpected request ${path}`);
   });
 }
@@ -200,14 +199,19 @@ describe('managed apex Single Redirect', () => {
     const results = [
       { name: domain },
       [{ name: domain, proxied: true, type: 'A' }],
-      [],
+      null,
       entry([{ id: ruleId, ...desired }]),
     ];
-    const fetcher = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ success: true, result: results.shift() }),
-    }));
+    const fetcher = vi.fn(async () => {
+      const result = results.shift();
+      return result === null
+        ? {
+            ok: false,
+            status: 404,
+            json: async () => ({ success: false, errors: [{ code: 10003 }] }),
+          }
+        : { ok: true, status: 200, json: async () => ({ success: true, result }) };
+    });
     const plan = await reconcileApexRedirect({
       domain,
       zoneId,
@@ -224,6 +228,26 @@ describe('managed apex Single Redirect', () => {
       phase: REDIRECT_PHASE,
       rules: [desired],
     });
+  });
+
+  it('treats only the exact redirect entrypoint404/code10003 as absent', async () => {
+    for (const [status, code] of [
+      [403, 10000],
+      [404, 10000],
+      [404, 9999],
+    ]) {
+      const fetcher = vi.fn(async () => ({
+        ok: false,
+        status,
+        json: async () => ({ success: false, errors: [{ code }] }),
+      }));
+      await expect(
+        cloudflareRequest('test-token', fetcher)(
+          `/zones/${zoneId}/rulesets/phases/${REDIRECT_PHASE}/entrypoint`,
+          { allowMissing: true }
+        )
+      ).rejects.toThrow(/failed/);
+    }
   });
 
   it('requires proxied DNS and rejects an unconfirmed mutation response', async () => {

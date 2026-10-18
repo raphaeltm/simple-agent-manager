@@ -69,14 +69,10 @@ export async function reconcileApexRedirect({
       throw new Error('Apex must already have proxied DNS; no DNS changes will be made.');
     }
   }
-  const rulesets = await request(`${zonePath}/rulesets`);
-  if (!Array.isArray(rulesets)) throw new Error('Invalid ruleset list response.');
-  const entries = rulesets.filter(
-    (entry) => entry.phase === REDIRECT_PHASE && entry.kind === 'zone'
-  );
-  if (entries.length > 1)
-    throw new Error('Ambiguous redirect entrypoints; inspect before applying.');
-  const entry = entries[0] ? await request(`${zonePath}/rulesets/${validId(entries[0].id)}`) : null;
+  // Read the exact phase entrypoint, avoiding pagination and unrelated phases.
+  const entry = await request(`${zonePath}/rulesets/phases/${REDIRECT_PHASE}/entrypoint`, {
+    allowMissing: true,
+  });
   if (
     entry &&
     (entry.phase !== REDIRECT_PHASE || entry.kind !== 'zone' || !Array.isArray(entry.rules))
@@ -143,13 +139,22 @@ export async function reconcileApexRedirect({
 
 export function cloudflareRequest(token, fetcher = fetch) {
   if (!token) throw new Error('CF_API_TOKEN is required.');
-  return async (path, { method = 'GET', body } = {}) => {
+  return async (path, { method = 'GET', body, allowMissing = false } = {}) => {
     const response = await fetcher(`https://api.cloudflare.com/client/v4${path}`, {
       method,
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
     const data = await response.json();
+    if (
+      allowMissing &&
+      method === 'GET' &&
+      path.endsWith(`/rulesets/phases/${REDIRECT_PHASE}/entrypoint`) &&
+      response.status === 404 &&
+      data.success === false &&
+      data.errors?.some((error) => error.code === 10003)
+    )
+      return null;
     // Do not echo API bodies: a failing service must not leak credential material.
     if (!response.ok || data.success !== true || data.result == null) {
       const codes = Array.isArray(data.errors)
