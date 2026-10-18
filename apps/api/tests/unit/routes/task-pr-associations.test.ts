@@ -1,28 +1,34 @@
 import Database from 'better-sqlite3';
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { handleTaskPullRequestAssociation } from '../../../src/routes/mcp/task-pr-association-tools';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
+import { handleTaskPullRequestAssociation } from '../../../src/routes/mcp/task-pr-association-tools';
 import { listAgentActivityTasks } from '../../../src/services/agent-activity';
 import {
+  callMcpTool,
   createJsonKv,
   createMcpApp,
   postMcp,
-  callMcpTool,
   storeMcpToken,
   toolResult,
 } from '../../helpers/mcp-route';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  applySqliteMigration,
+  createAllSchemaTables,
+  createSqliteD1,
+} from '../../helpers/sqlite-d1';
 
 const pr = (n: number) => `https://github.com/owner/repo/pull/${n}`;
 function fixture() {
   const sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema);
   sqlite.exec('DROP TABLE task_pull_request_associations');
-  sqlite.exec(readFileSync('src/db/migrations/0198_task_pull_request_associations.sql', 'utf8'));
+  applySqliteMigration(
+    sqlite,
+    new URL('../../../src/db/migrations/0198_task_pull_request_associations.sql', import.meta.url)
+  );
   sqlite
     .prepare(
       `INSERT INTO projects (id,user_id,name,repository,repo_provider,status) VALUES ('p','u','Project','owner/repo','github','active')`

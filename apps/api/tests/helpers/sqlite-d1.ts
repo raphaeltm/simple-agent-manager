@@ -1,6 +1,13 @@
+import { readFileSync } from 'node:fs';
+
 import type Database from 'better-sqlite3';
 import { is } from 'drizzle-orm';
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core';
+
+/** Execute the shipped migration, so behavioral tests validate actual SQL constraints. */
+export function applySqliteMigration(sqlite: Database.Database, migration: URL): void {
+  sqlite.exec(readFileSync(migration, 'utf8'));
+}
 
 interface ExecutableStatement {
   run(): Promise<unknown>;
@@ -101,8 +108,7 @@ export function createSqliteD1(sqlite: Database.Database): D1Database {
           .all(...normalize(params)),
       first: async (column?: string) => {
         const row = sqlite.prepare(sql).get(...normalize(params)) as
-          | Record<string, unknown>
-          | undefined;
+          Record<string, unknown> | undefined;
         return column === undefined ? (row ?? null) : (row?.[column] ?? null);
       },
     };
