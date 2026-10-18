@@ -154,6 +154,10 @@ When a task asks you to review a previous session or recover context from recent
 
 Without the `/do` instruction, a dispatched agent may skip critical phases like staging verification, specialist review, or proper PR creation. The `/do` workflow enforces all quality gates defined in this project's rules.
 
+## CI Waits and Shepherd Ownership
+
+For CI event subscriptions and stale owner continuations, follow [CI waits and PR ownership recovery](../../.agents/references/ci-event-waits.md). Use exact completion event names and full head SHAs, reconcile current checks around subscription creation and wake, and verify bounded recovery independently of subscription expiry. A recorded continuation or queued wake alone is not proof of live ownership.
+
 ## Integration with Other Systems
 
 - Tasks are for smaller work items; larger features use speckit (`/speckit.*` commands)
