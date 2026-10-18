@@ -35,7 +35,7 @@ No admin reimplementation, autosave #2366, held legacy PR merges/closures, crede
 
 - Local regression failed with the exact UNIQUE error on baseline using real ensureSessionLinked and real SQLite unique index; passes with transaction extension.
 - 66 focused tests passed before two extra status-with-marker controls. Full repo validation ongoing.
-- Production read-only confirms both predecessor workspace and node deletion markers. Original snapshot recovery_failed_at NULL, recovery_claimed_at 2026-10-17T17:14:23.689Z, attempts3, expires Oct24. No supported budget reset route found; clean-failure cooldown cannot release this unreported exhausted attempt. Binding release alone does not recover this original owner. No repair performed.
+- Production read-only confirms both predecessor workspace and node deletion markers. Original snapshot recovery_failed_at NULL, recovery_claimed_at 2026-10-17T17:14:23.689Z, attempts3, expires Oct24. No supported budget reset route exists; binding release alone cannot recover this owner. Added normal-continuation reconciliation of this exact task-reported stale collision: reconstruct only the missing failure anchor after strict deletion proof, retain attempts and existing cooldown/reclaim CAS. Real owner still untested; no production repair performed.
 - Sol profile 01KSSMJCG4EE1XS153GNZX5B09: gpt-6.1-sol, medium effort, conversation/lightweight. Runtime OPENAI_MODEL agrees.
 - Task-only direct-main push rejected by required Durable Object Workers check; retained required gate and carried task on assigned branch.
 - Local ProjectData boundary is mocked; real transcript continuation remains a staging gate.
@@ -46,3 +46,9 @@ What broke: supported wake failed a workspace-session UNIQUE binding after a pri
 Root cause: the stable-task wake transaction (introduced by #2230, ee80b0ee0) released only snapshot.workspace_id, although later failed wakes could own the unique binding on another retained workspace. Snapshot location is recovery content provenance, not necessarily the current runtime-binding owner.
 Why missed: the integration SQL helper omits unique constraints; prior tests asserted wake admission without exercising the actual asynchronous link writer.
 Process fix: regression explicitly installs the production UNIQUE index and executes ensureSessionLinked, with concurrency and conservative controls. Existing rule35 already requires this boundary-level coverage; no additional standing instruction added.
+
+## Narrow exhausted-claim completion
+
+Astra requested a supported path for the actual owner, not merely prevention of future collisions. `session-recovery-binding-failure.ts` reconstructs a missing clean-failure timestamp only when the exact stale attempt belongs to a sleeping task without a workspace, its recorded error is this binding collision after the claim, and the actual retained, snapshot and recovery workspaces have strict deletion proof. It normalizes the task failure timestamp to canonical ISO, does not reset attempts, and leaves the existing cooldown/reclaim CAS authoritative. Source/terminal/archive guards remain in the ordinary claim flow.
+
+Focused tests cover direct unchanged attempts=3 before reclaim, cooldown, distinct live/unconfirmed recovery workspace, task/session/project/user mismatch, wrong/invalid/future failure evidence, replaced attempt at write time, retained existing anchor, concurrent reconciliation and exhausted wakes. Real D1 Workers test exercises UPDATE alias/RETURNING and correlated proof. All specialist source reviews PASS; execution results and live journey remain tracked in PR/state.

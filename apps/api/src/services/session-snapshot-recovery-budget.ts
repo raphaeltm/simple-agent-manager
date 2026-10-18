@@ -47,7 +47,9 @@ export function sessionRecoveryDecayCutoffIso(env: RecoveryBudgetEnv, nowMs: num
  * window. `recovery_failed_at IS NULL` means no attempt reported back — a crashed
  * or still-leased attempt — and deliberately does NOT release the budget, so a
  * claim that never returns cannot be laundered into a fresh one. The stale-claim
- * lease in `claimSessionSnapshotRecovery` remains the path for that case.
+ * path can reconstruct a missing anchor only for a task-reported workspace-binding
+ * collision after strict deletion proof (`session-recovery-binding-failure.ts`).
+ * Its recorded task failure time remains subject to this same cooldown.
  *
  * This is the single definition shared by the resumer and by every consumer that
  * mirrors it, so the destroyer cannot disagree with the resumer about whether a
