@@ -40,7 +40,8 @@ const EVENT_FILTER_SCHEMA = {
     },
     eventType: {
       ...STRING_OR_STRING_ARRAY,
-      description: 'Exact event type value or bounded set of values; no prefix matching. GitHub CI completion types are check_run.completed, check_suite.completed, and workflow_run.completed.',
+      description:
+        'Exact event type value or bounded set of values; no prefix matching. GitHub CI completion types are check_run.completed, check_suite.completed, and workflow_run.completed.',
     },
     subjectType: {
       ...STRING_OR_STRING_ARRAY,
@@ -48,7 +49,8 @@ const EVENT_FILTER_SCHEMA = {
     },
     subjectId: {
       ...STRING_OR_STRING_ARRAY,
-      description: 'Exact event subject id value or bounded set of values. For GitHub commit subjects use the full 40-character head SHA, never an abbreviation.',
+      description:
+        'Exact event subject id value or bounded set of values. For GitHub commit subjects use the full 40-character head SHA, never an abbreviation.',
     },
     severity: {
       ...SEVERITY_OR_SEVERITY_ARRAY,
