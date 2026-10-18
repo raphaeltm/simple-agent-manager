@@ -51,3 +51,7 @@ Shared staging: recovery owner01M58JARRQQ01A3DB9JEDA2E9G has the next bounded va
 ## Safety and completion
 
 No paid browser runs. Authenticated journeys are staging only; production gets basic public smoke only. No held PR mutations, raw production DB repair, new credentials, permission grants, sensitive network settings or financial commitments. User requested draft PR early, so draft precedes application. SAM isolated checkout/assigned branch reused; task record stays in this PR to avoid concurrent direct-main release writes. Keep .do-state.md and PR current; do not archive or complete task before verified outcome.
+
+## Sonar review follow-up
+
+Sonar's initial quality gate passed but reported six maintainability issues: reconciliation cognitive complexity22, nested ternaries/templates in plan construction, and promise-chain CLI handling. Extracted plan construction with explicit branches and path accumulation; used top-level await with the same error handling. Independent bounded review confirms identical method/path/payload decisions and unchanged ownership/phase/DNS/apply safeguards. All81 relevant tests, focused lint, deployment typecheck and Node syntax pass. Fresh CI/Sonar verification is required on the new head. No live requests or permissions/configuration changes were performed during this follow-up; the approval hold remains.

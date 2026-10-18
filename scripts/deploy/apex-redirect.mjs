@@ -43,6 +43,24 @@ function sameRule(actual, desired) {
   );
 }
 
+function buildPlan({ zonePath, entry, before, desired, remove }) {
+  let method = 'POST';
+  if (remove) method = before ? 'DELETE' : null;
+  else if (sameRule(before, desired)) method = null;
+  else if (before) method = 'PATCH';
+
+  let path = `${zonePath}/rulesets`;
+  if (entry) path += `/${validId(entry.id)}/rules`;
+  if (before) path += `/${validId(before.id)}`;
+
+  let after = desired;
+  if (remove) after = null;
+  else if (!entry)
+    after = { name: 'Marketing redirects', kind: 'zone', phase: REDIRECT_PHASE, rules: [desired] };
+
+  return { method, path, before, after };
+}
+
 export async function reconcileApexRedirect({
   domain,
   zoneId,
@@ -93,24 +111,7 @@ export async function reconcileApexRedirect({
   ) {
     throw new Error('Unmanaged apex redirect exists; inspect before applying.');
   }
-  const plan = {
-    method: remove
-      ? before
-        ? 'DELETE'
-        : null
-      : sameRule(before, desired)
-        ? null
-        : before
-          ? 'PATCH'
-          : 'POST',
-    path: `${zonePath}/rulesets${entry ? `/${validId(entry.id)}/rules${before ? `/${validId(before.id)}` : ''}` : ''}`,
-    before,
-    after: remove
-      ? null
-      : entry
-        ? desired
-        : { name: 'Marketing redirects', kind: 'zone', phase: REDIRECT_PHASE, rules: [desired] },
-  };
+  const plan = buildPlan({ zonePath, entry, before, desired, remove });
   report(plan);
   if (apply && plan.method) {
     const result = await request(plan.path, {
@@ -200,8 +201,10 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error) => {
+  try {
+    await main();
+  } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
-  });
+  }
 }
