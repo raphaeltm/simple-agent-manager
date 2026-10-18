@@ -118,12 +118,24 @@ let agents create schedule, GitHub, and webhook triggers for their project; see
 ## Keep release PR ownership explicit
 
 When an agent takes responsibility for a PR after its task was dispatched, it can call
-`associate_pull_request` with the exact `prUrl`, current `prHeadBranch`, a `disposition` of `owned` or `held`,
+`associate_pull_request` with the exact `prUrl`, caller-reported `prHeadBranch`, a `disposition` of `owned` or `held`,
 and a `reason` recording the assignment. One task can associate several PRs.
+The branch hint is not verified GitHub identity. Until another active task with branch evidence relinquishes responsibility, this tool
+conservatively refuses new associations across the project,
+even when the caller supplies a different branch or that task also owns another PR.
+A branch hint cannot bypass a writer. This conservative refusal can block unrelated
+PRs during concurrent branch work; it preserves safety without verified GitHub branch identity.
+URL, branch, predecessor and cursor fields use the configured MCP dispatch reference
+length bound; reasons use the configured activity message bound. Oversized inputs are rejected.
 `list_project_agents(prUrl)` includes these exact associations when finding active owners.
 
 Use `list_pull_request_associations(prUrl)` to inspect retained ownership evidence,
-including completed owners and held artifacts. An association is evidence of responsibility,
+including completed owners and held artifacts. Results are bounded by the existing
+configured task list page size/maximum. Supply `limit` and pass the returned
+`nextCursor` as `cursor` with the same `prUrl` filter to read subsequent pages.
+`hasMore` explicitly identifies incomplete evidence; read all pages before drawing
+conclusions. The composite URL/task cursor preserves same-PR continuation history.
+Pages are live reads, not a snapshot; absence never authorizes takeover. An association is evidence of responsibility,
 not permission to merge, close, or clean up a PR. A held artifact stays held.
 
 An explicitly authorized continuation can supply `previousTaskId` for a terminal task owned by the same user in the same project

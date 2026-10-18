@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq, gt, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
@@ -8,6 +8,7 @@ import { AppError, errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { AGENT_ACTIVITY_ACTIVE_TASK_STATUSES } from '../../services/agent-activity';
 import {
+  getMcpLimits,
   INTERNAL_ERROR,
   INVALID_PARAMS,
   jsonRpcError,
@@ -16,15 +17,37 @@ import {
 } from './_helpers';
 
 export type TaskPullRequestTool = 'associate_pull_request' | 'list_pull_request_associations';
-const text = v.pipe(v.string(), v.trim(), v.nonEmpty());
-const associateArgs = v.strictObject({
-  prUrl: text,
-  prHeadBranch: text,
-  disposition: v.picklist(['owned', 'held']),
-  reason: text,
-  previousTaskId: v.optional(text),
-});
-const listArgs = v.strictObject({ prUrl: v.optional(text) });
+function argumentSchemas(env: Env) {
+  const limits = getMcpLimits(env);
+  const reference = v.pipe(
+    v.string(),
+    v.trim(),
+    v.nonEmpty(),
+    v.maxLength(limits.dispatchMaxReferenceLength)
+  );
+  return {
+    associate: v.strictObject({
+      prUrl: reference,
+      prHeadBranch: reference,
+      disposition: v.picklist(['owned', 'held']),
+      reason: v.pipe(
+        v.string(),
+        v.trim(),
+        v.nonEmpty(),
+        v.maxLength(limits.activityMessageMaxLength)
+      ),
+      previousTaskId: v.optional(reference),
+    }),
+    list: v.strictObject({
+      prUrl: v.optional(reference),
+      limit: v.optional(
+        v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(limits.taskListMax))
+      ),
+      cursor: v.optional(v.strictObject({ prUrl: reference, taskId: reference })),
+    }),
+    defaultLimit: Math.min(limits.taskListLimit, limits.taskListMax),
+  };
+}
 
 function canonicalPrUrl(value: string, repository: string): string {
   const match = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/([1-9][0-9]*)\/?$/.exec(value);
@@ -48,8 +71,9 @@ export async function handleTaskPullRequestAssociation(
   env: Env
 ) {
   try {
+    const schemas = argumentSchemas(env);
     const parsed = v.safeParse(
-      tool === 'associate_pull_request' ? associateArgs : listArgs,
+      tool === 'associate_pull_request' ? schemas.associate : schemas.list,
       params
     );
     if (!parsed.success) throw errors.badRequest(parsed.issues[0].message);
@@ -85,13 +109,23 @@ export async function handleTaskPullRequestAssociation(
       ? canonicalPrUrl(parsed.output.prUrl, project.repository)
       : undefined;
     if (tool === 'associate_pull_request') {
-      const args = v.parse(associateArgs, params);
+      const args = v.parse(schemas.associate, params);
       await recordAssociation(env, token, {
         ...args,
         prUrl: canonicalPrUrl(args.prUrl, project.repository),
       });
     }
-    const associations = await db
+    const page = tool === 'list_pull_request_associations' ? v.parse(schemas.list, params) : {};
+    const limit = page.limit ?? schemas.defaultLimit;
+    if (page.cursor) {
+      if (
+        canonicalPrUrl(page.cursor.prUrl, project.repository) !== page.cursor.prUrl ||
+        (url && page.cursor.prUrl !== url)
+      ) {
+        throw errors.badRequest('cursor must use the canonical URL and match the prUrl filter');
+      }
+    }
+    const rows = await db
       .select({
         taskId: schema.taskPullRequestAssociations.taskId,
         prUrl: schema.taskPullRequestAssociations.prUrl,
@@ -113,15 +147,35 @@ export async function handleTaskPullRequestAssociation(
       .where(
         and(
           eq(schema.taskPullRequestAssociations.projectId, token.projectId),
-          url ? eq(schema.taskPullRequestAssociations.prUrl, url) : undefined
+          url ? eq(schema.taskPullRequestAssociations.prUrl, url) : undefined,
+          page.cursor
+            ? or(
+                gt(schema.taskPullRequestAssociations.prUrl, page.cursor.prUrl),
+                and(
+                  eq(schema.taskPullRequestAssociations.prUrl, page.cursor.prUrl),
+                  gt(schema.taskPullRequestAssociations.taskId, page.cursor.taskId)
+                )
+              )
+            : undefined
         )
-      );
+      )
+      .orderBy(
+        asc(schema.taskPullRequestAssociations.prUrl),
+        asc(schema.taskPullRequestAssociations.taskId)
+      )
+      .limit(limit + 1);
+    const associations = rows.slice(0, limit);
+    const last = associations.at(-1);
+    const nextCursor =
+      rows.length > limit && last ? { prUrl: last.prUrl, taskId: last.taskId } : null;
     return jsonRpcSuccess(requestId, {
       content: [
         {
           type: 'text',
           text: JSON.stringify({
             associations,
+            nextCursor,
+            hasMore: nextCursor !== null,
             note: 'Ownership evidence only; held artifacts remain held. This does not authorize merge or cleanup.',
           }),
         },
@@ -148,6 +202,10 @@ async function recordAssociation(
   }
 ) {
   // One statement serializes competing claims and rechecks task state at write time.
+  // PR branch identity is not verified by this tool. A caller-provided hint must
+  // never bypass a branch-only writer: conservatively refuse any competing
+  // active branch evidence until that writer relinquishes responsibility.
+  // Even another explicit PR URL cannot prove all its branch work is unrelated.
   // History is retained; a held predecessor cannot be silently promoted to a release.
   const active = AGENT_ACTIVITY_ACTIVE_TASK_STATUSES.map(() => '?').join(',');
   const result = await env.DATABASE.prepare(
@@ -162,7 +220,7 @@ async function recordAssociation(
         WHERE other.project_id = t.project_id AND other.id != t.id
           AND other.status IN (${active}) AND other.superseded_by_task_id IS NULL
           AND (lower(rtrim(other.output_pr_url, '/')) = ? OR instr(lower(other.description), lower(?)) > 0
-            OR other.output_branch = ? OR w.branch = ? OR EXISTS (
+            OR NULLIF(other.output_branch, '') IS NOT NULL OR NULLIF(w.branch, '') IS NOT NULL OR EXISTS (
             SELECT 1 FROM task_pull_request_associations a
             WHERE a.task_id = other.id AND a.project_id = t.project_id AND a.pr_url = ?
           ))
@@ -209,8 +267,6 @@ async function recordAssociation(
       ...AGENT_ACTIVITY_ACTIVE_TASK_STATUSES,
       args.prUrl,
       args.prUrl,
-      args.prHeadBranch,
-      args.prHeadBranch,
       args.prUrl,
       args.previousTaskId ?? null,
       args.prUrl,
@@ -239,6 +295,6 @@ async function recordAssociation(
   )
     return;
   throw errors.badRequest(
-    'Association conflicts with existing ownership, a hold, task state, or continuation evidence'
+    'Association refused: existing ownership, unverified competing active branch evidence, a hold, task state, or continuation evidence'
   );
 }

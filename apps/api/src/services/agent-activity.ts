@@ -239,7 +239,8 @@ function appendPullRequestOwnerCondition(
       'instr(lower(t.description), lower(?)) > 0',
       'EXISTS (SELECT 1 FROM task_pull_request_associations association WHERE association.task_id = t.id AND association.project_id = t.project_id AND lower(association.pr_url) = lower(?))'
     );
-    binds.push(filter.url, filter.url, filter.url);
+    const canonicalUrl = filter.url.replace(/\/$/, '');
+    binds.push(canonicalUrl, canonicalUrl, canonicalUrl);
   }
   // An empty filter would return every task as an owner; refuse it outright.
   if (links.length === 0) {

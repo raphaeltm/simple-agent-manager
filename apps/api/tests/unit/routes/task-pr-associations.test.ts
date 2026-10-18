@@ -124,16 +124,22 @@ describe('explicit PR ownership vertical slice', () => {
       workspaceId: 'ws-next',
     });
     const peers = toolResult<{ agents: { taskId: string }[] }>(
-      await callMcpTool(app, f.env, 'peer-token', 'list_project_agents', { prUrl: pr(18) })
+      await callMcpTool(app, f.env, 'peer-token', 'list_project_agents', {
+        prUrl: pr(18).replace('owner/repo', 'Owner/Repo') + '/',
+      })
     );
     expect(peers.agents.map((a) => a.taskId)).toEqual(['owner']);
-    expect(
-      (
-        await callMcpTool(app, f.env, 'peer-token', 'list_pull_request_associations', {
-          prUrl: pr(18),
-        })
-      ).error
-    ).toBeUndefined();
+    const listed = toolResult<{
+      associations: { taskId: string; prUrl: string }[];
+      nextCursor: null;
+    }>(
+      await callMcpTool(app, f.env, 'peer-token', 'list_pull_request_associations', {
+        prUrl: pr(18).replace('owner/repo', 'Owner/Repo') + '/',
+        limit: 1,
+      })
+    );
+    expect(listed.associations.map((a) => [a.taskId, a.prUrl])).toEqual([['owner', pr(18)]]);
+    expect(listed.nextCursor).toBeNull();
     f.sqlite.close();
   }, 30_000);
 
@@ -188,6 +194,7 @@ describe('explicit PR ownership vertical slice', () => {
       ).error
     ).toBeUndefined();
     expect(await f.owners(mixed)).toEqual(['owner']);
+    expect(await f.owners(mixed + '/')).toEqual(['owner']);
     expect(await f.owners(pr(20))).toEqual(['owner']);
     expect(await f.owners(pr(2))).toEqual([]);
     f.sqlite
@@ -220,6 +227,159 @@ describe('explicit PR ownership vertical slice', () => {
       ).toBeDefined();
       f.sqlite.prepare(`UPDATE tasks SET ${column}=NULL WHERE id='next'`).run();
     }
+    f.sqlite.close();
+  });
+
+  it('refuses wrong or stale caller branch hints while any active branch-only writer exists', async () => {
+    const f = fixture();
+    f.sqlite
+      .prepare("UPDATE tasks SET output_branch='actual-current-branch' WHERE id='next'")
+      .run();
+    for (const prHeadBranch of ['wrong-branch', 'stale-branch', 'actual-current-branch']) {
+      expect(
+        (
+          await f.call('associate_pull_request', {
+            prUrl: pr(40),
+            prHeadBranch,
+            disposition: 'owned',
+            reason: 'Assigned',
+          })
+        ).error
+      ).toBeDefined();
+    }
+    // Owning another explicit artifact cannot prove this branch belongs to it.
+    f.sqlite.prepare("UPDATE tasks SET output_pr_url=? WHERE id='next'").run(pr(999));
+    expect(
+      (
+        await f.call('associate_pull_request', {
+          prUrl: pr(40),
+          prHeadBranch: 'wrong-branch',
+          disposition: 'owned',
+          reason: 'Assigned',
+        })
+      ).error
+    ).toBeDefined();
+    f.sqlite
+      .prepare(
+        `INSERT INTO workspaces (id,project_id,user_id,name,repository,branch,vm_size,vm_location)
+      VALUES ('competing-ws','p','u','Competitor','owner/repo','actual-workspace-branch','small','test')`
+      )
+      .run();
+    f.sqlite
+      .prepare("UPDATE tasks SET output_branch=NULL, workspace_id='competing-ws' WHERE id='next'")
+      .run();
+    expect(
+      (
+        await f.call('associate_pull_request', {
+          prUrl: pr(40),
+          prHeadBranch: 'wrong-branch',
+          disposition: 'owned',
+          reason: 'Assigned',
+        })
+      ).error
+    ).toBeDefined();
+    f.sqlite.prepare("UPDATE tasks SET status='completed' WHERE id='next'").run();
+    expect(
+      (
+        await f.call('associate_pull_request', {
+          prUrl: pr(40),
+          prHeadBranch: 'wrong-branch',
+          disposition: 'owned',
+          reason: 'Assigned',
+        })
+      ).error
+    ).toBeUndefined();
+    f.sqlite.close();
+  });
+
+  it('returns complete bounded pages including same-PR handoff history without silent truncation', async () => {
+    const f = fixture();
+    for (const n of [50, 51, 52]) {
+      expect(
+        (
+          await f.call('associate_pull_request', {
+            prUrl: pr(n),
+            disposition: 'owned',
+            reason: 'Assigned',
+          })
+        ).error
+      ).toBeUndefined();
+    }
+    f.sqlite.prepare("UPDATE tasks SET status='completed' WHERE id='owner'").run();
+    const next = { ...f.token, taskId: 'next' };
+    expect(
+      (
+        await f.call(
+          'associate_pull_request',
+          {
+            prUrl: pr(50),
+            disposition: 'owned',
+            reason: 'Continue',
+            previousTaskId: 'owner',
+          },
+          next
+        )
+      ).error
+    ).toBeUndefined();
+    const rows: { taskId: string; prUrl: string }[] = [];
+    let cursor;
+    do {
+      const page = data(
+        await f.call(
+          'list_pull_request_associations',
+          { limit: 1, ...(cursor ? { cursor } : {}) },
+          next
+        )
+      );
+      expect(page.associations).toHaveLength(1);
+      expect(page.hasMore).toBe(page.nextCursor !== null);
+      rows.push(...page.associations);
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(rows).toHaveLength(4);
+    expect(new Set(rows.map((r) => r.prUrl + r.taskId)).size).toBe(4);
+    const filtered = data(
+      await f.call('list_pull_request_associations', { prUrl: pr(50), limit: 1 }, next)
+    );
+    expect(filtered.hasMore).toBe(true);
+    expect(
+      data(
+        await f.call(
+          'list_pull_request_associations',
+          { prUrl: pr(50), limit: 1, cursor: filtered.nextCursor },
+          next
+        )
+      ).hasMore
+    ).toBe(false);
+    f.sqlite.close();
+  });
+
+  it('rejects excessive input lengths, invalid page bounds and mismatched cursors', async () => {
+    const f = fixture();
+    for (const key of ['prUrl', 'prHeadBranch', 'reason', 'previousTaskId']) {
+      expect(
+        (
+          await f.call('associate_pull_request', {
+            prUrl: pr(55),
+            disposition: 'owned',
+            reason: 'Assigned',
+            [key]: 'x'.repeat(32_001),
+          })
+        ).error
+      ).toBeDefined();
+    }
+    for (const args of [
+      { limit: 0 },
+      { limit: 1.5 },
+      { limit: 100_000 },
+      { prUrl: 'x'.repeat(32_001) },
+      { cursor: { prUrl: pr(55), taskId: 'x'.repeat(32_001) } },
+      { prUrl: pr(55), cursor: { prUrl: pr(56), taskId: 'owner' } },
+    ])
+      expect((await f.call('list_pull_request_associations', args)).error).toBeDefined();
+    expect(
+      f.sqlite.prepare('SELECT count(*) AS n FROM task_pull_request_associations').get()
+    ).toEqual({ n: 0 });
     f.sqlite.close();
   });
 

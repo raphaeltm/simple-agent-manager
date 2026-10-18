@@ -8,14 +8,15 @@ export const TASK_LIFECYCLE_TOOLS = [
   {
     name: 'associate_pull_request',
     description:
-      'Record an explicit PR association for the calling active task, including release artifacts assigned after dispatch. Multiple PRs are supported. Requires current project task:write access. Append-only evidence never grants merge or cleanup authority; held artifacts remain held. A continuation may name a terminal previousTaskId with exact prior PR evidence; active or held competing owners block reassignment.',
+      'Record an explicit PR association for the calling active task, including release artifacts assigned after dispatch. Multiple PRs are supported. Requires current project task:write access. Append-only evidence never grants merge or cleanup authority; held artifacts remain held. A continuation may name a terminal previousTaskId with exact prior PR evidence; active or held competing owners block reassignment. Unverified branch hints cannot rule out another active branch writer; such writers conservatively block association.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         prUrl: { type: 'string', description: 'Exact GitHub PR URL in this project repository.' },
         prHeadBranch: {
           type: 'string',
-          description: 'Current PR head branch, used to refuse an existing branch-only writer.',
+          description:
+            'Caller-reported PR branch hint, not verified identity. Any other active branch evidence conservatively blocks association regardless of this hint.',
         },
         disposition: {
           type: 'string',
@@ -47,6 +48,20 @@ export const TASK_LIFECYCLE_TOOLS = [
         prUrl: {
           type: 'string',
           description: 'Optional exact GitHub PR URL in this project repository.',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          description:
+            'Page size, bounded by the configured task list maximum. Defaults to the task list page size.',
+        },
+        cursor: {
+          type: 'object',
+          description:
+            'Pass nextCursor from the previous page with the same prUrl filter. Read all pages before drawing conclusions; absence never authorizes takeover.',
+          properties: { prUrl: { type: 'string' }, taskId: { type: 'string' } },
+          required: ['prUrl', 'taskId'],
+          additionalProperties: false,
         },
       },
       additionalProperties: false,
