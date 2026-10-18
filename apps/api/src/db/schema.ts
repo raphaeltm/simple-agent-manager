@@ -1083,16 +1083,14 @@ export const tasks = sqliteTable(
 export const taskPullRequestAssociations = sqliteTable(
   'task_pull_request_associations',
   {
-    taskId: text('task_id')
-      .notNull()
-      .references(() => tasks.id),
+    taskId: text('task_id').notNull(),
     projectId: text('project_id')
       .notNull()
-      .references(() => projects.id),
+      .references(() => projects.id, { onDelete: 'cascade' }),
     prUrl: text('pr_url').notNull(),
     disposition: text('disposition', { enum: ['owned', 'held'] }).notNull(),
     reason: text('reason').notNull(),
-    previousTaskId: text('previous_task_id').references(() => tasks.id),
+    previousTaskId: text('previous_task_id'),
     recordedByUserId: text('recorded_by_user_id').notNull(),
     createdAt: text('created_at').notNull(),
   },

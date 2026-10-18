@@ -95,7 +95,7 @@ export async function handleTaskPullRequestAssociation(
         ownerStatus: schema.tasks.status,
       })
       .from(schema.taskPullRequestAssociations)
-      .innerJoin(
+      .leftJoin(
         schema.tasks,
         and(
           eq(schema.tasks.id, schema.taskPullRequestAssociations.taskId),
@@ -153,18 +153,18 @@ async function recordAssociation(
         SELECT 1 FROM tasks other LEFT JOIN workspaces w ON w.id = other.workspace_id AND w.project_id = other.project_id
         WHERE other.project_id = t.project_id AND other.id != t.id
           AND other.status IN (${active}) AND other.superseded_by_task_id IS NULL
-          AND (other.output_pr_url = ? OR instr(lower(other.description), lower(?)) > 0
+          AND (lower(rtrim(other.output_pr_url, '/')) = ? OR instr(lower(other.description), lower(?)) > 0
             OR other.output_branch = ? OR w.branch = ? OR EXISTS (
             SELECT 1 FROM task_pull_request_associations a
             WHERE a.task_id = other.id AND a.project_id = t.project_id AND a.pr_url = ?
           ))
       )
       AND (? IS NOT NULL OR NOT EXISTS (
-        SELECT 1 FROM tasks predecessor WHERE predecessor.project_id = t.project_id AND predecessor.id != t.id
-          AND (predecessor.output_pr_url = ? OR EXISTS (
-            SELECT 1 FROM task_pull_request_associations a
-            WHERE a.task_id = predecessor.id AND a.project_id = t.project_id AND a.pr_url = ?
-          ))
+        SELECT 1 FROM tasks predecessor WHERE predecessor.project_id = t.project_id
+          AND predecessor.id != t.id AND lower(rtrim(predecessor.output_pr_url, '/')) = ?
+        UNION ALL
+        SELECT 1 FROM task_pull_request_associations a
+        WHERE a.project_id = t.project_id AND a.pr_url = ? AND a.task_id != t.id
       ))
       AND NOT EXISTS (
         SELECT 1 FROM task_pull_request_associations a
@@ -174,10 +174,15 @@ async function recordAssociation(
         SELECT 1 FROM tasks predecessor WHERE predecessor.id = ?
           AND predecessor.project_id = t.project_id AND predecessor.user_id = t.user_id
           AND predecessor.status IN ('completed','failed','cancelled')
-          AND (predecessor.output_pr_url = ? OR EXISTS (
+          AND (lower(rtrim(predecessor.output_pr_url, '/')) = ? OR EXISTS (
             SELECT 1 FROM task_pull_request_associations a
             WHERE a.task_id = predecessor.id AND a.project_id = t.project_id AND a.pr_url = ?
           ))
+      ) OR EXISTS (
+        SELECT 1 FROM task_pull_request_associations a
+        WHERE a.project_id = t.project_id AND a.task_id = ? AND a.pr_url = ?
+          AND a.recorded_by_user_id = t.user_id
+          AND NOT EXISTS (SELECT 1 FROM tasks predecessor WHERE predecessor.id = a.task_id)
       ))
     ON CONFLICT(task_id, pr_url) DO NOTHING
   `
@@ -206,6 +211,8 @@ async function recordAssociation(
       args.previousTaskId ?? null,
       args.previousTaskId ?? null,
       args.prUrl,
+      args.prUrl,
+      args.previousTaskId ?? null,
       args.prUrl
     )
     .run();

@@ -23,6 +23,7 @@ import {
 const pr = (n: number) => `https://github.com/owner/repo/pull/${n}`;
 function fixture() {
   const sqlite = new Database(':memory:');
+  sqlite.pragma('foreign_keys = ON');
   createAllSchemaTables(sqlite, schema);
   sqlite.exec('DROP TABLE task_pull_request_associations');
   applySqliteMigration(
@@ -174,6 +175,32 @@ describe('explicit PR ownership vertical slice', () => {
     ).toBeDefined();
     f.sqlite.close();
   });
+  it('matches canonical-equivalent GitHub repository URLs without matching adjacent PR numbers', async () => {
+    const f = fixture();
+    const mixed = pr(20).replace('owner/repo', 'Owner/Repo');
+    expect(
+      (
+        await f.call('associate_pull_request', {
+          prUrl: mixed,
+          disposition: 'owned',
+          reason: 'Assigned',
+        })
+      ).error
+    ).toBeUndefined();
+    expect(await f.owners(mixed)).toEqual(['owner']);
+    expect(await f.owners(pr(20))).toEqual(['owner']);
+    expect(await f.owners(pr(2))).toEqual([]);
+    f.sqlite
+      .prepare("UPDATE tasks SET output_pr_url=? WHERE id='old'")
+      .run(pr(2375).replace('owner/repo', 'Owner/Repo') + '/');
+    const args = { prUrl: pr(2375), disposition: 'owned', reason: 'Explicit continuation' };
+    expect((await f.call('associate_pull_request', args)).error).toBeDefined();
+    expect(
+      (await f.call('associate_pull_request', { ...args, previousTaskId: 'old' })).error
+    ).toBeUndefined();
+    f.sqlite.close();
+  });
+
   it('refuses implicit legacy handoff and active branch/description writers', async () => {
     const f = fixture();
     const args = { prUrl: pr(2375), disposition: 'owned', reason: 'Assigned' };
@@ -301,6 +328,46 @@ describe('explicit PR ownership vertical slice', () => {
         )
       ).associations
     ).toHaveLength(2);
+    f.sqlite.close();
+  });
+
+  it('retains holds and historical identities across task deletion while project deletion removes evidence', async () => {
+    const f = fixture();
+    await f.call('associate_pull_request', {
+      prUrl: pr(30),
+      disposition: 'held',
+      reason: 'Retain artifact',
+    });
+    await f.call('associate_pull_request', {
+      prUrl: pr(31),
+      disposition: 'owned',
+      reason: 'Assigned release',
+    });
+    f.sqlite.prepare("DELETE FROM tasks WHERE id='owner'").run();
+    expect(await f.owners(pr(30))).toEqual([]);
+    const next = { ...f.token, taskId: 'next' };
+    const records = data(await f.call('list_pull_request_associations', {}, next)).associations;
+    expect(records).toHaveLength(2);
+    expect(records.every((r: { ownerStatus: null }) => r.ownerStatus === null)).toBe(true);
+    expect(
+      (
+        await f.call(
+          'associate_pull_request',
+          { prUrl: pr(30), disposition: 'owned', reason: 'Replace', previousTaskId: 'owner' },
+          next
+        )
+      ).error
+    ).toBeDefined();
+    const args = { prUrl: pr(31), disposition: 'owned', reason: 'Authorized continuation' };
+    expect((await f.call('associate_pull_request', args, next)).error).toBeDefined();
+    expect(
+      (await f.call('associate_pull_request', { ...args, previousTaskId: 'owner' }, next)).error
+    ).toBeUndefined();
+    expect(await f.owners(pr(31))).toEqual(['next']);
+    f.sqlite.prepare("DELETE FROM projects WHERE id='p'").run();
+    expect(
+      f.sqlite.prepare('SELECT count(*) AS n FROM task_pull_request_associations').get()
+    ).toEqual({ n: 0 });
     f.sqlite.close();
   });
 

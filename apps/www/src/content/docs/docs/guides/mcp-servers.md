@@ -133,3 +133,8 @@ hold blocks reassignment. The tools derive identity from the agent token and rec
 current project access; they do not reopen tasks or make merging a condition of completing
 research or draft-only work. Association records are append-only; correcting a hold is
 outside this initial slice.
+
+Deleting an owner task leaves its association evidence and holds intact; the list reports
+`ownerStatus: null` when that task no longer exists. An authorized continuation can name
+the retained predecessor association owned by the same user. Explicitly deleting the
+whole project removes its associations. These operations never merge or close GitHub PRs.

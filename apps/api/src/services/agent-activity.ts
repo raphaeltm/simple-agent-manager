@@ -233,9 +233,9 @@ function appendPullRequestOwnerCondition(
     // Canonical PR URLs exceed D1's LIKE pattern ceiling. Literal substring
     // matching avoids that limit; lower() preserves LIKE's ASCII case folding.
     links.push(
-      't.output_pr_url = ?',
+      "lower(rtrim(t.output_pr_url, '/')) = lower(?)",
       'instr(lower(t.description), lower(?)) > 0',
-      'EXISTS (SELECT 1 FROM task_pull_request_associations association WHERE association.task_id = t.id AND association.project_id = t.project_id AND association.pr_url = ?)'
+      'EXISTS (SELECT 1 FROM task_pull_request_associations association WHERE association.task_id = t.id AND association.project_id = t.project_id AND lower(association.pr_url) = lower(?))'
     );
     binds.push(filter.url, filter.url, filter.url);
   }
