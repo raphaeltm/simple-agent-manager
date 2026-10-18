@@ -29,3 +29,9 @@ Both apex schemes permanently redirect to HTTPS www retaining paths/query; subdo
 Local independent Cloudflare/security/constitution review PASS: exact apex forwarding_url301 is public routing repair without security-sensitive settings. Use only apply-redirect; never provision for this repair. Test/docs/completion review PASS for draft preparation; final completion remains pending application and public smoke. No production authenticated journey or VM lifecycle is relevant to this apex-only rule; any genuine gate conflict must be reported, not silently waived.
 
 Relevant checks: infra 9 files/72 tests pass, infra typecheck/lint pass; scripts/deploy typecheck, focused script lint and node syntax pass; marketing workflow/name/teardown regression suite passes. Contract tests do not substitute for real public smoke. Full historical root cause cannot be asserted from expired run logs.
+
+## Live finding and revised design
+
+Read-only plan runs 39173562569 and 39173638664 passed zone/proxied-apex checks, skipped all DNS/Pages mutations, and failed Page Rules GET with HTTP400/code1011. Cloudflare's official issue https://github.com/cloudflare/cloudflare-docs/issues/23256 and account-owned token compatibility matrix identify Page Rules as unsupported for account-owned tokens. Increasing permissions would not fix that API incompatibility. No credentials or permissions changed.
+
+Superseding initial PageRule design: use one Single Redirect in the supported Rulesets `http_request_dynamic_redirect` phase, ref `sam_apex_to_www`, exact host expression, dynamic HTTPS www + original URI path and preserve_query_string=true. Create an absent entrypoint containing only this rule; otherwise append or PATCH only the owned rule. Never replace an existing whole ruleset, security phase or unrelated rule. Keep legacy teardown cleanup and add owned-rule cleanup to existing teardown paths; do not execute teardown. Re-review and live plan required before apply.

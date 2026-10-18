@@ -200,7 +200,7 @@ jobs:
           fi
 
       # ========================================
-      # Phase 4: Apex → www Redirect (Page Rule)
+      # Phase 4: Apex → www Single Redirect (account-token compatible)
       # ========================================
       - name: Create Apex Redirect Rule
         env:
@@ -237,7 +237,7 @@ jobs:
           - **Pages URL:** \`${PAGES_PROJECT}.pages.dev\`
 
           ### Redirect
-          - \`${BASE_DOMAIN}/*\` → \`https://${WWW_DOMAIN}/\$1\` (301)
+          - \`${BASE_DOMAIN}\` → \`https://${WWW_DOMAIN}\` (301, path and query retained)
 
           ### Next Steps
           1. Run the **Deploy Marketing Site** workflow to publish the site

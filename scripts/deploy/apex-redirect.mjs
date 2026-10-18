@@ -1,20 +1,46 @@
 #!/usr/bin/env node
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { validateBaseDomain } from './workflow-resource-names.mjs';
 
-// Existing provision-www Page Rule contract. The scheme is omitted deliberately:
-// Cloudflare matches HTTP and HTTPS; $1 retains the entire path/query suffix.
-// https://developers.cloudflare.com/rules/page-rules/reference/wildcard-matching/
+// Single Redirects support account-owned deployment tokens; Page Rules do not.
+// https://developers.cloudflare.com/rules/url-forwarding/single-redirects/create-api/
+export const REDIRECT_PHASE = 'http_request_dynamic_redirect';
+export const APEX_REDIRECT_REF = 'sam_apex_to_www';
+
 export function desiredApexRedirect(domain) {
   validateBaseDomain(domain);
   return {
-    targets: [{ target: 'url', constraint: { operator: 'matches', value: `${domain}/*` } }],
-    actions: [
-      { id: 'forwarding_url', value: { url: `https://www.${domain}/$1`, status_code: 301 } },
-    ],
-    status: 'active',
+    ref: APEX_REDIRECT_REF,
+    description: 'Apex to canonical www marketing site - managed by provision-www',
+    expression: `(http.host eq "${domain}")`,
+    action: 'redirect',
+    action_parameters: {
+      from_value: {
+        target_url: { expression: `concat("https://www.${domain}", http.request.uri.path)` },
+        status_code: 301,
+        preserve_query_string: true,
+      },
+    },
+    enabled: true,
   };
+}
+
+function validId(value) {
+  if (!/^[a-f0-9]{32}$/u.test(value ?? ''))
+    throw new Error('Invalid Cloudflare resource identifier.');
+  return value;
+}
+
+function sameRule(actual, desired) {
+  return (
+    actual?.ref === desired.ref &&
+    actual.expression === desired.expression &&
+    actual.action === desired.action &&
+    actual.enabled === true &&
+    isDeepStrictEqual(actual.action_parameters, desired.action_parameters)
+  );
 }
 
 export async function reconcileApexRedirect({
@@ -25,9 +51,7 @@ export async function reconcileApexRedirect({
   report = () => {},
 }) {
   const desired = desiredApexRedirect(domain);
-  if (!/^[a-f0-9]{32}$/u.test(zoneId ?? ''))
-    throw new Error('CF_ZONE_ID must be a zone identifier.');
-  const zonePath = `/zones/${zoneId}`;
+  const zonePath = `/zones/${validId(zoneId)}`;
   const zone = await request(zonePath);
   if (zone.name !== domain) throw new Error('CF_ZONE_ID does not match BASE_DOMAIN.');
   const dns = await request(`${zonePath}/dns_records?name=${encodeURIComponent(domain)}`);
@@ -42,56 +66,53 @@ export async function reconcileApexRedirect({
   ) {
     throw new Error('Apex must already have proxied DNS; no DNS changes will be made.');
   }
-  // Query both states explicitly: the API's default filter is not a contract
-  // to rely on, and an inactive rule must be repaired rather than duplicated.
-  const active = await request(`${zonePath}/pagerules?status=active`);
-  const disabled = await request(`${zonePath}/pagerules?status=disabled`);
-  if (!Array.isArray(active) || !Array.isArray(disabled))
-    throw new Error('Invalid Page Rule list response.');
-  const matches = [...active, ...disabled].filter((rule) =>
-    rule.targets?.some((target) => target.constraint?.value === `${domain}/*`)
+  const rulesets = await request(`${zonePath}/rulesets`);
+  if (!Array.isArray(rulesets)) throw new Error('Invalid ruleset list response.');
+  const entries = rulesets.filter(
+    (entry) => entry.phase === REDIRECT_PHASE && entry.kind === 'zone'
   );
-  if (matches.length > 1)
-    throw new Error('Ambiguous apex rules; inspect the existing rules before applying.');
-  const before = matches[0] ?? null;
+  if (entries.length > 1)
+    throw new Error('Ambiguous redirect entrypoints; inspect before applying.');
+  const entry = entries[0] ? await request(`${zonePath}/rulesets/${validId(entries[0].id)}`) : null;
   if (
-    before &&
-    (before.targets.length !== 1 ||
-      before.targets[0].target !== 'url' ||
-      before.targets[0].constraint.operator !== 'matches' ||
-      before.actions?.length !== 1 ||
-      before.actions[0].id !== 'forwarding_url')
+    entry &&
+    (entry.phase !== REDIRECT_PHASE || entry.kind !== 'zone' || !Array.isArray(entry.rules))
   ) {
-    throw new Error('Refusing to replace a non-redirect apex rule or security settings.');
+    throw new Error('Refusing to modify a non-redirect ruleset.');
   }
-  if (before && !/^[a-zA-Z0-9_-]+$/u.test(before.id ?? ''))
-    throw new Error('Invalid Page Rule identifier.');
-  const after = {
-    ...desired,
-    ...(before?.priority !== undefined ? { priority: before.priority } : {}),
-  };
-  const unchanged =
-    before?.status === desired.status &&
-    before.actions[0].value?.url === desired.actions[0].value.url &&
-    before.actions[0].value?.status_code === 301;
+  const owned = (entry?.rules ?? []).filter((rule) => rule.ref === APEX_REDIRECT_REF);
+  if (owned.length > 1) throw new Error('Ambiguous managed apex rules; inspect before applying.');
+  const before = owned[0] ?? null;
+  if (before && before.action !== 'redirect')
+    throw new Error('Refusing to replace a non-redirect rule or security settings.');
+  // Never adopt/overwrite a separately managed exact apex rule.
+  if (
+    (entry?.rules ?? []).some(
+      (rule) => rule.ref !== APEX_REDIRECT_REF && rule.expression === desired.expression
+    )
+  ) {
+    throw new Error('Unmanaged apex redirect exists; inspect before applying.');
+  }
   const plan = {
-    method: unchanged ? null : before ? 'PUT' : 'POST',
-    path: `${zonePath}/pagerules${before ? `/${before.id}` : ''}`,
+    method: sameRule(before, desired) ? null : before ? 'PATCH' : 'POST',
+    path: `${zonePath}/rulesets${entry ? `/${validId(entry.id)}/rules${before ? `/${validId(before.id)}` : ''}` : ''}`,
     before,
-    after,
+    after: entry
+      ? desired
+      : { name: 'Marketing redirects', kind: 'zone', phase: REDIRECT_PHASE, rules: [desired] },
   };
   report(plan);
   if (apply && plan.method) {
-    const result = await request(plan.path, { method: plan.method, body: after });
+    const result = await request(plan.path, { method: plan.method, body: plan.after });
+    const confirmed = result?.rules?.filter((rule) => rule.ref === APEX_REDIRECT_REF) ?? [];
     if (
-      !result?.id ||
-      result.status !== after.status ||
-      result.targets?.[0]?.constraint?.value !== `${domain}/*` ||
-      result.actions?.[0]?.value?.url !== after.actions[0].value.url ||
-      result.actions?.[0]?.value?.status_code !== 301
+      result?.phase !== REDIRECT_PHASE ||
+      result?.kind !== 'zone' ||
+      confirmed.length !== 1 ||
+      !sameRule(confirmed[0], desired)
     ) {
       throw new Error(
-        'Cloudflare did not confirm the requested apex redirect; inspect the rule before retrying.'
+        'Cloudflare did not confirm the requested apex redirect; inspect before retrying.'
       );
     }
   }

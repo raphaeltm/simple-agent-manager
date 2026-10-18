@@ -3,47 +3,52 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  APEX_REDIRECT_REF,
   cloudflareRequest,
   desiredApexRedirect,
   reconcileApexRedirect,
+  REDIRECT_PHASE,
 } from '../deploy/apex-redirect.mjs';
 
 const domain = 'example.com';
 const zoneId = 'a'.repeat(32);
+const rulesetId = 'b'.repeat(32);
+const ruleId = 'c'.repeat(32);
 const desired = desiredApexRedirect(domain);
-function api(
-  rules: Array<{ status?: string; [key: string]: unknown }> = [],
-  overrides: Record<string, unknown> = {}
-) {
-  return vi
-    .fn(async (path: string, options?: { method?: string; body?: unknown }) => {
-      if (path === `/zones/${zoneId}`) return { name: domain };
-      if (path.includes('/dns_records')) return [{ name: domain, proxied: true, type: 'A' }];
-      if (options?.method) return { id: 'rule-id', ...(options.body as object) };
-      if (path.endsWith('status=disabled')) return rules.filter((r) => r.status === 'disabled');
-      if (path.endsWith('status=active')) return rules.filter((r) => r.status === 'active');
-      throw new Error(`Unexpected API request ${path}`);
-    })
-    .mockImplementationOnce(async () => ({ name: domain, ...overrides }));
+const entry = (rules: unknown[]) => ({ id: rulesetId, kind: 'zone', phase: REDIRECT_PHASE, rules });
+function api(existing: ReturnType<typeof entry> | null = null, zone = domain) {
+  return vi.fn(async (path: string, options?: { method?: string; body?: unknown }) => {
+    if (options?.method) return entry([{ id: ruleId, ...desired }]);
+    if (path === `/zones/${zoneId}`) return { name: zone };
+    if (path.includes('/dns_records')) return [{ name: domain, proxied: true, type: 'A' }];
+    if (path.endsWith('/rulesets')) return existing ? [existing] : [];
+    if (path.endsWith(`/rulesets/${rulesetId}`)) return existing;
+    throw new Error(`Unexpected request ${path}`);
+  });
 }
 
-describe('managed apex redirect', () => {
-  it('uses the existing apex-only scheme-independent Page Rule contract', () => {
-    expect(desired).toEqual({
-      targets: [{ target: 'url', constraint: { operator: 'matches', value: 'example.com/*' } }],
-      actions: [
-        { id: 'forwarding_url', value: { url: 'https://www.example.com/$1', status_code: 301 } },
-      ],
-      status: 'active',
+describe('managed apex Single Redirect', () => {
+  it('matches only the bare hostname on both schemes and preserves paths and query strings', () => {
+    expect(desired).toMatchObject({
+      ref: APEX_REDIRECT_REF,
+      expression: '(http.host eq "example.com")',
+      action: 'redirect',
+      enabled: true,
+      action_parameters: {
+        from_value: {
+          target_url: { expression: 'concat("https://www.example.com", http.request.uri.path)' },
+          status_code: 301,
+          preserve_query_string: true,
+        },
+      },
     });
-    // Exercise Cloudflare's documented wildcard substitution, including raw query suffixes.
+    // Configuration contract; actual edge behavior requires public smoke.
     for (const scheme of ['http', 'https']) {
-      for (const suffix of ['', 'docs/', 'a%2Fb?x=1&x=2&q=a%20b&next=https%3A%2F%2Fexample.net']) {
-        const source = new URL(`${scheme}://${domain}/${suffix}`);
-        expect(
-          desired.actions[0].value.url.replace('$1', source.pathname.slice(1) + source.search)
-        ).toBe(`https://www.${domain}/${suffix}`);
-      }
+      const source = new URL(`${scheme}://${domain}/docs/a%2Fb?x=1&x=2&q=a%20b`);
+      expect(source.hostname).toBe(domain);
+      expect(`https://www.${domain}${source.pathname}${source.search}`).toBe(
+        'https://www.example.com/docs/a%2Fb?x=1&x=2&q=a%20b'
+      );
     }
     for (const host of [
       'www.example.com',
@@ -52,70 +57,95 @@ describe('managed apex redirect', () => {
       'preview.example.com',
       'ws-id.example.com',
       'node.vm.example.com',
-    ]) {
-      expect(`${host}/`.startsWith(desired.targets[0].constraint.value.slice(0, -1))).toBe(false);
-    }
+    ])
+      expect(host).not.toBe(domain);
   });
 
-  it('plans creation without writes by default', async () => {
+  it('plans a missing entrypoint without writes by default', async () => {
     const request = api();
-    const plan = await reconcileApexRedirect({ domain, zoneId, request });
-    expect(plan).toMatchObject({
+    expect(await reconcileApexRedirect({ domain, zoneId, request })).toMatchObject({
       method: 'POST',
-      path: `/zones/${zoneId}/pagerules`,
-      after: desired,
+      path: `/zones/${zoneId}/rulesets`,
+      before: null,
+      after: { kind: 'zone', phase: REDIRECT_PHASE, rules: [desired] },
     });
     expect(request.mock.calls.every(([, options]) => !options?.method)).toBe(true);
   });
 
-  it('creates exactly one rule when explicitly applied', async () => {
+  it('creates only the redirect entrypoint when explicitly applied', async () => {
     const request = api();
     await reconcileApexRedirect({ domain, zoneId, request, apply: true });
     expect(request.mock.calls.filter(([, options]) => options?.method)).toEqual([
-      [`/zones/${zoneId}/pagerules`, { method: 'POST', body: desired }],
+      [
+        `/zones/${zoneId}/rulesets`,
+        {
+          method: 'POST',
+          body: {
+            name: 'Marketing redirects',
+            kind: 'zone',
+            phase: REDIRECT_PHASE,
+            rules: [desired],
+          },
+        },
+      ],
     ]);
   });
 
-  it('reactivates the disabled matching redirect without duplicating it or changing priority', async () => {
-    const before = { ...desired, id: 'held-rule', status: 'disabled', priority: 7 };
-    const request = api([before]);
+  it('appends one rule without replacing unrelated rules or touching security phases', async () => {
+    const unrelated = {
+      id: 'd'.repeat(32),
+      ref: 'other',
+      expression: '(http.host eq "app.example.com")',
+      action: 'redirect',
+    };
+    const before = entry([unrelated]);
+    const request = api(before);
     const plan = await reconcileApexRedirect({ domain, zoneId, request, apply: true });
     expect(plan).toMatchObject({
-      method: 'PUT',
-      path: `/zones/${zoneId}/pagerules/held-rule`,
-      before,
-      after: { ...desired, priority: 7 },
+      method: 'POST',
+      path: `/zones/${zoneId}/rulesets/${rulesetId}/rules`,
+      after: desired,
     });
+    expect(before.rules).toEqual([unrelated]);
+    expect(request.mock.calls.filter(([, options]) => options?.method)).toEqual([
+      [plan.path, { method: 'POST', body: desired }],
+    ]);
+    expect(request.mock.calls.some(([path]) => /firewall|waf|pagerules/.test(path))).toBe(false);
   });
 
-  it('makes no write when already correct, leaving unrelated rules intact', async () => {
-    const request = api([
-      { ...desired, id: 'current', priority: 3 },
-      {
-        ...desired,
-        id: 'other',
-        targets: [
-          { target: 'url', constraint: { operator: 'matches', value: 'app.example.com/*' } },
-        ],
-      },
-    ]);
+  it('reactivates only the managed rule with PATCH and leaves its position unchanged', async () => {
+    const before = { id: ruleId, ...desired, enabled: false };
+    const request = api(entry([before]));
+    const plan = await reconcileApexRedirect({ domain, zoneId, request, apply: true });
+    expect(plan).toMatchObject({
+      method: 'PATCH',
+      path: `/zones/${zoneId}/rulesets/${rulesetId}/rules/${ruleId}`,
+      before,
+      after: desired,
+    });
+    expect(plan.after).not.toHaveProperty('position');
+  });
+
+  it('does not write when the managed rule is already correct', async () => {
+    const request = api(entry([{ id: ruleId, ...desired }]));
     expect(await reconcileApexRedirect({ domain, zoneId, request, apply: true })).toMatchObject({
       method: null,
     });
     expect(request.mock.calls.every(([, options]) => !options?.method)).toBe(true);
   });
 
-  it('refuses duplicate rules or a matching rule with security actions', async () => {
+  it('refuses duplicates, security actions, and unmanaged exact apex rules', async () => {
     for (const rules of [
       [
-        { ...desired, id: 'a' },
-        { ...desired, id: 'b', status: 'disabled' },
+        { id: ruleId, ...desired },
+        { id: 'd'.repeat(32), ...desired },
       ],
-      [{ ...desired, id: 'a', actions: [{ id: 'ssl', value: 'off' }] }],
+      [{ id: ruleId, ...desired, action: 'skip' }],
+      [{ id: ruleId, ...desired, ref: 'external-owner' }],
     ]) {
-      const request = api(rules);
+      const request = api(entry(rules));
       await expect(reconcileApexRedirect({ domain, zoneId, request, apply: true })).rejects.toThrow(
-        /Ambiguous|non-redirect/
+        /Ambiguous|non-redirect|Unmanaged/
       );
       expect(request.mock.calls.every(([, options]) => !options?.method)).toBe(true);
     }
@@ -123,12 +153,7 @@ describe('managed apex redirect', () => {
 
   it('fails before writes on wrong-zone or API errors', async () => {
     await expect(
-      reconcileApexRedirect({
-        domain,
-        zoneId,
-        request: api([], { name: 'other.com' }),
-        apply: true,
-      })
+      reconcileApexRedirect({ domain, zoneId, request: api(null, 'other.com'), apply: true })
     ).rejects.toThrow(/zone/i);
     await expect(
       reconcileApexRedirect({
@@ -140,13 +165,13 @@ describe('managed apex redirect', () => {
     ).rejects.toThrow('API denied');
   });
 
-  it('rejects success:false even on HTTP200 without leaking response secrets', async () => {
+  it('rejects success:false HTTP200/403 and missing result without leaking API bodies', async () => {
     const canary = 'secret-canary-value';
     for (const response of [
       {
         ok: true,
         status: 200,
-        json: async () => ({ success: false, errors: [{ message: canary }] }),
+        json: async () => ({ success: false, errors: [{ code: 1011, message: canary }] }),
       },
       {
         ok: false,
@@ -167,13 +192,12 @@ describe('managed apex redirect', () => {
     }
   });
 
-  it('runs the HTTP adapter through preflight and one exact redirect mutation', async () => {
+  it('runs the real HTTP adapter through preflight and exact redirect creation', async () => {
     const results = [
       { name: domain },
       [{ name: domain, proxied: true, type: 'A' }],
       [],
-      [],
-      { id: 'created', ...desired },
+      entry([{ id: ruleId, ...desired }]),
     ];
     const fetcher = vi.fn(async () => ({
       ok: true,
@@ -190,37 +214,31 @@ describe('managed apex redirect', () => {
     const calls = fetcher.mock.calls as unknown as Array<
       [string, { method: string; body?: string }]
     >;
-    expect(calls.map(([, options]) => options.method)).toEqual([
-      'GET',
-      'GET',
-      'GET',
-      'GET',
-      'POST',
-    ]);
-    expect(calls.at(-1)?.[0]).toBe(
-      `https://api.cloudflare.com/client/v4/zones/${zoneId}/pagerules`
-    );
-    expect(JSON.parse(calls.at(-1)?.[1].body ?? '{}')).toEqual(desired);
+    expect(calls.map(([, options]) => options.method)).toEqual(['GET', 'GET', 'GET', 'POST']);
+    expect(calls.at(-1)?.[0]).toBe(`https://api.cloudflare.com/client/v4/zones/${zoneId}/rulesets`);
+    expect(JSON.parse(calls.at(-1)?.[1].body ?? '{}')).toMatchObject({
+      phase: REDIRECT_PHASE,
+      rules: [desired],
+    });
   });
 
-  it('requires proxied apex DNS and refuses an unconfirmed write', async () => {
-    const dnsRequest = api();
-    dnsRequest
-      .mockImplementationOnce(async () => ({ name: domain }))
-      .mockImplementationOnce(async () => [{ name: domain, type: 'A', proxied: false }] as never);
-    await expect(
-      reconcileApexRedirect({ domain, zoneId, request: dnsRequest, apply: true })
-    ).rejects.toThrow(/proxied DNS/);
-    expect(dnsRequest.mock.calls.every(([, options]) => !options?.method)).toBe(true);
+  it('requires proxied DNS and rejects an unconfirmed mutation response', async () => {
     const request = api();
-    const wrapper = async (path: string, options?: { method?: string; body?: unknown }) =>
-      options?.method ? { id: 'wrong', status: 'disabled' } : request(path, options);
+    const noDns = async (path: string, options?: { method?: string; body?: unknown }) =>
+      path.includes('/dns_records') ? [] : request(path, options);
     await expect(
-      reconcileApexRedirect({ domain, zoneId, request: wrapper, apply: true })
+      reconcileApexRedirect({ domain, zoneId, request: noDns, apply: true })
+    ).rejects.toThrow(/proxied DNS/);
+    const mismatch = async (path: string, options?: { method?: string; body?: unknown }) =>
+      options?.method
+        ? entry([{ id: ruleId, ...desired, action: 'skip' }])
+        : request(path, options);
+    await expect(
+      reconcileApexRedirect({ domain, zoneId, request: mismatch, apply: true })
     ).rejects.toThrow(/did not confirm/);
   });
 
-  it('exposes a manual redirect-only plan without provisioning DNS, Pages, Worker or TLS resources', () => {
+  it('uses isolated plan/apply operations and retains the existing www-infra lease', () => {
     const workflow = readFileSync(
       new URL('../../.github/workflows/provision-www.yml', import.meta.url),
       'utf8'
@@ -229,19 +247,13 @@ describe('managed apex redirect', () => {
     expect(workflow).toContain('default: plan-redirect');
     expect(workflow).toContain('group: www-infra');
     expect(workflow).toContain('cancel-in-progress: false');
-    expect(workflow).toContain('node scripts/deploy/apex-redirect.mjs');
+    expect(workflow).toContain('node scripts/deploy/apex-redirect.mjs --apply');
+    expect(workflow).not.toContain('pagerules?status=active');
     for (const name of [
       'Create Pages Project',
       'Create DNS Records',
       'Add Custom Domain to Pages Project',
-    ]) {
+    ])
       expect(workflow).toContain(`- name: ${name}\n        if: inputs.operation == 'provision'`);
-    }
-    const provision = readFileSync(
-      new URL('../../.github/workflows/provision-www.yml', import.meta.url),
-      'utf8'
-    );
-    expect(provision).toContain('node scripts/deploy/apex-redirect.mjs --apply');
-    expect(provision).not.toContain('pagerules?status=active');
   });
 });
