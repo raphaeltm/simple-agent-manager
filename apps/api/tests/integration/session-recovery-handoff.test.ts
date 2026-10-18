@@ -3,12 +3,12 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import type { Env } from '../../src/env';
 import { ensureSessionLinked } from '../../src/durable-objects/task-runner/session-linking';
 import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner/types';
+import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { crudRoutes } from '../../src/routes/tasks/crud';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
