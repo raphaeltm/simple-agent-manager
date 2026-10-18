@@ -24,6 +24,10 @@ export async function reconcileSessionRecoveryBindingFailure(
           AND snapshot.recovery_task_id = ? AND snapshot.recovery_attempt_id = ?
           AND snapshot.recovery_status = 'waking' AND snapshot.recovery_failed_at IS NULL
           AND snapshot.runtime = 'vm' AND snapshot.sleeping_at IS NOT NULL
+          AND snapshot.sleep_status = 'sleeping' AND julianday(snapshot.expires_at) > julianday(?)
+          AND ((snapshot.status = 'available' AND snapshot.degradation = 'none')
+            OR (snapshot.status = 'degraded' AND snapshot.degradation IS NOT NULL
+              AND snapshot.degradation != 'none'))
           AND snapshot.recovery_claimed_at <= ?
           AND EXISTS (
             SELECT 1 FROM tasks task
@@ -68,6 +72,7 @@ export async function reconcileSessionRecoveryBindingFailure(
       input.userId,
       input.taskId,
       input.recoveryAttemptId,
+      input.now,
       input.staleBefore,
       input.now
     )

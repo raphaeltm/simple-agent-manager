@@ -43,9 +43,9 @@ describe('reconcile reported workspace-binding failure', () => {
         ('retained','project','user','chat','deleted','confirmed'),
         ('recovery','project','user',NULL,'deleted','confirmed');
       INSERT INTO session_snapshots (id,project_id,user_id,workspace_id,recovery_workspace_id,
-        chat_session_id,runtime,sleeping_at,recovery_status,recovery_task_id,recovery_attempt_id,
+        chat_session_id,runtime,status,degradation,sleep_status,expires_at,sleeping_at,recovery_status,recovery_task_id,recovery_attempt_id,
         recovery_claimed_at,recovery_attempts,recovery_failed_at)
-      VALUES ('snapshot','project','user','original','recovery','chat','vm','2026-10-18T19:00:00.000Z',
+      VALUES ('snapshot','project','user','original','recovery','chat','vm','available','none','sleeping','2026-10-25T19:00:00.000Z','2026-10-18T19:00:00.000Z',
         'waking','task','attempt','2026-10-18T20:00:00.000Z',3,NULL);`);
   });
   afterEach(() => sqlite.close());
@@ -84,6 +84,11 @@ describe('reconcile reported workspace-binding failure', () => {
     ["UPDATE session_snapshots SET recovery_status='restored'"],
     ['UPDATE session_snapshots SET sleeping_at=NULL'],
     ["UPDATE session_snapshots SET runtime='cf-container'"],
+    ["UPDATE session_snapshots SET expires_at='2026-10-18T21:00:00.000Z'"],
+    ["UPDATE session_snapshots SET expires_at='invalid'"],
+    ["UPDATE session_snapshots SET status='pending'"],
+    ["UPDATE session_snapshots SET degradation='home-skipped'"],
+    ["UPDATE session_snapshots SET sleep_status='stopping'"],
     ["UPDATE workspaces SET status='running' WHERE id='recovery'"],
     ["UPDATE workspaces SET runtime_deletion_confirmed_at=NULL WHERE id='recovery'"],
     ["UPDATE workspaces SET status='running' WHERE id='retained'"],
