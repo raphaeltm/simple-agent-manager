@@ -159,3 +159,10 @@ Without the `/do` instruction, a dispatched agent may skip critical phases like 
 - Tasks are for smaller work items; larger features use speckit (`/speckit.*` commands)
 - Task files can reference spec files if the work relates to a feature spec
 - Constitution validation still applies to all work tracked via tasks
+
+## CI Wait Recovery
+
+For CI subscriptions and PR shepherd owner reconciliation, follow
+[CI wait recovery](../../docs/guides/ci-wait-recovery.md): exact completion event
+names, full head SHAs, current checks before/after waits, and one independent
+fallback. Expiry or a stale continuation is not evidence of a future wake.

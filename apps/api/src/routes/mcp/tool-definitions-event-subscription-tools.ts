@@ -40,7 +40,8 @@ const EVENT_FILTER_SCHEMA = {
     },
     eventType: {
       ...STRING_OR_STRING_ARRAY,
-      description: 'Exact event type value or bounded set of values.',
+      description:
+        'Exact event type value or bounded set of values; no prefix matching. GitHub CI completion: check_run.completed, check_suite.completed, workflow_run.completed.',
     },
     subjectType: {
       ...STRING_OR_STRING_ARRAY,
@@ -48,7 +49,8 @@ const EVENT_FILTER_SCHEMA = {
     },
     subjectId: {
       ...STRING_OR_STRING_ARRAY,
-      description: 'Exact event subject id value or bounded set of values.',
+      description:
+        'Exact event subject id value or bounded set of values. For GitHub commit subjects, use the full 40-character PR head SHA, never an abbreviated SHA.',
     },
     severity: {
       ...SEVERITY_OR_SEVERITY_ARRAY,
@@ -84,8 +86,8 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
     name: 'create_project_event_subscription',
     description:
       'Create or replay a short-lived ProjectData event subscription owned by the calling task agent. Project, owner, session, task, and agent identity are derived from the MCP token; do not provide projectId or owner. For existing_session_prompt, SAM may wake this same chat later with event IDs only after a matching event materializes; read wakeInstructions in the response, checkpoint local state before ending your turn, and use list_subscription_events/get_event/ack_event_delivery after wake or polling. ' +
-      'Waiting on a GitHub PR: filter source "github" with subjectType "pull_request" and subjectId = the PR number for review, review-comment, PR-comment and PR events; CI events (check_run, check_suite, workflow_run) use subjectType "commit" and subjectId = the head SHA. ' +
-      'Only a PR comment waking an idle, live chat has been verified end to end; keep one bounded fallback check (for example gh pr checks) and say when you used it.',
+      'Waiting on a GitHub PR: filter source "github" with subjectType "pull_request" and subjectId = the PR number for review, review-comment, PR-comment and PR events; CI completion eventType values are "check_run.completed", "check_suite.completed", "workflow_run.completed" (bare names do not match); use subjectType "commit" and subjectId = the full 40-character PR head SHA. ' +
+      'Reconcile the current PR head and checks before subscribing, immediately after subscribing (to close the check/subscribe race), and after every resume. Completed checks need no new wait. Expiry is not a wake: arrange one bounded fallback check via create_project_schedule to the same session before ending your turn, or report that no supported wake is available. Only a PR comment waking an idle, live chat has been verified end to end; report reliance on the fallback.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -111,7 +113,7 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
         expiresAt: {
           type: 'integer',
           description:
-            'Optional future millisecond timestamp. Agent subscriptions are capped by the caller MCP token lifetime.',
+            'Optional future millisecond timestamp. Agent subscriptions are capped by the caller MCP token lifetime. Expiry does not itself wake the agent; arrange an independent bounded fallback before yielding.',
         },
       },
       required: ['idempotencyKey', 'filter', 'requestedDelivery'],
@@ -121,7 +123,7 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
   {
     name: 'list_project_event_subscriptions',
     description:
-      'List the calling task agent’s own ProjectData event subscriptions for the current session. Use this to recover the subscriptionId before list_subscription_events. Project and owner are derived from the MCP token.',
+      'List the calling task agent’s own ProjectData event subscriptions for the current session. Use state "any" when recovering a wait so expired or cancelled subscriptions are visible; recover the subscriptionId before list_subscription_events. Project and owner are derived from the MCP token.',
     inputSchema: {
       type: 'object' as const,
       properties: {
