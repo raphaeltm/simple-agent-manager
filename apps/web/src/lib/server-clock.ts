@@ -5,12 +5,24 @@
  * grant whatever a browser shows. Display only.
  */
 let offsetMs = 0;
+let latestServerTime = Number.NEGATIVE_INFINITY;
 
-/** Record the server's clock from a response that just arrived. */
+/**
+ * Record the server's clock from a response that just arrived. The server's clock never runs
+ * backwards, so a reading older than one already seen (a response served from a cache, or one
+ * that arrived out of order) is ignored rather than dragging the countdowns back.
+ */
 export function recordServerTime(serverTime: unknown, receivedAt: number = Date.now()): void {
-  if (typeof serverTime === 'number' && Number.isFinite(serverTime)) {
-    offsetMs = serverTime - receivedAt;
-  }
+  if (typeof serverTime !== 'number' || !Number.isFinite(serverTime)) return;
+  if (serverTime < latestServerTime) return;
+  latestServerTime = serverTime;
+  offsetMs = serverTime - receivedAt;
+}
+
+/** Forget every reading. For tests, which move the device clock around. */
+export function resetServerClock(): void {
+  offsetMs = 0;
+  latestServerTime = Number.NEGATIVE_INFINITY;
 }
 
 /** Now, by the server's clock. */

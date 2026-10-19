@@ -15,7 +15,7 @@ import {
   useSessionAccessSync,
 } from '../../../src/components/project-message-view/useSessionAccessSync';
 import type { ChatSessionResponse } from '../../../src/lib/api';
-import { recordServerTime } from '../../../src/lib/server-clock';
+import { recordServerTime, resetServerClock } from '../../../src/lib/server-clock';
 
 /**
  * A grantee's composer must lock when their chosen time runs out, even when no socket event
@@ -75,13 +75,14 @@ async function flush() {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
+  resetServerClock();
   recordServerTime(NOW);
   mocks.getSessionAccess.mockReset();
 });
 
 afterEach(() => {
   vi.useRealTimers();
-  recordServerTime(Date.now());
+  resetServerClock();
 });
 
 describe('useSessionAccessSync: when shared access runs out', () => {

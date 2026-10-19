@@ -32,7 +32,7 @@ import {
   type SessionShareDialogProps,
 } from '../../../src/components/project-message-view/SessionShareDialog';
 import { ApiClientError } from '../../../src/lib/api/client';
-import { recordServerTime } from '../../../src/lib/server-clock';
+import { recordServerTime, resetServerClock } from '../../../src/lib/server-clock';
 import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 const OWNER = { id: 'user-owner', name: 'Prakash Rao', avatarUrl: null };
@@ -131,7 +131,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getProjectMembers.mockResolvedValue(MEMBERS);
   // This device and the server agree, unless a test says otherwise.
-  recordServerTime(Date.now());
+  resetServerClock();
 });
 
 /** Open the confirm step for Dana from the owner's dialog. */

@@ -328,6 +328,59 @@ test.describe('Shared session — what each viewer sees', () => {
     await screenshot(page, slug('grantee', page));
   });
 
+  test('a teammate whose time runs out: the composer locks and says why', async ({ page }) => {
+    // Real time passes in this test: the grant ends 12 s after the mocks are set up.
+    test.setTimeout(90_000);
+    const expiresAt = Date.now() + 12_000;
+    // Answers like the server: its own clock, and an ended grant is gone.
+    const accessNow = () => {
+      const base = accessSummary('grantee', 3);
+      const ended = Date.now() >= expiresAt;
+      return {
+        ...base,
+        viewerAccess: ended ? 'reader' : 'grantee',
+        grants: ended
+          ? base.grants.slice(1)
+          : [{ ...base.grants[0]!, expiresAt }, ...base.grants.slice(1)],
+        serverTime: Date.now(),
+      };
+    };
+    await setupMocks(page, makeSession('grantee', { access: accessNow() }));
+    await page.route(`**/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/access`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(accessNow()),
+      })
+    );
+    await openChat(page);
+
+    await expect(page.getByTestId('shared-session-time-left')).toHaveText(
+      /^Your access ends in under a minute/
+    );
+    await expect(page.getByPlaceholder(/Send a message/)).toBeVisible();
+
+    // The end time passes with no socket message: the composer locks and says why.
+    await expect(page.getByText('Your shared access has ended')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByPlaceholder(/Send a message/)).toHaveCount(0);
+    await expect(page.getByTestId('shared-session-notice')).toHaveCount(0);
+    // The refetch that follows makes them a reader; the footer still says their access ended.
+    await expect
+      .poll(() => page.evaluate(() => document.body.innerText.includes('Only ')), {
+        timeout: 5_000,
+      })
+      .toBe(false);
+    await expect(page.getByText('Your shared access has ended')).toBeVisible();
+    await expect(
+      page.getByText(
+        `You can still read and comment. Ask ${LONG_OWNER} to share it again to keep chatting.`
+      )
+    ).toBeVisible();
+
+    await assertNoOverflow(page);
+    await screenshot(page, slug('access-ended', page));
+  });
+
   test('any other member: read-only composer that names the owner', async ({ page }) => {
     await setupMocks(page, makeSession('reader'));
     await openChat(page);

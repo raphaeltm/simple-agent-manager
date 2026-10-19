@@ -6,7 +6,7 @@ import { resolveSessionViewerCapabilities } from '../../../src/components/projec
 import { SessionFooter } from '../../../src/components/project-message-view/SessionFooter';
 import type { UseSessionLifecycleResult } from '../../../src/components/project-message-view/useSessionLifecycle.types';
 import type { ChatSessionResponse } from '../../../src/lib/api';
-import { recordServerTime } from '../../../src/lib/server-clock';
+import { recordServerTime, resetServerClock } from '../../../src/lib/server-clock';
 
 vi.mock('../../../src/components/project-message-view/FollowUpInput', async (importOriginal) => {
   const actual =
@@ -176,12 +176,12 @@ function sharedWith(grants: SessionAccessGrant[]): Partial<ChatSessionResponse> 
 describe('SessionFooter: when a grantee’s access ends', () => {
   beforeEach(() => {
     // Every test starts with this device and the server agreeing.
-    recordServerTime(Date.now());
+    resetServerClock();
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    recordServerTime(Date.now());
+    resetServerClock();
   });
 
   it('shows the viewer’s own end time, not someone else’s, and locks the composer when it ends', () => {

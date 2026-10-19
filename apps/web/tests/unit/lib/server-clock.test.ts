@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { recordServerTime, serverNow, toDeviceTime } from '../../../src/lib/server-clock';
+import {
+  recordServerTime,
+  resetServerClock,
+  serverNow,
+  toDeviceTime,
+} from '../../../src/lib/server-clock';
 
 /**
  * Access countdowns read the server's clock through this module. The offset is module state, so
@@ -9,7 +14,7 @@ import { recordServerTime, serverNow, toDeviceTime } from '../../../src/lib/serv
 describe('server clock', () => {
   afterEach(() => {
     vi.useRealTimers();
-    recordServerTime(Date.now());
+    resetServerClock();
   });
 
   it('reads the server clock from the offset measured when a response arrived', () => {
@@ -23,6 +28,20 @@ describe('server clock', () => {
     expect(serverNow()).toBe(1_060_000 + 300_000);
     // A server end time shown on this device's clock.
     expect(toDeviceTime(1_000_000 + 300_000 + 600_000)).toBe(1_600_000);
+  });
+
+  it('ignores a reading older than one already seen, and takes a newer one', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(3_000_000);
+    recordServerTime(3_000_000 + 2_000, 3_000_000);
+
+    // A cached or out-of-order response: its server time is older than what we already saw.
+    vi.advanceTimersByTime(10_000);
+    recordServerTime(3_000_000 + 1_000);
+    expect(serverNow()).toBe(3_012_000);
+
+    recordServerTime(3_010_000 + 5_000);
+    expect(serverNow()).toBe(3_015_000);
   });
 
   it.each([undefined, null, 'soon', NaN, Number.POSITIVE_INFINITY])(

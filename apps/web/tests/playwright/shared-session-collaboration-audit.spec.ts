@@ -19,7 +19,9 @@ import {
 const PROJECT_ID = 'proj-shared-collab';
 const SESSION_ID = 'session-shared-collab';
 const NOW = Date.now();
-const LONG_NAME = 'Maximiliana-Wolfeschlegelsteinhausenbergerdorff-Featherstonehaugh';
+// One unbroken token: no spaces or hyphens for the browser to break at, so only
+// overflow-wrap can keep the rows inside a 375px dialog.
+const LONG_NAME = 'MaximilianaWolfeschlegelsteinhausenbergerdorffFeatherstonehaugh';
 
 const OWNER = { id: 'user-owner', name: 'Prakash Rao', avatarUrl: null };
 const BEA = { id: 'user-bea', name: 'Bea Arthur', avatarUrl: null };
@@ -393,6 +395,9 @@ test.describe('Shared session collaboration', () => {
     for (const radio of await durations.getByRole('radio').all()) {
       await expect(radio).not.toBeChecked();
     }
+    await expect(dialog.getByTestId('share-requirements')).toHaveText(
+      'To share, choose how long and tick the box above.'
+    );
     await assertNoClippedOverflow(page);
     await screenshot(page, 'share-dialog-confirm', { scopeToProject: true });
 
@@ -403,6 +408,15 @@ test.describe('Shared session collaboration', () => {
     await expect(durations.getByRole('radio', { name: '30 min' })).toBeChecked();
     await expect(dialog.getByText(/^Ends at .+\.$/)).toBeVisible();
     await expect(share).toBeEnabled();
+    // Keyboard: arrow keys move the choice, and the focused option shows a focus ring.
+    await durations.getByRole('radio', { name: '30 min' }).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(durations.getByRole('radio', { name: '1 hour' })).toBeChecked();
+    await expect(durations.getByRole('radio', { name: '1 hour' })).toBeFocused();
+    const ring = await options.nth(3).evaluate((label) => getComputedStyle(label).outlineStyle);
+    expect(ring).not.toBe('none');
+    await page.keyboard.press('ArrowLeft');
+    await expect(durations.getByRole('radio', { name: '30 min' })).toBeChecked();
     await screenshot(page, 'share-dialog-confirm-chosen', { scopeToProject: true });
     await share.click();
     await expect(dialog.getByRole('status')).toHaveText(
@@ -470,6 +484,37 @@ test.describe('Shared session collaboration', () => {
       dialog.getByRole('button', { name: `Revoke ${LONG_NAME}'s access now` })
     ).toHaveCount(0);
     await expect(dialog.getByRole('button', { name: `Share with ${LONG_NAME}` })).toBeVisible();
+  });
+
+  test.describe('the narrowest phones', () => {
+    test.use({ viewport: { width: 320, height: 640 } });
+
+    test('the four durations fit on one row at 320px', async ({ page }) => {
+      await setupMocks(page, 'owner');
+      await openChat(page);
+      await page
+        .getByRole('button', { name: /chat access/i })
+        .first()
+        .click();
+      const dialog = page.getByRole('dialog', { name: 'Share chat access' });
+      await dialog.getByRole('button', { name: 'Share with Dana Scully' }).click();
+      const options = dialog.getByRole('group', { name: 'How long?' }).locator('label');
+      await expect(options).toHaveText(['5 min', '10 min', '30 min', '1 hour']);
+      const dialogBox = (await dialog.boundingBox())!;
+      const boxes = await Promise.all(
+        (await options.all()).map(async (option) => (await option.boundingBox())!)
+      );
+      for (const box of boxes) {
+        expect(Math.abs(box.y - boxes[0]!.y)).toBeLessThanOrEqual(1);
+        // One line of text: no label wrapped inside its pill.
+        expect(box.height).toBeLessThanOrEqual(boxes[0]!.height + 1);
+        expect(box.x + box.width).toBeLessThanOrEqual(dialogBox.x + dialogBox.width + 1);
+      }
+      await assertNoOverflow(page);
+      await assertNoClippedOverflow(page);
+      await options.first().scrollIntoViewIfNeeded();
+      await screenshot(page, 'share-dialog-confirm-320', { scopeToProject: true });
+    });
   });
 
   test('comment composer: @mention a teammate from the member palette', async ({ page }) => {
