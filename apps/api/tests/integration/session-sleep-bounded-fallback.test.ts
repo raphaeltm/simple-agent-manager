@@ -690,6 +690,42 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       expect(captureCount).toBe(3);
     });
 
+    it.each(['removed', 'replaced'] as const)(
+      'does not let a legacy block for a %s workspace consume the cleanup page',
+      async (kind) => {
+        seedSession({ id: 'a', taskStatus: 'completed' });
+        capture = 'old-agent-rejected';
+        await spendFullBudget();
+        sqlite
+          .prepare(
+            `UPDATE session_snapshots SET sleep_status = 'terminal_failed',
+          sleep_after = NULL, sleep_fallback_json = ? WHERE chat_session_id = 'chat-a'`
+          )
+          .run(
+            JSON.stringify({
+              version: 1,
+              outcome: 'blocked',
+              trigger: 'attempt_budget',
+              blockedReason: 'no_git_baseline',
+              decidedAt: tick(2).toISOString(),
+              episodeStartedAt: START.toISOString(),
+              failedAttempts: 3,
+              lastError: 'No Git recovery',
+              recoveryPoint: null,
+            })
+          );
+        if (kind === 'removed') sqlite.prepare("DELETE FROM workspaces WHERE id = 'ws-a'").run();
+        else
+          sqlite
+            .prepare("UPDATE workspaces SET node_id = 'replacement-node' WHERE id = 'ws-a'")
+            .run();
+        const result = await sweepAt(tick(3));
+        expect(result.selected).toBe(0);
+        expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+        expect(notices).toHaveLength(0);
+      }
+    );
+
     it('cleans a legacy no-Git runtime while preserving its already-stopped conversation', async () => {
       seedSession({ id: 'a', taskStatus: 'completed' });
       capture = 'wip-skipped';

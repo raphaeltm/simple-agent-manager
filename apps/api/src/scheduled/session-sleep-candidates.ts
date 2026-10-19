@@ -64,6 +64,13 @@ export function selectSweepCandidates(
         or(
           and(
             eq(snapshots.sleepStatus, 'terminal_failed'),
+            // Historical snapshots outlive removed/replaced workspaces. They must
+            // not consume the bounded live-cleanup page forever.
+            inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping', 'stopped']),
+            eq(schema.workspaces.nodeId, snapshots.nodeId),
+            eq(schema.workspaces.userId, snapshots.userId),
+            eq(schema.workspaces.projectId, snapshots.projectId),
+            eq(schema.workspaces.chatSessionId, snapshots.chatSessionId),
             or(isNull(snapshots.sleepAfter), lte(snapshots.sleepAfter, nowIso)),
             sql`CASE WHEN json_valid(${snapshots.sleepFallbackJson}) THEN json_extract(${snapshots.sleepFallbackJson}, '$.blockedReason') END IN ('no_git_baseline', 'commit_objects_unavailable', 'recovery_point_expired', 'unsupported_runtime', 'retry_ceiling', 'teardown_unconfirmed')`
           ),
