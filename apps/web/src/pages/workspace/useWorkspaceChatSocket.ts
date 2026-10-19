@@ -11,11 +11,13 @@
  * setters passed in, because the composer, pagination and file upload there all
  * write to them too.
  */
+import type { SessionAccessSummary } from '@simple-agent-manager/shared';
 import { type Dispatch, type SetStateAction, useCallback, useRef, useState } from 'react';
 
 import type { AgentActivityState } from '../../components/project-message-view/types';
 import { isWorkingActivity } from '../../components/project-message-view/types';
 import { useActivityVerifyTimer } from '../../components/project-message-view/useActivityVerifyTimer';
+import { useSessionAccessSync } from '../../components/project-message-view/useSessionAccessSync';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import type {
   ChatMessageResponse,
@@ -43,6 +45,8 @@ interface UseWorkspaceChatSocketOptions {
   sessionId: string;
   /** The socket only opens for an active session. */
   sessionStatus: string | undefined;
+  /** The chat's access summary; its `undelivered` list labels prompts that were never delivered. */
+  access: SessionAccessSummary | undefined;
   /** The view's transcript, read when the socket subscribes to find where to resume. */
   messages: ChatMessageResponse[];
   setMessages: Dispatch<SetStateAction<ChatMessageResponse[]>>;
@@ -65,6 +69,7 @@ export function useWorkspaceChatSocket({
   projectId,
   sessionId,
   sessionStatus,
+  access,
   messages,
   setMessages,
   setSession,
@@ -97,6 +102,17 @@ export function useWorkspaceChatSocket({
       }
     },
     [clearActivity, startVerifyDecayTimer, stopVerifyDecayTimer]
+  );
+
+  // A teammate's queued prompt cancelled by Revoke now or by expiry is labelled from the access
+  // summary, which the server re-sends on every access change: the project chat's own hook.
+  const chatSocketLive = useRef(false);
+  const { onSessionAccessChanged } = useSessionAccessSync(
+    projectId,
+    sessionId,
+    setSession,
+    access,
+    chatSocketLive
   );
 
   // ── DO WebSocket for real-time message updates (SOLE message source) ──
@@ -177,7 +193,9 @@ export function useWorkspaceChatSocket({
       },
       [clearActivity, startVerifyDecayTimer, stopVerifyDecayTimer]
     ),
+    onSessionAccessChanged,
   });
+  chatSocketLive.current = connectionState === 'connected';
 
   return {
     connectionState,

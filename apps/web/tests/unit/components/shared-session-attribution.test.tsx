@@ -1,3 +1,4 @@
+import type { SessionUndeliveredPrompt } from '@simple-agent-manager/shared';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
@@ -28,10 +29,7 @@ const delivery = (metadata: Record<string, unknown>) => ({
   ...metadata,
 });
 
-function renderRows(
-  rows: ChatMessageResponse[],
-  undelivered?: ReadonlyMap<string, 'sender_access_revoked' | 'sender_access_expired'>
-) {
+function renderRows(rows: ChatMessageResponse[], undelivered?: SessionUndeliveredPrompt[]) {
   const items = chatMessagesToConversationItems(rows, undelivered);
   return render(
     <>
@@ -146,10 +144,10 @@ describe('user message attribution', () => {
         userRow('cached-revoked', teammate),
         userRow('kept', teammate),
       ],
-      new Map([
-        ['cached-expired', 'sender_access_expired'],
-        ['cached-revoked', 'sender_access_revoked'],
-      ])
+      [
+        { messageId: 'cached-expired', reason: 'sender_access_expired' },
+        { messageId: 'cached-revoked', reason: 'sender_access_revoked' },
+      ]
     );
 
     expect(screen.getAllByText('Not delivered — access expired')).toHaveLength(1);
@@ -159,7 +157,10 @@ describe('user message attribution', () => {
   });
 
   it('never labels the owner’s own prompt from the summary', () => {
-    renderRows([userRow('owner-typed', null)], new Map([['owner-typed', 'sender_access_expired']]));
+    renderRows(
+      [userRow('owner-typed', null)],
+      [{ messageId: 'owner-typed', reason: 'sender_access_expired' }]
+    );
 
     expect(screen.getByText('Message owner-typed')).toBeTruthy();
     expect(screen.queryByText('Not delivered — access expired')).toBeNull();

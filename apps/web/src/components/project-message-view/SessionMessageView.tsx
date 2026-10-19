@@ -111,8 +111,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   // the same memo because every item object is rebuilt on every incoming token.
   const undeliveredList = lc.session?.access?.undelivered;
   const displayItems = useMemo<DisplayItem[]>(() => {
-    const undelivered = new Map(undeliveredList?.map((entry) => [entry.messageId, entry.reason]));
-    return groupToolCallItems(chatMessagesToConversationItems(lc.messages, undelivered));
+    return groupToolCallItems(chatMessagesToConversationItems(lc.messages, undeliveredList));
   }, [lc.messages, undeliveredList]);
   // Owner and grantees drive the agent; every member can comment; the server enforces both.
   const viewer = resolveSessionViewerCapabilities(lc.session);

@@ -92,6 +92,7 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     projectId,
     sessionId,
     sessionStatus: session?.status,
+    access: session?.access,
     messages,
     setMessages,
     setSession,
@@ -129,9 +130,10 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   // Consecutive tool calls fold into one collapsed activity row, with the same
   // parent-held expansion state and the same live signal as project chat, so the
   // two surfaces cannot drift (`.claude/rules/24`).
+  const undeliveredList = session?.access?.undelivered;
   const conversationItems = useMemo<DisplayItem[]>(() => {
-    return groupToolCallItems(chatMessagesToConversationItems(messages));
-  }, [messages]);
+    return groupToolCallItems(chatMessagesToConversationItems(messages, undeliveredList));
+  }, [messages, undeliveredList]);
 
   /*
    * Expansion lives here, not in the card: Virtuoso unmounts rows outside its

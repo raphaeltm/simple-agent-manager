@@ -346,6 +346,7 @@ describe('rows persisted between the last read and the socket subscription', () 
         projectId: 'proj-1',
         sessionId: 'sess-1',
         sessionStatus: 'active',
+        access: undefined,
         messages,
         setMessages,
         setSession,
