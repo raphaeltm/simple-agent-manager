@@ -43,10 +43,9 @@ export async function claimSessionSnapshotSleep(
      */
     force?: boolean;
     /**
-     * A person asked for this sleep. Only such a claim may reopen an episode that ended
-     * blocked, and it starts a fresh one. Every automatic claim, including the Instant
-     * container's idle sleep (`VmAgentContainer.markRuntimeSleeping`), leaves a blocked
-     * episode for the person to act on (`session-sleep-episode.ts`).
+     * A person asked for this sleep and may start a fresh blocked episode.
+     * Automatic cleanup instead re-arms historical preservation blocks separately,
+     * preserving their spent budget before using the normal claim/idle guards.
      */
     reopenBlockedEpisode?: boolean;
   }

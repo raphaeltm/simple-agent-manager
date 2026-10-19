@@ -9,8 +9,8 @@ import { TERMINAL_SESSION_SLEEP_STATUS } from './session-snapshot-sleep-failure'
 
 /**
  * Terminal task statuses whose conversation SAM keeps by SLEEPING it (final
- * snapshot, then runtime teardown, wakeable until the snapshot expires) instead
- * of tearing the workspace down.
+ * snapshot attempts, then runtime teardown, with transcript-based continuation
+ * when exact recovery is unavailable).
  *
  * - `completed`: the agent finished; its final response drains, then it sleeps.
  * - `failed`: the run failed, but uncommitted or unpushed work in the workspace

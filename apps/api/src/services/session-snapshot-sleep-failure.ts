@@ -25,8 +25,8 @@ type Db = ReturnType<typeof drizzle<typeof schema>>;
  * Record a failed sleep attempt that never crossed the point of no return.
  *
  * Every failure counts against the bounded episode (`session-sleep-episode.ts`) and keeps
- * a due retry: the sweep then either retries, falls back to a transcript-and-Git sleep, or
- * ends the episode blocked. A degraded capture or a capture still in flight is no longer
+ * a due retry: the sweep then retries or releases the idle runtime through
+ * transcript-based fallback, retaining any available Git recovery point. A degraded capture or a capture still in flight is no longer
  * exempt from the budget — that exemption is what let a permanently degraded session
  * retry every few minutes forever. The terminal post-capture errors (the workspace was
  * stopped underneath the sleep) still end the episode at once.
