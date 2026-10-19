@@ -65,7 +65,7 @@ export function sessionSleepFallbackNotice(record: SessionSleepFallbackRecord): 
       `Saving a complete snapshot failed after ${attemptsSummary(record)}.${lastErrorClause(record)}`,
       'Kept: this conversation and any successful backups. An exact Git or filesystem restore was not verified.',
       'Potentially lost: unpublished files, uncommitted work, installed tools and the agent’s saved session state.',
-      'Send a message to continue in a fresh workspace. The agent rebuilds its context from this transcript; it cannot promise an exact restore.',
+      'Continue in a fresh workspace from this transcript: send a message if this chat is sleeping, or fork the conversation if it has already ended. The agent rebuilds its context from the transcript; it cannot promise an exact restore.',
     ].join('\n\n');
   if (point.snapshotStatus === 'available' && point.degradation === 'none') {
     return [

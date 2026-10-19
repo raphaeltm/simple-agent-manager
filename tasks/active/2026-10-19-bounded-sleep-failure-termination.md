@@ -13,13 +13,13 @@ Failed final snapshots currently leave idle workspaces billed indefinitely when 
 - Fresh production read 23:16Z: motivating workspace/node already absent from D1; agent completed 23:02Z. Partial snapshot remains. Parent asked for preceding cleanup evidence; no incident mutation performed here.
 
 ## Implementation checklist
-- [ ] Retain existing configurable full-snapshot budgets; exhausted fallback releases idle runtime without exact Git recovery.
-- [ ] Keep transcript, successful backups, honest durable degraded-recovery notice and fresh continuation.
-- [ ] Converge legacy preservation-blocked states via lifecycle controls.
-- [ ] Keep action-time idleness, wake/runtime guards, ownership and co-tenant isolation.
-- [ ] Retry failed stops/deletions and preserve warm-node retention.
-- [ ] Update absolute-lifetime behavior and stale docs/notices.
-- [ ] Regression tests cover complete task through failed snapshot/termination/deletion, retries, activity races, co-tenants and full snapshot recovery.
+- [x] Retain existing configurable full-snapshot budgets; exhausted fallback releases idle runtime without exact Git recovery.
+- [x] Keep transcript, successful backups, honest durable degraded-recovery notice and fresh continuation.
+- [x] Converge legacy preservation-blocked states via lifecycle controls.
+- [x] Keep action-time idleness, wake/runtime guards, ownership and co-tenant isolation.
+- [x] Retry failed stops/deletions and preserve warm-node retention.
+- [x] Update absolute-lifetime behavior and stale docs/notices.
+- [x] Regression tests cover complete task through failed snapshot/termination/deletion, retries, activity races, co-tenants and full snapshot recovery.
 - [ ] Validate lint/typecheck/test/build and local specialist reviews.
 - [ ] Coordinate staging, validate real lifecycle and remove paid fixtures.
 - [ ] PR, CI, best-effort CodeRabbit, merge, production deploy/minimal smoke and incident status to parent.
