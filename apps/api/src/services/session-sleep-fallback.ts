@@ -14,6 +14,8 @@ import {
 import {
   serializeSessionSleepFallbackRecord,
   type SessionSleepBlockedReason,
+  sessionSleepEpisodeConfig,
+  sessionSleepEpisodeTrigger,
   type SessionSleepFallbackRecord,
   type SessionSleepFallbackTrigger,
 } from './session-sleep-episode';
@@ -22,6 +24,7 @@ import {
   persistSessionSleepBlockedNotice,
   persistSessionSleepFallbackNotice,
 } from './session-sleep-fallback-notices';
+import { isRearmableSessionSleepBlock } from './session-sleep-fallback-record';
 import {
   abandonSessionSnapshotCapture,
   beginSessionSnapshotFallbackStopping,
@@ -195,6 +198,33 @@ export async function runSessionSleepFallback(
 
   let pointOfNoReturn = false;
   try {
+    // Discovery is only a hint: a replayed failure/wake may have reset the
+    // episode before this claim. Recheck its current budget before any capture
+    // abandonment or teardown; the claim fences later resets at the stopping CAS.
+    const currentEpisode = await db
+      .select()
+      .from(schema.sessionSnapshots)
+      .where(eq(schema.sessionSnapshots.chatSessionId, chatSessionId))
+      .get();
+    if (!currentEpisode || currentEpisode.sleepClaimId !== claimId) return 'skipped';
+    const currentTrigger = sessionSleepEpisodeTrigger(
+      currentEpisode,
+      now,
+      sessionSleepEpisodeConfig(env)
+    );
+    if (!currentTrigger && !isRearmableSessionSleepBlock(currentEpisode.sleepFallbackJson)) {
+      await deferSessionSnapshotSleepBeforeClaim(
+        db,
+        env,
+        chatSessionId,
+        'Sleep episode changed after fallback selection',
+        undefined,
+        now,
+        { expectedPreparingClaimId: claimId }
+      );
+      return 'deferred';
+    }
+    const fallbackTrigger = currentTrigger ?? input.trigger;
     const agentSession = await loadResumableAgentSession(db, workspace.id);
     const classify = sleepTeardownSafetyGate(env, workspace);
     const stateBefore = await projectDataService.getSessionState(
@@ -277,7 +307,7 @@ export async function runSessionSleepFallback(
     const record: SessionSleepFallbackRecord = {
       version: 1,
       outcome: 'slept',
-      trigger: input.trigger,
+      trigger: fallbackTrigger,
       blockedReason: null,
       decidedAt: now.toISOString(),
       episodeStartedAt: episode?.sleepEpisodeStartedAt ?? null,

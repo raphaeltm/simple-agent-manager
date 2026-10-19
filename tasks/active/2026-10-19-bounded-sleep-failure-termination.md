@@ -54,3 +54,10 @@ No PR or staging deployment yet. Shared-sessions task01M59TN50JX53TPVXV0VTAN5JV 
 - Legacy failed/no-deadline rows and rearmable historical preservation blocks remain owned by the guarded sleep path, rather than being released to older orphan/failed-task cleanup first. Existing finite in-flight age bound remains.
 - Shared SQL/JS classification validates fallback metadata consistently; rearm retains recorded failure counts.
 - Regression validation: predicate and bounded-fallback integration suites 144/144 passed. API typecheck passed; independent lifecycle/security reviewer PASS after malformed-record parity fixes.
+
+### Full-suite reconciliation
+
+- Replaced older preservation-block assertions with actual runtime removal or durable retry after an explicitly unconfirmed stop.
+- Preserved concurrency tests; added claim-time episode-budget recheck so a callback resetting a selected episode cannot trigger stale fallback teardown.
+- Legacy failed/no-deadline pre-episode rows carry forward actual recorded attempts; a nine-attempt row performs no new capture and reports nine failures honestly.
+- Focused lifecycle suites125/125 PASS; independent final lifecycle/security PASS. Full API suite rerunning after initial broad run exposed stale expectations (other20root tasks passed).

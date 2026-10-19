@@ -45,23 +45,32 @@ vi.mock('../../src/services/observability', () => ({
   persistError: vi.fn().mockResolvedValue(undefined),
 }));
 
-const { getTaskAcpLivenessSignalsMock, containerLifecycleMock } = vi.hoisted(() => ({
-  getTaskAcpLivenessSignalsMock: vi.fn(),
-  containerLifecycleMock: vi.fn(),
-}));
+const { getTaskAcpLivenessSignalsMock, containerLifecycleMock, stopWorkspaceOnNodeMock } =
+  vi.hoisted(() => ({
+    getTaskAcpLivenessSignalsMock: vi.fn(),
+    containerLifecycleMock: vi.fn(),
+    stopWorkspaceOnNodeMock: vi.fn(),
+  }));
 vi.mock('../../src/services/vm-agent-container', () => ({
   inspectVmAgentContainerLifecycle: containerLifecycleMock,
 }));
 vi.mock('../../src/services/node-agent', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/services/node-agent')>()),
+  stopWorkspaceOnNode: stopWorkspaceOnNodeMock,
   listAgentSessionsOnNode: vi.fn(async (_nodeId: string, workspaceId: string) => {
     const probe = await getTaskAcpLivenessSignalsMock.mock.results.at(-1)?.value;
-    return { sessions: (probe?.sessions ?? [])
-      .filter((session: { workspaceId: string }) => session.workspaceId === workspaceId)
-      .map((session: object) => ({ ...session, hostStatus: 'ready' })) };
+    return {
+      sessions: (probe?.sessions ?? [])
+        .filter((session: { workspaceId: string }) => session.workspaceId === workspaceId)
+        .map((session: object) => ({ ...session, hostStatus: 'ready' })),
+    };
   }),
 }));
 vi.mock('../../src/services/project-data', () => ({
+  getSession: vi.fn(async () => ({ status: 'active' })),
+  getSessionState: vi.fn(async () => ({ activity: 'idle', activityAt: Date.now() - 60_000 })),
+  persistMessage: vi.fn(async () => 'notice-1'),
+  sleepSession: vi.fn(async () => true),
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
   listSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
   listAcpSessions: vi.fn().mockResolvedValue({ sessions: [] }),
@@ -268,6 +277,9 @@ beforeEach(() => {
   });
   sqlite = new Database(':memory:');
   createSchemaTables(sqlite, [
+    schema.projects,
+    schema.sessionSummaries,
+    schema.agentSessions,
     schema.tasks,
     schema.taskStatusEvents,
     schema.workspaces,
@@ -397,25 +409,63 @@ describe('runaway-cost ceiling — a sleeping conversation is not runaway comput
   });
 
   /**
-   * Its bound. An in-flight sleep older than `SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS`
-   * (30 min default) no longer preserves, so a wedged capture cannot make a live
-   * 25h runtime immortal (`.claude/rules/47`).
+   * An aged stopping claim is converged through runtime controls. A failed external
+   * stop must retain durable retry ownership, rather than pretending compute is gone.
    */
-  it('still terminalizes a 25h live runtime after its stale sleep convergence blocks', async () => {
+  it('keeps an unconfirmed runtime stop retryable past the ceiling without declaring removal', async () => {
     seedTask({ executionStep: 'running' });
     seedWorkspace({ status: 'running', createdAt: iso(PAST_CEILING) });
     seedNode({ heartbeatAt: iso(-30_000) });
     seedSnapshot({ sleepStatus: 'stopping', sleepingAt: null, sleepClaimedAt: iso(-2 * HOUR) });
+    sqlite.exec(
+      'CREATE UNIQUE INDEX idx_session_snapshots_chat_session_id ON session_snapshots(chat_session_id)'
+    );
+    sqlite.prepare('INSERT INTO projects (id) VALUES (?)').run(PROJECT_ID);
+    sqlite
+      .prepare(
+        `INSERT INTO agent_sessions (id, workspace_id, status, agent_type, created_at)
+      VALUES ('agent-1', ?, 'running', 'claude-code', ?)`
+      )
+      .run(WORKSPACE_ID, iso(PAST_CEILING));
+    sqlite
+      .prepare(
+        `INSERT INTO session_summaries (id, project_id, user_id, status, task_id, workspace_id, started_at, updated_at)
+      VALUES (?, ?, 'user-1', 'active', ?, ?, ?, ?)`
+      )
+      .run(CHAT_SESSION_ID, PROJECT_ID, TASK_ID, WORKSPACE_ID, Date.now(), Date.now());
+    sqlite
+      .prepare(`UPDATE session_snapshots SET agent_session_id = 'agent-1', sleep_fallback_json = ?`)
+      .run(
+        JSON.stringify({
+          version: 1,
+          outcome: 'slept',
+          trigger: 'attempt_budget',
+          blockedReason: null,
+          decidedAt: iso(-2 * HOUR),
+          episodeStartedAt: iso(-3 * HOUR),
+          failedAttempts: 3,
+          lastError: 'Snapshot failed',
+          recoveryPoint: null,
+        })
+      );
+    stopWorkspaceOnNodeMock.mockRejectedValue(new Error('VM agent stop response timed out'));
 
     await recoverStuckTasks(env());
-    expect(sqlite.prepare('SELECT sleep_status FROM session_snapshots WHERE chat_session_id = ?').get(CHAT_SESSION_ID))
-      .toEqual({ sleep_status: 'terminal_failed' });
-    // One bounded convergence attempt precedes the verdict; a blocked episode
-    // gains no extra preservation on the next sweep.
+    expect(stopWorkspaceOnNodeMock).toHaveBeenCalledOnce();
+    expect(
+      sqlite
+        .prepare(
+          'SELECT sleep_status, sleep_after FROM session_snapshots WHERE chat_session_id = ?'
+        )
+        .get(CHAT_SESSION_ID)
+    ).toMatchObject({ sleep_status: 'stopping', sleep_after: expect.any(String) });
+    // The durable stop intent owns cleanup; another sweep cannot discard it or
+    // claim provider removal while the stop response remains unconfirmed.
     await recoverStuckTasks(env());
-
-    expect(taskRow().status).toBe('failed');
-    expect(taskRow().error_message).toContain('runaway-cost ceiling');
+    expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    expect(sqlite.prepare('SELECT status FROM workspaces WHERE id = ?').get(WORKSPACE_ID)).toEqual({
+      status: 'running',
+    });
   });
 
   /**
@@ -885,7 +935,9 @@ describe('snapshot expiry is a neutral end state', () => {
     });
     expect(taskRow()).toEqual({ status: 'cancelled', error_message: null });
     expect(taskRow('control').status).toBe('in_progress');
-    expect(sqlite.prepare('SELECT terminal_reason FROM tasks WHERE id = ?').get(TASK_ID)).toEqual({ terminal_reason: 'snapshot_expired' });
+    expect(sqlite.prepare('SELECT terminal_reason FROM tasks WHERE id = ?').get(TASK_ID)).toEqual({
+      terminal_reason: 'snapshot_expired',
+    });
     expect(stopSession).toHaveBeenCalledWith(runtime, PROJECT_ID, CHAT_SESSION_ID);
     expect(
       sqlite.prepare("SELECT id FROM session_snapshots WHERE id = 'snapshot-1'").get()
@@ -894,7 +946,9 @@ describe('snapshot expiry is a neutral end state', () => {
     await recoverStuckTasks(runtime);
     expect(taskRow()).toEqual({ status: 'cancelled', error_message: null });
     expect(taskRow('control').status).toBe('in_progress');
-    expect(sqlite.prepare('SELECT terminal_reason FROM tasks WHERE id = ?').get(TASK_ID)).toEqual({ terminal_reason: 'snapshot_expired' });
+    expect(sqlite.prepare('SELECT terminal_reason FROM tasks WHERE id = ?').get(TASK_ID)).toEqual({
+      terminal_reason: 'snapshot_expired',
+    });
     expect(stopSession).toHaveBeenCalledWith(runtime, PROJECT_ID, CHAT_SESSION_ID);
   });
 
@@ -943,7 +997,13 @@ describe('snapshot expiry is a neutral end state', () => {
     expect(await runSessionSnapshotPurge(runtime)).toMatchObject({ deletedSnapshots: 0 });
     expect(taskRow().status).toBe('sleeping');
     expect(deleteObjects).not.toHaveBeenCalled();
-    expect(sqlite.prepare('SELECT recovery_status, status, sleep_status, sleep_claimed_at FROM session_snapshots').get()).toEqual({
+    expect(
+      sqlite
+        .prepare(
+          'SELECT recovery_status, status, sleep_status, sleep_claimed_at FROM session_snapshots'
+        )
+        .get()
+    ).toEqual({
       recovery_status: 'waking',
       status: 'available',
       sleep_status: 'sleeping',
@@ -973,7 +1033,13 @@ describe('snapshot expiry is a neutral end state', () => {
       deletedSnapshots: 1,
     });
     expect(deleteObjects).toHaveBeenCalledOnce();
-    expect(sqlite.prepare('SELECT count(*) AS n FROM task_status_events WHERE task_id = ?').get(TASK_ID)).toEqual({ n: 1 });
-    expect(sqlite.prepare('SELECT count(*) AS n FROM project_event_source_outbox WHERE subject_id = ?').get(TASK_ID)).toEqual({ n: 1 });
+    expect(
+      sqlite.prepare('SELECT count(*) AS n FROM task_status_events WHERE task_id = ?').get(TASK_ID)
+    ).toEqual({ n: 1 });
+    expect(
+      sqlite
+        .prepare('SELECT count(*) AS n FROM project_event_source_outbox WHERE subject_id = ?')
+        .get(TASK_ID)
+    ).toEqual({ n: 1 });
   });
 });

@@ -109,6 +109,9 @@ export async function claimSessionSnapshotSleep(
       // spends the same bounded budget as a reported failure.
       sleepEpisodeFailures: sql`CASE WHEN ${blockedEpisode} THEN 0
         WHEN ${snapshots.sleepStatus} = 'preparing' THEN COALESCE(${snapshots.sleepEpisodeFailures}, 0) + 1
+        WHEN ${snapshots.sleepStatus} = 'failed' AND ${snapshots.sleepAfter} IS NULL
+          AND ${snapshots.sleepEpisodeStartedAt} IS NULL
+          THEN MAX(COALESCE(${snapshots.sleepEpisodeFailures}, 0), ${snapshots.sleepAttempts})
         ELSE COALESCE(${snapshots.sleepEpisodeFailures}, 0) END`,
       sleepFallbackJson: sql`CASE WHEN ${blockedEpisode} THEN NULL
         ELSE ${snapshots.sleepFallbackJson} END`,
