@@ -14,7 +14,7 @@ import {
   type SessionRecoverySourceTaskGuard,
 } from '../../services/session-recovery-authority';
 import type { PromptDeliveryClaim, PromptDeliveryResult } from './prompt-delivery';
-import { senderLacksSessionAccess } from './session-access';
+import { labelUndeliveredPrompt, senderLacksSessionAccess } from './session-access';
 import type { Env } from './types';
 
 const MAX_TASK_ID_LENGTH = 128;
@@ -256,10 +256,20 @@ export function invalidSessionWriterSenderResult(
   if (claim.mode !== 'submit') return null;
   const denied = senderLacksSessionAccess(sql, claim.message);
   if (!denied) return null;
+  // The sweep labels prompts it cancels; label here too, so a prompt that reached delivery
+  // between an expiry and the sweep does not read as delivered.
+  if (denied.deliveryCancelled && claim.message.promptMessageId) {
+    labelUndeliveredPrompt(
+      sql,
+      claim.message.targetSessionId,
+      claim.message.promptMessageId,
+      denied.deliveryCancelled
+    );
+  }
   return {
     kind: 'failed',
     reason: 'sender_unauthorized',
-    error: denied,
+    error: denied.error,
     runtimeIdentity: claim.message.runtimeIdentity,
     capabilities: null,
   };

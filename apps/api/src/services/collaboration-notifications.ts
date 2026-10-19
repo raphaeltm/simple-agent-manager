@@ -176,11 +176,19 @@ export interface SessionAccessNotificationInput {
   sessionTopic: string | null;
   sessionOwnerUserId: string | null;
   actor: { userId: string; name: string | null };
-  change: 'granted' | 'revoked';
+  change: 'granted' | 'renewed' | 'revoked';
   /** People whose access changed (the target plus any cascaded grants on revoke). */
   affectedUserIds: string[];
   /** Display name of the primary grantee, for the owner's re-share notice. */
   granteeName: string | null;
+  /** When granted or renewed access ends (epoch ms). */
+  expiresAt?: number | null;
+}
+
+function accessWindow(expiresAt: number | null | undefined): string {
+  if (!expiresAt) return '';
+  const minutes = Math.max(1, Math.round((expiresAt - Date.now()) / 60_000));
+  return ` for the next ${minutes} minute${minutes === 1 ? '' : 's'}`;
 }
 
 export async function notifySessionAccessChange(
@@ -193,17 +201,24 @@ export async function notifySessionAccessChange(
   const actionUrl = buildActionUrl(input.projectId, input.sessionId);
   const sends: Array<{ userId: string; title: string; body: string | null }> = [];
 
+  const window = accessWindow(input.expiresAt);
   for (const userId of new Set(input.affectedUserIds)) {
     if (userId === input.actor.userId) continue;
-    sends.push(
-      input.change === 'granted'
-        ? {
-            userId,
-            title: `${actorName} shared ${topic} with you`,
-            body: 'You can now chat in this session. It runs on the owner’s accounts.',
-          }
-        : { userId, title: `Your access to ${topic} was removed`, body: null }
-    );
+    if (input.change === 'granted') {
+      sends.push({
+        userId,
+        title: `${actorName} shared ${topic} with you`,
+        body: `You can chat in this session${window}. It runs on the owner’s accounts.`,
+      });
+    } else if (input.change === 'renewed') {
+      sends.push({
+        userId,
+        title: `${actorName} extended your access to ${topic}`,
+        body: `You can chat in this session${window}.`,
+      });
+    } else {
+      sends.push({ userId, title: `Your access to ${topic} was removed`, body: null });
+    }
   }
   // An owner learns when someone they shared with passes the session on.
   if (

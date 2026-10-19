@@ -108,19 +108,29 @@ async function enrichSessionWithAccess(
   );
   const sessionId = typeof session.id === 'string' ? session.id : '';
   const viewerAccess = toSessionViewerAccess(input.access);
-  const grants: SessionAccessGrant[] = input.grants.map((grant) => ({
-    id: grant.id,
-    sessionId: grant.sessionId,
-    grantee: accessPerson(grant.granteeUserId, people),
-    grantedBy: accessPerson(grant.grantedByUserId, people),
-    parentGrantId: grant.parentGrantId,
-    createdAt: grant.createdAt,
-  }));
+  // Active grants always carry an end time; a row without one is never active (fail closed).
+  const grants: SessionAccessGrant[] = input.grants.flatMap((grant) =>
+    grant.expiresAt === null
+      ? []
+      : [
+          {
+            id: grant.id,
+            sessionId: grant.sessionId,
+            grantee: accessPerson(grant.granteeUserId, people),
+            grantedBy: accessPerson(grant.grantedByUserId, people),
+            parentGrantId: grant.parentGrantId,
+            createdAt: grant.createdAt,
+            expiresAt: grant.expiresAt,
+            durationMinutes: grant.durationMinutes ?? 0,
+          },
+        ]
+  );
   const access: SessionAccessSummary = {
     sessionId,
     viewerAccess,
     owner: input.access.ownerUserId ? accessPerson(input.access.ownerUserId, people) : null,
     grants,
+    serverTime: Date.now(),
   };
   return { ...attachCreator(session, people, currentUserId), viewerAccess, access };
 }

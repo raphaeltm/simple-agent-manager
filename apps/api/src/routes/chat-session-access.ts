@@ -2,21 +2,23 @@
  * Shared session access ("Share chat access") — idea 01M59MYE4GY91BWTE8TZF1ZB5D.
  *
  * GET    /api/projects/:projectId/sessions/:sessionId/access
- * POST   /api/projects/:projectId/sessions/:sessionId/access/grants        { userId, acknowledgeSharedCredentials: true }
+ * POST   /api/projects/:projectId/sessions/:sessionId/access/grants        { userId, durationMinutes, acknowledgeSharedCredentials: true }
  * DELETE /api/projects/:projectId/sessions/:sessionId/access/grants/:userId
  *
  * Any project member can read who has access. The owner or an active grantee can share the
- * session with another active member and remove anyone's grant (owner-equivalent control);
- * a grantee can always remove their own access. Removing a grant also removes the grants that
- * person issued, and fails their prompts that have not reached the agent yet.
+ * session with another active member for 5, 10, 30 or 60 minutes and remove anyone's grant
+ * (owner-equivalent control); a grantee can always remove their own access. Removing a grant
+ * also removes the grants that person issued, and fails their prompts that have not reached
+ * the agent yet. Access ends at its chosen time; only the owner can renew it.
  *
  * Sharing needs nothing beyond active membership: the grantee then drives the session exactly
- * as the owner would, on the owner's accounts (product rule, 2026-10-19).
+ * as the owner would, on the owner's accounts, until access ends (product rules, 2026-10-19).
  */
-import type {
-  CreateSessionAccessGrantResponse,
-  RevokeSessionAccessGrantResponse,
-  SessionAccessSummary,
+import {
+  type CreateSessionAccessGrantResponse,
+  type RevokeSessionAccessGrantResponse,
+  SESSION_ACCESS_DURATION_MINUTES,
+  type SessionAccessSummary,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context, Hono } from 'hono';
@@ -40,6 +42,11 @@ import { enrichSessionWithAccess } from './chat-session-ownership';
 
 const CreateGrantSchema = v.object({
   userId: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(128)),
+  // Required, with no default: access always ends (5, 10, 30 or 60 minutes).
+  durationMinutes: v.picklist(
+    SESSION_ACCESS_DURATION_MINUTES,
+    'Choose how long access lasts: 5, 10, 30 or 60 minutes'
+  ),
   acknowledgeSharedCredentials: v.literal(
     true,
     'Confirm that the session runs on the owner’s accounts'
@@ -96,7 +103,7 @@ export function registerChatSessionAccessRoutes(chatRoutes: Hono<{ Bindings: Env
     const actorUserId = getUserId(c);
     const projectId = requireRouteParam(c, 'projectId');
     const sessionId = requireRouteParam(c, 'sessionId');
-    const { userId: granteeUserId } = c.req.valid('json');
+    const { userId: granteeUserId, durationMinutes } = c.req.valid('json');
     const db = drizzle(c.env.DATABASE, { schema });
 
     await requireProjectCapability(db, projectId, actorUserId, 'task:write');
@@ -120,6 +127,7 @@ export function registerChatSessionAccessRoutes(chatRoutes: Hono<{ Bindings: Env
       sessionId,
       granteeUserId,
       grantedByUserId: actorUserId,
+      durationMinutes,
       maxActiveGrants,
     });
     switch (result.status) {
@@ -150,7 +158,7 @@ export function registerChatSessionAccessRoutes(chatRoutes: Hono<{ Bindings: Env
       },
       grants
     );
-    if (result.status === 'created') {
+    if (result.status === 'created' || result.status === 'renewed') {
       const grantee = summary.grants.find((grant) => grant.grantee.id === granteeUserId);
       notifyInBackground(
         c,
@@ -160,9 +168,10 @@ export function registerChatSessionAccessRoutes(chatRoutes: Hono<{ Bindings: Env
           sessionTopic: sessionTopic(writer.session),
           sessionOwnerUserId: writer.ownerUserId,
           actor: { userId: actorUserId, name: getAuth(c).user.name ?? null },
-          change: 'granted',
+          change: result.status === 'created' ? 'granted' : 'renewed',
           affectedUserIds: [granteeUserId],
           granteeName: grantee?.grantee.name ?? null,
+          expiresAt: grantee?.expiresAt ?? null,
         }),
         'session_access.grant_notification_failed'
       );
@@ -172,6 +181,7 @@ export function registerChatSessionAccessRoutes(chatRoutes: Hono<{ Bindings: Env
     const response: CreateSessionAccessGrantResponse = {
       grant,
       created: result.status === 'created',
+      renewed: result.status === 'renewed',
       access: summary,
     };
     return c.json(response, result.status === 'created' ? 201 : 200);

@@ -86,6 +86,8 @@ const SAME_TICK_CASCADES: Partial<
   Record<ProjectDataAlarmSection, readonly ProjectDataAlarmSection[]>
 > = {
   mailbox_delivery_sweep: ['prompt_delivery'],
+  // Cancelling an expired grantee's queued prompt can free the head of a target's queue.
+  session_access_expiry: ['prompt_delivery'],
   project_event_wake_materialization: ['prompt_delivery'],
   task_waits: ['prompt_delivery'],
 };

@@ -12,11 +12,14 @@ import {
 } from '../../../src/durable-objects/project-data/prompt-delivery';
 import { runPromptDeliveryClaim } from '../../../src/durable-objects/project-data/prompt-delivery-runner';
 import {
+  computeSessionAccessExpiryAlarmTime,
   createSessionAccessGrant,
   listActiveSessionAccessGrants,
+  processExpiredSessionAccessGrants,
   resolveSessionAccess,
   revokeSessionAccessForDepartedMember,
   revokeSessionAccessGrant,
+  SENDER_ACCESS_EXPIRED_REASON,
   SENDER_ACCESS_REVOKED_REASON,
 } from '../../../src/durable-objects/project-data/session-access';
 import type { VmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
@@ -77,11 +80,17 @@ describe('ProjectData shared session access', () => {
     );
   }
 
-  function share(granteeUserId: string, grantedByUserId: string, sessionId = 'chat-1') {
+  function share(
+    granteeUserId: string,
+    grantedByUserId: string,
+    sessionId = 'chat-1',
+    durationMinutes = 30
+  ) {
     return createSessionAccessGrant(sql, {
       sessionId,
       granteeUserId,
       grantedByUserId,
+      durationMinutes,
       maxActiveGrants: 10,
     });
   }
@@ -222,7 +231,7 @@ describe('ProjectData shared session access', () => {
   });
 
   describe('createSessionAccessGrant', () => {
-    it('records a root grant from the owner and is idempotent for the same person', () => {
+    it('records a root grant from the owner, and the same person keeps one grant', () => {
       const first = share('grantee-1', 'owner-1');
       const second = share('grantee-1', 'owner-1');
 
@@ -230,9 +239,9 @@ describe('ProjectData shared session access', () => {
         status: 'created',
         grant: { granteeUserId: 'grantee-1', grantedByUserId: 'owner-1', parentGrantId: null },
       });
-      expect(second.status).toBe('existing');
-      expect(second.status === 'existing' && first.status === 'created').toBe(true);
-      if (first.status === 'created' && second.status === 'existing') {
+      // The owner sharing again is an explicit renewal of the same grant.
+      expect(second.status).toBe('renewed');
+      if (first.status === 'created' && second.status === 'renewed') {
         expect(second.grant.id).toBe(first.grant.id);
       }
       expect(listActiveSessionAccessGrants(sql, 'chat-1')).toHaveLength(1);
@@ -299,6 +308,7 @@ describe('ProjectData shared session access', () => {
           sessionId: 'chat-1',
           granteeUserId,
           grantedByUserId: 'owner-1',
+          durationMinutes: 30,
           maxActiveGrants: 2,
         });
       expect(capped('grantee-1').status).toBe('created');
@@ -323,6 +333,228 @@ describe('ProjectData shared session access', () => {
 
       expect(share('grantee-1', 'owner-1').status).toBe('created');
       expect(resolveSessionAccess(sql, 'chat-1', 'grantee-1').role).toBe('grantee');
+    });
+  });
+
+  describe('grant expiry', () => {
+    const MINUTE = 60_000;
+    // The fake clock starts at 10_000 (beforeEach).
+    const START = 10_000;
+
+    it.each([undefined, 0, 1, 15, 45, 61, 120, -5, 30.5])(
+      'refuses a share without a 5/10/30/60-minute duration (%s), and writes nothing',
+      (durationMinutes) => {
+        const result = createSessionAccessGrant(sql, {
+          sessionId: 'chat-1',
+          granteeUserId: 'grantee-1',
+          grantedByUserId: 'owner-1',
+          durationMinutes: durationMinutes as number,
+          maxActiveGrants: 10,
+        });
+
+        expect(result).toEqual({
+          status: 'invalid',
+          reason: 'Choose how long access lasts: 5, 10, 30 or 60 minutes',
+        });
+        expect(grantRow('grantee-1')).toBeUndefined();
+      }
+    );
+
+    it.each([5, 10, 30, 60])('a %i-minute grant ends exactly at its expiry', (minutes) => {
+      const created = share('grantee-1', 'owner-1', 'chat-1', minutes);
+      const expiresAt = START + minutes * MINUTE;
+
+      expect(created).toMatchObject({
+        status: 'created',
+        grant: { expiresAt, durationMinutes: minutes },
+      });
+      expect(resolveSessionAccess(sql, 'chat-1', 'grantee-1', expiresAt - 1).role).toBe('grantee');
+      expect(resolveSessionAccess(sql, 'chat-1', 'grantee-1', expiresAt).role).toBe('none');
+      expect(listActiveSessionAccessGrants(sql, 'chat-1', expiresAt - 1)).toHaveLength(1);
+      expect(listActiveSessionAccessGrants(sql, 'chat-1', expiresAt)).toHaveLength(0);
+    });
+
+    it('reads server time by default, with no sweep needed', () => {
+      share('grantee-1', 'owner-1', 'chat-1', 5);
+      vi.setSystemTime(START + 5 * MINUTE);
+
+      // Nothing has run since the grant was made; the check alone ends access.
+      expect(resolveSessionAccess(sql, 'chat-1', 'grantee-1').role).toBe('none');
+      expect(grantRow('grantee-1')?.revoked_at).toBeNull();
+    });
+
+    it('never lets a grant passed on outlast the grant it came from', () => {
+      share('grantee-1', 'owner-1', 'chat-1', 5);
+      vi.setSystemTime(START + 2 * MINUTE);
+
+      const child = share('grantee-2', 'grantee-1', 'chat-1', 60);
+
+      expect(child).toMatchObject({
+        status: 'created',
+        grant: { expiresAt: START + 5 * MINUTE, durationMinutes: 60 },
+      });
+      expect(resolveSessionAccess(sql, 'chat-1', 'grantee-2', START + 5 * MINUTE).role).toBe(
+        'none'
+      );
+    });
+
+    it('lets the owner renew access someone still has, from now', () => {
+      const first = share('grantee-1', 'owner-1', 'chat-1', 5);
+      vi.setSystemTime(START + 3 * MINUTE);
+
+      const renewed = share('grantee-1', 'owner-1', 'chat-1', 10);
+
+      expect(renewed).toMatchObject({
+        status: 'renewed',
+        grant: { expiresAt: START + 13 * MINUTE, durationMinutes: 10, grantedByUserId: 'owner-1' },
+      });
+      if (first.status === 'created' && renewed.status === 'renewed') {
+        expect(renewed.grant.id).toBe(first.grant.id);
+      }
+      expect(resolveSessionAccess(sql, 'chat-1', 'grantee-1', START + 12 * MINUTE).role).toBe(
+        'grantee'
+      );
+    });
+
+    it('does not let a grantee renew anyone, and nobody can renew their own access', () => {
+      share('grantee-1', 'owner-1', 'chat-1', 30);
+      share('grantee-2', 'owner-1', 'chat-1', 5);
+
+      const reshare = share('grantee-2', 'grantee-1', 'chat-1', 60);
+      expect(reshare).toMatchObject({
+        status: 'existing',
+        grant: { expiresAt: START + 5 * MINUTE },
+      });
+      expect(share('grantee-1', 'grantee-1', 'chat-1', 60)).toMatchObject({ status: 'invalid' });
+      expect(resolveSessionAccess(sql, 'chat-1', 'grantee-2', START + 5 * MINUTE).role).toBe(
+        'none'
+      );
+    });
+
+    it('stops an expired grantee from sharing or removing anyone', () => {
+      share('grantee-1', 'owner-1', 'chat-1', 5);
+      share('grantee-2', 'owner-1', 'chat-1', 30);
+      vi.setSystemTime(START + 5 * MINUTE);
+
+      expect(share('grantee-3', 'grantee-1')).toMatchObject({ status: 'forbidden' });
+      expect(
+        revokeSessionAccessGrant(sql, {
+          sessionId: 'chat-1',
+          granteeUserId: 'grantee-2',
+          actorUserId: 'grantee-1',
+        })
+      ).toMatchObject({ status: 'forbidden' });
+      expect(resolveSessionAccess(sql, 'chat-1', 'grantee-2').role).toBe('grantee');
+    });
+
+    it('frees a cap slot when a grant expires', () => {
+      const capped = (granteeUserId: string, durationMinutes: number) =>
+        createSessionAccessGrant(sql, {
+          sessionId: 'chat-1',
+          granteeUserId,
+          grantedByUserId: 'owner-1',
+          durationMinutes,
+          maxActiveGrants: 1,
+        });
+      expect(capped('grantee-1', 5).status).toBe('created');
+      expect(capped('grantee-2', 5)).toEqual({ status: 'limit_exceeded', limit: 1 });
+
+      vi.setSystemTime(START + 5 * MINUTE);
+      expect(capped('grantee-2', 5).status).toBe('created');
+    });
+
+    it('cancels and labels an expired grantee’s queued prompts in one sweep, and only once', () => {
+      share('grantee-1', 'owner-1', 'chat-1', 5);
+      queuePrompt('grantee-prompt', 'grantee-1');
+      queuePrompt('grantee-directive', 'grantee-1', 'comment_directive');
+      queuePrompt('owner-prompt', 'owner-1');
+      expect(computeSessionAccessExpiryAlarmTime(sql)).toBe(START + 5 * MINUTE);
+
+      // Before expiry the sweep has nothing to do.
+      expect(processExpiredSessionAccessGrants(sql, START + 5 * MINUTE - 1)).toEqual([]);
+
+      const swept = processExpiredSessionAccessGrants(sql, START + 5 * MINUTE);
+
+      expect(swept).toHaveLength(1);
+      expect(swept[0]?.cancelledDeliveryIds.sort()).toEqual([
+        'grantee-directive',
+        'grantee-prompt',
+      ]);
+      for (const deliveryId of ['grantee-prompt', 'grantee-directive']) {
+        expect(mailbox.getMessage(sql, deliveryId)).toMatchObject({
+          deliveryState: 'failed',
+          terminalReason: SENDER_ACCESS_EXPIRED_REASON,
+        });
+        expect(transcriptMetadata(deliveryId).deliveryCancelled).toBe(SENDER_ACCESS_EXPIRED_REASON);
+      }
+      expect(mailbox.getMessage(sql, 'owner-prompt')?.deliveryState).toBe('queued');
+      // Handled rows leave the candidate set: no second pass, no further alarm.
+      expect(processExpiredSessionAccessGrants(sql, START + 10 * MINUTE)).toEqual([]);
+      expect(computeSessionAccessExpiryAlarmTime(sql)).toBeNull();
+    });
+
+    it('a regrant after expiry starts fresh and does not revive prompts from the old grant', () => {
+      const first = share('grantee-1', 'owner-1', 'chat-1', 5);
+      queuePrompt('old-prompt', 'grantee-1');
+      vi.setSystemTime(START + 6 * MINUTE);
+
+      const regrant = share('grantee-1', 'owner-1', 'chat-1', 10);
+
+      expect(regrant).toMatchObject({
+        status: 'created',
+        grant: { expiresAt: START + 16 * MINUTE, durationMinutes: 10 },
+      });
+      if (first.status === 'created' && regrant.status === 'created') {
+        expect(regrant.grant.id).toBe(first.grant.id);
+      }
+      expect(mailbox.getMessage(sql, 'old-prompt')).toMatchObject({
+        deliveryState: 'failed',
+        terminalReason: SENDER_ACCESS_EXPIRED_REASON,
+      });
+      expect(resolveSessionAccess(sql, 'chat-1', 'grantee-1').role).toBe('grantee');
+      // The regrant is scheduled again for its own expiry.
+      expect(computeSessionAccessExpiryAlarmTime(sql)).toBe(START + 16 * MINUTE);
+    });
+
+    it('settles a revoke racing a renewal in whichever order they land', () => {
+      share('grantee-1', 'owner-1', 'chat-1', 5);
+      // Revoke, then the owner shares again: a new grant.
+      revokeSessionAccessGrant(sql, {
+        sessionId: 'chat-1',
+        granteeUserId: 'grantee-1',
+        actorUserId: 'owner-1',
+      });
+      expect(share('grantee-1', 'owner-1', 'chat-1', 10).status).toBe('created');
+
+      // Renewal, then revoke: access ends and the renewed grant's queued prompts are cancelled.
+      expect(share('grantee-1', 'owner-1', 'chat-1', 60).status).toBe('renewed');
+      queuePrompt('after-renewal', 'grantee-1');
+      expect(
+        revokeSessionAccessGrant(sql, {
+          sessionId: 'chat-1',
+          granteeUserId: 'grantee-1',
+          actorUserId: 'owner-1',
+        })
+      ).toMatchObject({ status: 'revoked', cancelledDeliveryIds: ['after-renewal'] });
+      expect(resolveSessionAccess(sql, 'chat-1', 'grantee-1').role).toBe('none');
+    });
+
+    it('treats a grant from before expiry existed as expired, and sweeps it once', () => {
+      sql.exec(
+        `INSERT INTO chat_session_access_grants
+           (id, session_id, grantee_user_id, granted_by_user_id, parent_grant_id, created_at)
+         VALUES ('legacy-grant', 'chat-1', 'grantee-1', 'owner-1', NULL, 1000)`
+      );
+      queuePrompt('legacy-prompt', 'grantee-1');
+
+      expect(resolveSessionAccess(sql, 'chat-1', 'grantee-1').role).toBe('none');
+      expect(computeSessionAccessExpiryAlarmTime(sql)).toBe(0);
+      expect(processExpiredSessionAccessGrants(sql)[0]?.cancelledDeliveryIds).toEqual([
+        'legacy-prompt',
+      ]);
+      expect(computeSessionAccessExpiryAlarmTime(sql)).toBeNull();
+      // The owner can share again, with a duration.
+      expect(share('grantee-1', 'owner-1', 'chat-1', 5).status).toBe('created');
     });
   });
 
@@ -661,6 +893,40 @@ describe('ProjectData shared session access', () => {
         runPromptDeliveryClaim(sql, {}, config, claim!, adapter, hooks)
       ).resolves.toMatchObject({ kind: 'failed', reason: 'sender_unauthorized' });
       expect(mailbox.getMessage(sql, 'late-revoke')?.deliveryState).toBe('failed');
+    });
+
+    it('fails an expired grantee’s prompt at delivery even before the expiry sweep runs', async () => {
+      share('grantee-1', 'owner-1', 'chat-1', 5);
+      // Queued while access is still live (inside the delivery TTL), claimed once it has ended.
+      vi.setSystemTime(10_000 + 5 * 60_000 - 30_000);
+      queuePrompt('racing-prompt', 'grantee-1');
+      vi.setSystemTime(10_000 + 5 * 60_000);
+      const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
+      expect(claim?.message.id).toBe('racing-prompt');
+      const adapter = acceptingAdapter();
+
+      await expect(
+        runPromptDeliveryClaim(sql, {}, config, claim!, adapter, hooks)
+      ).resolves.toMatchObject({
+        kind: 'failed',
+        reason: 'sender_unauthorized',
+        error: "The sender's access to this session expired",
+      });
+      // Refused before the adapter is reached, so nothing is sent.
+      expect(adapter.submit).not.toHaveBeenCalled();
+      expect(mailbox.getMessage(sql, 'racing-prompt')?.deliveryState).toBe('failed');
+      expect(transcriptMetadata('racing-prompt').deliveryCancelled).toBe(
+        SENDER_ACCESS_EXPIRED_REASON
+      );
+    });
+
+    it('does not label a never-granted sender’s prompt as access removed', async () => {
+      queuePrompt('stranger-prompt', 'reader-1');
+      const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
+
+      await runPromptDeliveryClaim(sql, {}, config, claim!, acceptingAdapter(), hooks);
+
+      expect(transcriptMetadata('stranger-prompt').deliveryCancelled).toBeUndefined();
     });
 
     it('still reconciles a prompt that was already handed to the agent', async () => {

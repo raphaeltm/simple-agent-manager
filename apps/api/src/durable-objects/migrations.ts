@@ -2500,6 +2500,27 @@ export const MIGRATIONS: Migration[] = [
       sql.exec('ALTER TABLE comment_replies ADD COLUMN mentions_json TEXT');
     },
   },
+  {
+    // Session access grants expire (5/10/30/60 minutes, idea 01M59MYE4GY91BWTE8TZF1ZB5D).
+    // Additive only. A grant is active while `revoked_at IS NULL AND expires_at > now`, so
+    // expiry needs no write and never widens the `revoke_reason` CHECK. `expiry_handled_at`
+    // records that the expiry sweep has cancelled that grantee's undelivered prompts and told
+    // open clients; it is cleanup bookkeeping, never part of the authorization check.
+    //
+    // Existing rows: grants from before this migration have `expires_at IS NULL`, which the
+    // active predicate treats as expired (fail closed). They exist only on staging, where the
+    // feature was tested before release; the expiry sweep handles them once, and the owner can
+    // share again with a duration.
+    name: '065-session-access-grant-expiry',
+    run(sql) {
+      sql.exec('ALTER TABLE chat_session_access_grants ADD COLUMN expires_at INTEGER');
+      sql.exec('ALTER TABLE chat_session_access_grants ADD COLUMN duration_minutes INTEGER');
+      sql.exec('ALTER TABLE chat_session_access_grants ADD COLUMN expiry_handled_at INTEGER');
+      sql.exec(`CREATE INDEX idx_session_access_grants_expiry_due
+        ON chat_session_access_grants(expires_at)
+        WHERE revoked_at IS NULL AND expiry_handled_at IS NULL`);
+    },
+  },
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
   // that ran it keep an unused `message_upload_parts` table, since DO migrations
   // never drop tables, so neither that migration name nor that table name may be reused.

@@ -1924,8 +1924,8 @@ export async function createSessionAccessGrant(
   projectId: string,
   input: Omit<CreateSessionAccessGrantInput, 'now'>
 ): Promise<{ result: CreateSessionAccessGrantResult; grants: SessionAccessGrantRecord[] }> {
-  // Not retried: a lost response after a committed insert must not double-notify; the
-  // caller can re-issue, and a repeated grant is idempotent ("existing").
+  // Not retried: a lost response after a committed write must not double-notify. The caller
+  // can re-issue: the same person ends up with one grant (an owner's repeat renews it).
   return callProjectDataNoRetry(env, projectId, 'createSessionAccessGrant', (stub) =>
     stub.createSessionAccessGrant(input)
   );

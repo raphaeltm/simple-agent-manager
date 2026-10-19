@@ -5,8 +5,9 @@
  * The owner — or anyone the owner has shared the session with — can grant another active
  * project member owner-equivalent control of that ONE session. Everything the grantee asks
  * the agent to do still runs on the owner's agent credentials, GitHub identity and compute.
- * A grant has no expiry: it lasts until it is revoked, the grantee or the owner leaves the
- * project, or the session itself ends.
+ * A grant lasts for a chosen 5, 10, 30 or 60 minutes. It ends then, or earlier if it is revoked,
+ * the grantee or the owner leaves the project, or the session itself ends. Only the owner can
+ * renew it; ending access cannot undo what was already done with it.
  *
  * Grants live in the project's ProjectData Durable Object beside the session they belong to
  * (`chat_session_access_grants`), so the authorization check reads them in the same RPC that
@@ -25,6 +26,20 @@ export const SHAREABLE_CHAT_SESSION_STATUSES: readonly ChatSessionStatus[] = ['a
 
 export function isShareableChatSessionStatus(status: string | null | undefined): boolean {
   return (SHAREABLE_CHAT_SESSION_STATUSES as readonly string[]).includes(status ?? '');
+}
+
+/**
+ * How long a share lasts, in minutes. Sharing requires choosing one; there is no default and no
+ * unlimited option (Raphaël, 2026-10-19). Access ends at the chosen time unless the owner renews
+ * it, and is enforced against server time on every request and at prompt delivery.
+ */
+export const SESSION_ACCESS_DURATION_MINUTES = [5, 10, 30, 60] as const;
+export type SessionAccessDurationMinutes = (typeof SESSION_ACCESS_DURATION_MINUTES)[number];
+
+export function isSessionAccessDurationMinutes(
+  value: unknown
+): value is SessionAccessDurationMinutes {
+  return (SESSION_ACCESS_DURATION_MINUTES as readonly unknown[]).includes(value);
 }
 
 export const SESSION_VIEWER_ACCESS_LEVELS = ['owner', 'grantee', 'reader'] as const;
@@ -65,18 +80,26 @@ export interface SessionAccessGrant {
   /** The grant that authorized `grantedBy`, or null when the owner granted it directly. */
   parentGrantId: string | null;
   createdAt: number;
+  /** When access ends (epoch ms). A grant passed on never outlasts the grant it came from. */
+  expiresAt: number;
+  /** The duration chosen when the grant was created or last renewed. */
+  durationMinutes: number;
 }
 
 export interface SessionAccessSummary {
   sessionId: string;
   viewerAccess: SessionViewerAccess;
   owner: SessionAccessPerson | null;
-  /** Active grants only. */
+  /** Active (unexpired, unrevoked) grants only. */
   grants: SessionAccessGrant[];
+  /** Server clock when this summary was built, so clients can show remaining time without skew. */
+  serverTime: number;
 }
 
 export interface CreateSessionAccessGrantRequest {
   userId: string;
+  /** Required. Renewing someone who already has access sets a new end time from now. */
+  durationMinutes: SessionAccessDurationMinutes;
   /**
    * The person sharing must confirm that the grantee's requests run on the owner's
    * credentials and that the agent may be able to reveal them. Enforced server-side.
@@ -86,8 +109,10 @@ export interface CreateSessionAccessGrantRequest {
 
 export interface CreateSessionAccessGrantResponse {
   grant: SessionAccessGrant;
-  /** False when the grantee already had active access (idempotent re-grant). */
+  /** True when the person had no active access before this call. */
   created: boolean;
+  /** True when the owner renewed access the person already had (a new end time from now). */
+  renewed: boolean;
   access: SessionAccessSummary;
 }
 
@@ -104,6 +129,6 @@ export interface SessionAccessChangedEvent {
   type: 'session.access.changed';
   payload: {
     sessionId: string;
-    reason: 'granted' | 'revoked';
+    reason: 'granted' | 'renewed' | 'revoked' | 'expired';
   };
 }

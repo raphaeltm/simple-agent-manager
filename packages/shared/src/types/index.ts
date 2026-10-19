@@ -479,11 +479,14 @@ export type {
   SessionAccessGrant,
   SessionAccessPerson,
   SessionAccessRevokeReason,
+  SessionAccessDurationMinutes,
   SessionAccessSummary,
   SessionViewerAccess,
 } from './session-access';
 export {
+  isSessionAccessDurationMinutes,
   isShareableChatSessionStatus,
+  SESSION_ACCESS_DURATION_MINUTES,
   SESSION_ACCESS_REVOKE_REASONS,
   SESSION_VIEWER_ACCESS_LEVELS,
   SHAREABLE_CHAT_SESSION_STATUSES,

@@ -1460,7 +1460,7 @@ export class ProjectData extends DurableObject<Env> {
   createSessionAccessGrant(input: Omit<sessionAccess.CreateSessionAccessGrantInput, 'now'>) {
     const result = this.ctx.storage.transactionSync(() => {
       const created = sessionAccess.createSessionAccessGrant(this.sql, input);
-      if (created.status === 'created') {
+      if (created.status === 'created' || created.status === 'renewed') {
         activity.recordActivityEventInternal(
           this.sql,
           'session.access_granted',
@@ -1473,18 +1473,28 @@ export class ProjectData extends DurableObject<Env> {
             grantId: created.grant.id,
             granteeUserId: created.grant.granteeUserId,
             parentGrantId: created.grant.parentGrantId,
+            durationMinutes: created.grant.durationMinutes,
+            expiresAt: created.grant.expiresAt,
+            renewed: created.status === 'renewed',
           })
         );
       }
       return created;
     });
-    if (result.status === 'created') {
+    if (result.status === 'created' || result.status === 'renewed') {
       this.broadcastEvent(
         'session.access.changed',
-        { sessionId: input.sessionId, reason: 'granted' },
+        { sessionId: input.sessionId, reason: result.status === 'created' ? 'granted' : 'renewed' },
         input.sessionId
       );
       this.broadcastEvent('activity.new', { eventType: 'session.access_granted' });
+      // The expiry sweep must fire at the new end time.
+      this.recalculateAlarm().catch((err) =>
+        log.warn('session_access.recalculate_alarm_after_grant_failed', {
+          sessionId: input.sessionId,
+          ...serializeError(err),
+        })
+      );
     }
     return {
       result,
@@ -1548,6 +1558,44 @@ export class ProjectData extends DurableObject<Env> {
       this.afterSessionAccessRevoked(entry.sessionId, entry.cancelledDeliveryIds.length);
     }
     return revoked;
+  }
+
+  /**
+   * Alarm section: grants whose time ran out. Access already ended at `expires_at` (every
+   * check reads server time); this cancels the grantees' undelivered prompts and tells open
+   * clients so their composers lock without waiting for a refetch.
+   */
+  private processExpiredSessionAccess(): void {
+    const expired = this.ctx.storage.transactionSync(() => {
+      const results = sessionAccess.processExpiredSessionAccessGrants(this.sql);
+      for (const entry of results) {
+        activity.recordActivityEventInternal(
+          this.sql,
+          'session.access_expired',
+          'system',
+          null,
+          null,
+          entry.sessionId,
+          null,
+          JSON.stringify({
+            expiredGrantIds: entry.expiredGrants.map((grant) => grant.id),
+            granteeUserIds: entry.expiredGrants.map((grant) => grant.granteeUserId),
+            cancelledDeliveryCount: entry.cancelledDeliveryIds.length,
+          })
+        );
+      }
+      return results;
+    });
+    for (const entry of expired) {
+      this.broadcastEvent(
+        'session.access.changed',
+        { sessionId: entry.sessionId, reason: 'expired' },
+        entry.sessionId
+      );
+    }
+    if (expired.length > 0) {
+      this.broadcastEvent('activity.new', { eventType: 'session.access_expired' });
+    }
   }
 
   private afterSessionAccessRevoked(sessionId: string, cancelledDeliveries: number): void {
@@ -2922,6 +2970,10 @@ export class ProjectData extends DurableObject<Env> {
           }
         )
       );
+
+      // Before prompt delivery, so an expired grantee's queued prompts are cancelled rather
+      // than claimed in the same tick (the delivery fence would refuse them anyway).
+      await tick.run('session_access_expiry', () => this.processExpiredSessionAccess());
 
       await tick.run('attention_expiry', () =>
         attentionExpiry.processExpiredAttentionMarkers(

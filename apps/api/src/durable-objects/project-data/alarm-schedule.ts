@@ -20,6 +20,7 @@ import { computeStandingWatchAlarmTime } from './project-standing-watches-runner
 import { computePromptDeliveryAlarmTime } from './prompt-delivery';
 import * as reconciliation from './reconciliation';
 import { parseMetaValue } from './row-schemas';
+import { computeSessionAccessExpiryAlarmTime } from './session-access';
 import { computeSessionActivityProbeAlarmTime } from './session-activity-reconciliation';
 import { computeStorageSafetyAlarmTime } from './storage-safety-alarm-time';
 import { computeTaskWaitAlarmTime } from './task-waits';
@@ -38,6 +39,7 @@ export const PROJECT_DATA_ALARM_SECTIONS = [
   'workspace_idle_timeouts',
   'expired_idle_cleanups',
   'task_reconciliation',
+  'session_access_expiry',
   'attention_expiry',
   'session_activity_probe',
   'mailbox_delivery_sweep',
@@ -101,6 +103,9 @@ export function computeProjectDataAlarmSectionTimes(
     ),
     task_reconciliation: compute('task_reconciliation', () =>
       reconciliation.computeReconciliationAlarmTime(sql, env)
+    ),
+    session_access_expiry: compute('session_access_expiry', () =>
+      computeSessionAccessExpiryAlarmTime(sql)
     ),
     attention_expiry: compute('attention_expiry', () => attention.computeAttentionAlarmTime(sql)),
     // Conversation-mode sessions contribute no reconciliation alarm (that query is task-scoped), so
