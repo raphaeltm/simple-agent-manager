@@ -7,6 +7,13 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+/** The server's `deliveryCancelled` reason, as what the bubble says. */
+function notDeliveredReason(value: unknown): UserMessageAttribution['notDelivered'] {
+  if (value === 'sender_access_revoked') return 'access_removed';
+  if (value === 'sender_access_expired') return 'access_expired';
+  return undefined;
+}
+
 /**
  * Who really sent a user-role transcript row. Durable prompt deliveries carry the sender in
  * their tool metadata (server-written, never client-supplied): a teammate with shared access
@@ -19,7 +26,7 @@ export function userMessageAttribution(
   if (message.role !== 'user') return undefined;
   const meta = maybeJsonRecord(message.toolMetadata);
   if (!meta || meta.kind !== 'durable_prompt_delivery') return undefined;
-  const notDelivered = meta.deliveryCancelled === 'sender_access_revoked';
+  const notDelivered = notDeliveredReason(meta.deliveryCancelled);
 
   if (meta.source === 'comment_directive') {
     const author = maybeJsonRecord(meta.author);

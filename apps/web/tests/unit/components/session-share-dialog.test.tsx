@@ -32,19 +32,32 @@ import {
   type SessionShareDialogProps,
 } from '../../../src/components/project-message-view/SessionShareDialog';
 import { ApiClientError } from '../../../src/lib/api/client';
+import { recordServerTime } from '../../../src/lib/server-clock';
 import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 const OWNER = { id: 'user-owner', name: 'Prakash Rao', avatarUrl: null };
 const BEA = { id: 'user-bea', name: 'Bea Arthur', avatarUrl: null };
 const CY = { id: 'user-cy', name: 'Cy Young', avatarUrl: null };
 
+const MINUTE = 60_000;
+
 function grant(
   id: string,
   grantee: typeof BEA,
   grantedBy: typeof BEA,
-  parentGrantId: string | null = null
+  parentGrantId: string | null = null,
+  minutesLeft = 23
 ): SessionAccessGrant {
-  return { id, sessionId: 'sess-1', grantee, grantedBy, parentGrantId, createdAt: Date.now() };
+  return {
+    id,
+    sessionId: 'sess-1',
+    grantee,
+    grantedBy,
+    parentGrantId,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + minutesLeft * MINUTE,
+    durationMinutes: 30,
+  };
 }
 
 const G_BEA = grant('g-bea', BEA, OWNER);
@@ -54,7 +67,7 @@ function accessFor(
   viewerAccess: SessionAccessSummary['viewerAccess'],
   grants: SessionAccessGrant[] = [G_BEA, G_CY]
 ): SessionAccessSummary {
-  return { sessionId: 'sess-1', viewerAccess, owner: OWNER, grants };
+  return { sessionId: 'sess-1', viewerAccess, owner: OWNER, grants, serverTime: Date.now() };
 }
 
 function memberRow(
@@ -117,10 +130,17 @@ function renderDialog(overrides: Partial<SessionShareDialogProps> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getProjectMembers.mockResolvedValue(MEMBERS);
+  // This device and the server agree, unless a test says otherwise.
+  recordServerTime(Date.now());
 });
 
+/** Open the confirm step for Dana from the owner's dialog. */
+async function confirmDana(dialog: HTMLElement) {
+  fireEvent.click(await within(dialog).findByRole('button', { name: 'Share with Dana Scully' }));
+}
+
 describe('SessionShareDialog — sharing', () => {
-  it('requires the acknowledgement before it will share, then shares with the picked teammate', async () => {
+  it('requires the acknowledgement and a duration before it will share, then shares for that long', async () => {
     const shared = accessFor('owner', [
       G_BEA,
       G_CY,
@@ -129,13 +149,14 @@ describe('SessionShareDialog — sharing', () => {
     mocks.shareSessionAccess.mockResolvedValue({
       grant: shared.grants[2],
       created: true,
+      renewed: false,
       access: shared,
     });
     const { dialog, onChanged } = renderDialog();
 
     expect(
       within(dialog).getByText(
-        'People you add can message the agent and manage this chat, just like you. It runs on your accounts.'
+        'People you add can message the agent and manage this chat, just like you, for as long as you choose. It runs on your accounts.'
       )
     ).toBeInTheDocument();
 
@@ -164,8 +185,20 @@ describe('SessionShareDialog — sharing', () => {
       )
     ).toBeInTheDocument();
     expect(
-      within(dialog).getByText("There's no end date. You can remove access at any time.")
+      within(dialog).getByText(
+        "Access ends on its own after the time you choose, or when it's revoked. Ending it doesn't undo what Dana Scully did or stop work the agent already started, and keys they copied keep working until they're replaced."
+      )
     ).toBeInTheDocument();
+
+    // No duration is chosen for you, and there is no unlimited option.
+    const durations = within(dialog).getByRole('group', { name: 'How long?' });
+    expect(
+      within(durations)
+        .getAllByRole('radio')
+        .map((radio) => radio.closest('label')?.textContent)
+    ).toEqual(['5 min', '10 min', '30 min', '1 hour']);
+    for (const radio of within(durations).getAllByRole('radio')) expect(radio).not.toBeChecked();
+    expect(within(dialog).getByText('Choose how long access lasts.')).toBeInTheDocument();
 
     const share = within(dialog).getByRole('button', { name: 'Share' });
     expect(share).toBeDisabled();
@@ -175,16 +208,47 @@ describe('SessionShareDialog — sharing', () => {
     fireEvent.click(
       within(dialog).getByRole('checkbox', { name: 'I understand this runs on my accounts' })
     );
+    // Acknowledged but no duration yet: still refused.
+    expect(share).toBeDisabled();
+    fireEvent.click(within(durations).getByRole('radio', { name: '30 min' }));
+    expect(within(dialog).getByText(/^Ends at .+\.$/)).toBeInTheDocument();
     expect(share).toBeEnabled();
     fireEvent.click(share);
 
     await waitFor(() =>
-      expect(mocks.shareSessionAccess).toHaveBeenCalledWith('proj-1', 'sess-1', 'user-dana')
+      expect(mocks.shareSessionAccess).toHaveBeenCalledWith('proj-1', 'sess-1', 'user-dana', 30)
     );
     await waitFor(() => expect(onChanged).toHaveBeenCalledWith(shared));
     expect(within(dialog).getByRole('status')).toHaveTextContent(
-      'Dana Scully can now use this chat.'
+      /^Dana Scully can use this chat until .+\.$/
     );
+  });
+
+  it('needs a duration even after the acknowledgement, whichever is chosen first', async () => {
+    const { dialog } = renderDialog();
+    await confirmDana(dialog);
+    const share = within(dialog).getByRole('button', { name: 'Share' });
+
+    fireEvent.click(within(dialog).getByRole('radio', { name: '5 min' }));
+    expect(share).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /I understand/ }));
+    expect(share).toBeEnabled();
+  });
+
+  it('caps what a grantee passes on at their own end time, and says so', async () => {
+    const bea = grant('g-bea', BEA, OWNER, null, 8);
+    const { dialog } = renderDialog({
+      access: accessFor('grantee', [bea]),
+      viewerUserId: 'user-bea',
+    });
+    await confirmDana(dialog);
+
+    fireEvent.click(within(dialog).getByRole('radio', { name: '5 min' }));
+    expect(within(dialog).getByText(/^Ends at .+\.$/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('radio', { name: '30 min' }));
+    expect(
+      within(dialog).getByText(/^Ends at .+, when your own access ends\.$/)
+    ).toBeInTheDocument();
   });
 
   it('speaks about the owner by name when a grantee re-shares', async () => {
@@ -216,6 +280,7 @@ describe('SessionShareDialog — sharing', () => {
     const { dialog, onChanged } = renderDialog();
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Share with Dana Scully' }));
     fireEvent.click(within(dialog).getByRole('checkbox', { name: /I understand/ }));
+    fireEvent.click(within(dialog).getByRole('radio', { name: '10 min' }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Share' }));
 
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(message);
@@ -241,12 +306,73 @@ describe('SessionShareDialog — people with access', () => {
     expect(rows[0]).toHaveTextContent('Prakash Rao (you)');
     expect(rows[0]).toHaveTextContent('Owner');
     expect(rows[1]).toHaveTextContent('Bea Arthur');
-    expect(rows[1]).toHaveTextContent('added by you');
+    expect(rows[1]).toHaveTextContent(/added by you · ends in 23 min \(.+\)/);
     expect(rows[2]).toHaveTextContent('Cy Young');
-    expect(rows[2]).toHaveTextContent('added by Bea Arthur');
+    expect(rows[2]).toHaveTextContent(/added by Bea Arthur · ends in 23 min \(.+\)/);
   });
 
-  it('warns that removing someone also removes the people they added', async () => {
+  it('shows the time left by the server’s clock', () => {
+    // The server is 5 minutes ahead of this device.
+    recordServerTime(Date.now() + 5 * MINUTE);
+    const { dialog } = renderDialog({ access: accessFor('owner', [grant('g-bea', BEA, OWNER)]) });
+    expect(within(dialog).getByTestId('grant-time-left')).toHaveTextContent(/^ends in 18 min/);
+  });
+
+  it('marks access that has run out as ended, with nothing left to revoke', () => {
+    const { dialog } = renderDialog({
+      access: accessFor('owner', [grant('g-bea', BEA, OWNER, null, -1), G_CY]),
+    });
+    expect(within(dialog).getByText('access ended')).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole('button', { name: "Revoke Bea Arthur's access now" })
+    ).toBeNull();
+    // Liveness: the other row still offers it.
+    expect(
+      within(dialog).getByRole('button', { name: "Revoke Cy Young's access now" })
+    ).toBeInTheDocument();
+  });
+
+  it('lets the owner renew someone for a newly chosen time, through the same acknowledgement', async () => {
+    const renewedBea = { ...G_BEA, expiresAt: Date.now() + 60 * MINUTE, durationMinutes: 60 };
+    const after = accessFor('owner', [renewedBea, G_CY]);
+    mocks.shareSessionAccess.mockResolvedValue({
+      grant: renewedBea,
+      created: false,
+      renewed: true,
+      access: after,
+    });
+    const { dialog, onChanged } = renderDialog();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: "Renew Bea Arthur's access" }));
+    expect(
+      within(dialog).getByRole('heading', { name: "Renew Bea Arthur's access?" })
+    ).toHaveFocus();
+    const renew = within(dialog).getByRole('button', { name: 'Renew' });
+    expect(renew).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole('radio', { name: '1 hour' }));
+    expect(renew).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /I understand/ }));
+    fireEvent.click(renew);
+
+    await waitFor(() =>
+      expect(mocks.shareSessionAccess).toHaveBeenCalledWith('proj-1', 'sess-1', 'user-bea', 60)
+    );
+    await waitFor(() => expect(onChanged).toHaveBeenCalledWith(after));
+    expect(within(dialog).getByRole('status')).toHaveTextContent(
+      /^Bea Arthur's access now ends at .+\.$/
+    );
+  });
+
+  it('offers Renew only to the owner', () => {
+    const { dialog } = renderDialog({ access: accessFor('grantee'), viewerUserId: 'user-bea' });
+    expect(within(dialog).queryByRole('button', { name: /^Renew/ })).toBeNull();
+    // Liveness: the grantee still manages the row.
+    expect(
+      within(dialog).getByRole('button', { name: "Revoke Cy Young's access now" })
+    ).toBeInTheDocument();
+  });
+
+  it('warns that revoking someone also removes the people they added', async () => {
     const response = {
       revokedGrantIds: ['g-bea', 'g-cy'],
       cancelledDeliveryIds: ['d-1'],
@@ -256,17 +382,25 @@ describe('SessionShareDialog — people with access', () => {
     const { dialog, onChanged } = renderDialog();
 
     // Cy added nobody: no cascade warning.
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Cy Young' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: "Revoke Cy Young's access now" }));
     expect(
-      within(dialog).getByText("Remove Cy Young? They won't be able to send messages here anymore.")
+      within(dialog).getByText(
+        "Revoke Cy Young's access now? They won't be able to send messages here anymore."
+      )
     ).toBeInTheDocument();
-    expect(within(dialog).queryByText('This also removes anyone they added.')).toBeNull();
+    expect(
+      within(dialog).getByText('Work the agent already started keeps running.')
+    ).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Bea Arthur' }));
-    expect(within(dialog).getByText('This also removes anyone they added.')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: "Revoke Bea Arthur's access now" }));
+    expect(
+      within(dialog).getByText(
+        'This also removes anyone they added. Work the agent already started keeps running.'
+      )
+    ).toBeInTheDocument();
     expect(mocks.revokeSessionAccess).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Revoke now' }));
 
     await waitFor(() =>
       expect(mocks.revokeSessionAccess).toHaveBeenCalledWith('proj-1', 'sess-1', 'user-bea')
@@ -288,15 +422,23 @@ describe('SessionShareDialog — people with access', () => {
       viewerUserId: 'user-bea',
     });
 
-    expect(within(dialog).queryByRole('button', { name: 'Remove Bea Arthur' })).toBeNull();
-    // A grantee has owner-equivalent control: they may remove someone else, too.
-    expect(within(dialog).getByRole('button', { name: 'Remove Cy Young' })).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole('button', { name: "Revoke Bea Arthur's access now" })
+    ).toBeNull();
+    // A grantee has owner-equivalent control: they may revoke someone else, too.
+    expect(
+      within(dialog).getByRole('button', { name: "Revoke Cy Young's access now" })
+    ).toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Leave this chat' }));
     expect(
       within(dialog).getByText("Leave this chat? You won't be able to send messages here anymore.")
     ).toBeInTheDocument();
-    expect(within(dialog).getByText('This also removes anyone you added.')).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        'This also removes anyone you added. Work the agent already started keeps running.'
+      )
+    ).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Leave' }));
 
     await waitFor(() =>
@@ -313,8 +455,8 @@ describe('SessionShareDialog — people with access', () => {
       new ApiClientError('FORBIDDEN', 'Not allowed here', 403)
     );
     const { dialog, onChanged } = renderDialog();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Cy Young' }));
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: "Revoke Cy Young's access now" }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Revoke now' }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Not allowed here');
     expect(onChanged).not.toHaveBeenCalled();
   });
@@ -322,7 +464,7 @@ describe('SessionShareDialog — people with access', () => {
   it('shows a reader who has access, without any way to change it', async () => {
     const { dialog } = renderDialog({ access: accessFor('reader'), viewerUserId: 'user-dana' });
     expect(within(dialog).getByText('Bea Arthur')).toBeInTheDocument();
-    expect(within(dialog).queryByRole('button', { name: /^Remove/ })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: /^(Revoke|Renew)/ })).toBeNull();
     expect(within(dialog).queryByRole('heading', { name: 'Add a teammate' })).toBeNull();
     expect(mocks.getProjectMembers).not.toHaveBeenCalled();
   });
@@ -334,7 +476,9 @@ describe('SessionShareDialog — people with access', () => {
       within(dialog).getByText('This chat has ended, so no one else can be added.')
     ).toBeVisible();
     expect(within(dialog).queryByRole('heading', { name: 'Add a teammate' })).toBeNull();
-    expect(within(dialog).getByRole('button', { name: 'Remove Bea Arthur' })).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole('button', { name: "Revoke Bea Arthur's access now" })
+    ).toBeInTheDocument();
     expect(mocks.getProjectMembers).not.toHaveBeenCalled();
   });
 

@@ -1,10 +1,12 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import type { SessionAccessGrant, SessionAccessSummary } from '@simple-agent-manager/shared';
+import { act, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveSessionViewerCapabilities } from '../../../src/components/project-message-view/session-viewer-access';
 import { SessionFooter } from '../../../src/components/project-message-view/SessionFooter';
 import type { UseSessionLifecycleResult } from '../../../src/components/project-message-view/useSessionLifecycle.types';
 import type { ChatSessionResponse } from '../../../src/lib/api';
+import { recordServerTime } from '../../../src/lib/server-clock';
 
 vi.mock('../../../src/components/project-message-view/FollowUpInput', async (importOriginal) => {
   const actual =
@@ -78,12 +80,13 @@ function lifecycle(
   } as unknown as UseSessionLifecycleResult;
 }
 
-function renderFooter(chatSession: ChatSessionResponse, overrides = {}) {
+function renderFooter(chatSession: ChatSessionResponse, overrides = {}, viewerId = 'grantee-1') {
   return render(
     <SessionFooter
       projectId="project-1"
       lc={lifecycle(chatSession, overrides)}
       viewer={resolveSessionViewerCapabilities(chatSession)}
+      viewerId={viewerId}
       selectedTextComposer={null}
       agentProfiles={[]}
       slashCommands={[]}
@@ -136,5 +139,87 @@ describe('SessionFooter by viewer access', () => {
     expect(screen.getByText('This chat has ended')).toBeInTheDocument();
     expect(screen.getByText('Only Prakash Raman can fork it to continue.')).toBeInTheDocument();
     expect(screen.queryByText(/share this chat/)).toBeNull();
+  });
+});
+
+const MINUTE = 60_000;
+const NOW = Date.UTC(2026, 9, 19, 15, 0, 0);
+
+function grant(granteeId: string, expiresAt: number): SessionAccessGrant {
+  return {
+    id: `grant-${granteeId}`,
+    sessionId: 'session-1',
+    grantee: { id: granteeId, name: granteeId, avatarUrl: null },
+    grantedBy: { id: 'owner-1', name: 'Prakash Raman', avatarUrl: null },
+    parentGrantId: null,
+    createdAt: NOW - MINUTE,
+    expiresAt,
+    durationMinutes: 30,
+  };
+}
+
+function sharedWith(grants: SessionAccessGrant[]): Partial<ChatSessionResponse> {
+  const access: SessionAccessSummary = {
+    sessionId: 'session-1',
+    viewerAccess: 'grantee',
+    owner: { id: 'owner-1', name: 'Prakash Raman', avatarUrl: null },
+    grants,
+    serverTime: NOW,
+  };
+  return { viewerAccess: 'grantee', access };
+}
+
+describe('SessionFooter: when a grantee’s access ends', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    recordServerTime(Date.now());
+  });
+
+  it('shows the viewer’s own end time, not someone else’s, and counts down to the end', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    recordServerTime(NOW);
+    renderFooter(
+      session(
+        sharedWith([
+          grant('someone-else', NOW + 50 * MINUTE),
+          grant('grantee-1', NOW + 23 * MINUTE),
+        ])
+      )
+    );
+
+    expect(screen.getByTestId('shared-session-time-left')).toHaveTextContent(
+      /^Your access ends in 23 min \(.+\)\.$/
+    );
+    // Liveness for the absence below: the notice is still there, naming the owner.
+    expect(screen.getByTestId('shared-session-notice')).toHaveTextContent('Prakash Raman');
+
+    act(() => {
+      vi.advanceTimersByTime(23 * MINUTE);
+    });
+    expect(screen.getByTestId('shared-session-time-left')).toHaveTextContent(
+      'Your access has ended.'
+    );
+  });
+
+  it('reads the time left by the server’s clock, not this device’s', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    // The server is 5 minutes ahead of this device.
+    recordServerTime(NOW + 5 * MINUTE, NOW);
+    renderFooter(session(sharedWith([grant('grantee-1', NOW + 30 * MINUTE)])));
+
+    expect(screen.getByTestId('shared-session-time-left')).toHaveTextContent(
+      /^Your access ends in 25 min/
+    );
+  });
+
+  it('says nothing about time when the viewer’s own grant is not in the summary', () => {
+    renderFooter(session(sharedWith([grant('someone-else', NOW + 50 * MINUTE)])));
+
+    expect(screen.getByTestId('shared-session-notice')).toHaveTextContent(
+      "You're chatting in Prakash Raman's session."
+    );
+    expect(screen.queryByTestId('shared-session-time-left')).toBeNull();
   });
 });

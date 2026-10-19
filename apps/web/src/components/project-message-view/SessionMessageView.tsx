@@ -398,6 +398,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
         onFork={onFork}
         lc={lc}
         viewer={viewer}
+        viewerId={viewerId}
         selectedTextComposer={commentUi.selectedTextComposer}
         onSleepConversation={onSleepConversation}
         sleepingConversation={sleepingConversation}

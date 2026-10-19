@@ -6,6 +6,7 @@ import type {
   TaskExecutionStep,
 } from '@simple-agent-manager/shared';
 
+import { recordServerTime } from '../server-clock';
 import { request } from './client';
 
 // =============================================================================
@@ -254,10 +255,12 @@ export async function getChatSession(
     ? `/api/projects/${projectId}/sessions/${sessionId}?${qs}`
     : `/api/projects/${projectId}/sessions/${sessionId}`;
 
-  return request<ChatSessionDetailResponse>(
+  const detail = await request<ChatSessionDetailResponse>(
     endpoint,
     params.signal ? { signal: params.signal } : {}
   );
+  recordServerTime(detail.session?.access?.serverTime);
+  return detail;
 }
 
 export async function getChatSessionState(

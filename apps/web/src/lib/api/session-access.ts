@@ -1,9 +1,11 @@
 import type {
   CreateSessionAccessGrantResponse,
   RevokeSessionAccessGrantResponse,
+  SessionAccessDurationMinutes,
   SessionAccessSummary,
 } from '@simple-agent-manager/shared';
 
+import { recordServerTime } from '../server-clock';
 import { request } from './client';
 
 // =============================================================================
@@ -14,36 +16,49 @@ import { request } from './client';
 // owner-only `/api/workspaces/:id/*` routes.
 // =============================================================================
 
-export function getSessionAccess(
+export async function getSessionAccess(
   projectId: string,
   sessionId: string
 ): Promise<SessionAccessSummary> {
-  return request<SessionAccessSummary>(`/api/projects/${projectId}/sessions/${sessionId}/access`);
+  const access = await request<SessionAccessSummary>(
+    `/api/projects/${projectId}/sessions/${sessionId}/access`
+  );
+  recordServerTime(access.serverTime);
+  return access;
 }
 
-export function shareSessionAccess(
+/**
+ * Share (or, for the owner, renew) access for `durationMinutes`. Sent only after the person
+ * sharing ticked the shared-accounts acknowledgement, which the server requires every time.
+ */
+export async function shareSessionAccess(
   projectId: string,
   sessionId: string,
-  userId: string
+  userId: string,
+  durationMinutes: SessionAccessDurationMinutes
 ): Promise<CreateSessionAccessGrantResponse> {
-  return request<CreateSessionAccessGrantResponse>(
+  const response = await request<CreateSessionAccessGrantResponse>(
     `/api/projects/${projectId}/sessions/${sessionId}/access/grants`,
     {
       method: 'POST',
-      body: JSON.stringify({ userId, acknowledgeSharedCredentials: true }),
+      body: JSON.stringify({ userId, durationMinutes, acknowledgeSharedCredentials: true }),
     }
   );
+  recordServerTime(response.access.serverTime);
+  return response;
 }
 
-export function revokeSessionAccess(
+export async function revokeSessionAccess(
   projectId: string,
   sessionId: string,
   granteeUserId: string
 ): Promise<RevokeSessionAccessGrantResponse> {
-  return request<RevokeSessionAccessGrantResponse>(
+  const response = await request<RevokeSessionAccessGrantResponse>(
     `/api/projects/${projectId}/sessions/${sessionId}/access/grants/${encodeURIComponent(granteeUserId)}`,
     { method: 'DELETE' }
   );
+  recordServerTime(response.access.serverTime);
+  return response;
 }
 
 export function sleepChatSession(

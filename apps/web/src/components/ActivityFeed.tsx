@@ -9,6 +9,7 @@ import {
   Plus,
   Reply,
   RotateCw,
+  TimerOff,
   UserMinus,
   UserPlus,
   X,
@@ -21,6 +22,7 @@ import { maybeJsonRecord } from '../lib/runtime-validation';
 import { formatRelativeTime } from '../lib/time-utils';
 import { ProjectContext } from '../pages/ProjectContext';
 import { useAuth } from './AuthProvider';
+import { durationLabel } from './project-message-view/session-access-time';
 
 interface ActivityFeedProps {
   events: ActivityEventResponse[];
@@ -56,6 +58,7 @@ const EVENT_STYLES: Record<string, EventStyle> = {
   'session.idle_cleanup': { icon: Pause, color: MUTED },
   'session.access_granted': { icon: UserPlus, color: INFO },
   'session.access_revoked': { icon: UserMinus, color: MUTED },
+  'session.access_expired': { icon: TimerOff, color: MUTED },
   'session.shared_answer': { icon: Reply, color: INFO },
   'task.completed': { icon: Check, color: SUCCESS },
   'task.failed': { icon: X, color: DANGER },
@@ -107,7 +110,17 @@ function formatEventDescription(event: ActivityEventResponse, personLabel: Perso
     }
     case 'session.access_granted': {
       const grantee = personLabel(stringField(payload?.granteeUserId), true);
-      return grantee ? `Shared this session with ${grantee}` : 'Shared this session';
+      // Grants made before access had to expire carry no duration.
+      const minutes = typeof payload?.durationMinutes === 'number' ? payload.durationMinutes : null;
+      const forHowLong = minutes === null ? '' : ` for ${durationLabel(minutes)}`;
+      if (payload?.renewed === true) {
+        return grantee
+          ? `Renewed shared access for ${grantee}${forHowLong}`
+          : `Renewed shared access${forHowLong}`;
+      }
+      return grantee
+        ? `Shared this session with ${grantee}${forHowLong}`
+        : `Shared this session${forHowLong}`;
     }
     case 'session.access_revoked': {
       // `departedUserId` when the system revoked access because someone left the project.
@@ -115,6 +128,14 @@ function formatEventDescription(event: ActivityEventResponse, personLabel: Perso
       if (targetId && targetId === event.actorId) return 'Left a shared session';
       const target = personLabel(targetId, true);
       return target ? `Removed shared access for ${target}` : 'Removed shared access';
+    }
+    case 'session.access_expired': {
+      const ids = Array.isArray(payload?.granteeUserIds)
+        ? payload.granteeUserIds.filter((id): id is string => typeof id === 'string')
+        : [];
+      if (ids.length > 1) return `Shared access ran out for ${ids.length} people`;
+      const who = personLabel(ids[0] ?? null, true);
+      return who ? `Shared access ran out for ${who}` : 'Shared access ran out';
     }
     case 'session.shared_answer':
       return 'Answered the agent (shared access)';

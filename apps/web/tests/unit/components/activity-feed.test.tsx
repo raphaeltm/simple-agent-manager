@@ -122,6 +122,42 @@ describe('ActivityFeed — shared session events', () => {
     expect(answered.nextElementSibling).toHaveTextContent(/^Bea Arthur/);
   });
 
+  it('says how long access was shared or renewed for, and when it ran out', async () => {
+    renderFeed([
+      event({
+        eventType: 'session.access_granted',
+        payload: { granteeUserId: 'user-bea', durationMinutes: 30, renewed: false },
+      }),
+      event({
+        eventType: 'session.access_granted',
+        payload: { granteeUserId: 'user-cy', durationMinutes: 60, renewed: true },
+      }),
+      event({
+        eventType: 'session.access_expired',
+        actorType: 'system',
+        actorId: null,
+        payload: { granteeUserIds: ['user-dana'], cancelledDeliveryCount: 1 },
+      }),
+      event({
+        eventType: 'session.access_expired',
+        actorType: 'system',
+        actorId: null,
+        payload: { granteeUserIds: ['user-bea', 'user-cy'] },
+      }),
+    ]);
+
+    expect(
+      await screen.findByText('Shared this session with Bea Arthur for 30 min')
+    ).toBeInTheDocument();
+    expect(screen.getByText('Renewed shared access for Cy Young for 1 hour')).toBeInTheDocument();
+    expect(iconFor('Renewed shared access for Cy Young for 1 hour')).toBe('lucide-user-plus');
+
+    const ranOut = screen.getByText('Shared access ran out for Dana Scully');
+    expect(iconFor('Shared access ran out for Dana Scully')).toBe('lucide-timer-off');
+    expect(ranOut.nextElementSibling).toHaveTextContent(/^System/);
+    expect(screen.getByText('Shared access ran out for 2 people')).toBeInTheDocument();
+  });
+
   it('labels a teammate it cannot name without claiming it was you', async () => {
     renderFeed([event({ eventType: 'session.shared_answer', actorId: 'user-unknown' })]);
     const row = screen.getByText('Answered the agent (shared access)');

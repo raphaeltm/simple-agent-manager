@@ -23,7 +23,7 @@ function getTtsUrl(): string {
 
 /**
  * Above a user-role bubble the session owner did not type: who sent it to the agent, and
- * whether it was cancelled before delivery because the sender's shared access was removed.
+ * whether it was cancelled before delivery because the sender's shared access ended.
  */
 function UserMessageAttributionLine({ attribution }: { attribution: UserMessageAttribution }) {
   const sender = attribution.senderName ?? 'A teammate';
@@ -41,7 +41,9 @@ function UserMessageAttributionLine({ attribution }: { attribution: UserMessageA
       <span className="min-w-0 break-words text-right">{label}</span>
       {attribution.notDelivered && (
         <span className="rounded border border-warning/30 bg-warning-tint px-1.5 py-0.5 text-warning-fg">
-          Not delivered — access was removed
+          {attribution.notDelivered === 'access_expired'
+            ? 'Not delivered — access expired'
+            : 'Not delivered — access was removed'}
         </span>
       )}
     </div>

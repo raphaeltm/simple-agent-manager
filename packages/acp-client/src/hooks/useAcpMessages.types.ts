@@ -27,8 +27,11 @@ export interface UserMessageAttribution {
   senderName: string | null;
   /** For `comment`: who wrote the comment. */
   commentAuthorName?: string | null;
-  /** The prompt was cancelled before reaching the agent because the sender lost access. */
-  notDelivered?: boolean;
+  /**
+   * The prompt was cancelled before reaching the agent because the sender's shared access
+   * ended: revoked (or they left), or its chosen time ran out.
+   */
+  notDelivered?: 'access_removed' | 'access_expired';
 }
 
 export interface AgentMessage {

@@ -1,17 +1,24 @@
 import type {
   RevokeSessionAccessGrantResponse,
+  SessionAccessDurationMinutes,
   SessionAccessGrant,
   SessionAccessSummary,
 } from '@simple-agent-manager/shared';
-import { Avatar, Button, useModalInteraction } from '@simple-agent-manager/ui';
+import { Avatar, useModalInteraction } from '@simple-agent-manager/ui';
 import { useMutation } from '@tanstack/react-query';
-import { ArrowLeft, Users, X } from 'lucide-react';
+import { Users, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { ProjectMemberSummary } from '../../hooks/useProjectMembers';
 import { revokeSessionAccess, shareSessionAccess } from '../../lib/api/session-access';
+import { accessClockTime, useServerNow } from './session-access-time';
 import { AddTeammateSection, memberLabel } from './SessionShareAddTeammate';
+import {
+  type OwnerWords,
+  SessionShareConfirmStep,
+  type ShareTarget,
+} from './SessionShareConfirmStep';
 import { GrantRow, personName } from './SessionShareGrantRow';
 
 export interface SessionShareDialogProps {
@@ -30,16 +37,6 @@ export interface SessionShareDialogProps {
    * people can still be removed.
    */
   canAddPeople: boolean;
-}
-
-/** How the dialog talks about the owner, from the viewer's side: "your" when it is them. */
-interface OwnerWords {
-  /** "your" / "Prakash's" */
-  possessive: string;
-  /** "you" / "Prakash" — who agents are billed to. */
-  object: string;
-  /** "my" / "Prakash's" — for the acknowledgement the viewer ticks. */
-  firstPersonPossessive: string;
 }
 
 function ownerWords(viewerIsOwner: boolean, ownerLabel: string): OwnerWords {
@@ -91,13 +88,15 @@ function removalNotice(
 }
 
 /**
- * "Share chat access" — give a teammate owner-equivalent control of one chat session.
+ * "Share chat access" — give a teammate owner-equivalent control of one chat session for a
+ * chosen 5, 10, 30 or 60 minutes.
  *
  * Everything a person added here does runs on the owner's accounts (agent credential, GitHub
  * identity, compute), and the agent can read the owner's keys. The dialog says that in plain
- * words and requires an explicit acknowledgement before sharing; the server enforces the same
- * acknowledgement and the other rules (active membership, grant limit). Once shared, the
- * teammate's messages are handled exactly like the owner's.
+ * words and requires an explicit acknowledgement and a duration before sharing; the server
+ * enforces both and the other rules (active membership, grant limit) and ends access at the
+ * chosen time. Only the owner renews. Once shared, the teammate's messages are handled exactly
+ * like the owner's.
  *
  * Bottom sheet on phones, centered ~480px dialog from `sm` up. Focus trap, Escape and
  * background isolation come from the shared `useModalInteraction`.
@@ -117,10 +116,10 @@ export function SessionShareDialog({
   const introId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const confirmHeadingRef = useRef<HTMLHeadingElement>(null);
-  const [confirming, setConfirming] = useState<ProjectMemberSummary | null>(null);
-  const [acknowledged, setAcknowledged] = useState(false);
+  const [confirming, setConfirming] = useState<ShareTarget | null>(null);
   const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const now = useServerNow(true);
 
   useModalInteraction({ enabled: true, modalRef: panelRef, onEscape: onClose });
 
@@ -128,16 +127,23 @@ export function SessionShareDialog({
   const canManage = access.viewerAccess === 'owner' || access.viewerAccess === 'grantee';
   const words = ownerWords(viewerIsOwner, ownerLabel);
   const grants = [...access.grants].sort((a, b) => a.createdAt - b.createdAt);
+  const viewerExpiresAt = viewerIsOwner
+    ? null
+    : (grants.find((grant) => grant.grantee.id === viewerUserId)?.expiresAt ?? null);
 
   const shareMutation = useMutation({
-    mutationFn: (member: ProjectMemberSummary) =>
-      shareSessionAccess(projectId, sessionId, member.userId),
-    onSuccess: (response, member) => {
+    mutationFn: (input: { target: ShareTarget; durationMinutes: SessionAccessDurationMinutes }) =>
+      shareSessionAccess(projectId, sessionId, input.target.userId, input.durationMinutes),
+    onSuccess: (response, { target }) => {
       onChanged(response.access);
       setConfirming(null);
-      const name = memberLabel(member);
+      const until = accessClockTime(response.grant.expiresAt);
       setNotice(
-        response.created ? `${name} can now use this chat.` : `${name} already had access.`
+        response.renewed
+          ? `${target.name}'s access now ends at ${until}.`
+          : response.created
+            ? `${target.name} can use this chat until ${until}.`
+            : `${target.name} already has access, until ${until}.`
       );
     },
   });
@@ -164,12 +170,11 @@ export function SessionShareDialog({
     if (confirming) confirmHeadingRef.current?.focus();
   }, [confirming]);
 
-  const startConfirm = (member: ProjectMemberSummary) => {
+  const startConfirm = (target: ShareTarget) => {
     shareMutation.reset();
-    setAcknowledged(false);
     setNotice(null);
     setPendingRemovalId(null);
-    setConfirming(member);
+    setConfirming(target);
   };
 
   const backToList = () => {
@@ -177,8 +182,6 @@ export function SessionShareDialog({
     setConfirming(null);
     panelRef.current?.focus();
   };
-
-  const confirmName = confirming ? memberLabel(confirming) : '';
 
   return createPortal(
     <div
@@ -224,66 +227,26 @@ export function SessionShareDialog({
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <p id={introId} className="m-0 text-sm leading-relaxed text-fg-secondary">
             {canManage
-              ? `People you add can message the agent and manage this chat, just like you. It runs on ${words.possessive} accounts.`
-              : `The people below can message the agent and manage this chat, just like the owner. It runs on ${words.possessive} accounts.`}
+              ? `People you add can message the agent and manage this chat, just like you, for as long as you choose. It runs on ${words.possessive} accounts.`
+              : `The people below can message the agent and manage this chat, just like the owner, until their access ends. It runs on ${words.possessive} accounts.`}
           </p>
 
           {confirming ? (
-            <section aria-labelledby={`${titleId}-confirm`} className="mt-4">
-              <h3
-                id={`${titleId}-confirm`}
-                ref={confirmHeadingRef}
-                tabIndex={-1}
-                className="m-0 text-sm font-semibold text-fg-primary focus:outline-none [overflow-wrap:anywhere]"
-              >
-                Share with {confirmName}?
-              </h3>
-              <ul className="mt-2 mb-0 flex list-disc flex-col gap-2 pl-5 text-sm leading-relaxed text-fg-primary">
-                <li>
-                  {confirmName} can send messages, stop or archive the chat, and answer the agent —
-                  just like you.
-                </li>
-                <li>
-                  Everything runs on {words.possessive} accounts: AI subscription or API key, GitHub
-                  access and compute. Agents it starts are billed to {words.object}.
-                </li>
-                <li>
-                  The agent can read {words.possessive} keys, so {confirmName} may be able to see
-                  them. Only share with people you trust.
-                </li>
-                <li>There&apos;s no end date. You can remove access at any time.</li>
-              </ul>
-              <label className="mt-4 flex min-h-11 cursor-pointer items-start gap-3 rounded-md border border-border-default bg-inset px-3 py-2.5 text-sm text-fg-primary">
-                <input
-                  type="checkbox"
-                  checked={acknowledged}
-                  onChange={(event) => setAcknowledged(event.target.checked)}
-                  className="mt-0.5 h-5 w-5 shrink-0 accent-accent"
-                />
-                <span>I understand this runs on {words.firstPersonPossessive} accounts</span>
-              </label>
-              {shareMutation.error && (
-                <p
-                  role="alert"
-                  className="mt-3 mb-0 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger-fg [overflow-wrap:anywhere]"
-                >
-                  {errorMessage(shareMutation.error)}
-                </p>
-              )}
-              <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button variant="ghost" onClick={backToList} disabled={shareMutation.isPending}>
-                  <ArrowLeft size={16} aria-hidden="true" />
-                  Back
-                </Button>
-                <Button
-                  onClick={() => shareMutation.mutate(confirming)}
-                  disabled={!acknowledged}
-                  loading={shareMutation.isPending}
-                >
-                  Share
-                </Button>
-              </div>
-            </section>
+            <SessionShareConfirmStep
+              key={`${confirming.userId}:${confirming.renewing ? 'renew' : 'share'}`}
+              target={confirming}
+              words={words}
+              headingId={`${titleId}-confirm`}
+              headingRef={confirmHeadingRef}
+              now={now}
+              viewerExpiresAt={viewerExpiresAt}
+              pending={shareMutation.isPending}
+              error={shareMutation.error ? errorMessage(shareMutation.error) : null}
+              onBack={backToList}
+              onConfirm={(durationMinutes) =>
+                shareMutation.mutate({ target: confirming, durationMinutes })
+              }
+            />
           ) : (
             <>
               {notice && (
@@ -325,7 +288,9 @@ export function SessionShareDialog({
                       key={grant.id}
                       grant={grant}
                       viewerUserId={viewerUserId}
+                      now={now}
                       canManage={canManage}
+                      canRenew={access.viewerAccess === 'owner'}
                       cascades={hasDownstreamGrants(grants, grant)}
                       confirmingRemoval={pendingRemovalId === grant.grantee.id}
                       removing={
@@ -348,6 +313,13 @@ export function SessionShareDialog({
                         setPendingRemovalId(null);
                       }}
                       onConfirmRemove={() => revokeMutation.mutate(grant)}
+                      onRenew={() =>
+                        startConfirm({
+                          userId: grant.grantee.id,
+                          name: personName(grant.grantee, 'this teammate'),
+                          renewing: true,
+                        })
+                      }
                     />
                   ))}
                 </ul>
@@ -364,7 +336,13 @@ export function SessionShareDialog({
                   ownerUserId={access.owner?.id ?? null}
                   viewerUserId={viewerUserId}
                   grants={access.grants}
-                  onPick={startConfirm}
+                  onPick={(member: ProjectMemberSummary) =>
+                    startConfirm({
+                      userId: member.userId,
+                      name: memberLabel(member),
+                      renewing: false,
+                    })
+                  }
                 />
               )}
               {canManage && !canAddPeople && (

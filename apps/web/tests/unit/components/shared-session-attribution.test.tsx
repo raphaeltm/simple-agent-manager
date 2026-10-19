@@ -105,6 +105,47 @@ describe('user message attribution', () => {
     expect(screen.getByText('Not delivered — access was removed')).toBeInTheDocument();
   });
 
+  it('says a prompt was not delivered because its sender’s access ran out', () => {
+    renderRows([
+      userRow(
+        'expired',
+        delivery({
+          source: 'user_followup',
+          senderName: 'Ana Ruiz',
+          onBehalfOfUserId: 'owner-1',
+          deliveryCancelled: 'sender_access_expired',
+        })
+      ),
+      userRow(
+        'expired-comment',
+        delivery({
+          source: 'comment_directive',
+          senderName: 'Ana Ruiz',
+          deliveryCancelled: 'sender_access_expired',
+        })
+      ),
+    ]);
+
+    expect(screen.getAllByText('Not delivered — access expired')).toHaveLength(2);
+    expect(screen.queryByText('Not delivered — access was removed')).toBeNull();
+  });
+
+  it('does not treat an unknown or inherited reason as a cancellation', () => {
+    for (const reason of ['constructor', 'toString', 'sender_unauthorized']) {
+      expect(
+        userMessageAttribution({
+          role: 'user',
+          toolMetadata: delivery({
+            source: 'user_followup',
+            senderName: 'Ana Ruiz',
+            onBehalfOfUserId: 'owner-1',
+            deliveryCancelled: reason,
+          }),
+        })
+      ).toEqual({ kind: 'shared_access', senderName: 'Ana Ruiz' });
+    }
+  });
+
   it('ignores metadata that is not a durable delivery, and non-user rows', () => {
     expect(
       userMessageAttribution({

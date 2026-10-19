@@ -8,6 +8,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { ArchivedForkComposer } from './ArchivedForkComposer';
 import { CompletionDock } from './CompletionDock';
 import { FollowUpInput, ReadOnlyFollowUp } from './FollowUpInput';
+import { accessClockTime, accessTimeLeft, useServerNow } from './session-access-time';
 import { currentPlanToPlanItem, ElapsedTime } from './session-view-utils';
 import {
   sessionOwnerLabel as ownerLabelFor,
@@ -21,6 +22,8 @@ interface SessionFooterProps {
   lc: UseSessionLifecycleResult;
   /** What this viewer may do here; mirrors the server's session-writer check. */
   viewer: SessionViewerCapabilities;
+  /** The signed-in user, to find their own shared-access grant. */
+  viewerId: string | null;
   /** Mobile selected-text comment composer, overlaid above the chat input. */
   selectedTextComposer: ReactNode;
   onSleepConversation?: () => void;
@@ -43,6 +46,7 @@ export function SessionFooter({
   projectId,
   lc,
   viewer,
+  viewerId,
   selectedTextComposer,
   onSleepConversation,
   sleepingConversation,
@@ -69,6 +73,9 @@ export function SessionFooter({
   );
   const canWriteSession = viewer.canDriveSession;
   const sessionOwnerLabel = ownerLabelFor(lc.session);
+  const viewerGrant = viewer.isGrantee
+    ? lc.session?.access?.grants.find((grant) => grant.grantee.id === viewerId)
+    : undefined;
   const isConversationLifecycleSession =
     lc.taskEmbed?.taskMode === 'conversation' ||
     (!lc.taskEmbed?.id && (lc.session?.status === 'active' || lc.session?.status === 'sleeping'));
@@ -127,7 +134,12 @@ export function SessionFooter({
       {selectedTextComposer}
 
       {/* Input area */}
-      {isActive && viewer.isGrantee && <SharedSessionNotice ownerLabel={sessionOwnerLabel} />}
+      {isActive && viewer.isGrantee && (
+        <SharedSessionNotice
+          ownerLabel={sessionOwnerLabel}
+          expiresAt={viewerGrant?.expiresAt ?? null}
+        />
+      )}
       {isActive && canWriteSession && (
         <FollowUpInput
           value={lc.followUp}
@@ -202,8 +214,16 @@ export function SessionFooter({
   );
 }
 
-/** Above a grantee's composer: whose session this is and whose accounts it runs on. */
-function SharedSessionNotice({ ownerLabel }: Readonly<{ ownerLabel: string }>) {
+/**
+ * Above a grantee's composer: whose session this is, whose accounts it runs on, and when their
+ * access ends. The countdown is display only; the composer locks when the server says so.
+ */
+function SharedSessionNotice({
+  ownerLabel,
+  expiresAt,
+}: Readonly<{ ownerLabel: string; expiresAt: number | null }>) {
+  const now = useServerNow(expiresAt !== null);
+  const timeLeft = expiresAt === null ? null : accessTimeLeft(expiresAt, now);
   return (
     <div
       className="shrink-0 border-t border-border-default bg-surface px-4 py-2 text-xs text-fg-muted"
@@ -213,6 +233,16 @@ function SharedSessionNotice({ ownerLabel }: Readonly<{ ownerLabel: string }>) {
         You&apos;re chatting in {ownerLabel}&apos;s session.
       </span>{' '}
       It runs on {ownerLabel}&apos;s accounts.
+      {expiresAt !== null && (
+        <>
+          {' '}
+          <span data-testid="shared-session-time-left">
+            {timeLeft === null
+              ? 'Your access has ended.'
+              : `Your access ends in ${timeLeft} (${accessClockTime(expiresAt)}).`}
+          </span>
+        </>
+      )}
     </div>
   );
 }

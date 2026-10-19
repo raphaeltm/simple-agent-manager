@@ -56,7 +56,8 @@ export function useSessionLifecycle(
   const { applySessionAccess, onSessionAccessChanged } = useSessionAccessSync(
     projectId,
     sessionId,
-    setSession
+    setSession,
+    session?.access
   );
 
   const {
