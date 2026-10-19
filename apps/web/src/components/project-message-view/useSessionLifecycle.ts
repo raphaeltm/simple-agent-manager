@@ -21,7 +21,7 @@ import { DEFAULT_ATTACHMENT_MESSAGE } from '../../pages/project-chat/useAttachme
 import { useSessionDraft } from './session-drafts';
 import type { FilePanelState } from './session-lifecycle-helpers';
 import { parsePlanContent } from './session-lifecycle-helpers';
-import { resolveSessionViewerCapabilities } from './session-viewer-access';
+import { ownedWorkspaceId, resolveSessionViewerCapabilities } from './session-viewer-access';
 import type { AgentActivityState } from './types';
 import { deriveSessionState, IDLE_TIMEOUT_MS, isWorkingActivity } from './types';
 import { useActivityVerifyTimer } from './useActivityVerifyTimer';
@@ -66,7 +66,7 @@ export function useSessionLifecycle(
     uploadError,
   } = useSessionFileUpload({ projectId, sessionId });
 
-  const { workspace, node } = useSessionInfrastructure(session?.workspaceId);
+  const { workspace, node } = useSessionInfrastructure(ownedWorkspaceId(session));
   const draft = useSessionDraft(sessionId);
   const { text: followUp, setText: setFollowUp } = draft;
   const [sendingFollowUp, setSendingFollowUp] = useState(false);

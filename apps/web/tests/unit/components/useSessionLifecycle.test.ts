@@ -170,13 +170,14 @@ function detail(
   };
 }
 
-function detailWithWorkspace() {
+function detailWithWorkspace(viewerAccess: 'owner' | 'grantee' | 'reader' = 'owner') {
   const response = detail([msg('a', 1000)], false, 'active');
   return {
     ...response,
     session: {
       ...response.session,
       workspaceId: 'ws-1',
+      viewerAccess,
     },
   };
 }
@@ -862,6 +863,23 @@ describe('useSessionLifecycle loading semantics', () => {
       expect(result.current.node).toBeNull();
       expect(mocks.getNode).not.toHaveBeenCalled();
     });
+
+    it.each(['grantee', 'reader'] as const)(
+      "does not request the owner's workspace for a %s, whom workspace routes refuse",
+      async (viewerAccess) => {
+        mocks.getChatSession.mockResolvedValue(detailWithWorkspace(viewerAccess));
+
+        const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+          wrapper,
+        });
+
+        // Liveness: the chat itself loaded for this viewer.
+        await waitFor(() => expect(result.current.session?.viewerAccess).toBe(viewerAccess));
+        expect(result.current.messages.map((m) => m.id)).toEqual(['a']);
+        expect(mocks.getWorkspace).not.toHaveBeenCalled();
+        expect(result.current.workspace).toBeNull();
+      }
+    );
 
     it('does not re-request either resource once both have landed', async () => {
       mocks.getChatSession.mockResolvedValue(detailWithWorkspace());

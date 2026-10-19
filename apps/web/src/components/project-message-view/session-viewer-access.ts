@@ -54,6 +54,17 @@ export function resolveSessionViewerCapabilities(
   };
 }
 
+/**
+ * The session's workspace id when the viewer owns the session, else null. Workspace routes
+ * answer only the workspace's owner, so a teammate's page would fetch, 404 and retry.
+ */
+export function ownedWorkspaceId(
+  session: Pick<ChatSessionResponse, 'viewerAccess' | 'isMine' | 'workspaceId'> | null | undefined
+): string | null {
+  if (resolveSessionViewerAccess(session) !== 'owner') return null;
+  return session?.workspaceId ?? null;
+}
+
 /** "Prakash" for a session someone else owns; used in banners and read-only copy. */
 export function sessionOwnerLabel(session: ChatSessionResponse | null | undefined): string {
   const owner = session?.access?.owner;
