@@ -6,6 +6,7 @@ import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import { rearmableSessionSleepBlockSql } from '../services/session-sleep-fallback-record';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { DEFAULT_SESSION_SLEEP_CLAIM_LEASE_MS } from '../services/session-snapshots';
@@ -21,9 +22,8 @@ function claimLeaseCutoff(env: Env, now: Date): string {
 }
 
 /**
- * Due sleep intents. A failed attempt always carries a retry deadline inside a bounded
- * episode, so no clause selects a failure regardless of attempts any more: the former
- * "repairable capture" clause is what let a permanently degraded session retry forever.
+ * Due sleep intents, including legacy failures and preservation blocks now owned
+ * by the guarded bounded fallback. Claims and identity checks fence each action.
  */
 export function selectSweepCandidates(
   env: Env,
@@ -72,7 +72,7 @@ export function selectSweepCandidates(
             eq(schema.workspaces.projectId, snapshots.projectId),
             eq(schema.workspaces.chatSessionId, snapshots.chatSessionId),
             or(isNull(snapshots.sleepAfter), lte(snapshots.sleepAfter, nowIso)),
-            sql`CASE WHEN json_valid(${snapshots.sleepFallbackJson}) THEN json_extract(${snapshots.sleepFallbackJson}, '$.blockedReason') END IN ('no_git_baseline', 'commit_objects_unavailable', 'recovery_point_expired', 'unsupported_runtime', 'retry_ceiling', 'teardown_unconfirmed')`
+            sql.raw(rearmableSessionSleepBlockSql('session_snapshots'))
           ),
           and(
             eq(snapshots.sleepStatus, 'terminal_failed'),

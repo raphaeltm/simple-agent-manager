@@ -8,6 +8,10 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import {
+  isRearmableSessionSleepBlock,
+  parseSessionSleepFallbackRecord,
+} from './session-sleep-fallback-record';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import {
@@ -283,6 +287,8 @@ export async function rearmPreservationBlockedSleep(
   db: Db,
   input: { snapshotId: string; recordJson: string; now: Date }
 ): Promise<boolean> {
+  if (!isRearmableSessionSleepBlock(input.recordJson)) return false;
+  const record = parseSessionSleepFallbackRecord(input.recordJson)!;
   const s = schema.sessionSnapshots;
   const result = await db
     .update(s)
@@ -294,7 +300,7 @@ export async function rearmPreservationBlockedSleep(
       sleepStoppingSince: null,
       // Preserve the spent budget: reopening must never buy another full capture cycle.
       sleepEpisodeStartedAt: sql`COALESCE(${s.sleepEpisodeStartedAt}, ${s.createdAt})`,
-      sleepEpisodeFailures: sql`MAX(COALESCE(${s.sleepEpisodeFailures}, 0), 1)`,
+      sleepEpisodeFailures: sql`MAX(COALESCE(${s.sleepEpisodeFailures}, 0), ${record.failedAttempts})`,
       updatedAt: input.now.toISOString(),
     })
     .where(

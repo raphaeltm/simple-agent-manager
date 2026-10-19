@@ -18,6 +18,27 @@ import { createSchemaTables } from '../../helpers/sqlite-d1';
 
 const NOW = '2026-09-25T11:00:00.000Z';
 const MAX_SLEEP_ATTEMPTS = 9;
+const REARMABLE_REASONS = [
+  'no_git_baseline',
+  'commit_objects_unavailable',
+  'recovery_point_expired',
+  'unsupported_runtime',
+  'retry_ceiling',
+  'teardown_unconfirmed',
+];
+function blockedRecord(blockedReason: string): string {
+  return JSON.stringify({
+    version: 1,
+    outcome: 'blocked',
+    trigger: 'attempt_budget',
+    blockedReason,
+    decidedAt: NOW,
+    episodeStartedAt: NOW,
+    failedAttempts: 9,
+    lastError: 'Snapshot failed',
+    recoveryPoint: null,
+  });
+}
 
 describe('sleep-preserved task status authority', () => {
   let sqlite: Database.Database;
@@ -41,9 +62,9 @@ describe('sleep-preserved task status authority', () => {
         `INSERT INTO session_snapshots
            (id, project_id, workspace_id, user_id, chat_session_id, runtime, status, degradation,
             manifest_r2_key, expires_at, sleeping_at, sleep_status, sleep_after, capture_generation,
-            sleep_attempts, recovery_attempts, created_at, updated_at)
+            sleep_attempts, recovery_attempts, sleep_fallback_json, created_at, updated_at)
          VALUES ('snapshot-1', 'project-1', 'ws-1', 'user-1', 'chat-1', 'vm', ?, ?, 'manifest.json',
-                 ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+                 ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
       )
       .run(
         row.status ?? 'available',
@@ -54,6 +75,7 @@ describe('sleep-preserved task status authority', () => {
         row.sleepAfter ?? null,
         row.captureGeneration ?? null,
         row.sleepAttempts ?? 0,
+        row.sleepFallbackJson ?? null,
         NOW,
         NOW
       );
@@ -62,31 +84,99 @@ describe('sleep-preserved task status authority', () => {
   describe('the given-up sleep definition', () => {
     const spent = MAX_SLEEP_ATTEMPTS;
     const rows: Array<[string, Partial<SessionSleepAttemptState>, boolean]> = [
-      ['failed with its budget spent', { sleepStatus: 'failed', sleepAttempts: spent }, true],
-      // Raising SESSION_SLEEP_MAX_ATTEMPTS re-arms such a row, and the sweep retries it.
+      [
+        'legacy failure with its budget spent',
+        { sleepStatus: 'failed', sleepAttempts: spent },
+        false,
+      ],
+      // Legacy failed rows remain sweep-owned at any attempt count.
       [
         'failed with budget left and no retry time',
         { sleepStatus: 'failed', sleepAttempts: 3 },
         false,
       ],
       ['terminally refused', { sleepStatus: 'terminal_failed' }, true],
+      ...REARMABLE_REASONS.map((reason): [string, Partial<SessionSleepAttemptState>, boolean] => [
+        `legacy blocked ${reason}`,
+        { sleepStatus: 'terminal_failed', sleepFallbackJson: blockedRecord(reason) },
+        false,
+      ]),
+      [
+        'runtime changed',
+        { sleepStatus: 'terminal_failed', sleepFallbackJson: blockedRecord('runtime_changed') },
+        true,
+      ],
+      ...[
+        [
+          'boolean version',
+          blockedRecord('no_git_baseline').replace('"version":1', '"version":true'),
+          true,
+        ],
+        [
+          'numeric version 1.0',
+          blockedRecord('no_git_baseline').replace('"version":1', '"version":1.0'),
+          false,
+        ],
+        [
+          'incomplete recovery point',
+          blockedRecord('no_git_baseline').replace('"recoveryPoint":null', '"recoveryPoint":{}'),
+          true,
+        ],
+        [
+          'complete recovery point',
+          JSON.stringify({
+            ...JSON.parse(blockedRecord('no_git_baseline')),
+            recoveryPoint: {
+              generation: 'generation-1',
+              commit: 'abc123',
+              branch: 'feature/sleep',
+              detached: false,
+              upstream: null,
+              capturedAt: NOW,
+              snapshotStatus: 'degraded',
+              degradation: 'wip-skipped',
+              workingTreeSaved: false,
+              homeSaved: true,
+            },
+          }),
+          false,
+        ],
+      ].map(([label, record, exhausted]): [string, Partial<SessionSleepAttemptState>, boolean] => [
+        String(label),
+        { sleepStatus: 'terminal_failed', sleepFallbackJson: String(record) },
+        Boolean(exhausted),
+      ]),
+      ['invalid fallback JSON', { sleepStatus: 'terminal_failed', sleepFallbackJson: '{' }, true],
+      [
+        'incomplete fallback record',
+        {
+          sleepStatus: 'terminal_failed',
+          sleepFallbackJson: '{"version":1,"outcome":"blocked","blockedReason":"no_git_baseline"}',
+        },
+        true,
+      ],
+      [
+        'unsupported record version',
+        {
+          sleepStatus: 'terminal_failed',
+          sleepFallbackJson: blockedRecord('no_git_baseline').replace('"version":1', '"version":2'),
+        },
+        true,
+      ],
       [
         'failed with a retry scheduled',
         { sleepStatus: 'failed', sleepAfter: NOW, sleepAttempts: spent },
         false,
       ],
-      // No longer exempt: a degraded or in-flight capture with no retry left has given
-      // up like any other. Inside a bounded episode such a row keeps a due retry instead
-      // (next case), so the sweep still falls back or ends it blocked.
       [
         'a degraded capture with no retry left',
         { sleepStatus: 'failed', status: 'degraded', sleepAttempts: spent },
-        true,
+        false,
       ],
       [
         'a capture in progress with no retry left',
         { sleepStatus: 'failed', captureGeneration: 'g-2', sleepAttempts: spent },
-        true,
+        false,
       ],
       [
         'a degraded capture inside its bounded episode',
@@ -112,6 +202,7 @@ describe('sleep-preserved task status authority', () => {
             sleepAfter: row.sleepAfter ?? null,
             sleepStatus: row.sleepStatus ?? null,
             sleepAttempts: row.sleepAttempts ?? 0,
+            sleepFallbackJson: row.sleepFallbackJson ?? null,
             status: row.status ?? 'available',
             captureGeneration: row.captureGeneration ?? null,
           },
@@ -203,6 +294,18 @@ describe('sleep-preserved task status authority', () => {
 
     it.each<[string, Fixture]>([
       ['a claimable running VM', {}],
+      [
+        'a legacy failure at the attempt ceiling',
+        { snapshot: { sleepStatus: 'failed', sleepAttempts: 9 } },
+      ],
+      [
+        'a legacy degraded failure above the attempt ceiling',
+        { snapshot: { sleepStatus: 'failed', status: 'degraded', sleepAttempts: 99 } },
+      ],
+      ...REARMABLE_REASONS.map((reason): [string, Fixture] => [
+        `a preservation block for ${reason}`,
+        { snapshot: { sleepStatus: 'terminal_failed', sleepFallbackJson: blockedRecord(reason) } },
+      ]),
       ['a claimable Instant container', { node: { role: 'workspace', runtime: 'cf-container' } }],
       ['a workspace in recovery', { workspaceStatus: 'recovery' }],
       ['a sleep that is scheduled', { snapshot: { sleepStatus: 'scheduled', sleepAfter: NOW } }],
@@ -246,12 +349,17 @@ describe('sleep-preserved task status authority', () => {
       ['no agent session', { agentStatus: null }],
       ['a stopped workspace', { workspaceStatus: 'stopped' }],
       ['a workspace still creating', { workspaceStatus: 'creating' }],
-      ['a sleep with its budget spent', { snapshot: { sleepStatus: 'failed', sleepAttempts: 9 } }],
-      [
-        'a degraded capture with its budget spent and no retry',
-        { snapshot: { sleepStatus: 'failed', status: 'degraded', sleepAttempts: 9 } },
-      ],
+
       ['a terminally refused sleep', { snapshot: { sleepStatus: 'terminal_failed' } }],
+      [
+        'a runtime identity change',
+        {
+          snapshot: {
+            sleepStatus: 'terminal_failed',
+            sleepFallbackJson: blockedRecord('runtime_changed'),
+          },
+        },
+      ],
     ])('releases a failed task with %s to the reapers', (_label, fixture) => {
       expect(owned(fixture)).toBe(false);
     });

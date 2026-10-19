@@ -6,7 +6,16 @@
  * An unavailable Git recovery point means a fresh transcript-based continuation,
  * never authority to keep billing indefinitely. Runtime identity changes remain blocked.
  */
-import * as v from 'valibot';
+import {
+  parseSessionSleepFallbackRecord,
+  type SessionSleepFallbackRecord,
+} from './session-sleep-fallback-record';
+export {
+  parseSessionSleepFallbackRecord,
+  serializeSessionSleepFallbackRecord,
+  type SessionSleepFallbackRecord,
+  type SessionSleepRecoveryPoint,
+} from './session-sleep-fallback-record';
 
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
@@ -106,64 +115,6 @@ export type SessionSleepBlockedReason =
   | 'unsupported_runtime'
   /** Fallback attempts kept failing until the absolute ceiling. */
   | 'retry_ceiling';
-
-const RecoveryPointSchema = v.object({
-  generation: v.string(),
-  commit: v.string(),
-  branch: v.nullable(v.string()),
-  detached: v.boolean(),
-  upstream: v.nullable(v.string()),
-  capturedAt: v.nullable(v.string()),
-  snapshotStatus: v.string(),
-  degradation: v.string(),
-  workingTreeSaved: v.boolean(),
-  homeSaved: v.boolean(),
-});
-
-const FallbackRecordSchema = v.object({
-  version: v.literal(1),
-  outcome: v.picklist(['slept', 'blocked']),
-  trigger: v.picklist(['attempt_budget', 'elapsed_budget', 'retry_ceiling']),
-  blockedReason: v.nullable(
-    v.picklist([
-      'teardown_unconfirmed',
-      'runtime_changed',
-      'no_git_baseline',
-      'commit_objects_unavailable',
-      'recovery_point_expired',
-      'unsupported_runtime',
-      'retry_ceiling',
-    ])
-  ),
-  decidedAt: v.string(),
-  episodeStartedAt: v.nullable(v.string()),
-  failedAttempts: v.number(),
-  lastError: v.nullable(v.string()),
-  recoveryPoint: v.nullable(RecoveryPointSchema),
-});
-
-export type SessionSleepRecoveryPoint = v.InferOutput<typeof RecoveryPointSchema>;
-export type SessionSleepFallbackRecord = v.InferOutput<typeof FallbackRecordSchema>;
-
-/**
- * Read a stored fallback record. A malformed value is treated as absent rather than
- * thrown: it is diagnostic metadata, and a wake or a purge must not fail on it.
- */
-export function parseSessionSleepFallbackRecord(
-  value: string | null | undefined
-): SessionSleepFallbackRecord | null {
-  if (!value) return null;
-  try {
-    const parsed = v.safeParse(FallbackRecordSchema, JSON.parse(value) as unknown);
-    return parsed.success ? parsed.output : null;
-  } catch {
-    return null;
-  }
-}
-
-export function serializeSessionSleepFallbackRecord(record: SessionSleepFallbackRecord): string {
-  return JSON.stringify(v.parse(FallbackRecordSchema, record));
-}
 
 /**
  * The record of a session that slept through the fallback on the generation it still

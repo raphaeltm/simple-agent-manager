@@ -1,3 +1,7 @@
+import {
+  isRearmableSessionSleepBlock,
+  rearmableSessionSleepBlockSql,
+} from './session-sleep-fallback-record';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS } from './session-snapshot-artifacts';
@@ -77,29 +81,20 @@ export interface SessionSleepAttemptState {
   sleepAfter: string | null;
   sleepStatus: string | null;
   sleepAttempts: number;
+  sleepFallbackJson?: string | null;
 }
 
-/**
- * The sleep lifecycle has given up on this row: not asleep, no retry scheduled,
- * and either terminally failed or failed with its retry budget
- * (`SESSION_SLEEP_MAX_ATTEMPTS`) spent. It mirrors what the sweep will no longer
- * select (`runSessionSleepSweep`): a `failed` row with no retry time is still
- * re-selected while attempts remain — raising the budget re-arms it. A degraded
- * or in-flight capture is no longer retried past the budget: the bounded
- * sleep-failure episode (`session-sleep-episode.ts`) keeps a due retry on every
- * failure until the sweep falls back to a transcript-and-Git sleep or ends the
- * episode blocked (`terminal_failed`). Every writer that ends a sleep episode
- * leaves this shape (`blockSessionSleepEpisode`, the failure writer's terminal
- * errors, `terminalizeMissingSleepSource`, `retireDeadWorkspaceSleepIntent`).
- * {@link exhaustedSessionSleepSql} is the same definition in SQL.
- */
+/** Only truly terminal intents leave the guarded sleep lifecycle. Legacy failed
+ * rows and preservation blocks are retried through its canonical idle checks. */
 export function isSessionSleepExhausted(
   row: SessionSleepAttemptState,
-  maxSleepAttempts: number
+  _maxSleepAttempts: number
 ): boolean {
   if (row.sleepingAt || row.sleepAfter !== null) return false;
-  if (row.sleepStatus === TERMINAL_SESSION_SLEEP_STATUS) return true;
-  return row.sleepStatus === 'failed' && row.sleepAttempts >= maxSleepAttempts;
+  return (
+    row.sleepStatus === TERMINAL_SESSION_SLEEP_STATUS &&
+    !isRearmableSessionSleepBlock(row.sleepFallbackJson)
+  );
 }
 
 function assertSqlAlias(alias: string): string {
@@ -121,18 +116,14 @@ export function exhaustedSessionSleepSql(
   chatSessionIdSql: string,
   maxSleepAttempts: number
 ): string {
+  assertAttemptBudget(maxSleepAttempts);
   return `EXISTS (
     SELECT 1 FROM session_snapshots exhausted_sleep
     WHERE exhausted_sleep.chat_session_id = ${chatSessionIdSql}
       AND exhausted_sleep.sleeping_at IS NULL
       AND exhausted_sleep.sleep_after IS NULL
-      AND (
-        exhausted_sleep.sleep_status = '${TERMINAL_SESSION_SLEEP_STATUS}'
-        OR (
-          exhausted_sleep.sleep_status = 'failed'
-          AND exhausted_sleep.sleep_attempts >= ${assertAttemptBudget(maxSleepAttempts)}
-        )
-      )
+      AND exhausted_sleep.sleep_status = '${TERMINAL_SESSION_SLEEP_STATUS}'
+      AND NOT ${rearmableSessionSleepBlockSql('exhausted_sleep')}
   )`;
 }
 

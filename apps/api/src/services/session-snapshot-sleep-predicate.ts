@@ -5,7 +5,6 @@ import {
   sessionRecoveryDecayCutoffIso,
   sessionRecoveryMaxAttempts,
 } from './session-snapshot-recovery-budget';
-import { sessionSleepMaxAttempts } from './sleep-preserved-task-status';
 
 export const DEFAULT_SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS = 30 * 60 * 1000;
 export const MAX_SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -48,13 +47,8 @@ export function sessionSleepInFlightMaxAgeMs(env: SleepPredicateEnv): number {
 /**
  * Restorable sleeping snapshot, or a sleep still in flight. A clean failed wake
  * may be temporarily rate-limited; preserve it through cooldown until expiry.
- * The resumer's attempt budget decays, so cooldown is not loss of recoverability. A `failed` sleep is in
- * flight while the sweep will act on it: inside a bounded sleep-failure episode every
- * failure keeps a due retry (`sleep_after`) until the sweep retries it, falls back to a
- * transcript-and-Git sleep, or ends the episode blocked (`session-sleep-episode.ts`).
- * A degraded or in-flight capture is no longer in flight on its own. Legacy rows that
- * were exhausted without a retry stay in flight below the attempt budget, mirroring the
- * sweep's re-arm clause.
+ * The resumer's attempt budget decays. Failed sleep rows remain sweep-owned
+ * regardless of capture count, within the existing finite in-flight age bound.
  */
 export function restorableOrInFlightSleepSnapshotPredicateSql(alias = 'snapshot'): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
@@ -86,13 +80,7 @@ export function restorableOrInFlightSleepSnapshotPredicateSql(alias = 'snapshot'
           AND COALESCE(${s}.sleep_claimed_at, ${s}.sleep_after, ${s}.updated_at, ${s}.created_at) > ?
         )
       )
-      AND (
-        ${s}.sleep_status IN ('scheduled', 'preparing', 'stopping')
-        OR (
-          ${s}.sleep_status = 'failed'
-          AND (${s}.sleep_after IS NOT NULL OR ${s}.sleep_attempts < ?)
-        )
-      )
+
     )
   )`;
 }
@@ -100,7 +88,7 @@ export function restorableOrInFlightSleepSnapshotPredicateSql(alias = 'snapshot'
 export function sleepLifecyclePredicateBindings(
   env: SleepPredicateEnv,
   now: Date
-): [string, number, string, string, string, number] {
+): [string, number, string, string, string] {
   const inFlightCeiling = new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString();
   return [
     now.toISOString(),
@@ -108,9 +96,6 @@ export function sleepLifecyclePredicateBindings(
     sessionRecoveryDecayCutoffIso(env, now.getTime()),
     inFlightCeiling,
     inFlightCeiling,
-    // A failed sleep is still in flight while the sweep will retry it: the sleep
-    // budget, not the wake budget (`runSessionSleepSweep`, `.claude/rules/58`).
-    sessionSleepMaxAttempts(env),
   ];
 }
 
