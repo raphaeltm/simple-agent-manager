@@ -21,7 +21,7 @@ Project members can read each other's chat sessions, but:
 
 Supersedes "no expiry". Blocks merge and production until implemented and verified.
 
-Server (`a7d72cc3e`, `06970cc5f`, `6e15b44c0`):
+Server (`5e684676e`, `1893cc74d`, `e01463ebe`):
 
 - [x] Grant requires `durationMinutes` of 5, 10, 30 or 60: route refuses a missing/other value before anything runs; the DO re-checks; no default, no unlimited option
 - [x] Server-side expiry on every control path: the active-grant read is `revoked_at IS NULL AND expires_at > now` at server time, so `requireSessionWriter`, grant management and the delivery fence all stop at `expires_at`; NULL expiry counts as expired
@@ -30,7 +30,7 @@ Server (`a7d72cc3e`, `06970cc5f`, `6e15b44c0`):
 - [x] Renew/regrant: only the owner renews an active grant (from now, new duration); any session writer can regrant an expired person; onward grants are capped at the issuer's own expiry; nobody renews their own access; a regrant first cancels the old row's queued prompts
 - [x] Tests: 5/10/30/60 boundaries (`expiresAt - 1` active, `expiresAt` not), queued delivery before and after the sweep, sweep twice, regrant/revoke races both orders, legacy NULL row, route duration validation, workers slice through routes + D1 + DO + alarm + WebSocket; 9 mutations proven red
 
-Web and docs (`43e5aceb1`, `33974f50a`, `5ad59f724`):
+Web and docs (`584806445`, `c4e786882`, `dc988f470`):
 
 - [x] Share dialog: required 5/10/30/60 choice (no default; Share disabled until chosen); request carries `durationMinutes`
 - [x] Grant rows show remaining time and expires-at (server-time corrected); **Revoke now**; owner-only **Renew** with a duration choice
@@ -70,12 +70,12 @@ Web and docs (`43e5aceb1`, `33974f50a`, `5ad59f724`):
 - Workspace-level routes (terminal token, file proxy, git, port previews, fork restore) check the workspace owner; grantees are deliberately excluded rather than widening those checks (they bypass the transcript and expose the container).
 - Attachments are stored per uploader and delivered only when the uploader owns the workspace (`prompt-attachments.ts`), so grantee attachments are refused up front.
 - Human prompt producers that become sender-fenced: `send-chat.ts` (`user_followup`) and `message-comments.ts` (`comment_directive`) only. The /sam `send_message_to_subtask` mailbox path uses `agent_mailbox` and is unaffected.
-- Staging (2026-10-19): an Instant chat is `sleeping` minutes after its last turn, and grant creation refused anything but `active`, so most chats could not be shared by the time the owner opened Share. Fixed with one allowlist, `isShareableChatSessionStatus` (`active`, `sleeping`) in `packages/shared`, used by ProjectData grant creation and the share dialog (`4c8f797d6`).
+- Staging (2026-10-19): an Instant chat is `sleeping` minutes after its last turn, and grant creation refused anything but `active`, so most chats could not be shared by the time the owner opened Share. Fixed with one allowlist, `isShareableChatSessionStatus` (`active`, `sleeping`) in `packages/shared`, used by ProjectData grant creation and the share dialog (`c116168a2`).
 - Pre-existing, not changed: the task status route (`POST /tasks/:taskId/status`, used by the rail's **Complete**) allows any member with `task:write`. Tracked in `tasks/backlog/2026-10-19-session-complete-respects-session-writer.md`.
 
 ## Implementation checklist
 
-Server (`fd1682eb2`, `aa9ad82e5`):
+Server (`6c42d5236`, `e9404dc7f`):
 
 - [x] DO migration `064-session-access-grants-and-comment-mentions`: `chat_session_access_grants` + `mentions_json` columns (additive only)
 - [x] DO module `project-data/session-access.ts`: resolve, create (idempotent, cap, parent link), revoke with cascade, cancel undelivered prompts, departed member, sender fence
@@ -99,8 +99,8 @@ Web:
 - [x] Removed WebSocket `message.send`; `session.access.changed` refetches access
 - [x] Transcript attribution line for shared-access prompts, sent comments and cancelled deliveries
 - [x] Share tool in the session rail
-- [x] Share dialog, member @mention palette, mention rendering, send-to-agent gating on every surface, reader hint (`98c76f6ae`)
-- [x] Notification types in NotificationCenter / settings, comment-thread deep link, admin Collaboration category, activity feed labels (`98c76f6ae`)
+- [x] Share dialog, member @mention palette, mention rendering, send-to-agent gating on every surface, reader hint (`e38103d00`)
+- [x] Notification types in NotificationCenter / settings, comment-thread deep link, admin Collaboration category, activity feed labels (`e38103d00`)
 - [x] Web unit tests + Playwright visual audit at 375px and 1280px (`shared-session-viewer-audit.spec.ts`, `shared-session-collaboration-audit.spec.ts`; full web suite 4168/4168)
 - [x] UI review fixes: Share hint no longer invites readers to share; comment surfaces name the message ("The agent's reply · 5m ago", "Olivia's message") instead of its id, one describer for the rail and the drawer (the drawer no longer calls someone else's message "your message"); mention palette `aria-controls` target while loading; share intro scoped to what a grantee can do; reader button reads "Start your own chat"
 
@@ -113,10 +113,10 @@ Tests:
 - [x] `requireSessionWriter` unit tests (`tests/unit/services/session-access-writer.test.ts`)
 - [x] G5 (`tests/unit/routes/chat-start.test.ts`, `tests/unit/services/inherited-credential-attribution.test.ts`, Instant `/tasks/submit` in `tests/unit/routes/task-submit-capacity-pools.test.ts`, proven red against the old wiring)
 - [x] MCP author roles (`tests/unit/routes/mcp-message-comments.test.ts`)
-- [x] Session sleep/resume act on the owner's workspace for a grantee, real SQLite with a decoy workspace (`tests/unit/routes/chat-session-controls.test.ts`, `0395f6e79`, proven red)
-- [x] `sendChat` grantee branches: speaker line only in the agent's copy, both refusals before any side effect, owner controls (`tests/unit/services/send-chat-shared-session.test.ts`, `303f9ef77`, proven red)
+- [x] Session sleep/resume act on the owner's workspace for a grantee, real SQLite with a decoy workspace (`tests/unit/routes/chat-session-controls.test.ts`, `7a99077a5`, proven red)
+- [x] `sendChat` grantee branches: speaker line only in the agent's copy, both refusals before any side effect, owner controls (`tests/unit/services/send-chat-shared-session.test.ts`, `15da201a1`, proven red)
 - [x] Sharing a sleeping chat works; an ended chat cannot gain people but can still lose them (`session-access.test.ts`, `project-message-view.test.tsx` "Share follows the chat state", `shareable-session-status.test.ts`; proven red both ways)
-- [x] Mentions against real SQLite, recipient planning, settings, grant route mapping, `session.access.changed` broadcast scoping and owner offboarding through the real routes (`c50ef14c6`, each guard proven red)
+- [x] Mentions against real SQLite, recipient planning, settings, grant route mapping, `session.access.changed` broadcast scoping and owner offboarding through the real routes (`625a46f4a`, each guard proven red)
 
 Docs:
 
