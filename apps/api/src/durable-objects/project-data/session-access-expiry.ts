@@ -48,15 +48,25 @@ export function handleExpiredGrants(
     [...new Set(grants.map((grant) => grant.granteeUserId))],
     SENDER_ACCESS_EXPIRED_REASON
   );
+  markExpiryHandled(sql, grants, now);
+  return cancelled;
+}
+
+/**
+ * Take expired grants out of the sweep's candidate set. Only a grant that has expired by `now`
+ * can be marked, so a caller that passed an active one cannot hide its later expiry.
+ */
+function markExpiryHandled(sql: SqlStorage, grants: SessionAccessGrantRecord[], now: number) {
   for (const grant of grants) {
     sql.exec(
       `UPDATE chat_session_access_grants SET expiry_handled_at = ?
-        WHERE id = ? AND revoked_at IS NULL AND expiry_handled_at IS NULL`,
+        WHERE id = ? AND revoked_at IS NULL AND expiry_handled_at IS NULL
+          AND (expires_at IS NULL OR expires_at <= ?)`,
       now,
-      grant.id
+      grant.id,
+      now
     );
   }
-  return cancelled;
 }
 
 /** The alarm sweep: handle every grant that expired by `now`, at most `limit` per pass. */
@@ -88,8 +98,28 @@ export function processExpiredSessionAccessGrants(
   }
   const results: ExpiredSessionAccess[] = [];
   for (const [sessionId, grants] of bySession) {
-    const cancelledDeliveryIds = handleExpiredGrants(sql, sessionId, grants, now);
-    results.push({ sessionId, expiredGrants: grants, cancelledDeliveryIds });
+    try {
+      const cancelledDeliveryIds = handleExpiredGrants(sql, sessionId, grants, now);
+      results.push({ sessionId, expiredGrants: grants, cancelledDeliveryIds });
+    } catch (err) {
+      // One session must not hold back the rest of the batch (.claude/rules/53). Its grants
+      // still leave the candidate set: access already ended at `expires_at`, and the delivery
+      // fence refuses their queued prompts, so nothing is allowed that should not be.
+      log.error('session_access.expired_session_failed', {
+        sessionId,
+        grantIds: grants.map((grant) => grant.id),
+        error: err instanceof Error ? err.message : String(err),
+      });
+      try {
+        markExpiryHandled(sql, grants, now);
+      } catch (markErr) {
+        log.error('session_access.expired_session_mark_failed', {
+          sessionId,
+          error: markErr instanceof Error ? markErr.message : String(markErr),
+        });
+      }
+      results.push({ sessionId, expiredGrants: grants, cancelledDeliveryIds: [] });
+    }
   }
   return results;
 }

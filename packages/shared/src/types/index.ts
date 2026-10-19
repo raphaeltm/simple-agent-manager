@@ -476,10 +476,10 @@ export type {
   CreateSessionAccessGrantResponse,
   RevokeSessionAccessGrantResponse,
   SessionAccessChangedEvent,
+  SessionAccessDurationMinutes,
   SessionAccessGrant,
   SessionAccessPerson,
   SessionAccessRevokeReason,
-  SessionAccessDurationMinutes,
   SessionAccessSummary,
   SessionViewerAccess,
 } from './session-access';

@@ -1,9 +1,11 @@
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { registerChatSessionAccessRoutes } from '../../../src/routes/chat-session-access';
+import { notifySessionAccessChange } from '../../../src/services/collaboration-notifications';
 
 /**
  * Route-level coverage for "Share chat access" (idea 01M59MYE4GY91BWTE8TZF1ZB5D). Mocks sit at
@@ -127,6 +129,39 @@ const validGrantBody = {
   durationMinutes: 30,
   acknowledgeSharedCredentials: true,
 };
+
+const NOW = 1_800_000_000_000;
+
+function grantRecord(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'grant-1',
+    sessionId: 'session-1',
+    granteeUserId: 'grantee-1',
+    grantedByUserId: 'owner-1',
+    parentGrantId: null,
+    createdAt: NOW - 60_000,
+    expiresAt: NOW + 30 * 60_000,
+    durationMinutes: 30,
+    ...overrides,
+  };
+}
+
+/** The users lookup that names people in an access summary; nobody is found, ids are kept. */
+async function withUsersLookup<T>(run: () => Promise<T>): Promise<T> {
+  const mocked = vi.mocked(drizzle);
+  const previous = mocked.getMockImplementation();
+  mocked.mockImplementation(
+    () =>
+      ({
+        select: () => ({ from: () => ({ where: async () => [] }) }),
+      }) as unknown as ReturnType<typeof drizzle>
+  );
+  try {
+    return await run();
+  } finally {
+    if (previous) mocked.mockImplementation(previous);
+  }
+}
 
 describe('chat session access routes', () => {
   beforeEach(() => {
@@ -264,6 +299,39 @@ describe('chat session access routes', () => {
       expect(stub.createSessionAccessGrant).not.toHaveBeenCalled();
     });
 
+    it.each([
+      ['created', 'granted', 201],
+      ['renewed', 'renewed', 200],
+    ] as const)(
+      'tells the grantee when %s access ends (%s notification)',
+      async (status, change, httpStatus) => {
+        const record = grantRecord();
+        const stub = makeProjectDataStub({
+          createSessionAccessGrant: vi.fn().mockResolvedValue({
+            result: { status, grant: record },
+            grants: [record],
+          }),
+        });
+
+        const response = await withUsersLookup(() => postGrant(makeEnv(stub), validGrantBody));
+
+        expect(response.status).toBe(httpStatus);
+        await expect(response.json()).resolves.toMatchObject({
+          created: status === 'created',
+          renewed: status === 'renewed',
+          grant: { id: 'grant-1', expiresAt: record.expiresAt, durationMinutes: 30 },
+        });
+        expect(vi.mocked(notifySessionAccessChange)).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            change,
+            affectedUserIds: ['grantee-1'],
+            expiresAt: record.expiresAt,
+          })
+        );
+      }
+    );
+
     it.each([5, 10, 30, 60])('passes a %i-minute choice to ProjectData', async (minutes) => {
       const stub = makeProjectDataStub({
         createSessionAccessGrant: vi.fn().mockResolvedValue({
@@ -281,6 +349,36 @@ describe('chat session access routes', () => {
   });
 
   describe('GET /:sessionId/access', () => {
+    it('drops a grant without an end time and keeps the rest, with the server time', async () => {
+      const stub = makeProjectDataStub({
+        getSessionWithAccessGrants: vi.fn().mockResolvedValue({
+          session: { id: 'session-1', status: 'active', topic: 'Test session' },
+          access: makeOwnerAccess(),
+          grants: [
+            grantRecord({ id: 'legacy', granteeUserId: 'grantee-2', expiresAt: null }),
+            grantRecord(),
+          ],
+        }),
+      });
+      const before = Date.now();
+
+      const response = await withUsersLookup(() => getAccess(makeEnv(stub)));
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        grants: Array<{ id: string; expiresAt: number; durationMinutes: number }>;
+        serverTime: number;
+      };
+      expect(body.grants).toEqual([
+        expect.objectContaining({
+          id: 'grant-1',
+          expiresAt: NOW + 30 * 60_000,
+          durationMinutes: 30,
+        }),
+      ]);
+      expect(body.serverTime).toBeGreaterThanOrEqual(before);
+    });
+
     it('returns 404 when the session does not exist in this project', async () => {
       const stub = makeProjectDataStub({
         getSessionWithAccessGrants: vi.fn().mockResolvedValue({

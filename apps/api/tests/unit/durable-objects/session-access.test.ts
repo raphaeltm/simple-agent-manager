@@ -11,6 +11,7 @@ import {
   nudgePromptDeliveriesForTarget,
 } from '../../../src/durable-objects/project-data/prompt-delivery';
 import { runPromptDeliveryClaim } from '../../../src/durable-objects/project-data/prompt-delivery-runner';
+import { handleExpiredGrants } from '../../../src/durable-objects/project-data/session-access-expiry';
 import {
   computeSessionAccessExpiryAlarmTime,
   createSessionAccessGrant,
@@ -529,6 +530,101 @@ describe('ProjectData shared session access', () => {
         { at: START + 12 * MINUTE, sessionIds: ['chat-1'], grantees: ['grantee-2'] },
         { at: START + 30 * MINUTE, sessionIds: ['chat-2'], grantees: ['grantee-3'] },
       ]);
+    });
+
+    it('skips a grant row it cannot read, marks it handled, and still handles the rest', () => {
+      share('grantee-1', 'owner-1', 'chat-1', 5);
+      // `created_at` that is not a number fails the row schema.
+      sql.exec(
+        `INSERT INTO chat_session_access_grants
+           (id, session_id, grantee_user_id, granted_by_user_id, parent_grant_id, created_at,
+            expires_at, duration_minutes)
+         VALUES ('broken-grant', 'chat-1', 'grantee-2', 'owner-1', NULL, 'not-a-time', ?, 5)`,
+        START + MINUTE
+      );
+      queuePrompt('good-prompt', 'grantee-1');
+
+      const swept = processExpiredSessionAccessGrants(sql, START + 5 * MINUTE);
+
+      expect(swept.map((entry) => entry.expiredGrants.map((g) => g.granteeUserId))).toEqual([
+        ['grantee-1'],
+      ]);
+      expect(swept[0]?.cancelledDeliveryIds).toEqual(['good-prompt']);
+      const broken = sql
+        .exec(`SELECT expiry_handled_at FROM chat_session_access_grants WHERE id = 'broken-grant'`)
+        .toArray()[0];
+      expect(broken?.expiry_handled_at).toBe(START + 5 * MINUTE);
+      // Both left the candidate set.
+      expect(processExpiredSessionAccessGrants(sql, START + 10 * MINUTE)).toEqual([]);
+      expect(computeSessionAccessExpiryAlarmTime(sql)).toBeNull();
+    });
+
+    it('does not let one session whose cleanup fails hold back the others', () => {
+      seedSession('chat-2', 'owner-1');
+      share('grantee-1', 'owner-1', 'chat-1', 5);
+      share('grantee-2', 'owner-1', 'chat-2', 5);
+      queuePrompt('chat-1-prompt', 'grantee-1');
+      // Cancelling chat-2's queued prompts fails (fault injection at the SQL boundary).
+      const faulty = Object.create(sql) as SqlStorage;
+      faulty.exec = ((query: string, ...binds: unknown[]) => {
+        if (query.includes('UPDATE session_inbox') && binds.includes('chat-2')) {
+          throw new Error('injected failure');
+        }
+        return sql.exec(query, ...binds);
+      }) as SqlStorage['exec'];
+
+      vi.setSystemTime(START + 5 * MINUTE);
+      const swept = processExpiredSessionAccessGrants(faulty, START + 5 * MINUTE);
+
+      // Both expire at the same instant, so the order between sessions is not defined.
+      expect(
+        swept
+          .map((entry) => [entry.sessionId, entry.cancelledDeliveryIds])
+          .sort(([a], [b]) => String(a).localeCompare(String(b)))
+      ).toEqual([
+        ['chat-1', ['chat-1-prompt']],
+        ['chat-2', []],
+      ]);
+      expect(mailbox.getMessage(sql, 'chat-1-prompt')?.terminalReason).toBe(
+        SENDER_ACCESS_EXPIRED_REASON
+      );
+      // The failed session's grant still leaves the candidate set, so it cannot re-arm the
+      // alarm forever; its access ended at expires_at regardless.
+      expect(processExpiredSessionAccessGrants(sql, START + 10 * MINUTE)).toEqual([]);
+      expect(computeSessionAccessExpiryAlarmTime(sql)).toBeNull();
+      expect(resolveSessionAccess(sql, 'chat-2', 'grantee-2').role).toBe('none');
+    });
+
+    it('never marks a grant that has not expired as handled', () => {
+      share('grantee-1', 'owner-1', 'chat-1', 30);
+      const [active] = listActiveSessionAccessGrants(sql, 'chat-1');
+
+      handleExpiredGrants(sql, 'chat-1', [active!], START);
+
+      // Its expiry is still ahead of the sweep, which handles it when it comes.
+      expect(computeSessionAccessExpiryAlarmTime(sql)).toBe(START + 30 * MINUTE);
+      expect(processExpiredSessionAccessGrants(sql, START + 30 * MINUTE)).toHaveLength(1);
+    });
+
+    it('a regrant after expiry unlinks what the old grant passed on, so a later revoke leaves it alone', () => {
+      share('grantee-1', 'owner-1', 'chat-1', 5);
+      share('grantee-2', 'grantee-1', 'chat-1', 5);
+      vi.setSystemTime(START + 6 * MINUTE);
+      expect(share('grantee-1', 'owner-1', 'chat-1', 10).status).toBe('created');
+
+      revokeSessionAccessGrant(sql, {
+        sessionId: 'chat-1',
+        granteeUserId: 'grantee-1',
+        actorUserId: 'owner-1',
+      });
+
+      expect(grantRow('grantee-1')).toMatchObject({ revoke_reason: 'revoked' });
+      // grantee-2's grant ended with the old one; it is not recorded as cascaded from the new one.
+      expect(grantRow('grantee-2')).toMatchObject({
+        parent_grant_id: null,
+        revoked_at: null,
+        revoke_reason: null,
+      });
     });
 
     it('a regrant after expiry starts fresh and does not revive prompts from the old grant', () => {

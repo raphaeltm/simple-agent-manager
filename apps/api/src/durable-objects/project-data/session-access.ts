@@ -144,6 +144,16 @@ export function createSessionAccessGrant(
     // An expired grant still holds this person's row. Finish its cleanup first, so prompts
     // queued during the old grant are cancelled rather than revived, then start the new grant.
     handleExpiredGrants(sql, input.sessionId, [current], now);
+    // Anything this person passed on during the old grant was capped at its end, so it has
+    // expired too. Unlink it, so revoking the new grant later does not record a cascade against
+    // grants that ended long before.
+    sql.exec(
+      `UPDATE chat_session_access_grants SET parent_grant_id = NULL
+        WHERE parent_grant_id = ? AND revoked_at IS NULL
+          AND (expires_at IS NULL OR expires_at <= ?)`,
+      current.id,
+      now
+    );
     sql.exec(
       `UPDATE chat_session_access_grants
           SET granted_by_user_id = ?, parent_grant_id = ?, created_at = ?, expires_at = ?,
