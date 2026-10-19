@@ -84,7 +84,6 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
 
   const {
     connectionState,
-    wsRef,
     agentActivity,
     setAgentActivity,
     hydrateActivity,
@@ -221,23 +220,11 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
         },
       ]);
 
-      // Persist via DO WebSocket
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'message.send',
-            sessionId,
-            content: trimmed,
-            role: 'user',
-          })
-        );
-      }
-
-      // Forward prompt to the running agent via REST API
+      // Deliver through the REST API, which persists the attributed transcript row; the
+      // project socket is read-only.
       try {
         await sendFollowUpPrompt(projectId, sessionId, trimmed);
       } catch {
-        // Agent may be offline — message is still persisted via DO.
         // Reset to idle so the input isn't stuck in "Agent is working..." forever.
         setAgentActivity('idle');
       }
@@ -252,7 +239,6 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     sessionState,
     projectId,
     sessionId,
-    wsRef,
     clearCancelError,
     setAgentActivity,
   ]);

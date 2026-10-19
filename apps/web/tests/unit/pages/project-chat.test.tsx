@@ -42,7 +42,7 @@ const mocks = vi.hoisted(() => ({
   submitTask: vi.fn(),
   startInstantChatSession: vi.fn(),
   stopChatSession: vi.fn(),
-  sleepWorkspace: vi.fn(),
+  sleepChatSession: vi.fn(),
   getProjectTask: vi.fn(),
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
   closeConversationTask: vi.fn(),
@@ -79,7 +79,8 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   submitTask: mocks.submitTask,
   startInstantChatSession: mocks.startInstantChatSession,
   stopChatSession: mocks.stopChatSession,
-  sleepWorkspace: mocks.sleepWorkspace,
+  // Session-scoped sleep, so a grantee can sleep a chat shared with them.
+  sleepChatSession: mocks.sleepChatSession,
   getProjectTask: mocks.getProjectTask,
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
   closeConversationTask: mocks.closeConversationTask,
@@ -1408,7 +1409,7 @@ describe('ProjectChat close conversation button', () => {
     });
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.availableCommands = [];
-    mocks.sleepWorkspace.mockResolvedValue({
+    mocks.sleepChatSession.mockResolvedValue({
       status: 'sleeping',
       workspaceId: 'ws-idle',
       chatSessionId: 'session-idle',
@@ -1439,14 +1440,14 @@ describe('ProjectChat close conversation button', () => {
     });
 
     await waitFor(() => {
-      expect(mocks.sleepWorkspace).toHaveBeenCalledWith('ws-idle');
+      expect(mocks.sleepChatSession).toHaveBeenCalledWith(PROJECT_ID, 'session-idle');
     });
     expect(mocks.closeConversationTask).not.toHaveBeenCalled();
     expect(mocks.stopChatSession).not.toHaveBeenCalled();
   });
 
   it('passes sleep failures to ProjectMessageView without archiving', async () => {
-    mocks.sleepWorkspace.mockRejectedValueOnce(new Error('Snapshot is not ready yet'));
+    mocks.sleepChatSession.mockRejectedValueOnce(new Error('Snapshot is not ready yet'));
     mocks.listChatSessions.mockResolvedValue({
       sessions: [IDLE_SESSION_WITH_TASK],
       total: 1,
@@ -1490,7 +1491,7 @@ describe('ProjectChat close conversation button', () => {
         'This session has no workspace to sleep.'
       );
     });
-    expect(mocks.sleepWorkspace).not.toHaveBeenCalled();
+    expect(mocks.sleepChatSession).not.toHaveBeenCalled();
     expect(mocks.closeConversationTask).not.toHaveBeenCalled();
     expect(mocks.stopChatSession).not.toHaveBeenCalled();
   });
@@ -1519,7 +1520,7 @@ describe('ProjectChat close conversation button', () => {
     await waitFor(() => {
       expect(mocks.closeConversationTask).toHaveBeenCalledWith(PROJECT_ID, 'task-conv-1');
     });
-    expect(mocks.sleepWorkspace).not.toHaveBeenCalled();
+    expect(mocks.sleepChatSession).not.toHaveBeenCalled();
     expect(mocks.stopChatSession).not.toHaveBeenCalled();
   });
 
@@ -1544,7 +1545,7 @@ describe('ProjectChat close conversation button', () => {
     await waitFor(() => {
       expect(mocks.stopChatSession).toHaveBeenCalledWith(PROJECT_ID, 'session-instant-idle');
     });
-    expect(mocks.sleepWorkspace).not.toHaveBeenCalled();
+    expect(mocks.sleepChatSession).not.toHaveBeenCalled();
     expect(mocks.closeConversationTask).not.toHaveBeenCalled();
   });
 

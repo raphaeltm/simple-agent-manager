@@ -1,11 +1,10 @@
-import { useQuery } from '@tanstack/react-query';
 import { CalendarClock, ExternalLink, X } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router';
 
+import { useProjectMembers } from '../../hooks/useProjectMembers';
 import { useQueryScope } from '../../hooks/useQueryScope';
-import { getProjectMembers } from '../../lib/api';
 import { SchedulesPanel } from '../project-events/SchedulesPanel';
 import { StandingWatchesPanel } from '../project-events/StandingWatchesPanel';
 import { SubscriptionsPanel } from '../project-events/SubscriptionsPanel';
@@ -31,22 +30,20 @@ export function SessionEventsDrawer({ projectId, sessionId, onClose }: SessionEv
   const [activeTab, setActiveTab] = useState<EventsTab>('subscriptions');
 
   const scope = useQueryScope();
-  const members = useQuery({
-    queryKey: ['auth', scope, 'events', projectId, 'members'],
-    queryFn: () => getProjectMembers(projectId),
-    enabled: Boolean(scope),
-  });
-  const canWrite = members.data?.members.some(
+  // Every member row, not just active ones: a schedule's creator keeps their label after leaving.
+  const { allMembers } = useProjectMembers(projectId);
+  const canWrite = allMembers.some(
     (item) =>
-      item.userId === scope && (item.role === 'owner' || (item.status === 'active' && item.role !== 'viewer'))
-  ) ?? false;
+      item.userId === scope &&
+      (item.role === 'owner' || (item.status === 'active' && item.role !== 'viewer'))
+  );
 
   const creatorName = useCallback(
     (id: string) => {
-      const creator = members.data?.members.find((item) => item.userId === id);
-      return creator?.user?.name || (id === scope ? 'You' : id);
+      const creator = allMembers.find((item) => item.userId === id);
+      return creator?.name || (id === scope ? 'You' : id);
     },
-    [members.data?.members, scope]
+    [allMembers, scope]
   );
 
   const fullPageUrl = `/projects/${projectId}/events?sessionId=${encodeURIComponent(sessionId)}`;

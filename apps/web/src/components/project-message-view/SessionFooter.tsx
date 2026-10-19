@@ -9,13 +9,18 @@ import { ArchivedForkComposer } from './ArchivedForkComposer';
 import { CompletionDock } from './CompletionDock';
 import { FollowUpInput, ReadOnlyFollowUp } from './FollowUpInput';
 import { currentPlanToPlanItem, ElapsedTime } from './session-view-utils';
+import {
+  sessionOwnerLabel as ownerLabelFor,
+  type SessionViewerCapabilities,
+} from './session-viewer-access';
 import { StaleActivityNotice } from './StaleActivityNotice';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
 
 interface SessionFooterProps {
   projectId: string;
   lc: UseSessionLifecycleResult;
-  canWriteSession: boolean;
+  /** What this viewer may do here; mirrors the server's session-writer check. */
+  viewer: SessionViewerCapabilities;
   /** Mobile selected-text comment composer, overlaid above the chat input. */
   selectedTextComposer: ReactNode;
   onSleepConversation?: () => void;
@@ -37,7 +42,7 @@ interface SessionFooterProps {
 export function SessionFooter({
   projectId,
   lc,
-  canWriteSession,
+  viewer,
   selectedTextComposer,
   onSleepConversation,
   sleepingConversation,
@@ -62,10 +67,8 @@ export function SessionFooter({
       lc.currentPlan && lc.currentPlan.length > 0 ? currentPlanToPlanItem(lc.currentPlan) : null,
     [lc.currentPlan]
   );
-  const sessionOwnerLabel =
-    lc.session?.createdBy?.name?.trim() ||
-    lc.session?.createdBy?.email?.split('@')[0] ||
-    'the creator';
+  const canWriteSession = viewer.canDriveSession;
+  const sessionOwnerLabel = ownerLabelFor(lc.session);
   const isConversationLifecycleSession =
     lc.taskEmbed?.taskMode === 'conversation' ||
     (!lc.taskEmbed?.id && (lc.session?.status === 'active' || lc.session?.status === 'sleeping'));
@@ -124,6 +127,7 @@ export function SessionFooter({
       {selectedTextComposer}
 
       {/* Input area */}
+      {isActive && viewer.isGrantee && <SharedSessionNotice ownerLabel={sessionOwnerLabel} />}
       {isActive && canWriteSession && (
         <FollowUpInput
           value={lc.followUp}
@@ -131,9 +135,15 @@ export function SessionFooter({
           onSend={() => {
             void lc.handleSendFollowUp();
           }}
-          onUploadFiles={(files) => {
-            void lc.handleUploadFiles(files);
-          }}
+          // Attachments are stored under the uploader and only delivered into the
+          // uploader's own workspace, so a shared session cannot take them yet.
+          onUploadFiles={
+            viewer.isGrantee
+              ? undefined
+              : (files) => {
+                  void lc.handleUploadFiles(files);
+                }
+          }
           sending={lc.sendingFollowUp}
           uploading={lc.uploading}
           attachments={lc.attachments}
@@ -161,7 +171,7 @@ export function SessionFooter({
       {isActive && !canWriteSession && (
         <ReadOnlyFollowUp ownerLabel={sessionOwnerLabel} onNewChat={onNewChat} />
       )}
-      {lc.sessionState === 'terminated' && lc.session?.status === 'stopped' && canWriteSession && (
+      {lc.sessionState === 'terminated' && lc.session?.status === 'stopped' && viewer.canFork && (
         <ArchivedForkComposer
           key={lc.session.id}
           workspaceExpired={isExpiredTask(lc.taskEmbed)}
@@ -171,8 +181,8 @@ export function SessionFooter({
           agentProfiles={agentProfiles}
         />
       )}
-      {lc.sessionState === 'terminated' && !canWriteSession && (
-        <ReadOnlyFollowUp ownerLabel={sessionOwnerLabel} onNewChat={onNewChat} />
+      {lc.sessionState === 'terminated' && !viewer.canFork && (
+        <ReadOnlyFollowUp ownerLabel={sessionOwnerLabel} onNewChat={onNewChat} ended />
       )}
       {lc.sessionState === 'terminated' && lc.session?.status !== 'stopped' && (
         <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface text-center">
@@ -181,7 +191,7 @@ export function SessionFooter({
               ? 'The saved workspace has expired. Your transcript is still available.'
               : 'This session has ended.'}
           </p>
-          {canWriteSession && isExpiredTask(lc.taskEmbed) && onFork && (
+          {viewer.canFork && isExpiredTask(lc.taskEmbed) && onFork && (
             <Button onClick={onFork} size="lg" className="mt-2">
               Fork conversation
             </Button>
@@ -189,5 +199,20 @@ export function SessionFooter({
         </div>
       )}
     </>
+  );
+}
+
+/** Above a grantee's composer: whose session this is and whose accounts it runs on. */
+function SharedSessionNotice({ ownerLabel }: Readonly<{ ownerLabel: string }>) {
+  return (
+    <div
+      className="shrink-0 border-t border-border-default bg-surface px-4 py-2 text-xs text-fg-muted"
+      data-testid="shared-session-notice"
+    >
+      <span className="font-medium text-fg-primary">
+        You&apos;re chatting in {ownerLabel}&apos;s session.
+      </span>{' '}
+      It runs on {ownerLabel}&apos;s accounts.
+    </div>
   );
 }

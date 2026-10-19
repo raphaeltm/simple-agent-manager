@@ -153,7 +153,7 @@ describe('SessionCommentsDrawer', () => {
     fireEvent.submit(replyForm);
 
     await waitFor(() => {
-      expect(onReply).toHaveBeenCalledWith('thread-1', 'Re-check after the patch.', 'note');
+      expect(onReply).toHaveBeenCalledWith('thread-1', 'Re-check after the patch.', 'note', []);
     });
 
     await waitFor(() => {

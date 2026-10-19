@@ -10,7 +10,7 @@
  *     switch to a value the server rejected.
  *   - A load failure surfaces an accessible alert with a working Retry control.
  */
-import type { NotificationPreference } from '@simple-agent-manager/shared';
+import { NOTIFICATION_TYPES, type NotificationPreference } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,7 +25,6 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getNotificationPreferences: mocks.getNotificationPreferences,
   updateNotificationPreference: mocks.updateNotificationPreference,
 }));
-
 
 // `useQueryScope()` reads the authenticated identity, and every migrated query
 // is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
@@ -82,8 +81,12 @@ describe('SettingsNotifications', () => {
       expect(screen.getByText('Task Complete')).toBeInTheDocument();
     });
     const switches = screen.getAllByRole('switch');
-    expect(switches).toHaveLength(7);
+    expect(switches).toHaveLength(NOTIFICATION_TYPES.length);
+    expect(switches).toHaveLength(10);
     expect(screen.getByText('Operational Failure')).toBeInTheDocument();
+    expect(screen.getByText('Mentions')).toBeInTheDocument();
+    expect(screen.getByText('Comments on your sessions')).toBeInTheDocument();
+    expect(screen.getByText('Shared sessions')).toBeInTheDocument();
     for (const sw of switches) {
       expect(sw).toHaveAttribute('aria-checked', 'true');
     }

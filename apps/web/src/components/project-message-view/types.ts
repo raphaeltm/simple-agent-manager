@@ -7,6 +7,7 @@ import { isExpiredTask } from '@simple-agent-manager/shared';
 
 import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
+import { userMessageAttribution } from './message-attribution';
 import { DOCUMENT_CARD_TOOLS, normalizeToolName } from './tool-cards/document-card-data';
 
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
@@ -217,12 +218,14 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
   const toolCallMap = new Map<string, number>(); // toolCallId → index in acc
   const items = dedupedMsgs.reduce<ConversationItem[]>((acc, msg) => {
     if (msg.role === 'user') {
+      const attribution = userMessageAttribution(msg);
       acc.push({
         kind: 'user_message',
         id: msg.id,
         text: msg.content,
         timestamp: msg.createdAt,
         origin: msg.origin === 'system' ? 'system' : 'user',
+        ...(attribution ? { attribution } : {}),
       });
     } else if (msg.role === 'assistant') {
       // Merge consecutive assistant chunks into one item

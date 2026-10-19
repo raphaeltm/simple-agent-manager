@@ -64,9 +64,9 @@ function indexUserMessages(messages: Iterable<ChatMessageResponse>) {
       message.role === 'user' ? optimisticIdsByContent.get(message.content)?.shift() : undefined,
     /**
      * Whether a confirmed user message with the same content is already loaded.
-     * This catches dual delivery: the DO WebSocket persists the user message
-     * (message.send → message.new), then the VM agent batch-persists the same
-     * content under a new ID (ExtractMessages → messages.batch).
+     * This catches dual delivery: durable prompt acceptance persists the user
+     * message (message.new), then the VM agent batch-persists the same content
+     * under a new ID (ExtractMessages → messages.batch).
      */
     duplicatesConfirmed: (message: ChatMessageResponse): boolean =>
       message.role === 'user' && confirmedContents.has(message.content),

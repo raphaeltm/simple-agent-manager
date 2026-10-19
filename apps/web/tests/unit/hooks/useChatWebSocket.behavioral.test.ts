@@ -202,6 +202,28 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onSessionStopped).toHaveBeenCalledOnce();
   });
 
+  it('asks the viewer to re-check access when this session is shared or unshared', () => {
+    const onSessionAccessChanged = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onSessionAccessChanged }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.access.changed',
+        payload: { sessionId: 'other-session', reason: 'revoked' },
+      });
+    });
+    expect(onSessionAccessChanged).not.toHaveBeenCalled();
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.access.changed',
+        payload: { sessionId: defaultProps.sessionId, reason: 'revoked' },
+      });
+    });
+    expect(onSessionAccessChanged).toHaveBeenCalledTimes(1);
+  });
+
   it('forwards all supported session.activity states', () => {
     const onAgentActivity = vi.fn();
     renderHook(() => useChatWebSocket({ ...defaultProps, onAgentActivity }));

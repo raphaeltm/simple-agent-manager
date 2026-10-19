@@ -40,7 +40,7 @@ import {
   linkSessionIdea,
   listChatSessions,
   listProjectTasks,
-  sleepWorkspace,
+  sleepChatSession,
   startInstantChatSession,
   stopChatSession,
   submitTask,
@@ -810,8 +810,7 @@ export function useProjectChatState() {
   const handleSleepConversation = useCallback(async () => {
     const selectedSession = sessions.find((s) => s.id === sessionId);
     if (!selectedSession) return;
-    const workspaceId = selectedSession.workspaceId;
-    if (!workspaceId) {
+    if (!selectedSession.workspaceId) {
       setSleepError('This session has no workspace to sleep.');
       return;
     }
@@ -819,7 +818,8 @@ export function useProjectChatState() {
     setSleepingConversation(true);
     setSleepError(null);
     try {
-      await sleepWorkspace(workspaceId);
+      // Session-scoped: works for the owner and for anyone they shared the session with.
+      await sleepChatSession(projectId, selectedSession.id);
       if (queryScope) {
         await queryClient.invalidateQueries({
           queryKey: chatQueryKeys.sessionMessages(queryScope, projectId, selectedSession.id),

@@ -48,7 +48,7 @@ interface UseWorkspaceChatSocketOptions {
 
 export interface UseWorkspaceChatSocketResult extends Pick<
   ReturnType<typeof useChatWebSocket>,
-  'connectionState' | 'wsRef'
+  'connectionState'
 > {
   agentActivity: AgentActivityState;
   /** The composer sets `prompting` on send and `idle` when the agent is offline. */
@@ -94,7 +94,7 @@ export function useWorkspaceChatSocket({
   );
 
   // ── DO WebSocket for real-time message updates (SOLE message source) ──
-  const { connectionState, wsRef } = useChatWebSocket({
+  const { connectionState } = useChatWebSocket({
     projectId,
     sessionId,
     enabled: sessionStatus === 'active',
@@ -163,7 +163,6 @@ export function useWorkspaceChatSocket({
 
   return {
     connectionState,
-    wsRef,
     agentActivity,
     setAgentActivity,
     hydrateActivity,

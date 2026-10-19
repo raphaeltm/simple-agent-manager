@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiClientError } from '../../src/lib/api/client';
 const mocks = vi.hoisted(() => ({ fetchAdminSettings: vi.fn(), patchAdminSettings: vi.fn() }));
-vi.mock('../../src/lib/api/admin-settings', () => mocks);
+vi.mock('../../src/lib/api/admin-settings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/lib/api/admin-settings')>()),
+  ...mocks,
+}));
 import { AdminSettings } from '../../src/pages/AdminSettings';
 const field = (name: string, overrides = {}) => ({
   name,
@@ -167,6 +170,32 @@ describe('AdminSettings', () => {
       ).toBeEnabled()
     );
     expect(secret).toHaveValue('private-secret');
+  });
+  it('groups collaboration tunables and never hides a category this build does not know', async () => {
+    mocks.fetchAdminSettings.mockResolvedValue({
+      ...base,
+      settings: [
+        ...base.settings,
+        field('collaboration.commentMentionsMax', {
+          type: 'integer',
+          defaultValue: 10,
+          value: 10,
+          category: 'Collaboration',
+          range: { min: 1, max: 50 },
+        }),
+        field('future.newThing', { category: 'Future' }),
+      ],
+    });
+    render(<AdminSettings />);
+
+    const collaboration = await screen.findByRole('region', { name: 'Collaboration' });
+    expect(
+      within(collaboration).getByLabelText('collaboration · comment Mentions Max')
+    ).toBeInTheDocument();
+    const other = screen.getByRole('region', { name: 'Other' });
+    expect(within(other).getByLabelText('future · new Thing')).toBeInTheDocument();
+    // Liveness: the known groups still render beside the new ones.
+    expect(screen.getByRole('region', { name: 'Operations' })).toBeInTheDocument();
   });
   it('resets both database credential overrides atomically', async () => {
     mocks.fetchAdminSettings.mockResolvedValue({

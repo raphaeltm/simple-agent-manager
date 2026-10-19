@@ -286,6 +286,9 @@ function makeSession(id: string, status = 'active') {
     startedAt: Date.now() - 60000,
     endedAt: null,
     createdAt: Date.now() - 60000,
+    // The server says who the viewer is on every detail response; default to the owner.
+    isMine: true,
+    viewerAccess: 'owner',
   };
 }
 
@@ -428,7 +431,7 @@ describe('ProjectMessageView — ACP permission refresh signal', () => {
     };
     mocks.getChatSession.mockResolvedValue({
       ...makeSessionResponse('session-1', [makeMessage('m1', 'session-1', 'Hello')]),
-      session: { ...makeSession('session-1'), isMine: false },
+      session: { ...makeSession('session-1'), isMine: false, viewerAccess: 'reader' },
     });
     mocks.listAcpInteractions
       .mockResolvedValueOnce({ pending: [], settled: [], cursor: null })

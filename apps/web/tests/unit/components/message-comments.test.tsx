@@ -148,7 +148,9 @@ describe('CommentComposer', () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onCancel = vi.fn();
 
-    render(<CommentComposer quote="Quoted text" onSubmit={onSubmit} onCancel={onCancel} />);
+    render(
+      <CommentComposer quote="Quoted text" canSendToAgent onSubmit={onSubmit} onCancel={onCancel} />
+    );
 
     const textarea = screen.getByLabelText('Add a comment…') as HTMLTextAreaElement;
     expect(document.activeElement).toBe(textarea);
@@ -159,7 +161,7 @@ describe('CommentComposer', () => {
     fireEvent.submit(textarea.closest('form')!);
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith('Ask the agent to verify this.', 'send_to_agent');
+      expect(onSubmit).toHaveBeenCalledWith('Ask the agent to verify this.', 'send_to_agent', []);
     });
   });
 
@@ -191,7 +193,7 @@ describe('CommentComposer', () => {
     fireEvent.submit(textarea.closest('form')!);
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith('Typed first. Dictated words.', 'note');
+      expect(onSubmit).toHaveBeenCalledWith('Typed first. Dictated words.', 'note', []);
     });
   });
 
@@ -238,7 +240,7 @@ describe('CommentComposer', () => {
     });
     fireEvent.submit(textarea.closest('form')!);
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith('Typed. Dictated words.', 'note');
+      expect(onSubmit).toHaveBeenCalledWith('Typed. Dictated words.', 'note', []);
     });
   });
 
@@ -327,7 +329,7 @@ describe('CommentComposer', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith('Keyboard body', 'note');
+      expect(onSubmit).toHaveBeenCalledWith('Keyboard body', 'note', []);
     });
 
     fireEvent.keyDown(textarea, { key: 'Escape' });
@@ -367,7 +369,8 @@ describe('CommentThreadList', () => {
       expect(onReply).toHaveBeenCalledWith(
         'comment-1',
         'Reply that should reach the agent.',
-        'send_to_agent'
+        'send_to_agent',
+        []
       );
     });
 

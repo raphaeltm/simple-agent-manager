@@ -12,10 +12,7 @@ import { usePushSubscription } from '../hooks/usePushSubscription';
 import { usePwaInstallPrompt } from '../hooks/usePwaInstallPrompt';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { updateNotificationPreference } from '../lib/api';
-import {
-  notificationPreferencesQueryOptions,
-  notificationQueryKeys,
-} from '../lib/query-options';
+import { notificationPreferencesQueryOptions, notificationQueryKeys } from '../lib/query-options';
 
 const TYPE_LABELS: Record<NotificationType, { label: string; description: string }> = {
   task_complete: {
@@ -45,6 +42,18 @@ const TYPE_LABELS: Record<NotificationType, { label: string; description: string
   cron_failure: {
     label: 'Operational Failure',
     description: 'When a scheduled recovery sweep reports a failure',
+  },
+  mention: {
+    label: 'Mentions',
+    description: 'When someone @mentions you in a comment',
+  },
+  comment: {
+    label: 'Comments on your sessions',
+    description: 'When someone comments on your chat, or replies in a thread you are in',
+  },
+  session_access: {
+    label: 'Shared sessions',
+    description: 'When a chat is shared with you, or your access to one is removed',
   },
 };
 

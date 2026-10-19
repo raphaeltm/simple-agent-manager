@@ -21,6 +21,7 @@ import { DEFAULT_ATTACHMENT_MESSAGE } from '../../pages/project-chat/useAttachme
 import { useSessionDraft } from './session-drafts';
 import type { FilePanelState } from './session-lifecycle-helpers';
 import { parsePlanContent } from './session-lifecycle-helpers';
+import { resolveSessionViewerCapabilities } from './session-viewer-access';
 import type { AgentActivityState } from './types';
 import { deriveSessionState, IDLE_TIMEOUT_MS, isWorkingActivity } from './types';
 import { useActivityVerifyTimer } from './useActivityVerifyTimer';
@@ -28,6 +29,7 @@ import { useCancelAgentPrompt } from './useCancelAgentPrompt';
 import { useCompletionDockWorking } from './useCompletionDockWorking';
 import { useConnectionRecovery } from './useConnectionRecovery';
 import { useFallbackSessionPoll } from './useFallbackSessionPoll';
+import { useSessionAccessSync } from './useSessionAccessSync';
 import { useSessionFileUpload } from './useSessionFileUpload';
 import { useSessionInfrastructure } from './useSessionInfrastructure';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
@@ -50,6 +52,11 @@ export function useSessionLifecycle(
   );
   const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(
     () => transcript.detail?.session.task ?? null
+  );
+  const { applySessionAccess, onSessionAccessChanged } = useSessionAccessSync(
+    projectId,
+    sessionId,
+    setSession
   );
 
   const {
@@ -127,11 +134,7 @@ export function useSessionLifecycle(
   const transcribeApiUrl = getTranscribeApiUrl();
 
   // ── DO WebSocket (sole message source) ──
-  const {
-    connectionState,
-    wsRef,
-    retry: retryWs,
-  } = useChatWebSocket({
+  const { connectionState, retry: retryWs } = useChatWebSocket({
     projectId,
     sessionId,
     // A waking session is still `sleeping` server-side for the whole wake —
@@ -172,6 +175,7 @@ export function useSessionLifecycle(
       // Stop any pending verify timer so it can't re-arm and flash the bar back on.
       stopVerifyDecayTimer();
     }, [stopVerifyDecayTimer]),
+    onSessionAccessChanged,
     onCatchUp: useCallback(
       (
         catchUpMessages: ChatMessageResponse[],
@@ -257,6 +261,7 @@ export function useSessionLifecycle(
     connectionState,
     session,
     isProvisioning,
+    canDriveSession: resolveSessionViewerCapabilities(session).canDriveSession,
     setSession,
   });
 
@@ -370,27 +375,13 @@ export function useSessionLifecycle(
         toolMetadata: null,
         createdAt: Date.now(),
       };
-      // Attachment display includes canonical workspace paths; durable acceptance
-      // persists and broadcasts it once, avoiding a second plain-text WS copy.
+      // Attachment display includes canonical workspace paths, so only plain messages get
+      // an optimistic row; durable acceptance persists and broadcasts the real one.
       if (attachmentRefs.length === 0) appendMessages([optimisticMessage]);
       draft.sending(trimmed);
 
-      // Persist via DO WebSocket
-      if (
-        attachmentRefs.length === 0 &&
-        wsRef.current &&
-        wsRef.current.readyState === WebSocket.OPEN
-      ) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'message.send',
-            sessionId,
-            content: trimmed,
-            role: 'user',
-          })
-        );
-      }
-
+      // The transcript row is written by the server when the prompt is accepted (durable
+      // delivery) and attributed to the sender; the socket is read-only.
       // For idle sessions, resume first then send the prompt. The composer is
       // cleared only when delivery is confirmed (onDelivered); a failed resume
       // or delivery resets the working state and keeps the typed text as the
@@ -500,6 +491,6 @@ export function useSessionLifecycle(
     loadUntil: transcript.loadUntil,
     loadingMore: transcript.loadingMore,
     transcribeApiUrl,
-    wsRef,
+    applySessionAccess,
   };
 }

@@ -1,3 +1,4 @@
+import type { CommentMention } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { MessageSquareQuote, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -13,21 +14,52 @@ import { CommentComposer } from './CommentComposer';
 import { CommentCountMarker, CommentGlyph } from './CommentPrimitives';
 import { CommentThreadList } from './CommentThread';
 
+/**
+ * Everything a comment surface may do for the current viewer, decided once by
+ * `useProjectMessageCommentUi`. Surfaces that only receive this object (the desktop rail, the
+ * mobile selected-text composer) read their gates from it rather than re-deriving them.
+ */
 export interface CommentActions {
+  /** Project whose active members the composers offer as @mentions. */
+  mentionProjectId: string;
   createThread: (input: {
     messageId: string;
     quote?: string;
     body: string;
     action: MessageCommentAction;
+    mentions: CommentMention[];
   }) => Promise<unknown>;
   reply: (input: {
     commentId: string;
     body: string;
     action: MessageCommentAction;
+    mentions: CommentMention[];
   }) => Promise<unknown>;
   resolve: (commentId: string) => Promise<unknown>;
   reopen: (commentId: string) => Promise<unknown>;
-  sendToAgent: (input: { commentId: string; body?: string }) => Promise<unknown>;
+  /**
+   * Present only when the viewer controls the session (owner or grantee). Every
+   * Send-to-agent affordance — the thread button, the new-thread and reply choices — keys on
+   * its presence, so a reader never sees one.
+   */
+  sendToAgent?: (input: { commentId: string; body?: string }) => Promise<unknown>;
+}
+
+/** Thread-list callbacks for a surface, with Send to agent only when `actions` allows it. */
+function threadCallbacks(actions: CommentActions, canSendToAgent = true) {
+  const { sendToAgent } = actions;
+  return {
+    onReply: (
+      commentId: string,
+      body: string,
+      action: MessageCommentAction,
+      mentions: CommentMention[]
+    ) => actions.reply({ commentId, body, action, mentions }),
+    onResolve: actions.resolve,
+    onReopen: actions.reopen,
+    onSendToAgent:
+      canSendToAgent && sendToAgent ? (commentId: string) => sendToAgent({ commentId }) : undefined,
+  };
 }
 
 export function MessageCommentActionRow({
@@ -78,6 +110,7 @@ export function InlineMessageComments({
   draft,
   focusedCommentId,
   actions,
+  canSendToAgent,
   onClose,
   onClearDraft,
 }: {
@@ -86,11 +119,14 @@ export function InlineMessageComments({
   draft: MessageCommentDraft | null;
   focusedCommentId: string | null;
   actions: CommentActions;
+  /** The row's explicit gate; Send to agent also needs `actions.sendToAgent`. */
+  canSendToAgent: boolean;
   onClose: () => void;
   onClearDraft: () => void;
 }) {
   const shouldRender = comments.length > 0 || draft;
   if (!shouldRender) return null;
+  const callbacks = threadCallbacks(actions, canSendToAgent);
 
   return (
     <section
@@ -100,8 +136,10 @@ export function InlineMessageComments({
       {draft && (
         <CommentComposer
           quote={draft.quote}
-          onSubmit={async (body, action) => {
-            await actions.createThread({ messageId, quote: draft.quote, body, action });
+          canSendToAgent={Boolean(callbacks.onSendToAgent)}
+          mentionProjectId={actions.mentionProjectId}
+          onSubmit={async (body, action, mentions) => {
+            await actions.createThread({ messageId, quote: draft.quote, body, action, mentions });
             onClearDraft();
           }}
           onCancel={onClearDraft}
@@ -110,10 +148,8 @@ export function InlineMessageComments({
       <CommentThreadList
         comments={comments}
         focusedCommentId={focusedCommentId}
-        onReply={(commentId, body, action) => actions.reply({ commentId, body, action })}
-        onResolve={actions.resolve}
-        onReopen={actions.reopen}
-        onSendToAgent={(commentId) => actions.sendToAgent({ commentId })}
+        mentionProjectId={actions.mentionProjectId}
+        {...callbacks}
       />
       <div>
         <Button size="sm" variant="ghost" onClick={onClose}>
@@ -154,6 +190,7 @@ export function DesktopCommentRail({
   const hasDraft = Boolean(draft);
   const showLoading = loading && comments.length === 0;
   const showEmpty = !showLoading && !error && comments.length === 0 && !hasDraft;
+  const callbacks = threadCallbacks(actions);
 
   return (
     <aside
@@ -195,12 +232,15 @@ export function DesktopCommentRail({
             </h3>
             <CommentComposer
               quote={draft.quote}
-              onSubmit={async (body, action) => {
+              canSendToAgent={Boolean(callbacks.onSendToAgent)}
+              mentionProjectId={actions.mentionProjectId}
+              onSubmit={async (body, action, mentions) => {
                 await actions.createThread({
                   messageId: draft.anchorId,
                   quote: draft.quote,
                   body,
                   action,
+                  mentions,
                 });
                 onClearDraft();
               }}
@@ -250,12 +290,9 @@ export function DesktopCommentRail({
                 <CommentThreadList
                   comments={[comment]}
                   focusedCommentId={focusedCommentId}
-                  onReply={(commentId, body, action) =>
-                    actions.reply({ commentId, body, action })
-                  }
-                  onResolve={actions.resolve}
-                  onReopen={actions.reopen}
-                  onSendToAgent={(commentId) => actions.sendToAgent({ commentId })}
+                  mentionProjectId={actions.mentionProjectId}
+                  scrollFocusedIntoView
+                  {...callbacks}
                 />
               </section>
             ))}
@@ -296,12 +333,15 @@ export function MobileSelectedTextCommentComposer({
       </div>
       <CommentComposer
         quote={draft.quote}
-        onSubmit={async (body, action) => {
+        canSendToAgent={Boolean(actions.sendToAgent)}
+        mentionProjectId={actions.mentionProjectId}
+        onSubmit={async (body, action, mentions) => {
           await actions.createThread({
             messageId: draft.anchorId,
             quote: draft.quote,
             body,
             action,
+            mentions,
           });
           onClearDraft();
         }}

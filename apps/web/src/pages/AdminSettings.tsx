@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
+  ADMIN_SETTING_CATEGORIES,
   type AdminSetting,
   type AdminSettingsView,
   fetchAdminSettings,
@@ -70,6 +71,12 @@ function appendOAuthPartner(
     throw new Error(
       'Enter both client ID and client secret for this OAuth provider before saving.'
     );
+}
+
+const OTHER_CATEGORY = 'Other';
+const KNOWN_CATEGORIES: ReadonlySet<string> = new Set(ADMIN_SETTING_CATEGORIES);
+function settingCategory(setting: AdminSetting): string {
+  return KNOWN_CATEGORIES.has(setting.category) ? setting.category : OTHER_CATEGORY;
 }
 
 function choiceLabel(choice: string) {
@@ -321,8 +328,10 @@ export function AdminSettings() {
           {!filtered.length && (
             <p className="text-sm text-fg-muted">No settings match your search.</p>
           )}
-          {(['OAuth', 'Connector', 'Operations', 'Trials'] as const).map((category) => {
-            const settings = filtered.filter((item) => item.category === category);
+          {/* A category this build does not know yet still renders, under "Other", instead of
+              silently hiding its settings. */}
+          {[...ADMIN_SETTING_CATEGORIES, OTHER_CATEGORY].map((category) => {
+            const settings = filtered.filter((item) => settingCategory(item) === category);
             return (
               settings.length > 0 && (
                 <section key={category} aria-label={category} className="space-y-3">

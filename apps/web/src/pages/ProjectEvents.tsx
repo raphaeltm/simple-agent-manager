@@ -1,5 +1,5 @@
 import { Button } from '@simple-agent-manager/ui';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Clock, Eye, MessageSquare, Radio } from 'lucide-react';
 import type { ComponentType, SVGProps } from 'react';
 import { Link, useSearchParams } from 'react-router';
@@ -9,8 +9,8 @@ import { Feedback, linkClass } from '../components/project-events/EventUi';
 import { SchedulesPanel } from '../components/project-events/SchedulesPanel';
 import { StandingWatchesPanel } from '../components/project-events/StandingWatchesPanel';
 import { SubscriptionsPanel } from '../components/project-events/SubscriptionsPanel';
+import { useProjectMembers } from '../hooks/useProjectMembers';
 import { useQueryScope } from '../hooks/useQueryScope';
-import { getProjectMembers } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
 const sections = [
@@ -30,18 +30,13 @@ export function ProjectEvents() {
   const [params, setParams] = useSearchParams();
   const section = sections.find((item) => item.id === params.get('section'))?.id ?? 'subscriptions';
   const sessionId = params.get('sessionId') || undefined;
-  const members = useQuery({
-    queryKey: ['auth', scope, 'events', projectId, 'members'],
-    queryFn: () => getProjectMembers(projectId),
-    enabled: Boolean(scope),
-  });
-  const member = members.data?.members.find(
-    (item) => item.userId === scope && item.status === 'active'
-  );
+  const members = useProjectMembers(projectId);
+  const member = members.members.find((item) => item.userId === scope);
   const canWrite = project?.userId === scope || Boolean(member && member.role !== 'viewer');
+  // Every member row, not just active ones: a schedule's creator keeps their label after leaving.
   const creatorName = (id: string) => {
-    const creator = members.data?.members.find((item) => item.userId === id);
-    return creator?.user?.name || (id === scope ? 'You' : id);
+    const creator = members.allMembers.find((item) => item.userId === id);
+    return creator?.name || (id === scope ? 'You' : id);
   };
 
   const queryClient = useQueryClient();

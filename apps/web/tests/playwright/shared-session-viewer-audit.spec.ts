@@ -1,0 +1,379 @@
+import { expect, type Page, type Route, test } from '@playwright/test';
+
+import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
+
+/**
+ * Visual audit for how a chat looks to each kind of viewer once sessions can be shared
+ * (idea 01M59MYE4GY91BWTE8TZF1ZB5D): the owner, a teammate it was shared with, and any other
+ * project member. Covers the composer area, the shared-session notice, sender attribution on
+ * transcript rows, and the session rail's Share/Files tools. The share dialog, comment
+ * mentions and reader comment hint are audited in shared-session-collaboration-audit.spec.ts.
+ */
+
+const PROJECT_ID = 'proj-shared-viewer';
+const SESSION_ID = 'session-shared-viewer';
+const NOW = Date.now();
+const VIEWER_ID = 'user-viewer';
+
+const LONG_OWNER =
+  'Prakash Raman-Venkataraghavan (Platform Engineering) <script>alert(1)</script> 🚀 with a deliberately long display name';
+const LONG_GRANTEE =
+  'Ana Lucía Ruiz-Okafor, Staff Engineer & on-call lead for checkout payments 💳';
+
+const MOCK_USER = makeMockUser({
+  email: 'viewer@example.com',
+  name: 'Viewer Person',
+  role: 'user',
+  sessionId: 'auth-session-shared-viewer',
+  userId: VIEWER_ID,
+});
+
+const MOCK_PROJECT = {
+  id: PROJECT_ID,
+  name: 'Shared Session Viewer Audit',
+  repository: 'acme/checkout',
+  repoProvider: 'github',
+  defaultBranch: 'main',
+  userId: 'owner-1',
+  githubInstallationId: 'inst-shared-viewer',
+  defaultVmSize: null,
+  defaultAgentType: null,
+  defaultProvider: null,
+  defaultWorkspaceProfile: 'full',
+  defaultDevcontainerConfigName: '',
+  workspaceIdleTimeoutMs: null,
+  nodeIdleTimeoutMs: null,
+  createdAt: '2026-10-19T00:00:00Z',
+  updatedAt: '2026-10-19T00:00:00Z',
+};
+
+type Viewer = 'owner' | 'grantee' | 'reader';
+
+function person(id: string, name: string) {
+  return { id, name, avatarUrl: null };
+}
+
+function accessSummary(viewer: Viewer, grantCount: number) {
+  const grants = Array.from({ length: grantCount }, (_, index) => ({
+    id: `grant-${index}`,
+    sessionId: SESSION_ID,
+    grantee:
+      index === 0 && viewer === 'grantee'
+        ? person(VIEWER_ID, 'Viewer Person')
+        : person(`member-${index}`, index === 1 ? LONG_GRANTEE : `Teammate ${index}`),
+    grantedBy: person('owner-1', LONG_OWNER),
+    parentGrantId: null,
+    createdAt: NOW - 60_000 * (index + 1),
+  }));
+  return {
+    sessionId: SESSION_ID,
+    viewerAccess: viewer,
+    owner: person(viewer === 'owner' ? VIEWER_ID : 'owner-1', LONG_OWNER),
+    grants,
+  };
+}
+
+function makeSession(viewer: Viewer, overrides: Record<string, unknown> = {}) {
+  const ownerId = viewer === 'owner' ? VIEWER_ID : 'owner-1';
+  return {
+    id: SESSION_ID,
+    workspaceId: 'ws-shared-viewer',
+    taskId: null,
+    topic: 'Fix the flaky checkout tests before the Friday release',
+    status: 'active',
+    messageCount: 6,
+    startedAt: NOW - 600_000,
+    endedAt: null,
+    createdAt: NOW - 700_000,
+    lastMessageAt: NOW - 10_000,
+    isIdle: true,
+    agentCompletedAt: NOW - 20_000,
+    isTerminated: false,
+    workspaceUrl: null,
+    cleanupAt: null,
+    agentSessionId: null,
+    createdBy: { id: ownerId, name: LONG_OWNER, email: 'prakash@example.com' },
+    isMine: viewer === 'owner',
+    viewerAccess: viewer,
+    access: accessSummary(viewer, 3),
+    ...overrides,
+  };
+}
+
+/** A session whose agent is not idle, so the rail offers its live-workspace tools. */
+const LIVE = { isIdle: false, agentCompletedAt: null };
+
+const durable = (metadata: Record<string, unknown>) => ({
+  kind: 'durable_prompt_delivery',
+  deliveryId: `delivery-${Math.random().toString(36).slice(2)}`,
+  ...metadata,
+});
+
+const MESSAGES = [
+  {
+    id: 'msg-owner',
+    role: 'user',
+    content: 'The checkout tests fail about one run in five. Find out why.',
+    toolMetadata: null,
+  },
+  {
+    id: 'msg-agent-1',
+    role: 'assistant',
+    content: 'The flaky test waits on a fixed 200ms timeout before reading the cart total.',
+    toolMetadata: null,
+  },
+  {
+    id: 'msg-grantee',
+    role: 'user',
+    content:
+      'Replace the fixed wait with an explicit wait for the cart total, and run the suite 20 times.',
+    toolMetadata: durable({
+      source: 'user_followup',
+      userId: 'grantee-1',
+      senderName: LONG_GRANTEE,
+      onBehalfOfUserId: 'owner-1',
+      grantId: 'grant-1',
+    }),
+  },
+  {
+    id: 'msg-comment',
+    role: 'user',
+    content:
+      'SAM comment directive — Comment ID: thread-1. Feedback: please also cover the empty-cart case.',
+    toolMetadata: durable({
+      source: 'comment_directive',
+      userId: 'owner-1',
+      senderName: LONG_OWNER,
+      author: { kind: 'human', id: 'reviewer-1', displayName: 'Ben Okafor' },
+    }),
+  },
+  {
+    id: 'msg-cancelled',
+    role: 'user',
+    content: 'Also bump the retry count to five.',
+    toolMetadata: durable({
+      source: 'user_followup',
+      senderName: 'Teammate 2',
+      onBehalfOfUserId: 'owner-1',
+      deliveryCancelled: 'sender_access_revoked',
+    }),
+  },
+  {
+    id: 'msg-agent-2',
+    role: 'assistant',
+    content: 'Done: the explicit wait passes 20 of 20 runs, including the empty cart.',
+    toolMetadata: null,
+  },
+].map((message, index) => ({
+  ...message,
+  sessionId: SESSION_ID,
+  createdAt: NOW - (6 - index) * 30_000,
+  sequence: index + 1,
+}));
+
+async function setupMocks(page: Page, session: ReturnType<typeof makeSession>) {
+  const wide = (page.viewportSize()?.width ?? 0) >= 1024;
+  await page.addInitScript(
+    ({ userId, labelledRail }) => {
+      window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+      // Desktop rail checks read tool labels; phones keep the default compact rail.
+      if (labelledRail) window.localStorage.setItem('sam-session-tool-strip-mode', 'labels');
+    },
+    { userId: VIEWER_ID, labelledRail: wide }
+  );
+  await page.routeWebSocket(/\/api\/projects\/[^/]+\/sessions\/ws/, (ws) => {
+    ws.onMessage((raw) => {
+      try {
+        if (JSON.parse(String(raw))?.type === 'ping') ws.send(JSON.stringify({ type: 'pong' }));
+      } catch {
+        /* ignore non-json frames */
+      }
+    });
+  });
+  await page.route('**/api/**', async (route: Route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname;
+    const respond = (status: number, body: unknown) =>
+      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+
+    if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/credentials')) return respond(200, []);
+    if (path.startsWith('/api/provider-catalog') || path.startsWith('/api/providers/catalog'))
+      return respond(200, { catalogs: [] });
+    if (path === '/api/trial/status') return respond(200, { available: false });
+    if (path === '/api/agents') return respond(200, { agents: [] });
+    if (path === '/api/github/installations') return respond(200, []);
+    if (path === '/api/workspaces') return respond(200, []);
+    if (path === '/api/projects')
+      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+
+    const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
+    if (!projectMatch) return respond(200, {});
+    const subPath = projectMatch[2] || '';
+
+    if (subPath === `/sessions/${SESSION_ID}/comments`) return respond(200, { comments: [] });
+    if (subPath === `/sessions/${SESSION_ID}/access`) return respond(200, session.access);
+    if (subPath === '/sessions') {
+      return respond(200, { sessions: [session], total: 1, hasMore: false });
+    }
+    if (subPath === `/sessions/${SESSION_ID}`) {
+      return respond(200, { session, messages: MESSAGES, hasMore: false });
+    }
+    if (subPath.match(/^\/sessions\/[^/]+\/messages/)) return respond(200, MESSAGES);
+    if (subPath === '/members') return respond(200, { members: [], invites: [] });
+    if (subPath === '/tasks') return respond(200, { tasks: [], nextCursor: null });
+    if (subPath === '/agent-profiles') return respond(200, { items: [] });
+    if (subPath === '/skills') return respond(200, { items: [] });
+    if (subPath.match(/\/commands|\/cached-commands/)) return respond(200, { commands: [] });
+    return respond(200, MOCK_PROJECT);
+  });
+}
+
+/** Scroll the virtualized conversation from the top until `label` is rendered, then assert it. */
+async function scrollConversationUntil(page: Page, text: string) {
+  const scroller = page.locator('[data-sam-conversation-scroller="true"]').first();
+  await scroller.evaluate((el) => {
+    el.scrollTop = 0;
+    el.dispatchEvent(new Event('scroll', { bubbles: true }));
+  });
+  for (let step = 0; step < 20; step += 1) {
+    if (await page.getByText(text, { exact: false }).count()) return;
+    await scroller.evaluate((el) => {
+      el.scrollTop += Math.max(120, el.clientHeight * 0.6);
+      el.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    await page.waitForTimeout(150);
+  }
+}
+
+async function expectAttribution(page: Page, label: string) {
+  await scrollConversationUntil(page, label);
+  await expect(
+    page.getByTestId('user-message-attribution').filter({ hasText: label }).first()
+  ).toBeVisible();
+}
+
+/** The message renders, and no attribution line sits in the same row. */
+async function expectUnlabelled(page: Page, content: string) {
+  await scrollConversationUntil(page, content);
+  const bubble = page.getByText(content).first();
+  await expect(bubble).toBeVisible();
+  const row = page.locator('[data-index]').filter({ has: bubble }).first();
+  await expect(row.getByTestId('user-message-attribution')).toHaveCount(0);
+}
+
+async function openChat(page: Page) {
+  await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+  await expect(page.getByText(/explicit wait passes 20 of 20 runs/)).toBeVisible({
+    timeout: 15_000,
+  });
+}
+
+function slug(viewer: string, page: Page) {
+  const width = page.viewportSize()?.width ?? 0;
+  return `shared-session-${viewer}-${width < 768 ? 'mobile' : 'desktop'}`;
+}
+
+test.describe('Shared session — what each viewer sees', () => {
+  test('a teammate it was shared with: notice, composer, and attributed messages', async ({
+    page,
+  }) => {
+    await setupMocks(page, makeSession('grantee'));
+    await openChat(page);
+
+    // The owner's name is long, has HTML and emoji; it must render as text and wrap.
+    const notice = page.getByTestId('shared-session-notice');
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText(`You're chatting in ${LONG_OWNER}'s session.`);
+    await expect(page.getByPlaceholder(/Send a message/)).toBeVisible();
+
+    // The conversation is virtualized: scroll each labelled message into the rendered window.
+    await expectAttribution(page, `${LONG_GRANTEE} · shared access`);
+    await expectAttribution(page, `${LONG_OWNER} sent Ben Okafor's comment to the agent`);
+    await expectAttribution(page, 'Teammate 2 · shared access');
+    await expect(page.getByText('Not delivered — access was removed')).toBeVisible();
+    // Four user messages, three labelled: the owner's own message carries no label.
+    await expectUnlabelled(page, 'The checkout tests fail about one run in five. Find out why.');
+
+    await assertNoOverflow(page);
+    await screenshot(page, slug('grantee', page));
+  });
+
+  test('any other member: read-only composer that names the owner', async ({ page }) => {
+    await setupMocks(page, makeSession('reader'));
+    await openChat(page);
+
+    await expect(page.getByText(`Only ${LONG_OWNER} can message this agent`)).toBeVisible();
+    await expect(
+      page.getByText(
+        `You can leave comments on any message, or ask ${LONG_OWNER} to share this chat.`
+      )
+    ).toBeVisible();
+    await expect(page.getByTestId('shared-session-notice')).toHaveCount(0);
+    // No message composer for a reader (the comment composer is not open).
+    await expect(page.getByPlaceholder(/Send a message/)).toHaveCount(0);
+
+    await assertNoOverflow(page);
+    await screenshot(page, slug('reader', page));
+  });
+
+  test('the owner: no notice, uploads available, Share shows who has access', async ({ page }) => {
+    await setupMocks(page, makeSession('owner'));
+    await openChat(page);
+
+    await expect(page.getByTestId('shared-session-notice')).toHaveCount(0);
+    await expect(page.getByText(/can message this agent/)).toHaveCount(0);
+    await expect(page.getByPlaceholder(/Send a message/)).toBeVisible();
+
+    await assertNoOverflow(page);
+    await screenshot(page, slug('owner', page));
+  });
+
+  test('the owner’s rail: Share carries the grant count, and Files is there', async ({ page }) => {
+    const viewport = page.viewportSize();
+    test.skip(!viewport || viewport.width < 1024, 'The labelled tool rail is desktop-only');
+    // Files and Git are offered only while the session is live (not idle).
+    await setupMocks(page, makeSession('owner', LIVE));
+    await openChat(page);
+
+    const share = page.getByRole('button', { name: /Share/ }).first();
+    await expect(share).toBeVisible();
+    await expect(share).toContainText('3');
+    await expect(page.getByRole('button', { name: 'Browse workspace files' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Review uncommitted changes' })).toBeVisible();
+  });
+
+  test('a grantee does not get Files or Git, which reach the workspace directly', async ({
+    page,
+  }) => {
+    const viewport = page.viewportSize();
+    test.skip(!viewport || viewport.width < 1024, 'The labelled tool rail is desktop-only');
+    // The same live session that shows Files to its owner (previous test).
+    await setupMocks(page, makeSession('grantee', LIVE));
+    await openChat(page);
+
+    // Liveness: the rail rendered (Share is present) before asserting what it lacks.
+    await expect(page.getByRole('button', { name: /Share/ }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Browse workspace files' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Review uncommitted changes' })).toHaveCount(0);
+  });
+
+  test('an ended chat tells a grantee it cannot continue, without offering sharing', async ({
+    page,
+  }) => {
+    await setupMocks(
+      page,
+      makeSession('grantee', { status: 'stopped', isTerminated: true, endedAt: NOW - 5_000 })
+    );
+    await openChat(page);
+
+    await expect(page.getByText('This chat has ended')).toBeVisible();
+    await expect(page.getByText(`Only ${LONG_OWNER} can fork it to continue.`)).toBeVisible();
+    await expect(page.getByText(/share this chat/)).toHaveCount(0);
+
+    await assertNoOverflow(page);
+    await screenshot(page, slug('ended-grantee', page));
+  });
+});

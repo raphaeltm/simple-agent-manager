@@ -35,7 +35,8 @@ export function CommentableConversationItem({
   onLoadToolContent,
   animateAgentText,
   animateUserMessage,
-  canWriteSession,
+  canComment,
+  canSendToAgent,
   agentActivity,
   animationTargetIdx,
   commentState,
@@ -53,7 +54,10 @@ export function CommentableConversationItem({
   onLoadToolContent: (messageId: string) => Promise<ToolCallContentItem[]>;
   animateAgentText: boolean;
   animateUserMessage: boolean;
-  canWriteSession: boolean;
+  /** Start threads on this message. Every project member who can see the session. */
+  canComment: boolean;
+  /** Offer Send to agent on this message's threads. Session owner and grantees only. */
+  canSendToAgent: boolean;
   agentActivity: string;
   animationTargetIdx: number;
   commentState: MessageCommentRowState;
@@ -110,12 +114,12 @@ export function CommentableConversationItem({
         {afterContent}
       </div>
 
-      {isCommentableMessage && (canWriteSession || itemComments.length > 0) && (
+      {isCommentableMessage && (canComment || itemComments.length > 0) && (
         <MessageCommentActionRow
           messageId={item.id}
           comments={itemComments}
           expanded={isCommentsExpanded}
-          canComment={canWriteSession}
+          canComment={canComment}
           onToggle={() => commentState.onToggleMessageComments(item.id)}
           onStartComment={() => commentState.onStartComment({ anchorId: item.id })}
         />
@@ -129,6 +133,7 @@ export function CommentableConversationItem({
             draft={inlineDraftForMessage}
             focusedCommentId={commentState.focusedCommentId}
             actions={commentState.actions}
+            canSendToAgent={canSendToAgent}
             onClose={commentState.onCloseMessageComments}
             onClearDraft={commentState.onClearDraft}
           />

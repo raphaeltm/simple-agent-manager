@@ -20,6 +20,7 @@ import {
   Info,
   MessageSquareQuote,
   RotateCcw,
+  Users,
 } from 'lucide-react';
 
 import type { ChatSessionResponse } from '../../lib/api';
@@ -64,6 +65,7 @@ export type SessionToolId =
   | 'resources'
   | 'events'
   | 'comments'
+  | 'share'
   | 'retry'
   | 'fork'
   | 'report'
@@ -115,6 +117,14 @@ export interface BuildSessionToolActionsInput {
   hasCommentsHandler: boolean;
   hasRetryHandler: boolean;
   hasForkHandler: boolean;
+  hasShareHandler?: boolean;
+  /** People the session is shared with — the Share badge. */
+  sharedWithCount?: number;
+  /**
+   * Files/Git read the workspace through owner-only routes (they can reach any file in the
+   * container), so only the session owner gets them.
+   */
+  canBrowseWorkspace?: boolean;
   /** True while a mark-complete request is in flight. */
   completing?: boolean;
   /** Drives `aria-expanded` on the Details action. */
@@ -161,12 +171,13 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSp
     hasResourcesHandler,
     hasEventsHandler,
     hasCommentsHandler,
+    canBrowseWorkspace = true,
   } = input;
 
   const actions: SessionToolSpec[] = [];
 
   // Files / Git / Workspace need a live workspace to act on.
-  if (session.workspaceId && sessionState === 'active') {
+  if (session.workspaceId && sessionState === 'active' && canBrowseWorkspace) {
     if (hasFilesHandler) {
       actions.push({
         id: 'files',
@@ -229,7 +240,21 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSp
 /** Tools that act on the task behind the session. */
 function buildSessionGroup(input: BuildSessionToolActionsInput): SessionToolSpec[] {
   const { session, taskEmbed, hasRetryHandler, hasForkHandler } = input;
+  const { hasShareHandler = false, sharedWithCount = 0 } = input;
   const actions: SessionToolSpec[] = [];
+
+  if (hasShareHandler) {
+    actions.push({
+      id: 'share',
+      label: 'Share',
+      hint:
+        sharedWithCount > 0
+          ? `Shared with ${sharedWithCount} ${sharedWithCount === 1 ? 'person' : 'people'} — manage chat access`
+          : 'Share chat access with a teammate',
+      icon: Users,
+      badge: sharedWithCount > 0 ? sharedWithCount : undefined,
+    });
+  }
 
   // Retry / Fork act on the task, so they only exist when there is one.
   //

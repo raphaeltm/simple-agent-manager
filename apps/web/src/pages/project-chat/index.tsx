@@ -6,6 +6,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { useAppShell } from '../../components/AppShell';
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
 import { ProjectMessageView } from '../../components/project-message-view';
+import { useCommentDeepLink } from '../../components/project-message-view/comments/useCommentDeepLink';
 import { HierarchyModal } from '../../components/task-hierarchy';
 import { TriggerDropdown } from '../../components/triggers/TriggerDropdown';
 import { ZenPeekRail } from '../../components/ZenPeekRail';
@@ -118,27 +119,7 @@ export function ProjectChat() {
     },
     [navigate, state.projectId]
   );
-  const commentMessageTarget = useMemo(() => {
-    const params = new URLSearchParams(location.search);
-    const messageId = params.get('commentMessage');
-    if (!messageId) return null;
-    const timestampRaw = params.get('commentAt');
-    const timestamp = timestampRaw ? Number(timestampRaw) : null;
-    return {
-      messageId,
-      timestamp: Number.isFinite(timestamp) ? timestamp : null,
-    };
-  }, [location.search]);
-  const handleCommentMessageTargetConsumed = useCallback(() => {
-    const params = new URLSearchParams(location.search);
-    if (!params.has('commentMessage') && !params.has('commentAt')) return;
-    params.delete('commentMessage');
-    params.delete('commentAt');
-    const nextSearch = params.toString();
-    navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : ''}${location.hash}`, {
-      replace: true,
-    });
-  }, [location.hash, location.pathname, location.search, navigate]);
+  const commentDeepLink = useCommentDeepLink();
   const activeSessionId = state.sessionId ?? '';
   const starterPrompts = useMemo(() => {
     const repoLabel = state.project?.repository || state.project?.name || 'this repo';
@@ -558,9 +539,10 @@ export function ProjectChat() {
               slashCommands={state.slashCommands}
               onShowHierarchy={handleShowHierarchy}
               onNewChat={state.handleNewChat}
-              targetMessageId={commentMessageTarget?.messageId ?? null}
-              targetMessageTimestamp={commentMessageTarget?.timestamp ?? null}
-              onTargetMessageConsumed={handleCommentMessageTargetConsumed}
+              targetMessageId={commentDeepLink.targetMessage?.messageId ?? null}
+              targetMessageTimestamp={commentDeepLink.targetMessage?.timestamp ?? null}
+              onTargetMessageConsumed={commentDeepLink.consume}
+              focusCommentThreadId={commentDeepLink.focusThreadId}
               permissionRefreshSignal={permissionRefreshSignal}
             />
           </div>

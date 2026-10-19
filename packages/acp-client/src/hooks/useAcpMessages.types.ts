@@ -13,6 +13,22 @@ export interface UserMessage {
    * broadcast envelope. ACP _meta remains intentionally unused because the SDK strips it.
    */
   origin?: 'user' | 'system';
+  /**
+   * Who actually sent a user-role message when it was not the session owner typing it:
+   * a teammate with shared access, or a comment someone sent to the agent. Absent for the
+   * owner's own messages.
+   */
+  attribution?: UserMessageAttribution;
+}
+
+export interface UserMessageAttribution {
+  kind: 'shared_access' | 'comment';
+  /** The person who sent it to the agent. */
+  senderName: string | null;
+  /** For `comment`: who wrote the comment. */
+  commentAuthorName?: string | null;
+  /** The prompt was cancelled before reaching the agent because the sender lost access. */
+  notDelivered?: boolean;
 }
 
 export interface AgentMessage {

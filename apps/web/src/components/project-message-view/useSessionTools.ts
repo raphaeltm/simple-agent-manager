@@ -61,6 +61,11 @@ export interface UseSessionToolsInput {
   onOpenComments?: () => void;
   onRetry?: () => void;
   onFork?: () => void;
+  onOpenShare?: () => void;
+  /** Active shared-access grants on this session. */
+  sharedWithCount?: number;
+  /** Only the owner can browse workspace files (owner-only routes). */
+  canBrowseWorkspace?: boolean;
 }
 
 export interface UseSessionToolsResult {
@@ -97,6 +102,9 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     onOpenComments,
     onRetry,
     onFork,
+    onOpenShare,
+    sharedWithCount = 0,
+    canBrowseWorkspace = true,
   } = input;
 
   const [mode, setMode] = useState<ToolStripMode>(readStoredMode);
@@ -169,6 +177,9 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       hasCommentsHandler: !!onOpenComments,
       hasRetryHandler: !!onRetry,
       hasForkHandler: !!onFork,
+      hasShareHandler: !!onOpenShare,
+      sharedWithCount,
+      canBrowseWorkspace,
       completing,
       detailsExpanded,
     });
@@ -187,6 +198,9 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     onOpenComments,
     onRetry,
     onFork,
+    onOpenShare,
+    sharedWithCount,
+    canBrowseWorkspace,
     completing,
     detailsExpanded,
   ]);
@@ -211,6 +225,9 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
           break;
         case 'comments':
           onOpenComments?.();
+          break;
+        case 'share':
+          onOpenShare?.();
           break;
         case 'retry':
           onRetry?.();
@@ -241,6 +258,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       onOpenResources,
       onOpenEvents,
       onOpenComments,
+      onOpenShare,
       onRetry,
       onFork,
     ]

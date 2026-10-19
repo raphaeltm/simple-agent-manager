@@ -1,6 +1,5 @@
-import type { SlashCommand, ToolCallContentItem } from '@simple-agent-manager/acp-client';
+import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent } from '@simple-agent-manager/acp-client';
-import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useMemo, useRef, useState } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
@@ -8,11 +7,8 @@ import type { VirtuosoHandle } from 'react-virtuoso';
 import { useAcpPermissionInteractions } from '../../hooks/useAcpPermissionInteractions';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { getMessageToolContent } from '../../lib/api/sessions';
-import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
 import { useAuth } from '../AuthProvider';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
-import { SessionEventsDrawer } from '../chat/SessionEventsDrawer';
-import { ReportIssueDialog } from '../ReportIssueDialog';
 import { type CommentInboxItem, countBuckets, toInboxItem } from './comments/comment-inbox';
 import { CommentableConversationItem } from './comments/CommentableConversationItem';
 import { DesktopCommentRail } from './comments/MessageCommentPanels';
@@ -23,8 +19,10 @@ import { FloatingHeader } from './FloatingHeader';
 import { type ChatListContext, useFloatingHeaderHeight } from './MessageListScaffold';
 import { ProjectMessageViewDrawers } from './ProjectMessageViewDrawers';
 import { useSessionFocusHandoff } from './session-focus-handoff';
+import { resolveSessionViewerCapabilities } from './session-viewer-access';
 import { SessionFooter } from './SessionFooter';
-import { SessionHeaderCompletionDialog } from './SessionHeaderCompletionDialog';
+import type { ProjectMessageViewProps } from './SessionMessageView.types';
+import { SessionMessageViewDialogs } from './SessionMessageViewDialogs';
 import { SessionStatusBanners } from './SessionStatusBanners';
 import { SessionToolRail } from './SessionToolRail';
 import type { DisplayItem } from './tool-call-groups';
@@ -38,48 +36,7 @@ import { useSessionTimeline } from './useSessionTimeline';
 import { useSessionTools } from './useSessionTools';
 import { useToolCallGroupRowState } from './useToolCallGroupRowState';
 
-export interface ProjectMessageViewProps {
-  projectId: string;
-  sessionId: string;
-  /** When true, workspace is still provisioning — suppress "agent offline" banner. */
-  isProvisioning?: boolean;
-  /** Called after a mutation (e.g. mark complete) so the parent can refresh session list. */
-  onSessionMutated?: () => void;
-  /** Called when user clicks the retry button in the session header. */
-  onRetry?: () => void;
-  /** Called when user clicks the fork button in the session header. */
-  onFork?: () => void;
-  /** Source details for retries/forks. */
-  sourceContext?: SessionSourceContext;
-  /** Called when the user clicks Sleep on an awake idle conversation-mode session. */
-  onSleepConversation?: () => void;
-  /** Whether a sleep-conversation request is in flight. */
-  sleepingConversation?: boolean;
-  /** Error from a failed sleep-conversation attempt. */
-  sleepError?: string | null;
-  /** Called when the user confirms Archive on a sleeping conversation-mode session. */
-  onCloseConversation?: () => void;
-  /** Whether a close-conversation request is in flight. */
-  closingConversation?: boolean;
-  /** Error from a failed close-conversation attempt. */
-  closeError?: string | null;
-  /** Agent profiles available for @mention autocomplete in follow-up prompts. */
-  agentProfiles?: AgentProfile[];
-  /** Slash commands available for follow-up prompt autocomplete. */
-  slashCommands?: SlashCommand[];
-  /** Open hierarchy modal for the given task. */
-  onShowHierarchy?: (taskId: string) => void;
-  /** Start a new chat from read-only sessions. */
-  onNewChat?: () => void;
-  /** Message id requested by a route-level deep link, such as Project → Comments. */
-  targetMessageId?: string | null;
-  /** Timestamp used to load older history before resolving a route-level target. */
-  targetMessageTimestamp?: number | null;
-  /** Called once a route-level target has been consumed so refreshes do not re-jump. */
-  onTargetMessageConsumed?: () => void;
-  /** Changes whenever project realtime attention state changes for this session. */
-  permissionRefreshSignal?: string | null;
-}
+export type { ProjectMessageViewProps };
 
 export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   projectId,
@@ -103,6 +60,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   targetMessageTimestamp,
   onTargetMessageConsumed,
   permissionRefreshSignal,
+  focusCommentThreadId,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatLogRef = useRef<HTMLDivElement>(null);
@@ -111,6 +69,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   const [showComments, setShowComments] = useState(false);
   const [showEvents, setShowEvents] = useState(false);
   const [showResources, setShowResources] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   const openComments = useCallback(() => setShowComments(true), []);
   const closeComments = useCallback(() => setShowComments(false), []);
   // Stable identity matters: this feeds `useSessionTools`' memoized action array, and an
@@ -119,6 +78,9 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   const closeTimeline = useCallback(() => setShowTimeline(false), []);
   const openResources = useCallback(() => setShowResources(true), []);
   const openEvents = useCallback(() => setShowEvents(true), []);
+  const closeEvents = useCallback(() => setShowEvents(false), []);
+  const openShare = useCallback(() => setShowShare(true), []);
+  const closeShare = useCallback(() => setShowShare(false), []);
 
   const messageComments = useMessageComments(projectId, sessionId, Boolean(projectId && sessionId));
   const { user } = useAuth();
@@ -224,23 +186,26 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   // rebuilding the ternary (and therefore the callback) on every render.
   const fileClickHandler =
     lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined;
-  const canWriteSession = lc.session?.isMine !== false;
-  const canAnswerPermissions = lc.session?.isMine === true;
+  // Owner and grantees drive the agent; every member can comment; the server enforces both.
+  const viewer = resolveSessionViewerCapabilities(lc.session);
   const permissionPlacement = useAcpPermissionPlacement({
     displayItems,
     interactions: permissionItems,
     projectId,
     sessionId,
-    canAnswer: canAnswerPermissions,
+    canAnswer: viewer.canDriveSession,
     onRefresh: refreshPermissionInteractions,
   });
   const commentUi = useProjectMessageCommentUi({
     messageComments,
-    canWriteSession,
+    canComment: viewer.canComment,
+    canSendToAgent: viewer.canSendToAgent,
     hasMessages: displayItems.length > 0,
     chatLogRef,
     sessionId,
+    projectId,
     onRequestCommentSurface: openComments,
+    focusCommentThreadId,
   });
   const showDockedCommentRail = showComments && commentUi.usesDesktopRail;
   const showMobileCommentsDrawer = showComments && !commentUi.usesDesktopRail;
@@ -262,6 +227,9 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     onOpenComments: openComments,
     onRetry,
     onFork,
+    onOpenShare: lc.session?.access ? openShare : undefined,
+    sharedWithCount: lc.session?.access?.grants.length ?? 0,
+    canBrowseWorkspace: viewer.viewerAccess === 'owner',
   });
   const sessionToolRail = lc.session ? (
     <SessionToolRail
@@ -287,7 +255,8 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
           onLoadToolContent={handleLoadToolContent}
           animateAgentText
           animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
-          canWriteSession={canWriteSession}
+          canComment={viewer.canComment}
+          canSendToAgent={viewer.canSendToAgent}
           agentActivity={lc.agentActivity}
           animationTargetIdx={animationTargetIdx}
           commentState={commentUi.rowState}
@@ -313,7 +282,8 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
       lc.agentActivity,
       animationTargetIdx,
       animatedUserMsgIds,
-      canWriteSession,
+      viewer.canComment,
+      viewer.canSendToAgent,
       commentUi.rowState,
       groupRowState,
       permissionPlacement,
@@ -416,7 +386,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
         projectId={projectId}
         onFork={onFork}
         lc={lc}
-        canWriteSession={canWriteSession}
+        viewer={viewer}
         selectedTextComposer={commentUi.selectedTextComposer}
         onSleepConversation={onSleepConversation}
         sleepingConversation={sleepingConversation}
@@ -455,40 +425,29 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
         commentItems={commentInbox}
         commentsLoading={messageComments.loading}
         viewerId={viewerId}
-        canWriteSession={canWriteSession}
+        canSendToAgent={viewer.canSendToAgent}
         onCloseComments={closeComments}
         onJump={jumpToMessage}
-        onReply={(threadId, body, action) =>
-          messageComments.reply({ commentId: threadId, body, action })
+        onReply={(threadId, body, action, mentions) =>
+          messageComments.reply({ commentId: threadId, body, action, mentions })
         }
         onResolve={messageComments.resolve}
         onReopen={messageComments.reopen}
         onSendToAgent={(threadId) => messageComments.sendToAgent({ commentId: threadId })}
       />
 
-      {showEvents && (
-        <SessionEventsDrawer
-          projectId={projectId}
-          sessionId={sessionId}
-          onClose={() => setShowEvents(false)}
-        />
-      )}
-
-      {/* Dialogs for the rail's Report and Complete actions. They live here rather than
-          in `SessionHeader` because the actions that open them do. */}
-      <ReportIssueDialog
-        isOpen={sessionTools.reportOpen}
-        onClose={sessionTools.closeReport}
-        refs={{
-          sessionId,
-          taskId: lc.session?.taskId || undefined,
-          nodeId: lc.workspace?.nodeId || undefined,
-        }}
-      />
-      <SessionHeaderCompletionDialog
-        isOpen={sessionTools.confirmCompleteOpen}
-        onClose={sessionTools.closeConfirmComplete}
-        onConfirm={sessionTools.confirmComplete}
+      <SessionMessageViewDialogs
+        projectId={projectId}
+        sessionId={sessionId}
+        session={lc.session}
+        nodeId={lc.workspace?.nodeId ?? null}
+        viewerId={viewerId}
+        sessionTools={sessionTools}
+        showEvents={showEvents}
+        onCloseEvents={closeEvents}
+        showShare={showShare}
+        onCloseShare={closeShare}
+        onAccessChanged={lc.applySessionAccess}
       />
     </div>
   );

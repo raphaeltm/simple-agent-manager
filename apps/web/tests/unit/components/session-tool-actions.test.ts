@@ -151,3 +151,47 @@ describe('buildSessionToolActions — group assignment', () => {
     expect(groups).toEqual([...groups].sort((a, b) => firstSeen.indexOf(a) - firstSeen.indexOf(b)));
   });
 });
+
+describe('buildSessionToolActions — shared sessions', () => {
+  const input = (
+    overrides: Partial<BuildSessionToolActionsInput> = {}
+  ): BuildSessionToolActionsInput => ({
+    session: { id: 's1', workspaceId: 'ws1', taskId: 't1' } as never,
+    sessionState: 'active',
+    taskEmbed: { id: 't1', status: 'in_progress' } as never,
+    reportEnabled: false,
+    unresolvedCommentCount: 0,
+    needsAttentionCommentCount: 0,
+    hasFilesHandler: true,
+    hasGitHandler: true,
+    hasTimelineHandler: true,
+    hasEventsHandler: true,
+    hasCommentsHandler: true,
+    hasRetryHandler: true,
+    hasForkHandler: true,
+    ...overrides,
+  });
+  const ids = (actions: SessionToolAction[]) => actions.map((action) => action.id);
+
+  it('offers Share in the session group, badged with how many people have access', () => {
+    const actions = buildSessionToolActions(input({ hasShareHandler: true, sharedWithCount: 3 }));
+    const share = actions.find((action) => action.id === 'share');
+
+    expect(share).toMatchObject({ group: 'session', label: 'Share', badge: 3 });
+    expect(share?.hint).toBe('Shared with 3 people — manage chat access');
+    expect(
+      buildSessionToolActions(input({ hasShareHandler: true })).find((a) => a.id === 'share')
+    ).toMatchObject({ hint: 'Share chat access with a teammate', badge: undefined });
+    expect(ids(buildSessionToolActions(input()))).not.toContain('share');
+  });
+
+  it('keeps Files and Git for the owner only: they reach the workspace outside the chat', () => {
+    expect(ids(buildSessionToolActions(input()))).toEqual(expect.arrayContaining(['files', 'git']));
+
+    const viewer = ids(buildSessionToolActions(input({ canBrowseWorkspace: false })));
+    expect(viewer).not.toContain('files');
+    expect(viewer).not.toContain('git');
+    // Everything that stays inside the chat is still there.
+    expect(viewer).toEqual(expect.arrayContaining(['timeline', 'events', 'comments']));
+  });
+});

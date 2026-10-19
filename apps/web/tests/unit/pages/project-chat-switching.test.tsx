@@ -104,6 +104,9 @@ function chatSession(id: string, topic: string) {
     startedAt: Date.now() - 60_000,
     endedAt: null,
     createdAt: Date.now() - 60_000,
+    // The viewer's own chats: the server marks them on every detail response.
+    isMine: true,
+    viewerAccess: 'owner',
   };
 }
 

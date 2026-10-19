@@ -1,3 +1,4 @@
+import type { CommentMention } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { CornerDownRight, MessageSquareQuote, X } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
@@ -20,12 +21,20 @@ export interface SessionCommentsDrawerProps {
   items: CommentInboxItem[];
   loading: boolean;
   viewerId: string | null;
+  /** Project whose active members can be @mentioned in replies. */
+  mentionProjectId?: string;
   onClose: () => void;
   /** Scroll the conversation to the annotated message. */
   onJump: (target: TimelineJumpTarget) => void;
-  onReply: (threadId: string, body: string, action: MessageCommentAction) => Promise<unknown>;
+  onReply: (
+    threadId: string,
+    body: string,
+    action: MessageCommentAction,
+    mentions: CommentMention[]
+  ) => Promise<unknown>;
   onResolve: (threadId: string) => Promise<unknown>;
   onReopen: (threadId: string) => Promise<unknown>;
+  /** Absent for viewers who cannot drive the session: hides every Send-to-agent affordance. */
   onSendToAgent?: (threadId: string) => Promise<unknown>;
 }
 
@@ -45,6 +54,7 @@ export function SessionCommentsDrawer({
   items,
   loading,
   viewerId,
+  mentionProjectId,
   onClose,
   onJump,
   onReply,
@@ -127,7 +137,7 @@ export function SessionCommentsDrawer({
                         <CommentThread
                           comment={item.thread}
                           focused
-                          hideSendToAgent={!onSendToAgent}
+                          mentionProjectId={mentionProjectId}
                           onReply={onReply}
                           onResolve={onResolve}
                           onReopen={onReopen}

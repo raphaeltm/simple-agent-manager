@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ATTENTION_TYPES } from '../../../src/components/NotificationCenter';
+import { ATTENTION_TYPES } from '../../../src/components/notifications/notification-type-config';
 
 describe('ATTENTION_TYPES — notification badge classification', () => {
   it('includes needs_input as attention-required', () => {
@@ -31,8 +31,17 @@ describe('ATTENTION_TYPES — notification badge classification', () => {
     expect(ATTENTION_TYPES.has('pr_created')).toBe(false);
   });
 
-  it('contains exactly 3 attention types', () => {
-    expect(ATTENTION_TYPES.size).toBe(3);
+  it('includes mentions as attention-required: a person addressed you', () => {
+    expect(ATTENTION_TYPES.has('mention')).toBe(true);
+  });
+
+  it('keeps comment activity and shared-session changes in updates', () => {
+    expect(ATTENTION_TYPES.has('comment')).toBe(false);
+    expect(ATTENTION_TYPES.has('session_access')).toBe(false);
+  });
+
+  it('contains exactly 4 attention types', () => {
+    expect(ATTENTION_TYPES.size).toBe(4);
   });
 });
 
@@ -56,13 +65,13 @@ describe('notification badge count logic', () => {
 
   it('counts only attention types for badge', () => {
     const notifications = [
-      makeNotification('needs_input'),          // attention - unread
-      makeNotification('error'),                // attention - unread
-      makeNotification('cron_failure'),         // attention - unread
-      makeNotification('task_complete'),         // update - unread
-      makeNotification('progress'),             // update - unread
-      makeNotification('session_ended'),         // update - unread
-      makeNotification('pr_created'),            // update - unread
+      makeNotification('needs_input'), // attention - unread
+      makeNotification('error'), // attention - unread
+      makeNotification('cron_failure'), // attention - unread
+      makeNotification('task_complete'), // update - unread
+      makeNotification('progress'), // update - unread
+      makeNotification('session_ended'), // update - unread
+      makeNotification('pr_created'), // update - unread
     ];
 
     const attentionUnreadCount = notifications.filter(
@@ -76,7 +85,7 @@ describe('notification badge count logic', () => {
   it('does not count read attention notifications', () => {
     const notifications = [
       makeNotification('needs_input', new Date().toISOString()), // read
-      makeNotification('error'),                                  // unread
+      makeNotification('error'), // unread
     ];
 
     const attentionUnreadCount = notifications.filter(
@@ -114,11 +123,7 @@ describe('notification badge count logic', () => {
 
     expect(attentionNotifs).toHaveLength(3);
     expect(updateNotifs).toHaveLength(2);
-    expect(attentionNotifs.map((n) => n.type)).toEqual([
-      'needs_input',
-      'error',
-      'cron_failure',
-    ]);
+    expect(attentionNotifs.map((n) => n.type)).toEqual(['needs_input', 'error', 'cron_failure']);
     expect(updateNotifs.map((n) => n.type)).toEqual(['task_complete', 'progress']);
   });
 });

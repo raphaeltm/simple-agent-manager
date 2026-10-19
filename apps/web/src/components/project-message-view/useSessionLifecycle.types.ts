@@ -8,6 +8,7 @@
 
 import type {
   NodeResponse,
+  SessionAccessSummary,
   TaskExecutionStep,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
@@ -78,5 +79,6 @@ export interface UseSessionLifecycleResult {
   loadUntil: (target: HistoryTarget) => Promise<void>;
   loadingMore: boolean;
   transcribeApiUrl: string;
-  wsRef: React.RefObject<WebSocket | null>;
+  /** Apply a fresh shared-access summary for this session. */
+  applySessionAccess: (access: SessionAccessSummary) => void;
 }

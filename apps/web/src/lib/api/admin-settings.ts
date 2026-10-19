@@ -1,12 +1,23 @@
 import { request } from './client';
 
 export type SettingValue = boolean | number | string | string[] | null;
+
+/** Admin setting groups, in display order. Mirrors `AdminSettingDefinition['category']` in the API. */
+export const ADMIN_SETTING_CATEGORIES = [
+  'OAuth',
+  'Connector',
+  'Operations',
+  'Trials',
+  'Collaboration',
+] as const;
+export type AdminSettingCategory = (typeof ADMIN_SETTING_CATEGORIES)[number];
+
 export interface AdminSetting {
   name: string;
   type: 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
   defaultValue: SettingValue;
   value: SettingValue;
-  category: 'OAuth' | 'Connector' | 'Operations' | 'Trials';
+  category: AdminSettingCategory;
   description: string;
   secret: boolean;
   risky: boolean;

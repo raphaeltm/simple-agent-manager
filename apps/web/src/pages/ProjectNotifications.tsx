@@ -1,41 +1,16 @@
 import type { NotificationResponse, NotificationType } from '@simple-agent-manager/shared';
 import { NOTIFICATION_PREVIEW_LENGTH, NOTIFICATION_TYPES } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
-import {
-  Activity,
-  AlertCircle,
-  Bell,
-  Check,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  GitPullRequest,
-  HelpCircle,
-  MessageSquare,
-  X,
-} from 'lucide-react';
+import { Bell, Check, ChevronDown, ChevronRight, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
+import {
+  NOTIFICATION_TYPE_CONFIG,
+  notificationTypeConfig,
+} from '../components/notifications/notification-type-config';
 import { dismissNotification, listNotifications, markNotificationRead } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
-
-const NOTIFICATION_TYPE_CONFIG: Record<
-  NotificationType,
-  {
-    icon: typeof CheckCircle2;
-    color: string;
-    label: string;
-  }
-> = {
-  task_complete: { icon: CheckCircle2, color: 'text-success-fg', label: 'Task Complete' },
-  needs_input: { icon: HelpCircle, color: 'text-warning-fg', label: 'Needs Input' },
-  error: { icon: AlertCircle, color: 'text-danger-fg', label: 'Error' },
-  progress: { icon: Activity, color: 'text-fg-muted', label: 'Progress' },
-  session_ended: { icon: MessageSquare, color: 'text-accent', label: 'Session Ended' },
-  pr_created: { icon: GitPullRequest, color: 'text-success-fg', label: 'PR Created' },
-  cron_failure: { icon: AlertCircle, color: 'text-danger-fg', label: 'Operational Failure' },
-};
 
 const TYPE_FILTER_OPTIONS: { value: NotificationType | 'all'; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -186,7 +161,7 @@ export function ProjectNotifications() {
         ) : (
           <>
             {notifications.map((notification) => {
-              const config = NOTIFICATION_TYPE_CONFIG[notification.type];
+              const config = notificationTypeConfig(notification.type);
               const Icon = config.icon;
               const isUnread = !notification.readAt;
               const fullMessage = getFullMessage(notification);

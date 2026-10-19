@@ -54,6 +54,8 @@ interface UseChatWebSocketOptions {
   onWakeProgress?: (progress: WakeProgressUpdate) => void;
   /** Called for server-authoritative message-comment events carried over the session socket. */
   onCommentEvent?: (event: MessageCommentRealtimeEvent) => void;
+  /** Called when someone shares this session or removes access, so the viewer re-checks theirs. */
+  onSessionAccessChanged?: () => void;
 }
 
 /** Live wake phase delta broadcast by the ProjectData DO (`session.wake_progress`). */
@@ -86,6 +88,7 @@ export function useChatWebSocket({
   onSessionUpdated,
   onWakeProgress,
   onCommentEvent,
+  onSessionAccessChanged,
 }: UseChatWebSocketOptions): UseChatWebSocketReturn {
   const [connectionState, setConnectionState] = useState<ChatConnectionState>('disconnected');
 
@@ -106,6 +109,7 @@ export function useChatWebSocket({
   const onSessionUpdatedRef = useRef(onSessionUpdated);
   const onWakeProgressRef = useRef(onWakeProgress);
   const onCommentEventRef = useRef(onCommentEvent);
+  const onSessionAccessChangedRef = useRef(onSessionAccessChanged);
   onMessageRef.current = onMessage;
   onSessionStoppedRef.current = onSessionStopped;
   onCatchUpRef.current = onCatchUp;
@@ -114,6 +118,7 @@ export function useChatWebSocket({
   onSessionUpdatedRef.current = onSessionUpdated;
   onWakeProgressRef.current = onWakeProgress;
   onCommentEventRef.current = onCommentEvent;
+  onSessionAccessChangedRef.current = onSessionAccessChanged;
 
   const getReconnectDelay = useCallback((attempt: number) => {
     return Math.min(BASE_RECONNECT_DELAY * Math.pow(2, attempt), MAX_RECONNECT_DELAY);
@@ -276,6 +281,10 @@ export function useChatWebSocket({
                 wakePhase: isTaskExecutionStep(p.wakePhase) ? p.wakePhase : null,
               });
             }
+          } else if (data.type === 'session.access.changed') {
+            const p = payload;
+            if (p.sessionId !== sessionId) return;
+            onSessionAccessChangedRef.current?.();
           } else if (data.type === 'comment.thread.changed') {
             const p = payload;
             if (p.sessionId !== sessionId || !p.thread) return;

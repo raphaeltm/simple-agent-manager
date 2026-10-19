@@ -1,4 +1,30 @@
+import type { CommentMention, CommentMentionInput } from '@simple-agent-manager/shared';
+
 import { request } from './client';
+import { type BackendAuthor, type BackendReply, mapAuthor } from './comment-wire';
+import {
+  type BackendFileThread,
+  type LibraryFileCommentThread,
+  mapBackendFileThread,
+} from './library-file-comments';
+
+// Library-file comments live in their own module; re-exported so every importer of
+// `lib/api/comments` keeps one entry point for both anchor kinds.
+export type {
+  CreateLibraryFileCommentReplyRequest,
+  CreateLibraryFileCommentThreadRequest,
+  LibraryFileCommentAnchor,
+  LibraryFileCommentThread,
+  LibraryFileCommentThreadResponse,
+  ListLibraryFileCommentsResponse,
+} from './library-file-comments';
+export {
+  createLibraryFileCommentThread,
+  listLibraryFileComments,
+  reopenLibraryFileComment,
+  replyToLibraryFileComment,
+  resolveLibraryFileComment,
+} from './library-file-comments';
 
 export type MessageCommentStatus = 'open' | 'sent' | 'resolved';
 export type MessageCommentAction = 'note' | 'send_to_agent';
@@ -25,6 +51,8 @@ export interface MessageCommentReply {
   createdAt: number;
   updatedAt?: number | null;
   sentToAgent?: boolean;
+  /** Project members @mentioned in the body; display names are server snapshots. */
+  mentions?: CommentMention[];
 }
 
 export interface MessageCommentThread {
@@ -38,6 +66,8 @@ export interface MessageCommentThread {
   createdAt: number;
   updatedAt: number;
   status: MessageCommentStatus;
+  /** Project members @mentioned in the root comment; display names are server snapshots. */
+  mentions?: CommentMention[];
   replies: MessageCommentReply[];
 }
 
@@ -54,12 +84,16 @@ export interface CreateMessageCommentThreadRequest {
   anchor: MessageCommentAnchor;
   body: string;
   action: MessageCommentAction;
+  /** Members picked from the @mention palette. Only the IDs are sent; the server keeps active members. */
+  mentions?: readonly CommentMentionInput[];
 }
 
 export interface CreateMessageCommentReplyRequest {
   clientId: string;
   body: string;
   action: MessageCommentAction;
+  /** Members picked from the @mention palette. Only the IDs are sent; the server keeps active members. */
+  mentions?: readonly CommentMentionInput[];
 }
 
 export interface SendMessageCommentThreadRequest {
@@ -85,25 +119,6 @@ export type MessageCommentRealtimeEvent =
       };
     };
 
-type BackendAuthor = {
-  id: string;
-  kind: 'human' | 'agent';
-  name?: string | null;
-  displayName?: string | null;
-  email?: string | null;
-  avatarUrl?: string | null;
-};
-
-type BackendReply = {
-  id: string;
-  clientMutationId?: string | null;
-  author: BackendAuthor;
-  body: string;
-  createdAt: number;
-  updatedAt?: number | null;
-  sentToAgent?: boolean;
-};
-
 type BackendThread = {
   id: string;
   clientMutationId?: string | null;
@@ -119,6 +134,7 @@ type BackendThread = {
   createdAt: number;
   updatedAt: number;
   status: MessageCommentStatus;
+  mentions?: unknown;
   replies: BackendReply[];
 };
 
@@ -136,14 +152,30 @@ function sessionCommentsEndpoint(projectId: string, sessionId: string): string {
   return `/api/projects/${projectId}/sessions/${sessionId}/comments`;
 }
 
-function mapAuthor(author: BackendAuthor): MessageCommentAuthor {
-  return {
-    id: author.id,
-    kind: author.kind,
-    name: author.name ?? author.displayName ?? null,
-    email: author.email ?? null,
-    avatarUrl: author.avatarUrl ?? null,
-  };
+/**
+ * Keeps only well-formed mention entries. A malformed entry is dropped rather than failing the
+ * thread: a mention is decoration on a comment that must still render.
+ */
+function mapMentions(raw: unknown): CommentMention[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry: unknown): CommentMention[] => {
+    if (typeof entry !== 'object' || entry === null) return [];
+    const { userId, displayName } = entry as Record<string, unknown>;
+    if (typeof userId !== 'string' || !userId) return [];
+    return [{ userId, displayName: typeof displayName === 'string' ? displayName : null }];
+  });
+}
+
+/** Spread into a mapped thread or reply: absent rather than `[]` when nobody was mentioned. */
+function mentionsField(raw: unknown): { mentions?: CommentMention[] } {
+  const mentions = mapMentions(raw);
+  return mentions.length > 0 ? { mentions } : {};
+}
+
+/** Request field for picked mentions: IDs only, and omitted when nobody was picked. */
+function mentionsRequestField(mentions: readonly CommentMentionInput[] | undefined) {
+  if (!mentions || mentions.length === 0) return {};
+  return { mentions: mentions.map(({ userId }) => ({ userId })) };
 }
 
 export function mapBackendMessageCommentThread(
@@ -165,6 +197,7 @@ export function mapBackendMessageCommentThread(
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     status: thread.status,
+    ...mentionsField(thread.mentions),
     replies: thread.replies.map((reply) => ({
       id: reply.id,
       clientId: reply.clientMutationId ?? null,
@@ -173,6 +206,7 @@ export function mapBackendMessageCommentThread(
       createdAt: reply.createdAt,
       updatedAt: reply.updatedAt ?? null,
       sentToAgent: reply.sentToAgent ?? false,
+      ...mentionsField(reply.mentions),
     })),
   };
 }
@@ -217,6 +251,7 @@ export async function createMessageCommentThread(
         quote: data.anchor.quote ?? null,
         body: data.body,
         clientMutationId: data.clientId,
+        ...mentionsRequestField(data.mentions),
       }),
     }
   );
@@ -238,6 +273,7 @@ export async function createMessageCommentReply(
       body: JSON.stringify({
         body: data.body,
         clientMutationId: data.clientId,
+        ...mentionsRequestField(data.mentions),
       }),
     }
   );
@@ -284,211 +320,6 @@ export async function sendMessageCommentThreadToAgent(
     }
   );
   return { comment: getBackendThread(projectId, response) };
-}
-
-// ---------------------------------------------------------------------------
-// Library file comments
-// ---------------------------------------------------------------------------
-
-export interface LibraryFileCommentAnchor {
-  kind: 'library_file';
-  fileId: string;
-  quote?: string | null;
-}
-
-export interface LibraryFileCommentThread {
-  id: string;
-  clientId?: string | null;
-  projectId: string;
-  fileId: string;
-  anchor: LibraryFileCommentAnchor;
-  author: MessageCommentAuthor;
-  body: string;
-  createdAt: number;
-  updatedAt: number;
-  status: MessageCommentStatus;
-  replies: MessageCommentReply[];
-}
-
-export interface ListLibraryFileCommentsResponse {
-  threads: LibraryFileCommentThread[];
-  hasMore: boolean;
-}
-
-export interface LibraryFileCommentThreadResponse {
-  thread: LibraryFileCommentThread;
-  idempotent: boolean;
-}
-
-export interface CreateLibraryFileCommentThreadRequest {
-  body: string;
-  quote?: string | null;
-  clientMutationId?: string | null;
-}
-
-export interface CreateLibraryFileCommentReplyRequest {
-  body: string;
-  clientMutationId?: string | null;
-}
-
-type BackendFileThread = {
-  id: string;
-  clientMutationId?: string | null;
-  projectId?: string;
-  fileId: string;
-  anchor: {
-    kind: 'library_file';
-    fileId: string;
-    quote?: string | null;
-  };
-  author: BackendAuthor;
-  body: string;
-  createdAt: number;
-  updatedAt: number;
-  status: MessageCommentStatus;
-  replies: BackendReply[];
-};
-
-type BackendFileListResponse = {
-  threads?: BackendFileThread[];
-};
-
-type BackendFileThreadResponse = {
-  thread?: BackendFileThread;
-  idempotent?: boolean;
-};
-
-function libraryFileCommentsEndpoint(projectId: string, fileId: string): string {
-  return `/api/projects/${projectId}/library/${fileId}/comments`;
-}
-
-function mapBackendFileThread(
-  projectId: string,
-  thread: BackendFileThread
-): LibraryFileCommentThread {
-  return {
-    id: thread.id,
-    clientId: thread.clientMutationId ?? null,
-    projectId: thread.projectId ?? projectId,
-    fileId: thread.fileId,
-    anchor: {
-      kind: 'library_file',
-      fileId: thread.anchor.fileId,
-      quote: thread.anchor.quote ?? null,
-    },
-    author: mapAuthor(thread.author),
-    body: thread.body,
-    createdAt: thread.createdAt,
-    updatedAt: thread.updatedAt,
-    status: thread.status,
-    replies: thread.replies.map((reply) => ({
-      id: reply.id,
-      clientId: reply.clientMutationId ?? null,
-      author: mapAuthor(reply.author),
-      body: reply.body,
-      createdAt: reply.createdAt,
-      updatedAt: reply.updatedAt ?? null,
-      sentToAgent: reply.sentToAgent ?? false,
-    })),
-  };
-}
-
-export async function listLibraryFileComments(
-  projectId: string,
-  fileId: string,
-  params: { status?: MessageCommentStatus; signal?: AbortSignal } = {}
-): Promise<ListLibraryFileCommentsResponse> {
-  const searchParams = new URLSearchParams();
-  if (params.status) searchParams.set('status', params.status);
-  const qs = searchParams.toString();
-  const url = `${libraryFileCommentsEndpoint(projectId, fileId)}${qs ? `?${qs}` : ''}`;
-  const response = await request<BackendFileListResponse>(
-    url,
-    params.signal ? { signal: params.signal } : {}
-  );
-  const threads = response.threads ?? [];
-  return {
-    threads: threads.map((t) => mapBackendFileThread(projectId, t)),
-    hasMore: false,
-  };
-}
-
-export async function createLibraryFileCommentThread(
-  projectId: string,
-  fileId: string,
-  data: CreateLibraryFileCommentThreadRequest
-): Promise<LibraryFileCommentThreadResponse> {
-  const response = await request<BackendFileThreadResponse>(
-    libraryFileCommentsEndpoint(projectId, fileId),
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        body: data.body,
-        quote: data.quote ?? null,
-        clientMutationId: data.clientMutationId ?? null,
-      }),
-    }
-  );
-  if (!response.thread) throw new Error('Comment response did not include a thread');
-  return {
-    thread: mapBackendFileThread(projectId, response.thread),
-    idempotent: response.idempotent ?? false,
-  };
-}
-
-export async function replyToLibraryFileComment(
-  projectId: string,
-  fileId: string,
-  threadId: string,
-  data: CreateLibraryFileCommentReplyRequest
-): Promise<LibraryFileCommentThreadResponse> {
-  const response = await request<BackendFileThreadResponse>(
-    `${libraryFileCommentsEndpoint(projectId, fileId)}/${threadId}/replies`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        body: data.body,
-        clientMutationId: data.clientMutationId ?? null,
-      }),
-    }
-  );
-  if (!response.thread) throw new Error('Comment response did not include a thread');
-  return {
-    thread: mapBackendFileThread(projectId, response.thread),
-    idempotent: response.idempotent ?? false,
-  };
-}
-
-export async function resolveLibraryFileComment(
-  projectId: string,
-  fileId: string,
-  threadId: string
-): Promise<LibraryFileCommentThreadResponse> {
-  const response = await request<BackendFileThreadResponse>(
-    `${libraryFileCommentsEndpoint(projectId, fileId)}/${threadId}/resolve`,
-    { method: 'POST', body: JSON.stringify({}) }
-  );
-  if (!response.thread) throw new Error('Comment response did not include a thread');
-  return {
-    thread: mapBackendFileThread(projectId, response.thread),
-    idempotent: response.idempotent ?? false,
-  };
-}
-
-export async function reopenLibraryFileComment(
-  projectId: string,
-  fileId: string,
-  threadId: string
-): Promise<LibraryFileCommentThreadResponse> {
-  const response = await request<BackendFileThreadResponse>(
-    `${libraryFileCommentsEndpoint(projectId, fileId)}/${threadId}/reopen`,
-    { method: 'POST', body: JSON.stringify({}) }
-  );
-  if (!response.thread) throw new Error('Comment response did not include a thread');
-  return {
-    thread: mapBackendFileThread(projectId, response.thread),
-    idempotent: response.idempotent ?? false,
-  };
 }
 
 // ---------------------------------------------------------------------------

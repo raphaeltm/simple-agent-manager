@@ -21,7 +21,13 @@ type NotificationType =
   | 'progress'
   | 'session_ended'
   | 'pr_created'
-  | 'cron_failure';
+  | 'cron_failure'
+  | 'mention'
+  | 'comment'
+  | 'session_access';
+
+/** One in-app switch per notification type, plus the Web Push switch. */
+const TYPE_SWITCH_COUNT = 10;
 
 interface PreferenceMock {
   notificationType: NotificationType | '*';
@@ -101,6 +107,15 @@ async function setupApiMocks(
       return respond(200, { subscriptions: [] });
     }
 
+    // The app shell's setup-status check reads both credential lists on every page; the
+    // catch-all `{}` below crashes it ("credentials.some is not a function").
+    if (path === '/api/credentials') {
+      return respond(200, []);
+    }
+    if (path === '/api/credentials/agent') {
+      return respond(200, { credentials: [] });
+    }
+
     // Projects
     if (path === '/api/projects') {
       return respond(200, { projects: [] });
@@ -130,7 +145,7 @@ async function navigateToNotificationSettings(page: Page) {
 // ===========================================================================
 
 test.describe('Notification Settings — Mobile', () => {
-  test('default state: all seven type toggles render enabled', async ({ page }) => {
+  test('default state: every type toggle renders enabled', async ({ page }) => {
     await setupApiMocks(page, { preferences: [] });
     await navigateToNotificationSettings(page);
     await page.waitForSelector('[role="switch"]');
@@ -138,11 +153,11 @@ test.describe('Notification Settings — Mobile', () => {
     await assertNoOverflow(page);
 
     const switches = page.getByRole('switch');
-    await expect(switches).toHaveCount(8);
-    for (let i = 0; i < 7; i++) {
+    await expect(switches).toHaveCount(TYPE_SWITCH_COUNT + 1);
+    for (let i = 0; i < TYPE_SWITCH_COUNT; i++) {
       await expect(switches.nth(i)).toHaveAttribute('aria-checked', 'true');
     }
-    await expect(switches.nth(7)).toHaveAttribute('aria-checked', 'false');
+    await expect(switches.nth(TYPE_SWITCH_COUNT)).toHaveAttribute('aria-checked', 'false');
     await expect(page.getByRole('heading', { name: 'Push Notifications' })).toBeVisible();
     await expect(page.getByRole('switch', { name: 'Enable Web Push notifications' })).toBeVisible();
     await expect(page.getByText('Install SAM')).toBeVisible();
@@ -290,7 +305,7 @@ test.describe('Notification Settings — Desktop', () => {
     await assertNoOverflow(page);
 
     const switches = page.getByRole('switch');
-    await expect(switches).toHaveCount(8);
+    await expect(switches).toHaveCount(TYPE_SWITCH_COUNT + 1);
     await expect(page.getByRole('heading', { name: 'Push Notifications' })).toBeVisible();
     await expect(page.getByRole('switch', { name: 'Enable Web Push notifications' })).toBeVisible();
   });

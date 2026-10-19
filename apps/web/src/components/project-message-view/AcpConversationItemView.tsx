@@ -1,4 +1,4 @@
-import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
+import type { ToolCallContentItem, UserMessageAttribution } from '@simple-agent-manager/acp-client';
 import {
   AgentCrashReportView,
   MessageBubble as AcpMessageBubble,
@@ -19,6 +19,33 @@ let _cachedTtsApiUrl: string | undefined;
 function getTtsUrl(): string {
   if (!_cachedTtsApiUrl) _cachedTtsApiUrl = getTtsApiUrl();
   return _cachedTtsApiUrl;
+}
+
+/**
+ * Above a user-role bubble the session owner did not type: who sent it to the agent, and
+ * whether it was cancelled before delivery because the sender's shared access was removed.
+ */
+function UserMessageAttributionLine({ attribution }: { attribution: UserMessageAttribution }) {
+  const sender = attribution.senderName ?? 'A teammate';
+  const label =
+    attribution.kind === 'comment'
+      ? attribution.commentAuthorName && attribution.commentAuthorName !== attribution.senderName
+        ? `${sender} sent ${attribution.commentAuthorName}'s comment to the agent`
+        : `${sender} sent a comment to the agent`
+      : `${sender} · shared access`;
+  return (
+    <div
+      className="mb-1 flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-xs text-fg-muted"
+      data-testid="user-message-attribution"
+    >
+      <span className="min-w-0 break-words text-right">{label}</span>
+      {attribution.notDelivered && (
+        <span className="rounded border border-warning/30 bg-warning-tint px-1.5 py-0.5 text-warning-fg">
+          Not delivered — access was removed
+        </span>
+      )}
+    </div>
+  );
 }
 
 /** Renders a system message (task status, error logs) as preformatted text.
@@ -162,13 +189,16 @@ function AcpConversationItemViewImpl({
       }
       // The timestamp is what turns on the bubble's Info + Copy actions.
       return (
-        <AcpMessageBubble
-          text={item.text}
-          role="user"
-          animated={animateUserMessage}
-          timestamp={item.timestamp}
-          bubbleClassName="glass-msg-user"
-        />
+        <>
+          {item.attribution && <UserMessageAttributionLine attribution={item.attribution} />}
+          <AcpMessageBubble
+            text={item.text}
+            role="user"
+            animated={animateUserMessage}
+            timestamp={item.timestamp}
+            bubbleClassName="glass-msg-user"
+          />
+        </>
       );
     case 'agent_message':
       return (
