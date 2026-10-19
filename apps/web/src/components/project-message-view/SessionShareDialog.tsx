@@ -71,7 +71,7 @@ function removalNotice(
   removedName: string,
   leftSelf: boolean
 ): string {
-  const parts = [leftSelf ? 'You left this chat.' : `Removed ${removedName}.`];
+  const parts = [leftSelf ? 'You left this chat.' : `Revoked ${removedName}'s access.`];
   const cascaded = response.revokedGrantIds.length - 1;
   if (cascaded > 0) {
     parts.push(

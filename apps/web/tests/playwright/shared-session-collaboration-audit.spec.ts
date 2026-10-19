@@ -51,13 +51,25 @@ const MEMBERS = {
   accessRequests: [],
 };
 
+const MINUTE = 60_000;
+
 function grant(
   id: string,
   grantee: typeof BEA,
   grantedBy: typeof BEA,
-  parentGrantId: string | null
+  parentGrantId: string | null,
+  minutesLeft: number
 ) {
-  return { id, sessionId: SESSION_ID, grantee, grantedBy, parentGrantId, createdAt: NOW - 60_000 };
+  return {
+    id,
+    sessionId: SESSION_ID,
+    grantee,
+    grantedBy,
+    parentGrantId,
+    createdAt: NOW - MINUTE,
+    expiresAt: Date.now() + minutesLeft * MINUTE,
+    durationMinutes: 30,
+  };
 }
 
 function makeMessage(index: number) {
@@ -98,7 +110,13 @@ function sessionFor(viewer: Viewer, grants: ReturnType<typeof grant>[]) {
     isMine: viewer === 'owner',
     createdBy: { id: OWNER.id, name: OWNER.name, email: 'prakash@example.com' },
     viewerAccess: viewer,
-    access: { sessionId: SESSION_ID, viewerAccess: viewer, owner: OWNER, grants },
+    access: {
+      sessionId: SESSION_ID,
+      viewerAccess: viewer,
+      owner: OWNER,
+      grants,
+      serverTime: Date.now(),
+    },
   };
 }
 
@@ -122,7 +140,8 @@ async function setupMocks(page: Page, viewer: Viewer): Promise<Captured> {
           email: 'dana@example.com',
           name: 'Dana Scully',
         });
-  let grants = [grant('g-bea', BEA, OWNER, null), grant('g-cy', CY, BEA, 'g-bea')];
+  // Bea's access ends in 23 minutes; the long-named teammate she added, in 4.
+  let grants = [grant('g-bea', BEA, OWNER, null, 23), grant('g-cy', CY, BEA, 'g-bea', 4)];
   const comments: Record<string, unknown>[] = [];
   const captured: Captured = { commentBodies: [], shareBodies: [] };
 
@@ -182,17 +201,49 @@ async function setupMocks(page: Page, viewer: Viewer): Promise<Captured> {
     if (sub === `/sessions/${SESSION_ID}/access/grants` && method === 'POST') {
       const body = json();
       captured.shareBodies.push(body);
+      const minutes = Number(body.durationMinutes);
+      const existing = grants.find((row) => row.grantee.id === body.userId);
+      if (existing) {
+        // The owner renewing: a new end time from now.
+        const renewed = {
+          ...existing,
+          expiresAt: Date.now() + minutes * MINUTE,
+          durationMinutes: minutes,
+        };
+        grants = grants.map((row) => (row.id === existing.id ? renewed : row));
+        return respond(200, {
+          grant: renewed,
+          created: false,
+          renewed: true,
+          access: sessionFor(viewer, grants).access,
+        });
+      }
       const row = MEMBERS.members.find((member) => member.userId === body.userId);
       const created = grant(
         `g-${String(body.userId)}`,
         { id: String(body.userId), name: row?.user.name ?? null, avatarUrl: null } as typeof BEA,
         OWNER,
-        null
+        null,
+        minutes
       );
       grants = [...grants, created];
       return respond(201, {
         grant: created,
         created: true,
+        renewed: false,
+        access: sessionFor(viewer, grants).access,
+      });
+    }
+    const revokeMatch = sub.match(new RegExp(`^/sessions/${SESSION_ID}/access/grants/([^/]+)$`));
+    if (revokeMatch && method === 'DELETE') {
+      const granteeId = decodeURIComponent(revokeMatch[1]!);
+      const revoked = grants.filter(
+        (row) => row.grantee.id === granteeId || row.grantedBy.id === granteeId
+      );
+      grants = grants.filter((row) => !revoked.includes(row));
+      return respond(200, {
+        revokedGrantIds: revoked.map((row) => row.id),
+        cancelledDeliveryIds: [],
         access: sessionFor(viewer, grants).access,
       });
     }
@@ -311,24 +362,114 @@ test.describe('Shared session collaboration', () => {
     await assertNoClippedOverflow(page);
     await screenshot(page, 'share-dialog-list', { scopeToProject: true });
 
+    // Each person with access shows when it ends.
+    await expect(
+      dialog
+        .getByRole('listitem')
+        .filter({ has: page.getByText('Bea Arthur', { exact: true }) })
+        .getByTestId('grant-time-left')
+    ).toHaveText(/^ends in 23 min \(.+\)$/);
+    await expect(
+      dialog.getByRole('listitem').filter({ hasText: LONG_NAME }).getByTestId('grant-time-left')
+    ).toHaveText(/^ends in 4 min \(.+\)$/);
+
     await dialog.getByRole('button', { name: 'Share with Dana Scully' }).click();
     await expect(dialog.getByRole('heading', { name: 'Share with Dana Scully?' })).toBeVisible();
     const share = dialog.getByRole('button', { name: 'Share', exact: true });
     await expect(share).toBeDisabled();
+    // The four durations sit on one row inside the dialog, none picked for you.
+    const durations = dialog.getByRole('group', { name: 'How long?' });
+    const options = durations.locator('label');
+    await expect(options).toHaveText(['5 min', '10 min', '30 min', '1 hour']);
+    const dialogBox = (await dialog.boundingBox())!;
+    const optionBoxes = await Promise.all(
+      (await options.all()).map(async (option) => (await option.boundingBox())!)
+    );
+    for (const optionBox of optionBoxes) {
+      expect(Math.abs(optionBox.y - optionBoxes[0]!.y)).toBeLessThanOrEqual(1);
+      expect(optionBox.x).toBeGreaterThanOrEqual(dialogBox.x);
+      expect(optionBox.x + optionBox.width).toBeLessThanOrEqual(dialogBox.x + dialogBox.width + 1);
+    }
+    for (const radio of await durations.getByRole('radio').all()) {
+      await expect(radio).not.toBeChecked();
+    }
     await assertNoClippedOverflow(page);
     await screenshot(page, 'share-dialog-confirm', { scopeToProject: true });
 
     await dialog.getByRole('checkbox', { name: 'I understand this runs on my accounts' }).check();
+    // Acknowledged, but no duration yet.
+    await expect(share).toBeDisabled();
+    await durations.getByText('30 min').click();
+    await expect(durations.getByRole('radio', { name: '30 min' })).toBeChecked();
+    await expect(dialog.getByText(/^Ends at .+\.$/)).toBeVisible();
     await expect(share).toBeEnabled();
+    await screenshot(page, 'share-dialog-confirm-chosen', { scopeToProject: true });
     await share.click();
-    await expect(dialog.getByRole('status')).toHaveText('Dana Scully can now use this chat.');
+    await expect(dialog.getByRole('status')).toHaveText(
+      /^Dana Scully can use this chat until .+\.$/
+    );
     expect(captured.shareBodies).toEqual([
-      { userId: 'user-dana', acknowledgeSharedCredentials: true },
+      { userId: 'user-dana', durationMinutes: 30, acknowledgeSharedCredentials: true },
     ]);
     await screenshot(page, 'share-dialog-shared', { scopeToProject: true });
 
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
+  });
+
+  test('share dialog: the owner renews someone, and revokes someone now', async ({ page }) => {
+    const captured = await setupMocks(page, 'owner');
+    await openChat(page);
+    await page
+      .getByRole('button', { name: /chat access/i })
+      .first()
+      .click();
+    const dialog = page.getByRole('dialog', { name: 'Share chat access' });
+
+    // Renew and Revoke now stay inside the row next to an unbreakable 60-character name.
+    const longRow = dialog.getByRole('listitem').filter({ hasText: LONG_NAME });
+    const rowBox = (await longRow.boundingBox())!;
+    for (const name of [`Renew ${LONG_NAME}'s access`, `Revoke ${LONG_NAME}'s access now`]) {
+      const button = longRow.getByRole('button', { name });
+      await expect(button).toBeVisible();
+      const box = (await button.boundingBox())!;
+      expect(box.x + box.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
+    }
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'share-dialog-rows', { scopeToProject: true });
+
+    await dialog.getByRole('button', { name: "Renew Bea Arthur's access" }).click();
+    await expect(dialog.getByRole('heading', { name: "Renew Bea Arthur's access?" })).toBeVisible();
+    await dialog.getByRole('group', { name: 'How long?' }).getByText('1 hour').click();
+    await dialog.getByRole('checkbox', { name: 'I understand this runs on my accounts' }).check();
+    await screenshot(page, 'share-dialog-renew-confirm', { scopeToProject: true });
+    await dialog.getByRole('button', { name: 'Renew', exact: true }).click();
+    await expect(dialog.getByRole('status')).toHaveText(/^Bea Arthur's access now ends at .+\.$/);
+    await expect(
+      dialog
+        .getByRole('listitem')
+        .filter({ has: page.getByText('Bea Arthur', { exact: true }) })
+        .getByTestId('grant-time-left')
+    ).toHaveText(/^ends in 60 min \(.+\)$/);
+    expect(captured.shareBodies).toEqual([
+      { userId: 'user-bea', durationMinutes: 60, acknowledgeSharedCredentials: true },
+    ]);
+
+    await longRow.getByRole('button', { name: `Revoke ${LONG_NAME}'s access now` }).click();
+    await expect(
+      dialog.getByText(
+        `Revoke ${LONG_NAME}'s access now? They won't be able to send messages here anymore.`
+      )
+    ).toBeVisible();
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'share-dialog-revoke-confirm', { scopeToProject: true });
+    await dialog.getByRole('button', { name: 'Revoke now', exact: true }).click();
+    await expect(dialog.getByRole('status')).toHaveText(`Revoked ${LONG_NAME}'s access.`);
+    // Gone from the people with access, and offered again to anyone who wants to regrant.
+    await expect(
+      dialog.getByRole('button', { name: `Revoke ${LONG_NAME}'s access now` })
+    ).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: `Share with ${LONG_NAME}` })).toBeVisible();
   });
 
   test('comment composer: @mention a teammate from the member palette', async ({ page }) => {

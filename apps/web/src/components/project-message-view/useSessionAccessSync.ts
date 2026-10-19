@@ -48,7 +48,11 @@ export function useSessionAccessSync(
   }, [applySessionAccess, projectId, sessionId]);
 
   const nextExpiresAt = useMemo(() => {
-    const ends = (access?.grants ?? []).map((grant) => grant.expiresAt);
+    // A summary cached before grants had end times has none; never schedule on NaN, which
+    // `setTimeout` treats as 0 and would turn into a refetch loop.
+    const ends = (access?.grants ?? [])
+      .map((grant) => grant.expiresAt)
+      .filter((expiresAt) => Number.isFinite(expiresAt));
     return ends.length > 0 ? Math.min(...ends) : null;
   }, [access]);
   const summaryTime = access?.serverTime;

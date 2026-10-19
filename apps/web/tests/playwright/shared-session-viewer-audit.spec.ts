@@ -53,6 +53,9 @@ function person(id: string, name: string) {
   return { id, name, avatarUrl: null };
 }
 
+/** Minutes left on each grant: the viewer's own (first) ends in 23. */
+const MINUTES_LEFT = [23, 4, 58];
+
 function accessSummary(viewer: Viewer, grantCount: number) {
   const grants = Array.from({ length: grantCount }, (_, index) => ({
     id: `grant-${index}`,
@@ -64,12 +67,15 @@ function accessSummary(viewer: Viewer, grantCount: number) {
     grantedBy: person('owner-1', LONG_OWNER),
     parentGrantId: null,
     createdAt: NOW - 60_000 * (index + 1),
+    expiresAt: NOW + 60_000 * (MINUTES_LEFT[index] ?? 30),
+    durationMinutes: 60,
   }));
   return {
     sessionId: SESSION_ID,
     viewerAccess: viewer,
     owner: person(viewer === 'owner' ? VIEWER_ID : 'owner-1', LONG_OWNER),
     grants,
+    serverTime: NOW,
   };
 }
 
@@ -81,7 +87,7 @@ function makeSession(viewer: Viewer, overrides: Record<string, unknown> = {}) {
     taskId: null,
     topic: 'Fix the flaky checkout tests before the Friday release',
     status: 'active',
-    messageCount: 6,
+    messageCount: 7,
     startedAt: NOW - 600_000,
     endedAt: null,
     createdAt: NOW - 700_000,
@@ -159,6 +165,17 @@ const MESSAGES = [
     }),
   },
   {
+    id: 'msg-expired',
+    role: 'user',
+    content: 'And open a PR when the suite is green.',
+    toolMetadata: durable({
+      source: 'user_followup',
+      senderName: LONG_GRANTEE,
+      onBehalfOfUserId: 'owner-1',
+      deliveryCancelled: 'sender_access_expired',
+    }),
+  },
+  {
     id: 'msg-agent-2',
     role: 'assistant',
     content: 'Done: the explicit wait passes 20 of 20 runs, including the empty cart.',
@@ -167,7 +184,7 @@ const MESSAGES = [
 ].map((message, index) => ({
   ...message,
   sessionId: SESSION_ID,
-  createdAt: NOW - (6 - index) * 30_000,
+  createdAt: NOW - (7 - index) * 30_000,
   sequence: index + 1,
 }));
 
@@ -287,14 +304,24 @@ test.describe('Shared session — what each viewer sees', () => {
     const notice = page.getByTestId('shared-session-notice');
     await expect(notice).toBeVisible();
     await expect(notice).toContainText(`You're chatting in ${LONG_OWNER}'s session.`);
+    // Their own grant's time left, not another person's (4 and 58 minutes).
+    await expect(page.getByTestId('shared-session-time-left')).toHaveText(
+      /^Your access ends in 23 min \(.+\)\.$/
+    );
     await expect(page.getByPlaceholder(/Send a message/)).toBeVisible();
+    // The notice wraps inside the viewport rather than pushing the composer off-screen.
+    const viewport = page.viewportSize()!;
+    const noticeBox = (await notice.boundingBox())!;
+    expect(noticeBox.x + noticeBox.width).toBeLessThanOrEqual(viewport.width + 1);
 
     // The conversation is virtualized: scroll each labelled message into the rendered window.
     await expectAttribution(page, `${LONG_GRANTEE} · shared access`);
     await expectAttribution(page, `${LONG_OWNER} sent Ben Okafor's comment to the agent`);
     await expectAttribution(page, 'Teammate 2 · shared access');
     await expect(page.getByText('Not delivered — access was removed')).toBeVisible();
-    // Four user messages, three labelled: the owner's own message carries no label.
+    await scrollConversationUntil(page, 'And open a PR when the suite is green.');
+    await expect(page.getByText('Not delivered — access expired')).toBeVisible();
+    // Five user messages, four labelled: the owner's own message carries no label.
     await expectUnlabelled(page, 'The checkout tests fail about one run in five. Find out why.');
 
     await assertNoOverflow(page);

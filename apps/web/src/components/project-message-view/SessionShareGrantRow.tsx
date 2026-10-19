@@ -61,9 +61,10 @@ export function GrantRow({
 
   return (
     <li className="min-w-0 px-3 py-2">
-      <div className="flex min-h-10 min-w-0 items-center gap-3">
+      {/* The name keeps at least 10rem; on a phone the buttons wrap to their own line instead. */}
+      <div className="flex min-h-10 min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
         <Avatar name={name} imageUrl={grant.grantee.avatarUrl} tone="human" size="lg" />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[10rem] flex-1">
           <p className="m-0 text-sm font-medium text-fg-primary [overflow-wrap:anywhere]">
             {name}
             {isSelf && <span className="font-normal text-fg-muted"> (you)</span>}
@@ -80,7 +81,7 @@ export function GrantRow({
           </p>
         </div>
         {(showRenew || (canRemove && !confirmingRemoval)) && (
-          <div className="flex shrink-0 flex-wrap justify-end gap-1">
+          <div className="ml-auto flex shrink-0 flex-wrap justify-end gap-1">
             {showRenew && (
               <Button
                 size="sm"

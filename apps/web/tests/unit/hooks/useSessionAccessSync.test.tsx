@@ -169,6 +169,16 @@ describe('useSessionAccessSync: when shared access runs out', () => {
     expect(screen.getByTestId('viewer-access')).toHaveTextContent('reader');
   });
 
+  it('does not loop on a summary cached before grants had end times', () => {
+    const legacy = { ...grant('grantee-1', NOW), expiresAt: undefined as unknown as number };
+    render(<Harness initial={summary('grantee', [legacy], NOW)} />);
+    act(() => {
+      vi.advanceTimersByTime(10 * MINUTE);
+    });
+    expect(mocks.getSessionAccess).not.toHaveBeenCalled();
+    expect(screen.getByTestId('viewer-access')).toHaveTextContent('grantee');
+  });
+
   it('does not schedule anything when nobody has shared access', () => {
     render(<Harness initial={summary('owner', [], NOW)} />);
     act(() => {

@@ -407,7 +407,7 @@ describe('SessionShareDialog — people with access', () => {
     );
     await waitFor(() => expect(onChanged).toHaveBeenCalledWith(response.access));
     expect(within(dialog).getByRole('status')).toHaveTextContent(
-      "Removed Bea Arthur. Also removed 1 person they added. Cancelled 1 queued message that hadn't reached the agent yet."
+      "Revoked Bea Arthur's access. Also removed 1 person they added. Cancelled 1 queued message that hadn't reached the agent yet."
     );
   });
 

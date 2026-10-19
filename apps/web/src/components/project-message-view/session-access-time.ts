@@ -28,22 +28,26 @@ export function accessClockTime(serverMs: number): string {
   });
 }
 
-/** "23 min" / "under a minute" until `expiresAt`; null once it has passed. */
+/** "23 min" / "under a minute" until `expiresAt`; null once it has passed (or is unknown). */
 export function accessTimeLeft(expiresAt: number, now: number): string | null {
   const remaining = expiresAt - now;
-  if (remaining <= 0) return null;
+  // `!(x > 0)` also catches NaN: a grant without an end time is expired to the server too.
+  if (!(remaining > 0)) return null;
   if (remaining < 60_000) return 'under a minute';
   return `${Math.ceil(remaining / 60_000)} min`;
 }
 
-/** The server's clock, re-read every tick while `active`. */
+/**
+ * The server's clock, read on every render; while `active` it also re-renders each tick. Reading
+ * at render (rather than storing the last tick) keeps a just-arrived grant from showing more time
+ * than it was given.
+ */
 export function useServerNow(active: boolean): number {
-  const [now, setNow] = useState(serverNow);
+  const [, setTick] = useState(0);
   useEffect(() => {
     if (!active) return;
-    setNow(serverNow());
-    const id = window.setInterval(() => setNow(serverNow()), ACCESS_COUNTDOWN_TICK_MS);
+    const id = window.setInterval(() => setTick((tick) => tick + 1), ACCESS_COUNTDOWN_TICK_MS);
     return () => window.clearInterval(id);
   }, [active]);
-  return now;
+  return serverNow();
 }
