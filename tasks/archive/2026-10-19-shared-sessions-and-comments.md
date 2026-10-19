@@ -38,7 +38,7 @@ Web and docs (`584806445`, `c4e786882`, `dc988f470`):
 - [x] `session.access.changed` reasons `renewed`/`expired` handled; activity feed shows `session.access_expired`; transcript label for `sender_access_expired`
 - [x] Risk disclosure: capabilities/credentials the agent can reach; expiry/revocation cannot undo completed actions or invalidate copied credentials
 - [x] Docs: durations, renew, Revoke now, running turns keep running (no undo, owner's session not killed), browser timers display only
-- [ ] Re-run independent review, full suites, two-account staging including a real expiry, then PR
+- [x] Re-run independent review, full suites, two-account staging including a real expiry, then PR (staging run 15 passed 23/23 on `67d851640`)
 
 ## Product decisions (from Raphaël / the design idea)
 
@@ -82,6 +82,7 @@ Web and docs (`584806445`, `c4e786882`, `dc988f470`):
 - Staging run 12 (`bee28ae2c`): every step through the real expiry passed; at the end time the queued prompt was cancelled (`session.access_expired` `cancelledDeliveryCount: 1`) and the session read lists it (`access.undelivered`, `sender_access_expired`). The agent's running answer kept streaming after the end time, then the model provider stopped it ("API Error: Output blocked by content filtering policy", at the 1,012th number), so the E2E's busy work was shortened to 700 numbers.
 - Staging runs 13 and 14 (`bee28ae2c`): the queued prompt was cancelled at the end time, the running answer kept streaming past it and finished, and the open page showed **Not delivered — access expired**. Both runs then failed in the script's own search for the row (it matched on text while the list was virtualized, then after the reload it needed **Load earlier messages**); the script now finds the row by id and pages back, and fails when a run aborts or skips steps (an aborted login had printed "PASSED 0/0").
 - Task validation after run 14: the workspace page's chat (`WorkspaceChatView`, owner only) never read `undelivered` and ignored `session.access.changed`, so an owner with that page open kept seeing a cancelled teammate prompt as sent until a reload. Fixed in `5cd5d907c`: `useWorkspaceChatSocket` uses `useSessionAccessSync`, and `chatMessagesToConversationItems` takes the list itself so both views share one lookup. Test: `workspace-chat-view-undelivered.test.tsx` (the real view and socket hook with a fake `WebSocket`); removing the socket wiring fails the live case, removing the list fails both. The staging run now keeps the owner's workspace page open through the end time and checks the label there without a reload.
+- Staging run 15 (`67d851640`, deploy 39339351263, 23:24–23:33 UTC): all 23 steps passed with no page errors, through a real 5-minute expiry. Composer locked 0 s after the end time; 403 and reader afterwards; the queued prompt was cancelled (`cancelledDeliveryCount: 1`) and labelled on the teammate's page live and after a reload, and on the owner's workspace page live (1280px) and at 375px; the running answer finished. Navigation smoke (dashboard, projects, project, chat, settings at 1280 and 375): 200, no console errors, no overflow. Cleanup: chat stopped, workspace `deleted`, nothing under the teammate account. Screenshots: `tasks/evidence/2026-10-19-shared-sessions/staging-*.jpg`.
 - Doc review after run 14: the API reference skill still listed the deleted `/send-to-agent` route and had no shared-access routes. Fixed in `6b10e15ea`.
 - Pre-existing, not changed: the task status route (`POST /tasks/:taskId/status`, used by the rail's **Complete**) allows any member with `task:write`. Tracked in `tasks/backlog/2026-10-19-session-complete-respects-session-writer.md`.
 
@@ -153,7 +154,7 @@ Docs:
 - [x] Any member can comment and @mention; only writers can send to the agent; mentions notify only picked active members (route tests + web tests)
 - [x] Forking a teammate's task bills the caller (G5 tests)
 - [x] UI: readers see a read-only composer with the comment hint; grantees see the shared-session notice; Share dialog adds/removes people with the required confirmation (web tests + Playwright + staging)
-- [ ] Staging: two real staging users exercise share → grantee prompt → attribution → revoke → composer locks, plus comment + mention + notification, with zero errors
+- [x] Staging: two real staging users exercise share → grantee prompt → attribution → revoke → composer locks, plus comment + mention + notification, with zero errors (run 15, `67d851640`, deploy 39339351263: 23/23 steps, no page errors)
 
 ## Decisions
 
