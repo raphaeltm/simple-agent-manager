@@ -1,20 +1,8 @@
 /**
- * The minimum a bounded sleep fallback must keep before it may release compute:
- * a completed snapshot generation that records the exact Git commit the workspace was
- * on, with that commit's objects retained so a fresh workspace can restore it.
- *
- * A commit hash on its own is not restorable: if it was never pushed, a new clone
- * cannot fetch it. The WIP bundle a capture uploads holds the objects the restore
- * needs (pre-fix agents bundle the whole branch history; current agents bundle the
- * unpushed commits plus the snapshot commits on top of the remote refs). So the
- * fallback requires that bundle, verified in R2, unless the generation is a complete
- * snapshot, whose recorded artifacts are all verified instead.
- *
- * The restore this mirrors is the vm-agent's `restoreSessionSnapshot`
- * (`packages/vm-agent/internal/server/session_snapshot_restore.go`): it downloads every
- * recorded artifact, checks out `baseCommit` (on `manifest.git.branch` when present),
- * applies the WIP bundle, and — with no HOME archive — starts the agent fresh. Pre-fix
- * agents already run that path, so a Git-baseline wake needs no agent upgrade.
+ * Optional exact Git recovery assessment for the bounded sleep fallback.
+ * A verified point allows file restoration; its absence never prevents exhausted
+ * idle-runtime cleanup. The fallback instead retains backups and continues fresh
+ * from the transcript, without claiming exact recovery.
  */
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';

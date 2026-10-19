@@ -19,11 +19,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as observabilitySchema from '../../src/db/observability-schema';
 import * as schema from '../../src/db/schema';
 import {
+  guardedSessionSleep,
   type SessionSleepRuntimeGuard,
-  sessionSleepRuntimeIsCurrent,
 } from '../../src/durable-objects/project-data/session-sleep-runtime-guard';
 import type { Env } from '../../src/env';
 import { sessionSnapshotRoutes } from '../../src/routes/workspaces/session-snapshots';
+import { sweepStoppedHandoffNodes } from '../../src/scheduled/node-cleanup/node-phases';
+import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
 import { runSessionSnapshotPurge } from '../../src/scheduled/session-snapshot-purge';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
@@ -45,6 +47,7 @@ import { createRouteTestApp } from '../unit/routes/route-test-app';
 
 const mocks = vi.hoisted(() => ({
   cleanupTaskRun: vi.fn(),
+  deleteNodeResourcesStrict: vi.fn(),
   startTaskRunnerDO: vi.fn(),
   destroyVmAgentContainer: vi.fn(),
   failSession: vi.fn(),
@@ -97,6 +100,10 @@ vi.mock('../../src/services/compute-usage', () => ({
 vi.mock('../../src/services/task-runner-do', () => ({
   startTaskRunnerDO: (...args: unknown[]) => mocks.startTaskRunnerDO(...args),
   ensureTaskRunnerStarted: vi.fn(async () => false),
+}));
+
+vi.mock('../../src/services/nodes', () => ({
+  deleteNodeResourcesStrict: (...args: unknown[]) => mocks.deleteNodeResourcesStrict(...args),
 }));
 
 vi.mock('../../src/services/task-runner', () => ({
@@ -409,16 +416,31 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
         chatSessionId: string,
         options?: { runtimeGuard?: SessionSleepRuntimeGuard }
       ) => {
-        if (
-          options?.runtimeGuard &&
-          !(await sessionSleepRuntimeIsCurrent(_env.DATABASE, chatSessionId, options.runtimeGuard))
-        )
-          return false;
-        const state = projectData.get(chatSessionId);
-        if (state?.status !== 'active') return false;
-        state.status = 'sleeping';
-        order.push(`project-data-sleep:${chatSessionId}`);
-        return true;
+        const sleep = () => {
+          const state = projectData.get(chatSessionId);
+          if (state?.status !== 'active') return false;
+          state.status = 'sleeping';
+          order.push(`project-data-sleep:${chatSessionId}`);
+          return true;
+        };
+        if (!options?.runtimeGuard) return sleep();
+        // Exercise the real guarded ProjectData transition against a minimal local
+        // SQL boundary, including already-stopped conversations from the incident.
+        const localSql = {
+          exec: () => ({
+            toArray: () => {
+              const state = projectData.get(chatSessionId);
+              return state ? [{ status: state.status }] : [];
+            },
+          }),
+        } as unknown as SqlStorage;
+        return guardedSessionSleep(
+          _env.DATABASE,
+          localSql,
+          chatSessionId,
+          options.runtimeGuard,
+          sleep
+        );
       }
     );
     mocks.stopSession.mockImplementation(
@@ -666,6 +688,103 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
         expect(await sweepAt(tick(index))).toMatchObject({ selected: 0 });
       }
       expect(captureCount).toBe(3);
+    });
+
+    it('cleans a legacy no-Git runtime while preserving its already-stopped conversation', async () => {
+      seedSession({ id: 'a', taskStatus: 'completed' });
+      capture = 'wip-skipped';
+      await spendFullBudget();
+      const retained = [...r2Objects.keys()];
+      expect(retained.length).toBeGreaterThan(0);
+      projectData.set('chat-a', { status: 'stopped' });
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots SET sleep_status = 'terminal_failed',
+        sleep_after = NULL, sleep_fallback_json = ? WHERE chat_session_id = 'chat-a'`
+        )
+        .run(
+          JSON.stringify({
+            version: 1,
+            outcome: 'blocked',
+            trigger: 'attempt_budget',
+            blockedReason: 'commit_objects_unavailable',
+            decidedAt: tick(2).toISOString(),
+            episodeStartedAt: START.toISOString(),
+            failedAttempts: 3,
+            lastError: 'Git objects not retained',
+            recoveryPoint: null,
+          })
+        );
+      await sweepAt(tick(3));
+      expect(workspaceStatus()).toBe('sleeping');
+      expect(projectData.get('chat-a')?.status).toBe('stopped');
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+      expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1');
+      expect([...r2Objects.keys()]).toEqual(retained);
+      expect(fallbackRecord()).toMatchObject({ outcome: 'slept', recoveryPoint: null });
+      expect(notices.some((notice) => /unpublished/i.test(notice.content))).toBe(true);
+    });
+
+    it('removes the empty provider node after no-Git termination, retrying failed deletion', async () => {
+      seedSession({ id: 'a', taskStatus: 'completed' });
+      capture = 'old-agent-rejected';
+      await spendFullBudget();
+      await sweepAt(tick(3));
+      const retained = [...r2Objects.keys()];
+      expect(workspaceStatus()).toBe('sleeping');
+      expect(mocks.markIdle).toHaveBeenCalledWith('node-1', 'user-1', 2700000);
+
+      // The NodeLifecycle alarm hands off only after intentional warm retention.
+      // Its clock is covered by the NodeLifecycle tests; continue with the real
+      // scheduled cleanup/claim/proof SQL rather than mocking node cleanup itself.
+      const afterWarm = tick(30);
+      vi.setSystemTime(afterWarm);
+      sqlite
+        .prepare(
+          "UPDATE nodes SET status = 'stopped', created_at = ?, updated_at = ? WHERE id = 'node-1'"
+        )
+        .run(START.toISOString(), afterWarm.toISOString());
+      const db = drizzle(env.DATABASE, { schema });
+      const config = resolveCleanupConfig(env);
+      mocks.deleteNodeResourcesStrict.mockRejectedValueOnce(new Error('provider unavailable'));
+      const first = emptyResult();
+      await sweepStoppedHandoffNodes(db, env, afterWarm, config, first);
+      expect(first.errors).toBe(1);
+      expect(sqlite.prepare("SELECT status FROM nodes WHERE id = 'node-1'").get()).toEqual({
+        status: 'stopped',
+      });
+      expect(projectData.get('chat-a')?.status).toBe('sleeping');
+
+      const retryAt = new Date(afterWarm.getTime() + config.failureBackoffMs + 1);
+      vi.setSystemTime(retryAt);
+      // Only the provider-confirmed boundary supplies immutable runtime proof.
+      mocks.deleteNodeResourcesStrict.mockImplementationOnce(async () => {
+        const proof = retryAt.toISOString();
+        sqlite
+          .prepare("UPDATE nodes SET runtime_termination_confirmed_at = ? WHERE id = 'node-1'")
+          .run(proof);
+        sqlite
+          .prepare(
+            "UPDATE workspaces SET status = 'deleted', runtime_deletion_confirmed_at = ? WHERE node_id = 'node-1'"
+          )
+          .run(proof);
+        return {
+          providerVm: 'deleted',
+          runtimeTerminationConfirmedAt: proof,
+          runtimeIncarnationId: null,
+          providerInstanceId: null,
+        };
+      });
+      const second = emptyResult();
+      await sweepStoppedHandoffNodes(db, env, retryAt, config, second);
+      expect(second.lifetimeDestroyed).toBe(1);
+      expect(sqlite.prepare("SELECT status FROM nodes WHERE id = 'node-1'").get()).toEqual({
+        status: 'deleted',
+      });
+      expect(mocks.deleteNodeResourcesStrict).toHaveBeenCalledTimes(2);
+      expect(projectData.get('chat-a')?.status).toBe('sleeping');
+      expect([...r2Objects.keys()]).toEqual(retained);
+      expect(notices.some((notice) => /transcript/i.test(notice.content))).toBe(true);
     });
 
     it.each(['idle', 'prompting'] as const)(
