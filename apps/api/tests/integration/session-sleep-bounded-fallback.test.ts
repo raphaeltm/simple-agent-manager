@@ -1560,6 +1560,39 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       expect(restore.manifest).toMatchObject({ chatSessionId: 'chat-a', status: 'available' });
     });
 
+    it('rechecks in-flight work at the external stop boundary and retries once it ends', async () => {
+      seedSession({ id: 'a', taskStatus: 'completed' });
+      capture = 'old-agent-rejected';
+      await spendFullBudget();
+      const persist = mocks.persistMessage.getMockImplementation();
+      mocks.persistMessage.mockImplementationOnce(async (...args: unknown[]) => {
+        const result = await persist?.(...args);
+        activity = {
+          activity: 'prompting',
+          activityAt: tick(3).getTime(),
+          runtimeWorkState: 'active',
+          runtimeWorkCount: 1,
+          runtimeWorkUpdatedAt: tick(3).getTime(),
+          runtimeWorkProgressAt: tick(3).getTime(),
+        };
+        return result;
+      });
+      await sweepAt(tick(3));
+      expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+      expect(row()).toMatchObject({ sleep_status: 'stopping', sleeping_at: null });
+      expect(workspaceStatus()).toBe('running');
+      activity = {
+        activity: 'idle',
+        activityAt: tick(4).getTime(),
+        runtimeWorkState: 'idle',
+        runtimeWorkCount: 0,
+      };
+      await sweepAt(tick(4));
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+      expect(row().sleep_status).toBe('sleeping');
+      expect(captureCount).toBe(3);
+    });
+
     it('keeps unconfirmed runtime deletion retryable and converges after a restart', async () => {
       seedSession({ id: 'a', taskStatus: 'in_progress' });
       await spendFullBudget();
