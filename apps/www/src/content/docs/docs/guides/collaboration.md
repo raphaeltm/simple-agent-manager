@@ -143,9 +143,10 @@ the message it is about, and shows who sent it. Only the chat's owner and people
 
 ### Share a chat
 
-The owner of a chat can let a teammate drive it: send messages, interrupt the agent, stop, sleep or
-archive the chat, and answer the agent's questions. These are the same controls the owner has in
-that chat. Open the chat, select **Share** in the tool rail, then **Add a teammate**.
+The owner of a chat can let a teammate drive it for 5, 10, 30 or 60 minutes: send messages,
+interrupt the agent, stop, sleep or archive the chat, and answer the agent's questions. These are
+the same controls the owner has in that chat. Open the chat, select **Share** in the tool rail, then
+**Add a teammate**, choose how long, and confirm.
 
 Before you share, know what it means:
 
@@ -157,15 +158,25 @@ Before you share, know what it means:
   on GitLab projects the owner's GitLab sign-in, which reaches all of the owner's GitLab projects.
   On GitHub projects the agent only has a one-hour token for the project's repository. Share only with people you trust. SAM asks you to confirm
   before it shares.
-- **There is no end date.** Access lasts until someone removes it.
+- **Access lasts the time you choose.** You pick 5, 10, 30 or 60 minutes every time. There is no
+  default and no "until removed" option. When the time is up, access ends on its own. Only the owner
+  can extend it, with **Renew**, which starts a new period from now.
+- **Ending access undoes nothing.** It doesn't reverse what the teammate did, and keys they copied
+  keep working until you replace them. If the agent is already working on something they asked for,
+  it finishes; SAM doesn't stop the agent or the chat.
 - **It covers that one chat.** It gives no access to the owner's other chats, settings or keys.
 
 What SAM enforces:
 
 - You can share a chat while it is running or asleep (not after it has ended), and only with active
   members of the project. Once you share, their messages are handled exactly like yours.
-- People a chat is shared with can share it onward and remove anyone's access. Removing someone also
-  removes anyone they added.
+- SAM's servers check the time on every action and again just before a queued message goes to the
+  agent. A browser's clock or countdown has no say. Messages a teammate queued that haven't reached
+  the agent when their time runs out are cancelled and marked **Not delivered — access expired**.
+- People a chat is shared with can share it onward, but never for longer than their own access lasts,
+  and can remove anyone's access. Removing someone also removes anyone they added.
+- **Share** shows when each person's access ends. A teammate sees their own time left above the
+  message box, and their message box locks when it runs out.
 - A chat can be shared with up to 10 people at a time by default (an admin setting).
 - Each message shows who sent it (for example **Ana · shared access**), and the agent is told who
   is speaking.
@@ -176,11 +187,14 @@ What SAM enforces:
 
 ### Remove access
 
-Open **Share** and select **Remove** next to a person, or **Leave** to remove yourself. Access ends
-immediately. Their messages that haven't reached the agent yet are cancelled and marked
-**Not delivered — access was removed**. A message the agent already received can't be taken back.
-When a member is removed from the project, SAM also deletes the access they held and the access on
-chats they own.
+Access ends on its own when its time is up. To end it sooner, open **Share** and select
+**Revoke now** next to a person, or **Leave** to remove yourself. Access ends immediately. Their
+messages that haven't reached the agent yet are cancelled and marked
+**Not delivered — access was removed**. A message the agent already received can't be taken back,
+and work it has started keeps running. When a member is removed from the project, SAM also deletes
+the access they held and the access on chats they own.
+
+To give someone access again after it ended, add them again from **Add a teammate**.
 
 ## Who pays: credential attribution
 

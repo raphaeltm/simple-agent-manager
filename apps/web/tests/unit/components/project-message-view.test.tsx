@@ -1169,8 +1169,11 @@ describe('ProjectMessageView — Share follows the chat state', () => {
             grantedBy: owner,
             parentGrantId: null,
             createdAt: Date.now(),
+            expiresAt: Date.now() + 30 * 60_000,
+            durationMinutes: 30,
           },
         ],
+        serverTime: Date.now(),
       },
     };
   }
@@ -1211,8 +1214,10 @@ describe('ProjectMessageView — Share follows the chat state', () => {
       within(dialog).getByText('This chat has ended, so no one else can be added.')
     ).toBeTruthy();
     expect(within(dialog).queryByRole('heading', { name: 'Add a teammate' })).toBeNull();
-    // Removing people still works on an ended chat.
-    expect(within(dialog).getByRole('button', { name: 'Remove Bea Arthur' })).toBeTruthy();
+    // Revoking access still works on an ended chat.
+    expect(
+      within(dialog).getByRole('button', { name: "Revoke Bea Arthur's access now" })
+    ).toBeTruthy();
   });
 });
 

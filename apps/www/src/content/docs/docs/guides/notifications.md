@@ -18,7 +18,7 @@ SAM combines an in-app notification center with optional Web Push delivery for a
 | **cron_failure**   | High    | A five-minute operational recovery sweep fails, or a sweep opens a project's ProjectData archive circuit breaker (active superadmins only) |
 | **mention**        | Medium  | A teammate @mentions you in a chat comment or reply                                                                                        |
 | **comment**        | Low     | A teammate comments on a chat you own, or replies in a comment thread you are part of                                                      |
-| **session_access** | Medium  | A teammate shares a chat with you, removes your access to one, or shares a chat you own with someone else                                  |
+| **session_access** | Medium  | A teammate shares a chat with you (saying for how long), extends or removes your access, or shares a chat you own with someone else        |
 
 A permission request, question, or link card that an agent puts in the chat while it waits does
 **not** send a notification. Those show up as **Needs input** beside the chat in the project's
