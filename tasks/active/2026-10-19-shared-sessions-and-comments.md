@@ -30,14 +30,14 @@ Server (`a7d72cc3e`, `06970cc5f`, `6e15b44c0`):
 - [x] Renew/regrant: only the owner renews an active grant (from now, new duration); any session writer can regrant an expired person; onward grants are capped at the issuer's own expiry; nobody renews their own access; a regrant first cancels the old row's queued prompts
 - [x] Tests: 5/10/30/60 boundaries (`expiresAt - 1` active, `expiresAt` not), queued delivery before and after the sweep, sweep twice, regrant/revoke races both orders, legacy NULL row, route duration validation, workers slice through routes + D1 + DO + alarm + WebSocket; 9 mutations proven red
 
-Web and docs:
+Web and docs (`43e5aceb1`, `33974f50a`, `5ad59f724`):
 
-- [ ] Share dialog: required 5/10/30/60 choice (no default; Share disabled until chosen); request carries `durationMinutes`
-- [ ] Grant rows show remaining time and expires-at (server-time corrected); **Revoke now**; owner-only **Renew** with a duration choice
-- [ ] Collaborator notice shows remaining time; the client refetches at `expiresAt` (display only)
-- [ ] `session.access.changed` reasons `renewed`/`expired` handled; activity feed shows `session.access_expired`; transcript label for `sender_access_expired`
-- [ ] Risk disclosure: capabilities/credentials the agent can reach; expiry/revocation cannot undo completed actions or invalidate copied credentials
-- [ ] Docs: durations, renew, Revoke now, running turns keep running (no undo, owner's session not killed), browser timers display only
+- [x] Share dialog: required 5/10/30/60 choice (no default; Share disabled until chosen); request carries `durationMinutes`
+- [x] Grant rows show remaining time and expires-at (server-time corrected); **Revoke now**; owner-only **Renew** with a duration choice
+- [x] Collaborator notice shows remaining time; the client refetches at `expiresAt` (display only)
+- [x] `session.access.changed` reasons `renewed`/`expired` handled; activity feed shows `session.access_expired`; transcript label for `sender_access_expired`
+- [x] Risk disclosure: capabilities/credentials the agent can reach; expiry/revocation cannot undo completed actions or invalidate copied credentials
+- [x] Docs: durations, renew, Revoke now, running turns keep running (no undo, owner's session not killed), browser timers display only
 - [ ] Re-run independent review, full suites, two-account staging including a real expiry, then PR
 
 ## Product decisions (from Raphaël / the design idea)
