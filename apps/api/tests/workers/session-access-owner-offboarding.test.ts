@@ -64,6 +64,7 @@ function sessionPath(suffixPath: string): string {
 function share(actor: string, granteeUserId: string) {
   return request(actor, 'POST', sessionPath('/access/grants'), {
     userId: granteeUserId,
+    durationMinutes: 30,
     acknowledgeSharedCredentials: true,
   });
 }

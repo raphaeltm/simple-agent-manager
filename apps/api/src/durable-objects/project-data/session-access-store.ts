@@ -25,6 +25,11 @@ export const SENDER_ACCESS_REVOKED_REASON = 'sender_access_revoked';
 export const SENDER_ACCESS_EXPIRED_REASON = 'sender_access_expired';
 export type SenderAccessEndedReason =
   typeof SENDER_ACCESS_REVOKED_REASON | typeof SENDER_ACCESS_EXPIRED_REASON;
+/** The error a delivery records when its sender's access ended, by reason. */
+export const SENDER_ACCESS_ENDED_ERRORS: Record<SenderAccessEndedReason, string> = {
+  [SENDER_ACCESS_REVOKED_REASON]: 'The sender no longer has access to this session',
+  [SENDER_ACCESS_EXPIRED_REASON]: "The sender's access to this session expired",
+};
 
 /**
  * Most expired grants the alarm sweep handles in one pass. A safety bound, not a tunable: each
@@ -258,7 +263,7 @@ export function cancelUndeliveredSenderPrompts(
       `UPDATE session_inbox
           SET delivery_state = 'failed',
               terminal_reason = ?,
-              last_error = 'The sender no longer has access to this session',
+              last_error = ?,
               next_attempt_at = NULL,
               attempt_started_at = NULL
         WHERE target_session_id = ?
@@ -271,6 +276,7 @@ export function cancelUndeliveredSenderPrompts(
           )
         RETURNING id, prompt_message_id`,
       reason,
+      SENDER_ACCESS_ENDED_ERRORS[reason],
       sessionId,
       JSON.stringify(senderUserIds),
       JSON.stringify(SESSION_WRITER_PROMPT_SOURCES)

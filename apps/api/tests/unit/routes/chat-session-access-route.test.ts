@@ -122,7 +122,11 @@ function getAccess(env: Env) {
   return makeApp().request('/api/projects/project-1/sessions/session-1/access', {}, env);
 }
 
-const validGrantBody = { userId: 'grantee-1', acknowledgeSharedCredentials: true };
+const validGrantBody = {
+  userId: 'grantee-1',
+  durationMinutes: 30,
+  acknowledgeSharedCredentials: true,
+};
 
 describe('chat session access routes', () => {
   beforeEach(() => {
@@ -153,6 +157,7 @@ describe('chat session access routes', () => {
         sessionId: 'session-1',
         granteeUserId: 'grantee-1',
         grantedByUserId: 'owner-1',
+        durationMinutes: 30,
         maxActiveGrants: 2,
       });
     });
@@ -224,7 +229,7 @@ describe('chat session access routes', () => {
       const stub = makeProjectDataStub();
       const env = makeEnv(stub);
 
-      const response = await postGrant(env, { userId: 'grantee-1' });
+      const response = await postGrant(env, { userId: 'grantee-1', durationMinutes: 30 });
 
       expect(response.status).toBe(400);
       const body = (await response.json()) as { error: string; message: string };
@@ -232,6 +237,46 @@ describe('chat session access routes', () => {
       expect(body.message).toContain('acknowledgeSharedCredentials');
       expect(stub.getSessionAccess).not.toHaveBeenCalled();
       expect(stub.createSessionAccessGrant).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /:sessionId/access/grants requires a duration', () => {
+    it.each([
+      ['missing', undefined],
+      ['15 minutes', 15],
+      ['an unlimited marker', 0],
+      ['a day', 1440],
+      ['a numeric string', '30'],
+    ])('refuses %s before touching the DO', async (_label, durationMinutes) => {
+      const stub = makeProjectDataStub();
+      const env = makeEnv(stub);
+
+      const response = await postGrant(env, {
+        userId: 'grantee-1',
+        acknowledgeSharedCredentials: true,
+        ...(durationMinutes === undefined ? {} : { durationMinutes }),
+      });
+
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { error: string; message: string };
+      expect(body.message).toContain('Choose how long access lasts: 5, 10, 30 or 60 minutes');
+      expect(stub.getSessionAccess).not.toHaveBeenCalled();
+      expect(stub.createSessionAccessGrant).not.toHaveBeenCalled();
+    });
+
+    it.each([5, 10, 30, 60])('passes a %i-minute choice to ProjectData', async (minutes) => {
+      const stub = makeProjectDataStub({
+        createSessionAccessGrant: vi.fn().mockResolvedValue({
+          result: { status: 'limit_exceeded', limit: 2 },
+          grants: [],
+        }),
+      });
+
+      await postGrant(makeEnv(stub), { ...validGrantBody, durationMinutes: minutes });
+
+      expect(stub.createSessionAccessGrant).toHaveBeenCalledWith(
+        expect.objectContaining({ durationMinutes: minutes })
+      );
     });
   });
 

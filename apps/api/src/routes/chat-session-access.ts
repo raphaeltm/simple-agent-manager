@@ -40,13 +40,14 @@ import * as projectDataService from '../services/project-data';
 import { requireSessionWriter } from '../services/session-access';
 import { enrichSessionWithAccess } from './chat-session-ownership';
 
+const DURATION_REQUIRED = 'Choose how long access lasts: 5, 10, 30 or 60 minutes';
+
 const CreateGrantSchema = v.object({
   userId: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(128)),
-  // Required, with no default: access always ends (5, 10, 30 or 60 minutes).
-  durationMinutes: v.picklist(
-    SESSION_ACCESS_DURATION_MINUTES,
-    'Choose how long access lasts: 5, 10, 30 or 60 minutes'
-  ),
+  // Required, with no default: access always ends. Optional in the schema only so a missing
+  // value gets this message (valibot reports a missing key generically); the handler refuses
+  // it before anything else runs.
+  durationMinutes: v.optional(v.picklist(SESSION_ACCESS_DURATION_MINUTES, DURATION_REQUIRED)),
   acknowledgeSharedCredentials: v.literal(
     true,
     'Confirm that the session runs on the owner’s accounts'
@@ -104,6 +105,7 @@ export function registerChatSessionAccessRoutes(chatRoutes: Hono<{ Bindings: Env
     const projectId = requireRouteParam(c, 'projectId');
     const sessionId = requireRouteParam(c, 'sessionId');
     const { userId: granteeUserId, durationMinutes } = c.req.valid('json');
+    if (durationMinutes === undefined) throw errors.badRequest(DURATION_REQUIRED);
     const db = drizzle(c.env.DATABASE, { schema });
 
     await requireProjectCapability(db, projectId, actorUserId, 'task:write');

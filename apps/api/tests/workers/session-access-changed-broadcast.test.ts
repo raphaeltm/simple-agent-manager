@@ -76,6 +76,7 @@ describe('session access grant/revoke pushes session.access.changed', () => {
       sessionId: chatSessionId,
       granteeUserId,
       grantedByUserId: ownerUserId,
+      durationMinutes: 30,
       maxActiveGrants: 5,
     });
     expect(created.result.status).toBe('created');
@@ -112,6 +113,7 @@ describe('session access grant/revoke pushes session.access.changed', () => {
       sessionId: targetSessionId,
       granteeUserId,
       grantedByUserId: ownerUserId,
+      durationMinutes: 30,
       maxActiveGrants: 5,
     });
     expect(created.result.status).toBe('created');

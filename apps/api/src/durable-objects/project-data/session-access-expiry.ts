@@ -14,6 +14,7 @@ import {
   NEXT_UNHANDLED_EXPIRY_SQL,
   readUnrevokedGrant,
   resolveSessionAccess,
+  SENDER_ACCESS_ENDED_ERRORS,
   SENDER_ACCESS_EXPIRED_REASON,
   SENDER_ACCESS_REVOKED_REASON,
   type SenderAccessEndedReason,
@@ -132,7 +133,7 @@ export function senderLacksSessionAccess(
   if (access.role !== 'none') return null;
   if (readUnrevokedGrant(sql, delivery.targetSessionId, delivery.senderId)) {
     return {
-      error: "The sender's access to this session expired",
+      error: SENDER_ACCESS_ENDED_ERRORS[SENDER_ACCESS_EXPIRED_REASON],
       deliveryCancelled: SENDER_ACCESS_EXPIRED_REASON,
     };
   }
@@ -146,7 +147,7 @@ export function senderLacksSessionAccess(
       )
       .toArray().length > 0;
   return {
-    error: 'The sender no longer has access to this session',
+    error: SENDER_ACCESS_ENDED_ERRORS[SENDER_ACCESS_REVOKED_REASON],
     // Someone who never had access here gets no "access was removed" label.
     deliveryCancelled: everGranted ? SENDER_ACCESS_REVOKED_REASON : null,
   };

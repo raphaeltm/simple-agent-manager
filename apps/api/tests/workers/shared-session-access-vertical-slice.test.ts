@@ -2,8 +2,8 @@
  * Shared session access, end to end through the real routes, real D1 membership, real auth
  * cookies and the real ProjectData Durable Object (idea 01M59MYE4GY91BWTE8TZF1ZB5D).
  *
- * The project is Artifacts-backed so the grantee repository check has nothing external to
- * call (`verifyRepositoryUserAccess` returns early); workers tests cannot mock GitHub.
+ * The project is Artifacts-backed so nothing in the slice reaches GitHub, which workers tests
+ * cannot mock. Grant expiry has its own slice: session-access-expiry.test.ts.
  */
 import { env, runInDurableObject } from 'cloudflare:test';
 import { Hono } from 'hono';
@@ -56,6 +56,7 @@ function call(userId: string, method: string, path: string, body?: unknown) {
 function share(actor: string, granteeUserId: string) {
   return call(actor, 'POST', '/access/grants', {
     userId: granteeUserId,
+    durationMinutes: 30,
     acknowledgeSharedCredentials: true,
   });
 }
@@ -163,7 +164,10 @@ describe('shared session access vertical slice', () => {
 
   it('only shares with active members, and requires the shared-accounts acknowledgment', async () => {
     expect((await share(OWNER, OUTSIDER)).status).toBe(400);
-    const unacknowledged = await call(OWNER, 'POST', '/access/grants', { userId: GRANTEE });
+    const unacknowledged = await call(OWNER, 'POST', '/access/grants', {
+      userId: GRANTEE,
+      durationMinutes: 30,
+    });
     expect(unacknowledged.status).toBe(400);
     expect(await grantRows()).toEqual([]);
   });
