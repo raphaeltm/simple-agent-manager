@@ -493,6 +493,44 @@ describe('ProjectData shared session access', () => {
       expect(computeSessionAccessExpiryAlarmTime(sql)).toBeNull();
     });
 
+    it('fires exactly when each grant ends: the schedule and the sweep agree', () => {
+      // Drive the section's scheduler and its sweep together, the way the alarm does
+      // (.claude/rules/47): a row the sweep skips while the schedule keeps it due would show up
+      // here as an extra fire, and a renewed or revoked grant scheduled at its old time as a
+      // wrong one.
+      seedSession('chat-2', 'owner-1');
+      share('grantee-1', 'owner-1', 'chat-1', 5);
+      share('grantee-2', 'owner-1', 'chat-1', 10);
+      share('grantee-3', 'owner-1', 'chat-2', 30);
+      share('grantee-4', 'owner-1', 'chat-1', 60);
+      revokeSessionAccessGrant(sql, {
+        sessionId: 'chat-1',
+        granteeUserId: 'grantee-4',
+        actorUserId: 'owner-1',
+      });
+      vi.setSystemTime(START + 2 * MINUTE);
+      expect(share('grantee-2', 'owner-1', 'chat-1', 10).status).toBe('renewed');
+
+      const fired: Array<{ at: number; sessionIds: string[]; grantees: string[] }> = [];
+      for (let tick = 0; tick < 10; tick += 1) {
+        const at = computeSessionAccessExpiryAlarmTime(sql);
+        if (at === null) break;
+        vi.setSystemTime(at);
+        const swept = processExpiredSessionAccessGrants(sql, at);
+        fired.push({
+          at,
+          sessionIds: swept.map((entry) => entry.sessionId),
+          grantees: swept.flatMap((entry) => entry.expiredGrants.map((g) => g.granteeUserId)),
+        });
+      }
+
+      expect(fired).toEqual([
+        { at: START + 5 * MINUTE, sessionIds: ['chat-1'], grantees: ['grantee-1'] },
+        { at: START + 12 * MINUTE, sessionIds: ['chat-1'], grantees: ['grantee-2'] },
+        { at: START + 30 * MINUTE, sessionIds: ['chat-2'], grantees: ['grantee-3'] },
+      ]);
+    });
+
     it('a regrant after expiry starts fresh and does not revive prompts from the old grant', () => {
       const first = share('grantee-1', 'owner-1', 'chat-1', 5);
       queuePrompt('old-prompt', 'grantee-1');
