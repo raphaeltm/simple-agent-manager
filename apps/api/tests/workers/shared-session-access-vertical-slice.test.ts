@@ -22,6 +22,7 @@ const OWNER = `share-owner-${suffix}`;
 const GRANTEE = `share-grantee-${suffix}`;
 const GRANTEE_2 = `share-grantee2-${suffix}`;
 const READER = `share-reader-${suffix}`;
+const VIEWER = `share-viewer-${suffix}`;
 const OUTSIDER = `share-outsider-${suffix}`;
 const INSTALLATION = `share-installation-${suffix}`;
 const PROJECT = `share-project-${suffix}`;
@@ -143,7 +144,7 @@ async function addMember(userId: string, role: string) {
 
 describe('shared session access vertical slice', () => {
   beforeAll(async () => {
-    for (const userId of [OWNER, GRANTEE, GRANTEE_2, READER, OUTSIDER]) {
+    for (const userId of [OWNER, GRANTEE, GRANTEE_2, READER, VIEWER, OUTSIDER]) {
       await seedUser(userId, { name: `Name ${userId.split('-')[1]}` });
       cookies[userId] = await seedSignedInUser(userId);
     }
@@ -155,6 +156,8 @@ describe('shared session access vertical slice', () => {
     await addMember(GRANTEE, 'maintainer');
     await addMember(GRANTEE_2, 'maintainer');
     await addMember(READER, 'maintainer');
+    // A view-only member: `task:read` without `task:write`.
+    await addMember(VIEWER, 'viewer');
 
     sessionId = await projectDataService.createSession(
       testEnv,
@@ -323,6 +326,17 @@ describe('shared session access vertical slice', () => {
       undelivered?: unknown[];
     };
     expect(accessRead.undelivered).toContainEqual(cancelled[0]);
+    // A view-only member reads it too: they can read the transcript the label belongs to.
+    const viewerRead = await call(VIEWER, 'GET', '/access');
+    expect(viewerRead.status).toBe(200);
+    const viewerAccessRead = (await viewerRead.json()) as {
+      viewerAccess: string;
+      undelivered?: unknown[];
+    };
+    expect(viewerAccessRead.viewerAccess).toBe('reader');
+    expect(viewerAccessRead.undelivered).toContainEqual(cancelled[0]);
+    // Control: someone outside the project reads nothing.
+    expect((await call(OUTSIDER, 'GET', '/access')).status).not.toBe(200);
     const detail = (await (await call(OWNER, 'GET', '')).json()) as {
       session: { access?: { undelivered?: unknown[] } };
     };
