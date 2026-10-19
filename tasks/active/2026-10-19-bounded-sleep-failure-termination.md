@@ -29,3 +29,10 @@ Runtime resources are actually removed after bounded snapshot failure, including
 
 ## References
 Task 01M5B6WMMD6RV7Z737XSZCSBN9; parent 01M5B3SYXRWTC4HB7KQDT8DRX9. Rules 14, 25, 32, 53, 58, 61; existing bounded fallback integration fixture.
+
+## Durable progress (2026-10-19 23:29 UTC)
+Implementation now releases idle compute without exact Git recovery, retains artifacts, normalizes transcript-only sleep metadata, returns unavailable restore instead of claiming exact restore, and starts Instant continuation fresh with saved contract and scoped MCP. Legacy preservation blocks rearm through normal ownership/idleness/claim gates. External stop failures keep retrying. Runtime-changed intents remain fenced and reconcile notices separately. Absolute-lifetime continues requesting guarded cleanup.
+
+Focused regression: 8 files /247 tests PASS (bounded fallback vertical slice, lifecycle, sleep service, episode, sleep sweep, absolute-lifetime, Instant recovery state machine and SQLite helper). Full repository checks previously interrupted by workspace replacement; rerun bounded/sequentially before release. Local review found Instant point/start-race/expiry guards and old stopping missing metadata; addressed, final review pending. Documentation/configuration review in progress.
+
+No PR or staging deployment yet. Shared-sessions task01M59TN50JX53TPVXV0VTAN5JV reserves staging until~23:50UTC; await release. Production23:16Z motivating node/workspace absent D1 before implementation, agent completed23:02; parent asked for provider removal evidence. Chat4caf0202-5601-4db6-9767-30cfd33864b4; new runtime01M5B7SHQRT9Q03X7PNV70NTM9. No production mutation performed. `.do-state.md` and /tmp logs lost on workspace replacement; this task progress supplements local state.

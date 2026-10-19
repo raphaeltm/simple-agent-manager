@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull, ne, or, type SQL,sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, ne, or, type SQL, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -192,6 +192,13 @@ async function markSessionSnapshotSleepingWithConfig(
   const result = await db
     .update(schema.sessionSnapshots)
     .set({
+      // Transcript-only termination is wakeable, while original backup keys/manifest stay retained.
+      ...(fallback
+        ? {
+            status: sql`CASE WHEN json_extract(${schema.sessionSnapshots.sleepFallbackJson}, '$.recoveryPoint') IS NULL THEN 'degraded' ELSE ${schema.sessionSnapshots.status} END`,
+            degradation: sql`CASE WHEN json_extract(${schema.sessionSnapshots.sleepFallbackJson}, '$.recoveryPoint') IS NULL THEN 'transcript-only' ELSE ${schema.sessionSnapshots.degradation} END`,
+          }
+        : {}),
       sleepingAt: now.toISOString(),
       expiresAt: snapshotExpiry(now, ttlDays),
       recoveryStatus: null,
@@ -230,6 +237,15 @@ async function markSessionSnapshotSleepingWithConfig(
             ]
           : []),
         or(
+          ...(fallback
+            ? [
+                and(
+                  isNotNull(schema.sessionSnapshots.sleepFallbackJson),
+                  sql`json_extract(${schema.sessionSnapshots.sleepFallbackJson}, '$.outcome') = 'slept'`,
+                  isNull(schema.sessionSnapshots.captureGeneration)
+                ),
+              ]
+            : []),
           and(
             eq(schema.sessionSnapshots.status, 'available'),
             eq(schema.sessionSnapshots.degradation, 'none')
@@ -256,7 +272,12 @@ export async function finalizeSessionSnapshotSleeping(
   chatSessionId: string,
   claimId: string,
   now = new Date(),
-  options: { sleepWarning?: string | null; expectedGeneration?: string; fallback?: boolean; runtimeGuard?: SQL } = {}
+  options: {
+    sleepWarning?: string | null;
+    expectedGeneration?: string;
+    fallback?: boolean;
+    runtimeGuard?: SQL;
+  } = {}
 ): Promise<boolean> {
   const finalized = await markSessionSnapshotSleepingWithConfig(
     db,

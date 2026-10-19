@@ -106,11 +106,12 @@ describe('absolute lifetime active-workspace preservation', () => {
     sqlite.close();
   });
 
-  it('holds the old-node shape with home-skipped and nine failed attempts even after escalation', async () => {
+  it('queues guarded session cleanup with nine failures without deleting an occupied node', async () => {
     seed(sqlite, 9, 'failed');
     const config = resolveCleanupConfig(env);
     expect(await prepareAbsoluteLifetimeRelease(env, node, now, config)).toBe(false);
-    expect(mocks.queue).not.toHaveBeenCalled();
+    expect(mocks.queue).toHaveBeenCalledTimes(1);
+    expect(mocks.delete).not.toHaveBeenCalled();
     expect(mocks.message).not.toHaveBeenCalled();
     expect(sqlite.prepare(`SELECT event FROM node_health_events`).pluck().all()).toEqual([
       'absolute_lifetime_preservation_requested',
@@ -223,14 +224,15 @@ describe('absolute lifetime active-workspace preservation', () => {
     ).toBe(1);
   });
 
-  it('stops scheduling new capture attempts once the bounded hold has escalated', async () => {
+  it('keeps scheduling guarded session cleanup after the bounded hold escalates', async () => {
     seed(sqlite, 2, 'failed');
     const config = resolveCleanupConfig(env);
     await prepareAbsoluteLifetimeRelease(env, node, now, config);
     expect(mocks.queue).toHaveBeenCalledTimes(1);
     sqlite.prepare(`UPDATE node_health_events SET created_at = '2026-10-01T05:00:00.000Z'`).run();
     await prepareAbsoluteLifetimeRelease(env, node, now, config);
-    expect(mocks.queue).toHaveBeenCalledTimes(1);
+    expect(mocks.queue).toHaveBeenCalledTimes(2);
+    expect(mocks.delete).not.toHaveBeenCalled();
     expect(mocks.message).toHaveBeenCalledTimes(1);
   });
 

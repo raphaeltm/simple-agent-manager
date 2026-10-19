@@ -91,7 +91,14 @@ Sending a message in the same chat wakes it. The composer stays visible while th
 
 Sleeping Instant sessions retain their container identity throughout the snapshot retention window; the ordinary node lifetime limits do not remove their wake target. Archive permanently destroys a sleeping container without waking it first.
 
-SAM tears VM compute down only after it has re-read and re-verified durable snapshot metadata. An ordinary sleep also requires the final checkpoint to be a **complete** snapshot: the full HOME and work-in-progress state (`verifyAndBeginSleepTeardown` in `apps/api/src/services/session-sleep-execution.ts`). If the final checkpoint comes back degraded (for example `home-skipped` or `transcript-only`) or stops making progress, that sleep attempt fails, the workspace stays awake, and the scheduler tries again on a later sweep, but not forever. After three failed attempts or 15 minutes by default, SAM either sleeps an idle VM session on the exact Git commit and uncommitted changes an earlier snapshot saved, keeping the conversation but not every file, or, when there is no such recovery point (always the case on Instant), stops trying and says so in the chat (`runSessionSleepFallback()` in `apps/api/src/services/session-sleep-fallback.ts`). [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot) describes both outcomes. A sleeping session that holds an older degraded snapshot can still wake; the wake path reports the reduced restore state.
+An ordinary sleep requires a complete, verified final snapshot. If snapshots keep failing, SAM
+retries within the configured budget: three failed attempts or 15 minutes by default. After that,
+SAM terminates the idle runtime to avoid ongoing compute charges, even without verified exact
+Git or filesystem recovery. It keeps the conversation and successful backups and warns that
+unpublished files and saved agent state may be lost. When a verified Git recovery point exists,
+VM continuation can restore it with a fresh agent. Otherwise, including Instant fallback,
+continuation starts fresh from the transcript. Active work remains protected, and failed runtime
+cleanup keeps retrying until confirmed. See [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot).
 
 If a sleeping session cannot wake, SAM says so rather than leaving your message queued out of sight: the chat gets a system message starting **Wake failed:** with the reason, and the session list marks the chat **Wake failed** in red. [Session Troubleshooting](/docs/guides/session-troubleshooting/#wake-failed) explains each reason and what to do about it. If SAM can start compute but only from a degraded snapshot, the chat also records a system notice that the agent is starting fresh and must read the persisted transcript before continuing. A chat that slept through the fallback always wakes this way, because its saved agent session is older than its conversation.
 

@@ -36,7 +36,6 @@ import { findRestorableOrInFlightSleepSnapshot } from '../../src/services/sessio
 import {
   cancelScheduledSessionSleep,
   claimSessionSnapshotRecovery,
-  claimSessionSnapshotSleep,
   completeSessionSnapshot,
   completeSessionSnapshotRecovery,
   recordSessionSnapshotProgress,
@@ -594,7 +593,7 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       // The notice landed in the conversation before the runtime was stopped.
       expect(notices).toHaveLength(1);
       expect(notices[0]?.content).toContain(
-        'SAM put this session to sleep without saving all of its files.'
+        'SAM is putting this session to sleep without saving all of its files.'
       );
       expect(notices[0]?.content).toContain(
         `branch sam/feature at commit ${BASE_COMMIT.slice(0, 12)}`
@@ -643,63 +642,69 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
   });
 
   describe('pre-fix agents that never complete a capture', () => {
-    it('ends the episode blocked: no teardown, an actionable notice, no more captures', async () => {
-      seedSession({ id: 'a' });
+    it('terminates after three rejected captures and preserves transcript-based continuation', async () => {
+      seedSession({ id: 'a', taskStatus: 'completed' });
       capture = 'old-agent-rejected';
-
       await spendFullBudget();
-      // Each rejected capture completes as a transcript-only marker with no commit, and
-      // its orphaned full-history bundle is cleaned up.
-      expect(row()).toMatchObject({ status: 'degraded', degradation: 'transcript-only' });
-      expect([...r2Objects.keys()].filter((key) => key.endsWith('wip.bundle'))).toHaveLength(0);
+      const retained = [...r2Objects.keys()];
+      await sweepAt(tick(3));
 
-      const blocked = await sweepAt(tick(3));
-
-      expect(blocked).toMatchObject({ fallbacks: 1 });
-      expect(row()).toMatchObject({ sleep_status: 'terminal_failed', sleep_after: null });
-      expect(fallbackRecord()).toMatchObject({
-        outcome: 'blocked',
-        blockedReason: 'no_git_baseline',
-      });
-      expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
-      expect(workspaceStatus()).toBe('running');
+      expect(row()).toMatchObject({ sleep_status: 'sleeping', degradation: 'transcript-only' });
+      expect(fallbackRecord()).toMatchObject({ outcome: 'slept', recoveryPoint: null });
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+      expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1');
+      expect(mocks.markIdle).toHaveBeenCalledWith('node-1', 'user-1', 2700000);
+      expect(workspaceStatus()).toBe('sleeping');
+      expect(projectData.get('chat-a')?.status).toBe('sleeping');
+      expect([...r2Objects.keys()]).toEqual(retained);
       expect(notices).toHaveLength(1);
-      expect(notices[0]?.content).toContain('SAM could not put this session to sleep.');
-      expect(notices[0]?.content).toContain(
-        'commit and push anything you want to keep, then stop its workspace from the Workspaces page'
-      );
-
-      // The exit holds: later sweeps neither select nor capture it.
+      expect(notices[0]?.content).toMatch(/transcript/i);
+      expect(notices[0]?.content).toMatch(/unpublished|unsaved/i);
+      expect(await restoreResponse()).toMatchObject({ available: false });
+      expect(sessionRecoveryInitialPrompt(fallbackRecord())).toMatch(/transcript/i);
       for (let index = 4; index < 10; index++) {
         expect(await sweepAt(tick(index))).toMatchObject({ selected: 0 });
       }
       expect(captureCount).toBe(3);
     });
 
-    it('gives a human follow-up a fresh episode, but never an unbounded one', async () => {
-      seedSession({ id: 'a' });
-      capture = 'old-agent-rejected';
-      await spendFullBudget();
-      await sweepAt(tick(3));
-      expect(row()).toMatchObject({ sleep_status: 'terminal_failed' });
-
-      // The user replies: the follow-up route cancels sleep before delivering.
-      await cancelScheduledSessionSleep(drizzle(env.DATABASE, { schema }), 'chat-a');
-      expect(row()).toMatchObject({
-        sleep_status: null,
-        sleep_episode_failures: 0,
-        sleep_fallback_json: null,
-      });
-
-      // Idle again later: discovery queues a new intent and the new episode is bounded too.
-      activity = { activity: 'idle', activityAt: tick(4).getTime() - 60 * 60 * 1000 };
-      for (let index = 5; index < 8; index++) await sweepAt(tick(index));
-      expect(captureCount).toBe(6);
-      await sweepAt(tick(8));
-      expect(row()).toMatchObject({ sleep_status: 'terminal_failed' });
-      for (let index = 9; index < 12; index++) await sweepAt(tick(index));
-      expect(captureCount).toBe(6);
-    });
+    it.each(['idle', 'prompting'] as const)(
+      'rearms a legacy preservation block only when %s',
+      async (currentActivity) => {
+        seedSession({ id: 'a', taskStatus: 'in_progress' });
+        capture = 'old-agent-rejected';
+        await spendFullBudget();
+        sqlite
+          .prepare(
+            `UPDATE session_snapshots SET sleep_status = 'terminal_failed',
+        sleep_after = NULL, sleep_fallback_json = ? WHERE chat_session_id = 'chat-a'`
+          )
+          .run(
+            JSON.stringify({
+              version: 1,
+              outcome: 'blocked',
+              blockedReason: 'no_git_baseline',
+              trigger: 'attempt_budget',
+              failedAttempts: 3,
+              episodeStartedAt: tick(0).toISOString(),
+              recoveryPoint: null,
+              lastError: 'snapshot did not complete',
+              decidedAt: tick(2).toISOString(),
+            })
+          );
+        activity = { activity: currentActivity, activityAt: tick(2).getTime() - 60 * 60 * 1000 };
+        await sweepAt(tick(3));
+        if (currentActivity === 'idle') {
+          expect(row()).toMatchObject({ sleep_status: 'sleeping' });
+          expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+        } else {
+          expect(row().sleep_status).not.toBe('sleeping');
+          expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+          expect(workspaceStatus()).toBe('running');
+        }
+        expect(captureCount).toBe(3);
+      }
+    );
   });
 
   describe('non-degraded exhaustion', () => {
@@ -733,14 +738,14 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
         snapshot_generation: 'gen-checkpoint',
       });
       expect(notices[0]?.content).toContain(
-        'SAM put this session to sleep using its last complete snapshot.'
+        'SAM is putting this session to sleep using its last complete snapshot.'
       );
       expect(sessionRecoveryInitialPrompt(fallbackRecord())).toContain(
         'SAM restored that snapshot, so changes made after it are not in this workspace.'
       );
     });
 
-    it('ends blocked when no capture ever recorded a commit', async () => {
+    it('releases runtime when no capture ever recorded a commit', async () => {
       seedSession({ id: 'a' });
       capture = 'unreachable';
 
@@ -748,10 +753,10 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       await sweepAt(tick(3));
 
       expect(fallbackRecord()).toMatchObject({
-        outcome: 'blocked',
-        blockedReason: 'no_git_baseline',
+        outcome: 'slept',
+        recoveryPoint: null,
       });
-      expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
     });
 
     it('quotes the last error without secrets or control characters', async () => {
@@ -1205,7 +1210,7 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
     });
 
     it.each(['missing', 'expired'])(
-      'blocks a stale teardown with %s recovery without stopping runtime',
+      'converges a stale teardown with %s recovery using the transcript',
       async (kind) => {
         await seedStaleStoppingTasks(['a']);
         if (kind === 'expired') {
@@ -1219,28 +1224,17 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
             )
             .run();
         }
-        await recoverStuckTasks(env);
-        expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
-        expect(row()).toMatchObject({ sleep_status: 'terminal_failed', sleeping_at: null });
-        expect(notices.some((notice) => notice.content.includes('cannot'))).toBe(true);
-        expect(workspaceStatus()).toBe('running');
+        for (let index = 10; index < 14; index++) {
+          vi.setSystemTime(tick(index));
+          await sweepAt(tick(index));
+        }
+        expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+        expect(row()).toMatchObject({ sleep_status: 'sleeping' });
+        expect(fallbackRecord()).toMatchObject({ outcome: 'slept', recoveryPoint: null });
+        expect(notices.some((notice) => /transcript/i.test(notice.content))).toBe(true);
+        expect(workspaceStatus()).toBe('sleeping');
       }
     );
-
-    it('keeps the existing runaway bound after an unrecoverable stopping episode blocks', async () => {
-      await seedStaleStoppingTasks(['a']);
-      sqlite
-        .prepare("UPDATE session_snapshots SET expires_at = ? WHERE chat_session_id = 'chat-a'")
-        .run(tick(1).toISOString());
-      await recoverStuckTasks(env);
-      expect(row()).toMatchObject({ sleep_status: 'terminal_failed' });
-      vi.setSystemTime(tick(11));
-      await recoverStuckTasks(env);
-      expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'task-a'").get()).toEqual({
-        status: 'failed',
-      });
-      expect(mocks.cleanupTaskRun).toHaveBeenCalled();
-    });
 
     it('counts a failed final convergence claim once', async () => {
       await seedStaleStoppingTasks(['a']);
@@ -1248,7 +1242,7 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       mocks.stopWorkspaceOnNode.mockRejectedValue(new Error('still unreachable'));
       await recoverStuckTasks(env);
       expect(row().sleep_episode_failures).toBe((failures ?? 0) + 1);
-      expect(row()).toMatchObject({ sleep_status: 'terminal_failed' });
+      expect(row()).toMatchObject({ sleep_status: 'stopping' });
     });
 
     it('shares one teardown claim between concurrent stuck and sleep sweeps', async () => {
@@ -1411,84 +1405,39 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       expect(restore.manifest).toMatchObject({ chatSessionId: 'chat-a', status: 'available' });
     });
 
-    it('ends an unconfirmed stop visibly blocked within the existing teardown budget', async () => {
+    it('keeps unconfirmed runtime deletion retryable and converges after a restart', async () => {
       seedSession({ id: 'a', taskStatus: 'in_progress' });
       await spendFullBudget();
       mocks.stopWorkspaceOnNode.mockRejectedValue(new Error('Node Agent request timed out'));
-      await sweepAt(tick(3));
-      await sweepAt(tick(4));
-      expect(row()).toMatchObject({ sleep_status: 'terminal_failed', sleeping_at: null });
-      expect(fallbackRecord()).toMatchObject({
-        outcome: 'blocked',
-        blockedReason: 'teardown_unconfirmed',
-      });
-      expect(notices.at(-1)?.content).toContain('cannot promise a safe wake');
-      expect(mocks.failSession).toHaveBeenCalled();
+      for (let index = 3; index < 10; index++) await sweepAt(tick(index));
+      expect(row()).toMatchObject({ sleep_status: 'stopping', sleeping_at: null });
+      expect(row().sleep_after).not.toBeNull();
+      expect(fallbackRecord()).toMatchObject({ outcome: 'slept' });
+      expect(mocks.failSession).not.toHaveBeenCalled();
       expect(workspaceStatus()).toBe('running');
       expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'task-a'").get()).toEqual({
         status: 'in_progress',
       });
-      expect(await sweepAt(tick(6))).toMatchObject({ selected: 0 });
+      mocks.stopWorkspaceOnNode.mockResolvedValue(undefined);
+      await sweepAt(tick(10));
+      expect(row()).toMatchObject({ sleep_status: 'sleeping' });
+      expect(workspaceStatus()).toBe('sleeping');
+      expect(await sweepAt(tick(11))).toMatchObject({ selected: 0 });
+      expect(captureCount).toBe(3);
     });
 
-    it('does not fail a new sleep episode reopened while the blocked notice is being persisted', async () => {
+    it('does not reopen an unconfirmed teardown through a sleep cancellation', async () => {
       seedSession({ id: 'a', taskStatus: 'in_progress' });
       await spendFullBudget();
-      mocks.stopWorkspaceOnNode.mockRejectedValue(new Error('runtime stop unavailable'));
+      mocks.stopWorkspaceOnNode.mockRejectedValueOnce(new Error('runtime stop unavailable'));
       await sweepAt(tick(3));
-      const persist = mocks.persistMessage.getMockImplementation()!;
-      let reopened = false;
-      mocks.persistMessage.mockImplementation(async (...args) => {
-        const result = await persist(...args);
-        if (!reopened && String(args[4]).includes('cannot promise a safe wake')) {
-          reopened = true;
-          expect(
-            await claimSessionSnapshotSleep(drizzle(env.DATABASE, { schema }), env, {
-              chatSessionId: 'chat-a',
-              claimId: 'new-person-claim',
-              force: true,
-              reopenBlockedEpisode: true,
-            })
-          ).toMatchObject({ status: 'claimed' });
-        }
-        return result;
-      });
+      expect(row()).toMatchObject({ sleep_status: 'stopping' });
+      await cancelScheduledSessionSleep(drizzle(env.DATABASE, { schema }), 'chat-a');
+      expect(row()).toMatchObject({ sleep_status: 'stopping' });
       await sweepAt(tick(4));
-      expect(reopened).toBe(true);
-      expect(row()).toMatchObject({
-        sleep_status: 'preparing',
-        sleep_claim_id: 'new-person-claim',
-        sleep_fallback_json: null,
-      });
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(2);
       expect(mocks.failSession).not.toHaveBeenCalled();
-      expect(
-        sqlite.prepare("SELECT status, error_message FROM tasks WHERE id = 'task-a'").get()
-      ).toEqual({ status: 'in_progress', error_message: null });
-    });
-
-    it('retries blocked chat finalization when ProjectData fails after the terminal snapshot CAS', async () => {
-      seedSession({ id: 'a', taskStatus: 'in_progress' });
-      await spendFullBudget();
-      mocks.stopWorkspaceOnNode.mockRejectedValue(new Error('runtime stop unavailable'));
-      mocks.failSession.mockRejectedValueOnce(new Error('ProjectData unavailable'));
-      await sweepAt(tick(3));
-      await sweepAt(tick(4));
-      expect(row()).toMatchObject({ sleep_status: 'terminal_failed' });
-      expect(row().sleep_after).not.toBeNull();
-      expect(projectData.get('chat-a')?.status).toBe('sleeping');
-      const stops = mocks.stopWorkspaceOnNode.mock.calls.length;
-      mocks.failSession.mockImplementation(async (_env, _project, chatId) => {
-        projectData.get(chatId)!.status = 'failed';
-        return true;
-      });
-      await sweepAt(tick(5));
-      expect(row()).toMatchObject({ sleep_status: 'terminal_failed', sleep_after: null });
-      expect(projectData.get('chat-a')?.status).toBe('failed');
-      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(stops);
-      expect(
-        notices.filter((notice) => notice.content.includes('cannot promise a safe wake'))
-      ).toHaveLength(1);
-      expect(await sweepAt(tick(6))).toMatchObject({ selected: 0 });
+      expect(workspaceStatus()).toBe('sleeping');
     });
 
     it.each([
@@ -1559,9 +1508,10 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
   });
 
   describe('transcript and recovery-point failures', () => {
-    it('does not release compute when the transcript refuses the notice, and stays bounded', async () => {
+    it('retries notice persistence without repeating capture, then releases compute', async () => {
       seedSession({ id: 'a' });
       await spendFullBudget();
+      const persist = mocks.persistMessage.getMockImplementation()!;
       mocks.persistMessage.mockRejectedValue(new Error('ProjectData storage at its limit'));
 
       await sweepAt(tick(3));
@@ -1574,18 +1524,19 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       });
       expect(String(row().sleep_error)).toContain('Sleep fallback notice could not be persisted');
 
-      // Each tick retries the cheap fallback, never another capture, until the ceiling.
+      // Each tick retries the cheap fallback, never another capture.
       for (let index = 4; index < 20; index++) await sweepAt(tick(index));
       expect(captureCount).toBe(3);
       expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
-      expect(row()).toMatchObject({ sleep_status: 'terminal_failed', sleep_episode_failures: 9 });
-      expect(fallbackRecord()).toMatchObject({
-        outcome: 'blocked',
-        blockedReason: 'retry_ceiling',
-      });
+      expect(row()).toMatchObject({ sleep_status: 'failed', sleep_episode_failures: 20 });
+      mocks.persistMessage.mockImplementation(persist);
+      await sweepAt(tick(20));
+      expect(row()).toMatchObject({ sleep_status: 'sleeping' });
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+      expect(captureCount).toBe(3);
     });
 
-    it('refuses a recorded commit whose objects were not kept', async () => {
+    it('releases runtime without claiming a commit whose objects were not kept', async () => {
       seedSession({ id: 'a' });
       capture = 'wip-skipped';
 
@@ -1593,24 +1544,29 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       await sweepAt(tick(3));
 
       expect(fallbackRecord()).toMatchObject({
-        outcome: 'blocked',
-        blockedReason: 'commit_objects_unavailable',
+        outcome: 'slept',
+        recoveryPoint: null,
       });
-      expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
     });
 
-    it('refuses a WIP bundle that is missing from R2', async () => {
+    it('releases runtime without claiming a WIP bundle missing from R2', async () => {
       seedSession({ id: 'a' });
       await spendFullBudget();
       r2Objects.delete('session-snapshots/chat-a/gen-chat-a-3/wip.bundle');
 
+      const retained = [...r2Objects.keys()];
+      expect(retained.length).toBeGreaterThan(0);
       await sweepAt(tick(3));
 
       expect(fallbackRecord()).toMatchObject({
-        outcome: 'blocked',
-        blockedReason: 'commit_objects_unavailable',
+        outcome: 'slept',
+        recoveryPoint: null,
       });
-      expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+      expect([...r2Objects.keys()]).toEqual(retained);
+      expect(projectData.get('chat-a')?.status).toBe('sleeping');
+      expect(await restoreResponse()).toMatchObject({ available: false });
     });
   });
 
@@ -1698,8 +1654,12 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
 
       expect(captureCount).toBe(captures);
       if (captures === 1) {
-        // No commit was ever captured, so the fallback ends the episode blocked.
-        expect(fallbackRecord()).toMatchObject({ outcome: 'blocked', trigger: 'elapsed_budget' });
+        // Missing Git objects cannot keep idle compute alive after the elapsed budget.
+        expect(fallbackRecord()).toMatchObject({
+          outcome: 'slept',
+          trigger: 'elapsed_budget',
+          recoveryPoint: null,
+        });
       } else {
         expect(row()).toMatchObject({ sleep_status: 'failed', sleep_episode_failures: 2 });
       }
@@ -1721,29 +1681,40 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
   });
 
   describe('Instant runtimes', () => {
-    it('bounds the retries and ends blocked instead of tearing the container down', async () => {
+    it('bounds failed capture attempts and releases the container for a fresh continuation', async () => {
       seedSession({ id: 'a', runtime: 'cf-container' });
-
       await spendFullBudget();
       await sweepAt(tick(3));
-
-      expect(fallbackRecord()).toMatchObject({
-        outcome: 'blocked',
-        blockedReason: 'unsupported_runtime',
-      });
-      expect(notices[0]?.content).toContain('This Instant workspace keeps running');
-      expect(mocks.sleepVmAgentContainer).not.toHaveBeenCalled();
+      expect(fallbackRecord()).toMatchObject({ outcome: 'slept' });
+      expect(row()).toMatchObject({ sleep_status: 'sleeping' });
+      expect(mocks.sleepVmAgentContainer).toHaveBeenCalledTimes(1);
+      expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
       expect(captureCount).toBe(3);
     });
   });
 
-  describe('explicit sleep after a blocked episode', () => {
+  describe('explicit sleep after a new wake', () => {
     it('lets the user retry a full snapshot, starting a fresh episode', async () => {
       seedSession({ id: 'a' });
       capture = 'old-agent-rejected';
       await spendFullBudget();
       await sweepAt(tick(3));
-      expect(row()).toMatchObject({ sleep_status: 'terminal_failed' });
+      expect(row()).toMatchObject({ sleep_status: 'sleeping' });
+      const db = drizzle(env.DATABASE, { schema });
+      await expect(
+        claimSessionSnapshotRecovery(db, env, {
+          chatSessionId: 'chat-a',
+          userId: 'user-1',
+          taskId: 'wake-task',
+          now: tick(4),
+        })
+      ).resolves.toMatchObject({ status: 'claimed' });
+      await expect(
+        completeSessionSnapshotRecovery(db, 'chat-a', 'wake-task', 'ws-a')
+      ).resolves.toBe(true);
+      sqlite.prepare("UPDATE workspaces SET status = 'running' WHERE id = 'ws-a'").run();
+      sqlite.prepare("UPDATE agent_sessions SET status = 'running' WHERE id = 'agent-a'").run();
+      projectData.get('chat-a')!.status = 'active';
 
       capture = 'complete';
       await sleepWorkspaceSession(env, {

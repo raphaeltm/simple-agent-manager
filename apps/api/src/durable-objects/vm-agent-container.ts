@@ -9,6 +9,7 @@ import { maybeJsonRecord } from '../lib/runtime-validation';
 import { getCfContainerCreateWorkspaceTimeoutMs } from '../services/cf-container-timeouts';
 import { commitContainerWakeFromSleep } from '../services/container-wake-commit';
 import { loadInstantRestoreWorkspace } from '../services/instant-restore-workspace';
+import { instantTranscriptFallbackStart } from '../services/instant-transcript-fallback';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 import {
   findSessionRecoverySourceTaskGuardRefusal,
@@ -993,43 +994,82 @@ export class VmAgentContainer extends Container<Env> {
       if (!createResponse.ok) {
         return this.degradeRecovery(restoring, 'restore_http', target, createResponse.status);
       }
-      const restoreUrl = new URL(
-        `http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions/${context.agentSessionId}/restore`
-      );
-      await this.assertSourceTaskGuard(sourceTaskGuard);
-      const restoreResponse = await this.containerFetch(
-        new Request(restoreUrl.toString(), {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'X-SAM-Node-Id': config.nodeId,
-            'X-SAM-Workspace-Id': config.workspaceId,
-          },
-          body: JSON.stringify({
-            chatSessionId: context.chatSessionId,
-            runtime: 'cf-container',
-            agentType: context.agentType,
-            runtimeContract: context.runtimeContract,
-            workspaceCallbackToken,
+      const freshStart = await instantTranscriptFallbackStart(this.env, {
+        workspaceId: config.workspaceId,
+        nodeId: config.nodeId,
+        projectId: config.projectId,
+        userId: context.userId,
+        chatSessionId: context.chatSessionId,
+        agentSessionId: context.agentSessionId,
+        startedAt: recovery.startedAt,
+        contract: context.runtimeContract,
+        mcpServers: restoreMcp.mcpServers,
+      });
+      if (freshStart) {
+        const started = await this.withLifecycleLock(async () => {
+          const lifecycle = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
+          if (lifecycle === 'stopping' || lifecycle === 'stopped') return null;
+          await this.assertSourceTaskGuard(sourceTaskGuard);
+          return this.containerFetch(
+            new Request(
+              `http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions/${context.agentSessionId}/start`,
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                  'X-SAM-Node-Id': config.nodeId,
+                  'X-SAM-Workspace-Id': config.workspaceId,
+                },
+                body: JSON.stringify(freshStart),
+                signal: AbortSignal.timeout(this.getRuntimeSettings().portReadyTimeoutMs),
+              }
+            ),
+            config.vmAgentPort
+          );
+        });
+        if (!started) return stoppedRecoveryResult();
+        if (!started.ok)
+          return this.degradeRecovery(restoring, 'restore_http', target, started.status);
+      } else {
+        const restoreUrl = new URL(
+          `http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions/${context.agentSessionId}/restore`
+        );
+        await this.assertSourceTaskGuard(sourceTaskGuard);
+        const restoreResponse = await this.containerFetch(
+          new Request(restoreUrl.toString(), {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              'X-SAM-Node-Id': config.nodeId,
+              'X-SAM-Workspace-Id': config.workspaceId,
+            },
+            body: JSON.stringify({
+              chatSessionId: context.chatSessionId,
+              runtime: 'cf-container',
+              agentType: context.agentType,
+              runtimeContract: context.runtimeContract,
+              workspaceCallbackToken,
+            }),
           }),
-        }),
-        config.vmAgentPort
-      );
-      const restoreBody = await restoreResponse.text().catch(() => '');
-      if (!restoreResponse.ok) {
-        return this.degradeRecovery(restoring, 'restore_http', target, restoreResponse.status);
-      }
-      let restoreStatus = '';
-      try {
-        const parsedRaw = JSON.parse(restoreBody) as unknown;
-        const parsed = maybeJsonRecord(parsedRaw);
-        restoreStatus = parsed && typeof parsed.status === 'string' ? parsed.status : '';
-      } catch {
-        // An explicit restored status is required before D1 can become running.
-      }
-      if (restoreStatus !== 'restored') {
-        return this.degradeRecovery(restoring, 'restore_status', target);
+          config.vmAgentPort
+        );
+        const restoreBody = await restoreResponse.text().catch(() => '');
+        if (!restoreResponse.ok) {
+          return this.degradeRecovery(restoring, 'restore_http', target, restoreResponse.status);
+        }
+        let restoreStatus = '';
+        try {
+          const parsedRaw = JSON.parse(restoreBody) as unknown;
+          const parsed = maybeJsonRecord(parsedRaw);
+          restoreStatus = parsed && typeof parsed.status === 'string' ? parsed.status : '';
+        } catch {
+          // An explicit restored status is required before D1 can become running.
+        }
+        if (restoreStatus !== 'restored') {
+          return this.degradeRecovery(restoring, 'restore_status', target);
+        }
       }
 
       await this.assertSourceTaskGuard(sourceTaskGuard);

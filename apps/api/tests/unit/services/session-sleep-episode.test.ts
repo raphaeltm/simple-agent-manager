@@ -125,9 +125,10 @@ describe('sessionSleepEpisodePhase', () => {
     expect(phase(0, 60 * 60 * 1000)).toBe('full');
   });
 
-  it('ends blocked at the ceiling', () => {
+  it('keeps cleanup retryable beyond the capture ceiling', () => {
     expect(phase(8, 0)).toBe('fallback');
-    expect(phase(9, 0)).toBe('blocked');
+    expect(phase(9, 0)).toBe('fallback');
+    expect(phase(20, 0)).toBe('fallback');
   });
 
   it('cannot measure time from an unreadable start, but the attempt budget still bounds it', () => {
@@ -174,6 +175,16 @@ describe('the stored fallback record', () => {
     ).toThrow();
   });
 
+  it('recognizes transcript-only fallback independently of snapshot generation', () => {
+    const transcript = record({ recoveryPoint: null });
+    expect(
+      sleptFallbackRecord({
+        sleepFallbackJson: serializeSessionSleepFallbackRecord(transcript),
+        snapshotGeneration: null,
+      })
+    ).toEqual(transcript);
+  });
+
   it('names a fallback sleep only on the generation it was decided for', () => {
     const stored = serializeSessionSleepFallbackRecord(record());
     expect(sleptFallbackRecord({ sleepFallbackJson: stored, snapshotGeneration: 'gen-3' })).toEqual(
@@ -198,12 +209,23 @@ describe('the stored fallback record', () => {
 describe('what the user and the woken agent are told', () => {
   it('says plainly what a fallback kept and lost, without promising an exact restore', () => {
     const notice = sessionSleepFallbackNotice(record());
-    expect(notice).toContain('SAM put this session to sleep without saving all of its files.');
+    expect(notice).toContain('SAM is putting this session to sleep without saving all of its files.');
     expect(notice).toContain('Saving a complete snapshot failed after 3 attempts over 15 minutes.');
     expect(notice).toContain(`branch sam/feature at commit ${'f'.repeat(12)}`);
     expect(notice).toContain('installed tools and the agent’s own session files');
     expect(notice).toContain('rebuilds its context from this conversation');
     expect(notice).not.toMatch(/exact(ly)? (restore|reconstruct)/i);
+  });
+
+  it('discloses transcript-only continuation and unpublished filesystem loss', () => {
+    const transcript = record({ recoveryPoint: null });
+    const notice = sessionSleepFallbackNotice(transcript);
+    expect(notice).toMatch(/transcript|conversation/i);
+    expect(notice).toMatch(/unpublished|unsaved/i);
+    expect(notice).not.toContain('restored commit');
+    const prompt = sessionRecoveryInitialPrompt(transcript);
+    expect(prompt).toMatch(/transcript|conversation/i);
+    expect(prompt).not.toContain('SAM restored commit');
   });
 
   it('describes a complete recovery point differently', () => {
@@ -217,7 +239,7 @@ describe('what the user and the woken agent are told', () => {
         },
       })
     );
-    expect(notice).toContain('SAM put this session to sleep using its last complete snapshot.');
+    expect(notice).toContain('SAM is putting this session to sleep using its last complete snapshot.');
     expect(notice).toContain('Not kept: any change made after that snapshot was saved.');
     expect(notice).toContain('the agent starts a new session');
   });

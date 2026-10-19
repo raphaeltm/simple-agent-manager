@@ -16,10 +16,14 @@
  * applies the WIP bundle, and — with no HOME archive — starts the agent fresh. Pre-fix
  * agents already run that path, so a Git-baseline wake needs no agent upgrade.
  */
-import type * as schema from '../db/schema';
+import { and, eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { maybeJsonRecord, parseJsonRecord } from '../lib/runtime-validation';
 import {
+  serializeSessionSleepFallbackRecord,
   type SessionSleepBlockedReason,
   type SessionSleepFallbackRecord,
   type SessionSleepRecoveryPoint,
@@ -124,7 +128,23 @@ export async function confirmSessionSleepFallbackStopping(
   now: Date
 ): Promise<SessionSleepFallbackRecord | null> {
   const record = sleptFallbackRecord(snapshot);
-  if (!record) return null;
-  const assessment = await assessSessionSleepRecoveryPoint(env, snapshot, now);
-  return assessment.ok ? record : null;
+  if (!record || !snapshot.sleepClaimId || !snapshot.sleepFallbackJson) return null;
+  if (!record.recoveryPoint) return record;
+  const assessment = await assessSessionSleepRecoveryPoint(env, snapshot, now).catch(() => ({
+    ok: false as const,
+  }));
+  if (assessment.ok) return record;
+  const degraded = { ...record, recoveryPoint: null, decidedAt: now.toISOString() };
+  const result = await drizzle(env.DATABASE, { schema })
+    .update(schema.sessionSnapshots)
+    .set({ sleepFallbackJson: serializeSessionSleepFallbackRecord(degraded) })
+    .where(
+      and(
+        eq(schema.sessionSnapshots.id, snapshot.id),
+        eq(schema.sessionSnapshots.sleepStatus, 'stopping'),
+        eq(schema.sessionSnapshots.sleepClaimId, snapshot.sleepClaimId),
+        eq(schema.sessionSnapshots.sleepFallbackJson, snapshot.sleepFallbackJson)
+      )
+    );
+  return (result.meta.changes ?? 0) > 0 ? degraded : null;
 }

@@ -1,37 +1,4 @@
-/**
- * The bounded sleep fallback: release an idle VM session's compute after its sleep
- * episode ran out of full-snapshot attempts, keeping the transcript and an exact,
- * restorable Git recovery point instead of the whole filesystem
- * (`session-sleep-episode.ts`, policy `a3780107` as clarified 2026-10-04).
- *
- * Order matters, and every step before the point of no return is reversible:
- *
- * 1. Claim the session (the same CAS every sleep uses).
- * 2. Safety: the prompt turn ended and no agent work is in flight. Otherwise defer
- *    without spending the budget.
- * 3. Abandon any capture still in flight, so a late upload or completion from a slow
- *    or pre-fix agent cannot change the recovery point underneath the decision.
- * 4. Require the minimum (`assessSessionSleepRecoveryPoint`): the current generation
- *    records the exact commit and keeps its objects. Without it the episode ends
- *    blocked — no teardown, a notice in the chat, and no more expensive captures.
- * 5. Confirm the transcript store holds the conversation, re-check idleness against
- *    the state from step 2, then cross into `stopping` with the decision recorded.
- *    A follow-up message cancels the claim and a completed capture changes the
- *    generation; either makes that CAS fail and nothing is torn down.
- * 6. Persist the notice into the conversation. If that write fails, step back to
- *    `failed` before any teardown I/O.
- * 7. Tear down through the same idempotent path a full sleep uses
- *    (`completeSleepTeardown`, `finishSleepCleanup`): only this session's workspace is
- *    stopped, its deletion is scheduled through the NodeLifecycle DO, and the node
- *    turns warm only when no other workspace is active on it.
- *
- * The wake that follows restores the files and Git state but starts a new agent session
- * from the transcript, never the saved one (`session-snapshot-restore-response.ts`).
- *
- * Instant (cf-container) runtimes end blocked instead: they wake in place and keep
- * their container only for a complete snapshot, so a Git-baseline wake is not
- * available to them yet (idea 01M434RYFTNQ0NY704JGJYHRT7).
- */
+/** Bounded snapshot failure releases idle compute while retaining chat and backups. */
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -75,7 +42,6 @@ import {
   deferSessionSnapshotSleepBeforeClaim,
   deferSessionSnapshotStopping,
   failSessionSnapshotSleepBeforeTeardown,
-  getRestorableSessionSnapshot,
   sanitizeSessionLifecycleMessage,
   sessionLifecycleError,
 } from './session-snapshots';
@@ -83,7 +49,7 @@ import {
 export type SessionSleepFallbackOutcome =
   /** Compute released; the session sleeps on its recovery point. */
   | 'slept'
-  /** The episode ended without a recovery point; the runtime keeps running. */
+  /** Legacy blocked outcome retained for callers reading historical results. */
   | 'blocked'
   /** The old intent was blocked; the replacement runtime must be left alone. */
   | 'superseded'
@@ -229,18 +195,6 @@ export async function runSessionSleepFallback(
 
   let pointOfNoReturn = false;
   try {
-    // No Git-baseline wake for Instant yet (idea 01M434RYFTNQ0NY704JGJYHRT7).
-    if (workspace.nodeRuntime !== 'vm') {
-      const blocked = await endSessionSleepEpisodeBlocked(env, {
-        chatSessionId,
-        reason: 'unsupported_runtime',
-        trigger: input.trigger,
-        lastError: input.lastError,
-        expected: { kind: 'claim', claimId },
-        now,
-      });
-      return blocked ? 'blocked' : 'skipped';
-    }
     const agentSession = await loadResumableAgentSession(db, workspace.id);
     const classify = sleepTeardownSafetyGate(env, workspace);
     const stateBefore = await projectDataService.getSessionState(
@@ -270,19 +224,27 @@ export async function runSessionSleepFallback(
         now,
       });
     }
-    const snapshot = await getRestorableSessionSnapshot(db, chatSessionId, now);
-    const assessment = await assessSessionSleepRecoveryPoint(env, snapshot, now);
-    if (!assessment.ok) {
-      const blocked = await endSessionSleepEpisodeBlocked(env, {
-        chatSessionId,
-        reason: assessment.reason,
-        trigger: input.trigger,
-        lastError: input.lastError,
-        expected: { kind: 'claim', claimId },
-        now,
-      });
-      return blocked ? 'blocked' : 'skipped';
+    // Read metadata even when no completed capture exists. Backups remain untouched.
+    const snapshot = await db
+      .select()
+      .from(schema.sessionSnapshots)
+      .where(eq(schema.sessionSnapshots.chatSessionId, chatSessionId))
+      .get();
+    if (
+      !snapshot ||
+      snapshot.workspaceId !== workspace.id ||
+      snapshot.nodeId !== workspace.nodeId ||
+      snapshot.userId !== workspace.userId ||
+      snapshot.agentSessionId !== agentSession.id
+    ) {
+      throw new Error('Sleep fallback snapshot runtime identity changed');
     }
+    // Verification is best effort after the bounded capture budget. A storage outage
+    // must not convert the attempt ceiling into indefinite runtime retention.
+    const assessment = await assessSessionSleepRecoveryPoint(env, snapshot, now).catch(() => ({
+      ok: false as const,
+      reason: 'commit_objects_unavailable' as const,
+    }));
 
     // The transcript is the one thing the fallback promises to keep. A chat the
     // transcript store cannot find is a transient fault, not a reason to give up.
@@ -321,16 +283,17 @@ export async function runSessionSleepFallback(
       episodeStartedAt: episode?.sleepEpisodeStartedAt ?? null,
       failedAttempts: episode?.sleepEpisodeFailures ?? 0,
       lastError: sanitizeSessionLifecycleMessage(env, input.lastError || null),
-      recoveryPoint: assessment.recoveryPoint,
+      recoveryPoint:
+        workspace.nodeRuntime === 'vm' && assessment.ok ? assessment.recoveryPoint : null,
     };
     const recordJson = serializeSessionSleepFallbackRecord(record);
-    const point = assessment.recoveryPoint;
+    const point = record.recoveryPoint;
     if (
       !snapshot ||
       !(await beginSessionSnapshotFallbackStopping(db, {
         chatSessionId,
         claimId,
-        generation: point.generation,
+        generation: snapshot.snapshotGeneration,
         status: snapshot.status,
         degradation: snapshot.degradation,
         recordJson,
@@ -395,11 +358,11 @@ export async function runSessionSleepFallback(
       trigger: record.trigger,
       failedAttempts: record.failedAttempts,
       episodeStartedAt: record.episodeStartedAt,
-      generation: point.generation,
-      snapshotStatus: point.snapshotStatus,
-      degradation: point.degradation,
-      workingTreeSaved: point.workingTreeSaved,
-      homeSaved: point.homeSaved,
+      generation: snapshot.snapshotGeneration,
+      snapshotStatus: point?.snapshotStatus,
+      degradation: point?.degradation,
+      workingTreeSaved: point?.workingTreeSaved,
+      homeSaved: point?.homeSaved,
     });
     return 'slept';
   } catch (error) {

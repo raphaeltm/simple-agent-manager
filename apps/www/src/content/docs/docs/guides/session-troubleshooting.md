@@ -29,14 +29,12 @@ your work is safe and what to do next. Everything here applies to both
   transcript is safe. → [Send a message to try again](#a-snapshot-could-not-be-fully-restored)
 - **"SAM restored this sleeping conversation from a degraded snapshot…"** (VM). The chat is back,
   but some unpushed work may not be. → [Check what's missing](#a-snapshot-could-not-be-fully-restored)
-- **"SAM put this session to sleep without saving all of its files."** (VM). Snapshots kept failing,
+- **"SAM is putting this session to sleep without saving all of its files."** (VM). Snapshots kept failing,
   so SAM slept the chat on a Git recovery point. → [See what was kept](#sam-could-not-save-a-complete-snapshot)
-- **"SAM could not put this session to sleep."** Snapshots kept failing and there was no safe
-  recovery point, so the workspace keeps running. → [Decide what to do](#sam-could-not-save-a-complete-snapshot)
-- **"SAM could not finish putting this session to sleep."**, often with a **Failed** card whose
-  error reads **"Sleep teardown blocked; saved artifacts retained."** SAM saved the session but
-  couldn't confirm its workspace stopped, so it can't promise a wake.
-  → [Check the workspace](#sam-could-not-finish-putting-the-session-to-sleep)
+- **“SAM is terminating this idle workspace after repeated snapshot failures.”** The transcript and
+  successful backups remain; exact recovery was not verified. → [Continue from the transcript](#sam-could-not-save-a-complete-snapshot)
+- **“SAM could not finish putting this session to sleep.”** Runtime cleanup is still being retried.
+  → [Check cleanup status](#sam-could-not-finish-putting-the-session-to-sleep)
 - **Expired** in the session list, and a **Fork conversation** button where the message box was.
   The chat slept for longer than its saved workspace is kept. → [Fork it](#expired-saved-workspace)
 - **A system message starting "Wake failed:"**, and **Wake failed** in the session list. SAM could
@@ -298,7 +296,7 @@ retrying rather than keep a machine running indefinitely. What it does next depe
 earlier snapshot already saved. It only does this to a session whose agent has finished its turn;
 a session in use is left alone.
 
-**"SAM put this session to sleep without saving all of its files."** An earlier snapshot saved the
+**"SAM is putting this session to sleep without saving all of its files."** An earlier snapshot saved the
 repository: the exact commit the workspace was on, its branch, and its uncommitted changes. SAM
 kept that and the conversation, and released the workspace. The notice lists what was kept and
 what was not. Files outside the repository that the snapshot did not save (often installed tools,
@@ -315,39 +313,21 @@ If the notice says SAM used **its last complete snapshot**, everything in that s
 including files outside the repository, but changes made after it are missing. The agent still
 starts a new session from the transcript, because the conversation went on after that snapshot.
 
-**"SAM could not put this session to sleep."** SAM had no safe recovery point to fall back to. The
-notice gives the reason; usually no snapshot recorded the workspace's Git commit together with
-what is needed to restore it. This is typical of a workspace on an older VM agent whose snapshots
-never complete. SAM stops trying to put this session to sleep automatically, and the workspace
-keeps running. You can:
-
-- Keep working. A message works as usual, and SAM tries sleep again the next time the session
-  goes idle.
-- If you are done with it, commit and push anything you want to keep, then stop its workspace
-  from the **Workspaces** page. Work you did not push is lost once SAM cleans up the stopped
-  workspace.
-
-An Instant session always takes this path when its snapshots keep failing, because it can only
-sleep with a complete snapshot.
+**“SAM is terminating this idle workspace after repeated snapshot failures.”** No exact Git or
+filesystem recovery point could be verified. SAM stops the runtime to avoid ongoing compute
+charges, keeps this conversation and any successful backups, and explains the degraded recovery
+in the chat. Unpublished files, uncommitted work, installed tools and saved agent state may be lost.
+Send a message to continue in a fresh workspace; the agent uses the transcript to reconstruct
+missing work. It cannot promise an exact restore. Instant sessions also use this fresh continuation
+after repeated snapshot failures.
 
 ## SAM could not finish putting the session to sleep
 
-Going to sleep has two steps: SAM saves a snapshot of the workspace, then stops the workspace. If it
-can't confirm the second step in time, it stops retrying and ends the session instead of promising
-a wake it can't guarantee. The chat says **"SAM could not finish putting this session to sleep."**
-and the session ends. A **Failed** card usually appears under the chat header too; expand it, and
-its **Error** reads **"Sleep teardown blocked; saved artifacts retained. Check the workspace before
-restarting."** On a **Chat**, that card may also be marked **Recoverable** and say the session is
-still active and that sending another message retries it. Don't rely on that.
-
-The conversation and the saved snapshot are kept, but this session can't be woken. To carry on:
-
-1. Open the workspace from the **Workspaces** page (under **Infrastructure** in the main
-   navigation). If it's still there, commit and push anything you want to keep.
-2. Start a new chat, or [fork](/docs/guides/chat-features/#conversation-forking) this one so the
-   new agent can read it.
-3. If the workspace is gone or won't open, [report it](/docs/guides/reporting-issues/) (on a
-   self-hosted instance, tell your administrator).
+If stopping a workspace fails, SAM keeps retrying cleanup with backoff until runtime removal is
+confirmed. A failed stop does not mean billing has ended. The conversation and successful backups
+remain retained. Active agent work delays cleanup, and a replacement runtime is protected from an
+older sleep attempt. If cleanup remains stuck, [report it](/docs/guides/reporting-issues/) or contact
+your administrator.
 
 A related notice, **"SAM blocked the old sleep attempt because this workspace runtime changed."**,
 means the workspace's runtime was replaced (after a restart or rebuild, for example) while an older

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const recoveryMocks = vi.hoisted(() => ({
   loadContext: vi.fn(),
+  transcriptStart: vi.fn(),
   persistRecovering: vi.fn(),
   persistRecovered: vi.fn(),
   persistFailed: vi.fn(),
@@ -30,6 +31,10 @@ vi.mock('../../../src/durable-objects/vm-agent-container-recovery', async (impor
 
 vi.mock('../../../src/durable-objects/vm-agent-container-recovery-failure', () => ({
   persistRuntimeRecoveryFailed: recoveryMocks.persistFailed,
+}));
+
+vi.mock('../../../src/services/instant-transcript-fallback', () => ({
+  instantTranscriptFallbackStart: recoveryMocks.transcriptStart,
 }));
 
 vi.mock('../../../src/services/container-wake-commit', () => ({
@@ -246,6 +251,7 @@ function callProxyHttp(fake: unknown, request: Request): Promise<Response> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  recoveryMocks.transcriptStart.mockResolvedValue(null);
   recoveryMocks.loadContext.mockResolvedValue(runtimeContext);
   recoveryMocks.persistRecovering.mockResolvedValue(undefined);
   recoveryMocks.persistRecovered.mockResolvedValue(undefined);
@@ -637,6 +643,82 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     expect(recoveryMocks.revokeRestoreMcp).toHaveBeenCalledOnce();
     expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
     expect(fake.stop).toHaveBeenCalledOnce();
+  });
+
+  it('starts a fresh agent for transcript-only fallback and commits the guarded wake', async () => {
+    const { fake, values } = makeRecoveryFake();
+    const fresh = {
+      protocolVersion: 1,
+      initialPrompt: 'Rebuild from the saved conversation',
+      deliveryId: 'sleep-fallback-agent-session-1-1',
+      agentType: 'codex',
+    };
+    recoveryMocks.transcriptStart.mockResolvedValue(fresh);
+    await expect(callEnsureAwake(fake)).resolves.toEqual({ ok: true, status: 'running' });
+    const requests = fake.containerFetch.mock.calls.map(([request]) => request as Request);
+    const started = requests.find((request) => new URL(request.url).pathname.endsWith('/start'));
+    expect(started).toBeDefined();
+    expect(started?.headers.get('Authorization')).toBe('Bearer management-token');
+    await expect(started!.json()).resolves.toEqual(fresh);
+    expect(requests.some((request) => new URL(request.url).pathname.endsWith('/restore'))).toBe(
+      false
+    );
+    expect(recoveryMocks.commitWake).toHaveBeenCalledTimes(1);
+    expect(values.get('lifecycleStatus')).toBe('running');
+  });
+
+  it.each(['stopping', 'stopped'])(
+    'does not fresh-start after lifecycle becomes %s',
+    async (status) => {
+      const { fake, values } = makeRecoveryFake();
+      recoveryMocks.transcriptStart.mockImplementation(async () => {
+        values.set('lifecycleStatus', status);
+        return { protocolVersion: 1, initialPrompt: 'Rebuild from conversation' };
+      });
+      const result = await callEnsureAwake(fake);
+      expect(result.ok).toBe(false);
+      expect(
+        fake.containerFetch.mock.calls.some(([request]) =>
+          new URL((request as Request).url).pathname.endsWith('/start')
+        )
+      ).toBe(false);
+      expect(recoveryMocks.commitWake).not.toHaveBeenCalled();
+      expect(values.get('lifecycleStatus')).toBe(status);
+    }
+  );
+
+  it('refuses a fresh transcript start when source authority is revoked after session creation', async () => {
+    const { fake } = makeRecoveryFake();
+    recoveryMocks.transcriptStart.mockImplementation(async () => {
+      fake.assertSourceTaskGuard.mockRejectedValue(
+        new SessionRecoveryAuthorityRevokedError('source_task_guard')
+      );
+      return { protocolVersion: 1, initialPrompt: 'Rebuild from conversation' };
+    });
+    const recovery: RuntimeRecoveryState = {
+      version: 1,
+      phase: 'waking',
+      trigger: 'idle',
+      cause: { kind: 'idle_sleep' },
+      attempts: 1,
+      promptDisposition: 'none',
+      agentSessionId: 'agent-session-1',
+      startedAt: 1,
+      updatedAt: 1,
+    };
+    await expect(
+      privateContainer.wakeFromSnapshot.call(fake, recovery, {
+        taskId: 'parent-1',
+        projectId: 'project-1',
+        chatSessionId: 'chat-1',
+      })
+    ).rejects.toBeInstanceOf(SessionRecoveryAuthorityRevokedError);
+    expect(
+      fake.containerFetch.mock.calls.some(([request]) =>
+        new URL((request as Request).url).pathname.endsWith('/start')
+      )
+    ).toBe(false);
+    expect(recoveryMocks.commitWake).not.toHaveBeenCalled();
   });
 
   it('cold-wakes, reinjects fresh callback tokens, restores, then reconciles running', async () => {

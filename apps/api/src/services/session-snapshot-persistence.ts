@@ -4,6 +4,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { redactSecretPatterns } from './secret-redaction';
+import { sleptFallbackRecord } from './session-sleep-episode';
 import { abandonSessionSnapshotCapture } from './session-sleep-fallback-state';
 import {
   buildSessionSnapshotR2Key,
@@ -348,7 +349,8 @@ export async function completeActiveSessionSnapshotAsDegraded(
 export async function getRestorableSessionSnapshot(
   db: Db,
   chatSessionId: string,
-  now = new Date()
+  now = new Date(),
+  options: { includeIncomplete?: boolean } = {}
 ): Promise<schema.SessionSnapshot | null> {
   const rows = await db
     .select()
@@ -357,10 +359,16 @@ export async function getRestorableSessionSnapshot(
     .limit(1);
   const snapshot = rows[0];
   if (!snapshot) return null;
+  // Stopping roll-forward needs the retained ownership/claim even when no backup remains.
+  if (options.includeIncomplete) return snapshot;
   if (Date.parse(snapshot.expiresAt) <= now.getTime()) {
     return { ...snapshot, status: 'expired' };
   }
-  if (snapshot.status !== 'available' && snapshot.status !== 'degraded') {
+  if (
+    snapshot.status !== 'available' &&
+    snapshot.status !== 'degraded' &&
+    !sleptFallbackRecord(snapshot)
+  ) {
     return null;
   }
   return snapshot;
@@ -393,10 +401,7 @@ export async function recordSessionSnapshotRestoreResult(
  * bounded like every lifecycle error. Used for restore results and for the error a sleep
  * fallback notice quotes.
  */
-export function sanitizeSessionLifecycleMessage(
-  env: Env,
-  message: string | null
-): string | null {
+export function sanitizeSessionLifecycleMessage(env: Env, message: string | null): string | null {
   if (message === null) return null;
   const withoutControls = Array.from(message, (character) => {
     const code = character.codePointAt(0) ?? 0;

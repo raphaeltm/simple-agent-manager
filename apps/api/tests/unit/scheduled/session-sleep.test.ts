@@ -13,6 +13,7 @@ import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
   sleepWorkspaceSession: vi.fn(),
+  runSessionSleepFallback: vi.fn(),
   queueWorkspaceSessionSleep: vi.fn(),
   checkAutomaticSessionSleepEligibility: vi.fn(),
 }));
@@ -21,6 +22,10 @@ vi.mock('../../../src/services/session-sleep', () => ({
   sleepWorkspaceSession: mocks.sleepWorkspaceSession,
   queueWorkspaceSessionSleep: mocks.queueWorkspaceSessionSleep,
   checkAutomaticSessionSleepEligibility: mocks.checkAutomaticSessionSleepEligibility,
+}));
+
+vi.mock('../../../src/services/session-sleep-fallback', () => ({
+  runSessionSleepFallback: mocks.runSessionSleepFallback,
 }));
 
 describe('session sleep sweep', () => {
@@ -44,6 +49,7 @@ describe('session sleep sweep', () => {
       SESSION_SLEEP_MAX_ATTEMPTS: '3',
     } as unknown as Env;
     mocks.checkAutomaticSessionSleepEligibility.mockResolvedValue({ eligible: true });
+    mocks.runSessionSleepFallback.mockResolvedValue('slept');
   });
 
   afterEach(() => {
@@ -344,7 +350,7 @@ describe('session sleep sweep', () => {
     });
   });
 
-  it('re-arms an exhausted failure when the configured retry budget increases', async () => {
+  it('routes legacy exhausted failures to cleanup without requiring a budget increase', async () => {
     addDueSnapshot('snapshot-rearmed', 3);
     sqlite
       .prepare(
@@ -359,7 +365,8 @@ describe('session sleep sweep', () => {
 
     const result = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'));
 
-    expect(result).toMatchObject({ selected: 1, claimed: 1, slept: 1 });
+    expect(result).toMatchObject({ selected: 1, claimed: 0, fallbacks: 1, slept: 1 });
+    expect(mocks.runSessionSleepFallback).toHaveBeenCalledOnce();
     expect(
       sqlite
         .prepare(
@@ -367,7 +374,7 @@ describe('session sleep sweep', () => {
            FROM session_snapshots WHERE id = 'snapshot-rearmed'`
         )
         .get()
-    ).toEqual({ sleep_status: 'preparing', sleep_after: null, sleep_attempts: 4 });
+    ).toEqual({ sleep_status: 'failed', sleep_after: null, sleep_attempts: 3 });
   });
 
   it.each([
@@ -377,7 +384,7 @@ describe('session sleep sweep', () => {
       "status = 'available', degradation = 'none', capture_generation = 'capture-1'",
     ],
   ])(
-    'no longer retries an exhausted legacy failed %s row past the budget',
+    'routes exhausted legacy failed %s to bounded cleanup',
     async (_, setClause) => {
       // The removed "repairable capture" exemption: a legacy row that spent its budget
       // with no retry left was re-selected forever because it was degraded or had a
@@ -394,7 +401,8 @@ describe('session sleep sweep', () => {
 
       const result = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'));
 
-      expect(result).toMatchObject({ selected: 0, claimed: 0, slept: 0 });
+      expect(result).toMatchObject({ selected: 1, claimed: 0, fallbacks: 1, slept: 1 });
+      expect(mocks.runSessionSleepFallback).toHaveBeenCalledOnce();
       expect(mocks.sleepWorkspaceSession).not.toHaveBeenCalled();
       expect(
         sqlite

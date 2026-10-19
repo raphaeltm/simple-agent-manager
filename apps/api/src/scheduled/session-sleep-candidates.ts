@@ -2,7 +2,7 @@
  * Candidate selection for the session-sleep sweep (`runSessionSleepSweep`). Split out
  * of `session-sleep.ts` (`.claude/rules/18-file-size-limits.md`).
  */
-import { and, eq, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -30,7 +30,7 @@ export function selectSweepCandidates(
   db: ReturnType<typeof drizzle<typeof schema>>,
   now: Date,
   batchSize: number,
-  maxAttempts: number
+  _maxAttempts: number
 ) {
   const nowIso = now.toISOString();
   const staleClaim = claimLeaseCutoff(env, now);
@@ -47,6 +47,7 @@ export function selectSweepCandidates(
       sleepClaimId: snapshots.sleepClaimId,
       sleepClaimedAt: snapshots.sleepClaimedAt,
       sleepError: snapshots.sleepError,
+      sleepFallbackJson: snapshots.sleepFallbackJson,
       sleepEpisodeStartedAt: snapshots.sleepEpisodeStartedAt,
       sleepEpisodeFailures: snapshots.sleepEpisodeFailures,
       updatedAt: snapshots.updatedAt,
@@ -58,24 +59,28 @@ export function selectSweepCandidates(
     .leftJoin(schema.workspaces, eq(schema.workspaces.id, snapshots.workspaceId))
     .where(
       and(
-        inArray(snapshots.status, ['pending', 'available', 'degraded', 'failed']),
+        inArray(snapshots.status, ['pending', 'available', 'degraded', 'failed', 'expired']),
         isNull(snapshots.sleepingAt),
         or(
           and(
             eq(snapshots.sleepStatus, 'terminal_failed'),
+            or(isNull(snapshots.sleepAfter), lte(snapshots.sleepAfter, nowIso)),
+            sql`CASE WHEN json_valid(${snapshots.sleepFallbackJson}) THEN json_extract(${snapshots.sleepFallbackJson}, '$.blockedReason') END IN ('no_git_baseline', 'commit_objects_unavailable', 'recovery_point_expired', 'unsupported_runtime', 'retry_ceiling', 'teardown_unconfirmed')`
+          ),
+          and(
+            eq(snapshots.sleepStatus, 'terminal_failed'),
             lte(snapshots.sleepAfter, nowIso),
-            sql`CASE WHEN json_valid(${snapshots.sleepFallbackJson}) THEN json_extract(${snapshots.sleepFallbackJson}, '$.blockedReason') END IN ('teardown_unconfirmed', 'runtime_changed')`
+            sql`CASE WHEN json_valid(${snapshots.sleepFallbackJson}) THEN json_extract(${snapshots.sleepFallbackJson}, '$.blockedReason') END = 'runtime_changed'`
           ),
           and(
             inArray(snapshots.sleepStatus, ['scheduled', 'failed']),
             lte(snapshots.sleepAfter, nowIso)
           ),
-          // Legacy rows exhausted before bounded episodes existed: re-armed only by
-          // raising `SESSION_SLEEP_MAX_ATTEMPTS`.
+          // Legacy exhausted failures must converge through the same guarded fallback.
           and(
             eq(snapshots.sleepStatus, 'failed'),
             isNull(snapshots.sleepAfter),
-            lt(snapshots.sleepAttempts, maxAttempts)
+            sql`${snapshots.sleepAttempts} >= 0`
           ),
           and(
             eq(snapshots.sleepStatus, 'preparing'),

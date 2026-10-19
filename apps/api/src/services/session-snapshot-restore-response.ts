@@ -42,6 +42,10 @@ export function sessionSnapshotRestoreResponse(
   chatSessionId: string,
   snapshot: schema.SessionSnapshot
 ) {
+  const fallback = sleptFallbackRecord(snapshot);
+  if (fallback && !fallback.recoveryPoint) {
+    return { available: false, reason: 'transcript_only_sleep_fallback' };
+  }
   const artifactPath = (artifact: RestoreArtifact) =>
     `/api/workspaces/${workspaceId}/session-snapshot/artifacts/${artifact}?chatSessionId=${encodeURIComponent(chatSessionId)}`;
   return {

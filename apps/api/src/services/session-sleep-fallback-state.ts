@@ -82,7 +82,7 @@ export async function beginSessionSnapshotFallbackStopping(
   input: {
     chatSessionId: string;
     claimId: string;
-    generation: string;
+    generation: string | null;
     status: string;
     degradation: string;
     recordJson: string;
@@ -106,7 +106,7 @@ export async function beginSessionSnapshotFallbackStopping(
         eq(snapshots.chatSessionId, input.chatSessionId),
         eq(snapshots.sleepStatus, 'preparing'),
         eq(snapshots.sleepClaimId, input.claimId),
-        eq(snapshots.snapshotGeneration, input.generation),
+        sql`${snapshots.snapshotGeneration} IS ${input.generation}`,
         eq(snapshots.status, input.status),
         eq(snapshots.degradation, input.degradation),
         isNull(snapshots.captureGeneration),
@@ -273,6 +273,40 @@ export async function retireDeadWorkspaceSleepIntent(
         sql`EXISTS (SELECT 1 FROM ${schema.workspaces}
           WHERE ${schema.workspaces.id} = ${input.workspaceId}
             AND ${schema.workspaces.status} = ${input.workspaceStatus})`
+      )
+    );
+  return (result.meta.changes ?? 0) > 0;
+}
+
+/** Re-arm historical preservation blocks through the normal claim and idle gates. */
+export async function rearmPreservationBlockedSleep(
+  db: Db,
+  input: { snapshotId: string; recordJson: string; now: Date }
+): Promise<boolean> {
+  const s = schema.sessionSnapshots;
+  const result = await db
+    .update(s)
+    .set({
+      sleepStatus: 'failed',
+      sleepAfter: input.now.toISOString(),
+      sleepClaimId: null,
+      sleepClaimedAt: null,
+      sleepStoppingSince: null,
+      // Preserve the spent budget: reopening must never buy another full capture cycle.
+      sleepEpisodeStartedAt: sql`COALESCE(${s.sleepEpisodeStartedAt}, ${s.createdAt})`,
+      sleepEpisodeFailures: sql`MAX(COALESCE(${s.sleepEpisodeFailures}, 0), 1)`,
+      updatedAt: input.now.toISOString(),
+    })
+    .where(
+      and(
+        eq(s.id, input.snapshotId),
+        eq(s.sleepStatus, 'terminal_failed'),
+        eq(s.sleepFallbackJson, input.recordJson),
+        isNull(s.sleepingAt),
+        sql`EXISTS (SELECT 1 FROM workspaces w WHERE w.id = ${s.workspaceId}
+      AND w.node_id = ${s.nodeId} AND w.user_id = ${s.userId}
+      AND w.project_id = ${s.projectId} AND w.chat_session_id = ${s.chatSessionId}
+      AND w.status IN ('running', 'recovery', 'sleeping', 'stopped'))`
       )
     );
   return (result.meta.changes ?? 0) > 0;

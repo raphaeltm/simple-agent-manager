@@ -4,7 +4,7 @@
  * (`stopping`). Split out of `session-snapshot-sleep-lifecycle.ts`
  * (`.claude/rules/18-file-size-limits.md`).
  */
-import { and, eq, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -13,7 +13,6 @@ import { parsePositiveInt } from '../lib/route-helpers';
 import { blockedSleepEpisodeSql } from './session-sleep-episode';
 import {
   DEFAULT_SESSION_SLEEP_CLAIM_LEASE_MS,
-  DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS,
   type SessionSnapshotSleepClaim,
 } from './session-snapshot-artifacts';
 
@@ -55,10 +54,7 @@ export async function claimSessionSnapshotSleep(
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   const staleBefore = new Date(now.getTime() - sessionSleepClaimLeaseMs(env)).toISOString();
-  const maxAttempts = parsePositiveInt(
-    (env as SnapshotLeaseEnv).SESSION_SLEEP_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS
-  );
+
   const snapshots = schema.sessionSnapshots;
   const blockedEpisode = sql`${sql.raw(blockedSleepEpisodeSql('session_snapshots'))}`;
   const dueCondition = input.force
@@ -72,12 +68,11 @@ export async function claimSessionSnapshotSleep(
           inArray(snapshots.sleepStatus, ['scheduled', 'failed']),
           lte(snapshots.sleepAfter, nowIso)
         ),
-        // Legacy rows exhausted before the bounded episode existed stay re-armable by
-        // raising `SESSION_SLEEP_MAX_ATTEMPTS`.
+        // Legacy failures without a retry deadline must still enter runtime cleanup.
         and(
           eq(snapshots.sleepStatus, 'failed'),
           isNull(snapshots.sleepAfter),
-          lt(snapshots.sleepAttempts, maxAttempts)
+          sql`${snapshots.sleepAttempts} >= 0`
         )
       );
   // A final verified snapshot is produced inside sleepWorkspaceSession. Pending,
@@ -90,7 +85,7 @@ export async function claimSessionSnapshotSleep(
     snapshots.status,
     input.force
       ? ['pending', 'available', 'degraded', 'failed', 'expired']
-      : ['pending', 'available', 'degraded', 'failed']
+      : ['pending', 'available', 'degraded', 'failed', 'expired']
   );
   const staleClaim = and(
     eq(snapshots.sleepStatus, 'preparing'),

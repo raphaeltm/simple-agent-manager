@@ -18,7 +18,12 @@ import { handOffEmptyWorkspaceNode } from './node-warm-handoff';
 import * as projectDataService from './project-data';
 import { finishConfirmedSleepAttention } from './session-sleep-attention';
 import { finishSleepingWorkspaceComputeCleanup } from './session-sleep-cleanup';
-import { sessionSleepRuntimeChanged, SessionSleepRuntimeChangedError } from './session-sleep-runtime-identity';
+import { sessionSleepDeferralReason, sleepTeardownSafetyGate } from './session-sleep-eligibility';
+import { sleptFallbackRecord } from './session-sleep-episode';
+import {
+  sessionSleepRuntimeChanged,
+  SessionSleepRuntimeChangedError,
+} from './session-sleep-runtime-identity';
 import {
   finalizeSessionSnapshotSleeping,
   getRestorableSessionSnapshot,
@@ -108,8 +113,12 @@ async function assertSleepRuntimeIdentity(env: Env, workspace: SleepWorkspace): 
   const current = await drizzle(env.DATABASE, { schema })
     .select({ id: schema.workspaces.id })
     .from(schema.workspaces)
-    .where(and(sleepRuntimeIdentity(workspace),
-      inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping', 'stopped'])))
+    .where(
+      and(
+        sleepRuntimeIdentity(workspace),
+        inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping', 'stopped'])
+      )
+    )
     .get();
   if (!current) throw new SessionSleepRuntimeChangedError();
 }
@@ -123,8 +132,8 @@ function workspaceStopAlreadyConfirmed(error: unknown): boolean {
     return (
       !!body &&
       typeof body === 'object' &&
-      'message' in body && body.message ===
-        'Workspace cannot be stopped from current state: stopped'
+      'message' in body &&
+      body.message === 'Workspace cannot be stopped from current state: stopped'
     );
   } catch {
     return false;
@@ -206,14 +215,20 @@ export async function ensureProjectDataSleeping(
     env,
     workspace.projectId,
     workspace.chatSessionId,
-    ...(claimId ? [{ runtimeGuard: {
-      projectId: workspace.projectId,
-      userId: workspace.userId,
-      workspaceId: workspace.id,
-      nodeId: workspace.nodeId,
-      evictionGeneration: workspace.evictionGeneration ?? null,
-      claimId,
-    } }] as const : [] as const)
+    ...(claimId
+      ? ([
+          {
+            runtimeGuard: {
+              projectId: workspace.projectId,
+              userId: workspace.userId,
+              workspaceId: workspace.id,
+              nodeId: workspace.nodeId,
+              evictionGeneration: workspace.evictionGeneration ?? null,
+              claimId,
+            },
+          },
+        ] as const)
+      : ([] as const))
   );
   if (slept) return;
   if (claimId) throw new SessionSleepRuntimeChangedError();
@@ -237,6 +252,13 @@ export async function completeSleepTeardown(
 ) {
   const db = drizzle(env.DATABASE, { schema });
   await assertSleepRuntimeIdentity(env, workspace);
+  const activity = await projectDataService.getSessionState(
+    env,
+    workspace.projectId,
+    agentSession.id
+  );
+  const safe = sleepTeardownSafetyGate(env, workspace)(activity);
+  if (!safe.idle) throw new Error(sessionSleepDeferralReason(safe, activity));
   await ensureProjectDataSleeping(env, workspace, claimId);
 
   // `stopping` is durable before this I/O. An interrupted or ambiguous stop
@@ -259,9 +281,12 @@ export async function completeSleepTeardown(
   }
 
   const now = new Date().toISOString();
-  const confirmedRuntime = exists(db.select({ id: schema.workspaces.id })
-    .from(schema.workspaces)
-    .where(and(sleepRuntimeIdentity(workspace), eq(schema.workspaces.status, 'sleeping'))));
+  const confirmedRuntime = exists(
+    db
+      .select({ id: schema.workspaces.id })
+      .from(schema.workspaces)
+      .where(and(sleepRuntimeIdentity(workspace), eq(schema.workspaces.status, 'sleeping')))
+  );
   const workspaceSleeping = db
     .update(schema.workspaces)
     .set({ status: 'sleeping', errorMessage: null, updatedAt: now })
@@ -344,7 +369,7 @@ export async function completeSleepTeardown(
   }
   if (!workspaceChanges) throw new SessionSleepRuntimeChangedError();
   const sleepWarning = options.fallback
-    ? `Workspace slept through the bounded sleep fallback (transcript and Git recovery point, snapshot ${verified?.status ?? 'unknown'}/${verified?.degradation ?? 'unknown'})`
+    ? `Workspace slept through the bounded sleep fallback (conversation and available backups, snapshot ${verified?.status ?? 'unknown'}/${verified?.degradation ?? 'unknown'})`
     : verified?.status === 'degraded'
       ? `Workspace slept with degraded snapshot (${verified.degradation})`
       : null;
@@ -389,7 +414,8 @@ export async function finishAlreadySleeping(
 ): Promise<SleepWorkspaceSessionResult | null> {
   if (
     workspace.status === 'sleeping' &&
-    isSessionSnapshotSleepReleasable(snapshot) &&
+    snapshot &&
+    (isSessionSnapshotSleepReleasable(snapshot) || sleptFallbackRecord(snapshot)) &&
     snapshot.sleepStatus === 'sleeping' &&
     snapshot.sleepingAt
   ) {

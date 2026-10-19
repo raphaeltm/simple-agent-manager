@@ -37,6 +37,8 @@ export async function guardedSessionSleep(
   if (!(await sessionSleepRuntimeIsCurrent(database, sessionId, guard))) return false;
   const chat = sql.exec('SELECT status FROM chat_sessions WHERE id = ? AND workspace_id = ?',
     sessionId, guard.workspaceId).toArray()[0];
-  if (chat?.status === 'sleeping') return true;
+  // A stopped conversation may still own leaked compute. Preserve its terminal
+  // state while the exact guarded stopping claim releases only that runtime.
+  if (chat?.status === 'sleeping' || chat?.status === 'stopped') return true;
   return chat?.status === 'active' && sleep();
 }

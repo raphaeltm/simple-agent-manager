@@ -59,12 +59,19 @@ export function sessionSleepNoticeId(
 /** The chat notice persisted before a fallback sleep releases the workspace. */
 export function sessionSleepFallbackNotice(record: SessionSleepFallbackRecord): string {
   const point = record.recoveryPoint;
-  if (!point) throw new Error('A fallback sleep notice needs its recovery point');
+  if (!point)
+    return [
+      'SAM is terminating this idle workspace after repeated snapshot failures to stop using compute. Cleanup will retry until runtime removal is confirmed.',
+      `Saving a complete snapshot failed after ${attemptsSummary(record)}.${lastErrorClause(record)}`,
+      'Kept: this conversation and any successful backups. An exact Git or filesystem restore was not verified.',
+      'Potentially lost: unpublished files, uncommitted work, installed tools and the agent’s saved session state.',
+      'Send a message to continue in a fresh workspace. The agent rebuilds its context from this transcript; it cannot promise an exact restore.',
+    ].join('\n\n');
   if (point.snapshotStatus === 'available' && point.degradation === 'none') {
     return [
-      'SAM put this session to sleep using its last complete snapshot.',
+      'SAM is putting this session to sleep using its last complete snapshot.',
       '',
-      `Saving a fresh snapshot failed after ${attemptsSummary(record)}, so SAM released the workspace to stop using compute.${lastErrorClause(record)}`,
+      `Saving a fresh snapshot failed after ${attemptsSummary(record)}, so SAM is releasing the workspace to stop using compute. Cleanup retries until runtime removal is confirmed.${lastErrorClause(record)}`,
       '',
       `Kept: this conversation and the complete snapshot${capturedClause(point.capturedAt)}, including ${gitLocation(record)}.`,
       'Not kept: any change made after that snapshot was saved.',
@@ -73,9 +80,9 @@ export function sessionSleepFallbackNotice(record: SessionSleepFallbackRecord): 
     ].join('\n');
   }
   return [
-    'SAM put this session to sleep without saving all of its files.',
+    'SAM is putting this session to sleep without saving all of its files.',
     '',
-    `Saving a complete snapshot failed after ${attemptsSummary(record)}. Sleep should not keep a machine running forever, so SAM released the workspace and kept a recovery point instead.${lastErrorClause(record)}`,
+    `Saving a complete snapshot failed after ${attemptsSummary(record)}. Sleep should not keep a machine running forever, so SAM is releasing the workspace and keeping a recovery point instead. Cleanup retries until runtime removal is confirmed.${lastErrorClause(record)}`,
     '',
     'Kept:',
     '- this conversation',
@@ -187,6 +194,16 @@ export function sessionRecoveryInitialPrompt(
 ): string {
   const point = record?.outcome === 'slept' ? record.recoveryPoint : null;
   if (!point) {
+    if (record?.outcome === 'slept')
+      return [
+        'Resume from the persisted transcript. Use get_session_messages for this chat before relying on memory.',
+        'The previous idle workspace was terminated after bounded snapshot failures. Exact Git/filesystem recovery was not verified. Unpublished files and saved harness state may have been lost. This is a fresh agent session.',
+        'Inspect the repository and transcript; reconstruct only missing work. Never claim an exact restore.',
+        `${NO_EXTERNAL_REPLAY}.`,
+        nextStep === 'continue_assigned_task'
+          ? 'Continue only work still required by the transcript.'
+          : 'Answer the latest queued follow-up message.',
+      ].join('\n\n');
     return nextStep === 'continue_assigned_task'
       ? SESSION_RECOVERY_CONTINUE_TASK_PROMPT
       : SESSION_RECOVERY_INITIAL_PROMPT;

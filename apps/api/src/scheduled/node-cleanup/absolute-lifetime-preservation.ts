@@ -76,8 +76,6 @@ export async function prepareAbsoluteLifetimeRelease(
 
     const attempts = workspace.sleep_attempts ?? 0;
     if (
-      now.getTime() - Date.parse(requested.created_at) < holdMs &&
-      attempts < maxAttempts &&
       workspace.sleep_status !== 'preparing' &&
       workspace.sleep_status !== 'stopping' &&
       // The sleep scheduler keeps the earliest deadline. Re-queueing a future
@@ -114,9 +112,8 @@ export async function prepareAbsoluteLifetimeRelease(
       .first();
     if (recorded) continue;
 
-    // Exhausted attempts or elapsed budget is an escalation, never authority
-    // to discard an uncaptured agent home. A separate verified migration or
-    // owner-directed operation is required to release this active workspace.
+    // The session sleep sweep owns bounded snapshot failure and guarded runtime
+    // termination. Never delete a whole occupied node from this timeout.
     if (workspace.project_id && workspace.chat_session_id) {
       try {
         await persistMessage(
@@ -124,7 +121,7 @@ export async function prepareAbsoluteLifetimeRelease(
           workspace.project_id,
           workspace.chat_session_id,
           'system',
-          `SAM could not preserve workspace ${workspace.id} before the managed node reached its absolute lifetime. Its snapshot is ${workspace.snapshot_status ?? 'missing'}/${workspace.degradation ?? 'unknown'} after ${attempts} sleep attempts. Automatic deletion is blocked to protect its agent home and unpublished files; an operator must resolve the preservation failure.`,
+          `SAM could not preserve workspace ${workspace.id} before the managed node reached its absolute lifetime. Its snapshot is ${workspace.snapshot_status ?? 'missing'}/${workspace.degradation ?? 'unknown'} after ${attempts} sleep attempts. SAM will terminate the idle workspace through its bounded sleep cleanup to stop using compute, even if exact recovery cannot be verified. This conversation and successful backups are retained; unpublished files and saved agent state may be lost. Active work and other workspaces remain protected.`,
           { source: 'node_cleanup', kind: 'absolute_lifetime_preservation_blocked' },
           `absolute-lifetime-preservation-${node.id}-${workspace.id}`
         );

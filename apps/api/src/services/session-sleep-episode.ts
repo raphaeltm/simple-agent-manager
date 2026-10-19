@@ -1,25 +1,10 @@
 /**
  * The bounded sleep-failure episode.
  *
- * Sleep is a convenience. A session whose final snapshot keeps failing must not pin its
- * compute forever, but it also must not lose work without an honest, durable recovery
- * point. An episode starts when a sleep first claims the session
- * (`claimSessionSnapshotSleep`) and ends when the session sleeps, wakes, or a human sends
- * a follow-up (`cancelScheduledSessionSleep`). Inside it:
- *
- * - `full`: ordinary full-snapshot sleep attempts, while fewer than
- *   `SESSION_SLEEP_FAILURE_MAX_ATTEMPTS` attempts failed and less than
- *   `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS` passed since the episode began.
- * - `fallback`: the sweep releases an idle VM session's compute while keeping its
- *   transcript and a restorable Git recovery point (`session-sleep-fallback.ts`). A
- *   transient failure to establish that minimum counts as another failed attempt.
- * - `blocked`: the minimum cannot be established, or failures reached the absolute ceiling
- *   (`SESSION_SLEEP_MAX_ATTEMPTS`). Automatic sleep stops retrying and says so in the chat;
- *   the runtime is left running.
- *
- * Both counters live on `session_snapshots` (migration 0179), so the budget survives
- * Worker restarts and duplicate sweeps. Neither a capture generation (prepare, complete,
- * or a degraded completion) nor a deferral touches them.
+ * Full snapshots are bounded by the existing attempt/time budgets. Once exhausted,
+ * release an idle runtime, retaining the transcript and any successful backups.
+ * An unavailable Git recovery point means a fresh transcript-based continuation,
+ * never authority to keep billing indefinitely. Runtime identity changes remain blocked.
  */
 import * as v from 'valibot';
 
@@ -40,7 +25,7 @@ export interface SessionSleepEpisodeConfig {
   failureMaxAttempts: number;
   /** Elapsed time since the episode began before the fallback phase. */
   failureMaxElapsedMs: number;
-  /** Failed attempts (full and fallback) at which the episode ends blocked. */
+  /** Legacy attempt ceiling retained for diagnostic trigger classification. */
   ceilingFailures: number;
 }
 
@@ -62,13 +47,13 @@ export function sessionSleepEpisodeConfig(env: EpisodeEnv): SessionSleepEpisodeC
       env.SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS,
       DEFAULT_SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS
     ),
-    // The absolute ceiling also bounds fallback retries. It is clamped above the full
-    // budget so a misconfigured pair still gives the fallback at least one attempt.
+    // Retain the legacy ceiling as a diagnostic trigger; external cleanup remains
+    // retryable after exhaustion.
     ceilingFailures: Math.max(sessionSleepMaxAttempts(env), failureMaxAttempts + 1),
   };
 }
 
-export type SessionSleepEpisodePhase = 'full' | 'fallback' | 'blocked';
+export type SessionSleepEpisodePhase = 'full' | 'fallback';
 
 export interface SessionSleepEpisodeState {
   sleepEpisodeStartedAt: string | null;
@@ -83,11 +68,7 @@ export function sessionSleepEpisodePhase(
   now: Date,
   config: SessionSleepEpisodeConfig
 ): SessionSleepEpisodePhase {
-  return sessionSleepEpisodeTrigger(row, now, config) === null
-    ? 'full'
-    : (row.sleepEpisodeFailures ?? 0) >= config.ceilingFailures
-      ? 'blocked'
-      : 'fallback';
+  return sessionSleepEpisodeTrigger(row, now, config) === null ? 'full' : 'fallback';
 }
 
 /**
@@ -197,7 +178,8 @@ export function sleptFallbackRecord(snapshot: {
   snapshotGeneration: string | null;
 }): SessionSleepFallbackRecord | null {
   const record = parseSessionSleepFallbackRecord(snapshot.sleepFallbackJson);
-  if (record?.outcome !== 'slept' || !record.recoveryPoint) return null;
+  if (record?.outcome !== 'slept') return null;
+  if (!record.recoveryPoint) return record;
   return record.recoveryPoint.generation === snapshot.snapshotGeneration ? record : null;
 }
 
