@@ -111,7 +111,9 @@ export function registerChatSessionAccessRoutes(chatRoutes: Hono<{ Bindings: Env
     // The grantee must be an active member who can work on tasks in this project. Nothing
     // else is required: sharing is the owner's consent to let them drive this session.
     if (!(await hasProjectCapability(db, projectId, granteeUserId, 'task:write'))) {
-      throw errors.badRequest('Sessions can only be shared with active members of this project');
+      throw errors.badRequest(
+        'Only active project members who can run tasks can be added to a session'
+      );
     }
     const maxActiveGrants = await getSessionAccessMaxGrants(c.env);
     const { result, grants } = await projectDataService.createSessionAccessGrant(c.env, projectId, {

@@ -5,7 +5,6 @@
 import { DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
-import { log } from '../lib/logger';
 import { resolveAdminSetting } from './admin-settings';
 import {
   type AdminSettingName,
@@ -13,19 +12,11 @@ import {
   DEFAULT_SESSION_ACCESS_MAX_GRANTS,
 } from './admin-settings-registry';
 
+// resolveAdminSetting degrades to the registry default on a store outage, so a read never
+// blocks commenting or sharing; the guard only narrows the value's type.
 async function integerSetting(env: Env, name: AdminSettingName, fallback: number) {
-  try {
-    const value = await resolveAdminSetting(env, name);
-    return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
-  } catch (err) {
-    // resolveAdminSetting already degrades to the default on a store outage; anything that
-    // still throws is an unknown setting, which must not block commenting or sharing.
-    log.warn('collaboration_settings.read_failed', {
-      name,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return fallback;
-  }
+  const value = await resolveAdminSetting(env, name);
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 export function getSessionAccessMaxGrants(env: Env): Promise<number> {
