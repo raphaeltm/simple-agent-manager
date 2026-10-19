@@ -53,12 +53,8 @@ export function useSessionLifecycle(
   const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(
     () => transcript.detail?.session.task ?? null
   );
-  const { applySessionAccess, onSessionAccessChanged } = useSessionAccessSync(
-    projectId,
-    sessionId,
-    setSession,
-    session?.access
-  );
+  const { applySessionAccess, onSessionAccessChanged, resyncAccessAfterSubscribe } =
+    useSessionAccessSync(projectId, sessionId, setSession, session?.access);
 
   const {
     uploading,
@@ -149,8 +145,11 @@ export function useSessionLifecycle(
     // ordinary sleeping session still connects nothing) is what makes the push
     // half of wake progress actually reach the user.
     enabled: session?.status === 'active' || wake.isWaking,
-    // A page load or a wake reads what was persisted since the transcript's last read.
-    onSubscribed: catchUpTail,
+    // A page load or a wake re-reads rows, and access, changed since the transcript's last read.
+    onSubscribed: useCallback(
+      () => catchUpTail(resyncAccessAfterSubscribe),
+      [catchUpTail, resyncAccessAfterSubscribe]
+    ),
     onMessage: useCallback(
       (msg: ChatMessageResponse) => {
         appendMessages([msg]);

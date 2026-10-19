@@ -2,6 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useProjectWebSocket } from '../../../src/hooks/useProjectWebSocket';
+import { subscribeSessionAccessChanged } from '../../../src/lib/session-access-events';
 
 // ---------------------------------------------------------------------------
 // WebSocket mock — supports tracking multiple instances
@@ -147,6 +148,31 @@ describe('useProjectWebSocket', () => {
     });
 
     expect(onSessionEvent).toHaveBeenCalledTimes(3);
+  });
+
+  it("tells the open chat its access changed, even when that chat's own socket is off", () => {
+    const openChat = vi.fn();
+    const otherChat = vi.fn();
+    const stopOpen = subscribeSessionAccessChanged('sess-1', openChat);
+    const stopOther = subscribeSessionAccessChanged('sess-2', otherChat);
+    const onSessionEvent = vi.fn();
+    renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }));
+
+    act(() => simulateOpen());
+    act(() =>
+      simulateMessage({
+        type: 'session.access.changed',
+        payload: { sessionId: 'sess-1', reason: 'revoked' },
+      })
+    );
+    act(() => simulateMessage({ type: 'session.access.changed', payload: { reason: 'revoked' } }));
+
+    expect(openChat).toHaveBeenCalledTimes(1);
+    expect(otherChat).not.toHaveBeenCalled();
+    // It is not a session-list delta.
+    expect(onSessionEvent).not.toHaveBeenCalled();
+    stopOpen();
+    stopOther();
   });
 
   it('ignores non-lifecycle events like message.new', () => {

@@ -5,6 +5,7 @@ import {
   type MessageCommentRealtimeEvent,
 } from '../lib/api/comments';
 import { expectJsonRecord } from '../lib/runtime-validation';
+import { publishSessionAccessChanged } from '../lib/session-access-events';
 
 export type SessionEventType =
   | 'session.created'
@@ -171,6 +172,14 @@ export function useProjectWebSocket({
                 ),
               },
             } as MessageCommentRealtimeEvent);
+            return;
+          }
+          if (type === 'session.access.changed') {
+            // The open chat re-reads its access; its own socket is off while the chat sleeps.
+            const payload = expectJsonRecord(data.payload, 'project.websocket.access.payload');
+            if (typeof payload.sessionId === 'string' && payload.sessionId) {
+              publishSessionAccessChanged(payload.sessionId);
+            }
             return;
           }
           if (SESSION_DELTA_EVENTS.has(type)) {

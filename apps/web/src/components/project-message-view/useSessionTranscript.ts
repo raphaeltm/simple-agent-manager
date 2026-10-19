@@ -39,8 +39,11 @@ export interface SessionTranscript {
   firstItemIndex: number;
   /** Adds live rows (socket deliveries, optimistic sends) in transcript order. */
   appendMessages: (incoming: ChatMessageResponse[]) => void;
-  /** Reads and adds every row persisted after the newest loaded one (the socket subscribed). */
-  catchUpTail: () => void;
+  /**
+   * Reads and adds every row persisted after the newest loaded one (the socket subscribed).
+   * `afterReadsSettle` runs once no transcript read is in flight, for other state to re-read.
+   */
+  catchUpTail: (afterReadsSettle?: () => void) => void;
   /** Merges a newest-window response, draining any gap to the loaded tail first. */
   mergeRecentWindow: (recent: ChatSessionDetailResponse, signal?: AbortSignal) => Promise<void>;
   /** Loads the next page of older history. */
@@ -115,35 +118,44 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
    * and this one resumes from the newest row a read returned instead of reading that range
    * twice. Rows added live in the meantime are newer than the gap, so they never set the
    * cursor. Messages only, through the messages-only route; the session and state snapshots
-   * stay with the reads that own them.
+   * stay with the reads that own them, and `afterReadsSettle` is the point where a caller can
+   * re-read one of them without a read in flight landing an older snapshot on top.
    */
-  const catchUpTail = useCallback(() => {
-    const addedLive = new Set<string>();
-    addedLiveRef.current = addedLive;
-    const inFlight = queryClient.getQueryCache().find({ queryKey, exact: true })?.promise;
-    void Promise.resolve(inFlight)
+  const catchUpTail = useCallback(
+    (afterReadsSettle?: () => void) => {
+      const addedLive = new Set<string>();
+      addedLiveRef.current = addedLive;
+      const inFlight = queryClient.getQueryCache().find({ queryKey, exact: true })?.promise;
       // A failed or cancelled read still leaves a transcript to resume from.
-      .catch(() => undefined)
-      .then(async () => {
-        const loaded = readDetail();
-        if (!loaded) return;
-        const read = loaded.messages.filter((message) => !addedLive.has(message.id));
-        const found = await readMessagesAfter(projectId, sessionId, read);
-        if (found.length === 0) return;
-        queryClient.setQueryData<ChatSessionDetailResponse>(
-          queryKey,
-          (current) =>
-            current && { ...current, messages: mergeMessages(current.messages, found, 'append') }
-        );
-      })
-      .catch((err: unknown) => {
-        // Best effort: a reconnect catch-up or the fallback poll reads the newest window again.
-        console.warn('Failed to read messages persisted before the chat socket opened', err);
-      })
-      .finally(() => {
-        if (addedLiveRef.current === addedLive) addedLiveRef.current = null;
-      });
-  }, [projectId, queryClient, queryKey, readDetail, sessionId]);
+      const readsSettled = Promise.resolve(inFlight).catch(() => undefined);
+      if (afterReadsSettle) {
+        void readsSettled.then(afterReadsSettle).catch((err: unknown) => {
+          console.warn('Failed to re-read session state after the chat socket opened', err);
+        });
+      }
+      void readsSettled
+        .then(async () => {
+          const loaded = readDetail();
+          if (!loaded) return;
+          const read = loaded.messages.filter((message) => !addedLive.has(message.id));
+          const found = await readMessagesAfter(projectId, sessionId, read);
+          if (found.length === 0) return;
+          queryClient.setQueryData<ChatSessionDetailResponse>(
+            queryKey,
+            (current) =>
+              current && { ...current, messages: mergeMessages(current.messages, found, 'append') }
+          );
+        })
+        .catch((err: unknown) => {
+          // Best effort: a reconnect catch-up or the fallback poll reads the newest window again.
+          console.warn('Failed to read messages persisted before the chat socket opened', err);
+        })
+        .finally(() => {
+          if (addedLiveRef.current === addedLive) addedLiveRef.current = null;
+        });
+    },
+    [projectId, queryClient, queryKey, readDetail, sessionId]
+  );
 
   /**
    * Merges a newest-window response (fallback poll, reconnect catch-up). A window

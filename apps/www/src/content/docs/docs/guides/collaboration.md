@@ -188,7 +188,8 @@ What SAM enforces:
 ### Remove access
 
 Access ends on its own when its time is up. To end it sooner, open **Share** and select
-**Revoke now** next to a person, or **Leave** to remove yourself. Access ends immediately. Their
+**Revoke now** next to a person, or **Leave** to remove yourself. Access ends immediately, and
+their open page locks without a reload, even while the chat is asleep. Their
 messages that haven't reached the agent yet are cancelled and marked
 **Not delivered — access was removed**. A message the agent already received can't be taken back,
 and work it has started keeps running. When a member is removed from the project, SAM also deletes

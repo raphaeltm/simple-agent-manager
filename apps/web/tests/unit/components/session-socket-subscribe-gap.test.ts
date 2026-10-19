@@ -20,12 +20,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   getChatSession: vi.fn(),
   listChatMessages: vi.fn(),
+  getSessionAccess: vi.fn(),
+  // Stable like the real hook's callbacks: a new identity per render would re-run the
+  // lifecycle's server-snapshot effect on every render.
+  startVerifyDecayTimer: vi.fn(),
+  stopVerifyDecayTimer: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getChatSession: mocks.getChatSession,
   listChatMessages: mocks.listChatMessages,
+  getSessionAccess: mocks.getSessionAccess,
   getWorkspace: vi.fn(),
   getNode: vi.fn(),
   getTerminalToken: vi.fn(),
@@ -51,8 +57,8 @@ vi.mock('../../../src/hooks/useWorkspacePorts', () => ({
 }));
 vi.mock('../../../src/components/project-message-view/useActivityVerifyTimer', () => ({
   useActivityVerifyTimer: () => ({
-    startVerifyDecayTimer: vi.fn(),
-    stopVerifyDecayTimer: vi.fn(),
+    startVerifyDecayTimer: mocks.startVerifyDecayTimer,
+    stopVerifyDecayTimer: mocks.stopVerifyDecayTimer,
   }),
 }));
 vi.mock('../../../src/components/project-message-view/useConnectionRecovery', () => ({
@@ -74,6 +80,7 @@ vi.mock('../../../src/components/project-message-view/types', async (importOrigi
 }));
 
 import { useSessionLifecycle } from '../../../src/components/project-message-view/useSessionLifecycle';
+import { useProjectWebSocket } from '../../../src/hooks/useProjectWebSocket';
 import type { ChatMessageResponse, ChatSessionResponse } from '../../../src/lib/api';
 import { chatQueryKeys } from '../../../src/lib/query-options';
 import { useWorkspaceChatSocket } from '../../../src/pages/workspace/useWorkspaceChatSocket';
@@ -125,7 +132,30 @@ function row(id: string, role: string, createdAt: number): ChatMessageResponse {
   };
 }
 
-function session(status: string): ChatSessionResponse {
+type Viewer = 'owner' | 'grantee' | 'reader';
+
+function accessSummary(viewerAccess: Viewer, serverTime: number) {
+  const grant = {
+    id: 'grant-1',
+    grantee: { id: 'mate', name: 'Mate', email: null, avatarUrl: null },
+    grantedBy: { id: 'owner', name: 'Owner', email: null, avatarUrl: null },
+    createdAt: 0,
+    expiresAt: Date.now() + 30 * 60_000,
+  };
+  return {
+    sessionId: 'sess-1',
+    viewerAccess,
+    owner: { id: 'owner', name: 'Owner', email: null, avatarUrl: null },
+    grants: viewerAccess === 'reader' ? [] : [grant],
+    serverTime,
+  };
+}
+
+function session(
+  status: string,
+  viewerAccess: Viewer = 'owner',
+  serverTime = 1
+): ChatSessionResponse {
   return {
     id: 'sess-1',
     workspaceId: null,
@@ -135,12 +165,14 @@ function session(status: string): ChatSessionResponse {
     startedAt: 0,
     endedAt: null,
     createdAt: 0,
+    viewerAccess,
+    access: accessSummary(viewerAccess, serverTime),
   } as ChatSessionResponse;
 }
 
-function detail(messages: ChatMessageResponse[]) {
+function detail(messages: ChatMessageResponse[], viewerAccess: Viewer = 'owner', serverTime = 1) {
   return {
-    session: session('active'),
+    session: session('active', viewerAccess, serverTime),
     messages,
     hasMore: false,
     state: {
@@ -344,5 +376,142 @@ describe('rows persisted between the last read and the socket subscription', () 
       expect(result.current.map((m) => m.id)).toEqual(['m1', 'm2', 'comment-directive-t1', 'r4'])
     );
     expect(mocks.getChatSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('access changed between the last read and the socket subscription', () => {
+  let queryClient: QueryClient;
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: queryClient }, children);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    FakeWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    mocks.listChatMessages.mockResolvedValue(messagesPage([]));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("a teammate's page re-reads access when its socket subscribes, so a missed revoke still locks it", async () => {
+    // The owner revoked while the teammate's page was loading: the page read them as a grantee,
+    // and the revoke's broadcast reached no socket.
+    mocks.getChatSession.mockResolvedValueOnce(detail([ownerPrompt, agentReply], 'grantee'));
+    mocks.getSessionAccess.mockResolvedValueOnce(accessSummary('reader', 5));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.session?.viewerAccess).toBe('grantee'));
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    expect(mocks.getSessionAccess).not.toHaveBeenCalled();
+
+    act(() => {
+      FakeWebSocket.instances[0]!.open();
+    });
+
+    await waitFor(() => expect(result.current.session?.viewerAccess).toBe('reader'));
+    expect(mocks.getSessionAccess).toHaveBeenCalledWith('proj-1', 'sess-1');
+    // Liveness: the same subscription also read the transcript tail.
+    expect(mocks.listChatMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it("the owner's page does not pay for the access read", async () => {
+    mocks.getChatSession.mockResolvedValueOnce(detail([ownerPrompt, agentReply], 'owner'));
+
+    renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), { wrapper });
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    act(() => {
+      FakeWebSocket.instances[0]!.open();
+    });
+
+    await waitFor(() => expect(mocks.listChatMessages).toHaveBeenCalledTimes(1));
+    expect(mocks.getSessionAccess).not.toHaveBeenCalled();
+  });
+
+  it('reads access only after the mount refresh lands, so its older snapshot cannot undo the revoke', async () => {
+    queryClient.setQueryData(
+      chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1'),
+      detail([ownerPrompt, agentReply], 'grantee', 1)
+    );
+    const mountRefresh = deferred<ReturnType<typeof detail>>();
+    mocks.getChatSession.mockReturnValueOnce(mountRefresh.promise);
+    const accessRead = deferred<ReturnType<typeof accessSummary>>();
+    mocks.getSessionAccess.mockReturnValueOnce(accessRead.promise);
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    await act(async () => {
+      FakeWebSocket.instances[0]!.open();
+      await Promise.resolve();
+    });
+    // The refresh built before the revoke is still in flight; reading access now would let it
+    // land on top of the answer.
+    expect(mocks.getSessionAccess).not.toHaveBeenCalled();
+
+    await act(async () => {
+      mountRefresh.resolve(detail([], 'grantee', 2));
+      await mountRefresh.promise;
+    });
+    await waitFor(() => expect(mocks.getSessionAccess).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      accessRead.resolve(accessSummary('reader', 3));
+      await accessRead.promise;
+    });
+
+    await waitFor(() => expect(result.current.session?.viewerAccess).toBe('reader'));
+  });
+});
+
+describe('access changes while the chat sleeps', () => {
+  let queryClient: QueryClient;
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: queryClient }, children);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    FakeWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("a revoke reaches a teammate's open page through the project socket", async () => {
+    const asleep = detail([ownerPrompt, agentReply], 'grantee');
+    asleep.session = { ...asleep.session, status: 'sleeping' };
+    mocks.getChatSession.mockResolvedValueOnce(asleep);
+    mocks.getSessionAccess.mockResolvedValueOnce(accessSummary('reader', 5));
+
+    const { result } = renderHook(
+      () => {
+        // The project chat page runs both: the sidebar's project socket and the open chat.
+        useProjectWebSocket({ projectId: 'proj-1' });
+        return useSessionLifecycle('proj-1', 'sess-1', false);
+      },
+      { wrapper }
+    );
+    await waitFor(() => expect(result.current.session?.viewerAccess).toBe('grantee'));
+    // Asleep: the chat socket stays off; only the project socket exists.
+    expect(FakeWebSocket.instances.map((socket) => socket.url.includes('sessionId='))).toEqual([
+      false,
+    ]);
+
+    act(() => {
+      const projectSocket = FakeWebSocket.instances[0]!;
+      projectSocket.open();
+      projectSocket.deliver({
+        type: 'session.access.changed',
+        payload: { sessionId: 'sess-1', reason: 'revoked' },
+      });
+    });
+
+    await waitFor(() => expect(result.current.session?.viewerAccess).toBe('reader'));
+    expect(mocks.getSessionAccess).toHaveBeenCalledTimes(1);
   });
 });

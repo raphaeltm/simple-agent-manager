@@ -1,9 +1,10 @@
 import type { SessionAccessSummary } from '@simple-agent-manager/shared';
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo } from 'react';
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef } from 'react';
 
 import type { ChatSessionResponse } from '../../lib/api';
 import { getSessionAccess } from '../../lib/api';
 import { serverNow } from '../../lib/server-clock';
+import { subscribeSessionAccessChanged } from '../../lib/session-access-events';
 
 /** Ask the server this long after a grant's end time, so its clock has passed it too. */
 export const ACCESS_EXPIRY_REFETCH_GRACE_MS = 2_000;
@@ -17,6 +18,11 @@ export const ACCESS_EXPIRY_REFETCH_GRACE_MS = 2_000;
  * The server also says when a grant expires, but only to open sockets, and a sleeping chat's
  * socket is closed. So the hook refetches once the soonest grant in `access` has ended. That
  * only updates the display: the server already refuses an expired grant.
+ *
+ * While the chat sleeps its socket is off; the project-wide socket still hears the change and
+ * publishes it (`session-access-events`). A change broadcast before the chat socket subscribed
+ * reached no socket, so `resyncAccessAfterSubscribe` re-reads it for a viewer whose composer
+ * depends on it.
  */
 export function useSessionAccessSync(
   projectId: string,
@@ -47,6 +53,18 @@ export function useSessionAccessSync(
       });
   }, [applySessionAccess, projectId, sessionId]);
 
+  useEffect(
+    () => subscribeSessionAccessChanged(sessionId, onSessionAccessChanged),
+    [onSessionAccessChanged, sessionId]
+  );
+
+  // The owner's composer does not depend on grants, so their page skips the extra read.
+  const viewerAccessRef = useRef(access?.viewerAccess);
+  viewerAccessRef.current = access?.viewerAccess;
+  const resyncAccessAfterSubscribe = useCallback(() => {
+    if (viewerAccessRef.current !== 'owner') onSessionAccessChanged();
+  }, [onSessionAccessChanged]);
+
   const nextExpiresAt = useMemo(() => {
     // A summary cached before grants had end times has none; never schedule on NaN, which
     // `setTimeout` treats as 0 and would turn into a refetch loop.
@@ -66,5 +84,5 @@ export function useSessionAccessSync(
     return () => window.clearTimeout(id);
   }, [nextExpiresAt, summaryTime, onSessionAccessChanged]);
 
-  return { applySessionAccess, onSessionAccessChanged };
+  return { applySessionAccess, onSessionAccessChanged, resyncAccessAfterSubscribe };
 }
