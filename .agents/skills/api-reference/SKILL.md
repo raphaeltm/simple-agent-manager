@@ -20,6 +20,7 @@ The reference covers:
 - MCP private incident backlog tools (`list_incident_queue`, `get_incident`, `claim_incident`, `resolve_incident`)
 - Agent Sessions (`/api/workspaces/:id/agent-sessions/*`)
 - Message-anchored chat comments (`/api/projects/:projectId/sessions/:sessionId/comments*`)
+- Shared chat access (`/api/projects/:projectId/sessions/:sessionId/access*`, session sleep/resume) and the session-writer check
 - Project-wide comment inbox (`/api/projects/:projectId/comments`)
 - Agent Settings (`/api/agent-settings/*`)
 - Notifications (`/api/notifications/*`)
