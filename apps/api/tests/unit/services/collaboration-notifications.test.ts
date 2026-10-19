@@ -349,11 +349,63 @@ describe('notifySessionAccessChange', () => {
         type: 'session_access',
         urgency: NOTIFICATION_TYPE_URGENCY.session_access,
         title: expect.stringContaining('Owner Name'),
-        body: expect.stringContaining('You can now chat in this session'),
+        body: 'You can chat in this session. It runs on the owner’s accounts.',
         actionUrl: '/projects/project-1/chat/session-1',
         metadata: { projectName: 'Demo Project', change: 'granted', actorUserId: 'owner-1' },
       })
     );
+  });
+
+  it('says how long shared or extended access lasts', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    try {
+      await notifySessionAccessChange(env, {
+        projectId: 'project-1',
+        sessionId: 'session-1',
+        sessionTopic: 'Debugging the thing',
+        sessionOwnerUserId: 'owner-1',
+        actor: { userId: 'owner-1', name: 'Owner Name' },
+        change: 'granted',
+        affectedUserIds: ['grantee-1'],
+        granteeName: 'Grantee Name',
+        expiresAt: 1_000_000 + 30 * 60_000,
+      });
+      await notifySessionAccessChange(env, {
+        projectId: 'project-1',
+        sessionId: 'session-1',
+        sessionTopic: 'Debugging the thing',
+        sessionOwnerUserId: 'owner-1',
+        actor: { userId: 'owner-1', name: 'Owner Name' },
+        change: 'renewed',
+        affectedUserIds: ['grantee-1'],
+        granteeName: 'Grantee Name',
+        expiresAt: 1_000_000 + 5 * 60_000,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(mocks.sendNotification).toHaveBeenNthCalledWith(
+      1,
+      env,
+      'grantee-1',
+      expect.objectContaining({
+        body: 'You can chat in this session for the next 30 minutes. It runs on the owner’s accounts.',
+      })
+    );
+    expect(mocks.sendNotification).toHaveBeenNthCalledWith(
+      2,
+      env,
+      'grantee-1',
+      expect.objectContaining({
+        title: expect.stringContaining('Owner Name extended your access to'),
+        body: 'You can chat in this session for the next 5 minutes.',
+        metadata: { projectName: 'Demo Project', change: 'renewed', actorUserId: 'owner-1' },
+      })
+    );
+    // One notification per change, both to the grantee.
+    expect(mocks.sendNotification).toHaveBeenCalledTimes(2);
   });
 
   it('notifies both the new grantee and the owner when a grantee re-shares the session', async () => {
