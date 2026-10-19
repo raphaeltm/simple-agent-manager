@@ -7,10 +7,12 @@ import { getChatSession } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
 import {
   fetchHistoryUntil,
+  fetchNewestPage,
   historyReaches,
   type HistoryTarget,
   mergeRecentWindowOrRefresh,
   oldestPersistedCursor,
+  refreshCachedTranscript,
 } from '../../lib/message-paging';
 import {
   chatQueryKeys,
@@ -38,6 +40,8 @@ export interface SessionTranscript {
   firstItemIndex: number;
   /** Adds live rows (socket deliveries, optimistic sends) in transcript order. */
   appendMessages: (incoming: ChatMessageResponse[]) => void;
+  /** Reads and adds every row persisted after the newest loaded one (the socket subscribed). */
+  catchUpTail: () => void;
   /** Merges a newest-window response, draining any gap to the loaded tail first. */
   mergeRecentWindow: (recent: ChatSessionDetailResponse, signal?: AbortSignal) => Promise<void>;
   /** Loads the next page of older history. */
@@ -96,6 +100,36 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
     },
     [queryClient, queryKey]
   );
+
+  /**
+   * Reads every row persisted after the newest loaded one and adds it, for a socket that
+   * just subscribed: a row persisted after the last read and before the subscription reached
+   * no socket, and once a newer live row lands after it, no later read from the newest row
+   * would find it again. `refreshCachedTranscript` takes its cursor before it first awaits, so
+   * a live row arriving meanwhile cannot move the cursor past the missed one. Only messages
+   * are merged; the session and state snapshots stay with the reads that own them.
+   */
+  const catchUpTail = useCallback(() => {
+    const loaded = readDetail();
+    if (!loaded) return;
+    const loadedIds = new Set(loaded.messages.map((message) => message.id));
+    void refreshCachedTranscript(projectId, sessionId, loaded)
+      .then((refreshed) => refreshed ?? fetchNewestPage(projectId, sessionId))
+      .then((fresh) => {
+        // Only what the read found; a row the transcript has dropped since stays dropped.
+        const found = fresh.messages.filter((message) => !loadedIds.has(message.id));
+        if (found.length === 0) return;
+        queryClient.setQueryData<ChatSessionDetailResponse>(
+          queryKey,
+          (current) =>
+            current && { ...current, messages: mergeMessages(current.messages, found, 'append') }
+        );
+      })
+      .catch((err: unknown) => {
+        // Best effort: a reconnect catch-up or the fallback poll reads the newest window again.
+        console.warn('Failed to read messages persisted before the chat socket opened', err);
+      });
+  }, [projectId, queryClient, queryKey, readDetail, sessionId]);
 
   /**
    * Merges a newest-window response (fallback poll, reconnect catch-up). A window
@@ -207,6 +241,7 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
     loadingMore: olderLoadsInFlight > 0,
     firstItemIndex,
     appendMessages,
+    catchUpTail,
     mergeRecentWindow,
     loadMore,
     loadUntil,

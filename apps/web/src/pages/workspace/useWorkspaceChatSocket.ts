@@ -11,18 +11,20 @@
  * setters passed in, because the composer, pagination and file upload there all
  * write to them too.
  */
-import { type Dispatch, type SetStateAction, useCallback, useState } from 'react';
+import { type Dispatch, type SetStateAction, useCallback, useRef, useState } from 'react';
 
 import type { AgentActivityState } from '../../components/project-message-view/types';
 import { isWorkingActivity } from '../../components/project-message-view/types';
 import { useActivityVerifyTimer } from '../../components/project-message-view/useActivityVerifyTimer';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
+import { getChatSession } from '../../lib/api';
 import type {
   ChatMessageResponse,
   ChatSessionResponse,
   SessionStateSnapshot,
 } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
+import { fetchNewestPage, newestPersistedCursor } from '../../lib/message-paging';
 
 /** Seconds of silence after last agent row before returning to idle. */
 const IDLE_TIMEOUT_MS = 3000;
@@ -42,6 +44,8 @@ interface UseWorkspaceChatSocketOptions {
   sessionId: string;
   /** The socket only opens for an active session. */
   sessionStatus: string | undefined;
+  /** The view's transcript, read when the socket subscribes to find where to resume. */
+  messages: ChatMessageResponse[];
   setMessages: Dispatch<SetStateAction<ChatMessageResponse[]>>;
   setSession: Dispatch<SetStateAction<ChatSessionResponse | null>>;
 }
@@ -62,10 +66,13 @@ export function useWorkspaceChatSocket({
   projectId,
   sessionId,
   sessionStatus,
+  messages,
   setMessages,
   setSession,
 }: UseWorkspaceChatSocketOptions): UseWorkspaceChatSocketResult {
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   const clearActivity = useCallback(() => {
     setAgentActivity('idle');
@@ -98,7 +105,19 @@ export function useWorkspaceChatSocket({
     projectId,
     sessionId,
     enabled: sessionStatus === 'active',
-    knownAsleep: sessionStatus !== undefined && sessionStatus !== 'active',
+    // The view's load can predate this subscription; read what was persisted since its
+    // newest row. The cursor is taken now, before this socket delivers anything newer.
+    onSubscribed: useCallback(() => {
+      const after = newestPersistedCursor(messagesRef.current);
+      const read = after
+        ? getChatSession(projectId, sessionId, { after })
+        : fetchNewestPage(projectId, sessionId);
+      void read
+        .then((page) => setMessages((prev) => mergeMessages(prev, page.messages, 'append')))
+        .catch((err: unknown) => {
+          console.warn('Failed to read messages persisted before the chat socket opened', err);
+        });
+    }, [projectId, sessionId, setMessages]),
     onMessage: useCallback(
       (msg: ChatMessageResponse) => {
         setMessages((prev) => mergeMessages(prev, [msg], 'append'));

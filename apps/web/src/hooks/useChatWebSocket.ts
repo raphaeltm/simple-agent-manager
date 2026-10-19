@@ -26,17 +26,18 @@ interface UseChatWebSocketOptions {
   sessionId: string;
   /** Only connect when the session is active. */
   enabled: boolean;
-  /**
-   * True when the socket is off because the chat is known to be asleep, as opposed to its
-   * status not being loaded yet. A later open then catches up on what was persisted while it
-   * was off. Leaving it false keeps a cold page load from fetching the transcript twice.
-   */
-  knownAsleep?: boolean;
   /** Called when a new message arrives via WebSocket (single or from batch). */
   onMessage: (msg: ChatMessageResponse) => void;
   /** Called when the session is stopped server-side. */
   onSessionStopped: () => void;
-  /** Called with missed messages after a reconnect, or after the socket was off (a wake). */
+  /**
+   * Called when the socket opens with no earlier connection to catch up from: on a page load,
+   * and when a chat that was asleep wakes. The consumer's last REST read can predate this
+   * subscription, and a row persisted in between reached no socket, so the consumer reads
+   * forward from the newest row it holds and merges what it finds.
+   */
+  onSubscribed?: () => void;
+  /** Called when we catch up with missed messages after reconnect. */
   onCatchUp: (
     messages: ChatMessageResponse[],
     session: ChatSessionResponse,
@@ -86,9 +87,9 @@ export function useChatWebSocket({
   projectId,
   sessionId,
   enabled,
-  knownAsleep = false,
   onMessage,
   onSessionStopped,
+  onSubscribed,
   onCatchUp,
   onAgentCompleted,
   onAgentActivity,
@@ -106,14 +107,11 @@ export function useChatWebSocket({
   const mountedRef = useRef(true);
   const connectRef = useRef<() => void>(() => {});
   const hadConnectionRef = useRef(false);
-  // The socket was off because the chat was asleep, and has not opened since. Rows persisted
-  // meanwhile, such as a teammate's prompt or a comment sent to the agent that woke the chat,
-  // were broadcast to no socket, so the next open must catch up.
-  const offSinceLastOpenRef = useRef(false);
 
   // Keep callbacks stable via refs
   const onMessageRef = useRef(onMessage);
   const onSessionStoppedRef = useRef(onSessionStopped);
+  const onSubscribedRef = useRef(onSubscribed);
   const onCatchUpRef = useRef(onCatchUp);
   const onAgentCompletedRef = useRef(onAgentCompleted);
   const onAgentActivityRef = useRef(onAgentActivity);
@@ -123,6 +121,7 @@ export function useChatWebSocket({
   const onSessionAccessChangedRef = useRef(onSessionAccessChanged);
   onMessageRef.current = onMessage;
   onSessionStoppedRef.current = onSessionStopped;
+  onSubscribedRef.current = onSubscribed;
   onCatchUpRef.current = onCatchUp;
   onAgentCompletedRef.current = onAgentCompleted;
   onAgentActivityRef.current = onAgentActivity;
@@ -178,19 +177,21 @@ export function useChatWebSocket({
           return;
         }
         const wasReconnect = hadConnectionRef.current;
-        const wasOff = offSinceLastOpenRef.current;
         retriesRef.current = 0;
         setConnectionState('connected');
         hadConnectionRef.current = true;
-        offSinceLastOpenRef.current = false;
 
-        // Catch up on a reconnect, and on the first open after the chat was asleep: anything
-        // persisted while the socket was off reached no socket. The first open of a page
-        // whose chat is active skips it: the initial REST load (loadSession) covers it, and a
-        // duplicate catch-up racing that load can overwrite messages via the 'replace' merge
-        // strategy, so they briefly appear then disappear.
-        if (wasReconnect || wasOff) {
+        // A reconnect re-reads the newest window. Any other open follows a REST read that this
+        // socket did not see the end of: a page load, or a wake after the socket was off. A row
+        // persisted between that read and now, such as a comment sent to the agent, reached no
+        // socket, so the consumer reads forward from its newest row. It runs here, before any
+        // frame of this socket, so a newer live row cannot move its cursor past the missed one.
+        // Consumers merge what they read: a replace racing the initial load once made messages
+        // appear and then disappear.
+        if (wasReconnect) {
           void catchUpMessages();
+        } else {
+          onSubscribedRef.current?.();
         }
       };
 
@@ -411,7 +412,6 @@ export function useChatWebSocket({
       clearTimeout(pongTimeoutRef.current);
       setConnectionState('disconnected');
       hadConnectionRef.current = false;
-      if (knownAsleep) offSinceLastOpenRef.current = true;
       retriesRef.current = 0;
       return;
     }
@@ -428,7 +428,7 @@ export function useChatWebSocket({
         wsRef.current = null;
       }
     };
-  }, [enabled, knownAsleep, projectId, sessionId]);
+  }, [enabled, projectId, sessionId]);
 
   const retry = useCallback(() => {
     retriesRef.current = 0;

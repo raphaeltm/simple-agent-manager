@@ -44,7 +44,7 @@ export function useSessionLifecycle(
   onCommentEvent?: (event: MessageCommentRealtimeEvent) => void
 ): UseSessionLifecycleResult {
   const transcript = useSessionTranscript(projectId, sessionId);
-  const { appendMessages, mergeRecentWindow } = transcript;
+  const { appendMessages, catchUpTail, mergeRecentWindow } = transcript;
   // Seeded from the cached transcript so a cached chat renders whole on its first
   // render; the server-snapshot effect below keeps both current from then on.
   const [session, setSession] = useState<ChatSessionResponse | null>(
@@ -149,8 +149,8 @@ export function useSessionLifecycle(
     // ordinary sleeping session still connects nothing) is what makes the push
     // half of wake progress actually reach the user.
     enabled: session?.status === 'active' || wake.isWaking,
-    // Loaded and not active: the socket is off because the chat sleeps, so a wake catches up.
-    knownAsleep: session !== null && session.status !== 'active' && !wake.isWaking,
+    // A page load or a wake reads what was persisted since the transcript's last read.
+    onSubscribed: catchUpTail,
     onMessage: useCallback(
       (msg: ChatMessageResponse) => {
         appendMessages([msg]);

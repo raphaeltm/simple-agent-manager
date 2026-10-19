@@ -92,6 +92,7 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     projectId,
     sessionId,
     sessionStatus: session?.status,
+    messages,
     setMessages,
     setSession,
   });
