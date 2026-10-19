@@ -103,14 +103,14 @@ const BLOCKED_REASON_TEXT: Record<SessionSleepBlockedReason, string> = {
   commit_objects_unavailable:
     'the saved Git commit was not kept with its objects, so a new workspace may not be able to restore it',
   recovery_point_expired: 'the last saved snapshot has expired',
-  unsupported_runtime: 'an Instant workspace can only sleep with a complete snapshot',
+  unsupported_runtime: 'the earlier Instant sleep attempt required a complete snapshot',
   retry_ceiling: 'saving the recovery point kept failing',
 };
 
 /** The chat notice persisted when the episode ends without releasing the workspace. */
 export function sessionSleepBlockedNotice(
   record: SessionSleepFallbackRecord,
-  runtime: string
+  _runtime: string
 ): string {
   const reason = record.blockedReason ?? 'retry_ceiling';
   if (reason === 'runtime_changed') {
@@ -124,26 +124,16 @@ export function sessionSleepBlockedNotice(
     return [
       'SAM could not finish putting this session to sleep.',
       `The workspace stop or recovery point could not be confirmed within the sleep budget.${lastErrorClause(record)}`,
-      'Automatic sleep retries have stopped. The conversation and saved snapshot artifacts are retained, but this session cannot promise a safe wake.',
-      'Check the workspace from the Workspaces page before restarting it. Commit and push any work still present there. Contact your SAM administrator if the workspace is unavailable.',
+      'Runtime cleanup is still pending. SAM will retry guarded cleanup while the session is idle until runtime removal is confirmed.',
+      'The conversation and saved backups are retained. Unpublished filesystem changes and agent session state may be lost; continuation may require a fresh workspace rebuilt from the transcript.',
     ].join('\n\n');
   }
-  const keepsRunning =
-    runtime === 'cf-container'
-      ? 'This Instant workspace keeps running.'
-      : 'Its workspace keeps running.';
   return [
-    'SAM could not put this session to sleep.',
-    '',
-    `Saving a snapshot failed after ${attemptsSummary(record)}, and SAM could not keep a safe recovery point: ${BLOCKED_REASON_TEXT[reason]}.${lastErrorClause(record)}`,
-    '',
-    `To avoid retrying forever, SAM stopped trying to put this session to sleep automatically. ${keepsRunning}`,
-    '',
-    'What you can do:',
-    '- Keep working: send a message as usual. SAM tries sleep again the next time the session goes idle.',
-    // Archive is offered only once a session sleeps (`SessionFooter`), so it cannot help here.
-    '- If you are done with it: commit and push anything you want to keep, then stop its workspace from the Workspaces page. Work you did not push is lost once SAM cleans up the stopped workspace.',
-  ].join('\n');
+    'An earlier sleep attempt could not retain an exact recovery point.',
+    `Saving a snapshot failed after ${attemptsSummary(record)}: ${BLOCKED_REASON_TEXT[reason]}.${lastErrorClause(record)}`,
+    'SAM will retry guarded runtime cleanup while this session is idle, even without an exact Git or filesystem recovery point. Runtime removal is not yet confirmed.',
+    'The conversation and successful backups are retained. Unpublished filesystem changes and agent session state may be lost. Send a message when sleeping, or fork an ended conversation, to continue in a fresh workspace from the transcript.',
+  ].join('\n\n');
 }
 
 export const SESSION_RECOVERY_INITIAL_PROMPT =

@@ -55,9 +55,9 @@ function manifestGitState(manifestJson: string | null): ManifestGitState | null 
 
 /**
  * Decide whether the session's current completed generation is a recovery point the
- * fallback may release compute with. Deterministic refusals are returned as a reason;
- * an R2 outage throws, so the caller counts it as a failed attempt and retries rather
- * than ending the episode on a transient fault.
+ * fallback may restore files from. Deterministic refusals are returned as a reason;
+ * an R2 outage throws, and the bounded fallback treats it as unavailable recovery
+ * while retaining the saved artifacts and proceeding through guarded cleanup.
  */
 export async function assessSessionSleepRecoveryPoint(
   env: Env,
