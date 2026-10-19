@@ -10,6 +10,8 @@ import { serverNow, toDeviceTime } from '../../lib/server-clock';
 
 /** How often a visible countdown re-renders. */
 export const ACCESS_COUNTDOWN_TICK_MS = 15_000;
+/** How far past an end time the exact re-render lands, so the clock has surely passed it. */
+const WAKE_SLACK_MS = 50;
 
 export function durationLabel(minutes: number): string {
   return minutes === 60 ? '1 hour' : `${minutes} min`;
@@ -38,16 +40,24 @@ export function accessTimeLeft(expiresAt: number, now: number): string | null {
 }
 
 /**
- * The server's clock, read on every render; while `active` it also re-renders each tick. Reading
- * at render (rather than storing the last tick) keeps a just-arrived grant from showing more time
- * than it was given.
+ * The server's clock, read on every render; while `active` it also re-renders each tick, and once
+ * more just after `wakeAt` (an end time), so whatever depends on it changes at that moment rather
+ * than up to a tick later. Reading at render (rather than storing the last tick) keeps a
+ * just-arrived grant from showing more time than it was given.
  */
-export function useServerNow(active: boolean): number {
+export function useServerNow(active: boolean, wakeAt: number | null = null): number {
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!active) return;
     const id = window.setInterval(() => setTick((tick) => tick + 1), ACCESS_COUNTDOWN_TICK_MS);
     return () => window.clearInterval(id);
   }, [active]);
+  useEffect(() => {
+    if (!active || wakeAt === null || !Number.isFinite(wakeAt)) return;
+    const delay = wakeAt - serverNow();
+    if (delay <= 0) return;
+    const id = window.setTimeout(() => setTick((tick) => tick + 1), delay + WAKE_SLACK_MS);
+    return () => window.clearTimeout(id);
+  }, [active, wakeAt]);
   return serverNow();
 }

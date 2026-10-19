@@ -71,11 +71,27 @@ export function SessionFooter({
       lc.currentPlan && lc.currentPlan.length > 0 ? currentPlanToPlanItem(lc.currentPlan) : null,
     [lc.currentPlan]
   );
-  const canWriteSession = viewer.canDriveSession;
   const sessionOwnerLabel = ownerLabelFor(lc.session);
   const viewerGrant = viewer.isGrantee
     ? lc.session?.access?.grants.find((grant) => grant.grantee.id === viewerId)
     : undefined;
+  const now = useServerNow(viewerGrant !== undefined, viewerGrant?.expiresAt ?? null);
+  // The viewer's grant has run out by the server's clock. The server already refuses them; lock
+  // the composer now rather than when the access refetch lands (display only).
+  const grantEndedHere =
+    viewerGrant !== undefined && accessTimeLeft(viewerGrant.expiresAt, now) === null;
+  const canWriteSession = viewer.canDriveSession && !grantEndedHere;
+  // Remember that this viewer had shared access to this chat while it was open, so once the
+  // server takes it away (expiry or revoke) the read-only footer says so instead of reading as
+  // if they never had it.
+  const sessionId = lc.session?.id ?? null;
+  const [sharedAccessSessionId, setSharedAccessSessionId] = useState<string | null>(null);
+  useEffect(() => {
+    if (viewer.isGrantee && sessionId) setSharedAccessSessionId(sessionId);
+  }, [viewer.isGrantee, sessionId]);
+  const accessEnded =
+    grantEndedHere ||
+    (!viewer.canDriveSession && sessionId !== null && sharedAccessSessionId === sessionId);
   const isConversationLifecycleSession =
     lc.taskEmbed?.taskMode === 'conversation' ||
     (!lc.taskEmbed?.id && (lc.session?.status === 'active' || lc.session?.status === 'sleeping'));
@@ -134,10 +150,11 @@ export function SessionFooter({
       {selectedTextComposer}
 
       {/* Input area */}
-      {isActive && viewer.isGrantee && (
+      {isActive && viewer.isGrantee && !grantEndedHere && (
         <SharedSessionNotice
           ownerLabel={sessionOwnerLabel}
           expiresAt={viewerGrant?.expiresAt ?? null}
+          now={now}
         />
       )}
       {isActive && canWriteSession && (
@@ -181,7 +198,11 @@ export function SessionFooter({
         />
       )}
       {isActive && !canWriteSession && (
-        <ReadOnlyFollowUp ownerLabel={sessionOwnerLabel} onNewChat={onNewChat} />
+        <ReadOnlyFollowUp
+          ownerLabel={sessionOwnerLabel}
+          onNewChat={onNewChat}
+          accessEnded={accessEnded}
+        />
       )}
       {lc.sessionState === 'terminated' && lc.session?.status === 'stopped' && viewer.canFork && (
         <ArchivedForkComposer
@@ -216,13 +237,14 @@ export function SessionFooter({
 
 /**
  * Above a grantee's composer: whose session this is, whose accounts it runs on, and when their
- * access ends. The countdown is display only; the composer locks when the server says so.
+ * access ends (by the server's clock). Once it has ended the footer shows the read-only state
+ * instead, so this only ever counts down.
  */
 function SharedSessionNotice({
   ownerLabel,
   expiresAt,
-}: Readonly<{ ownerLabel: string; expiresAt: number | null }>) {
-  const now = useServerNow(expiresAt !== null);
+  now,
+}: Readonly<{ ownerLabel: string; expiresAt: number | null; now: number }>) {
   const timeLeft = expiresAt === null ? null : accessTimeLeft(expiresAt, now);
   return (
     <div
@@ -233,13 +255,11 @@ function SharedSessionNotice({
         You&apos;re chatting in {ownerLabel}&apos;s session.
       </span>{' '}
       It runs on {ownerLabel}&apos;s accounts.
-      {expiresAt !== null && (
+      {expiresAt !== null && timeLeft !== null && (
         <>
           {' '}
           <span data-testid="shared-session-time-left">
-            {timeLeft === null
-              ? 'Your access has ended.'
-              : `Your access ends in ${timeLeft} (${accessClockTime(expiresAt)}).`}
+            Your access ends in {timeLeft} ({accessClockTime(expiresAt)}).
           </span>
         </>
       )}

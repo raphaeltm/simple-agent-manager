@@ -198,7 +198,10 @@ describe('SessionShareDialog — sharing', () => {
         .map((radio) => radio.closest('label')?.textContent)
     ).toEqual(['5 min', '10 min', '30 min', '1 hour']);
     for (const radio of within(durations).getAllByRole('radio')) expect(radio).not.toBeChecked();
-    expect(within(dialog).getByText('Choose how long access lasts.')).toBeInTheDocument();
+    // A disabled Share cannot be focused to ask why, so the step says what is missing.
+    expect(within(dialog).getByTestId('share-requirements')).toHaveTextContent(
+      'To share, choose how long and tick the box above.'
+    );
 
     const share = within(dialog).getByRole('button', { name: 'Share' });
     expect(share).toBeDisabled();
@@ -208,11 +211,15 @@ describe('SessionShareDialog — sharing', () => {
     fireEvent.click(
       within(dialog).getByRole('checkbox', { name: 'I understand this runs on my accounts' })
     );
-    // Acknowledged but no duration yet: still refused.
+    // Acknowledged but no duration yet: still refused, and still said.
     expect(share).toBeDisabled();
+    expect(within(dialog).getByTestId('share-requirements')).toHaveTextContent(
+      'To share, choose how long access lasts.'
+    );
     fireEvent.click(within(durations).getByRole('radio', { name: '30 min' }));
     expect(within(dialog).getByText(/^Ends at .+\.$/)).toBeInTheDocument();
     expect(share).toBeEnabled();
+    expect(within(dialog).queryByTestId('share-requirements')).toBeNull();
     fireEvent.click(share);
 
     await waitFor(() =>
@@ -231,6 +238,9 @@ describe('SessionShareDialog — sharing', () => {
 
     fireEvent.click(within(dialog).getByRole('radio', { name: '5 min' }));
     expect(share).toBeDisabled();
+    expect(within(dialog).getByTestId('share-requirements')).toHaveTextContent(
+      'To share, tick the box above.'
+    );
     fireEvent.click(within(dialog).getByRole('checkbox', { name: /I understand/ }));
     expect(share).toBeEnabled();
   });
@@ -349,6 +359,9 @@ describe('SessionShareDialog — people with access', () => {
     ).toHaveFocus();
     const renew = within(dialog).getByRole('button', { name: 'Renew' });
     expect(renew).toBeDisabled();
+    expect(within(dialog).getByTestId('share-requirements')).toHaveTextContent(
+      'To renew, choose how long and tick the box above.'
+    );
     fireEvent.click(within(dialog).getByRole('radio', { name: '1 hour' }));
     expect(renew).toBeDisabled();
     fireEvent.click(within(dialog).getByRole('checkbox', { name: /I understand/ }));

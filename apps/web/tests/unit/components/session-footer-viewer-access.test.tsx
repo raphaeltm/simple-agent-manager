@@ -1,6 +1,6 @@
 import type { SessionAccessGrant, SessionAccessSummary } from '@simple-agent-manager/shared';
 import { act, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveSessionViewerCapabilities } from '../../../src/components/project-message-view/session-viewer-access';
 import { SessionFooter } from '../../../src/components/project-message-view/SessionFooter';
@@ -80,8 +80,8 @@ function lifecycle(
   } as unknown as UseSessionLifecycleResult;
 }
 
-function renderFooter(chatSession: ChatSessionResponse, overrides = {}, viewerId = 'grantee-1') {
-  return render(
+function footer(chatSession: ChatSessionResponse, overrides = {}, viewerId = 'grantee-1') {
+  return (
     <SessionFooter
       projectId="project-1"
       lc={lifecycle(chatSession, overrides)}
@@ -92,6 +92,10 @@ function renderFooter(chatSession: ChatSessionResponse, overrides = {}, viewerId
       slashCommands={[]}
     />
   );
+}
+
+function renderFooter(chatSession: ChatSessionResponse, overrides = {}, viewerId = 'grantee-1') {
+  return render(footer(chatSession, overrides, viewerId));
 }
 
 describe('SessionFooter by viewer access', () => {
@@ -170,12 +174,17 @@ function sharedWith(grants: SessionAccessGrant[]): Partial<ChatSessionResponse> 
 }
 
 describe('SessionFooter: when a grantee’s access ends', () => {
+  beforeEach(() => {
+    // Every test starts with this device and the server agreeing.
+    recordServerTime(Date.now());
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     recordServerTime(Date.now());
   });
 
-  it('shows the viewer’s own end time, not someone else’s, and counts down to the end', () => {
+  it('shows the viewer’s own end time, not someone else’s, and locks the composer when it ends', () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     recordServerTime(NOW);
@@ -183,22 +192,67 @@ describe('SessionFooter: when a grantee’s access ends', () => {
       session(
         sharedWith([
           grant('someone-else', NOW + 50 * MINUTE),
-          grant('grantee-1', NOW + 23 * MINUTE),
+          // Off the 15-second tick grid, so only the exact re-render at the end can catch it.
+          grant('grantee-1', NOW + 23 * MINUTE + 7_000),
         ])
       )
     );
 
     expect(screen.getByTestId('shared-session-time-left')).toHaveTextContent(
-      /^Your access ends in 23 min \(.+\)\.$/
+      /^Your access ends in 24 min \(.+\)\.$/
     );
     // Liveness for the absence below: the notice is still there, naming the owner.
     expect(screen.getByTestId('shared-session-notice')).toHaveTextContent('Prakash Raman');
 
+    expect(screen.getByTestId('composer')).toBeInTheDocument();
+
+    // At the end time, by the server's clock, the notice and the composer go together, even
+    // before any refetch tells the page (the server already refuses the grantee).
     act(() => {
-      vi.advanceTimersByTime(23 * MINUTE);
+      vi.advanceTimersByTime(23 * MINUTE + 7_100);
     });
+    expect(screen.queryByTestId('composer')).toBeNull();
+    expect(screen.queryByTestId('shared-session-notice')).toBeNull();
+    expect(screen.getByText('Your shared access has ended')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'You can still read and comment. Ask Prakash Raman to share it again to keep chatting.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('says access ended when the server takes it away, not that it was never shared', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    recordServerTime(NOW);
+    const shared = session(sharedWith([grant('grantee-1', NOW + 23 * MINUTE)]));
+    const view = renderFooter(shared);
+    expect(screen.getByTestId('composer')).toBeInTheDocument();
+
+    // The access refetch after a revoke or an expiry: the viewer is a reader now.
+    view.rerender(footer({ ...shared, viewerAccess: 'reader', access: undefined }));
+
+    expect(screen.queryByTestId('composer')).toBeNull();
+    expect(screen.getByText('Your shared access has ended')).toBeInTheDocument();
+    expect(screen.queryByText('Only Prakash Raman can message this agent')).toBeNull();
+  });
+
+  it('gives the composer back when the owner renews before the page catches up', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    recordServerTime(NOW);
+    const shared = session(sharedWith([grant('grantee-1', NOW + 5 * MINUTE)]));
+    const view = renderFooter(shared);
+    act(() => {
+      vi.advanceTimersByTime(5 * MINUTE);
+    });
+    expect(screen.queryByTestId('composer')).toBeNull();
+
+    view.rerender(footer(session(sharedWith([grant('grantee-1', NOW + 15 * MINUTE)]))));
+
+    expect(screen.getByTestId('composer')).toBeInTheDocument();
     expect(screen.getByTestId('shared-session-time-left')).toHaveTextContent(
-      'Your access has ended.'
+      /^Your access ends in 10 min/
     );
   });
 

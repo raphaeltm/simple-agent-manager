@@ -74,27 +74,37 @@ export function FollowUpInput({
 /**
  * Shown instead of the composer to someone who can't drive this chat. `ended` covers an
  * archived chat, which only its owner can fork and which can no longer be shared.
+ * `accessEnded` is for a teammate whose shared access just ran out or was revoked, so the
+ * footer says so instead of reading as if they never had it.
  */
 export function ReadOnlyFollowUp({
   ownerLabel,
   onNewChat,
   ended = false,
+  accessEnded = false,
 }: {
   ownerLabel: string;
   onNewChat?: () => void;
   ended?: boolean;
+  accessEnded?: boolean;
 }) {
   return (
     <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
       <div className="flex items-center gap-3 rounded-md border border-border-default bg-surface/50 px-3 py-2">
         <div className="min-w-0 flex-1">
           <div className="text-xs font-medium text-fg-primary break-words">
-            {ended ? 'This chat has ended' : `Only ${ownerLabel} can message this agent`}
+            {ended
+              ? 'This chat has ended'
+              : accessEnded
+                ? 'Your shared access has ended'
+                : `Only ${ownerLabel} can message this agent`}
           </div>
           <div className="text-xs text-fg-muted break-words">
             {ended
               ? `Only ${ownerLabel} can fork it to continue.`
-              : `You can leave comments on any message, or ask ${ownerLabel} to share this chat.`}
+              : accessEnded
+                ? `You can still read and comment. Ask ${ownerLabel} to share it again to keep chatting.`
+                : `You can leave comments on any message, or ask ${ownerLabel} to share this chat.`}
           </div>
         </div>
         {onNewChat && (

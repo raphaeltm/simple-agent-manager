@@ -59,6 +59,17 @@ export function SessionShareConfirmStep({
   const [acknowledged, setAcknowledged] = useState(false);
   const name = target.name;
 
+  const verb = target.renewing ? 'renew' : 'share';
+  // A disabled button cannot be focused to ask why, so say what is still missing next to it.
+  const missing =
+    durationMinutes === null && !acknowledged
+      ? `To ${verb}, choose how long and tick the box above.`
+      : durationMinutes === null
+        ? `To ${verb}, choose how long access lasts.`
+        : !acknowledged
+          ? `To ${verb}, tick the box above.`
+          : null;
+
   const chosenEnd = durationMinutes === null ? null : now + durationMinutes * 60_000;
   const cappedByViewer =
     chosenEnd !== null && viewerExpiresAt !== null && viewerExpiresAt < chosenEnd;
@@ -114,9 +125,10 @@ export function SessionShareConfirmStep({
             </label>
           ))}
         </div>
-        <p id={endsAtId} className="m-0 mt-2 text-xs text-fg-muted" aria-live="polite">
+        {/* Always mounted, so the end time is announced when it first appears. */}
+        <p id={endsAtId} className="m-0 mt-2 min-h-4 text-xs text-fg-muted" aria-live="polite">
           {endsAt === null
-            ? 'Choose how long access lasts.'
+            ? ''
             : cappedByViewer
               ? `Ends at ${accessClockTime(endsAt)}, when your own access ends.`
               : `Ends at ${accessClockTime(endsAt)}.`}
@@ -138,6 +150,11 @@ export function SessionShareConfirmStep({
           className="mt-3 mb-0 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger-fg [overflow-wrap:anywhere]"
         >
           {error}
+        </p>
+      )}
+      {missing && !pending && (
+        <p className="m-0 mt-3 text-xs text-fg-muted" data-testid="share-requirements">
+          {missing}
         </p>
       )}
       <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
