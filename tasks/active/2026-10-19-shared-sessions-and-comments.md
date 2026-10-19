@@ -135,9 +135,9 @@ Docs:
 - [x] UI: readers see a read-only composer with the comment hint; grantees see the shared-session notice; Share dialog adds/removes people with the required confirmation (web tests + Playwright + staging)
 - [ ] Staging: two real staging users exercise share → grantee prompt → attribution → revoke → composer locks, plus comment + mention + notification, with zero errors
 
-## Decisions pending
+## Decisions
 
-- Credential exposure residual: Raphaël asked what the problem was (2026-10-19). Explained: the agent environment holds the owner's AI key/OAuth login, the git credential (GitHub: 1-hour repo-scoped installation token; GitLab: owner's personal OAuth token) and the SAM MCP token (owner identity, ≤24h); a grantee can ask the agent to print them. Waiting for his yes/no on shipping with that risk + a warning. Merge and production deploy wait for it.
+- Credential exposure residual (resolved): the agent environment holds the owner's AI key/OAuth login, the git credential (GitHub: 1-hour repo-scoped installation token; GitLab: owner's personal OAuth token) and the SAM MCP token (owner identity, ≤24h), and a grantee can ask the agent to print them. Raphaël's answer (message `01M5A6Y1BB0RES9EC38DQ40K7R`, read from session history): proceed with the trusted-collaborator model, with a clear warning that revoking cannot undo actions or invalidate copied secrets; no real collaborator access or real credential disclosure during testing. He then required time-limited grants (`01M5A75SZRB9ZB7Z1X53HA95JF`), implemented above. Merge and production wait only for the expiry verification (reviews, suites, two-account staging with a real expiry).
 
 ## Out of scope / follow-ups
 
