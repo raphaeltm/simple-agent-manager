@@ -10,6 +10,7 @@ import { ulid } from '../lib/ulid';
 import { getUserId } from '../middleware/auth';
 import { requireProjectCapability } from '../middleware/project-auth';
 import * as chatPersistence from '../services/chat-persistence';
+import { requireSessionWriter } from '../services/session-access';
 import { ensureSessionTaskBacked } from '../services/session-task-repair';
 import { isSleepingContainerRuntime } from '../services/sleeping-container-runtime';
 import { isExecutableTaskStatus, isTaskStatus } from '../services/task-status';
@@ -17,7 +18,6 @@ import {
   cleanupTerminalTaskResources,
   type TerminalTaskCleanupStatus,
 } from '../services/task-terminal-cleanup';
-import { requireSessionCreator } from './chat-session-ownership';
 import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
 
 type Database = ReturnType<typeof drizzle<typeof schema>>;
@@ -25,7 +25,10 @@ type Database = ReturnType<typeof drizzle<typeof schema>>;
 interface StopRouteContext {
   projectId: string;
   sessionId: string;
+  /** The session owner: selects the task, workspace and node. */
   userId: string;
+  /** The person archiving (the owner or a grantee): recorded as the actor. */
+  actorUserId: string;
 }
 
 type TaskForStop = {
@@ -108,7 +111,7 @@ async function stopTaskBackedSession(
   const terminalStatus = getTerminalTaskStatus(task);
 
   if (task && !terminalStatus) {
-    await cancelExecutableTaskForArchive(db, task, taskId, context.userId);
+    await cancelExecutableTaskForArchive(db, task, taskId, context.actorUserId);
   }
 
   const cleanupStatus: TerminalTaskCleanupStatus = terminalStatus ?? 'cancelled';
@@ -220,13 +223,16 @@ export async function stopChat(env: Env, userId: string, projectId: string, sess
   const db = drizzle(env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
-  await requireSessionCreator(env, projectId, sessionId, userId);
+  const writer = await requireSessionWriter(env, projectId, sessionId, userId, {
+    db,
+    action: 'archive this session',
+  });
 
-  const context = { projectId, sessionId, userId };
+  const context = { projectId, sessionId, userId: writer.ownerUserId, actorUserId: userId };
   const backingTask = await ensureSessionTaskBacked(db, env, {
     projectId,
     sessionId,
-    fallbackUserId: userId,
+    fallbackUserId: writer.ownerUserId,
   });
   // Signal the agent BEFORE teardown — once the workspace row is gone there is
   // nothing left to resolve a node from.

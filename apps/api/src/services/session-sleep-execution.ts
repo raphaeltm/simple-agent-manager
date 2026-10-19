@@ -129,6 +129,20 @@ async function verifyAndBeginSleepTeardown(
  * uses a zero delay while it is still inside the final ACP prompt; the scheduled
  * sweep performs the snapshot and teardown after ProjectData reports idle.
  */
+const SAFE_SLEEP_DEFERRAL_MESSAGES = new Set([
+  'Harness-owned background work is active',
+  'Workspace idle interval has not elapsed',
+  'Workspace activity changed while the final snapshot was captured',
+  'Workspace activity changed during snapshot artifact verification',
+]);
+
+/** An explicit sleep refused for a safe, retryable reason (the routes answer 409). */
+export function isSafeSleepDeferral(error: unknown): error is Error {
+  if (!(error instanceof Error)) return false;
+  if (SAFE_SLEEP_DEFERRAL_MESSAGES.has(error.message)) return true;
+  return error.message.startsWith('Workspace agent is not idle (');
+}
+
 export async function sleepWorkspaceSession(
   env: Env,
   input: {

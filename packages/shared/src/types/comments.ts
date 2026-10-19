@@ -3,8 +3,9 @@
  * commenting.
  *
  * Anchor types form a discriminated union on `kind`. Phase 1 supports
- * 'message' and 'library_file'. Block anchors, fuzzy re-anchoring,
- * reactions, and mentions are outside this slice.
+ * 'message' and 'library_file'. Block anchors, fuzzy re-anchoring and
+ * reactions are outside this slice. Message comments carry structured
+ * @mentions of project members (`CommentMention`); library-file comments do not.
  */
 
 export const COMMENT_STATUSES = ['open', 'sent', 'resolved'] as const;
@@ -36,6 +37,24 @@ export type CommentAuthor = {
 };
 
 export type MessageCommentAuthor = CommentAuthor;
+
+/**
+ * A project member @mentioned in a message comment or reply.
+ *
+ * Mentions are structured: the client sends user IDs picked from the member
+ * list, and the server keeps only IDs that belong to active project members.
+ * `displayName` is snapshotted by the server at write time for rendering; it is
+ * never used as an identity. Plain `@text` that was not picked stays text.
+ */
+export type CommentMention = {
+  userId: string;
+  displayName: string | null;
+};
+
+/** Client input for a mention: only the ID is trusted, and only after server validation. */
+export type CommentMentionInput = {
+  userId: string;
+};
 
 export type MessageCommentAnchor = {
   kind: 'message';
@@ -84,6 +103,8 @@ export type CommentReply = {
   sequence?: number;
   clientMutationId?: string | null;
   sentToAgent?: boolean;
+  /** Message replies only. */
+  mentions?: CommentMention[];
 };
 
 export type MessageCommentReply = CommentReply;
@@ -112,6 +133,7 @@ export type MessageCommentThread = {
   lastReplyAt?: number | null;
   sourceMessage?: MessageCommentSourceMessageContext | null;
   directive?: MessageCommentDirectiveState | null;
+  mentions?: CommentMention[];
   replies: MessageCommentReply[];
 };
 
@@ -137,11 +159,7 @@ export type MessageCommentReplyMutationResponse = {
 };
 
 export type MessageCommentThreadEventReason =
-  | 'thread_created'
-  | 'reply_created'
-  | 'marked_sent'
-  | 'resolved'
-  | 'reopened';
+  'thread_created' | 'reply_created' | 'marked_sent' | 'resolved' | 'reopened';
 
 export type MessageCommentThreadEvent = {
   type: 'comment.thread.changed';

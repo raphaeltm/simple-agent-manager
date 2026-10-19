@@ -60,11 +60,7 @@ export function getMessageCommentConfig(env: MessageCommentConfigEnv): MessageCo
 }
 
 export type MessageCommentErrorCode =
-  | 'invalid_request'
-  | 'not_found'
-  | 'forbidden'
-  | 'conflict'
-  | 'unavailable';
+  'invalid_request' | 'not_found' | 'forbidden' | 'conflict' | 'unavailable';
 
 export class MessageCommentServiceError extends Error {
   constructor(
@@ -113,6 +109,7 @@ export interface ObserveMessageCommentThreadInput extends MessageCommentThreadLo
 export interface RecordMessageCommentDirectiveInput extends MessageCommentThreadLookup {
   delivery: MessageCommentDirectiveState;
   sentByUserId: string;
+  sentByName: string | null;
   sentAt: number;
 }
 
@@ -249,8 +246,8 @@ export function createProjectDataMessageCommentAdapter(env: Env): MessageComment
         actor: {
           kind: 'human',
           id: input.sentByUserId,
-          name: null,
-          displayName: null,
+          name: input.sentByName,
+          displayName: input.sentByName,
         },
       });
       return {
@@ -373,7 +370,15 @@ export interface SendMessageCommentDirectiveInput {
   projectId: string;
   sessionId: string;
   threadId: string;
+  /**
+   * The session writer pressing Send to agent. The caller MUST have authorized them with
+   * `requireSessionWriter`; this service does not re-check session control.
+   */
   humanUserId: string;
+  /** Server-derived display name of `humanUserId`, for the directive and `sentBy`. */
+  humanDisplayName: string | null;
+  /** Set when the sender is a grantee rather than the session owner. */
+  sharedAccess?: { ownerUserId: string; grantId: string | null } | null;
   body?: string | null;
   now?: number;
 }
@@ -417,7 +422,10 @@ export async function sendMessageCommentDirective(
 
   const config = getMessageCommentConfig(input.env);
   const deliveryId = buildCommentDirectiveDeliveryId(thread.id);
-  const content = buildDirectivePrompt(thread, config, input.body);
+  const content = buildDirectivePrompt(thread, config, input.body, {
+    sentBy: input.humanDisplayName,
+    sharedAccess: Boolean(input.sharedAccess),
+  });
   const accepted = await projectDataService.acceptPromptDelivery(input.env, input.projectId, {
     deliveryId,
     targetSessionId: input.sessionId,
@@ -435,8 +443,19 @@ export async function sendMessageCommentDirective(
       quote: thread.anchor.quote,
       author: {
         kind: thread.author.kind,
+        id: thread.author.id,
         displayName: getAuthorDisplayName(thread.author),
       },
+      // Who pressed Send to agent, so the transcript card is attributed to them rather than
+      // rendering as the owner's own words.
+      userId: input.humanUserId,
+      senderName: input.humanDisplayName,
+      ...(input.sharedAccess
+        ? {
+            onBehalfOfUserId: input.sharedAccess.ownerUserId,
+            grantId: input.sharedAccess.grantId,
+          }
+        : {}),
     },
   });
 
@@ -455,6 +474,7 @@ export async function sendMessageCommentDirective(
       threadId: thread.id,
       delivery,
       sentByUserId: input.humanUserId,
+      sentByName: input.humanDisplayName,
       sentAt,
     })) ?? thread;
 
@@ -470,9 +490,13 @@ export async function sendMessageCommentDirective(
 function buildDirectivePrompt(
   thread: MessageCommentThread,
   config: MessageCommentConfig,
-  directiveBody?: string | null
+  directiveBody: string | null | undefined,
+  sender: { sentBy: string | null; sharedAccess: boolean }
 ): string {
   const author = getAuthorDisplayName(thread.author) || `${thread.author.kind}:${thread.author.id}`;
+  const sentBy = sender.sentBy
+    ? `Sent to you by: ${sender.sentBy}${sender.sharedAccess ? ' (shared access to this session)' : ''}`
+    : null;
   const quote = normalizeCommentQuote(
     thread.anchor.quote ?? thread.sourceMessage?.quote ?? null,
     config
@@ -483,6 +507,7 @@ function buildDirectivePrompt(
     `Comment ID: ${thread.id}`,
     `Source message ID: ${thread.anchor.messageId}`,
     `Author: ${author}`,
+    sentBy,
     quote ? `Quoted context:\n${quote}` : null,
     `Feedback:\n${body}`,
   ].filter((section): section is string => Boolean(section));

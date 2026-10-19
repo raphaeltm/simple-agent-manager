@@ -103,6 +103,15 @@ import {
   ProjectEventValidationError,
 } from '../durable-objects/project-data/project-events-contracts';
 import type {
+  CreateSessionAccessGrantInput,
+  CreateSessionAccessGrantResult,
+  RevokedSessionAccessForUser,
+  RevokeSessionAccessGrantInput,
+  RevokeSessionAccessGrantResult,
+  SessionAccessGrantRecord,
+  SessionAccessResolution,
+} from '../durable-objects/project-data/session-access';
+import type {
   ProjectDataStorageReliefMeasureInput,
   ProjectDataStorageReliefMeasureResult,
 } from '../durable-objects/project-data/storage-relief-measurement';
@@ -1866,6 +1875,79 @@ export async function listProjectCommentInbox(
     'listProjectCommentInbox',
     (stub) => stub.listProjectCommentInbox(input),
     'idempotent_read'
+  );
+}
+
+// =========================================================================
+// Shared session access (ProjectData DO migration 064)
+// =========================================================================
+
+export async function getSessionAccess(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  userId: string
+): Promise<{
+  session: Record<string, unknown> | null;
+  access: SessionAccessResolution;
+}> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'getSessionAccess',
+    (stub) => stub.getSessionAccess({ sessionId, userId }),
+    'idempotent_read'
+  );
+}
+
+export async function getSessionWithAccessGrants(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  viewerUserId: string
+): Promise<{
+  session: Record<string, unknown> | null;
+  access: SessionAccessResolution;
+  grants: SessionAccessGrantRecord[];
+}> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'getSessionWithAccessGrants',
+    (stub) => stub.getSessionWithAccessGrants({ sessionId, viewerUserId }),
+    'idempotent_read'
+  );
+}
+
+export async function createSessionAccessGrant(
+  env: Env,
+  projectId: string,
+  input: Omit<CreateSessionAccessGrantInput, 'now'>
+): Promise<{ result: CreateSessionAccessGrantResult; grants: SessionAccessGrantRecord[] }> {
+  // Not retried: a lost response after a committed insert must not double-notify; the
+  // caller can re-issue, and a repeated grant is idempotent ("existing").
+  return callProjectDataNoRetry(env, projectId, 'createSessionAccessGrant', (stub) =>
+    stub.createSessionAccessGrant(input)
+  );
+}
+
+export async function revokeSessionAccessGrant(
+  env: Env,
+  projectId: string,
+  input: Omit<RevokeSessionAccessGrantInput, 'now'>
+): Promise<{ result: RevokeSessionAccessGrantResult; grants: SessionAccessGrantRecord[] }> {
+  return callProjectDataNoRetry(env, projectId, 'revokeSessionAccessGrant', (stub) =>
+    stub.revokeSessionAccessGrant(input)
+  );
+}
+
+export async function revokeSessionAccessForDepartedMember(
+  env: Env,
+  projectId: string,
+  userId: string
+): Promise<RevokedSessionAccessForUser[]> {
+  return callProjectDataWithRetry(env, projectId, 'revokeSessionAccessForDepartedMember', (stub) =>
+    stub.revokeSessionAccessForDepartedMember({ userId })
   );
 }
 

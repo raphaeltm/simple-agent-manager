@@ -7,6 +7,7 @@
 import type {
   CapacityWorkloadRole,
   CredentialProvider,
+  CredentialSource,
   ResourceRequirementsSource,
   TaskMode,
   VMLocation,
@@ -228,6 +229,29 @@ export function normalizeCredentialAttribution(
     userId: null,
     projectId: null,
     source: null,
+  };
+}
+
+/**
+ * The credential attribution a new task records when it inherits from a parent task, as the
+ * caller. One implementation for every launch path (VM placement normalizes through
+ * `normalizeCredentialAttribution` directly; Instant launches persist this result): a parent
+ * owned by another member never makes the new task bill that member (gap G5, idea
+ * 01M59MYE4GY91BWTE8TZF1ZB5D). Without inheritable attribution the task bills the caller.
+ */
+export function inheritedCredentialAttributionForCaller(
+  inherited: PlacementCredentialAttributionInput | null | undefined,
+  currentUserId: string,
+  currentProjectId: string
+): { userId: string; projectId: string | null; source: CredentialSource } {
+  const normalized = normalizeCredentialAttribution(inherited, currentUserId, currentProjectId);
+  if (!normalized.source || !normalized.userId) {
+    return { userId: currentUserId, projectId: null, source: 'user' };
+  }
+  return {
+    userId: normalized.userId,
+    projectId: normalized.projectId,
+    source: normalized.source,
   };
 }
 

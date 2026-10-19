@@ -2082,7 +2082,9 @@ export const MIGRATIONS: Migration[] = [
             throw error;
         }
       }
-      sql.exec('SELECT audience_scope, audience_project_id, audience_user_id FROM project_events LIMIT 0');
+      sql.exec(
+        'SELECT audience_scope, audience_project_id, audience_user_id FROM project_events LIMIT 0'
+      );
       sql.exec(`
         CREATE INDEX IF NOT EXISTS idx_project_events_audience
         ON project_events(project_id, audience_scope, audience_user_id, received_at DESC, id)
@@ -2206,10 +2208,14 @@ export const MIGRATIONS: Migration[] = [
     name: '056-project-event-orphan-retention-cursor',
     run: (sql) => {
       for (const [column, statement] of [
-        ['orphan_scan_lifecycle_at',
-          'ALTER TABLE project_event_wake_scheduler_state ADD COLUMN orphan_scan_lifecycle_at INTEGER'],
-        ['orphan_scan_match_id',
-          'ALTER TABLE project_event_wake_scheduler_state ADD COLUMN orphan_scan_match_id TEXT'],
+        [
+          'orphan_scan_lifecycle_at',
+          'ALTER TABLE project_event_wake_scheduler_state ADD COLUMN orphan_scan_lifecycle_at INTEGER',
+        ],
+        [
+          'orphan_scan_match_id',
+          'ALTER TABLE project_event_wake_scheduler_state ADD COLUMN orphan_scan_match_id TEXT',
+        ],
       ] as const) {
         try {
           sql.exec(statement);
@@ -2235,10 +2241,14 @@ export const MIGRATIONS: Migration[] = [
     name: '057-chat-search-incremental-watermark',
     run: (sql) => {
       for (const [column, statement] of [
-        ['materialized_through_created_at',
-          'ALTER TABLE chat_sessions ADD COLUMN materialized_through_created_at INTEGER'],
-        ['materialized_through_sequence',
-          'ALTER TABLE chat_sessions ADD COLUMN materialized_through_sequence INTEGER'],
+        [
+          'materialized_through_created_at',
+          'ALTER TABLE chat_sessions ADD COLUMN materialized_through_created_at INTEGER',
+        ],
+        [
+          'materialized_through_sequence',
+          'ALTER TABLE chat_sessions ADD COLUMN materialized_through_sequence INTEGER',
+        ],
       ] as const) {
         try {
           sql.exec(statement);
@@ -2450,6 +2460,44 @@ export const MIGRATIONS: Migration[] = [
            AND requested_delivery IN ('existing_session_prompt', 'runtime_interrupt')
            AND resolved_delivery = 'queued_for_prompt_delivery'
       `);
+    },
+  },
+  {
+    // Shared session access (idea 01M59MYE4GY91BWTE8TZF1ZB5D). A grant gives one active
+    // project member owner-equivalent control of ONE chat session until it is revoked.
+    // Revoked rows are kept for audit; the partial unique index allows one active grant per
+    // (session, grantee) while preserving history. `parent_grant_id` records which grant
+    // authorized the granter (NULL when the session owner granted directly), so revoking a
+    // grant can also revoke the grants that person issued. Child of `chat_sessions` because a
+    // grant is meaningless without its session.
+    //
+    // Comment mentions are additive JSON columns on the existing message-comment tables:
+    // they are rendered with their thread and never used as a scope predicate (rule 63).
+    name: '064-session-access-grants-and-comment-mentions',
+    run(sql) {
+      sql.exec(`CREATE TABLE chat_session_access_grants (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        grantee_user_id TEXT NOT NULL,
+        granted_by_user_id TEXT NOT NULL,
+        parent_grant_id TEXT,
+        created_at INTEGER NOT NULL,
+        revoked_at INTEGER,
+        revoked_by_user_id TEXT,
+        revoke_reason TEXT CHECK (revoke_reason IS NULL OR revoke_reason IN
+          ('revoked', 'left', 'cascade', 'member_removed', 'owner_removed'))
+      )`);
+      sql.exec(`CREATE UNIQUE INDEX idx_session_access_grants_active
+        ON chat_session_access_grants(session_id, grantee_user_id)
+        WHERE revoked_at IS NULL`);
+      sql.exec(`CREATE INDEX idx_session_access_grants_grantee_active
+        ON chat_session_access_grants(grantee_user_id)
+        WHERE revoked_at IS NULL`);
+      sql.exec(`CREATE INDEX idx_session_access_grants_parent_active
+        ON chat_session_access_grants(parent_grant_id)
+        WHERE revoked_at IS NULL AND parent_grant_id IS NOT NULL`);
+      sql.exec('ALTER TABLE comment_threads ADD COLUMN mentions_json TEXT');
+      sql.exec('ALTER TABLE comment_replies ADD COLUMN mentions_json TEXT');
     },
   },
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects

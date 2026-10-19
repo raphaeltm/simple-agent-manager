@@ -10,6 +10,12 @@ export const NOTIFICATION_TYPES = [
   'session_ended',
   'pr_created',
   'cron_failure',
+  /** A project member @mentioned you in a session comment. */
+  'mention',
+  /** Someone commented on your session, or replied in a comment thread you are part of. */
+  'comment',
+  /** A session was shared with you, or your shared access to it was removed. */
+  'session_access',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 

@@ -409,7 +409,9 @@ export type PromptDeliveryResult =
         | 'dead_target'
         | 'wake_refused'
         | 'unsupported_capability'
-        | 'delivery_conflict';
+        | 'delivery_conflict'
+        // The human sender is no longer the session owner or an active grantee.
+        | 'sender_unauthorized';
       error: string;
       runtimeIdentity: string | null;
       capabilities: VmPromptDeliveryCapabilities | null;

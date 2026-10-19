@@ -324,6 +324,8 @@ export type {
   CommentAnchorKind,
   CommentAuthor,
   CommentAuthorKind,
+  CommentMention,
+  CommentMentionInput,
   CommentReply,
   CommentStatus,
   CreateLibraryFileCommentThreadRequest,
@@ -467,6 +469,20 @@ export type {
   WebPushSubscriptionsResponse,
 } from './notification';
 export { NOTIFICATION_CHANNELS, NOTIFICATION_TYPES, NOTIFICATION_URGENCIES } from './notification';
+
+// Shared session access
+export type {
+  CreateSessionAccessGrantRequest,
+  CreateSessionAccessGrantResponse,
+  RevokeSessionAccessGrantResponse,
+  SessionAccessChangedEvent,
+  SessionAccessGrant,
+  SessionAccessPerson,
+  SessionAccessRevokeReason,
+  SessionAccessSummary,
+  SessionViewerAccess,
+} from './session-access';
+export { SESSION_ACCESS_REVOKE_REASONS, SESSION_VIEWER_ACCESS_LEVELS } from './session-access';
 
 // Admin Observability
 export type {

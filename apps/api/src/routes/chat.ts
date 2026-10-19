@@ -6,44 +6,27 @@
  *
  * See: specs/018-project-first-architecture/tasks.md (T027)
  */
-import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
-import {
-  DEFAULT_CHAT_COMPACT_MODE,
-  DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
-  isTaskExecutionStep,
-  isTaskMode,
-} from '@simple-agent-manager/shared';
+import { DEFAULT_CHAT_COMPACT_MODE } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { markRejectedBeforeEffects } from '../lib/operation-effect-boundary';
 import { requireRouteParam } from '../lib/route-helpers';
-import { expectJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
-import {
-  CreateChatSessionSchema,
-  parseOptionalBody,
-  ResolveAttentionAnswerSchema,
-} from '../schemas';
-import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
+import { CreateChatSessionSchema, parseOptionalBody } from '../schemas';
 import * as chatPersistence from '../services/chat-persistence';
 import * as projectDataService from '../services/project-data';
-import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
-import { isTaskStatus } from '../services/task-status';
-import { attachWakeState } from './chat/wake-state';
+import { requireSessionWriter } from '../services/session-access';
 import { registerChatAcpInteractionRoutes } from './chat-acp-interactions';
-import { resolveChatAgentState } from './chat-agent-state';
+import { registerChatAttentionRoute } from './chat-attention';
 import { registerChatCancelRoute } from './chat-cancel';
-import { registerChatCommentDirectiveRoute } from './chat-comment-directives';
 import { chatCommentRoutes } from './chat-comments';
 import { chatIdeaRoutes } from './chat-ideas';
-import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
 import {
   getCompactMode,
   getMessageCursor,
@@ -51,11 +34,11 @@ import {
   getRequestedRoles,
   getSessionMessageLimit,
 } from './chat-message-query';
-import { preparePromptForLiveAgent, sendPreparedPromptToLiveAgent } from './chat-prompt-forward';
 import { registerChatPromptRoute } from './chat-prompt-route';
-import { getChatSessionRouteContext } from './chat-route-context';
+import { registerChatSessionAccessRoutes } from './chat-session-access';
+import { registerChatSessionControlRoutes } from './chat-session-controls';
+import { registerChatSessionDetailRoute } from './chat-session-detail';
 import { registerChatSessionListRoute } from './chat-session-list';
-import { enrichSessionsWithCreators, requireSessionCreator } from './chat-session-ownership';
 import { chatStateRoutes } from './chat-state';
 import { registerChatStopRoute } from './chat-stop';
 
@@ -143,145 +126,7 @@ chatRoutes.get('/ws', async (c) => {
  */
 chatRoutes.route('/', chatStateRoutes);
 
-/**
- * GET /api/projects/:projectId/sessions/:sessionId
- * Get a single session with its messages (cursor-paginated).
- */
-chatRoutes.get('/:sessionId', async (c) => {
-  const { db, projectId, sessionId, userId } = await getChatSessionRouteContext(c);
-
-  let session: Awaited<ReturnType<typeof projectDataService.getSession>>;
-  try {
-    session = await projectDataService.getSession(c.env, projectId, sessionId);
-  } catch (err) {
-    return recordChatSessionLoadFailure(c, {
-      err,
-      phase: 'get_session',
-      projectId,
-      sessionId,
-      userId,
-    });
-  }
-
-  if (!session) {
-    throw errors.notFound('Chat session');
-  }
-
-  const limit = getSessionMessageLimit(c.env, c.req.query('limit'));
-  const before = getMessageCursor('before', c.req.query('before'));
-  const after = getMessageCursor('after', c.req.query('after'));
-  const configuredDeltaLimit = Number.parseInt(c.env.CHAT_SESSION_DELTA_MESSAGE_LIMIT || '', 10);
-  const deltaLimit =
-    Number.isFinite(configuredDeltaLimit) && configuredDeltaLimit > 0
-      ? configuredDeltaLimit
-      : DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT;
-  const effectiveLimit = after !== null && c.req.query('limit') === undefined ? deltaLimit : limit;
-
-  const compactDefault = (c.env.CHAT_COMPACT_MODE_DEFAULT ?? '').toLowerCase();
-  const compact = compactDefault === 'false' ? false : DEFAULT_CHAT_COMPACT_MODE;
-
-  let messagesResult: Awaited<ReturnType<typeof projectDataService.getMessages>>;
-  try {
-    messagesResult = await projectDataService.getMessages(
-      c.env,
-      projectId,
-      sessionId,
-      effectiveLimit,
-      before,
-      after,
-      undefined,
-      compact,
-      getMessageOrder(undefined, { before, after })
-    );
-  } catch (err) {
-    return recordChatSessionLoadFailure(c, {
-      err,
-      phase: 'get_messages',
-      projectId,
-      sessionId,
-      userId,
-    });
-  }
-
-  // Embed task summary if session is linked to a task (D1 lookup, best-effort)
-  let task: ChatSessionTaskEmbed | null = null;
-  const sessionRecord = expectJsonRecord(session, 'chat.session');
-  const taskId = typeof sessionRecord.taskId === 'string' ? sessionRecord.taskId : null;
-  if (taskId) {
-    try {
-      const [taskRow] = await db
-        .select({
-          id: schema.tasks.id,
-          status: schema.tasks.status,
-          executionStep: schema.tasks.executionStep,
-          terminalReason: schema.tasks.terminalReason,
-          errorMessage: schema.tasks.errorMessage,
-          placementExplanationJson: schema.tasks.placementExplanationJson,
-          outputBranch: schema.tasks.outputBranch,
-          outputPrUrl: schema.tasks.outputPrUrl,
-          outputSummary: schema.tasks.outputSummary,
-          finalizedAt: schema.tasks.finalizedAt,
-          taskMode: schema.tasks.taskMode,
-          agentProfileHint: schema.tasks.agentProfileHint,
-        })
-        .from(schema.tasks)
-        .where(eq(schema.tasks.id, taskId))
-        .limit(1);
-
-      if (taskRow) {
-        const agentProfileHint = await resolveTaskAgentProfileHint(db, {
-          hint: taskRow.agentProfileHint,
-          projectId,
-          userId,
-        });
-
-        task = {
-          id: taskRow.id,
-          status: isTaskStatus(taskRow.status) ? taskRow.status : 'draft',
-          executionStep: isTaskExecutionStep(taskRow.executionStep) ? taskRow.executionStep : null,
-          terminalReason: taskRow.terminalReason ?? null,
-          errorMessage: taskRow.errorMessage ?? null,
-          placementExplanationJson: publicPlacementExplanationJson(
-            taskRow.placementExplanationJson
-          ),
-          outputBranch: taskRow.outputBranch,
-          outputPrUrl: taskRow.outputPrUrl,
-          outputSummary: taskRow.outputSummary ?? null,
-          finalizedAt: taskRow.finalizedAt ?? null,
-          taskMode: isTaskMode(taskRow.taskMode) ? taskRow.taskMode : null,
-          agentProfileHint,
-        };
-      }
-    } catch {
-      // D1 lookup failure is non-fatal — return session without task
-    }
-  }
-
-  const { agentSessionId, agentType, state } = await resolveChatAgentState(c.env, {
-    projectId,
-    sessionId,
-    lookupFailureEvent: 'chat.agent_session_id_lookup_failed',
-  });
-
-  const stateWithRecovery = await attachWakeState(db, state, {
-    projectId,
-    sessionId,
-    sessionStatus: sessionRecord.status,
-  });
-
-  return c.json({
-    session: (
-      await enrichSessionsWithCreators(
-        db,
-        [{ ...session, agentSessionId, agentType, task }],
-        userId
-      )
-    )[0],
-    messages: messagesResult.messages,
-    hasMore: messagesResult.hasMore,
-    state: stateWithRecovery,
-  });
-});
+registerChatSessionDetailRoute(chatRoutes);
 
 /**
  * GET /api/projects/:projectId/sessions/:sessionId/messages
@@ -362,6 +207,8 @@ chatRoutes.route('/', chatCommentRoutes);
 
 registerChatStopRoute(chatRoutes);
 registerChatCancelRoute(chatRoutes);
+registerChatSessionControlRoutes(chatRoutes);
+registerChatSessionAccessRoutes(chatRoutes);
 
 /**
  * POST /api/projects/:projectId/sessions/:sessionId/idle-reset
@@ -374,7 +221,10 @@ chatRoutes.post('/:sessionId/idle-reset', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
-  await requireSessionCreator(c.env, projectId, sessionId, userId);
+  await requireSessionWriter(c.env, projectId, sessionId, userId, {
+    db,
+    action: 'keep this session awake',
+  });
 
   const result = await projectDataService.resetIdleCleanup(c.env, projectId, sessionId);
 
@@ -392,7 +242,10 @@ chatRoutes.get('/:sessionId/durability', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:read');
-  await requireSessionCreator(c.env, projectId, sessionId, userId);
+  await requireSessionWriter(c.env, projectId, sessionId, userId, {
+    db,
+    action: 'inspect delivery state for this session',
+  });
 
   const snapshot = await projectDataService.getDurableExecutionSnapshot(
     c.env,
@@ -403,23 +256,8 @@ chatRoutes.get('/:sessionId/durability', async (c) => {
 });
 
 registerChatPromptRoute(chatRoutes);
-registerChatCommentDirectiveRoute(chatRoutes);
 
-/**
- * POST /api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve
- * Validate, deliver, and record one of the agent-provided answer options.
- */
-chatRoutes.post('/:sessionId/attention/:markerId/resolve', async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const sessionId = requireRouteParam(c, 'sessionId');
-  const markerId = requireRouteParam(c, 'markerId');
-  const { answer } = await parseOptionalBody(c.req.raw, ResolveAttentionAnswerSchema, {
-    answer: '',
-  });
-  const result = await answerAttention(c.env, userId, projectId, sessionId, markerId, answer);
-  return c.json(result, 'inFlight' in result ? 202 : 200);
-});
+registerChatAttentionRoute(chatRoutes);
 
 chatRoutes.route('/', chatIdeaRoutes);
 
@@ -428,75 +266,3 @@ chatRoutes.route('/', chatIdeaRoutes);
 // See: specs/021-task-chat-architecture (US1 — Agent-Side Chat Persistence).
 
 export { chatRoutes };
-
-export async function answerAttention(
-  env: Env,
-  userId: string,
-  projectId: string,
-  sessionId: string,
-  markerId: string,
-  answer: string
-) {
-  const db = drizzle(env.DATABASE, { schema });
-
-  await requireProjectCapability(db, projectId, userId, 'task:write');
-  await requireSessionCreator(env, projectId, sessionId, userId);
-
-  if (!answer) throw markRejectedBeforeEffects(errors.badRequest('answer is required'));
-
-  const prepared = await projectDataService.prepareAttentionAnswer(
-    env,
-    projectId,
-    sessionId,
-    markerId,
-    answer
-  );
-  if (prepared.status === 'unsupported_source') {
-    throw markRejectedBeforeEffects(
-      errors.badRequest('This attention marker must be answered through the interaction route')
-    );
-  }
-  if (prepared.status === 'not_found')
-    throw markRejectedBeforeEffects(errors.notFound('Attention request'));
-  if (prepared.status === 'invalid_option') {
-    throw markRejectedBeforeEffects(
-      errors.badRequest('answer must match one of the requested options')
-    );
-  }
-  if (prepared.status === 'already_resolved') {
-    if (prepared.answer !== answer)
-      throw markRejectedBeforeEffects(errors.conflict('Attention request is already resolved'));
-    return { resolved: true, alreadyResolved: true, answer };
-  }
-  if (prepared.status === 'conflicting_answer') {
-    throw markRejectedBeforeEffects(
-      errors.conflict('A different answer is already being delivered')
-    );
-  }
-  if (prepared.status === 'in_flight') {
-    return { resolved: false, alreadyResolved: false, inFlight: true, answer };
-  }
-
-  let preparedPrompt;
-  try {
-    preparedPrompt = await preparePromptForLiveAgent(env, db, {
-      projectId,
-      sessionId,
-      userId,
-      content: answer,
-    });
-  } catch (cause) {
-    // Resolution/enrichment failed before the mutating request began, so this
-    // claim is definitively safe to retry.
-    await projectDataService.releaseAttentionAnswer(env, projectId, sessionId, markerId, answer);
-    throw cause instanceof Error ? markRejectedBeforeEffects(cause) : cause;
-  }
-
-  // Every transport/response error after this boundary is outcome-unknown: the
-  // VM agent dispatches asynchronously before responding. Preserve the claim so
-  // an approval is never replayed. The marker ID is also propagated as the
-  // stable downstream message ID for persistence-level deduplication.
-  await sendPreparedPromptToLiveAgent(env, preparedPrompt, markerId);
-  await projectDataService.completeAttentionAnswer(env, projectId, sessionId, markerId, answer);
-  return { resolved: true, alreadyResolved: false, answer };
-}

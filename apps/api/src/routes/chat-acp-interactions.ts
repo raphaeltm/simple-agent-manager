@@ -25,7 +25,7 @@ import {
   recordInteractionDelivery,
   snapshotInteractions,
 } from '../services/acp-interaction-store';
-import { requireSessionCreator } from './chat-session-ownership';
+import { recordSharedSessionAnswer, requireSessionWriter } from '../services/session-access';
 
 type AnswerInteractionResult = Awaited<ReturnType<typeof answerInteraction>>;
 type AcceptedAnswerResult = Extract<
@@ -142,9 +142,12 @@ async function listInteractionSnapshots(c: ChatAcpContext): Promise<Response> {
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:read');
-  const session = await requireSessionCreator(c.env, projectId, sessionId, userId).catch(
-    () => null
-  );
+  // Session writers (the owner and active grantees) see full requests; everyone else sees
+  // only that the agent is waiting.
+  const session = await requireSessionWriter(c.env, projectId, sessionId, userId, {
+    db,
+    action: 'view the agent requests in this session',
+  }).catch(() => null);
   const snapshot = await snapshotInteractions(
     c.env,
     projectId,
@@ -173,7 +176,10 @@ async function readInteractionDetail(c: ChatAcpContext): Promise<Response> {
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:read');
-  await requireSessionCreator(c.env, projectId, sessionId, userId);
+  await requireSessionWriter(c.env, projectId, sessionId, userId, {
+    db,
+    action: 'view the agent requests in this session',
+  });
   const detail = await getInteractionDetail(c.env, projectId, sessionId, interactionId);
   if (!detail) throw errors.notFound('ACP interaction');
   c.header('Cache-Control', 'private, no-store');
@@ -208,8 +214,13 @@ export async function answerAgentInteraction(
 ) {
   const db = drizzle(env.DATABASE, { schema });
 
-  await requireProjectCapability(db, projectId, userId, 'task:write');
-  await requireSessionCreator(env, projectId, sessionId, userId);
+  const project = await requireProjectCapability(db, projectId, userId, 'task:write');
+  const writer = await requireSessionWriter(env, projectId, sessionId, userId, {
+    db,
+    project,
+    requireGranteeRepositoryAccess: true,
+    action: 'answer the agent in this session',
+  });
   const answerBodyHash = await interactionDecisionHash(body.decision);
   const answer = await answerInteraction(env, {
     projectId,
@@ -228,6 +239,12 @@ export async function answerAgentInteraction(
     acceptedAnswer,
     body.decision
   );
+  if (acceptedAnswer.status === 'answered') {
+    await recordSharedSessionAnswer(env, writer, {
+      interactionId,
+      kind: acceptedAnswer.summary.kind,
+    });
+  }
 
   return { accepted: true, state: acceptedAnswer.summary.state };
 }

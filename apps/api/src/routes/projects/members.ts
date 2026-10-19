@@ -42,6 +42,7 @@ import {
 import { clearProjectMultiplayerStateCache } from '../../services/project-multiplayer';
 import { applyProjectMemberOffboarding } from '../../services/project-offboarding-apply';
 import { createProjectMemberOffboardingPreview } from '../../services/project-offboarding-preview';
+import { revokeSessionAccessForDepartedMember } from '../../services/session-access';
 import { projectOwnershipTransferRoutes } from './ownership-transfer';
 
 const INVITE_TOKEN_PREFIX = 'sam_inv_';
@@ -83,7 +84,9 @@ async function hmacInviteToken(rawToken: string, secret: string): Promise<string
     ['sign']
   );
   const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawToken));
-  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return Array.from(new Uint8Array(sig))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 function inviteStatus(row: schema.ProjectInviteLink, now = new Date()): ProjectInviteLinkStatus {
   if (row.revokedAt) return 'revoked';
@@ -367,24 +370,22 @@ projectMembersRoutes.get('/:id/members', async (c) => {
     : [];
 
   const response: ProjectMembersResponse = {
-    members: memberRows.map(
-      (row): ProjectMemberResponse => ({
-        projectId: row.member.projectId,
-        userId: row.member.userId,
-        role: row.member.role as ProjectMemberRole,
-        status: row.member.status as ProjectMemberStatus,
-        invitedBy: row.member.invitedBy,
-        createdAt: row.member.createdAt,
-        updatedAt: row.member.updatedAt,
-        user: toUser({
-          id: row.userId,
-          name: row.name,
-          email: row.email,
-          image: row.image,
-          avatarUrl: row.avatarUrl,
-        }),
-      })
-    ),
+    members: memberRows.map((row): ProjectMemberResponse => ({
+      projectId: row.member.projectId,
+      userId: row.member.userId,
+      role: row.member.role as ProjectMemberRole,
+      status: row.member.status as ProjectMemberStatus,
+      invitedBy: row.member.invitedBy,
+      createdAt: row.member.createdAt,
+      updatedAt: row.member.updatedAt,
+      user: toUser({
+        id: row.userId,
+        name: row.name,
+        email: row.email,
+        image: row.image,
+        avatarUrl: row.avatarUrl,
+      }),
+    })),
     inviteLinks: inviteRows.map(toInviteLinkResponse),
     accessRequests: requestRows.map(toAccessRequestResponse),
   };
@@ -433,6 +434,12 @@ projectMembersRoutes.post(
       finalMemberStatus: body.finalMemberStatus,
       defaultAgentType: c.env.DEFAULT_TASK_AGENT_TYPE || 'opencode',
     });
+    if (response.status === 'removed') {
+      // Per-request membership checks already stop a removed member from driving a shared
+      // session; this also deletes their stored grants (and grants on sessions they own) so a
+      // later re-approval cannot bring them back.
+      await revokeSessionAccessForDepartedMember(c.env, projectId, memberUserId);
+    }
 
     return c.json(response);
   }

@@ -1,4 +1,6 @@
 /** Phase 1 only. Existing readers are wired here after the recovery wave releases integration. */
+import { DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS } from '@simple-agent-manager/shared';
+
 import type { Env } from '../env';
 import {
   CONNECTOR_DEFAULTS,
@@ -11,6 +13,9 @@ export type AdminSettingValue = boolean | number | string | readonly string[] | 
 export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
 export type AdminSettingName =
   | `connector.${ConnectorSettingKey}`
+  | 'collaboration.commentMentionsMax'
+  | 'collaboration.commentNotificationWindowSeconds'
+  | 'collaboration.sessionAccessMaxGrants'
   | 'integration.github.clientId'
   | 'integration.github.clientSecret'
   | 'integration.google.clientId'
@@ -28,7 +33,7 @@ export interface AdminSettingDefinition {
   readonly name: AdminSettingName;
   readonly type: AdminSettingType;
   readonly defaultValue: AdminSettingValue;
-  readonly category: 'OAuth' | 'Connector' | 'Operations' | 'Trials';
+  readonly category: 'OAuth' | 'Connector' | 'Operations' | 'Trials' | 'Collaboration';
   readonly description: string;
   readonly secret: boolean;
   readonly risky: boolean;
@@ -39,6 +44,10 @@ export interface AdminSettingDefinition {
   readonly choices?: readonly string[];
   readonly validate: (value: unknown) => boolean;
 }
+
+/** Collaboration defaults (idea 01M59MYE4GY91BWTE8TZF1ZB5D); admins can change them at runtime. */
+export const DEFAULT_SESSION_ACCESS_MAX_GRANTS = 10;
+export const DEFAULT_COMMENT_MENTIONS_MAX = 10;
 
 const connectorDescriptions: Record<ConnectorSettingKey, string> = {
   enabled: 'Allow authenticated external clients to use the SAM Connector.',
@@ -127,6 +136,30 @@ function switchDefinition(
     risky: true,
     ...legacy,
     validate: (value) => typeof value === 'boolean',
+  };
+}
+
+function integerDefinition(
+  name: AdminSettingName,
+  defaultValue: number,
+  category: AdminSettingDefinition['category'],
+  description: string,
+  range: { min: number; max: number }
+): AdminSettingDefinition {
+  return {
+    name,
+    type: 'integer',
+    defaultValue,
+    category,
+    description,
+    secret: false,
+    risky: false,
+    range,
+    validate: (value) =>
+      typeof value === 'number' &&
+      Number.isInteger(value) &&
+      value >= range.min &&
+      value <= range.max,
   };
 }
 
@@ -222,6 +255,27 @@ const definitions: AdminSettingDefinition[] = [
     'Trials',
     'Allow anonymous trials. Fresh installs remain disabled.',
     { legacyKv: 'trials' }
+  ),
+  integerDefinition(
+    'collaboration.sessionAccessMaxGrants',
+    DEFAULT_SESSION_ACCESS_MAX_GRANTS,
+    'Collaboration',
+    'Maximum people one chat session can be shared with at a time.',
+    { min: 1, max: 100 }
+  ),
+  integerDefinition(
+    'collaboration.commentMentionsMax',
+    DEFAULT_COMMENT_MENTIONS_MAX,
+    'Collaboration',
+    'Maximum people one comment can @mention.',
+    { min: 1, max: 50 }
+  ),
+  integerDefinition(
+    'collaboration.commentNotificationWindowSeconds',
+    DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS / 1000,
+    'Collaboration',
+    'Seconds in which repeated comments on one session send one notification per person. Mentions always notify.',
+    { min: 60, max: 86_400 }
   ),
   switchDefinition(
     'operations.stalledTaskClassifierEnabled',

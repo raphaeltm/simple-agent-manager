@@ -9,8 +9,8 @@ import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
+import { requireSessionWriter } from '../services/session-access';
 import { isSleepingContainerRuntime } from '../services/sleeping-container-runtime';
-import { requireSessionCreator } from './chat-session-ownership';
 import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
 
 export function registerChatCancelRoute(chatRoutes: Hono<{ Bindings: Env }>): void {
@@ -27,14 +27,18 @@ export function registerChatCancelRoute(chatRoutes: Hono<{ Bindings: Env }>): vo
     const db = drizzle(c.env.DATABASE, { schema });
 
     await requireProjectCapability(db, projectId, userId, 'task:write');
-    await requireSessionCreator(c.env, projectId, sessionId, userId);
+    const writer = await requireSessionWriter(c.env, projectId, sessionId, userId, {
+      db,
+      action: 'interrupt the agent in this session',
+    });
 
     // Resolve the live workspace + running agent session, tenant-scoped and
-    // fail-fast (see resolveLiveAgentSessionForChat).
+    // fail-fast (see resolveLiveAgentSessionForChat). Resources belong to the
+    // session owner; a grantee's own id never selects them.
     const { workspace, agentSession } = await resolveLiveAgentSessionForChat(db, {
       projectId,
       sessionId,
-      userId,
+      userId: writer.ownerUserId,
     });
 
     // Capture the turn-end observation instant BEFORE the (slow) VM call, so a
@@ -52,7 +56,7 @@ export function registerChatCancelRoute(chatRoutes: Hono<{ Bindings: Env }>): vo
           workspace.id,
           agentSession.id,
           c.env,
-          userId
+          writer.ownerUserId
         );
 
     // 409 means no prompt in flight — not an error from the user's perspective

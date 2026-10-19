@@ -33,6 +33,7 @@ import {
 import {
   invalidParentWakeTargetResult,
   invalidProjectEventWakeSourceTaskResult,
+  invalidSessionWriterSenderResult,
   sourceTaskGuardForClaim,
   sourceValidationReadFailure,
 } from './prompt-delivery-source-guards';
@@ -113,6 +114,7 @@ export async function runPromptDeliveryClaim(
       }
     };
     const validateDeliveryTarget = async (): Promise<PromptDeliveryResult | null> =>
+      invalidSessionWriterSenderResult(sql, claim) ??
       (await validateParentWakeTarget()) ??
       (await validateProjectEventWakeTarget()) ??
       (await invalidScheduledDeliveryTarget(sql, env, hooks.projectId, claim)) ??

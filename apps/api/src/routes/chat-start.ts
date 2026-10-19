@@ -16,6 +16,7 @@ import { requireProjectCapability } from '../middleware/project-auth';
 import { jsonValidator, StartChatSessionSchema } from '../schemas';
 import { acceptInstantSession, continueInstantSessionLaunch } from '../services/instant-session';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
+import { inheritedCredentialAttributionForCaller } from '../services/placement-field-resolution';
 import { resolveSkillProfile } from '../services/skills';
 import { markTaskFailedIfNonTerminal } from '../services/task-failure';
 import { truncateTitle } from '../services/task-title';
@@ -172,6 +173,17 @@ chatStartRoutes.post(
       body.parentTaskId,
       parsePositiveInt(c.env.ACP_SESSION_MAX_FORK_DEPTH, ACP_SESSION_DEFAULTS.MAX_FORK_DEPTH)
     );
+    const instantAttribution = inheritedCredentialAttributionForCaller(
+      parentTask
+        ? {
+            userId: parentTask.credentialAttributionUserId ?? parentTask.userId,
+            projectId: parentTask.credentialAttributionProjectId ?? null,
+            source: (parentTask.credentialAttributionSource as CredentialSource | null) ?? 'user',
+          }
+        : null,
+      userId,
+      projectId
+    );
     const taskId = ulid();
     const now = new Date().toISOString();
     const taskTitle = truncateTitle(message, DEFAULT_TASK_TITLE_MAX_LENGTH) || 'Instant Chat';
@@ -190,11 +202,11 @@ chatStartRoutes.post(
       skillHint: body.skillId ?? null,
       taskMode: 'conversation',
       triggeredBy: 'user',
-      credentialAttributionUserId:
-        parentTask?.credentialAttributionUserId ?? parentTask?.userId ?? userId,
-      credentialAttributionProjectId: parentTask?.credentialAttributionProjectId ?? null,
-      credentialAttributionSource:
-        (parentTask?.credentialAttributionSource as CredentialSource | null) ?? 'user',
+      // Never another member's credentials: a teammate's parent task must not make this one
+      // bill them (gap G5). Same normalization as `submitTask`.
+      credentialAttributionUserId: instantAttribution.userId,
+      credentialAttributionProjectId: instantAttribution.projectId,
+      credentialAttributionSource: instantAttribution.source,
       createdBy: userId,
       createdAt: now,
       updatedAt: now,

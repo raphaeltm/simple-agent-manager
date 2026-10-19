@@ -25,7 +25,16 @@ export const NOTIFICATION_TYPE_URGENCY: Record<NotificationType, NotificationUrg
   session_ended: 'medium',
   pr_created: 'medium',
   cron_failure: 'high',
+  mention: 'medium',
+  comment: 'low',
+  session_access: 'medium',
 };
+
+/**
+ * Window in which repeated comment activity on one session produces at most one `comment`
+ * notification per recipient. Mentions are never batched. Default: 10 minutes.
+ */
+export const DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS = 10 * 60 * 1000;
 
 /** Batch window for progress notifications — only one per task within this window. Default: 5 minutes.
  * Override via NOTIFICATION_PROGRESS_BATCH_WINDOW_MS env var. */

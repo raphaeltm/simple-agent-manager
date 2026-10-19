@@ -629,6 +629,7 @@ export {
 // Notifications
 export type { HumanInputCategory } from './notifications';
 export {
+  DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS,
   DEFAULT_HUMAN_INPUT_ESCALATION_FRACTIONS,
   DEFAULT_HUMAN_INPUT_MAX_WAIT_MS,
   DEFAULT_HUMAN_INPUT_TIMEOUT_MS,

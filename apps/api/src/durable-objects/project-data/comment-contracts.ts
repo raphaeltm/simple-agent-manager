@@ -1,5 +1,6 @@
 import type {
   CommentAuthor,
+  CommentMention,
   CommentReply,
   CommentStatus,
   LibraryFileCommentThread,
@@ -16,6 +17,8 @@ export type CreateCommentThreadInput = {
   quote?: string | null;
   clientMutationId?: string | null;
   actor: CommentActor;
+  /** Already validated against active project membership by the API. */
+  mentions?: CommentMention[];
 };
 
 export type CreateCommentReplyInput = {
@@ -24,6 +27,8 @@ export type CreateCommentReplyInput = {
   body: string;
   clientMutationId?: string | null;
   actor: CommentActor;
+  /** Already validated against active project membership by the API. */
+  mentions?: CommentMention[];
 };
 
 export type ListCommentThreadsInput = {

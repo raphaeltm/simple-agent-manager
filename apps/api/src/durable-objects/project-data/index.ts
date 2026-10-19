@@ -93,6 +93,7 @@ import * as promptDelivery from './prompt-delivery';
 import * as reconciliation from './reconciliation';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
+import * as sessionAccess from './session-access';
 import * as sessionActivityProbe from './session-activity-probe';
 import * as sessionActivityReconciliation from './session-activity-reconciliation';
 import * as sessionReads from './session-reads';
@@ -1428,6 +1429,132 @@ export class ProjectData extends DurableObject<Env> {
     input: commentContracts.ListProjectCommentThreadsInput
   ): commentContracts.ProjectCommentInboxResult {
     return projectCommentInbox.listProjectCommentInbox(this.sql, this.env, input);
+  }
+
+  // --- Shared session access (DO migration 064) -------------------------------
+  // Grants live beside `chat_sessions`, so one RPC answers "who may drive this session"
+  // together with the session row. Logic lives in ./session-access.
+
+  /** The session row plus the caller's access, for authorization checks. */
+  getSessionAccess(input: { sessionId: string; userId: string }) {
+    const access = sessionAccess.resolveSessionAccess(this.sql, input.sessionId, input.userId);
+    const session = access.found ? sessionReads.getSession(this.sql, input.sessionId) : null;
+    return { session: session ? this.addBaseDomain(session) : null, access };
+  }
+
+  /** The session row, the viewer's access and every active grant, for session detail. */
+  getSessionWithAccessGrants(input: { sessionId: string; viewerUserId: string }) {
+    const { session, access } = this.getSessionAccess({
+      sessionId: input.sessionId,
+      userId: input.viewerUserId,
+    });
+    return {
+      session,
+      access,
+      grants: access.found
+        ? sessionAccess.listActiveSessionAccessGrants(this.sql, input.sessionId)
+        : [],
+    };
+  }
+
+  createSessionAccessGrant(input: Omit<sessionAccess.CreateSessionAccessGrantInput, 'now'>) {
+    const result = this.ctx.storage.transactionSync(() => {
+      const created = sessionAccess.createSessionAccessGrant(this.sql, input);
+      if (created.status === 'created') {
+        activity.recordActivityEventInternal(
+          this.sql,
+          'session.access_granted',
+          'user',
+          input.grantedByUserId,
+          null,
+          input.sessionId,
+          null,
+          JSON.stringify({
+            grantId: created.grant.id,
+            granteeUserId: created.grant.granteeUserId,
+            parentGrantId: created.grant.parentGrantId,
+          })
+        );
+      }
+      return created;
+    });
+    if (result.status === 'created') {
+      this.broadcastEvent(
+        'session.access.changed',
+        { sessionId: input.sessionId, reason: 'granted' },
+        input.sessionId
+      );
+      this.broadcastEvent('activity.new', { eventType: 'session.access_granted' });
+    }
+    return {
+      result,
+      grants: sessionAccess.listActiveSessionAccessGrants(this.sql, input.sessionId),
+    };
+  }
+
+  revokeSessionAccessGrant(input: Omit<sessionAccess.RevokeSessionAccessGrantInput, 'now'>) {
+    const result = this.ctx.storage.transactionSync(() => {
+      const revoked = sessionAccess.revokeSessionAccessGrant(this.sql, input);
+      if (revoked.status === 'revoked') {
+        activity.recordActivityEventInternal(
+          this.sql,
+          'session.access_revoked',
+          'user',
+          input.actorUserId,
+          null,
+          input.sessionId,
+          null,
+          JSON.stringify({
+            granteeUserId: input.granteeUserId,
+            revokedGrantIds: revoked.revokedGrants.map((grant) => grant.id),
+            cancelledDeliveryCount: revoked.cancelledDeliveryIds.length,
+          })
+        );
+      }
+      return revoked;
+    });
+    if (result.status === 'revoked') {
+      this.afterSessionAccessRevoked(input.sessionId, result.cancelledDeliveryIds.length);
+    }
+    return {
+      result,
+      grants: sessionAccess.listActiveSessionAccessGrants(this.sql, input.sessionId),
+    };
+  }
+
+  /** A member left or was removed from the project: revoke grants they hold or issued as owner. */
+  revokeSessionAccessForDepartedMember(input: { userId: string }) {
+    const revoked = this.ctx.storage.transactionSync(() => {
+      const results = sessionAccess.revokeSessionAccessForDepartedMember(this.sql, input.userId);
+      for (const entry of results) {
+        activity.recordActivityEventInternal(
+          this.sql,
+          'session.access_revoked',
+          'system',
+          null,
+          null,
+          entry.sessionId,
+          null,
+          JSON.stringify({
+            departedUserId: input.userId,
+            revokedGrantIds: entry.revokedGrants.map((grant) => grant.id),
+            cancelledDeliveryCount: entry.cancelledDeliveryIds.length,
+          })
+        );
+      }
+      return results;
+    });
+    for (const entry of revoked) {
+      this.afterSessionAccessRevoked(entry.sessionId, entry.cancelledDeliveryIds.length);
+    }
+    return revoked;
+  }
+
+  private afterSessionAccessRevoked(sessionId: string, cancelledDeliveries: number): void {
+    this.broadcastEvent('session.access.changed', { sessionId, reason: 'revoked' }, sessionId);
+    this.broadcastEvent('activity.new', { eventType: 'session.access_revoked' });
+    // Cancelled deliveries may have been the target's head: let the alarm re-plan.
+    if (cancelledDeliveries > 0) void this.recalculateAlarm();
   }
 
   // --- Project event subscriptions -----------------------------------------
@@ -2934,74 +3061,20 @@ export class ProjectData extends DurableObject<Env> {
         return;
       }
       if (msg.type === 'message.send') {
-        const rawSessionId = msg.sessionId;
-        const rawContent = msg.content;
-        const rawRole = msg.role;
-        if (
-          !rawSessionId ||
-          typeof rawSessionId !== 'string' ||
-          !rawContent ||
-          typeof rawContent !== 'string'
-        ) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Missing sessionId or content' }));
-          return;
-        }
-        const sessionId = rawSessionId;
-        const content = rawContent;
-        // Validate session tag
-        const wsTags = this.ctx.getTags(ws);
-        const wsSessionTag = wsTags.find((t) => t.startsWith('session:'));
-        if (wsSessionTag) {
-          const wsSessionId = wsSessionTag.slice('session:'.length);
-          if (wsSessionId !== sessionId) {
-            log.error('websocket_session_mismatch', {
-              wsSessionId,
-              messageSessionId: sessionId,
-              action: 'rejected',
-            });
-            ws.send(
-              JSON.stringify({
-                type: 'error',
-                message: `Session mismatch: WebSocket connected to session ${wsSessionId}, but message targets ${sessionId}`,
-              })
-            );
-            return;
-          }
-        }
-        // Validate session exists and is active
-        const targetSession = this.sql
-          .exec('SELECT id, status FROM chat_sessions WHERE id = ?', sessionId)
-          .toArray()[0];
-        if (!targetSession) {
-          ws.send(JSON.stringify({ type: 'error', message: `Session ${sessionId} not found` }));
-          return;
-        }
-        if (targetSession.status !== 'active') {
-          ws.send(
-            JSON.stringify({
-              type: 'error',
-              message: `Session ${sessionId} is ${targetSession.status}, not active`,
-            })
-          );
-          return;
-        }
-        const sanitizedRole = rawRole === 'user' ? 'user' : 'user'; // Only allow user role
-        const trimmed = content.trim();
-        if (!trimmed || trimmed.length > 2000) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Message must be 1-2000 characters' }));
-          return;
-        }
-        try {
-          const messageId = await this.persistMessage(sessionId, sanitizedRole, trimmed, null);
-          ws.send(JSON.stringify({ type: 'message.ack', messageId, sessionId }));
-        } catch (err) {
-          ws.send(
-            JSON.stringify({
-              type: 'error',
-              message: err instanceof Error ? err.message : 'Failed to persist message',
-            })
-          );
-        }
+        // Browser sockets are read-only. This path used to persist a `role=user` row into any
+        // active session for any connected project member, without knowing who they were
+        // (idea 01M59MYE4GY91BWTE8TZF1ZB5D, gap G1). Prompts and their transcript rows now
+        // come only from authorized REST delivery (`sendChat` → durable prompt delivery).
+        log.warn('websocket.message_send_rejected', {
+          sessionTag: this.ctx.getTags(ws).find((tag) => tag.startsWith('session:')) ?? null,
+          action: 'rejected',
+        });
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            message: 'Sending messages over this socket is not supported',
+          })
+        );
       }
     } catch {
       /* Ignore non-JSON messages */

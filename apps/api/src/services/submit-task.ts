@@ -36,6 +36,7 @@ import { validateAttachments } from '../services/attachment-upload';
 import { generateBranchName } from '../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../services/capacity-placement-snapshot';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
+import { inheritedCredentialAttributionForCaller } from '../services/placement-field-resolution';
 import {
   PlacementResolutionError,
   resolveTaskStartPlacement,
@@ -344,6 +345,15 @@ async function submitTaskImplementation(
       );
     }
     setOperation('instant_submission');
+    const instantAttribution = inheritedCredentialAttributionForCaller(
+      {
+        userId: inheritedAttributionUserId,
+        projectId: inheritedAttributionProjectId,
+        source: inheritedAttributionSource,
+      },
+      userId,
+      projectId
+    );
     const result = await submitInstantTask({
       beforeTaskEffects,
       db,
@@ -363,9 +373,11 @@ async function submitTaskImplementation(
       attachments: validatedAttachments,
       triggeredBy: via === 'connector' || via === 'pat' ? 'connector' : 'user',
       connectorClientName: clientName,
-      credentialAttributionUserId: inheritedAttributionUserId ?? userId,
-      credentialAttributionProjectId: inheritedAttributionProjectId ?? null,
-      credentialAttributionSource: inheritedAttributionSource ?? 'user',
+      // Never another member's credentials: a teammate's parent task must not make this one
+      // bill them (gap G5). Same normalization VM placement applies.
+      credentialAttributionUserId: instantAttribution.userId,
+      credentialAttributionProjectId: instantAttribution.projectId,
+      credentialAttributionSource: instantAttribution.source,
     });
     const titleConfig = getTaskTitleConfig(env);
     schedulePostSubmitWork({
