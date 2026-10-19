@@ -11,7 +11,6 @@ import {
   nudgePromptDeliveriesForTarget,
 } from '../../../src/durable-objects/project-data/prompt-delivery';
 import { runPromptDeliveryClaim } from '../../../src/durable-objects/project-data/prompt-delivery-runner';
-import { handleExpiredGrants } from '../../../src/durable-objects/project-data/session-access-expiry';
 import {
   computeSessionAccessExpiryAlarmTime,
   createSessionAccessGrant,
@@ -23,6 +22,7 @@ import {
   SENDER_ACCESS_EXPIRED_REASON,
   SENDER_ACCESS_REVOKED_REASON,
 } from '../../../src/durable-objects/project-data/session-access';
+import { handleExpiredGrants } from '../../../src/durable-objects/project-data/session-access-expiry';
 import type { VmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
 import { createSqlStorage } from './sql-storage-test-utils';
 
