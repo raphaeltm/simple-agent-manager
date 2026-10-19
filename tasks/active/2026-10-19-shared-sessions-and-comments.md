@@ -21,15 +21,23 @@ Project members can read each other's chat sessions, but:
 
 Supersedes "no expiry". Blocks merge and production until implemented and verified.
 
-- [ ] Grant requires a duration choice of 5, 10, 30 or 60 minutes; no default, no unlimited option
-- [ ] Server-side expiry on every control path (`requireSessionWriter` uses server time) and at queued-prompt delivery (`sender_access_expired`)
-- [ ] Undelivered collaborator prompts cancelled after expiry or revocation; live clients notified (`session.access.changed`)
-- [ ] Remaining time / expires-at shown on grants and in the collaborator notice; **Revoke now**
-- [ ] Explicit renew/regrant by a session writer; no silent renewal; nobody renews their own access; onward grants capped at the issuer's expiry
+Server (`a7d72cc3e`, `06970cc5f`, `6e15b44c0`):
+
+- [x] Grant requires `durationMinutes` of 5, 10, 30 or 60: route refuses a missing/other value before anything runs; the DO re-checks; no default, no unlimited option
+- [x] Server-side expiry on every control path: the active-grant read is `revoked_at IS NULL AND expires_at > now` at server time, so `requireSessionWriter`, grant management and the delivery fence all stop at `expires_at`; NULL expiry counts as expired
+- [x] Delivery fence refuses an expired sender's queued prompt before any side effect and labels it `sender_access_expired`
+- [x] Alarm section `session_access_expiry` (cleanup only, not authorization): cancels expired senders' undelivered prompts, marks the grant handled, records `session.access_expired`, broadcasts `session.access.changed` reason `expired`; schedule and sweep share one predicate; cascades to `prompt_delivery` in the same tick
+- [x] Renew/regrant: only the owner renews an active grant (from now, new duration); any session writer can regrant an expired person; onward grants are capped at the issuer's own expiry; nobody renews their own access; a regrant first cancels the old row's queued prompts
+- [x] Tests: 5/10/30/60 boundaries (`expiresAt - 1` active, `expiresAt` not), queued delivery before and after the sweep, sweep twice, regrant/revoke races both orders, legacy NULL row, route duration validation, workers slice through routes + D1 + DO + alarm + WebSocket; 9 mutations proven red
+
+Web and docs:
+
+- [ ] Share dialog: required 5/10/30/60 choice (no default; Share disabled until chosen); request carries `durationMinutes`
+- [ ] Grant rows show remaining time and expires-at (server-time corrected); **Revoke now**; owner-only **Renew** with a duration choice
+- [ ] Collaborator notice shows remaining time; the client refetches at `expiresAt` (display only)
+- [ ] `session.access.changed` reasons `renewed`/`expired` handled; activity feed shows `session.access_expired`; transcript label for `sender_access_expired`
 - [ ] Risk disclosure: capabilities/credentials the agent can reach; expiry/revocation cannot undo completed actions or invalidate copied credentials
-- [ ] Already-running turn keeps running; expiry stops further collaborator control (documented, no undo promised, owner's session not killed)
-- [ ] Browser timers display only; alarm sweep is cleanup only, never the authorization
-- [ ] Tests: clock boundaries, queued delivery, live connections, regrant/revoke races, actor attribution
+- [ ] Docs: durations, renew, Revoke now, running turns keep running (no undo, owner's session not killed), browser timers display only
 - [ ] Re-run independent review, full suites, two-account staging including a real expiry, then PR
 
 ## Product decisions (from Raphaël / the design idea)
