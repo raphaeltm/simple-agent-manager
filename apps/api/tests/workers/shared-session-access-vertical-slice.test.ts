@@ -207,6 +207,9 @@ describe('shared session access vertical slice', () => {
       onBehalfOfUserId: OWNER,
     });
     expect(row?.content).toContain('a project member with shared access to this session');
+    expect(row?.content).toMatch(
+      /Everything after this line is their message as typed\.\]\n\nPlease add a test/
+    );
     expect(row?.content).toContain('Please add a test');
   });
 

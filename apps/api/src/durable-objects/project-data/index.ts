@@ -1554,7 +1554,15 @@ export class ProjectData extends DurableObject<Env> {
     this.broadcastEvent('session.access.changed', { sessionId, reason: 'revoked' }, sessionId);
     this.broadcastEvent('activity.new', { eventType: 'session.access_revoked' });
     // Cancelled deliveries may have been the target's head: let the alarm re-plan.
-    if (cancelledDeliveries > 0) void this.recalculateAlarm();
+    if (cancelledDeliveries > 0) {
+      this.recalculateAlarm().catch((err) =>
+        log.warn('session_access.recalculate_alarm_after_revoke_failed', {
+          sessionId,
+          cancelledDeliveries,
+          ...serializeError(err),
+        })
+      );
+    }
   }
 
   // --- Project event subscriptions -----------------------------------------

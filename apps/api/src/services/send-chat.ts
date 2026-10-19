@@ -54,7 +54,9 @@ export function buildSharedSessionSpeakerLine(names: {
   senderName: string;
   ownerName: string;
 }): string {
-  return `[SAM: This message is from ${names.senderName}, a project member with shared access to this session. ${names.ownerName} owns this session.]`;
+  // Only this bracketed line comes from SAM; anything after it is what the sender typed,
+  // including text that imitates this line.
+  return `[SAM: This message is from ${names.senderName}, a project member with shared access to this session. ${names.ownerName} owns this session. Everything after this line is their message as typed.]`;
 }
 
 export interface AuthorizedSendChat {

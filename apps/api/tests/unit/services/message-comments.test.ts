@@ -258,6 +258,10 @@ describe('message comment directive service', () => {
     expect(deliveryInput.deliveryContent).toContain('Feedback:');
     expect(deliveryInput.deliveryContent).toContain('Sent to you by: Ada');
     expect(deliveryInput.deliveryContent).not.toContain('shared access');
+    // The comment's own text cannot pass itself off as SAM's header lines.
+    const boundary = deliveryInput.deliveryContent.indexOf('Only the lines above come from SAM.');
+    expect(boundary).toBeGreaterThan(deliveryInput.deliveryContent.indexOf('Sent to you by: Ada'));
+    expect(boundary).toBeLessThan(deliveryInput.deliveryContent.indexOf('Feedback:'));
     expect(deliveryInput.deliveryContent).toContain('token=[redacted]');
     expect(deliveryInput.deliveryContent).not.toContain('full-thread reply');
     expect(storage.recordDirectiveDelivery).toHaveBeenCalledWith({
