@@ -50,6 +50,9 @@ const MOCK_SESSION = {
   workspaceUrl: null,
   cleanupAt: null,
   agentSessionId: 'agent-session-message-comments',
+  // The viewer started this chat: an unknown viewer would get the read-only view.
+  isMine: true,
+  viewerAccess: 'owner',
 };
 
 const AUTHOR = {
@@ -457,12 +460,14 @@ test.describe('message comments audit — desktop 1280x800', () => {
     await openChat(page);
 
     await expect(page.getByRole('complementary', { name: 'Session comments' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Add comment on message msg-27' }).click();
+    await page
+      .locator('[data-conversation-item-id="msg-27"]')
+      .getByRole('button', { name: 'Comment on this message' }).click();
 
     const rail = page.getByRole('complementary', { name: 'Session comments' });
     await expect(rail).toBeVisible();
     await expect(rail.getByLabel('New message comment')).toBeVisible();
-    await expect(rail.getByText(/New comment on message msg-27/)).toBeVisible();
+    await expect(rail.getByText(/New comment on message The agent's reply ·/)).toBeVisible();
     await expect(rail.getByLabel('Add a comment…')).toBeVisible();
     await screenshot(page, 'message-comments-desktop-message-button-draft');
     await assertNoOverflow(page);
@@ -487,7 +492,7 @@ test.describe('message comments audit — desktop 1280x800', () => {
     const rail = page.getByRole('complementary', { name: 'Session comments' });
     await expect(rail).toBeVisible();
     await expect(rail.getByLabel('New comment on selected text')).toBeVisible();
-    await expect(rail.getByText(/New comment on selected text msg-27/)).toBeVisible();
+    await expect(rail.getByText(/New comment on selected text The agent's reply ·/)).toBeVisible();
     await expect(rail.getByText(selectedQuote)).toBeVisible();
     await expect(rail.getByLabel('Add a comment…')).toBeVisible();
     await screenshot(page, 'message-comments-desktop-selected-text-draft');
@@ -523,7 +528,7 @@ test.describe('message comments audit — desktop 1280x800', () => {
     await expect(selectionDialog).toBeVisible();
     await selectionDialog.getByRole('button', { name: 'Comment' }).click();
 
-    await expect(rail.getByText(/New comment on selected text msg-27/)).toBeVisible();
+    await expect(rail.getByText(/New comment on selected text The agent's reply ·/)).toBeVisible();
     await rail.getByLabel('Add a comment…').fill('Desktop note from selected message text.');
     await rail.getByRole('button', { name: 'Comment', exact: true }).click();
 

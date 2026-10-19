@@ -59,6 +59,7 @@ function chatSession(id: string, topic: string, messageCount: number, status = '
     isIdle: false,
     agentCompletedAt: null,
     agentSessionId: null,
+    viewerAccess: 'owner',
   };
 }
 
@@ -404,8 +405,9 @@ test.describe('project chat — instant switching audit', () => {
         .click();
       await page.getByRole('button', { name: /show in conversation/i }).click();
     } else {
+      // The commented message is not loaded yet, so the rail cannot name it.
       await page
-        .getByRole('button', { name: `Show message ${LONG.id}-m10 in conversation` })
+        .getByRole('button', { name: 'Show an earlier message in the conversation' })
         .click();
     }
     await expect(conversation(page).getByText('Long chat message 10:')).toBeInViewport({

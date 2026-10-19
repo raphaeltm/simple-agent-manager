@@ -124,3 +124,11 @@ fix (array-shaped app-shell mocks plus default onboarding-wizard dismissal) and 
 - The failing assertions also include the "This Month" button, cache counts and the pricing
   disclaimer.
 - Quarantined at `visual-audit-quarantine.txt:24`.
+
+## Note (2026-10-19, shared chat sessions)
+
+The chat view now decides what the viewer may do from `viewerAccess` on the session (falling back
+to `isMine === true`), and an unknown viewer gets the read-only view. A mocked session with neither
+field renders "Only … can message this agent" instead of the composer. When repairing a quarantined
+chat spec, give its session fixture `viewerAccess: 'owner'` (or `isMine: true`) unless the spec is
+about another member's view. The non-quarantined chat audits were updated in the shared-sessions PR.

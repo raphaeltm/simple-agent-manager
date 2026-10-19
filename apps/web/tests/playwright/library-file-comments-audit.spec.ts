@@ -65,6 +65,7 @@ const MOCK_SESSION = {
   isIdle: false,
   agentCompletedAt: null,
   agentSessionId: null,
+  viewerAccess: 'owner',
   agentType: 'claude-code',
 };
 

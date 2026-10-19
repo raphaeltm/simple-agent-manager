@@ -53,6 +53,7 @@ function makeChatSession(overrides: Partial<{
     topic: overrides.topic ?? 'Implement file browsing feature',
     workspaceId: overrides.workspaceId ?? 'ws-test-1',
     agentSessionId: overrides.agentSessionId ?? 'as-1',
+    viewerAccess: 'owner',
     isIdle: overrides.isIdle ?? false,
     agentCompletedAt: null,
     task: {

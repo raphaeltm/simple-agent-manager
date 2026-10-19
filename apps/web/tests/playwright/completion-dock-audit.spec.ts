@@ -118,6 +118,7 @@ function makeSession(status: 'active' | 'sleeping' = 'active') {
     workspaceUrl: null,
     cleanupAt: null,
     agentSessionId: 'agent-sess-1',
+    viewerAccess: 'owner',
     agentType: 'claude-code',
     task: null,
   };

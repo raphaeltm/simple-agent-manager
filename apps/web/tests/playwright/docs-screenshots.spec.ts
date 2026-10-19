@@ -250,6 +250,7 @@ const REPORT_SESSION = {
   isIdle: false,
   isTerminated: false,
   agentSessionId: 'acp-1',
+  viewerAccess: 'owner',
   agentType: 'claude-code',
   task: {
     id: '01K9TASKB2YH7VC1KG8XPMR40D',

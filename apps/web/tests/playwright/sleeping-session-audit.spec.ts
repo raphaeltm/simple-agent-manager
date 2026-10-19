@@ -57,6 +57,8 @@ const SESSION = {
   createdAt: Date.parse('2026-01-15T10:00:00Z'),
   updatedAt: Date.parse('2026-01-15T10:05:00Z'),
   stoppedAt: null,
+  // The viewer started this chat; an unknown viewer would get the read-only view.
+  viewerAccess: 'owner',
 };
 
 const MESSAGES = [

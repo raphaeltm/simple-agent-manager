@@ -59,6 +59,7 @@ function makeSession(overrides: { id: string; topic?: string; status?: string })
     workspaceUrl: null,
     cleanupAt: null,
     agentSessionId: null,
+    viewerAccess: 'owner',
   };
 }
 

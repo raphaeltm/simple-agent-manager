@@ -57,6 +57,7 @@ function makeSession(scenario: RecoveryScenario) {
     isIdle: idle,
     agentCompletedAt: idle ? NOW - 60_000 : null,
     agentSessionId: AGENT_SESSION_ID,
+    viewerAccess: 'owner',
     agentType: 'codex',
   };
 }

@@ -61,6 +61,7 @@ function makeChatSession() {
     topic: 'A very long conversation used to measure rendered DOM weight',
     workspaceId: 'ws-bound-1',
     agentSessionId: 'as-1',
+    viewerAccess: 'owner',
     isIdle: false,
     agentCompletedAt: null,
     createdAt: '2026-03-20T10:00:00Z',

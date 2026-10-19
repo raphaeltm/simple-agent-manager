@@ -160,6 +160,7 @@ const ACTIVE_SESSION = {
   workspaceUrl: null,
   cleanupAt: null,
   agentSessionId: 'agent-session-1',
+  viewerAccess: 'owner',
   task: {
     id: 'task-composer-1',
     status: 'in_progress',

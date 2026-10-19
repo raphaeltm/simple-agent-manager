@@ -510,6 +510,7 @@ test.describe('Archived chat Fork composer audit', () => {
     await expect(page.getByPlaceholder('Write a prompt to fork this archived chat...')).toHaveCount(
       0
     );
-    await expect(page.getByText('Read-only session')).toBeVisible();
+    await expect(page.getByText('This chat has ended')).toBeVisible();
+    await expect(page.getByText('Only Test User can fork it to continue.')).toBeVisible();
   });
 });

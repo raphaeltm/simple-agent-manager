@@ -69,6 +69,7 @@ async function openDiagrams(page: Page) {
       isIdle: false,
       agentCompletedAt: null,
       agentSessionId: null,
+      viewerAccess: 'owner',
       agentType: 'claude-code',
     },
     messages: [DIAGRAMS_MESSAGE],

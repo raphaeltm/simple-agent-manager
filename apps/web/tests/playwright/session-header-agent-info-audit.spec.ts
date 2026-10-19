@@ -100,6 +100,7 @@ function makeSession(overrides: Partial<Record<string, unknown>> = {}) {
     isIdle: false,
     isTerminated: false,
     agentSessionId: 'acp-session-1',
+    viewerAccess: 'owner',
     agentType: 'claude-code',
     task: {
       id: 'task-1',

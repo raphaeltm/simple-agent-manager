@@ -192,6 +192,7 @@ const SESSION = {
   isIdle: false,
   agentCompletedAt: null,
   agentSessionId: 'acp-user-actions',
+  viewerAccess: 'owner',
   agentType: 'claude-code',
 };
 

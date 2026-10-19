@@ -31,6 +31,7 @@ const SESSION = {
   isIdle: false,
   agentCompletedAt: null,
   agentSessionId: null,
+  viewerAccess: 'owner',
   agentType: 'openai-codex',
 };
 

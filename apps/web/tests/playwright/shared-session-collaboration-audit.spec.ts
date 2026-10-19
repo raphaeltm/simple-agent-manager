@@ -335,7 +335,10 @@ test.describe('Shared session collaboration', () => {
     const captured = await setupMocks(page, 'owner');
     await openChat(page);
 
-    await page.getByRole('button', { name: 'Add comment on message msg-7' }).click();
+    await page
+      .locator('[data-conversation-item-id="msg-7"]')
+      .getByRole('button', { name: 'Comment on this message' })
+      .click();
     // Desktop opens the docked rail; below `lg` the composer is inline under the message.
     // Both exist in the DOM, so always act on the one a person can see.
     const field = page.getByLabel('Add a comment…').filter({ visible: true }).first();
@@ -372,7 +375,10 @@ test.describe('Shared session collaboration', () => {
     await setupMocks(page, 'reader');
     await openChat(page);
 
-    await page.getByRole('button', { name: 'Add comment on message msg-7' }).click();
+    await page
+      .locator('[data-conversation-item-id="msg-7"]')
+      .getByRole('button', { name: 'Comment on this message' })
+      .click();
     const field = page.getByLabel('Add a comment…').filter({ visible: true }).first();
     const form = page.locator('form').filter({ has: field });
     await expect(
