@@ -262,7 +262,7 @@ Enforcement points:
 **Remaining risk.** A grantee who can prompt the agent can ask it to print anything in its environment and keep using it after their access is revoked. SAM cannot prevent this while the grantee controls the agent. What the agent holds:
 
 - The owner's agent credential: an API key or Claude/Codex OAuth token (`packages/vm-agent/internal/acp/process.go`). A chat on a project credential holds the project's key instead; a chat on the SAM AI proxy holds only a placeholder.
-- Git access from the workspace credential helper (`POST /api/workspaces/:id/git-token` in `apps/api/src/routes/workspaces/runtime.ts`). For GitHub it is an installation token scoped to the project repository that expires within an hour. For GitLab it is the owner's personal GitLab OAuth access token.
+- Git access from the workspace credential helper (`POST /api/workspaces/:id/git-token` in `apps/api/src/routes/workspaces/runtime.ts`). For GitHub it is an installation token scoped to the project repository that expires within an hour. For GitLab it is the owner's personal GitLab OAuth access token. It carries GitLab's `api` scope (requested in `apps/api/src/auth.ts`), so it reaches every GitLab project the owner can, not only this one.
 - The workspace's SAM MCP token, which acts as the owner in this project's MCP tools (8-hour sliding window, 24-hour maximum; `apps/api/src/services/mcp-token.ts`).
 
 The share dialog says so, and the server requires the owner to acknowledge it (`acknowledgeSharedCredentials` on `POST /api/projects/:id/sessions/:sessionId/access/grants`).

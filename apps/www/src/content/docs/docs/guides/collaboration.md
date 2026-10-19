@@ -154,8 +154,8 @@ Before you share, know what it means:
   is billed to the owner.
 - **The agent can read the owner's keys**, so a teammate who drives it can ask it to print them and
   keep using them after their access ends. That is the owner's AI key or Claude/Codex sign-in, and
-  on GitLab projects the owner's GitLab sign-in. On GitHub projects the agent only has a one-hour
-  token for the project's repository. Share only with people you trust. SAM asks you to confirm
+  on GitLab projects the owner's GitLab sign-in, which reaches all of the owner's GitLab projects.
+  On GitHub projects the agent only has a one-hour token for the project's repository. Share only with people you trust. SAM asks you to confirm
   before it shares.
 - **There is no end date.** Access lasts until someone removes it.
 - **It covers that one chat.** It gives no access to the owner's other chats, settings or keys.
