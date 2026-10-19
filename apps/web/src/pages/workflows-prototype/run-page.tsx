@@ -90,7 +90,10 @@ function Tab({
 }
 
 function AboutRun({ run, frame }: { run: RunDef; frame: RunFrame }) {
-  const chats = run.steps.filter((s) => s.kind === 'agent' && frame.steps[s.key]?.started);
+  const notStarted = ['waiting', 'up_next', 'blocked'];
+  const chats = run.steps.filter(
+    (s) => s.kind === 'agent' && !notStarted.includes(frame.steps[s.key]?.status ?? 'waiting')
+  );
   const outputs = [
     ...new Map(
       run.steps

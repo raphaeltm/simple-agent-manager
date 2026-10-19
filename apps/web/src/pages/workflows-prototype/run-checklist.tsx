@@ -6,6 +6,7 @@
  */
 import { Button } from '@simple-agent-manager/ui';
 import { CornerDownRight, Hand, RotateCcw, SkipForward } from 'lucide-react';
+import { useState } from 'react';
 
 import {
   afterLine,
@@ -14,6 +15,7 @@ import {
   type RunDef,
   type RunFrame,
   type StepDef,
+  type StepStatus,
 } from './model';
 import { EvidenceChip, ProfileChip, STEP_META, StepIcon } from './status-ui';
 
@@ -197,6 +199,38 @@ export function StepRow({
   );
 }
 
+/** Large parallel groups fold finished and queued steps so the ones that matter stay visible. */
+const FOLD_THRESHOLD = 6;
+const FOLD_DONE: StepStatus[] = ['done', 'approved', 'skipped'];
+const FOLD_LATER: StepStatus[] = ['waiting', 'up_next', 'blocked', 'cancelled'];
+
+function FoldRow({
+  status,
+  count,
+  label,
+  onShow,
+}: {
+  status: StepStatus;
+  count: number;
+  label: string;
+  onShow: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onShow}
+      className="w-full flex items-center gap-2.5 rounded-lg border border-dashed border-border-default bg-transparent px-3 py-2 text-left cursor-pointer hover:border-accent/50"
+      data-testid="fold-row"
+    >
+      <StepIcon status={status} size={16} />
+      <span className="text-sm text-fg-primary">
+        {count} {label}
+      </span>
+      <span className="ml-auto text-xs text-accent">Show</span>
+    </button>
+  );
+}
+
 export function RunChecklist({
   run,
   frame,
@@ -218,42 +252,78 @@ export function RunChecklist({
 }) {
   const layers = layerSteps(run.steps);
   const order = new Map(layers.flat().map((s, i) => [s.key, i + 1]));
+  const [unfolded, setUnfolded] = useState<Set<string>>(new Set());
+  const statusOf = (k: string): StepStatus => frame.steps[k]?.status ?? 'waiting';
 
   return (
     <ol className="flex flex-col gap-4 list-none p-0 m-0" aria-label="Steps">
-      {layers.map((layer, li) => (
-        <li key={layer.map((s) => s.key).join('-')} className="min-w-0">
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-fg-muted whitespace-nowrap">
-              {layerLabel(li, layers.length, layer)}
-            </span>
-            <span className="h-px flex-1 bg-[linear-gradient(90deg,var(--sam-color-border-default),transparent)]" />
-            {layer.length > 1 && (
-              <span className="text-[10px] text-fg-muted whitespace-nowrap">
-                {layer.length} steps · up to {run.maxParallel} at once
+      {layers.map((layer, li) => {
+        const layerKey = layer.map((s) => s.key).join('-');
+        const fold = layer.length > FOLD_THRESHOLD;
+        const done = layer.filter((s) => FOLD_DONE.includes(statusOf(s.key)));
+        const later = layer.filter((s) => FOLD_LATER.includes(statusOf(s.key)));
+        const showDone = !fold || unfolded.has(`${layerKey}:done`);
+        const showLater = !fold || unfolded.has(`${layerKey}:later`);
+        const visible = layer.filter((s) => {
+          const st = statusOf(s.key);
+          if (FOLD_DONE.includes(st)) return showDone;
+          if (FOLD_LATER.includes(st)) return showLater;
+          return true;
+        });
+        const unfold = (part: string) =>
+          setUnfolded((prev) => new Set(prev).add(`${layerKey}:${part}`));
+        return (
+          <li key={layerKey} className="min-w-0">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-fg-muted whitespace-nowrap">
+                {layerLabel(li, layers.length, layer)}
               </span>
-            )}
-          </div>
-          <div
-            className={`grid gap-2 min-w-0 ${sideBySide && layer.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}
-          >
-            {layer.map((step) => (
-              <StepRow
-                key={step.key}
-                step={step}
-                number={order.get(step.key) ?? 0}
-                frame={frame}
-                after={afterLine(step, layers[li - 1], run.steps)}
-                selected={selectedKey === step.key}
-                onSelect={onSelect}
-                onDecide={onDecide}
-                onRetry={onRetry}
-                onSkip={onSkip}
-              />
-            ))}
-          </div>
-        </li>
-      ))}
+              <span className="h-px flex-1 bg-[linear-gradient(90deg,var(--sam-color-border-default),transparent)]" />
+              {layer.length > 1 && (
+                <span className="text-[10px] text-fg-muted whitespace-nowrap">
+                  {layer.length} steps · up to {run.maxParallel} at once
+                </span>
+              )}
+            </div>
+            <div className="flex flex-col gap-2 min-w-0">
+              {fold && !showDone && done.length > 0 && (
+                <FoldRow
+                  status="done"
+                  count={done.length}
+                  label="done"
+                  onShow={() => unfold('done')}
+                />
+              )}
+              <div
+                className={`grid gap-2 min-w-0 ${sideBySide && visible.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}
+              >
+                {visible.map((step) => (
+                  <StepRow
+                    key={step.key}
+                    step={step}
+                    number={order.get(step.key) ?? 0}
+                    frame={frame}
+                    after={afterLine(step, layers[li - 1], run.steps)}
+                    selected={selectedKey === step.key}
+                    onSelect={onSelect}
+                    onDecide={onDecide}
+                    onRetry={onRetry}
+                    onSkip={onSkip}
+                  />
+                ))}
+              </div>
+              {fold && !showLater && later.length > 0 && (
+                <FoldRow
+                  status={statusOf(later[0]?.key ?? '')}
+                  count={later.length}
+                  label="still to come"
+                  onShow={() => unfold('later')}
+                />
+              )}
+            </div>
+          </li>
+        );
+      })}
     </ol>
   );
 }

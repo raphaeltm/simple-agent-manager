@@ -244,7 +244,7 @@ export function OptionCRunbook() {
           <Breadcrumb
             segments={[
               { label: 'Library', path: p('c/runbook') },
-              { label: 'runbooks', path: p('c/runbook') },
+              { label: 'runbooks', path: p('c/runbook?dir=runbooks') },
               { label: 'code-change-with-review.md' },
             ]}
           />
