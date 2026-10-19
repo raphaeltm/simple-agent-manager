@@ -543,6 +543,68 @@ describe('useChatWebSocket (behavioral)', () => {
     );
   });
 
+  it('catches up when a chat that was asleep wakes and its socket opens', async () => {
+    // Loaded asleep: the socket is off, then the chat wakes (say, a comment sent to the agent).
+    // The row that woke it was broadcast before this socket existed.
+    const onCatchUp = vi.fn();
+    const { rerender } = renderHook(
+      ({ enabled }) => useChatWebSocket({ ...defaultProps, enabled, onCatchUp }),
+      { initialProps: { enabled: false } }
+    );
+    expect(MockWebSocket.instances).toHaveLength(0);
+
+    rerender({ enabled: true });
+    await act(async () => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onCatchUp).toHaveBeenCalledTimes(1);
+    expect(onCatchUp).toHaveBeenLastCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'msg-catchup-1' })]),
+      expect.any(Object),
+      undefined
+    );
+  });
+
+  it('catches up after a sleep in the middle of a session, and only once per wake', async () => {
+    const onCatchUp = vi.fn();
+    const { rerender } = renderHook(
+      ({ enabled }) => useChatWebSocket({ ...defaultProps, enabled, onCatchUp }),
+      { initialProps: { enabled: true } }
+    );
+    await act(async () => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      await Promise.resolve();
+    });
+    // The first open of an active chat leaves loading to the initial REST load.
+    expect(onCatchUp).toHaveBeenCalledTimes(0);
+
+    rerender({ enabled: false });
+    rerender({ enabled: true });
+    await act(async () => {
+      MockWebSocket.instances[1]!.simulateOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onCatchUp).toHaveBeenCalledTimes(1);
+
+    // A reconnect afterwards still catches up, as before.
+    act(() => {
+      MockWebSocket.instances[1]!.simulateClose(1006);
+    });
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    await act(async () => {
+      MockWebSocket.instances[2]!.simulateOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onCatchUp).toHaveBeenCalledTimes(2);
+  });
+
   it('stale onclose does not null the new active socket (BUG-2 fix)', () => {
     const { result } = renderHook(() => useChatWebSocket({ ...defaultProps }));
 

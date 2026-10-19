@@ -30,7 +30,7 @@ interface UseChatWebSocketOptions {
   onMessage: (msg: ChatMessageResponse) => void;
   /** Called when the session is stopped server-side. */
   onSessionStopped: () => void;
-  /** Called when we catch up with missed messages after reconnect. */
+  /** Called with missed messages after a reconnect, or after the socket was off (a wake). */
   onCatchUp: (
     messages: ChatMessageResponse[],
     session: ChatSessionResponse,
@@ -99,6 +99,10 @@ export function useChatWebSocket({
   const mountedRef = useRef(true);
   const connectRef = useRef<() => void>(() => {});
   const hadConnectionRef = useRef(false);
+  // The socket was switched off (a sleeping chat) and has not opened since. Rows persisted
+  // meanwhile, such as a teammate's prompt or a comment sent to the agent that woke the chat,
+  // were broadcast to no socket, so the next open must catch up.
+  const offSinceLastOpenRef = useRef(false);
 
   // Keep callbacks stable via refs
   const onMessageRef = useRef(onMessage);
@@ -167,15 +171,19 @@ export function useChatWebSocket({
           return;
         }
         const wasReconnect = hadConnectionRef.current;
+        const wasOff = offSinceLastOpenRef.current;
         retriesRef.current = 0;
         setConnectionState('connected');
         hadConnectionRef.current = true;
+        offSinceLastOpenRef.current = false;
 
-        // Only catch up on reconnect — the initial REST load (loadSession)
-        // already fetches messages, so a duplicate catch-up on first connect
-        // races with it and can overwrite messages via the 'replace' merge
-        // strategy, causing them to briefly appear then disappear.
-        if (wasReconnect) {
+        // Catch up on a reconnect, and on the first open after the socket was off: it opens
+        // then only because the chat woke, after the initial REST load gave its status, and
+        // anything persisted while it was off reached no socket. The very first open of an
+        // already-active chat skips it: the initial REST load (loadSession) is still in
+        // flight, and a duplicate catch-up racing it can overwrite messages via the
+        // 'replace' merge strategy, so they briefly appear then disappear.
+        if (wasReconnect || wasOff) {
           void catchUpMessages();
         }
       };
@@ -397,6 +405,7 @@ export function useChatWebSocket({
       clearTimeout(pongTimeoutRef.current);
       setConnectionState('disconnected');
       hadConnectionRef.current = false;
+      offSinceLastOpenRef.current = true;
       retriesRef.current = 0;
       return;
     }
