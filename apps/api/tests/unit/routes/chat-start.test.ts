@@ -162,8 +162,12 @@ describe('chatStartRoutes', () => {
     );
   });
 
-  it('keeps a fork on the direct cf-container path with lineage and inherited attribution', async () => {
-    const parentDb = {
+  function parentTaskDb(parent: {
+    userId: string;
+    credentialAttributionUserId: string;
+    credentialAttributionSource: string;
+  }) {
+    return {
       ...db,
       select: vi.fn(() => ({
         from: vi.fn(() => ({
@@ -172,21 +176,20 @@ describe('chatStartRoutes', () => {
               {
                 id: 'parent-task',
                 projectId: 'project-1',
-                userId: 'source-user',
                 parentTaskId: null,
-                credentialAttributionUserId: 'source-user',
                 credentialAttributionProjectId: null,
-                credentialAttributionSource: 'platform',
+                ...parent,
               },
             ]),
           })),
         })),
       })),
     };
-    mocks.drizzle.mockReturnValueOnce(parentDb);
-    const app = makeApp();
+  }
 
-    const res = await app.request(
+  async function forkParent(parentDb: ReturnType<typeof parentTaskDb>) {
+    mocks.drizzle.mockReturnValueOnce(parentDb);
+    return makeApp().request(
       `${BASE_URL}${REQUEST_PATH}`,
       {
         method: 'POST',
@@ -200,12 +203,22 @@ describe('chatStartRoutes', () => {
       },
       makeEnv()
     );
+  }
+
+  it('keeps a fork of your own task on the direct cf-container path with lineage and inherited attribution', async () => {
+    const parentDb = parentTaskDb({
+      userId: 'user-1',
+      credentialAttributionUserId: 'user-1',
+      credentialAttributionSource: 'platform',
+    });
+
+    const res = await forkParent(parentDb);
 
     expect(res.status).toBe(202);
     expect(parentDb.insert.mock.results[0]?.value.values).toHaveBeenCalledWith(
       expect.objectContaining({
         parentTaskId: 'parent-task',
-        credentialAttributionUserId: 'source-user',
+        credentialAttributionUserId: 'user-1',
         credentialAttributionSource: 'platform',
       })
     );
@@ -217,6 +230,25 @@ describe('chatStartRoutes', () => {
         contextSummary: ['## Fork Context', 'Source summary'].join(String.fromCharCode(10)),
       })
     );
+  });
+
+  it('bills the caller, never the parent owner, when forking a teammate task (gap G5)', async () => {
+    const parentDb = parentTaskDb({
+      userId: 'source-user',
+      credentialAttributionUserId: 'source-user',
+      credentialAttributionSource: 'platform',
+    });
+
+    const res = await forkParent(parentDb);
+
+    expect(res.status).toBe(202);
+    const inserted = parentDb.insert.mock.results[0]?.value.values.mock.calls[0]?.[0];
+    expect(inserted).toMatchObject({
+      parentTaskId: 'parent-task',
+      credentialAttributionUserId: 'user-1',
+      credentialAttributionSource: 'user',
+    });
+    expect(inserted.credentialAttributionUserId).not.toBe('source-user');
   });
 
   it('returns conflict when the selected runtime resolves to vm', async () => {

@@ -244,11 +244,16 @@ export async function invalidProjectEventWakeSourceTaskResult(
  * session owner or an active grantee when it is delivered, not only when it was queued.
  * Revocation already fails that sender's undelivered prompts in the same transaction; this
  * fence covers any path that left one behind (idea 01M59MYE4GY91BWTE8TZF1ZB5D).
+ *
+ * Only submit claims are fenced. A reconcile claim reads the receipt of a prompt that was
+ * already handed to the agent; failing it would label a prompt the agent may have received
+ * as undelivered.
  */
 export function invalidSessionWriterSenderResult(
   sql: SqlStorage,
   claim: PromptDeliveryClaim
 ): PromptDeliveryResult | null {
+  if (claim.mode !== 'submit') return null;
   const denied = senderLacksSessionAccess(sql, claim.message);
   if (!denied) return null;
   return {

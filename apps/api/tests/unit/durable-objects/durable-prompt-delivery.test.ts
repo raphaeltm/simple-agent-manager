@@ -96,9 +96,12 @@ describe('ProjectData durable prompt delivery', () => {
     sql = createSqlStorage(db);
     runMigrations(sql);
     sql.exec(
+      // Owned by the human sender: production only queues human follow-ups from the session
+      // owner or an active grantee, and the delivery runner re-checks that before sending.
       `INSERT INTO chat_sessions
-       (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
-       VALUES ('chat-1', 'workspace-1', 'Test', 'active', 0, 10000, 10000, 10000)`
+       (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at,
+        created_by_user_id)
+       VALUES ('chat-1', 'workspace-1', 'Test', 'active', 0, 10000, 10000, 10000, 'user-1')`
     );
   });
 

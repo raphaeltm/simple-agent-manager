@@ -99,9 +99,10 @@ there too. Open the chat and look for one of these:
 - **SAM's notice that it paused check-ins.** See
   [SAM paused automatic check-ins](#sam-paused-automatic-check-ins).
 
-Only the person who started the chat can answer a card. If you're someone else in a
-[shared project](/docs/guides/collaboration/), the card says it is waiting for the session creator:
-ask them (the session list shows who started it).
+Only the person who started the chat, and anyone they
+[shared it with](/docs/guides/collaboration/#share-a-chat), can answer a card. If you're someone
+else in a [shared project](/docs/guides/collaboration/), the card says it is waiting for the session
+creator: ask them (the session list shows who started it), or ask them to share the chat with you.
 
 If an agent keeps asking about every command when you don't want it to, see
 [An agent asks when you don't expect it](/docs/guides/agents/#an-agent-asks-when-you-dont-expect-it).

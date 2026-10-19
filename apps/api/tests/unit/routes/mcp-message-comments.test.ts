@@ -201,6 +201,72 @@ describe('MCP message comment tools', () => {
     });
   });
 
+  it('labels every thread and reply with its author role in this session', async () => {
+    // The MCP token belongs to the session owner (user-1). Teammates can comment on any
+    // session, so the agent must be able to tell their comments from the owner's.
+    const ownerThread = makeSummary({
+      id: 'thread-owner',
+      author: { kind: 'human', id: 'user-1', displayName: 'Owner' },
+    });
+    const memberThread = makeSummary({ id: 'thread-member' });
+    const agentThread = makeSummary({
+      id: 'thread-agent',
+      author: { kind: 'agent', id: 'agent-session-1', displayName: 'SAM agent' },
+    });
+    const storage = makeStorage({
+      listThreads: vi.fn().mockResolvedValue({
+        threads: [ownerThread, memberThread, agentThread],
+        nextCursor: null,
+        hasMore: false,
+      }),
+      getThread: vi.fn().mockResolvedValue(
+        makeThread({
+          id: 'thread-member',
+          replies: [
+            {
+              id: 'reply-owner',
+              body: 'Agreed, please do this',
+              author: { kind: 'human', id: 'user-1', displayName: 'Owner' },
+              createdAt: 1100,
+            },
+            {
+              id: 'reply-member',
+              body: 'Also rename the flag',
+              author: { kind: 'human', id: 'user-3', displayName: 'Teammate' },
+              createdAt: 1200,
+            },
+          ],
+        })
+      ),
+    });
+
+    const listed = parseToolResponse(
+      await handleListMessageCommentThreads(1, {}, makeToken(), makeEnv(), storage)
+    ) as { threads: Array<{ id: string; authorRole: string }> };
+    expect(listed.threads.map((thread) => [thread.id, thread.authorRole])).toEqual([
+      ['thread-owner', 'session_owner'],
+      ['thread-member', 'project_member'],
+      ['thread-agent', 'agent'],
+    ]);
+
+    const fetched = parseToolResponse(
+      await handleGetMessageCommentThread(
+        1,
+        { threadId: 'thread-member' },
+        makeToken(),
+        makeEnv(),
+        storage
+      )
+    ) as {
+      thread: { authorRole: string; replies: Array<{ id: string; authorRole: string }> };
+    };
+    expect(fetched.thread.authorRole).toBe('project_member');
+    expect(fetched.thread.replies.map((reply) => [reply.id, reply.authorRole])).toEqual([
+      ['reply-owner', 'session_owner'],
+      ['reply-member', 'project_member'],
+    ]);
+  });
+
   it('rejects cross-session tool arguments before storage access', async () => {
     const storage = makeStorage();
 

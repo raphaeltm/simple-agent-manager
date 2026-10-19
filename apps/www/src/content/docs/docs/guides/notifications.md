@@ -1,21 +1,24 @@
 ---
 title: Notifications
-description: In-app and Web Push notifications in SAM — task completion, questions agents send with the request_human_input tool, progress updates, and out-of-band delivery.
+description: In-app and Web Push notifications in SAM — task completion, questions agents send with the request_human_input tool, comments, mentions and shared chats, progress updates, and out-of-band delivery.
 ---
 
 SAM combines an in-app notification center with optional Web Push delivery for agent progress and activity.
 
 ## Notification Types
 
-| Type              | Urgency | When It Fires                                                                                                                              |
-| ----------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **task_complete** | Medium  | A task finishes executing successfully (includes PR URL or branch name)                                                                    |
-| **needs_input**   | High    | An agent calls `request_human_input` because it needs your decision                                                                        |
-| **error**         | High    | Execution fails with an error                                                                                                              |
-| **progress**      | Low     | An agent reports incremental progress via `update_task_status`                                                                             |
-| **session_ended** | Medium  | A conversation-mode session turn completes                                                                                                 |
-| **pr_created**    | Medium  | An agent creates a pull request                                                                                                            |
-| **cron_failure**  | High    | A five-minute operational recovery sweep fails, or a sweep opens a project's ProjectData archive circuit breaker (active superadmins only) |
+| Type               | Urgency | When It Fires                                                                                                                              |
+| ------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **task_complete**  | Medium  | A task finishes executing successfully (includes PR URL or branch name)                                                                    |
+| **needs_input**    | High    | An agent calls `request_human_input` because it needs your decision                                                                        |
+| **error**          | High    | Execution fails with an error                                                                                                              |
+| **progress**       | Low     | An agent reports incremental progress via `update_task_status`                                                                             |
+| **session_ended**  | Medium  | A conversation-mode session turn completes                                                                                                 |
+| **pr_created**     | Medium  | An agent creates a pull request                                                                                                            |
+| **cron_failure**   | High    | A five-minute operational recovery sweep fails, or a sweep opens a project's ProjectData archive circuit breaker (active superadmins only) |
+| **mention**        | Medium  | A teammate @mentions you in a chat comment or reply                                                                                        |
+| **comment**        | Low     | A teammate comments on a chat you own, or replies in a comment thread you are part of                                                      |
+| **session_access** | Medium  | A teammate shares a chat with you, removes your access to one, or shares a chat you own with someone else                                  |
 
 A permission request, question, or link card that an agent puts in the chat while it waits does
 **not** send a notification. Those show up as **Needs input** beside the chat in the project's
@@ -94,6 +97,10 @@ SAM automatically deduplicates notifications:
 
 - `task_complete` notifications are deduplicated within a 60-second window (configurable via `NOTIFICATION_DEDUP_WINDOW_MS`)
 - Progress notifications are batched per task per 5-minute window
+- `mention` notifications are sent once per mention. `comment` notifications are grouped per chat:
+  each person gets at most one per chat in a 10-minute window (the
+  `collaboration.commentNotificationWindowSeconds` [admin setting](/docs/guides/admin-settings/)).
+  Nobody is notified about their own comment, and a person who is mentioned gets only the mention.
 - `cron_failure` notifications are throttled per sweep name. KV provides the
   expiring coarse marker, and an atomic per-user Notification Durable Object
   claim guarantees that overlapping cron invocations do not send duplicates.

@@ -45,8 +45,8 @@ function rows(enabled: boolean): AdminSettingOverrideRow[] {
 
 describe('Phase 1 settings registry', () => {
   it('covers bounded Phase 1 controls and reuses Connector defaults', () => {
-    expect(new Set(ADMIN_SETTINGS_REGISTRY.map((setting) => setting.name)).size).toBe(23);
-    expect(ADMIN_SETTINGS_REGISTRY).toHaveLength(23);
+    expect(new Set(ADMIN_SETTINGS_REGISTRY.map((setting) => setting.name)).size).toBe(26);
+    expect(ADMIN_SETTINGS_REGISTRY).toHaveLength(26);
     for (const [key, value] of Object.entries(CONNECTOR_DEFAULTS)) {
       const definition = findAdminSetting(`connector.${key}`)!;
       expect(definition.defaultValue).toEqual(value);
@@ -56,6 +56,11 @@ describe('Phase 1 settings registry', () => {
     expect(findAdminSetting('operations.cronSweepsEnabled')?.defaultValue).toBe(true);
     expect(findAdminSetting('operations.doAlarmsEnabled')?.defaultValue).toBe(true);
     expect(findAdminSetting('operations.stalledTaskClassifierEnabled')?.defaultValue).toBe(true);
+    expect(findAdminSetting('collaboration.sessionAccessMaxGrants')?.defaultValue).toBe(10);
+    expect(findAdminSetting('collaboration.commentMentionsMax')?.defaultValue).toBe(10);
+    expect(findAdminSetting('collaboration.commentNotificationWindowSeconds')?.defaultValue).toBe(
+      600
+    );
     expect(findAdminSetting('feedback.projectId')).toBeUndefined();
     expect(findAdminSetting('integration.github.appPrivateKey')).toBeUndefined();
     expect(findAdminSetting('__proto__')).toBeUndefined();

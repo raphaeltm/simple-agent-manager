@@ -37,9 +37,10 @@ session list. The agent is paused until you answer.
 
 For every kind of request:
 
-- **Only the person who started the chat can answer.** In a
+- **Only the person who started the chat can answer**, plus anyone they
+  [shared the chat with](/docs/guides/collaboration/#share-a-chat). In a
   [shared project](/docs/guides/collaboration/), other members see that the agent is waiting, but
-  not what it asked or what you answered.
+  not what it asked or what was answered.
 - **No notification is sent.** Watch the session list for **Needs input**; on a phone, open the list
   with the list icon at the right of the project-name bar. (Notifications cover a different kind of
   question, the one agents ask with their `request_human_input` tool — see
@@ -195,24 +196,26 @@ features on this page are opened from. (The session's lifecycle controls — Int
 Archive — and the agent's plan sit in the dock just above the composer instead, because they act on
 the conversation you are in rather than opening something beside it.)
 
-| Tool          | What it opens                                                                                                                                                      | When it appears                                          |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
-| **Files**     | The workspace file browser — [File Browsing](#file-browsing)                                                                                                       | While the session is live and has a workspace            |
-| **Git**       | Uncommitted changes in the workspace                                                                                                                               | While the session is live and has a workspace            |
-| **Timeline**  | A jump list through the session's history                                                                                                                          | Always                                                   |
-| **Resources** | CPU, memory, I/O, and OOM history — [Session Resource History](/docs/guides/session-resources/)                                                                    | Always                                                   |
-| **Events**    | This session's subscriptions, schedules, and watches — [Scheduled actions](/docs/guides/scheduled-actions/)                                                        | Always                                                   |
-| **Comments**  | Comment threads on this session. Unresolved threads show as a dot in icons mode and a count in labels mode; the marker turns amber when a thread is waiting on you | Always                                                   |
-| **Retry**     | Start a new chat with the original task prompt — [Retrying a Session](#retrying-a-session)                                                                         | When the session has a task, unless the chat has expired |
-| **Fork**      | Start a new chat that can read this one — [Conversation Forking](#conversation-forking)                                                                            | When the session has a task                              |
-| **Report**    | File a problem report — [Reporting Issues](/docs/guides/reporting-issues/)                                                                                         | When the deployment has reporting configured             |
-| **Complete**  | Mark the task complete                                                                                                                                             | When the session has a task that is not already finished |
-| **Details**   | Session identifiers and the infrastructure it ran on                                                                                                               | Always                                                   |
+| Tool          | What it opens                                                                                                                                                      | When it appears                                                   |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| **Files**     | The workspace file browser — [File Browsing](#file-browsing)                                                                                                       | While the session is live and has a workspace                     |
+| **Git**       | Uncommitted changes in the workspace                                                                                                                               | While the session is live and has a workspace                     |
+| **Timeline**  | A jump list through the session's history                                                                                                                          | Always                                                            |
+| **Resources** | CPU, memory, I/O, and OOM history — [Session Resource History](/docs/guides/session-resources/)                                                                    | Always                                                            |
+| **Events**    | This session's subscriptions, schedules, and watches — [Scheduled actions](/docs/guides/scheduled-actions/)                                                        | Always                                                            |
+| **Comments**  | Comment threads on this session. Unresolved threads show as a dot in icons mode and a count in labels mode; the marker turns amber when a thread is waiting on you | Always                                                            |
+| **Share**     | Who else can drive this chat, and controls to add or remove people — [Share a chat](/docs/guides/collaboration/#share-a-chat)                                      | Always; only the owner and people it is shared with can change it |
+| **Retry**     | Start a new chat with the original task prompt — [Retrying a Session](#retrying-a-session)                                                                         | When the session has a task, unless the chat has expired          |
+| **Fork**      | Start a new chat that can read this one — [Conversation Forking](#conversation-forking)                                                                            | When the session has a task                                       |
+| **Report**    | File a problem report — [Reporting Issues](/docs/guides/reporting-issues/)                                                                                         | When the deployment has reporting configured                      |
+| **Complete**  | Mark the task complete                                                                                                                                             | When the session has a task that is not already finished          |
+| **Details**   | Session identifiers and the infrastructure it ran on                                                                                                               | Always                                                            |
 
 ![The session tool rail in icons-and-labels mode, listing Files, Git, Timeline, Resources, Events and Comments, then Retry and Fork after a divider, with Report, Complete and Details pinned at the bottom.](/images/docs/session-tool-rail.png)
 
 **Files** and **Git** need a linked workspace and a live session, so they disappear once the
-session sleeps or stops. Everything else stays, which matters: inspecting resources, reading the
+session sleeps or stops. They are also only for the chat's owner: someone the chat is shared with
+doesn't see them. Everything else stays, which matters: inspecting resources, reading the
 timeline, or reporting a problem is usually something you want to do _after_ a session has ended.
 
 The rail is grouped by what each tool acts on: the workspace and its history at the top, the task
@@ -548,7 +551,7 @@ An unsent message in the composer stays with its chat when you switch to another
 
 In a project shared with teammates, everyone's chat sessions appear in the same session list. A filter near the session search lets you switch between **my sessions** and **all sessions** so you can focus on your own work or see everything happening in the project.
 
-For the full team workflow — inviting people, approving access, roles, and shared resources — see [Collaboration & Shared Projects](/docs/guides/collaboration/).
+For the full team workflow — inviting people, approving access, roles, and shared resources — see [Collaboration & Shared Projects](/docs/guides/collaboration/). To comment on a teammate's chat, mention someone, or drive a chat together, see [Work together in a chat](/docs/guides/collaboration/#work-together-in-a-chat).
 
 ## Focus Mode
 

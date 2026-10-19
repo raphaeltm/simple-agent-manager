@@ -1,27 +1,51 @@
 import type { AgentMailboxMessage, MessageCommentThread } from '@simple-agent-manager/shared';
-import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
-import { registerChatCommentDirectiveRoute } from '../../../src/routes/chat-comment-directives';
+import { chatCommentRoutes } from '../../../src/routes/chat-comments';
+
+/**
+ * "Send to agent" (`POST .../comments/:threadId/send`) is the only way a comment reaches the
+ * agent, and it queues a prompt on the session owner's agent and credentials. Gap G2: it used
+ * to check only project membership. These tests drive the real route and the real
+ * ProjectData service over a stubbed Durable Object.
+ */
+
+const mocks = vi.hoisted(() => ({
+  userId: 'human-1',
+  hasProjectCapability: vi.fn(),
+  requireRepositoryAccess: vi.fn(),
+}));
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn(() => ({ mockedDb: true })),
 }));
 
 vi.mock('../../../src/middleware/auth', () => ({
-  getUserId: vi.fn(() => 'human-1'),
+  getUserId: vi.fn(() => mocks.userId),
+  getAuth: vi.fn(() => ({
+    user: { id: mocks.userId, email: `${mocks.userId}@example.com`, name: `Name ${mocks.userId}` },
+  })),
 }));
 
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireProjectCapability: vi.fn().mockResolvedValue(undefined),
+  requireProjectCapability: vi.fn().mockResolvedValue({
+    id: 'project-1',
+    repository: 'acme/app',
+    repoProvider: 'github',
+  }),
+  hasProjectCapability: mocks.hasProjectCapability,
+}));
+
+vi.mock('../../../src/routes/projects/_helpers', () => ({
+  requireRepositoryAccess: mocks.requireRepositoryAccess,
 }));
 
 type ProjectDataCommentTestStub = {
   ensureProjectId: ReturnType<typeof vi.fn>;
-  getSession: ReturnType<typeof vi.fn>;
+  getSessionAccess: ReturnType<typeof vi.fn>;
   getCommentThread: ReturnType<typeof vi.fn>;
   updateCommentThreadStatus: ReturnType<typeof vi.fn>;
   acceptPromptDelivery: ReturnType<typeof vi.fn>;
@@ -29,9 +53,7 @@ type ProjectDataCommentTestStub = {
 
 function makeApp(): Hono<{ Bindings: Env }> {
   const root = new Hono<{ Bindings: Env }>();
-  const routes = new Hono<{ Bindings: Env }>();
-  registerChatCommentDirectiveRoute(routes);
-  root.route('/api/projects/:projectId/sessions', routes);
+  root.route('/api/projects/:projectId/sessions', chatCommentRoutes);
   root.onError((err, c) => {
     if (err instanceof AppError) {
       return c.json(err.toJSON(), err.statusCode as never);
@@ -118,12 +140,15 @@ function makeMailboxMessage(id: string, duplicate: boolean): AgentMailboxMessage
   };
 }
 
+type Access = 'owner' | 'grantee' | 'none';
+
 function makeEnv(
   options: {
     duplicate?: boolean;
-    session?: { id: string; taskId: string; projectId: string } | null;
+    session?: { id: string; taskId: string; projectId: string; createdByUserId: string } | null;
     thread?: MessageCommentThread | null;
     durablePromptDeliveryEnabled?: string;
+    access?: Access;
   } = {}
 ): Env & {
   _projectDataStub: ProjectDataCommentTestStub;
@@ -131,13 +156,33 @@ function makeEnv(
   const duplicate = options.duplicate ?? false;
   const session =
     options.session === undefined
-      ? { id: 'session-1', taskId: 'task-1', projectId: 'project-1' }
+      ? { id: 'session-1', taskId: 'task-1', projectId: 'project-1', createdByUserId: 'owner-1' }
       : options.session;
+  const access = options.access ?? 'owner';
   const thread = options.thread === undefined ? makeThread() : options.thread;
   const deliveryId = 'comment-directive-thread-1';
   const projectDataStub: ProjectDataCommentTestStub = {
     ensureProjectId: vi.fn().mockResolvedValue(undefined),
-    getSession: vi.fn().mockResolvedValue(session),
+    getSessionAccess: vi.fn(async () => ({
+      session,
+      access: {
+        found: Boolean(session),
+        ownerUserId: session?.createdByUserId ?? null,
+        sessionStatus: 'active',
+        role: access,
+        grant:
+          access === 'grantee'
+            ? {
+                id: 'grant-1',
+                sessionId: 'session-1',
+                granteeUserId: mocks.userId,
+                grantedByUserId: 'owner-1',
+                parentGrantId: null,
+                createdAt: 1,
+              }
+            : null,
+      },
+    })),
     getCommentThread: vi.fn().mockResolvedValue(thread),
     updateCommentThreadStatus: vi.fn(async () => ({
       thread: {
@@ -178,24 +223,32 @@ function makeEnv(
   } as unknown as Env & { _projectDataStub: ProjectDataCommentTestStub };
 }
 
-describe('chat comment directive route', () => {
+function send(env: Env) {
+  return makeApp().request(
+    '/api/projects/project-1/sessions/session-1/comments/thread-1/send',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+    env
+  );
+}
+
+describe('chat comment send-to-agent route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.userId = 'owner-1';
+    mocks.hasProjectCapability.mockResolvedValue(true);
+    mocks.requireRepositoryAccess.mockResolvedValue(undefined);
   });
 
-  it('queues one comment directive for the authenticated project session', async () => {
-    const app = makeApp();
+  it('queues one attributed comment directive when the session owner sends it', async () => {
     const env = makeEnv();
 
-    const response = await app.request(
-      '/api/projects/project-1/sessions/session-1/comments/thread-1/send-to-agent',
-      { method: 'POST' },
-      env
-    );
+    const response = await send(env);
 
     expect(response.status).toBe(202);
-    expect(drizzle).toHaveBeenCalledWith(env.DATABASE, expect.anything());
-    expect(env._projectDataStub.getSession).toHaveBeenCalledWith('session-1');
+    expect(env._projectDataStub.getSessionAccess).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      userId: 'owner-1',
+    });
     expect(env._projectDataStub.getCommentThread).toHaveBeenCalledWith({
       sessionId: 'session-1',
       threadId: 'thread-1',
@@ -206,14 +259,16 @@ describe('chat comment directive route', () => {
         targetSessionId: 'session-1',
         sourceTaskId: 'task-1',
         senderType: 'human',
-        senderId: 'human-1',
+        senderId: 'owner-1',
         messageClass: 'deliver',
         sourceKind: 'comment_directive',
         metadata: {
           commentThreadId: 'thread-1',
           sourceMessageId: 'message-1',
           quote: 'Quote from the source message',
-          author: { kind: 'human', displayName: 'Reviewer' },
+          author: { kind: 'human', id: 'reviewer-1', displayName: 'Reviewer' },
+          userId: 'owner-1',
+          senderName: 'Name owner-1',
         },
       })
     );
@@ -222,64 +277,128 @@ describe('chat comment directive route', () => {
       ?.deliveryContent as string;
     expect(deliveryContent).toContain('Comment ID: thread-1');
     expect(deliveryContent).toContain('Source message ID: message-1');
+    expect(deliveryContent).toContain('Author: Reviewer');
+    expect(deliveryContent).toContain('Sent to you by: Name owner-1');
+    expect(deliveryContent).not.toContain('shared access');
     expect(deliveryContent).not.toContain('Existing reply that must not be sent passively');
-
-    const body = await response.json();
-    expect(body).toEqual({
-      accepted: true,
-      status: 'queued',
-      duplicate: false,
-      deliveryId: 'comment-directive-thread-1',
-      messageId: 'prompt-comment-directive-thread-1',
-      thread: {
-        id: 'thread-1',
+    // The owner's grant check never runs: no membership re-check, no repository check.
+    expect(mocks.hasProjectCapability).not.toHaveBeenCalled();
+    expect(mocks.requireRepositoryAccess).not.toHaveBeenCalled();
+    // sentBy is recorded with the sender's name, not a bare id.
+    expect(env._projectDataStub.updateCommentThreadStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
         status: 'sent',
-        directive: {
-          deliveryId: 'comment-directive-thread-1',
-          deliveryState: 'queued',
-          promptMessageId: 'prompt-comment-directive-thread-1',
-          acceptedAt: 2000,
-          ackedAt: null,
-        },
-      },
+        actor: expect.objectContaining({ id: 'owner-1', name: 'Name owner-1' }),
+      })
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      idempotent: false,
+      thread: { id: 'thread-1', status: 'sent' },
     });
+  });
+
+  it('rejects a project member who does not control the session (gap G2)', async () => {
+    mocks.userId = 'reader-1';
+    const env = makeEnv({ access: 'none' });
+
+    const response = await send(env);
+
+    expect(response.status).toBe(403);
+    expect(env._projectDataStub.getCommentThread).not.toHaveBeenCalled();
+    expect(env._projectDataStub.acceptPromptDelivery).not.toHaveBeenCalled();
+    expect(env._projectDataStub.updateCommentThreadStatus).not.toHaveBeenCalled();
+  });
+
+  it('lets a grantee send, attributed to them and marked as shared access', async () => {
+    mocks.userId = 'grantee-1';
+    const env = makeEnv({ access: 'grantee' });
+
+    const response = await send(env);
+
+    expect(response.status).toBe(202);
+    expect(mocks.hasProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      'grantee-1',
+      'task:write'
+    );
+    expect(mocks.hasProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      'owner-1',
+      'task:write'
+    );
+    expect(mocks.requireRepositoryAccess).toHaveBeenCalledWith(
+      env,
+      expect.anything(),
+      expect.objectContaining({ id: 'project-1' }),
+      'grantee-1'
+    );
+    const call = env._projectDataStub.acceptPromptDelivery.mock.calls[0]?.[0];
+    expect(call).toMatchObject({
+      senderId: 'grantee-1',
+      metadata: expect.objectContaining({
+        userId: 'grantee-1',
+        senderName: 'Name grantee-1',
+        onBehalfOfUserId: 'owner-1',
+        grantId: 'grant-1',
+      }),
+    });
+    expect(call?.deliveryContent).toContain(
+      'Sent to you by: Name grantee-1 (shared access to this session)'
+    );
+  });
+
+  it('rejects a grantee who has lost their own repository access', async () => {
+    mocks.userId = 'grantee-1';
+    mocks.requireRepositoryAccess.mockRejectedValue(new AppError(403, 'FORBIDDEN', 'no access'));
+    const env = makeEnv({ access: 'grantee' });
+
+    const response = await send(env);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      message: 'You need your own access to acme/app to work in a shared session',
+    });
+    expect(env._projectDataStub.acceptPromptDelivery).not.toHaveBeenCalled();
+  });
+
+  it('rejects a grantee once the session owner has left the project', async () => {
+    mocks.userId = 'grantee-1';
+    mocks.hasProjectCapability.mockImplementation(
+      async (_db: unknown, _projectId: string, userId: string) => userId !== 'owner-1'
+    );
+    const env = makeEnv({ access: 'grantee' });
+
+    const response = await send(env);
+
+    expect(response.status).toBe(403);
+    expect(env._projectDataStub.acceptPromptDelivery).not.toHaveBeenCalled();
   });
 
   it('surfaces idempotent retries as duplicate without changing route target', async () => {
     const env = makeEnv({ duplicate: true });
 
-    const response = await makeApp().request(
-      '/api/projects/project-1/sessions/session-1/comments/thread-1/send-to-agent',
-      { method: 'POST' },
-      env
-    );
+    const response = await send(env);
 
-    expect(response.status).toBe(202);
+    expect(response.status).toBe(200);
     expect(env._projectDataStub.acceptPromptDelivery).toHaveBeenCalledWith(
       expect.objectContaining({ deliveryId: 'comment-directive-thread-1' })
     );
-    await expect(response.json()).resolves.toMatchObject({
-      status: 'duplicate',
-      duplicate: true,
-      deliveryId: 'comment-directive-thread-1',
-    });
+    await expect(response.json()).resolves.toMatchObject({ idempotent: true });
   });
 
   it('maps a missing chat session to 404 before touching comment storage', async () => {
     const env = makeEnv({ session: null });
 
-    const response = await makeApp().request(
-      '/api/projects/project-1/sessions/session-1/comments/thread-1/send-to-agent',
-      { method: 'POST' },
-      env
-    );
+    const response = await send(env);
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
       error: 'NOT_FOUND',
       message: 'Chat session not found',
     });
-    expect(env._projectDataStub.getSession).toHaveBeenCalledWith('session-1');
     expect(env._projectDataStub.getCommentThread).not.toHaveBeenCalled();
     expect(env._projectDataStub.acceptPromptDelivery).not.toHaveBeenCalled();
   });
@@ -287,11 +406,7 @@ describe('chat comment directive route', () => {
   it('maps wrong-session comment threads to 403 without queuing delivery', async () => {
     const env = makeEnv({ thread: makeThread({ sessionId: 'session-2' }) });
 
-    const response = await makeApp().request(
-      '/api/projects/project-1/sessions/session-1/comments/thread-1/send-to-agent',
-      { method: 'POST' },
-      env
-    );
+    const response = await send(env);
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({
@@ -305,11 +420,7 @@ describe('chat comment directive route', () => {
   it('maps resolved comment threads to 409 without queuing delivery', async () => {
     const env = makeEnv({ thread: makeThread({ status: 'resolved', resolvedAt: 1500 }) });
 
-    const response = await makeApp().request(
-      '/api/projects/project-1/sessions/session-1/comments/thread-1/send-to-agent',
-      { method: 'POST' },
-      env
-    );
+    const response = await send(env);
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
@@ -323,11 +434,7 @@ describe('chat comment directive route', () => {
   it('maps disabled durable delivery to 409 without false queued success', async () => {
     const env = makeEnv({ durablePromptDeliveryEnabled: 'false' });
 
-    const response = await makeApp().request(
-      '/api/projects/project-1/sessions/session-1/comments/thread-1/send-to-agent',
-      { method: 'POST' },
-      env
-    );
+    const response = await send(env);
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({

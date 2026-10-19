@@ -180,73 +180,50 @@ describe('ProjectData DO session validation behavior', () => {
 
   it.each([
     {
+      name: 'an active session the socket is tagged for',
+      socketTags: ['session:session-a'],
+      payload: { type: 'message.send' as const, sessionId: 'session-a', role: 'user', content: 'hello' },
+    },
+    {
       name: 'a different session than the socket tag',
       socketTags: ['session:session-a'],
       payload: { type: 'message.send' as const, sessionId: 'session-b', role: 'user', content: 'hello' },
-      queryHandler: () => [],
-      error: 'Session mismatch',
     },
     {
-      name: 'missing sessions before persistence',
-      socketTags: ['session:missing-session'],
-      payload: { type: 'message.send' as const, sessionId: 'missing-session', role: 'user', content: 'hello' },
-      queryHandler: (query: string) => {
-        if (query.includes('SELECT id, status FROM chat_sessions')) return [];
-        return [];
-      },
-      error: 'not found',
-    },
-    {
-      name: 'non-active sessions before persistence',
+      name: 'an assistant-role message',
       socketTags: ['session:session-a'],
-      payload: { type: 'message.send' as const, sessionId: 'session-a', role: 'user', content: 'hello' },
+      payload: { type: 'message.send' as const, sessionId: 'session-a', role: 'assistant', content: 'hello' },
+    },
+  ])('never persists a WebSocket message.send for $name (gap G1)', async ({ socketTags, payload }) => {
+    // Any connected project member used to be able to write a user message into any active
+    // session over the browser socket, unauthenticated as to who they were. Prompts now come
+    // only from authorized REST delivery, so the socket refuses every write.
+    await expectMessageSendRejected({
+      socketTags,
+      payload,
       queryHandler: (query: string) => {
         if (query.includes('SELECT id, status FROM chat_sessions')) {
-          return [{ id: 'session-a', status: 'stopped' }];
+          return [{ id: 'session-a', status: 'active' }];
         }
         return [];
       },
-      error: 'not active',
-    },
-  ])('rejects WebSocket messages for $name', async ({ socketTags, payload, queryHandler, error }) => {
-    await expectMessageSendRejected({ socketTags, payload, queryHandler, error });
+      error: 'not supported',
+    });
   });
 
-  it('persists and acknowledges valid WebSocket user messages', async () => {
-    const { ctx, projectData } = createProjectData((query) => {
-      if (query.includes('SELECT id, status FROM chat_sessions')) return [{ id: 'session-a', status: 'active' }];
-      if (query.includes('SELECT message_count FROM chat_sessions')) return [{ message_count: 0 }];
-      if (query.includes('SELECT id FROM chat_messages')) return [];
-      if (query.includes('COALESCE(MAX(sequence), 0)')) return [{ max_seq: 0 }];
-      if (query.includes('SELECT topic FROM chat_sessions')) return [{ topic: null }];
-      if (query.includes('SELECT workspace_id FROM chat_sessions')) return [{ workspace_id: null }];
-      if (query.includes('SELECT session_id FROM idle_cleanup_schedule')) return [];
-      return [];
-    });
+  it('still answers pings on a socket that tried to write (liveness control)', async () => {
+    const { projectData } = createProjectData(() => []);
     const socket = createMockWebSocket(['session:session-a']);
 
     await projectData.webSocketMessage(
       socket,
-      JSON.stringify({ type: 'message.send', sessionId: 'session-a', role: 'assistant', content: '  hello  ' }),
+      JSON.stringify({ type: 'message.send', sessionId: 'session-a', role: 'user', content: 'hi' })
     );
+    await projectData.webSocketMessage(socket, JSON.stringify({ type: 'ping' }));
 
-    expect(ctx.sqlExec).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO chat_messages'),
-      expect.any(String),
-      'session-a',
-      'user',
-      'hello',
-      null,
-      expect.any(Number),
-      1,
-    );
-    expect(parseSent(socket)).toContainEqual(
-      expect.objectContaining({
-        type: 'message.ack',
-        sessionId: 'session-a',
-        messageId: expect.any(String),
-      }),
-    );
+    const sent = parseSent(socket);
+    expect(sent.map((message) => message.type)).toEqual(['error', 'pong']);
+    expect(sent.some((message) => message.type === 'message.ack')).toBe(false);
   });
 
   it('rejects batch persistence to stopped sessions', async () => {

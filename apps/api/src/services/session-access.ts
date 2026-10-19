@@ -140,8 +140,10 @@ export async function requireSessionWriter(
     try {
       await requireRepositoryAccess(env, db, project, actorUserId);
     } catch (err) {
+      // Only a definite "no access" answer (a 4xx) is the grantee's problem. A check that could
+      // not run (a provider outage, a thrown fetch) says nothing about their access: surface it.
+      if (!(err instanceof AppError) || err.statusCode >= 500) throw err;
       rejected(logContext, 'grantee_repository_access');
-      if (err instanceof AppError && err.statusCode >= 500) throw err;
       throw errors.forbidden(
         `You need your own access to ${project.repository} to work in a shared session`
       );

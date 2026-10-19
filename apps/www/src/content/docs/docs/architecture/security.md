@@ -243,6 +243,24 @@ Mermaid lays a diagram out in the live page before it is sanitized, so a remote 
 
 Credential tokens are stripped before text reaches a log line or a stored diagnostic: OpenAI and Anthropic `sk-...` keys (including `sk-proj-...` and `sk-ant-...`), GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), and SAM personal access and webhook tokens. Every API redactor takes these token shapes from one definition, `redactCredentialTokens` in `apps/api/src/lib/credential-token-redaction.ts`: structured Worker logs (`apps/api/src/lib/logger.ts`), stored VM agent error reports and debug-agent evidence (`redactSensitiveData`), comment directives delivered to agents, deployment publish and apply events, Report Issue text, and agent sign-in helper diagnostics. `Bearer ...` and `Basic ...` values are matched by each redactor's own rule, because those are also ordinary words and a log line can afford to over-redact where text shown to a user cannot. Redaction is pattern-based and best-effort - a safety net, not a reason to paste secrets anywhere.
 
+## Shared Chat Sessions
+
+A chat's creator can give another project member the same controls in that one chat (see [Share a chat](/docs/guides/collaboration/#share-a-chat)). Every request that drives a chat resolves two identities (`requireSessionWriter` in `apps/api/src/services/session-access.ts`):
+
+- The **actor** is the person acting. It is used only for attribution: the transcript sender, a comment's `sentBy`, activity events and notifications.
+- The **owner** (`chat_sessions.created_by_user_id`) is used for every resource and credential lookup: workspace, node, task, agent session, agent credential and billing. A grantee's identity never selects a resource.
+
+Enforcement points:
+
+- Grants live in the project's ProjectData Durable Object (`chat_session_access_grants`, migration `064-session-access-grants-and-comment-mentions`). `resolveSessionAccess` in `apps/api/src/durable-objects/project-data/session-access.ts` reads them on every check; no decision is cached. A chat without a recorded owner can never be shared.
+- `requireSessionWriter` also requires the grantee and the owner to both be active members with `task:write`. For prompts, answers and sending a comment to the agent it requires the grantee's own verified repository access (`requireRepositoryAccess` in `apps/api/src/routes/projects/_helpers.ts`).
+- The browser's chat WebSocket is read-only. It used to store a `message.send` user message for any connected member; `webSocketMessage` in `apps/api/src/durable-objects/project-data/index.ts` now rejects it, so every prompt passes the REST checks.
+- Durable prompt delivery checks the sender again just before it sends (`invalidSessionWriterSenderResult` in `apps/api/src/durable-objects/project-data/prompt-delivery-source-guards.ts`). Revoking a grant fails that person's undelivered prompts in the same transaction (`revokeSessionAccessGrant`).
+- Forking or retrying a teammate's task bills the person who starts it, not the teammate (`inheritedCredentialAttributionForCaller` in `apps/api/src/services/placement-field-resolution.ts`).
+- Terminal, file browser, Git, port preview, fork and attachment routes keep their workspace-owner checks, so a grantee cannot reach the workspace outside the chat.
+
+**Remaining risk.** The agent process holds the owner's agent credential (an API key or OAuth token) in its environment, and a grantee can ask the agent to print it. SAM cannot prevent this while the grantee controls the agent. The share dialog says so, and the server requires the owner to acknowledge it (`acknowledgeSharedCredentials` on `POST /api/projects/:id/sessions/:sessionId/access/grants`). A chat that runs on a project credential exposes the project's key rather than a personal one.
+
 ## Workspace Isolation Model
 
 SAM's isolation boundary is the **node VM**, not the devcontainer. This is deliberate. Security reviews of SAM, whether by people or by automated scanners, should assess findings against this model.

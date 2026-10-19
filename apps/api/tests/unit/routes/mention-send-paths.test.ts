@@ -51,21 +51,26 @@ vi.mock('../../../src/auth', () => ({
     },
   }),
 }));
-vi.mock('../../../src/services/project-data', async (original) => ({
-  ...(await original<typeof import('../../../src/services/project-data')>()),
-  createSession: boundary.createSession,
-  persistMessage: boundary.persistMessage,
-  recordActivityEvent: boundary.recordActivityEvent,
-  updateSessionTopic: boundary.updateSessionTopic,
-  getSession: async () => ({
+vi.mock('../../../src/services/project-data', async (original) => {
+  const { sessionAccessFromGetSession } = await import('../../helpers/session-access-mock');
+  const getSession = async () => ({
     id: 'chat-1',
     status: 'active',
     workspaceId: 'workspace-1',
     taskId: null,
     topic: 'Mention regression',
     createdByUserId: boundary.creatorId,
-  }),
-}));
+  });
+  return {
+    ...(await original<typeof import('../../../src/services/project-data')>()),
+    createSession: boundary.createSession,
+    persistMessage: boundary.persistMessage,
+    recordActivityEvent: boundary.recordActivityEvent,
+    updateSessionTopic: boundary.updateSessionTopic,
+    getSession,
+    getSessionAccess: sessionAccessFromGetSession(getSession),
+  };
+});
 vi.mock('../../../src/services/task-runner-do', async (original) => ({
   ...(await original<typeof import('../../../src/services/task-runner-do')>()),
   startTaskRunnerDO: boundary.startTaskRunnerDO,

@@ -36,7 +36,11 @@ vi.mock('../../../src/services/project-data', () => ({
   cleanupWorkspaceActivity: vi.fn(),
   stopSession: vi.fn(),
 }));
-vi.mock('../../../src/services/session-sleep', () => ({
+vi.mock('../../../src/services/session-sleep', async (importOriginal) => ({
+  // The real deferral classifier: the 409 mapping under test depends on it.
+  isSafeSleepDeferral: (
+    await importOriginal<typeof import('../../../src/services/session-sleep')>()
+  ).isSafeSleepDeferral,
   sleepWorkspaceSession: mocks.sleepWorkspaceSession,
 }));
 vi.mock('../../../src/services/session-snapshots', () => ({

@@ -4,8 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { takeRejectedBeforeEffects } from '../../../src/lib/operation-effect-boundary';
 import { AppError } from '../../../src/middleware/error';
-import { answerAttention, chatRoutes } from '../../../src/routes/chat';
+import { chatRoutes } from '../../../src/routes/chat';
+import { answerAttention } from '../../../src/routes/chat-attention';
 import * as projectDataService from '../../../src/services/project-data';
+import { sessionAccessFromGetSession } from '../../helpers/session-access-mock';
 
 const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(),
@@ -67,6 +69,8 @@ vi.mock('../../../src/services/project-data', () => ({
   createSession: vi.fn(),
   forwardWebSocket: vi.fn(),
   getSession: vi.fn(),
+  getSessionAccess: vi.fn(),
+  getSessionWithAccessGrants: vi.fn(),
   getMessages: vi.fn(),
   resetIdleCleanup: vi.fn(),
   prepareAttentionAnswer: vi.fn(),
@@ -175,6 +179,9 @@ beforeEach(() => {
     createdByUserId: 'user-1',
     status: 'active',
   });
+  vi.mocked(projectDataService.getSessionAccess).mockImplementation(
+    sessionAccessFromGetSession(projectDataService.getSession as never)
+  );
   mocks.snapshotInteractions.mockResolvedValue({
     pending: [
       {

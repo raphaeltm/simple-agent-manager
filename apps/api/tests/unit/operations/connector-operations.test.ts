@@ -29,6 +29,7 @@ import {
 import type { OperationContext } from '../../../src/operations/types';
 import { executeConnectorWrite } from '../../../src/services/connector-execution';
 import * as projectData from '../../../src/services/project-data';
+import { sessionAccessFromGetSession } from '../../helpers/session-access-mock';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
@@ -48,7 +49,7 @@ vi.mock('../../../src/services/submit-task', () => ({ submitTask: mocks.submit }
 vi.mock('../../../src/routes/chat-acp-interactions', () => ({
   answerAgentInteraction: mocks.answer,
 }));
-vi.mock('../../../src/routes/chat', () => ({ answerAttention: mocks.answer }));
+vi.mock('../../../src/routes/chat-attention', () => ({ answerAttention: mocks.answer }));
 vi.mock('../../../src/routes/chat-stop', () => ({ stopChat: mocks.stop }));
 vi.mock('../../../src/services/acp-interaction-store', () => ({
   snapshotInteractions: mocks.snapshot,
@@ -67,6 +68,17 @@ vi.mock('../../../src/services/task-terminal-cleanup', () => ({
 }));
 vi.mock('../../../src/services/project-data', () => ({
   getSession: mocks.getSession,
+  getSessionAccess: (...args: [unknown, string, string, string]) =>
+    sessionAccessFromGetSession(mocks.getSession)(...args),
+  getSessionWithAccessGrants: async (
+    env: unknown,
+    projectId: string,
+    sessionId: string,
+    userId: string
+  ) => ({
+    ...(await sessionAccessFromGetSession(mocks.getSession)(env, projectId, sessionId, userId)),
+    grants: [],
+  }),
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
   recordActivityEvent: vi.fn().mockResolvedValue(undefined),
   admitProjectEvent: vi.fn().mockResolvedValue({ accepted: true }),

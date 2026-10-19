@@ -564,7 +564,9 @@ describe('DO Migrations', () => {
       // Active mailbox capacity index (055): 1.
       // Complete archive-search projection: 1 session seek index (058).
       // Active prompt-delivery queue indexes (062): 4.
-      expect(indexes).toHaveLength(130);
+      // Shared session access grants (064): 2 (active by grantee, active by parent grant);
+      // the one-active-grant-per-person index is CREATE UNIQUE INDEX and is not counted.
+      expect(indexes).toHaveLength(132);
       expect(indexes.some((query) => query.includes('idx_archive_raw_chunk_time'))).toBe(true);
     });
   });

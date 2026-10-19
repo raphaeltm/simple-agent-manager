@@ -1510,7 +1510,7 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-batch-content-dedup');
       const sessionId = await stub.createSession(null, null);
 
-      // Simulate: user message persisted via DO WebSocket (message.send)
+      // Simulate: user message persisted by durable prompt delivery (REST send)
       await stub.persistMessage(sessionId, 'user', 'Fix the login bug', null);
 
       // Simulate: VM agent batch includes same user message with a different ID

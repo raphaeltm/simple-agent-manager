@@ -39,6 +39,17 @@ vi.mock('../../../src/services/project-data', () => ({
   getMessages: vi.fn(),
   getMessageToolContent: vi.fn(),
   getSession: mocks.getSession,
+  getSessionAccess: (...args: [unknown, string, string, string]) =>
+    sessionAccessFromGetSession(mocks.getSession)(...args),
+  getSessionWithAccessGrants: async (
+    env: unknown,
+    projectId: string,
+    sessionId: string,
+    userId: string
+  ) => ({
+    ...(await sessionAccessFromGetSession(mocks.getSession)(env, projectId, sessionId, userId)),
+    grants: [],
+  }),
   getSessionState: vi.fn(),
   linkSessionIdea: vi.fn(),
   listAcpSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
@@ -72,6 +83,7 @@ vi.mock('../../../src/services/node-agent', () => ({
 }));
 
 import { chatRoutes } from '../../../src/routes/chat';
+import { sessionAccessFromGetSession } from '../../helpers/session-access-mock';
 
 function buildDb(selectResults: unknown[][]) {
   const select = vi.fn(() => {

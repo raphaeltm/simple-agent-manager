@@ -30,6 +30,7 @@ import {
   acceptPromptDelivery,
   nudgePromptDeliveriesForTarget,
 } from '../../src/durable-objects/project-data/prompt-delivery';
+import { resolveSessionAccess } from '../../src/durable-objects/project-data/session-access';
 import { getSession } from '../../src/durable-objects/project-data/session-reads';
 import {
   applySessionWakeReady,
@@ -71,6 +72,16 @@ function projectDataSql(): SqlStorage {
 vi.mock('../../src/services/project-data', () => ({
   getSession: async (_env: unknown, _projectId: string, sessionId: string) =>
     getSession(projectDataSql(), sessionId),
+  // Session-writer checks resolve against the real grant rows, as the ProjectData RPC does.
+  getSessionAccess: async (
+    _env: unknown,
+    _projectId: string,
+    sessionId: string,
+    userId: string
+  ) => {
+    const access = resolveSessionAccess(projectDataSql(), sessionId, userId);
+    return { session: access.found ? getSession(projectDataSql(), sessionId) : null, access };
+  },
   sleepSession: async (_env: unknown, _projectId: string, sessionId: string) =>
     sessions.sleepSession(projectDataSql(), sessionId),
   wakeSession: async (

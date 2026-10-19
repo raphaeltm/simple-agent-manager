@@ -86,6 +86,39 @@ function isRpcError(value: { sessionId: string } | JsonRpcResponse): value is Js
   return 'jsonrpc' in value;
 }
 
+type CommentAuthorRole = 'session_owner' | 'project_member' | 'agent';
+
+function authorRole(author: { kind: string; id: string }, ownerUserId: string): CommentAuthorRole {
+  if (author.kind === 'agent') return 'agent';
+  return author.id === ownerUserId ? 'session_owner' : 'project_member';
+}
+
+/**
+ * Label who wrote each thread and reply. Project members can comment on any session; their
+ * comments are context for the agent, not instructions, until someone who controls the
+ * session sends the thread (status `sent`). The agent's MCP token belongs to the session
+ * owner, so `tokenData.userId` identifies the owner.
+ */
+function withAuthorRoles<
+  T extends {
+    author: { kind: string; id: string };
+    replies?: Array<{ author: { kind: string; id: string } }>;
+  },
+>(thread: T, ownerUserId: string): T & { authorRole: CommentAuthorRole } {
+  return {
+    ...thread,
+    authorRole: authorRole(thread.author, ownerUserId),
+    ...(thread.replies
+      ? {
+          replies: thread.replies.map((reply) => ({
+            ...reply,
+            authorRole: authorRole(reply.author, ownerUserId),
+          })),
+        }
+      : {}),
+  };
+}
+
 export async function handleListMessageCommentThreads(
   requestId: string | number | null,
   params: Record<string, unknown>,
@@ -115,7 +148,9 @@ export async function handleListMessageCommentThreads(
     });
     return toolSuccess(requestId, {
       ...result,
-      threads: result.threads.map((thread) => boundCommentThreadSummary(thread, config)),
+      threads: result.threads.map((thread) =>
+        withAuthorRoles(boundCommentThreadSummary(thread, config), tokenData.userId)
+      ),
     });
   } catch (err) {
     return mapCommentError(requestId, err, 'mcp.comments.list_failed', {
@@ -160,7 +195,9 @@ export async function handleGetMessageCommentThread(
       observer: author,
       provenance,
     });
-    return toolSuccess(requestId, { thread: boundCommentThread(thread, config) });
+    return toolSuccess(requestId, {
+      thread: withAuthorRoles(boundCommentThread(thread, config), tokenData.userId),
+    });
   } catch (err) {
     return mapCommentError(requestId, err, 'mcp.comments.get_failed', {
       projectId: tokenData.projectId,

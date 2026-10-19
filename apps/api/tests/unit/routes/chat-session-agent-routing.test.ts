@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { chatRoutes } from '../../../src/routes/chat';
+import { sessionAccessFromGetSession } from '../../helpers/session-access-mock';
 
 const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(),
@@ -104,6 +105,17 @@ vi.mock('../../../src/services/project-data', () => ({
   createSession: vi.fn(),
   forwardWebSocket: vi.fn(),
   getSession: mocks.getSession,
+  getSessionAccess: (...args: [unknown, string, string, string]) =>
+    sessionAccessFromGetSession(mocks.getSession)(...args),
+  getSessionWithAccessGrants: async (
+    env: unknown,
+    projectId: string,
+    sessionId: string,
+    userId: string
+  ) => ({
+    ...(await sessionAccessFromGetSession(mocks.getSession)(env, projectId, sessionId, userId)),
+    grants: [],
+  }),
   getMessages: mocks.getMessages,
   resetIdleCleanup: vi.fn(),
   listAcpSessions: mocks.listAcpSessions,

@@ -118,7 +118,9 @@ export function registerChatSessionAccessRoutes(chatRoutes: Hono<{ Bindings: Env
     try {
       await requireRepositoryAccess(c.env, db, project, granteeUserId);
     } catch (err) {
-      if (err instanceof AppError && err.statusCode >= 500) throw err;
+      // A check that could not run is not evidence the grantee lacks access (see
+      // requireSessionWriter): only a definite 4xx answer becomes the friendly rejection.
+      if (!(err instanceof AppError) || err.statusCode >= 500) throw err;
       log.info('session_access.grant_rejected_repository_access', {
         projectId,
         sessionId,

@@ -218,6 +218,7 @@ describe('chat comment routes', () => {
       quote: null,
       clientMutationId: 'thread-key',
       actor: { kind: 'human', id: 'user-1', name: 'Ada' },
+      mentions: [],
     });
 
     const replyResponse = await createApp().request(
@@ -236,6 +237,7 @@ describe('chat comment routes', () => {
       body: 'Reply',
       clientMutationId: 'reply-key',
       actor: { kind: 'human', id: 'user-1', name: 'Ada' },
+      mentions: [],
     });
   });
 

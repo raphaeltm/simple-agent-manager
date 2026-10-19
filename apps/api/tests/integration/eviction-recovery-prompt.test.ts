@@ -147,9 +147,12 @@ describe('recovery prompt chosen by the wake cause', () => {
       const sql = createSqlStorage(db);
       runMigrations(sql);
       sql.exec(
+        // Owned by the follow-up's sender: the delivery runner refuses a human follow-up from
+        // anyone who is not the session owner or an active grantee.
         `INSERT INTO chat_sessions
-          (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
-         VALUES ('chat-1', 'workspace-1', 'source-task', 'Task', 'sleeping', 1, 1, 1, 1)`
+          (id, workspace_id, task_id, topic, status, message_count, started_at, created_at,
+           updated_at, created_by_user_id)
+         VALUES ('chat-1', 'workspace-1', 'source-task', 'Task', 'sleeping', 1, 1, 1, 1, 'user-1')`
       );
       acceptPromptDelivery(
         sql,
