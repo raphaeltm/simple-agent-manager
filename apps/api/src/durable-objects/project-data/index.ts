@@ -1454,6 +1454,9 @@ export class ProjectData extends DurableObject<Env> {
       grants: access.found
         ? sessionAccess.listActiveSessionAccessGrants(this.sql, input.sessionId)
         : [],
+      undelivered: access.found
+        ? sessionAccess.listUndeliveredSenderPrompts(this.sql, input.sessionId)
+        : [],
     };
   }
 
@@ -1529,6 +1532,7 @@ export class ProjectData extends DurableObject<Env> {
     return {
       result,
       grants: sessionAccess.listActiveSessionAccessGrants(this.sql, input.sessionId),
+      undelivered: sessionAccess.listUndeliveredSenderPrompts(this.sql, input.sessionId),
     };
   }
 

@@ -328,6 +328,88 @@ test.describe('Shared session — what each viewer sees', () => {
     await screenshot(page, slug('grantee', page));
   });
 
+  test('a message cancelled after the page cached it shows Not delivered, live and after a reload', async ({
+    page,
+  }) => {
+    // The page loads before the teammate's access runs out: their last message is unlabelled.
+    // The server then cancels it and labels the stored row, but this page already has the row,
+    // so the label has to come from the access read the change triggers.
+    const late = 'And open a PR when the suite is green.';
+    const unlabelled = MESSAGES.map((message) =>
+      message.id === 'msg-expired'
+        ? {
+            ...message,
+            toolMetadata: durable({
+              source: 'user_followup',
+              senderName: LONG_GRANTEE,
+              onBehalfOfUserId: 'owner-1',
+            }),
+          }
+        : message
+    );
+    const session = makeSession('owner');
+    let cancelled = false;
+    const access = () => ({
+      ...session.access,
+      ...(cancelled
+        ? { undelivered: [{ messageId: 'msg-expired', reason: 'sender_access_expired' }] }
+        : {}),
+    });
+    await setupMocks(page, session);
+    // Registered after setupMocks, so these answer first.
+    const sockets: { send(message: string): void }[] = [];
+    await page.routeWebSocket(/\/api\/projects\/[^/]+\/sessions\/ws/, (ws) => {
+      sockets.push(ws);
+      ws.onMessage((raw) => {
+        if (String(raw).includes('"ping"')) ws.send(JSON.stringify({ type: 'pong' }));
+      });
+    });
+    await page.route(new RegExp(`/sessions/${SESSION_ID}/access(\\?.*)?$`), (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(access()),
+      })
+    );
+    await page.route(new RegExp(`/api/projects/[^/]+/sessions/${SESSION_ID}(\\?.*)?$`), (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          session: { ...session, access: access() },
+          messages: unlabelled,
+          hasMore: false,
+        }),
+      })
+    );
+
+    await openChat(page);
+    await scrollConversationUntil(page, late);
+    await expect(page.getByText(late).first()).toBeVisible();
+    await expect(page.getByText('Not delivered — access expired')).toHaveCount(0);
+    await expect.poll(() => sockets.length).toBeGreaterThan(0);
+
+    cancelled = true;
+    for (const socket of sockets) {
+      socket.send(
+        JSON.stringify({
+          type: 'session.access.changed',
+          payload: { sessionId: SESSION_ID, reason: 'expired' },
+        })
+      );
+    }
+    await expectAttribution(page, 'Not delivered — access expired');
+    await screenshot(page, `${slug('owner', page)}-cancelled-live`);
+
+    // A reload keeps the cached row as it was; the session read carries the label again.
+    await page.reload();
+    await expect(page.getByText(/explicit wait passes 20 of 20 runs/)).toBeVisible({
+      timeout: 15_000,
+    });
+    await expectAttribution(page, 'Not delivered — access expired');
+    await assertNoOverflow(page);
+  });
+
   test('a teammate whose time runs out: the composer locks and says why', async ({ page }) => {
     // Real time passes in this test: the grant ends 12 s after the mocks are set up.
     test.setTimeout(90_000);

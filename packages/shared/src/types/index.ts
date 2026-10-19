@@ -481,6 +481,8 @@ export type {
   SessionAccessPerson,
   SessionAccessRevokeReason,
   SessionAccessSummary,
+  SessionUndeliveredPrompt,
+  SessionUndeliveredReason,
   SessionViewerAccess,
 } from './session-access';
 export {

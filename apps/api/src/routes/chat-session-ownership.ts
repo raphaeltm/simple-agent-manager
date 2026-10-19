@@ -2,6 +2,7 @@ import type {
   SessionAccessGrant,
   SessionAccessPerson,
   SessionAccessSummary,
+  SessionUndeliveredPrompt,
 } from '@simple-agent-manager/shared';
 import { inArray } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
@@ -99,7 +100,12 @@ async function enrichSessionWithAccess(
   db: ReturnType<typeof drizzle<typeof schema>>,
   session: Record<string, unknown>,
   currentUserId: string,
-  input: { access: SessionAccessResolution; grants: SessionAccessGrantRecord[] }
+  input: {
+    access: SessionAccessResolution;
+    grants: SessionAccessGrantRecord[];
+    /** Messages cancelled because their sender's access ended; omitted when not read. */
+    undelivered?: SessionUndeliveredPrompt[];
+  }
 ): Promise<Record<string, unknown>> {
   const people = await buildCreatorMap(
     db,
@@ -130,6 +136,7 @@ async function enrichSessionWithAccess(
     viewerAccess,
     owner: input.access.ownerUserId ? accessPerson(input.access.ownerUserId, people) : null,
     grants,
+    ...(input.undelivered ? { undelivered: input.undelivered } : {}),
     serverTime: Date.now(),
   };
   return { ...attachCreator(session, people, currentUserId), viewerAccess, access };

@@ -69,7 +69,7 @@ async function inboxRow(deliveryId: string) {
   return runInDurableObject(projectDataStub(), async (_instance, state) => {
     const row = state.storage.sql
       .exec(
-        `SELECT sender_id, delivery_state, terminal_reason, metadata, content
+        `SELECT sender_id, delivery_state, terminal_reason, metadata, content, prompt_message_id
            FROM session_inbox WHERE id = ?`,
         deliveryId
       )
@@ -81,6 +81,7 @@ async function inboxRow(deliveryId: string) {
           terminal_reason: string | null;
           metadata: string | null;
           content: string;
+          prompt_message_id: string | null;
         }
       | undefined;
   });
@@ -305,6 +306,27 @@ describe('shared session access vertical slice', () => {
     expect(await viewerAccess(GRANTEE)).toBe('reader');
     expect(await viewerAccess(GRANTEE_2)).toBe('reader');
     expect((await call(GRANTEE, 'POST', '/prompt', { content: 'Still here?' })).status).toBe(403);
+
+    // Every access read says that message was never delivered, so a page that cached the row
+    // before it was labelled still shows the label: the revoke response, a later access read,
+    // and the session detail a reload reads.
+    const cancelled = [
+      {
+        messageId: (await inboxRow(deliveryId))?.prompt_message_id,
+        reason: 'sender_access_revoked',
+      },
+    ];
+    expect(cancelled[0]?.messageId).toEqual(expect.any(String));
+    // Earlier tests in this file share the session, so other cancelled messages may be listed.
+    expect((body.access as { undelivered?: unknown[] }).undelivered).toContainEqual(cancelled[0]);
+    const accessRead = (await (await call(GRANTEE_2, 'GET', '/access')).json()) as {
+      undelivered?: unknown[];
+    };
+    expect(accessRead.undelivered).toContainEqual(cancelled[0]);
+    const detail = (await (await call(OWNER, 'GET', '')).json()) as {
+      session: { access?: { undelivered?: unknown[] } };
+    };
+    expect(detail.session.access?.undelivered).toContainEqual(cancelled[0]);
   });
 
   it('lets a grantee leave on their own', async () => {

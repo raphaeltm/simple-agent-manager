@@ -47,6 +47,7 @@ export {
 export {
   labelUndeliveredPrompt,
   listActiveSessionAccessGrants,
+  listUndeliveredSenderPrompts,
   resolveSessionAccess,
   SENDER_ACCESS_EXPIRED_REASON,
   SENDER_ACCESS_REVOKED_REASON,

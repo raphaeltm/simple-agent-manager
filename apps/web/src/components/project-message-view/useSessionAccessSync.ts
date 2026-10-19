@@ -39,7 +39,10 @@ export function useSessionAccessSync(
           ? ({
               ...prev,
               viewerAccess: summary.viewerAccess,
-              access: summary,
+              // A share response does not read the cancelled-message list; keep the last one.
+              access: summary.undelivered
+                ? summary
+                : { ...summary, undelivered: prev.access?.undelivered },
             } as ChatSessionResponse)
           : prev
       );

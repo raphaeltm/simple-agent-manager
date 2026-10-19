@@ -15,6 +15,7 @@ import {
   computeSessionAccessExpiryAlarmTime,
   createSessionAccessGrant,
   listActiveSessionAccessGrants,
+  listUndeliveredSenderPrompts,
   processExpiredSessionAccessGrants,
   resolveSessionAccess,
   revokeSessionAccessForDepartedMember,
@@ -23,6 +24,7 @@ import {
   SENDER_ACCESS_REVOKED_REASON,
 } from '../../../src/durable-objects/project-data/session-access';
 import { handleExpiredGrants } from '../../../src/durable-objects/project-data/session-access-expiry';
+import { SESSION_ACCESS_UNDELIVERED_SUMMARY_LIMIT } from '../../../src/durable-objects/project-data/session-access-store';
 import type { VmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
 import { createSqlStorage } from './sql-storage-test-utils';
 
@@ -887,6 +889,87 @@ describe('ProjectData shared session access', () => {
       });
 
       expect(mailbox.getMessage(sql, 'system-wake')?.deliveryState).toBe('queued');
+    });
+  });
+
+  describe('messages cancelled because their sender lost access (access summary)', () => {
+    function promptMessageId(deliveryId: string): string {
+      return String(
+        sql
+          .exec('SELECT prompt_message_id FROM session_inbox WHERE id = ?', deliveryId)
+          .toArray()[0]?.prompt_message_id
+      );
+    }
+
+    it('lists a revoked sender’s cancelled messages, newest first, and nobody else’s', () => {
+      share('grantee-1', 'owner-1');
+      queuePrompt('mate-first', 'grantee-1');
+      vi.advanceTimersByTime(1_000);
+      queuePrompt('mate-second', 'grantee-1');
+      queuePrompt('owner-queued', 'owner-1');
+      // Control: before anything is cancelled the list is empty.
+      expect(listUndeliveredSenderPrompts(sql, 'chat-1')).toEqual([]);
+
+      revokeSessionAccessGrant(sql, {
+        sessionId: 'chat-1',
+        granteeUserId: 'grantee-1',
+        actorUserId: 'owner-1',
+      });
+
+      expect(listUndeliveredSenderPrompts(sql, 'chat-1')).toEqual([
+        { messageId: promptMessageId('mate-second'), reason: SENDER_ACCESS_REVOKED_REASON },
+        { messageId: promptMessageId('mate-first'), reason: SENDER_ACCESS_REVOKED_REASON },
+      ]);
+    });
+
+    it('names expiry as the reason when access ran out', () => {
+      share('grantee-1', 'owner-1', 'chat-1', 5);
+      queuePrompt('mate-queued', 'grantee-1');
+      vi.advanceTimersByTime(5 * 60_000 + 1);
+
+      processExpiredSessionAccessGrants(sql, Date.now());
+
+      expect(listUndeliveredSenderPrompts(sql, 'chat-1')).toEqual([
+        { messageId: promptMessageId('mate-queued'), reason: SENDER_ACCESS_EXPIRED_REASON },
+      ]);
+    });
+
+    it('ignores other failures and other sessions', () => {
+      seedSession('chat-2', 'owner-1');
+      share('grantee-1', 'owner-1');
+      queuePrompt('mate-queued', 'grantee-1');
+      sql.exec(
+        `UPDATE session_inbox SET delivery_state = 'failed', terminal_reason = 'expired'
+          WHERE id = ?`,
+        'mate-queued'
+      );
+      share('grantee-1', 'owner-1', 'chat-2');
+      revokeSessionAccessGrant(sql, {
+        sessionId: 'chat-2',
+        granteeUserId: 'grantee-1',
+        actorUserId: 'owner-1',
+      });
+
+      expect(listUndeliveredSenderPrompts(sql, 'chat-1')).toEqual([]);
+    });
+
+    it('keeps only the newest when there are more than the summary carries', () => {
+      share('grantee-1', 'owner-1');
+      for (let index = 0; index <= SESSION_ACCESS_UNDELIVERED_SUMMARY_LIMIT; index++) {
+        queuePrompt(`mate-${String(index).padStart(3, '0')}`, 'grantee-1');
+        vi.advanceTimersByTime(1);
+      }
+      revokeSessionAccessGrant(sql, {
+        sessionId: 'chat-1',
+        granteeUserId: 'grantee-1',
+        actorUserId: 'owner-1',
+      });
+
+      const listed = listUndeliveredSenderPrompts(sql, 'chat-1');
+      expect(listed).toHaveLength(SESSION_ACCESS_UNDELIVERED_SUMMARY_LIMIT);
+      const newest = String(SESSION_ACCESS_UNDELIVERED_SUMMARY_LIMIT).padStart(3, '0');
+      expect(listed[0]?.messageId).toBe(promptMessageId(`mate-${newest}`));
+      expect(listed.map((entry) => entry.messageId)).not.toContain(promptMessageId('mate-000'));
     });
   });
 

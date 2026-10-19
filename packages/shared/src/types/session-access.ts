@@ -86,12 +86,27 @@ export interface SessionAccessGrant {
   durationMinutes: number;
 }
 
+/** Why a teammate's queued message never reached the agent. */
+export type SessionUndeliveredReason = 'sender_access_revoked' | 'sender_access_expired';
+
+/** A transcript message cancelled before delivery because its sender's access ended. */
+export interface SessionUndeliveredPrompt {
+  messageId: string;
+  reason: SessionUndeliveredReason;
+}
+
 export interface SessionAccessSummary {
   sessionId: string;
   viewerAccess: SessionViewerAccess;
   owner: SessionAccessPerson | null;
   /** Active (unexpired, unrevoked) grants only. */
   grants: SessionAccessGrant[];
+  /**
+   * Messages cancelled before delivery because their sender's access ended, newest first. The
+   * transcript row also carries this, but a client that cached the row earlier would not
+   * re-read it; this list arrives with every access read so the label still appears.
+   */
+  undelivered?: SessionUndeliveredPrompt[];
   /** Server clock when this summary was built, so clients can show remaining time without skew. */
   serverTime: number;
 }

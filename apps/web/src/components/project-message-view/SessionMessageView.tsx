@@ -109,9 +109,11 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   // Convert DO messages to conversation items (single source), then fold
   // consecutive tool activity into one collapsed group row. Both passes live in
   // the same memo because every item object is rebuilt on every incoming token.
+  const undeliveredList = lc.session?.access?.undelivered;
   const displayItems = useMemo<DisplayItem[]>(() => {
-    return groupToolCallItems(chatMessagesToConversationItems(lc.messages));
-  }, [lc.messages]);
+    const undelivered = new Map(undeliveredList?.map((entry) => [entry.messageId, entry.reason]));
+    return groupToolCallItems(chatMessagesToConversationItems(lc.messages, undelivered));
+  }, [lc.messages, undeliveredList]);
   // Owner and grantees drive the agent; every member can comment; the server enforces both.
   const viewer = resolveSessionViewerCapabilities(lc.session);
   // One description per commented message ("the agent's reply", "Olivia's message"), shared by

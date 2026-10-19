@@ -40,6 +40,14 @@ export const SENDER_ACCESS_ENDED_ERRORS: Record<SenderAccessEndedReason, string>
  */
 export const SESSION_ACCESS_EXPIRY_SWEEP_LIMIT = 200;
 
+/**
+ * Most cancelled-message labels an access summary carries, newest first. Display only: every
+ * cancelled row also carries its label, which any read of the row returns, so this bounds only
+ * how far back a client's cached transcript is corrected. A safety bound rather than a tunable,
+ * for the same reason as the sweep limit above.
+ */
+export const SESSION_ACCESS_UNDELIVERED_SUMMARY_LIMIT = 100;
+
 const GrantRowSchema = v.object({
   id: v.string(),
   session_id: v.string(),
@@ -305,6 +313,41 @@ export function cancelUndeliveredSenderPrompts(
     );
   }
   return deliveryIds;
+}
+
+/**
+ * Transcript messages whose delivery was cancelled because the sender's access ended, newest
+ * first, for the access summary (`SESSION_ACCESS_UNDELIVERED_SUMMARY_LIMIT`). Reads the inbox
+ * through its `(target_session_id, delivery_state)` index rather than scanning the transcript.
+ */
+export function listUndeliveredSenderPrompts(
+  sql: SqlStorage,
+  sessionId: string
+): Array<{ messageId: string; reason: SenderAccessEndedReason }> {
+  return sql
+    .exec(
+      `SELECT prompt_message_id, terminal_reason
+         FROM session_inbox
+        WHERE target_session_id = ?
+          AND delivery_state = 'failed'
+          AND terminal_reason IN (?, ?)
+          AND prompt_message_id IS NOT NULL
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?`,
+      sessionId,
+      SENDER_ACCESS_REVOKED_REASON,
+      SENDER_ACCESS_EXPIRED_REASON,
+      SESSION_ACCESS_UNDELIVERED_SUMMARY_LIMIT
+    )
+    .toArray()
+    .flatMap((row) => {
+      const reason = row.terminal_reason;
+      if (typeof row.prompt_message_id !== 'string') return [];
+      if (reason !== SENDER_ACCESS_REVOKED_REASON && reason !== SENDER_ACCESS_EXPIRED_REASON) {
+        return [];
+      }
+      return [{ messageId: row.prompt_message_id, reason }];
+    });
 }
 
 /**

@@ -65,6 +65,7 @@ import type {
   SendAgentChannelMessageInput,
   SendAgentChannelMessageResult,
   SessionActivityTerminalReason,
+  SessionUndeliveredPrompt,
 } from '@simple-agent-manager/shared';
 import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-manager/shared';
 
@@ -1909,6 +1910,7 @@ export async function getSessionWithAccessGrants(
   session: Record<string, unknown> | null;
   access: SessionAccessResolution;
   grants: SessionAccessGrantRecord[];
+  undelivered: SessionUndeliveredPrompt[];
 }> {
   return callProjectDataWithRetry(
     env,
@@ -1935,7 +1937,11 @@ export async function revokeSessionAccessGrant(
   env: Env,
   projectId: string,
   input: Omit<RevokeSessionAccessGrantInput, 'now'>
-): Promise<{ result: RevokeSessionAccessGrantResult; grants: SessionAccessGrantRecord[] }> {
+): Promise<{
+  result: RevokeSessionAccessGrantResult;
+  grants: SessionAccessGrantRecord[];
+  undelivered: SessionUndeliveredPrompt[];
+}> {
   return callProjectDataNoRetry(env, projectId, 'revokeSessionAccessGrant', (stub) =>
     stub.revokeSessionAccessGrant(input)
   );

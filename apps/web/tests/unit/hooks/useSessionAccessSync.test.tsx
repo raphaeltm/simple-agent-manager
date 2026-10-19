@@ -193,3 +193,65 @@ describe('useSessionAccessSync: when shared access runs out', () => {
     expect(screen.getByTestId('viewer-access')).toHaveTextContent('owner');
   });
 });
+
+/** Applies a summary on click, the way the share dialog applies its response. */
+function ApplyHarness({
+  initial,
+  next,
+}: Readonly<{ initial: SessionAccessSummary; next: SessionAccessSummary }>) {
+  const [session, setSession] = useState<ChatSessionResponse | null>({
+    id: 'session-1',
+    viewerAccess: initial.viewerAccess,
+    access: initial,
+  } as ChatSessionResponse);
+  const { applySessionAccess } = useSessionAccessSync(
+    'project-1',
+    'session-1',
+    setSession,
+    session?.access,
+    NO_CHAT_SOCKET
+  );
+  return (
+    <>
+      <button type="button" onClick={() => applySessionAccess(next)}>
+        apply
+      </button>
+      <p data-testid="undelivered">
+        {(session?.access?.undelivered ?? []).map((entry) => entry.messageId).join(',') || 'none'}
+      </p>
+    </>
+  );
+}
+
+describe('useSessionAccessSync: messages cancelled because access ended', () => {
+  const withCancelled: SessionAccessSummary = {
+    ...summary('owner', [], NOW),
+    undelivered: [{ messageId: 'msg-1', reason: 'sender_access_expired' }],
+  };
+
+  it('keeps the cancelled list when a summary does not carry one (a share response)', () => {
+    render(<ApplyHarness initial={withCancelled} next={summary('owner', [], NOW + 1)} />);
+    expect(screen.getByTestId('undelivered')).toHaveTextContent('msg-1');
+
+    act(() => {
+      screen.getByRole('button', { name: 'apply' }).click();
+    });
+
+    expect(screen.getByTestId('undelivered')).toHaveTextContent('msg-1');
+  });
+
+  it('takes the list a summary does carry, including an empty one', () => {
+    render(
+      <ApplyHarness
+        initial={withCancelled}
+        next={{ ...summary('owner', [], NOW + 1), undelivered: [] }}
+      />
+    );
+
+    act(() => {
+      screen.getByRole('button', { name: 'apply' }).click();
+    });
+
+    expect(screen.getByTestId('undelivered')).toHaveTextContent('none');
+  });
+});

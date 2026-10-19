@@ -171,7 +171,7 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
         db,
         { ...session, agentSessionId, agentType, task },
         userId,
-        { access: loaded.access, grants: loaded.grants }
+        { access: loaded.access, grants: loaded.grants, undelivered: loaded.undelivered }
       ),
       messages: messagesResult.messages,
       hasMore: messagesResult.hasMore,

@@ -3,7 +3,7 @@ import type {
   ToolCallContentItem,
   ToolCallItem,
 } from '@simple-agent-manager/acp-client';
-import { isExpiredTask } from '@simple-agent-manager/shared';
+import { isExpiredTask, type SessionUndeliveredReason } from '@simple-agent-manager/shared';
 
 import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
@@ -193,8 +193,14 @@ export function deriveSessionState(session: ChatSessionResponse): SessionState {
 // DO message → ConversationItem conversion
 // ---------------------------------------------------------------------------
 
-/** Converts DO-persisted ChatMessageResponse[] into ConversationItem[] for unified rendering. */
-export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): ConversationItem[] {
+/**
+ * Converts DO-persisted ChatMessageResponse[] into ConversationItem[] for unified rendering.
+ * `undelivered` maps message ids to why their delivery was cancelled (the access summary).
+ */
+export function chatMessagesToConversationItems(
+  msgs: ChatMessageResponse[],
+  undelivered?: ReadonlyMap<string, SessionUndeliveredReason>
+): ConversationItem[] {
   // Safety-net deduplication by message ID. Primary dedup now happens at the
   // state level via mergeMessages(). If this catches duplicates, it indicates
   // a gap in state-level dedup that should be investigated.
@@ -218,7 +224,7 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
   const toolCallMap = new Map<string, number>(); // toolCallId → index in acc
   const items = dedupedMsgs.reduce<ConversationItem[]>((acc, msg) => {
     if (msg.role === 'user') {
-      const attribution = userMessageAttribution(msg);
+      const attribution = userMessageAttribution(msg, undelivered?.get(msg.id));
       acc.push({
         kind: 'user_message',
         id: msg.id,

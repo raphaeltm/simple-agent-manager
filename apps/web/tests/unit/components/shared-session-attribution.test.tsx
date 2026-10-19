@@ -28,8 +28,11 @@ const delivery = (metadata: Record<string, unknown>) => ({
   ...metadata,
 });
 
-function renderRows(rows: ChatMessageResponse[]) {
-  const items = chatMessagesToConversationItems(rows);
+function renderRows(
+  rows: ChatMessageResponse[],
+  undelivered?: ReadonlyMap<string, 'sender_access_revoked' | 'sender_access_expired'>
+) {
+  const items = chatMessagesToConversationItems(rows, undelivered);
   return render(
     <>
       {items.map((item) => (
@@ -128,6 +131,38 @@ describe('user message attribution', () => {
 
     expect(screen.getAllByText('Not delivered — access expired')).toHaveLength(2);
     expect(screen.queryByText('Not delivered — access was removed')).toBeNull();
+  });
+
+  it('labels a row the access summary says was cancelled, though the cached row is not', () => {
+    // A transcript cached before the server labelled the row: only the summary knows.
+    const teammate = delivery({
+      source: 'user_followup',
+      senderName: 'Ana Ruiz',
+      onBehalfOfUserId: 'owner-1',
+    });
+    renderRows(
+      [
+        userRow('cached-expired', teammate),
+        userRow('cached-revoked', teammate),
+        userRow('kept', teammate),
+      ],
+      new Map([
+        ['cached-expired', 'sender_access_expired'],
+        ['cached-revoked', 'sender_access_revoked'],
+      ])
+    );
+
+    expect(screen.getAllByText('Not delivered — access expired')).toHaveLength(1);
+    expect(screen.getAllByText('Not delivered — access was removed')).toHaveLength(1);
+    // Liveness: the third teammate row still renders with its sender and no label.
+    expect(screen.getAllByText('Ana Ruiz · shared access')).toHaveLength(3);
+  });
+
+  it('never labels the owner’s own prompt from the summary', () => {
+    renderRows([userRow('owner-typed', null)], new Map([['owner-typed', 'sender_access_expired']]));
+
+    expect(screen.getByText('Message owner-typed')).toBeTruthy();
+    expect(screen.queryByText('Not delivered — access expired')).toBeNull();
   });
 
   it('does not treat an unknown or inherited reason as a cancellation', () => {

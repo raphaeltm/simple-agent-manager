@@ -172,7 +172,8 @@ What SAM enforces:
   members of the project. Once you share, their messages are handled exactly like yours.
 - SAM's servers check the time on every action and again just before a queued message goes to the
   agent. A browser's clock or countdown has no say. Messages a teammate queued that haven't reached
-  the agent when their time runs out are cancelled and marked **Not delivered — access expired**.
+  the agent when their time runs out are cancelled and marked **Not delivered — access expired**,
+  on every open page as well as after a reload.
 - People a chat is shared with can share it onward, but never for longer than their own access lasts,
   and can remove anyone's access. Removing someone also removes anyone they added.
 - **Share** shows when each person's access ends. A teammate sees their own time left above the

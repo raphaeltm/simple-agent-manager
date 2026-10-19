@@ -122,7 +122,8 @@ async function inboxRow(deliveryId: string) {
   return runInDurableObject(stub(), async (_instance, state) => {
     return state.storage.sql
       .exec(
-        `SELECT i.delivery_state, i.terminal_reason, i.last_error, m.tool_metadata
+        `SELECT i.delivery_state, i.terminal_reason, i.last_error, i.prompt_message_id,
+                m.tool_metadata
            FROM session_inbox i LEFT JOIN chat_messages m ON m.id = i.prompt_message_id
           WHERE i.id = ?`,
         deliveryId
@@ -132,6 +133,7 @@ async function inboxRow(deliveryId: string) {
           delivery_state: string;
           terminal_reason: string | null;
           last_error: string | null;
+          prompt_message_id: string | null;
           tool_metadata: string | null;
         }
       | undefined;
@@ -298,6 +300,17 @@ describe('shared session access expiry', () => {
     expect(metadata.deliveryCancelled).toBe('sender_access_expired');
     expect(events).toEqual([{ sessionId, reason: 'expired' }]);
     expect((await grantRow(sessionId, GRANTEE))?.expiry_handled_at).not.toBeNull();
+    // The access read the clients make on that event names the cancelled message, so a page
+    // that cached the row before it was labelled still shows "Not delivered".
+    const access = (await (await call(GRANTEE, 'GET', sessionId, '/access')).json()) as {
+      undelivered?: unknown;
+    };
+    expect(access.undelivered).toEqual([
+      {
+        messageId: (await inboxRow(deliveryId))?.prompt_message_id,
+        reason: 'sender_access_expired',
+      },
+    ]);
 
     // A second tick finds nothing left to do and says nothing.
     await runAlarm();

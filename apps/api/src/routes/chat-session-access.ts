@@ -19,6 +19,7 @@ import {
   type RevokeSessionAccessGrantResponse,
   SESSION_ACCESS_DURATION_MINUTES,
   type SessionAccessSummary,
+  type SessionUndeliveredPrompt,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context, Hono } from 'hono';
@@ -61,9 +62,14 @@ async function accessSummary(
   session: Record<string, unknown>,
   viewerUserId: string,
   access: Awaited<ReturnType<typeof projectDataService.getSessionAccess>>['access'],
-  grants: SessionAccessGrantRecord[]
+  grants: SessionAccessGrantRecord[],
+  undelivered?: SessionUndeliveredPrompt[]
 ): Promise<SessionAccessSummary> {
-  const enriched = await enrichSessionWithAccess(db, session, viewerUserId, { access, grants });
+  const enriched = await enrichSessionWithAccess(db, session, viewerUserId, {
+    access,
+    grants,
+    undelivered,
+  });
   return enriched.access as SessionAccessSummary;
 }
 
@@ -97,7 +103,16 @@ export function registerChatSessionAccessRoutes(chatRoutes: Hono<{ Bindings: Env
       userId
     );
     if (!loaded.session) throw errors.notFound('Chat session');
-    return c.json(await accessSummary(db, loaded.session, userId, loaded.access, loaded.grants));
+    return c.json(
+      await accessSummary(
+        db,
+        loaded.session,
+        userId,
+        loaded.access,
+        loaded.grants,
+        loaded.undelivered
+      )
+    );
   });
 
   chatRoutes.post('/:sessionId/access/grants', jsonValidator(CreateGrantSchema), async (c) => {
@@ -211,11 +226,15 @@ export function registerChatSessionAccessRoutes(chatRoutes: Hono<{ Bindings: Env
           action: 'remove access to this session',
         });
 
-    const { result, grants } = await projectDataService.revokeSessionAccessGrant(c.env, projectId, {
-      sessionId,
-      granteeUserId,
-      actorUserId,
-    });
+    const { result, grants, undelivered } = await projectDataService.revokeSessionAccessGrant(
+      c.env,
+      projectId,
+      {
+        sessionId,
+        granteeUserId,
+        actorUserId,
+      }
+    );
     switch (result.status) {
       case 'session_not_found':
         throw errors.notFound('Chat session');
@@ -234,7 +253,14 @@ export function registerChatSessionAccessRoutes(chatRoutes: Hono<{ Bindings: Env
       actorUserId
     );
     if (!loaded.session) throw errors.notFound('Chat session');
-    const summary = await accessSummary(db, loaded.session, actorUserId, loaded.access, grants);
+    const summary = await accessSummary(
+      db,
+      loaded.session,
+      actorUserId,
+      loaded.access,
+      grants,
+      undelivered
+    );
     notifyInBackground(
       c,
       notifySessionAccessChange(c.env, {
