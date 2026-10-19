@@ -33,7 +33,10 @@ export const SENDER_ACCESS_ENDED_ERRORS: Record<SenderAccessEndedReason, string>
 
 /**
  * Most expired grants the alarm sweep handles in one pass. A safety bound, not a tunable: each
- * one costs a few local statements, and any left over keep the section due for the next alarm.
+ * one costs a few local statements, and any left over keep the section due for the next alarm, so
+ * no value changes what is allowed. Deliberately not an environment variable: new tunables go in
+ * the admin settings registry (.claude/rules/07, `pnpm quality:runtime-tunables`), and reading a
+ * setting here would add I/O to every alarm tick for nothing.
  */
 export const SESSION_ACCESS_EXPIRY_SWEEP_LIMIT = 200;
 
