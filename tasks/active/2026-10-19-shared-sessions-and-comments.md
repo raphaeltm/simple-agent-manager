@@ -47,6 +47,7 @@ Project members can read each other's chat sessions, but:
 - Workspace-level routes (terminal token, file proxy, git, port previews, fork restore) check the workspace owner; grantees are deliberately excluded rather than widening those checks (they bypass the transcript and expose the container).
 - Attachments are stored per uploader and delivered only when the uploader owns the workspace (`prompt-attachments.ts`), so grantee attachments are refused up front.
 - Human prompt producers that become sender-fenced: `send-chat.ts` (`user_followup`) and `message-comments.ts` (`comment_directive`) only. The /sam `send_message_to_subtask` mailbox path uses `agent_mailbox` and is unaffected.
+- Staging (2026-10-19): an Instant chat is `sleeping` minutes after its last turn, and grant creation refused anything but `active`, so most chats could not be shared by the time the owner opened Share. Fixed with one allowlist, `isShareableChatSessionStatus` (`active`, `sleeping`) in `packages/shared`, used by ProjectData grant creation and the share dialog (`4c8f797d6`).
 - Pre-existing, not changed: the task status route (`POST /tasks/:taskId/status`, used by the rail's **Complete**) allows any member with `task:write`. Tracked in `tasks/backlog/2026-10-19-session-complete-respects-session-writer.md`.
 
 ## Implementation checklist
@@ -91,6 +92,7 @@ Tests:
 - [x] MCP author roles (`tests/unit/routes/mcp-message-comments.test.ts`)
 - [x] Session sleep/resume act on the owner's workspace for a grantee, real SQLite with a decoy workspace (`tests/unit/routes/chat-session-controls.test.ts`, `0395f6e79`, proven red)
 - [x] `sendChat` grantee branches: speaker line only in the agent's copy, both refusals before any side effect, owner controls (`tests/unit/services/send-chat-shared-session.test.ts`, `303f9ef77`, proven red)
+- [x] Sharing a sleeping chat works; an ended chat cannot gain people but can still lose them (`session-access.test.ts`, `project-message-view.test.tsx` "Share follows the chat state", `shareable-session-status.test.ts`; proven red both ways)
 - [x] Mentions against real SQLite, recipient planning, settings, grant route mapping, `session.access.changed` broadcast scoping and owner offboarding through the real routes (`c50ef14c6`, each guard proven red)
 
 Docs:
