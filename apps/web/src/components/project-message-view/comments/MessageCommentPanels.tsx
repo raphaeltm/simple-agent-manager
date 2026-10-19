@@ -11,6 +11,11 @@ import {
   type UiMessageCommentThread,
 } from './comment-utils';
 import { CommentComposer } from './CommentComposer';
+import {
+  type DescribeCommentedMessage,
+  formatCommentedMessageLabel,
+  showCommentedMessageName,
+} from './commented-message-label';
 import { CommentCountMarker, CommentGlyph } from './CommentPrimitives';
 import { CommentThreadList } from './CommentThread';
 
@@ -63,14 +68,12 @@ function threadCallbacks(actions: CommentActions, canSendToAgent = true) {
 }
 
 export function MessageCommentActionRow({
-  messageId,
   comments,
   expanded,
   canComment,
   onToggle,
   onStartComment,
 }: {
-  messageId: string;
   comments: UiMessageCommentThread[];
   expanded: boolean;
   canComment: boolean;
@@ -94,7 +97,7 @@ export function MessageCommentActionRow({
           type="button"
           onClick={onStartComment}
           className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[0.6875rem] hover:text-fg-primary"
-          aria-label={`Add comment on message ${messageId}`}
+          aria-label="Comment on this message"
         >
           <CommentGlyph />
           Comment
@@ -173,6 +176,7 @@ export function DesktopCommentRail({
   onClearDraft,
   onSelectMessage,
   onClose,
+  describeMessage,
 }: {
   comments: UiMessageCommentThread[];
   draft: MessageCommentDraft | null;
@@ -186,6 +190,8 @@ export function DesktopCommentRail({
   onClearDraft: () => void;
   onSelectMessage: (messageId: string, commentId?: string) => void;
   onClose: () => void;
+  /** Names each thread's message ("Agent message · 5m ago") instead of its id. */
+  describeMessage: DescribeCommentedMessage;
 }) {
   const hasDraft = Boolean(draft);
   const showLoading = loading && comments.length === 0;
@@ -228,7 +234,9 @@ export function DesktopCommentRail({
           >
             <h3 className="mb-2 text-xs font-semibold text-fg-primary">
               {draft.quote ? 'New comment on selected text' : 'New comment on message'}{' '}
-              <span className="font-mono text-[0.6875rem] text-fg-muted">{draft.anchorId}</span>
+              <span className="text-[0.6875rem] font-normal text-fg-muted">
+                {formatCommentedMessageLabel(describeMessage(draft.anchorId))}
+              </span>
             </h3>
             <CommentComposer
               quote={draft.quote}
@@ -272,30 +280,33 @@ export function DesktopCommentRail({
           </p>
         ) : (
           <div className="flex min-w-0 flex-col gap-4">
-            {comments.map((comment) => (
-              <section key={comment.id} className="min-w-0">
-                <button
-                  type="button"
-                  className={`mb-2 flex w-full min-w-0 items-center justify-between gap-2 rounded-md border px-2 py-1 text-left text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus-ring ${
-                    activeMessageId === comment.anchor.messageId
-                      ? 'border-focus-ring bg-surface-hover text-fg-primary'
-                      : 'border-border-default text-fg-muted hover:text-fg-primary'
-                  }`}
-                  onClick={() => onSelectMessage(comment.anchor.messageId, comment.id)}
-                  aria-label={`Show message ${comment.anchor.messageId} in conversation`}
-                >
-                  <span className="min-w-0 truncate">Message {comment.anchor.messageId}</span>
-                  <span className="shrink-0">View</span>
-                </button>
-                <CommentThreadList
-                  comments={[comment]}
-                  focusedCommentId={focusedCommentId}
-                  mentionProjectId={actions.mentionProjectId}
-                  scrollFocusedIntoView
-                  {...callbacks}
-                />
-              </section>
-            ))}
+            {comments.map((comment) => {
+              const message = describeMessage(comment.anchor.messageId);
+              return (
+                <section key={comment.id} className="min-w-0">
+                  <button
+                    type="button"
+                    className={`mb-2 flex w-full min-w-0 items-center justify-between gap-2 rounded-md border px-2 py-1 text-left text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus-ring ${
+                      activeMessageId === comment.anchor.messageId
+                        ? 'border-focus-ring bg-surface-hover text-fg-primary'
+                        : 'border-border-default text-fg-muted hover:text-fg-primary'
+                    }`}
+                    onClick={() => onSelectMessage(comment.anchor.messageId, comment.id)}
+                    aria-label={showCommentedMessageName(message)}
+                  >
+                    <span className="min-w-0 truncate">{formatCommentedMessageLabel(message)}</span>
+                    <span className="shrink-0">View</span>
+                  </button>
+                  <CommentThreadList
+                    comments={[comment]}
+                    focusedCommentId={focusedCommentId}
+                    mentionProjectId={actions.mentionProjectId}
+                    scrollFocusedIntoView
+                    {...callbacks}
+                  />
+                </section>
+              );
+            })}
           </div>
         )}
       </div>

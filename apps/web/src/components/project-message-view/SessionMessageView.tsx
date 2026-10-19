@@ -11,6 +11,7 @@ import { useAuth } from '../AuthProvider';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { type CommentInboxItem, countBuckets, toInboxItem } from './comments/comment-inbox';
 import { CommentableConversationItem } from './comments/CommentableConversationItem';
+import { buildCommentedMessageDescriber } from './comments/commented-message-label';
 import { DesktopCommentRail } from './comments/MessageCommentPanels';
 import { useMessageComments } from './comments/useMessageComments';
 import { useProjectMessageCommentUi } from './comments/useProjectMessageCommentUi';
@@ -19,7 +20,7 @@ import { FloatingHeader } from './FloatingHeader';
 import { type ChatListContext, useFloatingHeaderHeight } from './MessageListScaffold';
 import { ProjectMessageViewDrawers } from './ProjectMessageViewDrawers';
 import { useSessionFocusHandoff } from './session-focus-handoff';
-import { resolveSessionViewerCapabilities } from './session-viewer-access';
+import { resolveSessionViewerCapabilities, sessionOwnerLabel } from './session-viewer-access';
 import { SessionFooter } from './SessionFooter';
 import type { ProjectMessageViewProps } from './SessionMessageView.types';
 import { SessionMessageViewDialogs } from './SessionMessageViewDialogs';
@@ -105,33 +106,43 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     : permissionInteractions.interactions;
   const refreshPermissionInteractions = permissionInteractions.refresh;
 
-  // One derivation feeds the header chip, the drawer, and the timeline, so the
-  // three can never disagree about how many comments are outstanding.
-  const commentInbox = useMemo<CommentInboxItem[]>(() => {
-    const roleById = new Map(lc.messages.map((msg) => [msg.id, msg.role]));
-    return messageComments.comments.map((thread) =>
-      toInboxItem(thread, {
-        kind: 'session',
-        sessionId,
-        sessionTopic: lc.session?.topic ?? 'This session',
-        messageId: thread.anchor.messageId,
-        messageRole: anchorRole(roleById.get(thread.anchor.messageId)),
-      })
-    );
-  }, [messageComments.comments, lc.messages, lc.session?.topic, sessionId]);
-
-  const commentCounts = useMemo(
-    () => countBuckets(commentInbox, viewerId),
-    [commentInbox, viewerId]
-  );
-  const unresolvedCommentCount = commentCounts.all - commentCounts.resolved;
-
   // Convert DO messages to conversation items (single source), then fold
   // consecutive tool activity into one collapsed group row. Both passes live in
   // the same memo because every item object is rebuilt on every incoming token.
   const displayItems = useMemo<DisplayItem[]>(() => {
     return groupToolCallItems(chatMessagesToConversationItems(lc.messages));
   }, [lc.messages]);
+  // Owner and grantees drive the agent; every member can comment; the server enforces both.
+  const viewer = resolveSessionViewerCapabilities(lc.session);
+  // One description per commented message ("the agent's reply", "Olivia's message"), shared by
+  // the drawer rows and the desktop rail so they cannot name the same message differently.
+  const ownerName = sessionOwnerLabel(lc.session);
+  const viewerIsOwner = viewer.viewerAccess === 'owner';
+  const describeCommentedMessage = useMemo(
+    () => buildCommentedMessageDescriber(displayItems, { ownerName, viewerIsOwner }),
+    [displayItems, ownerName, viewerIsOwner]
+  );
+
+  // One derivation feeds the header chip, the drawer, and the timeline, so the
+  // three can never disagree about how many comments are outstanding.
+  const commentInbox = useMemo<CommentInboxItem[]>(() => {
+    return messageComments.comments.map((thread) => {
+      const message = describeCommentedMessage(thread.anchor.messageId);
+      return toInboxItem(thread, {
+        kind: 'session',
+        sessionId,
+        sessionTopic: lc.session?.topic ?? 'This session',
+        messageId: thread.anchor.messageId,
+        messageDescription: message.loaded ? message.phrase : null,
+      });
+    });
+  }, [messageComments.comments, describeCommentedMessage, lc.session?.topic, sessionId]);
+
+  const commentCounts = useMemo(
+    () => countBuckets(commentInbox, viewerId),
+    [commentInbox, viewerId]
+  );
+  const unresolvedCommentCount = commentCounts.all - commentCounts.resolved;
 
   const timeline = useSessionTimeline(
     projectId,
@@ -186,8 +197,6 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   // rebuilding the ternary (and therefore the callback) on every render.
   const fileClickHandler =
     lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined;
-  // Owner and grantees drive the agent; every member can comment; the server enforces both.
-  const viewer = resolveSessionViewerCapabilities(lc.session);
   const permissionPlacement = useAcpPermissionPlacement({
     displayItems,
     interactions: permissionItems,
@@ -229,6 +238,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     onFork,
     onOpenShare: lc.session?.access ? openShare : undefined,
     sharedWithCount: lc.session?.access?.grants.length ?? 0,
+    canManageShare: viewer.canManageAccess,
     canBrowseWorkspace: viewer.viewerAccess === 'owner',
   });
   const sessionToolRail = lc.session ? (
@@ -341,6 +351,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
         jumpToMessage({ messageId, timestamp: Date.now() });
       }}
       onClose={closeComments}
+      describeMessage={describeCommentedMessage}
     />
   ) : null;
 
@@ -454,7 +465,3 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
 };
 
 /** The annotated message's author, or null when it is not loaded (older history). */
-function anchorRole(role: string | undefined): 'user' | 'assistant' | null {
-  if (role === undefined) return null;
-  return role === 'user' ? 'user' : 'assistant';
-}

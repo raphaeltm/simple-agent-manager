@@ -56,6 +56,7 @@ vi.mock('../../../src/components/project-message-view/AcpConversationItemView', 
 import { toInboxItem } from '../../../src/components/project-message-view/comments/comment-inbox';
 import { CommentableConversationItem } from '../../../src/components/project-message-view/comments/CommentableConversationItem';
 import { READER_COMMENT_HINT } from '../../../src/components/project-message-view/comments/CommentComposer';
+import { buildCommentedMessageDescriber } from '../../../src/components/project-message-view/comments/commented-message-label';
 import { DesktopCommentRail } from '../../../src/components/project-message-view/comments/MessageCommentPanels';
 import { useMessageComments } from '../../../src/components/project-message-view/comments/useMessageComments';
 import { useProjectMessageCommentUi } from '../../../src/components/project-message-view/comments/useProjectMessageCommentUi';
@@ -77,6 +78,11 @@ const THREAD: MessageCommentThread = {
 };
 
 type Surface = 'rail' | 'inline' | 'drawer' | 'mobile-composer';
+
+const DESCRIBE_MESSAGE = buildCommentedMessageDescriber(
+  [{ kind: 'agent_message', id: 'msg-1', text: 'Agent answer', streaming: false, timestamp: 1 }],
+  { ownerName: 'Grace Hopper', viewerIsOwner: true }
+);
 
 function CommentUiHarness({
   surface,
@@ -121,6 +127,7 @@ function CommentUiHarness({
         onClearDraft={ui.rowState.onClearDraft}
         onSelectMessage={ui.rowState.onSelectMessageComments}
         onClose={() => undefined}
+        describeMessage={DESCRIBE_MESSAGE}
       />
     );
   } else if (surface === 'inline') {

@@ -64,6 +64,8 @@ export interface UseSessionToolsInput {
   onOpenShare?: () => void;
   /** Active shared-access grants on this session. */
   sharedWithCount?: number;
+  /** Owner and grantees can add or remove people; everyone else only sees who has access. */
+  canManageShare?: boolean;
   /** Only the owner can browse workspace files (owner-only routes). */
   canBrowseWorkspace?: boolean;
 }
@@ -104,6 +106,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     onFork,
     onOpenShare,
     sharedWithCount = 0,
+    canManageShare = false,
     canBrowseWorkspace = true,
   } = input;
 
@@ -179,6 +182,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       hasForkHandler: !!onFork,
       hasShareHandler: !!onOpenShare,
       sharedWithCount,
+      canManageShare,
       canBrowseWorkspace,
       completing,
       detailsExpanded,
@@ -200,6 +204,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     onFork,
     onOpenShare,
     sharedWithCount,
+    canManageShare,
     canBrowseWorkspace,
     completing,
     detailsExpanded,

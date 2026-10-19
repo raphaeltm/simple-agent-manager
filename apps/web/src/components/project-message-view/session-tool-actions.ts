@@ -121,6 +121,11 @@ export interface BuildSessionToolActionsInput {
   /** People the session is shared with — the Share badge. */
   sharedWithCount?: number;
   /**
+   * Whether this viewer can add or remove people (owner and grantees). Everyone else can only
+   * see who has access, so their hint must not invite them to share.
+   */
+  canManageShare?: boolean;
+  /**
    * Files/Git read the workspace through owner-only routes (they can reach any file in the
    * container), so only the session owner gets them.
    */
@@ -237,20 +242,27 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSp
   return actions;
 }
 
+function buildShareHint(sharedWithCount: number, canManageShare: boolean): string {
+  if (sharedWithCount === 0) {
+    return canManageShare ? 'Share chat access with a teammate' : 'See who has access to this chat';
+  }
+  const people = `${sharedWithCount} ${sharedWithCount === 1 ? 'person' : 'people'}`;
+  return canManageShare
+    ? `Shared with ${people} — manage chat access`
+    : `Shared with ${people} — see who has access`;
+}
+
 /** Tools that act on the task behind the session. */
 function buildSessionGroup(input: BuildSessionToolActionsInput): SessionToolSpec[] {
   const { session, taskEmbed, hasRetryHandler, hasForkHandler } = input;
-  const { hasShareHandler = false, sharedWithCount = 0 } = input;
+  const { hasShareHandler = false, sharedWithCount = 0, canManageShare = false } = input;
   const actions: SessionToolSpec[] = [];
 
   if (hasShareHandler) {
     actions.push({
       id: 'share',
       label: 'Share',
-      hint:
-        sharedWithCount > 0
-          ? `Shared with ${sharedWithCount} ${sharedWithCount === 1 ? 'person' : 'people'} — manage chat access`
-          : 'Share chat access with a teammate',
+      hint: buildShareHint(sharedWithCount, canManageShare),
       icon: Users,
       badge: sharedWithCount > 0 ? sharedWithCount : undefined,
     });

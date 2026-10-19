@@ -218,8 +218,8 @@ export function SessionShareDialog({
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <p id={introId} className="m-0 text-sm leading-relaxed text-fg-secondary">
             {canManage
-              ? `People you add can do everything you can in this chat. It runs on ${words.possessive} accounts.`
-              : `The people below can do everything the owner can in this chat. It runs on ${words.possessive} accounts.`}
+              ? `People you add can message the agent and manage this chat, just like you. It runs on ${words.possessive} accounts.`
+              : `The people below can message the agent and manage this chat, just like the owner. It runs on ${words.possessive} accounts.`}
           </p>
 
           {confirming ? (

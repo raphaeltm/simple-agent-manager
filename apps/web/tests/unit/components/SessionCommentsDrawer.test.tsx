@@ -51,7 +51,7 @@ function makeInboxItem(thread: UiCommentThread): CommentInboxItem {
     sessionId: 'session-1',
     sessionTopic: 'Ship comment navigation',
     messageId: 'message-1',
-    messageRole: 'assistant',
+    messageDescription: "the agent's reply",
   });
 }
 

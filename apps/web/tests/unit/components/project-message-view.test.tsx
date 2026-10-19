@@ -1950,10 +1950,15 @@ describe('ProjectMessageView — message anchored comments', () => {
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
 
     await screen.findByText('Agent answer');
-    fireEvent.click(screen.getByRole('button', { name: /add comment on message msg-1/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Comment on this message' }));
 
     const rail = await screen.findByRole('complementary', { name: 'Session comments' });
     expect(within(rail).getByRole('region', { name: 'New message comment' })).toBeTruthy();
+    // The draft names the message from the loaded conversation, never by its id.
+    expect(
+      within(rail).getByRole('heading', { name: /New comment on message The agent's reply ·/ })
+    ).toBeTruthy();
+    expect(rail.textContent).not.toContain('msg-1');
     const textarea = within(rail).getByLabelText('Add a comment…') as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: ' Desktop message-level comment. ' } });
     fireEvent.click(within(textarea.closest('form')!).getByRole('button', { name: 'Comment' }));
@@ -2014,7 +2019,7 @@ describe('ProjectMessageView — message anchored comments', () => {
       expect(screen.getByText('Agent answer')).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /add comment on message msg-1/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Comment on this message' }));
     const textarea = screen.getAllByLabelText('Add a comment…')[0] as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: ' Please check this edge case. ' } });
     fireEvent.click(within(textarea.closest('form')!).getByRole('button', { name: 'Comment' }));

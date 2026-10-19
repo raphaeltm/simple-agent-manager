@@ -134,7 +134,7 @@ describe('SessionShareDialog — sharing', () => {
 
     expect(
       within(dialog).getByText(
-        'People you add can do everything you can in this chat. It runs on your accounts.'
+        'People you add can message the agent and manage this chat, just like you. It runs on your accounts.'
       )
     ).toBeInTheDocument();
 

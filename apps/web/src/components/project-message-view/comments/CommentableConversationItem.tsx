@@ -116,7 +116,6 @@ export function CommentableConversationItem({
 
       {isCommentableMessage && (canComment || itemComments.length > 0) && (
         <MessageCommentActionRow
-          messageId={item.id}
           comments={itemComments}
           expanded={isCommentsExpanded}
           canComment={canComment}

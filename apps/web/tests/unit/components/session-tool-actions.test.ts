@@ -174,15 +174,36 @@ describe('buildSessionToolActions — shared sessions', () => {
   const ids = (actions: SessionToolAction[]) => actions.map((action) => action.id);
 
   it('offers Share in the session group, badged with how many people have access', () => {
-    const actions = buildSessionToolActions(input({ hasShareHandler: true, sharedWithCount: 3 }));
-    const share = actions.find((action) => action.id === 'share');
+    const share = (overrides: Partial<BuildSessionToolActionsInput>) =>
+      buildSessionToolActions(input({ hasShareHandler: true, ...overrides })).find(
+        (action) => action.id === 'share'
+      );
 
-    expect(share).toMatchObject({ group: 'session', label: 'Share', badge: 3 });
-    expect(share?.hint).toBe('Shared with 3 people — manage chat access');
-    expect(
-      buildSessionToolActions(input({ hasShareHandler: true })).find((a) => a.id === 'share')
-    ).toMatchObject({ hint: 'Share chat access with a teammate', badge: undefined });
+    expect(share({ sharedWithCount: 3, canManageShare: true })).toMatchObject({
+      group: 'session',
+      label: 'Share',
+      badge: 3,
+      hint: 'Shared with 3 people — manage chat access',
+    });
+    expect(share({ canManageShare: true })).toMatchObject({
+      hint: 'Share chat access with a teammate',
+      badge: undefined,
+    });
     expect(ids(buildSessionToolActions(input()))).not.toContain('share');
+  });
+
+  it('only invites people who can share to share; everyone else is told they can look', () => {
+    const hint = (overrides: Partial<BuildSessionToolActionsInput>) =>
+      buildSessionToolActions(input({ hasShareHandler: true, ...overrides })).find(
+        (action) => action.id === 'share'
+      )?.hint;
+
+    expect(hint({ sharedWithCount: 1, canManageShare: false })).toBe(
+      'Shared with 1 person — see who has access'
+    );
+    expect(hint({ canManageShare: false })).toBe('See who has access to this chat');
+    // Unknown means "cannot", like every other viewer capability.
+    expect(hint({ sharedWithCount: 2 })).toBe('Shared with 2 people — see who has access');
   });
 
   it('keeps Files and Git for the owner only: they reach the workspace outside the chat', () => {

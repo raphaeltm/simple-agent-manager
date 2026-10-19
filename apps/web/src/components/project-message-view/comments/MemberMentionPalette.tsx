@@ -154,6 +154,8 @@ export function MemberMentionPalette({
   const content =
     options.length === 0 ? (
       <div
+        // The field's aria-controls points here while teammates load.
+        id={listboxId}
         role="status"
         style={style}
         className="fixed z-panel flex items-center gap-2 rounded-md border border-border-default bg-surface px-3 py-2 text-xs text-fg-muted shadow-lg"

@@ -29,10 +29,11 @@ export type CommentInboxSource =
       /** Jump target inside the conversation. */
       messageId: string;
       /**
-       * Role of the annotated message, so the row can say "on SAM's reply". Null or
-       * absent when the message is not loaded and its author is unknown.
+       * Which message the thread is on, mid-sentence ("the agent's reply", "your message",
+       * "Olivia's message"), so the row can say "on the agent's reply". Null or absent when
+       * the message is not loaded and its author is unknown.
        */
-      messageRole?: 'user' | 'assistant' | null;
+      messageDescription?: string | null;
     }
   | {
       kind: 'library_file';

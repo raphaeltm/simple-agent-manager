@@ -103,7 +103,7 @@ export function ReadOnlyFollowUp({
             onClick={onNewChat}
             className="shrink-0 rounded-md border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/15 transition-colors"
           >
-            New chat
+            Start your own chat
           </button>
         )}
       </div>

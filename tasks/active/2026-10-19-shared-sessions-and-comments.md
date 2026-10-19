@@ -78,6 +78,7 @@ Web:
 - [x] Share dialog, member @mention palette, mention rendering, send-to-agent gating on every surface, reader hint (`98c76f6ae`)
 - [x] Notification types in NotificationCenter / settings, comment-thread deep link, admin Collaboration category, activity feed labels (`98c76f6ae`)
 - [x] Web unit tests + Playwright visual audit at 375px and 1280px (`shared-session-viewer-audit.spec.ts`, `shared-session-collaboration-audit.spec.ts`; full web suite 4168/4168)
+- [x] UI review fixes: Share hint no longer invites readers to share; comment surfaces name the message ("The agent's reply · 5m ago", "Olivia's message") instead of its id, one describer for the rail and the drawer (the drawer no longer calls someone else's message "your message"); mention palette `aria-controls` target while loading; share intro scoped to what a grantee can do; reader button reads "Start your own chat"
 
 Tests:
 
@@ -88,6 +89,9 @@ Tests:
 - [x] `requireSessionWriter` unit tests (`tests/unit/services/session-access-writer.test.ts`)
 - [x] G5 (`tests/unit/routes/chat-start.test.ts`, `tests/unit/services/inherited-credential-attribution.test.ts`, Instant `/tasks/submit` in `tests/unit/routes/task-submit-capacity-pools.test.ts`, proven red against the old wiring)
 - [x] MCP author roles (`tests/unit/routes/mcp-message-comments.test.ts`)
+- [x] Session sleep/resume act on the owner's workspace for a grantee, real SQLite with a decoy workspace (`tests/unit/routes/chat-session-controls.test.ts`, `0395f6e79`, proven red)
+- [x] `sendChat` grantee branches: speaker line only in the agent's copy, both refusals before any side effect, owner controls (`tests/unit/services/send-chat-shared-session.test.ts`, `303f9ef77`, proven red)
+- [x] Mentions against real SQLite, recipient planning, settings, grant route mapping, `session.access.changed` broadcast scoping and owner offboarding through the real routes (`c50ef14c6`, each guard proven red)
 
 Docs:
 

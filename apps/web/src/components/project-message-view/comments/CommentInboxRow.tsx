@@ -13,8 +13,7 @@ import { relativeCommentTime } from './comment-utils';
 
 function anchorFallbackLabel(source: CommentInboxItem['source']): string {
   if (source.kind === 'library_file') return 'on this file';
-  if (source.messageRole === 'user') return 'on your message';
-  if (source.messageRole === 'assistant') return "on the agent's reply";
+  if (source.messageDescription) return `on ${source.messageDescription}`;
   // The annotated message is not loaded (older history, or another page), so its
   // author is unknown — say nothing rather than guess.
   return 'on a message';
