@@ -482,7 +482,12 @@ export type {
   SessionAccessSummary,
   SessionViewerAccess,
 } from './session-access';
-export { SESSION_ACCESS_REVOKE_REASONS, SESSION_VIEWER_ACCESS_LEVELS } from './session-access';
+export {
+  isShareableChatSessionStatus,
+  SESSION_ACCESS_REVOKE_REASONS,
+  SESSION_VIEWER_ACCESS_LEVELS,
+  SHAREABLE_CHAT_SESSION_STATUSES,
+} from './session-access';
 
 // Admin Observability
 export type {

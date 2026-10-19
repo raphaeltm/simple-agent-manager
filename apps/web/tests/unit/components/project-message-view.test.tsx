@@ -51,6 +51,7 @@ const mocks = vi.hoisted(() => ({
   listActivityEvents: vi.fn(),
   listNotifications: vi.fn(),
   listAcpInteractions: vi.fn(),
+  getProjectMembers: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -65,6 +66,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getNode: mocks.getNode,
   updateProjectTaskStatus: mocks.updateProjectTaskStatus,
   deleteWorkspace: mocks.deleteWorkspace,
+  getProjectMembers: mocks.getProjectMembers,
 }));
 
 vi.mock('../../../src/lib/api/comments', async (importOriginal) => ({
@@ -1147,6 +1149,72 @@ describe('chatMessagesToConversationItems', () => {
 // ---------------------------------------------------------------------------
 // Collapsible session header
 // ---------------------------------------------------------------------------
+
+describe('ProjectMessageView — Share follows the chat state', () => {
+  const owner = { id: 'user-1', name: 'Olivia Owner', avatarUrl: null };
+  const bea = { id: 'user-bea', name: 'Bea Arthur', avatarUrl: null };
+
+  function sharedSession(status: string) {
+    return {
+      ...makeSession('session-1', status),
+      access: {
+        sessionId: 'session-1',
+        viewerAccess: 'owner',
+        owner,
+        grants: [
+          {
+            id: 'grant-bea',
+            sessionId: 'session-1',
+            grantee: bea,
+            grantedBy: owner,
+            parentGrantId: null,
+            createdAt: Date.now(),
+          },
+        ],
+      },
+    };
+  }
+
+  beforeEach(() => {
+    mocks.getProjectMembers.mockResolvedValue({ members: [], inviteLinks: [], accessRequests: [] });
+  });
+
+  it('still lets the owner add people to a chat that is asleep', async () => {
+    mocks.getChatSession.mockResolvedValue({
+      session: sharedSession('sleeping'),
+      messages: [makeMessage('msg-1', 'session-1', 'Agent answer')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /Shared with 1 person/ }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Share chat access' });
+    expect(within(dialog).getByRole('heading', { name: 'Add a teammate' })).toBeTruthy();
+    expect(
+      within(dialog).queryByText('This chat has ended, so no one else can be added.')
+    ).toBeNull();
+  });
+
+  it('stops offering new people once the chat has ended', async () => {
+    mocks.getChatSession.mockResolvedValue({
+      session: sharedSession('stopped'),
+      messages: [makeMessage('msg-1', 'session-1', 'Agent answer')],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /Shared with 1 person/ }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Share chat access' });
+    expect(
+      within(dialog).getByText('This chat has ended, so no one else can be added.')
+    ).toBeTruthy();
+    expect(within(dialog).queryByRole('heading', { name: 'Add a teammate' })).toBeNull();
+    // Removing people still works on an ended chat.
+    expect(within(dialog).getByRole('button', { name: 'Remove Bea Arthur' })).toBeTruthy();
+  });
+});
 
 describe('ProjectMessageView — collapsible session header', () => {
   beforeEach(() => {

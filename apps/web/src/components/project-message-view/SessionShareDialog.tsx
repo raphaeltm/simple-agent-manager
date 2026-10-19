@@ -25,6 +25,11 @@ export interface SessionShareDialogProps {
   onClose: () => void;
   /** The server's access summary after a share or a removal. */
   onChanged: (access: SessionAccessSummary) => void;
+  /**
+   * False once the chat has ended (`isShareableChatSessionStatus`): no one new can be added, but
+   * people can still be removed.
+   */
+  canAddPeople: boolean;
 }
 
 /** How the dialog talks about the owner, from the viewer's side: "your" when it is them. */
@@ -106,6 +111,7 @@ export function SessionShareDialog({
   ownerLabel,
   onClose,
   onChanged,
+  canAddPeople,
 }: SessionShareDialogProps) {
   const titleId = useId();
   const introId = useId();
@@ -352,7 +358,7 @@ export function SessionShareDialog({
                 )}
               </section>
 
-              {canManage && (
+              {canManage && canAddPeople && (
                 <AddTeammateSection
                   projectId={projectId}
                   ownerUserId={access.owner?.id ?? null}
@@ -360,6 +366,11 @@ export function SessionShareDialog({
                   grants={access.grants}
                   onPick={startConfirm}
                 />
+              )}
+              {canManage && !canAddPeople && (
+                <p className="m-0 mt-5 text-sm text-fg-muted">
+                  This chat has ended, so no one else can be added.
+                </p>
               )}
             </>
           )}

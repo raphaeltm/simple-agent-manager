@@ -1,4 +1,7 @@
-import type { SessionAccessSummary } from '@simple-agent-manager/shared';
+import {
+  isShareableChatSessionStatus,
+  type SessionAccessSummary,
+} from '@simple-agent-manager/shared';
 
 import type { ChatSessionResponse } from '../../lib/api';
 import { SessionEventsDrawer } from '../chat/SessionEventsDrawer';
@@ -54,6 +57,7 @@ export function SessionMessageViewDialogs({
           ownerLabel={sessionOwnerLabel(session)}
           onClose={onCloseShare}
           onChanged={onAccessChanged}
+          canAddPeople={isShareableChatSessionStatus(session.status)}
         />
       )}
 

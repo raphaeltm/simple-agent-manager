@@ -269,12 +269,21 @@ describe('ProjectData shared session access', () => {
       expect(share('grantee-1', 'grantee-1')).toMatchObject({ status: 'invalid' });
     });
 
-    it('only shares active sessions', () => {
-      seedSession('chat-stopped', 'owner-1', 'stopped');
+    it('shares a sleeping chat: it wakes on the next message', () => {
+      seedSession('chat-sleeping', 'owner-1', 'sleeping');
 
-      expect(share('grantee-1', 'owner-1', 'chat-stopped')).toEqual({
+      expect(share('grantee-1', 'owner-1', 'chat-sleeping')).toMatchObject({
+        status: 'created',
+        grant: { sessionId: 'chat-sleeping', granteeUserId: 'grantee-1' },
+      });
+    });
+
+    it.each(['stopped', 'error'])('does not share a chat that has ended (%s)', (status) => {
+      seedSession(`chat-${status}`, 'owner-1', status);
+
+      expect(share('grantee-1', 'owner-1', `chat-${status}`)).toEqual({
         status: 'invalid',
-        reason: 'Only active sessions can be shared',
+        reason: 'This chat has ended, so it can no longer be shared',
       });
     });
 

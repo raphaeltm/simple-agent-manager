@@ -162,8 +162,8 @@ Before you share, know what it means:
 
 What SAM enforces:
 
-- You can share only active chats, and only with active members of the project. Once you share,
-  their messages are handled exactly like yours.
+- You can share a chat while it is running or asleep (not after it has ended), and only with active
+  members of the project. Once you share, their messages are handled exactly like yours.
 - People a chat is shared with can share it onward and remove anyone's access. Removing someone also
   removes anyone they added.
 - A chat can be shared with up to 10 people at a time by default (an admin setting).

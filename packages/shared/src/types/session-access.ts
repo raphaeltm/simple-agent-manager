@@ -13,6 +13,20 @@
  * reads the session.
  */
 
+import type { ChatSessionStatus } from './session';
+
+/**
+ * Chat states that can still take another message, and so can be shared. A sleeping chat is a
+ * live conversation that wakes on its next message (Instant chats sleep within minutes of going
+ * idle); only a stopped or failed chat has ended. An allowlist, so a new status has to be placed
+ * deliberately (.claude/rules/79).
+ */
+export const SHAREABLE_CHAT_SESSION_STATUSES: readonly ChatSessionStatus[] = ['active', 'sleeping'];
+
+export function isShareableChatSessionStatus(status: string | null | undefined): boolean {
+  return (SHAREABLE_CHAT_SESSION_STATUSES as readonly string[]).includes(status ?? '');
+}
+
 export const SESSION_VIEWER_ACCESS_LEVELS = ['owner', 'grantee', 'reader'] as const;
 /**
  * What the requesting user may do in one session.

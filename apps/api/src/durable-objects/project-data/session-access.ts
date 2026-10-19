@@ -10,7 +10,10 @@
  * Expected outcomes (not found, forbidden, limit) are returned as discriminated results rather
  * than thrown, because an error crossing the Durable Object RPC boundary keeps only its message.
  */
-import type { SessionAccessRevokeReason } from '@simple-agent-manager/shared';
+import {
+  isShareableChatSessionStatus,
+  type SessionAccessRevokeReason,
+} from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { createModuleLogger } from '../../lib/logger';
@@ -200,8 +203,8 @@ export function createSessionAccessGrant(
   if (!actor.ownerUserId) {
     return { status: 'invalid', reason: 'This session has no owner to share on behalf of' };
   }
-  if (actor.sessionStatus !== 'active') {
-    return { status: 'invalid', reason: 'Only active sessions can be shared' };
+  if (!isShareableChatSessionStatus(actor.sessionStatus)) {
+    return { status: 'invalid', reason: 'This chat has ended, so it can no longer be shared' };
   }
   if (input.granteeUserId === actor.ownerUserId) {
     return { status: 'invalid', reason: 'The session owner already controls this session' };

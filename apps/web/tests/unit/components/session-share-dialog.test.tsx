@@ -102,6 +102,7 @@ function renderDialog(overrides: Partial<SessionShareDialogProps> = {}) {
       ownerLabel="Prakash Rao"
       onClose={onClose}
       onChanged={onChanged}
+      canAddPeople
       {...overrides}
     />
   );
@@ -323,6 +324,17 @@ describe('SessionShareDialog — people with access', () => {
     expect(within(dialog).getByText('Bea Arthur')).toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: /^Remove/ })).toBeNull();
     expect(within(dialog).queryByRole('heading', { name: 'Add a teammate' })).toBeNull();
+    expect(mocks.getProjectMembers).not.toHaveBeenCalled();
+  });
+
+  it('stops offering new people once the chat has ended, but still lets the owner remove them', () => {
+    const { dialog } = renderDialog({ canAddPeople: false });
+
+    expect(
+      within(dialog).getByText('This chat has ended, so no one else can be added.')
+    ).toBeVisible();
+    expect(within(dialog).queryByRole('heading', { name: 'Add a teammate' })).toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Remove Bea Arthur' })).toBeInTheDocument();
     expect(mocks.getProjectMembers).not.toHaveBeenCalled();
   });
 
