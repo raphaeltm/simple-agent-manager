@@ -43,7 +43,7 @@ describe('authorized current GitHub PR branch read', () => {
     );
     expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith(
       'https://api.github.com/repos/owner/repo/pulls/42',
-      expect.objectContaining({ method: 'GET', redirect: 'error' })
+      expect.objectContaining({ method: 'GET', redirect: 'manual' })
     );
   });
 
@@ -117,7 +117,7 @@ describe('authorized current GitHub PR branch read', () => {
     expect(mocks.fetch).not.toHaveBeenCalled();
   });
 
-  it.each([403, 404, 500])(
+  it.each([301, 302, 307, 308, 403, 404, 500])(
     'fails closed for GitHub HTTP %s without returning provider content',
     async (status) => {
       mocks.fetch.mockResolvedValueOnce(new Response('private-provider-detail', { status }));

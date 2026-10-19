@@ -45,7 +45,8 @@ export async function resolveProjectPullRequestHeadBranch(
     `https://api.github.com/repos/${repository.split('/').map(encodeURIComponent).join('/')}/pulls/${number}`,
     {
       method: 'GET',
-      redirect: 'error',
+      // Workers supports manual/follow only. Never follow redirects with the token.
+      redirect: 'manual',
       signal: AbortSignal.timeout(
         parsePositiveInt(env.SAM_GITHUB_TIMEOUT_MS, DEFAULT_GITHUB_TIMEOUT_MS)
       ),
