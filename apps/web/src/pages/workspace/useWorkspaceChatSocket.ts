@@ -17,14 +17,13 @@ import type { AgentActivityState } from '../../components/project-message-view/t
 import { isWorkingActivity } from '../../components/project-message-view/types';
 import { useActivityVerifyTimer } from '../../components/project-message-view/useActivityVerifyTimer';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
-import { getChatSession } from '../../lib/api';
 import type {
   ChatMessageResponse,
   ChatSessionResponse,
   SessionStateSnapshot,
 } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
-import { fetchNewestPage, newestPersistedCursor } from '../../lib/message-paging';
+import { readMessagesAfter } from '../../lib/message-paging';
 
 /** Seconds of silence after last agent row before returning to idle. */
 const IDLE_TIMEOUT_MS = 3000;
@@ -106,14 +105,13 @@ export function useWorkspaceChatSocket({
     sessionId,
     enabled: sessionStatus === 'active',
     // The view's load can predate this subscription; read what was persisted since its
-    // newest row. The cursor is taken now, before this socket delivers anything newer.
+    // newest row. The view's load has finished before the socket opens (the socket waits for
+    // its status), and the cursor is taken now, before this socket delivers anything newer.
     onSubscribed: useCallback(() => {
-      const after = newestPersistedCursor(messagesRef.current);
-      const read = after
-        ? getChatSession(projectId, sessionId, { after })
-        : fetchNewestPage(projectId, sessionId);
-      void read
-        .then((page) => setMessages((prev) => mergeMessages(prev, page.messages, 'append')))
+      void readMessagesAfter(projectId, sessionId, messagesRef.current)
+        .then((found) => {
+          if (found.length > 0) setMessages((prev) => mergeMessages(prev, found, 'append'));
+        })
         .catch((err: unknown) => {
           console.warn('Failed to read messages persisted before the chat socket opened', err);
         });

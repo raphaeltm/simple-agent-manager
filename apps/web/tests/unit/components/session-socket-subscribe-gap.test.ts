@@ -10,6 +10,7 @@
  * cache, and own the ordering: the load resolves, the row is persisted, the socket opens, a
  * live row lands while the read is in flight, and only then does the read resolve.
  */
+import { DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -18,11 +19,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getChatSession: vi.fn(),
+  listChatMessages: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getChatSession: mocks.getChatSession,
+  listChatMessages: mocks.listChatMessages,
   getWorkspace: vi.fn(),
   getNode: vi.fn(),
   getTerminalToken: vi.fn(),
@@ -72,6 +75,7 @@ vi.mock('../../../src/components/project-message-view/types', async (importOrigi
 
 import { useSessionLifecycle } from '../../../src/components/project-message-view/useSessionLifecycle';
 import type { ChatMessageResponse, ChatSessionResponse } from '../../../src/lib/api';
+import { chatQueryKeys } from '../../../src/lib/query-options';
 import { useWorkspaceChatSocket } from '../../../src/pages/workspace/useWorkspaceChatSocket';
 
 class FakeWebSocket {
@@ -171,24 +175,29 @@ function liveBatch(message: ChatMessageResponse) {
   return { type: 'messages.batch', payload: { sessionId: 'sess-1', messages: [message] } };
 }
 
+function messagesPage(messages: ChatMessageResponse[]) {
+  return { messages, hasMore: false };
+}
+
 describe('rows persisted between the last read and the socket subscription', () => {
+  let queryClient: QueryClient;
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: queryClient }, children);
+
   beforeEach(() => {
     vi.clearAllMocks();
     FakeWebSocket.instances = [];
     vi.stubGlobal('WebSocket', FakeWebSocket);
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   });
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
   it('project chat: shows the row and keeps it in order with the live row after it', async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children);
-    const subscribeRead = deferred<ReturnType<typeof detail>>();
-    mocks.getChatSession
-      .mockResolvedValueOnce(detail([ownerPrompt, agentReply]))
-      .mockReturnValueOnce(subscribeRead.promise);
+    const subscribeRead = deferred<ReturnType<typeof messagesPage>>();
+    mocks.getChatSession.mockResolvedValueOnce(detail([ownerPrompt, agentReply]));
+    mocks.listChatMessages.mockReturnValueOnce(subscribeRead.promise);
 
     const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
       wrapper,
@@ -200,22 +209,25 @@ describe('rows persisted between the last read and the socket subscription', () 
 
     act(() => {
       socket.open();
-      // A live row lands while the subscribe read is still in flight.
+      // A live row lands before the subscribe read has even started.
       socket.deliver(liveBatch(replyToDirective));
-    });
-
-    // The read resumes from the newest row loaded before the socket opened, not from the live
-    // row that arrived after it.
-    expect(mocks.getChatSession).toHaveBeenLastCalledWith('proj-1', 'sess-1', {
-      signal: undefined,
-      after: '[2000,2000,"m2"]',
     });
     await waitFor(() =>
       expect(result.current.messages.map((m) => m.id)).toEqual(['m1', 'm2', 'r4'])
     );
 
+    // The read resumes from the newest row the page had read, not from the live row, and goes
+    // through the messages-only route.
+    await waitFor(() =>
+      expect(mocks.listChatMessages).toHaveBeenCalledWith('proj-1', 'sess-1', {
+        after: '[2000,2000,"m2"]',
+        limit: DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
+        signal: undefined,
+      })
+    );
+
     await act(async () => {
-      subscribeRead.resolve(detail([directive]));
+      subscribeRead.resolve(messagesPage([directive]));
       await subscribeRead.promise;
     });
 
@@ -227,12 +239,73 @@ describe('rows persisted between the last read and the socket subscription', () 
         'r4',
       ])
     );
-    expect(mocks.getChatSession).toHaveBeenCalledTimes(2);
+    expect(mocks.getChatSession).toHaveBeenCalledTimes(1);
+    expect(mocks.listChatMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('project chat, cached transcript: waits for the mount refresh instead of reading its range twice', async () => {
+    // Reopening a chat whose transcript is cached: the mount refresh is still reading what was
+    // persisted while it was closed when the socket opens.
+    const closedWhile = row('m3', 'user', 3000);
+    const gap = row('comment-directive-t4', 'user', 4000);
+    const live = row('r5', 'assistant', 5000);
+    queryClient.setQueryData(
+      chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1'),
+      detail([ownerPrompt, agentReply])
+    );
+    const mountRefresh = deferred<ReturnType<typeof detail>>();
+    mocks.getChatSession.mockReturnValueOnce(mountRefresh.promise);
+    mocks.listChatMessages.mockResolvedValueOnce(messagesPage([gap]));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(mocks.getChatSession).toHaveBeenCalledTimes(1));
+    expect(mocks.getChatSession).toHaveBeenLastCalledWith('proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      after: '[2000,2000,"m2"]',
+    });
+    // The cached session is active, so the socket opens while the refresh is in flight.
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const socket = FakeWebSocket.instances[0]!;
+    await act(async () => {
+      socket.open();
+      await Promise.resolve();
+      socket.deliver(liveBatch(live));
+      await Promise.resolve();
+    });
+    expect(mocks.listChatMessages).not.toHaveBeenCalled();
+
+    await act(async () => {
+      mountRefresh.resolve(detail([closedWhile]));
+      await mountRefresh.promise;
+    });
+
+    // Resumes after the refresh's newest row: not m2 (the refresh's own range), and not the
+    // live row (which would skip the gap).
+    await waitFor(() =>
+      expect(mocks.listChatMessages).toHaveBeenCalledWith('proj-1', 'sess-1', {
+        after: '[3000,3000,"m3"]',
+        limit: DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
+        signal: undefined,
+      })
+    );
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual([
+        'm1',
+        'm2',
+        'm3',
+        'comment-directive-t4',
+        'r5',
+      ])
+    );
+    expect(mocks.getChatSession).toHaveBeenCalledTimes(1);
+    expect(mocks.listChatMessages).toHaveBeenCalledTimes(1);
   });
 
   it('workspace chat: shows the row and keeps it in order with the live row after it', async () => {
-    const subscribeRead = deferred<ReturnType<typeof detail>>();
-    mocks.getChatSession.mockReturnValueOnce(subscribeRead.promise);
+    const subscribeRead = deferred<ReturnType<typeof messagesPage>>();
+    mocks.listChatMessages.mockReturnValueOnce(subscribeRead.promise);
 
     const { result } = renderHook(() => {
       const [messages, setMessages] = useState<ChatMessageResponse[]>([ownerPrompt, agentReply]);
@@ -255,18 +328,21 @@ describe('rows persisted between the last read and the socket subscription', () 
       socket.deliver(liveBatch(replyToDirective));
     });
 
-    expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
+    expect(mocks.listChatMessages).toHaveBeenCalledWith('proj-1', 'sess-1', {
       after: '[2000,2000,"m2"]',
+      limit: DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
+      signal: undefined,
     });
     expect(result.current.map((m) => m.id)).toEqual(['m1', 'm2', 'r4']);
 
     await act(async () => {
-      subscribeRead.resolve(detail([directive]));
+      subscribeRead.resolve(messagesPage([directive]));
       await subscribeRead.promise;
     });
 
     await waitFor(() =>
       expect(result.current.map((m) => m.id)).toEqual(['m1', 'm2', 'comment-directive-t1', 'r4'])
     );
+    expect(mocks.getChatSession).not.toHaveBeenCalled();
   });
 });

@@ -7,12 +7,11 @@ import { getChatSession } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
 import {
   fetchHistoryUntil,
-  fetchNewestPage,
   historyReaches,
   type HistoryTarget,
   mergeRecentWindowOrRefresh,
   oldestPersistedCursor,
-  refreshCachedTranscript,
+  readMessagesAfter,
 } from '../../lib/message-paging';
 import {
   chatQueryKeys,
@@ -89,9 +88,15 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
     [queryClient, queryKey]
   );
 
+  // Ids of rows added live while a subscribe read waits for a read already in flight; see
+  // `catchUpTail`.
+  const addedLiveRef = useRef<Set<string> | null>(null);
+
   /** Adds live rows (socket deliveries, optimistic sends) in transcript order. */
   const appendMessages = useCallback(
     (incoming: ChatMessageResponse[]) => {
+      const addedLive = addedLiveRef.current;
+      if (addedLive) for (const message of incoming) addedLive.add(message.id);
       queryClient.setQueryData<ChatSessionDetailResponse>(
         queryKey,
         (current) =>
@@ -102,22 +107,28 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
   );
 
   /**
-   * Reads every row persisted after the newest loaded one and adds it, for a socket that
-   * just subscribed: a row persisted after the last read and before the subscription reached
-   * no socket, and once a newer live row lands after it, no later read from the newest row
-   * would find it again. `refreshCachedTranscript` takes its cursor before it first awaits, so
-   * a live row arriving meanwhile cannot move the cursor past the missed one. Only messages
-   * are merged; the session and state snapshots stay with the reads that own them.
+   * For a socket that just subscribed: reads the rows persisted after the transcript's last
+   * read and before the subscription. They reached no socket, and once a newer live row lands,
+   * no read from the newest row would find them again.
+   *
+   * A read already in flight (the mount refresh, started before the socket opened) is awaited,
+   * and this one resumes from the newest row a read returned instead of reading that range
+   * twice. Rows added live in the meantime are newer than the gap, so they never set the
+   * cursor. Messages only, through the messages-only route; the session and state snapshots
+   * stay with the reads that own them.
    */
   const catchUpTail = useCallback(() => {
-    const loaded = readDetail();
-    if (!loaded) return;
-    const loadedIds = new Set(loaded.messages.map((message) => message.id));
-    void refreshCachedTranscript(projectId, sessionId, loaded)
-      .then((refreshed) => refreshed ?? fetchNewestPage(projectId, sessionId))
-      .then((fresh) => {
-        // Only what the read found; a row the transcript has dropped since stays dropped.
-        const found = fresh.messages.filter((message) => !loadedIds.has(message.id));
+    const addedLive = new Set<string>();
+    addedLiveRef.current = addedLive;
+    const inFlight = queryClient.getQueryCache().find({ queryKey, exact: true })?.promise;
+    void Promise.resolve(inFlight)
+      // A failed or cancelled read still leaves a transcript to resume from.
+      .catch(() => undefined)
+      .then(async () => {
+        const loaded = readDetail();
+        if (!loaded) return;
+        const read = loaded.messages.filter((message) => !addedLive.has(message.id));
+        const found = await readMessagesAfter(projectId, sessionId, read);
         if (found.length === 0) return;
         queryClient.setQueryData<ChatSessionDetailResponse>(
           queryKey,
@@ -128,6 +139,9 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
       .catch((err: unknown) => {
         // Best effort: a reconnect catch-up or the fallback poll reads the newest window again.
         console.warn('Failed to read messages persisted before the chat socket opened', err);
+      })
+      .finally(() => {
+        if (addedLiveRef.current === addedLive) addedLiveRef.current = null;
       });
   }, [projectId, queryClient, queryKey, readDetail, sessionId]);
 
