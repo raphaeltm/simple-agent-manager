@@ -80,6 +80,23 @@ async function setExpiresAt(sessionId: string, granteeUserId: string, expiresAt:
   });
 }
 
+/**
+ * Hold deliveries to this chat the way a mid-turn agent does (a busy backoff), so a queued prompt
+ * stays queued. Without it the prompt is attempted at once and, with no runtime in this harness,
+ * fails on its own before the expiry the test is about.
+ */
+async function holdDeliveries(sessionId: string) {
+  await runInDurableObject(stub(), async (_instance, state) => {
+    state.storage.sql.exec(
+      `INSERT INTO prompt_delivery_target_backoff
+         (target_session_id, busy_attempts, next_attempt_at, message_priority)
+       VALUES (?, 1, ?, 2)`,
+      sessionId,
+      Date.now() + 10 * MINUTE
+    );
+  });
+}
+
 async function grantRow(sessionId: string, granteeUserId: string) {
   return runInDurableObject(stub(), async (_instance, state) => {
     return state.storage.sql
@@ -259,10 +276,12 @@ describe('shared session access expiry', () => {
   it('the alarm cancels queued prompts and tells open clients, once', async () => {
     const sessionId = await newSession('Swept');
     expect((await share(OWNER, sessionId, GRANTEE, 5)).status).toBe(201);
+    await holdDeliveries(sessionId);
     const queued = await call(GRANTEE, 'POST', sessionId, '/prompt', { content: 'Queued' });
     expect(queued.status).toBe(202);
     const { deliveryId } = (await queued.json()) as { deliveryId: string };
     const { ws, events } = await subscribe(sessionId);
+    expect(await inboxRow(deliveryId)).toMatchObject({ delivery_state: 'queued' });
 
     await setExpiresAt(sessionId, GRANTEE, Date.now() - 1);
     await runAlarm();
@@ -290,8 +309,10 @@ describe('shared session access expiry', () => {
   it('a regrant after expiry gives access again without reviving the old queued prompt', async () => {
     const sessionId = await newSession('Regrant');
     expect((await share(OWNER, sessionId, GRANTEE, 5)).status).toBe(201);
+    await holdDeliveries(sessionId);
     const queued = await call(GRANTEE, 'POST', sessionId, '/prompt', { content: 'Old' });
     const { deliveryId } = (await queued.json()) as { deliveryId: string };
+    expect(await inboxRow(deliveryId)).toMatchObject({ delivery_state: 'queued' });
     await setExpiresAt(sessionId, GRANTEE, Date.now() - 1);
 
     const regrant = await share(OWNER, sessionId, GRANTEE, 10);

@@ -86,6 +86,24 @@ async function inboxRow(deliveryId: string) {
   });
 }
 
+/**
+ * Hold deliveries to the session the way a mid-turn agent does (a busy backoff), so a queued
+ * prompt stays queued. Without it the prompt is attempted at once and, with no runtime in this
+ * harness, can fail on its own before the revoke the test is about.
+ */
+async function holdDeliveries() {
+  await runInDurableObject(projectDataStub(), async (_instance, state) => {
+    state.storage.sql.exec(
+      `INSERT INTO prompt_delivery_target_backoff
+         (target_session_id, busy_attempts, next_attempt_at, message_priority)
+       VALUES (?, 1, ?, 2)
+       ON CONFLICT(target_session_id) DO UPDATE SET next_attempt_at = excluded.next_attempt_at`,
+      sessionId,
+      Date.now() + 10 * 60_000
+    );
+  });
+}
+
 async function inboxCount() {
   return runInDurableObject(projectDataStub(), async (_instance, state) => {
     const row = state.storage.sql
@@ -253,9 +271,11 @@ describe('shared session access vertical slice', () => {
   it('cascades a revoke and cancels the revoked people’s undelivered prompts', async () => {
     // The grantee shares onward; that grant hangs off theirs.
     expect((await share(GRANTEE, GRANTEE_2)).status).toBe(201);
+    await holdDeliveries();
     const queued = await call(GRANTEE_2, 'POST', '/prompt', { content: 'Second-hand prompt' });
     expect(queued.status).toBe(202);
     const { deliveryId } = (await queued.json()) as { deliveryId: string };
+    expect(await inboxRow(deliveryId)).toMatchObject({ delivery_state: 'queued' });
 
     const response = await call(OWNER, 'DELETE', `/access/grants/${GRANTEE}`);
 
