@@ -80,8 +80,6 @@ export async function authorizeSendChat(
   const project = await requireProjectCapability(db, projectId, userId, 'task:write');
   const writer = await requireSessionWriter(env, projectId, sessionId, userId, {
     db,
-    project,
-    requireGranteeRepositoryAccess: true,
     action: 'send messages in this session',
   });
   return { project, writer };

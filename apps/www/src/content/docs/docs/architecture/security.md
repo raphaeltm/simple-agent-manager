@@ -253,13 +253,19 @@ A chat's creator can give another project member the same controls in that one c
 Enforcement points:
 
 - Grants live in the project's ProjectData Durable Object (`chat_session_access_grants`, migration `064-session-access-grants-and-comment-mentions`). `resolveSessionAccess` in `apps/api/src/durable-objects/project-data/session-access.ts` reads them on every check; no decision is cached. A chat without a recorded owner can never be shared.
-- `requireSessionWriter` also requires the grantee and the owner to both be active members with `task:write`. For prompts, answers and sending a comment to the agent it requires the grantee's own verified repository access (`requireRepositoryAccess` in `apps/api/src/routes/projects/_helpers.ts`).
+- `requireSessionWriter` also requires the grantee and the owner to both be active members with `task:write`. Nothing else is checked: the owner's share is the consent for the grantee to act through the owner's session, so the grantee needs no repository access of their own.
 - The browser's chat WebSocket is read-only. It used to store a `message.send` user message for any connected member; `webSocketMessage` in `apps/api/src/durable-objects/project-data/index.ts` now rejects it, so every prompt passes the REST checks.
 - Durable prompt delivery checks the sender again just before it sends (`invalidSessionWriterSenderResult` in `apps/api/src/durable-objects/project-data/prompt-delivery-source-guards.ts`). Revoking a grant fails that person's undelivered prompts in the same transaction (`revokeSessionAccessGrant`).
 - Forking or retrying a teammate's task bills the person who starts it, not the teammate (`inheritedCredentialAttributionForCaller` in `apps/api/src/services/placement-field-resolution.ts`).
 - Terminal, file browser, Git, port preview, fork and attachment routes keep their workspace-owner checks, so a grantee cannot reach the workspace outside the chat.
 
-**Remaining risk.** The agent process holds the owner's agent credential (an API key or OAuth token) in its environment, and a grantee can ask the agent to print it. SAM cannot prevent this while the grantee controls the agent. The share dialog says so, and the server requires the owner to acknowledge it (`acknowledgeSharedCredentials` on `POST /api/projects/:id/sessions/:sessionId/access/grants`). A chat that runs on a project credential exposes the project's key rather than a personal one.
+**Remaining risk.** A grantee who can prompt the agent can ask it to print anything in its environment and keep using it after their access is revoked. SAM cannot prevent this while the grantee controls the agent. What the agent holds:
+
+- The owner's agent credential: an API key or Claude/Codex OAuth token (`packages/vm-agent/internal/acp/process.go`). A chat on a project credential holds the project's key instead; a chat on the SAM AI proxy holds only a placeholder.
+- Git access from the workspace credential helper (`POST /api/workspaces/:id/git-token` in `apps/api/src/routes/workspaces/runtime.ts`). For GitHub it is an installation token scoped to the project repository that expires within an hour. For GitLab it is the owner's personal GitLab OAuth access token.
+- The workspace's SAM MCP token, which acts as the owner in this project's MCP tools (8-hour sliding window, 24-hour maximum; `apps/api/src/services/mcp-token.ts`).
+
+The share dialog says so, and the server requires the owner to acknowledge it (`acknowledgeSharedCredentials` on `POST /api/projects/:id/sessions/:sessionId/access/grants`).
 
 ## Workspace Isolation Model
 

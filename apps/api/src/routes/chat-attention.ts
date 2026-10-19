@@ -46,11 +46,9 @@ export async function answerAttention(
 ) {
   const db = drizzle(env.DATABASE, { schema });
 
-  const project = await requireProjectCapability(db, projectId, userId, 'task:write');
+  await requireProjectCapability(db, projectId, userId, 'task:write');
   const writer = await requireSessionWriter(env, projectId, sessionId, userId, {
     db,
-    project,
-    requireGranteeRepositoryAccess: true,
     action: 'answer the agent in this session',
   });
 

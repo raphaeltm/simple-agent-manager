@@ -10,8 +10,8 @@
  * a grantee can always remove their own access. Removing a grant also removes the grants that
  * person issued, and fails their prompts that have not reached the agent yet.
  *
- * A grantee must have their own verified access to the project repository (July 2026 rule:
- * never let a member act on the repository only through someone else's identity).
+ * Sharing needs nothing beyond active membership: the grantee then drives the session exactly
+ * as the owner would, on the owner's accounts (product rule, 2026-10-19).
  */
 import type {
   CreateSessionAccessGrantResponse,
@@ -29,7 +29,7 @@ import { log } from '../lib/logger';
 import { requireRouteParam } from '../lib/route-helpers';
 import { resolveWaitUntil } from '../lib/wait-until';
 import { getAuth, getUserId } from '../middleware/auth';
-import { AppError, errors } from '../middleware/error';
+import { errors } from '../middleware/error';
 import { hasProjectCapability, requireProjectCapability } from '../middleware/project-auth';
 import { jsonValidator } from '../schemas/_validator';
 import { notifySessionAccessChange } from '../services/collaboration-notifications';
@@ -37,7 +37,6 @@ import { getSessionAccessMaxGrants } from '../services/collaboration-settings';
 import * as projectDataService from '../services/project-data';
 import { requireSessionWriter } from '../services/session-access';
 import { enrichSessionWithAccess } from './chat-session-ownership';
-import { requireRepositoryAccess } from './projects/_helpers';
 
 const CreateGrantSchema = v.object({
   userId: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(128)),
@@ -100,39 +99,20 @@ export function registerChatSessionAccessRoutes(chatRoutes: Hono<{ Bindings: Env
     const { userId: granteeUserId } = c.req.valid('json');
     const db = drizzle(c.env.DATABASE, { schema });
 
-    const project = await requireProjectCapability(db, projectId, actorUserId, 'task:write');
+    await requireProjectCapability(db, projectId, actorUserId, 'task:write');
     const writer = await requireSessionWriter(c.env, projectId, sessionId, actorUserId, {
       db,
-      project,
       action: 'share this session',
     });
     if (granteeUserId === writer.ownerUserId) {
       throw errors.badRequest('The session owner already controls this session');
     }
 
-    // The grantee must be an active member who can work on tasks in this project...
+    // The grantee must be an active member who can work on tasks in this project. Nothing
+    // else is required: sharing is the owner's consent to let them drive this session.
     if (!(await hasProjectCapability(db, projectId, granteeUserId, 'task:write'))) {
       throw errors.badRequest('Sessions can only be shared with active members of this project');
     }
-    // ...and must already have their own access to the repository the agent works on.
-    try {
-      await requireRepositoryAccess(c.env, db, project, granteeUserId);
-    } catch (err) {
-      // A check that could not run is not evidence the grantee lacks access (see
-      // requireSessionWriter): only a definite 4xx answer becomes the friendly rejection.
-      if (!(err instanceof AppError) || err.statusCode >= 500) throw err;
-      log.info('session_access.grant_rejected_repository_access', {
-        projectId,
-        sessionId,
-        actorUserId,
-        granteeUserId,
-        outcome: 'rejected',
-      });
-      throw errors.forbidden(
-        `This person needs their own access to ${project.repository} before you can share a session with them`
-      );
-    }
-
     const maxActiveGrants = await getSessionAccessMaxGrants(c.env);
     const { result, grants } = await projectDataService.createSessionAccessGrant(c.env, projectId, {
       sessionId,

@@ -28,7 +28,7 @@ Project members can read each other's chat sessions, but:
 
 - **Authority:** one server-side check, `requireSessionWriter`, for every session-scoped write path (REST, Connector operations, MCP-free browser paths). Owner = `chat_sessions.created_by_user_id`; grantee = active row in the new ProjectData table `chat_session_access_grants`. Membership (`requireProjectCapability`) is still checked first on every request, so removal from the project ends access immediately.
 - **Actor vs credential owner:** writer actions carry both `actorUserId` (attribution: message sender, comment author/sentBy, activity events, task status events) and `ownerUserId` (resource resolution: workspace, node, task rows, credentials, billing). Grantee actions never resolve resources by the grantee's id.
-- **Repository identity (July 2026 rule: never let a member act on the repo via another user's identity):** a grant requires the grantee to have their own verified access to the project repository (`requireRepositoryAccess`, user∩installation), checked at grant time and again at every grantee prompt/answer that drives the agent. No positive-decision caching.
+- **No further checks after sharing (Raphaël, 2026-10-19):** "once the user gives access, we don't really check anything else" — a grantee's prompts are handled exactly like the owner's, labelled in the UI and for the agent. The earlier grantee repository-access check (grant time + every prompt/answer/send) was removed; only membership of both people remains.
 - **Owner must still be a member:** grantee actions also require the session owner to hold active `task:write` membership.
 - **Revocation** is one ProjectData transaction: mark the grant revoked, cascade to grants issued by that grantee (downstream grants), and fail that sender's unclaimed/pre-submit prompt deliveries for the session (`terminal_reason='sender_access_revoked'`). A `session.access.changed` WebSocket event makes clients refetch. A prompt the agent already received keeps running (cannot be taken back).
 - **Delivery-time fence (defence in depth):** the prompt-delivery runner re-checks, before any side effect, that a human `user_followup`/`comment_directive` delivery's sender is the session owner or holds an active grant.
@@ -56,7 +56,7 @@ Server (`fd1682eb2`, `aa9ad82e5`):
 - [x] DO migration `064-session-access-grants-and-comment-mentions`: `chat_session_access_grants` + `mentions_json` columns (additive only)
 - [x] DO module `project-data/session-access.ts`: resolve, create (idempotent, cap, parent link), revoke with cascade, cancel undelivered prompts, departed member, sender fence
 - [x] `requireSessionWriter` on prompt, cancel, stop/archive, idle-reset, durability, interactions list/detail/answer, attention answer, comment send, sleep, resume, grant management, Connector `sam_chat_send` / `sam_agent_answer` / `sam_work_stop`
-- [x] Grantee checks: grantee and owner both active `task:write` members; grantee's own repository access for prompts, answers and comment send; failed checks that could not run are rethrown
+- [x] Grantee checks: grantee and owner both active `task:write` members (repository check removed per Raphaël 2026-10-19)
 - [x] Grant routes `GET/POST/DELETE .../access(/grants)` with server-enforced `acknowledgeSharedCredentials`
 - [x] Session controls `POST .../sleep`, `POST .../agent-sessions/:id/resume` resolving resources by owner
 - [x] Offboarding apply revokes the departed member's grants and grants on sessions they own
@@ -96,7 +96,7 @@ Docs:
 ## Acceptance criteria
 
 - [ ] A project member who is not the owner or a grantee gets `403` from prompt, cancel, stop, sleep, resume, answer, attention answer, comment send and grant creation, and nothing is queued (workers slice + route tests)
-- [ ] The owner can share an active session with an active member who has repository access; the acknowledgment is required; non-members, the owner and self are refused (workers slice)
+- [ ] The owner can share an active session with an active member; the acknowledgment is required; non-members, the owner and self are refused (workers slice)
 - [ ] A grantee's prompt is queued on the owner's session as the grantee, with `onBehalfOfUserId` and a speaker line (workers slice)
 - [ ] Revoking a grant cascades and fails the revoked people's undelivered prompts; the agent never receives them (DO tests + workers slice)
 - [ ] A delivery whose sender lost access is failed before any send (DO runner tests)
@@ -108,7 +108,7 @@ Docs:
 
 ## Decisions pending
 
-- Credential exposure residual: asked Raphaël (A: ship with warning + limits, B: only sessions on project keys). Merge waits for the answer.
+- Credential exposure residual: Raphaël asked what the problem was (2026-10-19). Explained: the agent environment holds the owner's AI key/OAuth login, the git credential (GitHub: 1-hour repo-scoped installation token; GitLab: owner's personal OAuth token) and the SAM MCP token (owner identity, ≤24h); a grantee can ask the agent to print them. Waiting for his yes/no on shipping with that risk + a warning. Merge and production deploy wait for it.
 
 ## Out of scope / follow-ups
 

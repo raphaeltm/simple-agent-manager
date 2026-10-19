@@ -260,11 +260,9 @@ chatCommentRoutes.post(
     const threadId = requireRouteParam(c, 'threadId');
     const db = drizzle(c.env.DATABASE, { schema });
 
-    const project = await requireProjectCapability(db, projectId, userId, 'task:write');
+    await requireProjectCapability(db, projectId, userId, 'task:write');
     const writer = await requireSessionWriter(c.env, projectId, sessionId, userId, {
       db,
-      project,
-      requireGranteeRepositoryAccess: true,
       action: 'send comments to the agent in this session',
     });
 

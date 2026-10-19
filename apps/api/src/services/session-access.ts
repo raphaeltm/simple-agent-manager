@@ -11,6 +11,11 @@
  *   resource and credential resolution: the workspace, node, task and agent-session rows, the
  *   agent credential, compute billing. A grantee's own id never selects a resource.
  *
+ * Product rule (Raphaël, 2026-10-19): once the owner shares a session, the grantee drives it
+ * exactly as the owner would — no further checks beyond both people staying active project
+ * members. The grantee does not need their own repository access: the owner's grant is the
+ * consent to act through the owner's session.
+ *
  * Preconditions: the caller has already checked the actor's project capability
  * (`requireProjectCapability`) for the request. Grantee requests are re-checked here anyway,
  * because a grantee's authority exists only while they, and the owner, remain members.
@@ -22,9 +27,8 @@ import * as schema from '../db/schema';
 import type { SessionAccessResolution } from '../durable-objects/project-data/session-access';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { AppError, errors } from '../middleware/error';
+import { errors } from '../middleware/error';
 import { type AppDb, hasProjectCapability } from '../middleware/project-auth';
-import { requireRepositoryAccess } from '../routes/projects/_helpers';
 import * as projectDataService from './project-data';
 
 export type SessionWriterRole = 'owner' | 'grantee';
@@ -45,14 +49,6 @@ export interface SessionWriterContext {
 
 export interface RequireSessionWriterOptions {
   db?: AppDb;
-  /** The project row the caller already loaded, to avoid a second read. */
-  project?: schema.Project;
-  /**
-   * Grantee actions that give the agent new instructions (prompts, answers, sending a comment)
-   * must prove the grantee's own repository access, so a member never acts on the repository
-   * through someone else's identity alone. No positive decision is cached.
-   */
-  requireGranteeRepositoryAccess?: boolean;
   /** Short label for logs and errors, e.g. "send messages", "stop this session". */
   action?: string;
 }
@@ -130,24 +126,6 @@ export async function requireSessionWriter(
   if (!ownerIsMember) {
     rejected(logContext, 'owner_not_member');
     throw errors.forbidden('The owner of this session is no longer a member of this project');
-  }
-
-  if (options.requireGranteeRepositoryAccess) {
-    const project =
-      options.project ??
-      (await db.query.projects.findFirst({ where: (p, { eq }) => eq(p.id, projectId) }));
-    if (!project || project.id !== projectId) throw errors.notFound('Project');
-    try {
-      await requireRepositoryAccess(env, db, project, actorUserId);
-    } catch (err) {
-      // Only a definite "no access" answer (a 4xx) is the grantee's problem. A check that could
-      // not run (a provider outage, a thrown fetch) says nothing about their access: surface it.
-      if (!(err instanceof AppError) || err.statusCode >= 500) throw err;
-      rejected(logContext, 'grantee_repository_access');
-      throw errors.forbidden(
-        `You need your own access to ${project.repository} to work in a shared session`
-      );
-    }
   }
 
   return {

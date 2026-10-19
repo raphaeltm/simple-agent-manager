@@ -152,16 +152,18 @@ Before you share, know what it means:
 - **It runs on the owner's accounts.** A teammate's messages go to the owner's agent, on the owner's
   AI subscription or API key, the owner's compute, and the workspace's GitHub access. Work it starts
   is billed to the owner.
-- **The agent can read the owner's keys**, so a teammate who drives it may be able to see them. Share
-  only with people you trust. SAM asks you to confirm this before it shares.
+- **The agent can read the owner's keys**, so a teammate who drives it can ask it to print them and
+  keep using them after their access ends. That is the owner's AI key or Claude/Codex sign-in, and
+  on GitLab projects the owner's GitLab sign-in. On GitHub projects the agent only has a one-hour
+  token for the project's repository. Share only with people you trust. SAM asks you to confirm
+  before it shares.
 - **There is no end date.** Access lasts until someone removes it.
 - **It covers that one chat.** It gives no access to the owner's other chats, settings or keys.
 
 What SAM enforces:
 
-- You can share only active chats, and only with active members of the project who have their own
-  GitHub access to the project's repository. SAM checks that repository access again each time the
-  teammate sends a message, answers the agent, or sends a comment to the agent.
+- You can share only active chats, and only with active members of the project. Once you share,
+  their messages are handled exactly like yours.
 - People a chat is shared with can share it onward and remove anyone's access. Removing someone also
   removes anyone they added.
 - A chat can be shared with up to 10 people at a time by default (an admin setting).

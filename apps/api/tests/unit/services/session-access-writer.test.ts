@@ -8,7 +8,7 @@ import { AppError } from '../../../src/middleware/error';
  * `requireSessionWriter` decides who may drive a chat session. The SQL that resolves the
  * owner/grantee role is tested against real SQLite in
  * `tests/unit/durable-objects/session-access.test.ts`; this file covers what the service adds
- * on top: live membership for both people, and the grantee's own repository access.
+ * on top: live membership for both people — and nothing else (product rule, 2026-10-19).
  */
 
 const mocks = vi.hoisted(() => ({
@@ -31,7 +31,6 @@ vi.mock('../../../src/routes/projects/_helpers', () => ({
 const { requireSessionWriter } = await import('../../../src/services/session-access');
 
 const env = { DATABASE: {} } as unknown as Env;
-const project = { id: 'project-1', repository: 'acme/app' } as never;
 const session = { id: 'session-1', topic: 'Fix the build' };
 
 function access(overrides: Partial<SessionAccessResolution> = {}): SessionAccessResolution {
@@ -73,12 +72,7 @@ describe('requireSessionWriter', () => {
   it('returns the owner as both actor and credential owner, with no extra checks', async () => {
     mocks.getSessionAccess.mockResolvedValue({ session, access: access({ role: 'owner' }) });
 
-    await expect(
-      requireSessionWriter(env, 'project-1', 'session-1', 'owner-1', {
-        project,
-        requireGranteeRepositoryAccess: true,
-      })
-    ).resolves.toEqual({
+    await expect(requireSessionWriter(env, 'project-1', 'session-1', 'owner-1')).resolves.toEqual({
       projectId: 'project-1',
       sessionId: 'session-1',
       session,
@@ -99,10 +93,7 @@ describe('requireSessionWriter', () => {
     });
 
     await expect(
-      requireSessionWriter(env, 'project-1', 'session-1', 'grantee-1', {
-        project,
-        requireGranteeRepositoryAccess: true,
-      })
+      requireSessionWriter(env, 'project-1', 'session-1', 'grantee-1')
     ).resolves.toMatchObject({
       role: 'grantee',
       actorUserId: 'grantee-1',
@@ -121,23 +112,7 @@ describe('requireSessionWriter', () => {
       'owner-1',
       'task:write'
     );
-    // The grantee's OWN repository access is checked, never the owner's.
-    expect(mocks.requireRepositoryAccess).toHaveBeenCalledWith(
-      env,
-      expect.anything(),
-      project,
-      'grantee-1'
-    );
-  });
-
-  it('only checks repository access when the action asks for it', async () => {
-    mocks.getSessionAccess.mockResolvedValue({
-      session,
-      access: access({ role: 'grantee', grant }),
-    });
-
-    await requireSessionWriter(env, 'project-1', 'session-1', 'grantee-1', { project });
-
+    // Once shared, nothing else is checked: no repository access of the grantee's own.
     expect(mocks.requireRepositoryAccess).not.toHaveBeenCalled();
   });
 
@@ -202,44 +177,4 @@ describe('requireSessionWriter', () => {
     expect(error.statusCode).toBe(403);
     expect(error.message).toBe('The owner of this session is no longer a member of this project');
   });
-
-  it('turns a definite "no repository access" answer into a 403 that names the repository', async () => {
-    mocks.getSessionAccess.mockResolvedValue({
-      session,
-      access: access({ role: 'grantee', grant }),
-    });
-    mocks.requireRepositoryAccess.mockRejectedValue(
-      new AppError(403, 'FORBIDDEN', 'GitHub authorization is required')
-    );
-
-    const error = await rejection(
-      requireSessionWriter(env, 'project-1', 'session-1', 'grantee-1', {
-        project,
-        requireGranteeRepositoryAccess: true,
-      })
-    );
-    expect(error.statusCode).toBe(403);
-    expect(error.message).toBe('You need your own access to acme/app to work in a shared session');
-  });
-
-  it.each([
-    ['a provider 5xx', new AppError(502, 'BAD_GATEWAY', 'GitHub is unavailable')],
-    ['a thrown fetch', new TypeError('fetch failed')],
-  ])(
-    'surfaces %s from the repository check instead of calling it missing access',
-    async (_, cause) => {
-      mocks.getSessionAccess.mockResolvedValue({
-        session,
-        access: access({ role: 'grantee', grant }),
-      });
-      mocks.requireRepositoryAccess.mockRejectedValue(cause);
-
-      await expect(
-        requireSessionWriter(env, 'project-1', 'session-1', 'grantee-1', {
-          project,
-          requireGranteeRepositoryAccess: true,
-        })
-      ).rejects.toBe(cause);
-    }
-  );
 });

@@ -329,12 +329,8 @@ describe('chat comment send-to-agent route', () => {
       'owner-1',
       'task:write'
     );
-    expect(mocks.requireRepositoryAccess).toHaveBeenCalledWith(
-      env,
-      expect.anything(),
-      expect.objectContaining({ id: 'project-1' }),
-      'grantee-1'
-    );
+    // Sharing is the owner's consent; the grantee needs no repository access of their own.
+    expect(mocks.requireRepositoryAccess).not.toHaveBeenCalled();
     const call = env._projectDataStub.acceptPromptDelivery.mock.calls[0]?.[0];
     expect(call).toMatchObject({
       senderId: 'grantee-1',
@@ -348,20 +344,6 @@ describe('chat comment send-to-agent route', () => {
     expect(call?.deliveryContent).toContain(
       'Sent to you by: Name grantee-1 (shared access to this session)'
     );
-  });
-
-  it('rejects a grantee who has lost their own repository access', async () => {
-    mocks.userId = 'grantee-1';
-    mocks.requireRepositoryAccess.mockRejectedValue(new AppError(403, 'FORBIDDEN', 'no access'));
-    const env = makeEnv({ access: 'grantee' });
-
-    const response = await send(env);
-
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
-      message: 'You need your own access to acme/app to work in a shared session',
-    });
-    expect(env._projectDataStub.acceptPromptDelivery).not.toHaveBeenCalled();
   });
 
   it('rejects a grantee once the session owner has left the project', async () => {
