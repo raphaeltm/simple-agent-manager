@@ -208,8 +208,17 @@ describe('SessionFooter: when a grantee’s access ends', () => {
 
     // At the end time, by the server's clock, the notice and the composer go together, even
     // before any refetch tells the page (the server already refuses the grantee).
+    // The last countdown tick before the end: 7 seconds left, still usable.
     act(() => {
-      vi.advanceTimersByTime(23 * MINUTE + 7_100);
+      vi.advanceTimersByTime(23 * MINUTE);
+    });
+    expect(screen.getByTestId('shared-session-time-left')).toHaveTextContent(
+      /^Your access ends in under a minute/
+    );
+    expect(screen.getByTestId('composer')).toBeInTheDocument();
+    // No countdown tick falls in the next 7.1 s, so only the re-render at the end time can lock.
+    act(() => {
+      vi.advanceTimersByTime(7_100);
     });
     expect(screen.queryByTestId('composer')).toBeNull();
     expect(screen.queryByTestId('shared-session-notice')).toBeNull();
