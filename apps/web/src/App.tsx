@@ -147,6 +147,11 @@ const ProjectTriggerDetail = lazyNamed(
 const ProjectTriggers = lazyNamed(() => import('./pages/ProjectTriggers'), 'ProjectTriggers');
 const ProjectEvents = lazyNamed(() => import('./pages/ProjectEvents'), 'ProjectEvents');
 const SamPrototype = lazyNamed(() => import('./pages/SamPrototype'), 'SamPrototype');
+// PROTOTYPE ONLY (never merge): Workflows UX exploration, task 01M59TPKHAYJP0GNC5AWH66DYH.
+const WorkflowsPrototype = lazyNamed(
+  () => import('./pages/workflows-prototype'),
+  'WorkflowsPrototype'
+);
 const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
 const ConnectorConsent = lazyNamed(() => import('./pages/ConnectorConsent'), 'ConnectorConsent');
@@ -272,6 +277,11 @@ export default function App() {
                       <>
                         {/* SAM prototype — local/test only, no auth */}
                         <Route path="/sam" element={page(<SamPrototype />)} />
+                        {/* Workflows UX prototype — local/test only, no auth, never merge */}
+                        <Route
+                          path="/prototype/workflows/*"
+                          element={page(<WorkflowsPrototype />)}
+                        />
                         {/* Harness for Playwright audits — mounts trial components with mock data */}
                         <Route
                           path="/__test/trial-chat-gate"
