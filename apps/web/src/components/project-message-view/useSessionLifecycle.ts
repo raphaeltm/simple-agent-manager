@@ -149,6 +149,8 @@ export function useSessionLifecycle(
     // ordinary sleeping session still connects nothing) is what makes the push
     // half of wake progress actually reach the user.
     enabled: session?.status === 'active' || wake.isWaking,
+    // Loaded and not active: the socket is off because the chat sleeps, so a wake catches up.
+    knownAsleep: session !== null && session.status !== 'active' && !wake.isWaking,
     onMessage: useCallback(
       (msg: ChatMessageResponse) => {
         appendMessages([msg]);

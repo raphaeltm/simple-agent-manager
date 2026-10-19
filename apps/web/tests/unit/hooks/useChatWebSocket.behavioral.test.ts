@@ -543,22 +543,31 @@ describe('useChatWebSocket (behavioral)', () => {
     );
   });
 
+  type SocketProps = { enabled: boolean; knownAsleep: boolean };
+  function renderSocket(onCatchUp: ReturnType<typeof vi.fn>, initialProps: SocketProps) {
+    return renderHook(
+      ({ enabled, knownAsleep }: SocketProps) =>
+        useChatWebSocket({ ...defaultProps, enabled, knownAsleep, onCatchUp }),
+      { initialProps }
+    );
+  }
+  async function openSocket(index: number) {
+    await act(async () => {
+      MockWebSocket.instances[index]!.simulateOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
   it('catches up when a chat that was asleep wakes and its socket opens', async () => {
     // Loaded asleep: the socket is off, then the chat wakes (say, a comment sent to the agent).
     // The row that woke it was broadcast before this socket existed.
     const onCatchUp = vi.fn();
-    const { rerender } = renderHook(
-      ({ enabled }) => useChatWebSocket({ ...defaultProps, enabled, onCatchUp }),
-      { initialProps: { enabled: false } }
-    );
+    const { rerender } = renderSocket(onCatchUp, { enabled: false, knownAsleep: true });
     expect(MockWebSocket.instances).toHaveLength(0);
 
-    rerender({ enabled: true });
-    await act(async () => {
-      MockWebSocket.instances[0]!.simulateOpen();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    rerender({ enabled: true, knownAsleep: false });
+    await openSocket(0);
 
     expect(onCatchUp).toHaveBeenCalledTimes(1);
     expect(onCatchUp).toHaveBeenLastCalledWith(
@@ -568,26 +577,40 @@ describe('useChatWebSocket (behavioral)', () => {
     );
   });
 
+  it('catches up when a cold page load finds the chat asleep and it later wakes', async () => {
+    const onCatchUp = vi.fn();
+    // Status not loaded yet, then loaded as asleep, then it wakes.
+    const { rerender } = renderSocket(onCatchUp, { enabled: false, knownAsleep: false });
+    rerender({ enabled: false, knownAsleep: true });
+    rerender({ enabled: true, knownAsleep: false });
+    await openSocket(0);
+
+    expect(onCatchUp).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fetch twice when a cold page load turns out to be an active chat', async () => {
+    const onCatchUp = vi.fn();
+    // Status not loaded yet (socket off for that reason only), then loaded as active.
+    const { rerender } = renderSocket(onCatchUp, { enabled: false, knownAsleep: false });
+    rerender({ enabled: true, knownAsleep: false });
+    await openSocket(0);
+
+    // The initial REST load already has these messages.
+    expect(onCatchUp).not.toHaveBeenCalled();
+    // Liveness: the socket did open.
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
   it('catches up after a sleep in the middle of a session, and only once per wake', async () => {
     const onCatchUp = vi.fn();
-    const { rerender } = renderHook(
-      ({ enabled }) => useChatWebSocket({ ...defaultProps, enabled, onCatchUp }),
-      { initialProps: { enabled: true } }
-    );
-    await act(async () => {
-      MockWebSocket.instances[0]!.simulateOpen();
-      await Promise.resolve();
-    });
+    const { rerender } = renderSocket(onCatchUp, { enabled: true, knownAsleep: false });
+    await openSocket(0);
     // The first open of an active chat leaves loading to the initial REST load.
     expect(onCatchUp).toHaveBeenCalledTimes(0);
 
-    rerender({ enabled: false });
-    rerender({ enabled: true });
-    await act(async () => {
-      MockWebSocket.instances[1]!.simulateOpen();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    rerender({ enabled: false, knownAsleep: true });
+    rerender({ enabled: true, knownAsleep: false });
+    await openSocket(1);
     expect(onCatchUp).toHaveBeenCalledTimes(1);
 
     // A reconnect afterwards still catches up, as before.
@@ -597,11 +620,7 @@ describe('useChatWebSocket (behavioral)', () => {
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-    await act(async () => {
-      MockWebSocket.instances[2]!.simulateOpen();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await openSocket(2);
     expect(onCatchUp).toHaveBeenCalledTimes(2);
   });
 

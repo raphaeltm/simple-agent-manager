@@ -98,6 +98,7 @@ export function useWorkspaceChatSocket({
     projectId,
     sessionId,
     enabled: sessionStatus === 'active',
+    knownAsleep: sessionStatus !== undefined && sessionStatus !== 'active',
     onMessage: useCallback(
       (msg: ChatMessageResponse) => {
         setMessages((prev) => mergeMessages(prev, [msg], 'append'));
