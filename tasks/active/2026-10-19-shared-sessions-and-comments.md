@@ -17,11 +17,26 @@ Project members can read each other's chat sessions, but:
    - **G3** — every durable prompt delivery renders as the owner's own bubble (comment directives included), so a cross-user prompt would look like the owner typed it.
    - **G5** — `POST /tasks/submit` accepts a caller-supplied `parentTaskId` and inherits the parent's credential attribution without checking who the caller is (to verify with a real-SQL attack test).
 
+## Required refinement: grant expiry (Raphaël, 2026-10-19 13:55Z; messages 01M5A75SZRB9ZB7Z1X53HA95JF, 01M5A8QKNP3BKZ9FMW34ACB9P7)
+
+Supersedes "no expiry". Blocks merge and production until implemented and verified.
+
+- [ ] Grant requires a duration choice of 5, 10, 30 or 60 minutes; no default, no unlimited option
+- [ ] Server-side expiry on every control path (`requireSessionWriter` uses server time) and at queued-prompt delivery (`sender_access_expired`)
+- [ ] Undelivered collaborator prompts cancelled after expiry or revocation; live clients notified (`session.access.changed`)
+- [ ] Remaining time / expires-at shown on grants and in the collaborator notice; **Revoke now**
+- [ ] Explicit renew/regrant by a session writer; no silent renewal; nobody renews their own access; onward grants capped at the issuer's expiry
+- [ ] Risk disclosure: capabilities/credentials the agent can reach; expiry/revocation cannot undo completed actions or invalidate copied credentials
+- [ ] Already-running turn keeps running; expiry stops further collaborator control (documented, no undo promised, owner's session not killed)
+- [ ] Browser timers display only; alarm sweep is cleanup only, never the authorization
+- [ ] Tests: clock boundaries, queued delivery, live connections, regrant/revoke races, actor attribution
+- [ ] Re-run independent review, full suites, two-account staging including a real expiry, then PR
+
 ## Product decisions (from Raphaël / the design idea)
 
 - Any active project member can comment on any session in the project, @mention a person, and see clear author attribution.
 - Comments are visible to people and to the session's agent, but a comment never reaches an agent unless an authorized session writer explicitly presses **Send to agent**. No blocking review gate.
-- The session owner can grant a named project member owner-equivalent control **within that session**, until revoked, no expiry. Not account or project administration. Grants do not propagate to forks or child sessions.
+- The session owner can grant a named project member owner-equivalent control **within that session** for a chosen 5/10/30/60 minutes (superseding the original "until revoked, no expiry"). Not account or project administration. Grants do not propagate to forks or child sessions.
 - Do not grant any real third party access during deployment/testing.
 
 ## Security design decisions (this task)
