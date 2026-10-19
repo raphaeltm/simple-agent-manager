@@ -58,6 +58,19 @@ export interface SessionAccessResolution {
 const GRANT_COLUMNS =
   'id, session_id, grantee_user_id, granted_by_user_id, parent_grant_id, created_at';
 
+// Whole statements built once at module load from the static column list, so no caller value
+// ever reaches SQL text (the same pattern as CLAIM_DUE_PROMPT_DELIVERIES_SQL).
+const READ_ACTIVE_GRANT_SQL = `SELECT ${GRANT_COLUMNS} FROM chat_session_access_grants
+  WHERE session_id = ? AND grantee_user_id = ? AND revoked_at IS NULL
+  LIMIT 1`;
+const LIST_ACTIVE_GRANTS_SQL = `SELECT ${GRANT_COLUMNS} FROM chat_session_access_grants
+  WHERE session_id = ? AND revoked_at IS NULL
+  ORDER BY created_at ASC, id ASC`;
+const LIST_ACTIVE_CHILD_GRANTS_SQL = `SELECT ${GRANT_COLUMNS} FROM chat_session_access_grants
+  WHERE parent_grant_id = ? AND revoked_at IS NULL`;
+const LIST_ACTIVE_GRANTS_HELD_BY_SQL = `SELECT ${GRANT_COLUMNS} FROM chat_session_access_grants
+  WHERE grantee_user_id = ? AND revoked_at IS NULL`;
+
 function mapGrant(row: unknown): SessionAccessGrantRecord {
   const r = parseRow(GrantRowSchema, row, 'session_access_grant');
   return {
@@ -92,15 +105,7 @@ function readActiveGrant(
   sessionId: string,
   granteeUserId: string
 ): SessionAccessGrantRecord | null {
-  const row = sql
-    .exec(
-      `SELECT ${GRANT_COLUMNS} FROM chat_session_access_grants
-        WHERE session_id = ? AND grantee_user_id = ? AND revoked_at IS NULL
-        LIMIT 1`,
-      sessionId,
-      granteeUserId
-    )
-    .toArray()[0];
+  const row = sql.exec(READ_ACTIVE_GRANT_SQL, sessionId, granteeUserId).toArray()[0];
   if (!row) return null;
   try {
     return mapGrant(row);
@@ -151,14 +156,7 @@ export function listActiveSessionAccessGrants(
   sql: SqlStorage,
   sessionId: string
 ): SessionAccessGrantRecord[] {
-  const rows = sql
-    .exec(
-      `SELECT ${GRANT_COLUMNS} FROM chat_session_access_grants
-        WHERE session_id = ? AND revoked_at IS NULL
-        ORDER BY created_at ASC, id ASC`,
-      sessionId
-    )
-    .toArray();
+  const rows = sql.exec(LIST_ACTIVE_GRANTS_SQL, sessionId).toArray();
   const grants: SessionAccessGrantRecord[] = [];
   for (const row of rows) {
     try {
@@ -279,13 +277,7 @@ function collectGrantsWithDescendants(
     for (const grant of frontier) {
       if (collected.has(grant.id)) continue;
       collected.set(grant.id, grant);
-      const children = sql
-        .exec(
-          `SELECT ${GRANT_COLUMNS} FROM chat_session_access_grants
-            WHERE parent_grant_id = ? AND revoked_at IS NULL`,
-          grant.id
-        )
-        .toArray();
+      const children = sql.exec(LIST_ACTIVE_CHILD_GRANTS_SQL, grant.id).toArray();
       for (const child of children) {
         try {
           const mapped = mapGrant(child);
@@ -315,8 +307,8 @@ function cancelUndeliveredSenderPrompts(
   senderUserIds: string[]
 ): string[] {
   if (senderUserIds.length === 0) return [];
-  const senderPlaceholders = senderUserIds.map(() => '?').join(', ');
-  const sourcePlaceholders = SESSION_WRITER_PROMPT_SOURCES.map(() => '?').join(', ');
+  // Both lists are bound as JSON arrays (`json_each`), so the statement text is fixed and its
+  // bind count does not grow with the number of revoked people.
   const rows = sql
     .exec(
       `UPDATE session_inbox
@@ -327,8 +319,8 @@ function cancelUndeliveredSenderPrompts(
               attempt_started_at = NULL
         WHERE target_session_id = ?
           AND sender_type = 'human'
-          AND sender_id IN (${senderPlaceholders})
-          AND source_kind IN (${sourcePlaceholders})
+          AND sender_id IN (SELECT value FROM json_each(?))
+          AND source_kind IN (SELECT value FROM json_each(?))
           AND (
             delivery_state IN ('queued', 'retry_wait')
             OR (delivery_state = 'delivering' AND prompt_delivery_phase = 'preparing')
@@ -336,8 +328,8 @@ function cancelUndeliveredSenderPrompts(
         RETURNING id, prompt_message_id`,
       SENDER_ACCESS_REVOKED_REASON,
       sessionId,
-      ...senderUserIds,
-      ...SESSION_WRITER_PROMPT_SOURCES
+      JSON.stringify(senderUserIds),
+      JSON.stringify(SESSION_WRITER_PROMPT_SOURCES)
     )
     .toArray();
   const deliveryIds: string[] = [];
@@ -447,13 +439,7 @@ export function revokeSessionAccessForDepartedMember(
   userId: string,
   now = Date.now()
 ): RevokedSessionAccessForUser[] {
-  const held = sql
-    .exec(
-      `SELECT ${GRANT_COLUMNS} FROM chat_session_access_grants
-        WHERE grantee_user_id = ? AND revoked_at IS NULL`,
-      userId
-    )
-    .toArray();
+  const held = sql.exec(LIST_ACTIVE_GRANTS_HELD_BY_SQL, userId).toArray();
   const owned = sql
     .exec(
       `SELECT g.id, g.session_id, g.grantee_user_id, g.granted_by_user_id, g.parent_grant_id,

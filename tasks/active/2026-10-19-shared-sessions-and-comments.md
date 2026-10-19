@@ -1,0 +1,116 @@
+# Shared sessions and cross-member comments
+
+**Task:** SAM task `01M59TN50JX53TPVXV0VTAN5JV` (chat session `a4ea9145-0a55-485e-9e3e-9414c2a98d04`)
+**Branch:** `sam/implement-shared-sessions-comments-tan5jv`
+**Design:** SAM idea `01M59MYE4GY91BWTE8TZF1ZB5D` (verified against `main` `0e603a055`)
+**Authorization:** Raphaël, 2026-10-19 — implement shared sessions and comments, green PR, merge, production. Workflows/missions are out of scope.
+
+## Problem
+
+Project members can read each other's chat sessions, but:
+
+1. Only the session owner can start a comment thread in the UI. There are no @mentions of people and no comment notifications.
+2. There is no way for an owner to let a teammate drive one specific session.
+3. Three existing authorization/attribution gaps block multiplayer:
+   - **G1** — any project member can persist a forged `role=user` message into any active session through the project WebSocket (`message.send` in `ProjectData.webSocketMessage`).
+   - **G2** — "Send to agent" (`POST .../comments/:threadId/send` and `.../send-to-agent`) checks only `task:write`, so any member can queue a prompt into another member's agent, on that member's credentials.
+   - **G3** — every durable prompt delivery renders as the owner's own bubble (comment directives included), so a cross-user prompt would look like the owner typed it.
+   - **G5** — `POST /tasks/submit` accepts a caller-supplied `parentTaskId` and inherits the parent's credential attribution without checking who the caller is (to verify with a real-SQL attack test).
+
+## Product decisions (from Raphaël / the design idea)
+
+- Any active project member can comment on any session in the project, @mention a person, and see clear author attribution.
+- Comments are visible to people and to the session's agent, but a comment never reaches an agent unless an authorized session writer explicitly presses **Send to agent**. No blocking review gate.
+- The session owner can grant a named project member owner-equivalent control **within that session**, until revoked, no expiry. Not account or project administration. Grants do not propagate to forks or child sessions.
+- Do not grant any real third party access during deployment/testing.
+
+## Security design decisions (this task)
+
+- **Authority:** one server-side check, `requireSessionWriter`, for every session-scoped write path (REST, Connector operations, MCP-free browser paths). Owner = `chat_sessions.created_by_user_id`; grantee = active row in the new ProjectData table `chat_session_access_grants`. Membership (`requireProjectCapability`) is still checked first on every request, so removal from the project ends access immediately.
+- **Actor vs credential owner:** writer actions carry both `actorUserId` (attribution: message sender, comment author/sentBy, activity events, task status events) and `ownerUserId` (resource resolution: workspace, node, task rows, credentials, billing). Grantee actions never resolve resources by the grantee's id.
+- **Repository identity (July 2026 rule: never let a member act on the repo via another user's identity):** a grant requires the grantee to have their own verified access to the project repository (`requireRepositoryAccess`, user∩installation), checked at grant time and again at every grantee prompt/answer that drives the agent. No positive-decision caching.
+- **Owner must still be a member:** grantee actions also require the session owner to hold active `task:write` membership.
+- **Revocation** is one ProjectData transaction: mark the grant revoked, cascade to grants issued by that grantee (downstream grants), and fail that sender's unclaimed/pre-submit prompt deliveries for the session (`terminal_reason='sender_access_revoked'`). A `session.access.changed` WebSocket event makes clients refetch. A prompt the agent already received keeps running (cannot be taken back).
+- **Delivery-time fence (defence in depth):** the prompt-delivery runner re-checks, before any side effect, that a human `user_followup`/`comment_directive` delivery's sender is the session owner or holds an active grant.
+- **Grantee prompts require durable delivery** (attribution + revocation semantics); the non-durable fallback stays owner-only.
+- **Agent speaker line:** grantee prompts reach the agent with a server-added line naming the sender and the owner; never added to owner prompts.
+- **Credential exposure (residual risk, not resolved by a warning):** the agent process holds the owner's agent credential and runs tools with it, so a grantee who can prompt the agent may be able to make it reveal that credential. Server-side controls above bound everything that can be bounded; the residual is disclosed in the share dialog (explicit acknowledgment enforced server-side) and reported to Raphaël.
+
+
+## Research findings
+
+- Session writes were gated by `requireSessionCreator` (`chat_sessions.created_by_user_id === userId`) in the chat routes, Connector operations and interactions/attention routes. Replaced everywhere by `requireSessionWriter` (`apps/api/src/services/session-access.ts`).
+- G1 confirmed: `ProjectData.webSocketMessage` persisted `message.send` user rows for any socket tagged to an active session, with no identity. The web app used it only for optimistic display; prompts already went over REST.
+- G2 confirmed: `/comments/:threadId/send` and the duplicate `/send-to-agent` route only checked `task:write`. The duplicate route is deleted.
+- G3 confirmed: durable deliveries carry only `toolMetadata.source`; the web rendered every `role=user` row as the viewer's own bubble.
+- G5 confirmed for the Instant paths only: `submit-task.ts` (Instant branch) and `chat-start.ts` persisted the parent task's attribution unchecked. The VM path already normalizes through `normalizeCredentialAttribution`.
+- Workspace-level routes (terminal token, file proxy, git, port previews, fork restore) check the workspace owner; grantees are deliberately excluded rather than widening those checks (they bypass the transcript and expose the container).
+- Attachments are stored per uploader and delivered only when the uploader owns the workspace (`prompt-attachments.ts`), so grantee attachments are refused up front.
+- Human prompt producers that become sender-fenced: `send-chat.ts` (`user_followup`) and `message-comments.ts` (`comment_directive`) only. The /sam `send_message_to_subtask` mailbox path uses `agent_mailbox` and is unaffected.
+- Pre-existing, not changed: the task status route (`POST /tasks/:taskId/status`, used by the rail's **Complete**) allows any member with `task:write`. Tracked in `tasks/backlog/2026-10-19-session-complete-respects-session-writer.md`.
+
+## Implementation checklist
+
+Server (`fd1682eb2`, `aa9ad82e5`):
+
+- [x] DO migration `064-session-access-grants-and-comment-mentions`: `chat_session_access_grants` + `mentions_json` columns (additive only)
+- [x] DO module `project-data/session-access.ts`: resolve, create (idempotent, cap, parent link), revoke with cascade, cancel undelivered prompts, departed member, sender fence
+- [x] `requireSessionWriter` on prompt, cancel, stop/archive, idle-reset, durability, interactions list/detail/answer, attention answer, comment send, sleep, resume, grant management, Connector `sam_chat_send` / `sam_agent_answer` / `sam_work_stop`
+- [x] Grantee checks: grantee and owner both active `task:write` members; grantee's own repository access for prompts, answers and comment send; failed checks that could not run are rethrown
+- [x] Grant routes `GET/POST/DELETE .../access(/grants)` with server-enforced `acknowledgeSharedCredentials`
+- [x] Session controls `POST .../sleep`, `POST .../agent-sessions/:id/resume` resolving resources by owner
+- [x] Offboarding apply revokes the departed member's grants and grants on sessions they own
+- [x] G1: WebSocket `message.send` rejected
+- [x] G2: `/send` writer-gated; `/send-to-agent` deleted
+- [x] G3: delivery metadata carries sender/owner/grant; speaker line for grantee prompts; comment directive names who sent it
+- [x] G5: `inheritedCredentialAttributionForCaller` for Instant launches
+- [x] Delivery-time sender fence (submit claims only; reconcile claims are never relabelled)
+- [x] Mentions: active members only, capped, display-name snapshot; notifications `mention` / `comment` (grouped) / `session_access`
+- [x] Admin settings `collaboration.sessionAccessMaxGrants`, `collaboration.commentMentionsMax`, `collaboration.commentNotificationWindowSeconds`
+- [x] MCP comment tools label `authorRole`; descriptions say member comments are context unless sent
+
+Web:
+
+- [x] `viewerAccess` capabilities (`session-viewer-access.ts`) drive composer, footer notice, auto-resume, Files/Git, fork
+- [x] Removed WebSocket `message.send`; `session.access.changed` refetches access
+- [x] Transcript attribution line for shared-access prompts, sent comments and cancelled deliveries
+- [x] Share tool in the session rail
+- [ ] Share dialog, member @mention palette, mention rendering, send-to-agent gating on every surface, reader hint (frontend agent)
+- [ ] Notification types in NotificationCenter / settings, comment-thread deep link, admin Collaboration category, activity feed labels (frontend agent)
+- [ ] Web unit tests + Playwright visual audit at 375px and 1280px
+
+Tests:
+
+- [x] Real-SQLite DO tests with mutation-proven guards (`tests/unit/durable-objects/session-access.test.ts`)
+- [x] Workers vertical slice (`tests/workers/shared-session-access-vertical-slice.test.ts`)
+- [x] G1 WebSocket regression proven against the pre-fix DO (`project-data-session-validation.test.ts`)
+- [x] G2 send route attack/owner/grantee (`tests/unit/routes/chat-comment-send.test.ts`)
+- [x] `requireSessionWriter` unit tests (`tests/unit/services/session-access-writer.test.ts`)
+- [x] G5 (`tests/unit/routes/chat-start.test.ts`, `tests/unit/services/inherited-credential-attribution.test.ts`)
+- [x] MCP author roles (`tests/unit/routes/mcp-message-comments.test.ts`)
+
+Docs:
+
+- [x] `guides/collaboration.md`, `guides/chat-features.md`, `guides/notifications.md`, `guides/admin-settings.md`, `guides/session-troubleshooting.md`, `reference/api.md`, `architecture/security.md`
+
+## Acceptance criteria
+
+- [ ] A project member who is not the owner or a grantee gets `403` from prompt, cancel, stop, sleep, resume, answer, attention answer, comment send and grant creation, and nothing is queued (workers slice + route tests)
+- [ ] The owner can share an active session with an active member who has repository access; the acknowledgment is required; non-members, the owner and self are refused (workers slice)
+- [ ] A grantee's prompt is queued on the owner's session as the grantee, with `onBehalfOfUserId` and a speaker line (workers slice)
+- [ ] Revoking a grant cascades and fails the revoked people's undelivered prompts; the agent never receives them (DO tests + workers slice)
+- [ ] A delivery whose sender lost access is failed before any send (DO runner tests)
+- [ ] The browser WebSocket can no longer write messages (G1 regression)
+- [ ] Any member can comment and @mention; only writers can send to the agent; mentions notify only picked active members (route tests + web tests)
+- [ ] Forking a teammate's task bills the caller (G5 tests)
+- [ ] UI: readers see a read-only composer with the comment hint; grantees see the shared-session notice; Share dialog adds/removes people with the required confirmation (web tests + Playwright + staging)
+- [ ] Staging: two real staging users exercise share → grantee prompt → attribution → revoke → composer locks, plus comment + mention + notification, with zero errors
+
+## Decisions pending
+
+- Credential exposure residual: asked Raphaël (A: ship with warning + limits, B: only sessions on project keys). Merge waits for the answer.
+
+## Out of scope / follow-ups
+
+- Grantee attachments (needs owner-scoped attachment storage).
+- `tasks/backlog/2026-10-19-session-complete-respects-session-writer.md` — Complete/task-status is project-permission based.

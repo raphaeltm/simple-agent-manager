@@ -472,6 +472,21 @@ describe('ProjectData shared session access', () => {
       expect(mailbox.getMessage(sql, 'submitting-prompt')?.deliveryState).toBe('delivering');
     });
 
+    it('leaves the same person’s messages from other sources alone', () => {
+      // The /sam orchestrator queues mailbox messages as a human sender (agent_mailbox). Only
+      // prompts a session writer typed or sent from a comment are fenced and cancelled.
+      share('grantee-1', 'owner-1');
+      queuePrompt('mailbox-message', 'grantee-1', 'agent_mailbox');
+
+      revokeSessionAccessGrant(sql, {
+        sessionId: 'chat-1',
+        granteeUserId: 'grantee-1',
+        actorUserId: 'owner-1',
+      });
+
+      expect(mailbox.getMessage(sql, 'mailbox-message')?.deliveryState).toBe('queued');
+    });
+
     it('leaves system-originated deliveries from the same id alone', () => {
       share('grantee-1', 'owner-1');
       acceptPromptDelivery(

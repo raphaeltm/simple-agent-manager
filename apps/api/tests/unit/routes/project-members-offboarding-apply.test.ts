@@ -9,11 +9,15 @@ import { projectMembersRoutes } from '../../../src/routes/projects/members';
 const mocks = vi.hoisted(() => ({
   currentUserId: 'owner-user',
   requireProjectCapability: vi.fn(),
+  revokeSessionAccessForDepartedMember: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => mocks.currentUserId,
+}));
+vi.mock('../../../src/services/session-access', () => ({
+  revokeSessionAccessForDepartedMember: mocks.revokeSessionAccessForDepartedMember,
 }));
 vi.mock('../../../src/middleware/project-auth', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/middleware/project-auth')>();
@@ -555,6 +559,12 @@ describe('project member offboarding apply', () => {
         values: expect.objectContaining({ selectedAction: 'break_and_flag', status: 'applied' }),
       }),
     ]);
+    // Removal also deletes the shared session access they held or granted on their sessions.
+    expect(mocks.revokeSessionAccessForDepartedMember).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'departing-user'
+    );
   });
 
   it('keeps a trigger active when reattaching to existing project credential coverage', async () => {
@@ -669,6 +679,8 @@ describe('project member offboarding apply', () => {
       ],
     });
     expect(updatedRows.some((row) => row.table === schema.projectMembers)).toBe(false);
+    // Still a member, so their shared session access stays.
+    expect(mocks.revokeSessionAccessForDepartedMember).not.toHaveBeenCalled();
   });
 
   it('breaks deployment environments and disables departing project attachments', async () => {
