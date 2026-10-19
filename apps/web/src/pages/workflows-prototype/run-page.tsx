@@ -20,7 +20,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { getRun, getSaved } from './mock-workflows';
 import { countSteps, progressSentence, type RunDef, type RunFrame, type StepStatus } from './model';
-import { SimulationBar, useParam, useRunFrame } from './proto-controls';
+import { SimulationBar, useParam, useRunFrame, useSetParams } from './proto-controls';
 import { RunChecklist } from './run-checklist';
 import { RunGraph } from './run-graph';
 import { ActivityLog, CancelDialog, RunCallout, SaveAsDialog } from './run-parts';
@@ -186,7 +186,7 @@ export function RunPage() {
   const run = getRun(runId);
   const isMobile = useIsMobile();
   const navigate = useNavigate();
-  const { frame: scripted, goTo } = useRunFrame(run);
+  const { frame: scripted } = useRunFrame(run);
   const [stepKey, setStepKey] = useParam('step');
   const [view, setView] = useParam('view');
   const [dialog, setDialog] = useParam('dialog');
@@ -202,10 +202,11 @@ export function RunPage() {
   const activeView = isMobile && view === 'graph' ? 'steps' : (view ?? 'steps');
   const live = !['done', 'cancelled', 'draft'].includes(frame.status);
 
+  const setParams = useSetParams();
   const act = (kind: 'approve' | 'reject' | 'retry' | 'skip') => {
     const target = script[kind];
-    if (target) goTo(target);
-    setStepKey(null);
+    // One navigation: changing the frame and closing the panel separately would race.
+    setParams(target ? { t: target, step: null } : { step: null });
   };
 
   const crumbs = [

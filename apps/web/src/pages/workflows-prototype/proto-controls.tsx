@@ -39,6 +39,30 @@ export function useRunFrame(run: RunDef) {
   return { frame, index, goTo };
 }
 
+/**
+ * Apply several URL param changes in ONE navigation. Two back-to-back setSearchParams calls race:
+ * the second computes from the stale location and silently undoes the first.
+ */
+export function useSetParams() {
+  const [, setParams] = useSearchParams();
+  return useCallback(
+    (changes: Record<string, string | null>) => {
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          for (const [k, v] of Object.entries(changes)) {
+            if (v === null) next.delete(k);
+            else next.set(k, v);
+          }
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setParams]
+  );
+}
+
 export function useParam(name: string) {
   const [params, setParams] = useSearchParams();
   const value = params.get(name);
