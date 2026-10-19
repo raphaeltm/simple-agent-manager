@@ -515,3 +515,55 @@ describe('access changes while the chat sleeps', () => {
     expect(mocks.getSessionAccess).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('one access read per change', () => {
+  let queryClient: QueryClient;
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: queryClient }, children);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    FakeWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    mocks.listChatMessages.mockResolvedValue(messagesPage([]));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('an active chat hears the change on both sockets but reads access once', async () => {
+    mocks.getChatSession.mockResolvedValueOnce(detail([ownerPrompt, agentReply], 'grantee'));
+    // The subscribe re-read, then the revoke.
+    mocks.getSessionAccess
+      .mockResolvedValueOnce(accessSummary('grantee', 2))
+      .mockResolvedValueOnce(accessSummary('reader', 5));
+
+    const { result } = renderHook(
+      () => {
+        useProjectWebSocket({ projectId: 'proj-1' });
+        return useSessionLifecycle('proj-1', 'sess-1', false);
+      },
+      { wrapper }
+    );
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    const [projectSocket, chatSocket] = [
+      FakeWebSocket.instances.find((socket) => !socket.url.includes('sessionId='))!,
+      FakeWebSocket.instances.find((socket) => socket.url.includes('sessionId='))!,
+    ];
+    act(() => {
+      projectSocket.open();
+      chatSocket.open();
+    });
+    await waitFor(() => expect(mocks.getSessionAccess).toHaveBeenCalledTimes(1));
+
+    const revoked = { type: 'session.access.changed', payload: { sessionId: 'sess-1' } };
+    act(() => {
+      projectSocket.deliver(revoked);
+      chatSocket.deliver(revoked);
+    });
+
+    await waitFor(() => expect(result.current.session?.viewerAccess).toBe('reader'));
+    expect(mocks.getSessionAccess).toHaveBeenCalledTimes(2);
+  });
+});

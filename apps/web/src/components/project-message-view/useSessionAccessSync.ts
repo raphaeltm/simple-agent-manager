@@ -28,7 +28,9 @@ export function useSessionAccessSync(
   projectId: string,
   sessionId: string,
   setSession: Dispatch<SetStateAction<ChatSessionResponse | null>>,
-  access: SessionAccessSummary | undefined
+  access: SessionAccessSummary | undefined,
+  /** True while the chat's own socket is connected and so delivers access changes itself. */
+  chatSocketLive: { readonly current: boolean }
 ) {
   const applySessionAccess = useCallback(
     (summary: SessionAccessSummary) => {
@@ -54,8 +56,12 @@ export function useSessionAccessSync(
   }, [applySessionAccess, projectId, sessionId]);
 
   useEffect(
-    () => subscribeSessionAccessChanged(sessionId, onSessionAccessChanged),
-    [onSessionAccessChanged, sessionId]
+    () =>
+      subscribeSessionAccessChanged(sessionId, () => {
+        // The project socket hears every change; a live chat socket delivers the same one.
+        if (!chatSocketLive.current) onSessionAccessChanged();
+      }),
+    [chatSocketLive, onSessionAccessChanged, sessionId]
   );
 
   // The owner's composer does not depend on grants, so their page skips the extra read.

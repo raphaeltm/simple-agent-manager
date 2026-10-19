@@ -54,6 +54,9 @@ function summary(
   };
 }
 
+/** The chat socket is off (a sleeping chat), so project-socket access events are read. */
+const NO_CHAT_SOCKET = { current: false };
+
 /** Holds the session the way `useSessionLifecycle` does and shows what the viewer may do. */
 function Harness({ initial }: Readonly<{ initial: SessionAccessSummary }>) {
   const [session, setSession] = useState<ChatSessionResponse | null>({
@@ -61,7 +64,7 @@ function Harness({ initial }: Readonly<{ initial: SessionAccessSummary }>) {
     viewerAccess: initial.viewerAccess,
     access: initial,
   } as ChatSessionResponse);
-  useSessionAccessSync('project-1', 'session-1', setSession, session?.access);
+  useSessionAccessSync('project-1', 'session-1', setSession, session?.access, NO_CHAT_SOCKET);
   return <p data-testid="viewer-access">{session?.viewerAccess}</p>;
 }
 
