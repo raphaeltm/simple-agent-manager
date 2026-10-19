@@ -91,7 +91,9 @@ describe('model-catalog', () => {
       const allModels = groups.flatMap((g) => g.models);
       expect(allModels.some((m) => m.id === 'gemini-3.8-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.7-flash')).toBe(true);
-      expect(allModels.find((m) => m.id === 'gemini-3.7-flash')?.name).toContain('Previous');
+      expect(allModels.find((m) => m.id === 'gemini-3.7-flash')?.name).toBe(
+        'Gemini 3.7 Flash (Deprecated; routes to 3.8)'
+      );
       expect(allModels.some((m) => m.id === 'gemini-2.5-pro')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.6-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.5-flash')).toBe(true);

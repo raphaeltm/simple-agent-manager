@@ -11,7 +11,7 @@ The shared static model catalog drifts as agent providers change their supported
 - Official Claude Code model configuration documents native 1M context for Opus 4.7 and later and `[1m]` variants for Opus 4.6 and Sonnet 4.6: https://code.claude.com/docs/en/model-config
 - Codex model list supports the existing latest and previous groups: https://learn.chatgpt.com/docs/models
 - Mistral Vibe configuration supports the existing groups: https://docs.mistral.ai/vibe/code/cli/configuration
-- Gemini model docs call 3.7 previous generation and limit 2.5 to existing users: https://ai.google.dev/gemini-api/docs/models
+- Gemini model docs limit 2.5 to existing users; the dedicated 3.7 page says its deprecated ID routes to 3.8: https://ai.google.dev/gemini-api/docs/models and https://ai.google.dev/gemini-api/docs/models/gemini-3.7-flash
 - OpenCode static fallback compared against active Zen and Go IDs/names from https://models.dev/api.json on 2026-10-19.
 
 ## Checklist

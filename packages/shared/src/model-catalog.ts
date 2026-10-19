@@ -295,7 +295,7 @@ const MISTRAL_MODELS: ModelGroup[] = [
 const GEMINI_MODELS: ModelGroup[] = [
   modelGroupFromTuples('Gemini 3 (Latest)', [
     ['gemini-3.8-flash', 'Gemini 3.8 Flash'],
-    ['gemini-3.7-flash', 'Gemini 3.7 Flash (Previous)'],
+    ['gemini-3.7-flash', 'Gemini 3.7 Flash (Deprecated; routes to 3.8)'],
     ['gemini-3.6-flash', 'Gemini 3.6 Flash'],
     ['gemini-3.5-flash', 'Gemini 3.5 Flash'],
     ['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite'],
