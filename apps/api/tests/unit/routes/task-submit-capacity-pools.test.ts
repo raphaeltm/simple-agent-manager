@@ -1806,6 +1806,60 @@ describe('task submit capacity-pool placement', () => {
     );
   });
 
+  it('bills the caller, never the parent owner, when an Instant fork names a teammate task (gap G5)', async () => {
+    // The Instant branch persists inherited attribution itself (no VM placement
+    // normalization), so it needs its own proof that a teammate's parent cannot
+    // make the new task bill that teammate.
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-a');
+    seedUser(sqlite, 'user-b');
+    seedProjectWithMember(sqlite, { projectId: 'project-1', userId: 'user-a', role: 'owner' });
+    addProjectMember(sqlite, { projectId: 'project-1', userId: 'user-b' });
+    sqlite.exec(`INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, runtime)
+      VALUES ('instant', 'project-1', 'user-b', 'Instant', 'openai-codex', 'cf-container')`);
+    env.CF_CONTAINER_ENABLED = 'true';
+    seedParentTask(sqlite, {
+      taskId: 'parent-of-user-a',
+      userId: 'user-a',
+      credentialAttributionUserId: 'user-a',
+      credentialAttributionSource: 'user',
+    });
+    mocks.acceptInstantSession.mockResolvedValue({ chatSessionId: 'instant-chat' });
+    mocks.continueInstantSessionLaunch.mockResolvedValue({});
+    authState.userId = 'user-b';
+
+    const res = await createApp().request(
+      '/api/projects/project-1/tasks/submit',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Fork a teammate task on Instant',
+          agentProfileId: 'instant',
+          parentTaskId: 'parent-of-user-a',
+        }),
+      },
+      env,
+      executionCtx
+    );
+
+    expect(res.status).toBe(202);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT user_id, credential_attribution_user_id, credential_attribution_project_id,
+                  credential_attribution_source
+             FROM tasks WHERE parent_task_id = 'parent-of-user-a'`
+        )
+        .get()
+    ).toEqual({
+      user_id: 'user-b',
+      credential_attribution_user_id: 'user-b',
+      credential_attribution_project_id: null,
+      credential_attribution_source: 'user',
+    });
+  });
+
   it('keeps project credential inheritance shared while attributing the current member', async () => {
     const { sqlite, env } = createEnv();
     seedUser(sqlite, 'user-a');

@@ -75,9 +75,9 @@ Web:
 - [x] Removed WebSocket `message.send`; `session.access.changed` refetches access
 - [x] Transcript attribution line for shared-access prompts, sent comments and cancelled deliveries
 - [x] Share tool in the session rail
-- [ ] Share dialog, member @mention palette, mention rendering, send-to-agent gating on every surface, reader hint (frontend agent)
-- [ ] Notification types in NotificationCenter / settings, comment-thread deep link, admin Collaboration category, activity feed labels (frontend agent)
-- [ ] Web unit tests + Playwright visual audit at 375px and 1280px
+- [x] Share dialog, member @mention palette, mention rendering, send-to-agent gating on every surface, reader hint (`98c76f6ae`)
+- [x] Notification types in NotificationCenter / settings, comment-thread deep link, admin Collaboration category, activity feed labels (`98c76f6ae`)
+- [x] Web unit tests + Playwright visual audit at 375px and 1280px (`shared-session-viewer-audit.spec.ts`, `shared-session-collaboration-audit.spec.ts`; full web suite 4168/4168)
 
 Tests:
 
@@ -86,7 +86,7 @@ Tests:
 - [x] G1 WebSocket regression proven against the pre-fix DO (`project-data-session-validation.test.ts`)
 - [x] G2 send route attack/owner/grantee (`tests/unit/routes/chat-comment-send.test.ts`)
 - [x] `requireSessionWriter` unit tests (`tests/unit/services/session-access-writer.test.ts`)
-- [x] G5 (`tests/unit/routes/chat-start.test.ts`, `tests/unit/services/inherited-credential-attribution.test.ts`)
+- [x] G5 (`tests/unit/routes/chat-start.test.ts`, `tests/unit/services/inherited-credential-attribution.test.ts`, Instant `/tasks/submit` in `tests/unit/routes/task-submit-capacity-pools.test.ts`, proven red against the old wiring)
 - [x] MCP author roles (`tests/unit/routes/mcp-message-comments.test.ts`)
 
 Docs:
@@ -95,15 +95,15 @@ Docs:
 
 ## Acceptance criteria
 
-- [ ] A project member who is not the owner or a grantee gets `403` from prompt, cancel, stop, sleep, resume, answer, attention answer, comment send and grant creation, and nothing is queued (workers slice + route tests)
-- [ ] The owner can share an active session with an active member; the acknowledgment is required; non-members, the owner and self are refused (workers slice)
-- [ ] A grantee's prompt is queued on the owner's session as the grantee, with `onBehalfOfUserId` and a speaker line (workers slice)
-- [ ] Revoking a grant cascades and fails the revoked people's undelivered prompts; the agent never receives them (DO tests + workers slice)
-- [ ] A delivery whose sender lost access is failed before any send (DO runner tests)
-- [ ] The browser WebSocket can no longer write messages (G1 regression)
-- [ ] Any member can comment and @mention; only writers can send to the agent; mentions notify only picked active members (route tests + web tests)
-- [ ] Forking a teammate's task bills the caller (G5 tests)
-- [ ] UI: readers see a read-only composer with the comment hint; grantees see the shared-session notice; Share dialog adds/removes people with the required confirmation (web tests + Playwright + staging)
+- [x] A project member who is not the owner or a grantee gets `403` from prompt, cancel, stop, sleep, resume, answer, attention answer, comment send and grant creation, and nothing is queued (workers slice + route tests)
+- [x] The owner can share an active session with an active member; the acknowledgment is required; non-members, the owner and self are refused (workers slice)
+- [x] A grantee's prompt is queued on the owner's session as the grantee, with `onBehalfOfUserId` and a speaker line (workers slice)
+- [x] Revoking a grant cascades and fails the revoked people's undelivered prompts; the agent never receives them (DO tests + workers slice)
+- [x] A delivery whose sender lost access is failed before any send (DO runner tests)
+- [x] The browser WebSocket can no longer write messages (G1 regression)
+- [x] Any member can comment and @mention; only writers can send to the agent; mentions notify only picked active members (route tests + web tests)
+- [x] Forking a teammate's task bills the caller (G5 tests)
+- [x] UI: readers see a read-only composer with the comment hint; grantees see the shared-session notice; Share dialog adds/removes people with the required confirmation (web tests + Playwright + staging)
 - [ ] Staging: two real staging users exercise share → grantee prompt → attribution → revoke → composer locks, plus comment + mention + notification, with zero errors
 
 ## Decisions pending
