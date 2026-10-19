@@ -168,14 +168,18 @@ See the [AI Agents guide](/docs/guides/agents/) and [Chat Features guide](/docs/
 
 SAM includes an in-app notification system with real-time delivery via WebSocket:
 
-| Type            | Urgency | Trigger                                    |
-| --------------- | ------- | ------------------------------------------ |
-| `task_complete` | Medium  | A task finishes executing successfully     |
-| `needs_input`   | High    | Agent is blocked and needs your decision   |
-| `error`         | High    | Execution fails                            |
-| `progress`      | Low     | Agent reports incremental progress         |
-| `session_ended` | Medium  | A conversation-mode session turn completes |
-| `pr_created`    | Medium  | Agent creates a pull request               |
+| Type             | Urgency | Trigger                                    |
+| ---------------- | ------- | ------------------------------------------ |
+| `task_complete`  | Medium  | A task finishes executing successfully     |
+| `needs_input`    | High    | Agent is blocked and needs your decision   |
+| `error`          | High    | Execution fails                            |
+| `progress`       | Low     | Agent reports incremental progress         |
+| `session_ended`  | Medium  | A conversation-mode session turn completes |
+| `pr_created`     | Medium  | Agent creates a pull request               |
+| `cron_failure`   | High    | An operational sweep fails (superadmins)   |
+| `mention`        | Medium  | A teammate @mentions you in a comment      |
+| `comment`        | Low     | New comments on your chat or your threads  |
+| `session_access` | Medium  | A chat is shared with you, or access ends  |
 
 See the [Notifications guide](/docs/guides/notifications/) for full details.
 
