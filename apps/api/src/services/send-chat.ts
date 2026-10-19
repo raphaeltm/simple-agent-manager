@@ -65,10 +65,9 @@ export interface AuthorizedSendChat {
 }
 
 /**
- * The full authorization for a prompt: project capability, session writer, and — for a
- * grantee — the owner's continued membership and the grantee's own repository access.
- * Routes call it before an idempotency receipt is reserved and hand the result to `sendChat`,
- * so the checks run once per request.
+ * The full authorization for a prompt: project capability and session writer (the owner, or a
+ * grantee while both people stay active project members). Routes call it before an idempotency
+ * receipt is reserved and hand the result to `sendChat`, so the checks run once per request.
  */
 export async function authorizeSendChat(
   env: Env,
@@ -116,12 +115,23 @@ export async function sendChat(
 
   const content = validateSendChatContent(body);
 
+  // Every refusal comes before the first side effect (validating uploads, cancelling a
+  // scheduled sleep), so a refused prompt changes nothing.
+  const durableConfig = resolveDurableExecutionConfig(env);
   const attachments = body.attachments ?? [];
   if (attachments.length > 0 && shared) {
     // Attachments are stored under the uploader and delivered only when the uploader owns the
     // target workspace (prompt-attachments.ts). Refuse up front instead of queueing a prompt
     // whose files can never arrive.
     throw errors.badRequest('Attachments are not supported in a shared session yet');
+  }
+  if (shared && !durableConfig.deliveryEnabled) {
+    // Durable delivery is what carries sender attribution and lets revocation cancel a queued
+    // prompt; the live fallback has neither.
+    throw errors.conflict('Shared session messages require durable prompt delivery');
+  }
+  if (attachments.length > 0 && !durableConfig.deliveryEnabled) {
+    throw errors.badRequest('Attachment messages require durable prompt delivery to be enabled');
   }
   if (attachments.length > 0) {
     const validation = await validateAttachments(env, userId, attachments);
@@ -139,15 +149,6 @@ export async function sendChat(
   // A follow-up is an immediate keep-awake gesture. Cancel only an unclaimed
   // idle sleep; durable delivery wakes a sleep that has already begun.
   await cancelScheduledSessionSleep(db, sessionId);
-  const durableConfig = resolveDurableExecutionConfig(env);
-  if (attachments.length > 0 && !durableConfig.deliveryEnabled) {
-    throw errors.badRequest('Attachment messages require durable prompt delivery to be enabled');
-  }
-  if (shared && !durableConfig.deliveryEnabled) {
-    // Durable delivery is what carries sender attribution and lets revocation cancel a queued
-    // prompt; the live fallback has neither.
-    throw errors.conflict('Shared session messages require durable prompt delivery');
-  }
   if (durableConfig.deliveryEnabled) {
     const names = shared ? await loadSharedSessionNames(db, writer) : null;
     const deliveryMessage = names
