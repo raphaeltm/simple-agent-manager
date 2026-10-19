@@ -8,12 +8,12 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import type { Env } from '../env';
+import { parsePositiveInt } from '../lib/route-helpers';
 import {
   isRearmableSessionSleepBlock,
   parseSessionSleepFallbackRecord,
 } from './session-sleep-fallback-record';
-import type { Env } from '../env';
-import { parsePositiveInt } from '../lib/route-helpers';
 import {
   DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS,
   sessionLifecycleError,
@@ -288,7 +288,8 @@ export async function rearmPreservationBlockedSleep(
   input: { snapshotId: string; recordJson: string; now: Date }
 ): Promise<boolean> {
   if (!isRearmableSessionSleepBlock(input.recordJson)) return false;
-  const record = parseSessionSleepFallbackRecord(input.recordJson)!;
+  const record = parseSessionSleepFallbackRecord(input.recordJson);
+  if (!record) return false;
   const s = schema.sessionSnapshots;
   const result = await db
     .update(s)
