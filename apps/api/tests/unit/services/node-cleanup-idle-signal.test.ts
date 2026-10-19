@@ -174,7 +174,7 @@ beforeEach(() => {
       workspace_id TEXT, project_id TEXT, sleep_claim_id TEXT, sleep_claimed_at TEXT, sleep_stopping_since TEXT,
       chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending',
       sleeping_at TEXT, sleep_status TEXT, sleep_after TEXT, capture_generation TEXT,
-      sleep_attempts INTEGER NOT NULL DEFAULT 0
+      sleep_attempts INTEGER NOT NULL DEFAULT 0, sleep_fallback_json TEXT
     );
     CREATE TABLE compute_usage (
       id TEXT PRIMARY KEY, workspace_id TEXT, user_id TEXT, ended_at TEXT
