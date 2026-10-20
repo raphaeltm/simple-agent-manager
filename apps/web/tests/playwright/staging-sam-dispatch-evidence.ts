@@ -29,6 +29,20 @@ export interface Turn {
   response: string | null;
   actions: Action[];
 }
+/** Check requested mode against the exact profile already read back from the API. */
+export function hasConversationDispatchMode(
+  input: { agentProfileId?: unknown; taskMode?: unknown },
+  profile: { id?: unknown; taskMode?: unknown }
+): boolean {
+  return (
+    typeof profile.id === 'string' &&
+    profile.id.length > 0 &&
+    input.agentProfileId === profile.id &&
+    (input.taskMode === 'conversation' ||
+      (input.taskMode === undefined && profile.taskMode === 'conversation'))
+  );
+}
+
 export type DispatchPhase =
   | 'setup'
   | 'dispatch'

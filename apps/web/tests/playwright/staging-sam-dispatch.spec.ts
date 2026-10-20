@@ -24,6 +24,7 @@ import { expect, test } from '@playwright/test';
 import { dismissStagingOnboarding, STAGING_API, STAGING_APP } from './staging-helpers';
 import {
   type DispatchPhase,
+  hasConversationDispatchMode,
   type Json,
   READS,
   safeDispatchFailure,
@@ -223,7 +224,13 @@ test(
               input.projectId === PROJECT && input.agentProfileId === ledger.profileId,
               'Dispatch uses exact project and temporary profile'
             );
-            check(input.taskMode === 'conversation', 'Dispatch stays conversational');
+            check(
+              hasConversationDispatchMode(input, {
+                id: ledger.profileId,
+                taskMode: ledger.profileTaskMode,
+              }),
+              'Dispatch requests conversation explicitly or through exact verified profile'
+            );
             const brief = String(input.message ?? '');
             check(brief.includes(marker), 'Project brief retains unique run marker');
             check(
@@ -494,12 +501,14 @@ test(
         },
       });
       ledger.profileId = profile.id;
+      ledger.profileTaskMode = profile.taskMode;
       await save();
       check(
         profile.model === 'gpt-6-astra' &&
           profile.effort === 'high' &&
           profile.agentType === 'openai-codex' &&
-          profile.runtime === 'vm',
+          profile.runtime === 'vm' &&
+          profile.taskMode === 'conversation',
         'Exact requested profile persisted'
       );
       await enable(true);
