@@ -28,7 +28,7 @@ function runtimeResourceKind(resource: ProjectCredentialAttributionHealthSummary
 function resourceGroupLabel(kind: string): string {
   switch (kind) {
     case 'trigger':
-      return 'Triggers';
+      return 'Automation';
     case 'task_tree':
       return 'Running tasks';
     case 'node':

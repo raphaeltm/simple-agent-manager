@@ -23,6 +23,8 @@ import {
   fromTrigger,
   fromWatch,
   titleFromPrompt,
+  WATCH_CREATOR_ACCESS_REVOKED,
+  WATCH_TARGET_NOT_OWNED,
 } from '../../../src/pages/automation/model';
 
 const NOW = Date.parse('2026-10-20T12:00:00Z');
@@ -146,9 +148,10 @@ describe('trigger attention', () => {
     expect(item.attention).toMatchObject({
       tone: 'danger',
       title: 'Paused · its last 3 runs failed',
-      body: 'The last error was: GitHub token expired',
       fix: 'resume',
     });
+    expect(item.attention?.body).toContain('The last error was: GitHub token expired');
+    expect(item.attention?.body).toContain('Resuming starts the count again.');
     expect(item.attention?.title).not.toMatch(/automatically|SAM paused/i);
   });
 
@@ -217,8 +220,15 @@ describe('one-time schedules', () => {
   });
 
   it('raises unconfirmed and failed schedules only inside the attention window', () => {
-    const recent = fromSchedule(schedule({ state: 'ambiguous', updatedAt: NOW - HOUR }), NOW, WINDOW);
-    expect(recent.attention).toMatchObject({ title: 'Could not confirm it ran', fix: 'check-receipt' });
+    const recent = fromSchedule(
+      schedule({ state: 'ambiguous', updatedAt: NOW - HOUR }),
+      NOW,
+      WINDOW
+    );
+    expect(recent.attention).toMatchObject({
+      title: 'Could not confirm it ran',
+      fix: 'check-receipt',
+    });
     const old = fromSchedule(
       schedule({ state: 'failed', updatedAt: NOW - WINDOW - HOUR }),
       NOW,
@@ -242,6 +252,34 @@ describe('standing watches', () => {
       fix: 'raise-limit',
     });
     expect(fromWatch(watch({ executionCount: 10, state: 'revoked' }), null).attention).toBeNull();
+  });
+
+  it('does not offer to raise a watch that is already at the most runs a watch can have', () => {
+    const attention = fromWatch(watch({ executionCount: 100, maxExecutions: 100 }), null).attention;
+    expect(attention).toMatchObject({ fix: 'review' });
+    expect(attention?.body).toMatch(/Create a new watch/);
+  });
+
+  it('never offers resume as the fix for a watch paused because of a problem', () => {
+    const attention = fromWatch(
+      watch({ state: 'paused', lastError: WATCH_TARGET_NOT_OWNED }),
+      null
+    ).attention;
+    expect(attention).toMatchObject({ tone: 'danger', title: 'Paused by SAM', fix: 'review' });
+    expect(attention?.body).toMatch(/no longer owns the chat/);
+    expect(
+      fromWatch(watch({ state: 'paused', lastError: WATCH_CREATOR_ACCESS_REVOKED }), null).attention
+    ).toMatchObject({ fix: 'review' });
+  });
+
+  it('reads a person’s own pause reason as a note, not a problem', () => {
+    const item = fromWatch(
+      watch({ state: 'paused', lastError: 'Release freeze until Monday' }),
+      null
+    );
+    expect(item.attention).toBeNull();
+    expect(item.stateNote).toBe('Paused: Release freeze until Monday');
+    expect(fromWatch(watch({ state: 'paused' }), null).attention).toBeNull();
   });
 });
 
@@ -307,22 +345,35 @@ describe('event filters and agent waits', () => {
       }).clause
     ).toBe('someone posts on #release-train');
     expect(
-      describeEventFilter({ version: 1, source: 'sam.lifecycle', eventType: 'deployment.release.failed' })
-        .clause
+      describeEventFilter({
+        version: 1,
+        source: 'sam.lifecycle',
+        eventType: 'deployment.release.failed',
+      }).clause
     ).toBe('a release fails');
   });
 
   it('recognises SAM’s own agent-message relays', () => {
     const relay = {
       owner: { type: 'agent', id: 'p:chat', name: 'SAM agent messaging' },
-      filter: { version: 1, subjectId: 'agent-dm.0123456789abcdef0123456789abcdef01234567' },
+      filter: {
+        version: 1,
+        source: 'sam.agent_channel',
+        subjectType: 'agent_channel',
+        subjectId: 'agent-dm.0123456789abcdef0123456789abcdef01234567',
+      },
     } as unknown as ProjectEventSubscriptionRecord;
-    const own = {
+    const ownChannel = {
       owner: { type: 'agent', id: 'p:chat', name: null },
-      filter: { version: 1, subjectId: 'abc123' },
+      filter: { version: 1, subjectType: 'agent_channel', subjectId: 'release-train' },
+    } as unknown as ProjectEventSubscriptionRecord;
+    const ci = {
+      owner: { type: 'agent', id: 'p:chat', name: null },
+      filter: { version: 1, subjectType: 'commit', subjectId: 'agent-dm.lookalike' },
     } as unknown as ProjectEventSubscriptionRecord;
     expect(isSamRelay(relay)).toBe(true);
-    expect(isSamRelay(own)).toBe(false);
+    expect(isSamRelay(ownChannel)).toBe(false);
+    expect(isSamRelay(ci)).toBe(false);
   });
 });
 

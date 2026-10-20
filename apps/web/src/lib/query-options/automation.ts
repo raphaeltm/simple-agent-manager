@@ -10,6 +10,7 @@
  */
 import {
   AGENT_MESSAGE_CHANNEL_PREFIX,
+  DEFAULT_PROJECT_EVENT_LIST_MAX,
   type ProjectEventChannel,
   type ProjectEventSubscriptionState,
   type ProjectSchedule,
@@ -17,12 +18,12 @@ import {
 } from '@simple-agent-manager/shared';
 import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 
+import { getTrigger, listTriggerExecutions, listWebhookDeliveries } from '../api';
 import {
   AUTOMATION_MAX_CHANNEL_PAGES,
   AUTOMATION_MAX_LIST_PAGES,
   AUTOMATION_RUNS_PAGE_SIZE,
 } from '../automation-config';
-import { getTrigger, listTriggerExecutions, listWebhookDeliveries } from '../api';
 import {
   getEventChannelHistory,
   getSchedule,
@@ -89,7 +90,11 @@ async function readPages<T>(
   return { items, truncated: true };
 }
 
-export function triggerDetailQueryOptions(queryScope: string, projectId: string, triggerId: string) {
+export function triggerDetailQueryOptions(
+  queryScope: string,
+  projectId: string,
+  triggerId: string
+) {
   return queryOptions({
     queryKey: automationQueryKeys.trigger(queryScope, projectId, triggerId),
     queryFn: () => getTrigger(projectId, triggerId),
@@ -147,7 +152,12 @@ export function schedulesQueryOptions(
     queryKey: automationQueryKeys.schedules(queryScope, projectId, sessionId),
     queryFn: (): Promise<BoundedList<ProjectSchedule>> =>
       readPages(AUTOMATION_MAX_LIST_PAGES, async (cursor) => {
-        const page = await listSchedules(projectId, cursor, sessionId ?? undefined);
+        const page = await listSchedules(
+          projectId,
+          cursor,
+          sessionId ?? undefined,
+          DEFAULT_PROJECT_EVENT_LIST_MAX
+        );
         return { items: page.schedules, nextCursor: page.nextCursor };
       }),
   });
@@ -169,7 +179,12 @@ export function watchesQueryOptions(
     queryKey: automationQueryKeys.watches(queryScope, projectId, sessionId),
     queryFn: (): Promise<BoundedList<ProjectStandingWatch>> =>
       readPages(AUTOMATION_MAX_LIST_PAGES, async (cursor) => {
-        const page = await listStandingWatches(projectId, cursor, sessionId ?? undefined);
+        const page = await listStandingWatches(
+          projectId,
+          cursor,
+          sessionId ?? undefined,
+          DEFAULT_PROJECT_EVENT_LIST_MAX
+        );
         return { items: page.watches, nextCursor: page.nextCursor };
       }),
   });
@@ -182,6 +197,7 @@ export function watchDetailQueryOptions(queryScope: string, projectId: string, i
   });
 }
 
+/** One page of the API's largest size: subscriptions have no cursor (`hasMore` only). */
 export function subscriptionsQueryOptions(
   queryScope: string,
   projectId: string,
@@ -190,7 +206,13 @@ export function subscriptionsQueryOptions(
 ) {
   return queryOptions({
     queryKey: automationQueryKeys.subscriptions(queryScope, projectId, sessionId, state),
-    queryFn: () => listEventSubscriptions(projectId, sessionId ?? undefined, state),
+    queryFn: () =>
+      listEventSubscriptions(
+        projectId,
+        sessionId ?? undefined,
+        state,
+        DEFAULT_PROJECT_EVENT_LIST_MAX
+      ),
   });
 }
 
@@ -225,7 +247,11 @@ export type ChannelCatalog = BoundedList<ProjectEventChannel> & {
  * catalog (bounded) and sorts locally. Without `includeDirect`, SAM's agent-to-agent relays are
  * left out and their name range is skipped.
  */
-export function channelsQueryOptions(queryScope: string, projectId: string, includeDirect: boolean) {
+export function channelsQueryOptions(
+  queryScope: string,
+  projectId: string,
+  includeDirect: boolean
+) {
   return queryOptions({
     queryKey: automationQueryKeys.channels(queryScope, projectId, includeDirect),
     queryFn: async (): Promise<ChannelCatalog> => {
@@ -233,13 +259,14 @@ export function channelsQueryOptions(queryScope: string, projectId: string, incl
       let directSeen = 0;
       let cursor: string | null = null;
       for (let page = 0; page < AUTOMATION_MAX_CHANNEL_PAGES; page++) {
-        const result = await listEventChannels(projectId, cursor);
+        const result = await listEventChannels(projectId, cursor, DEFAULT_PROJECT_EVENT_LIST_MAX);
         for (const channel of result.channels) {
           if (!includeDirect && isDirectChannel(channel.name)) directSeen++;
           else channels.push(channel);
         }
         const last = result.channels.at(-1)?.name;
-        if (!result.nextCursor) return { items: sortByActivity(channels), truncated: false, directSeen };
+        if (!result.nextCursor)
+          return { items: sortByActivity(channels), truncated: false, directSeen };
         cursor =
           !includeDirect && last && isDirectChannel(last) && last < DIRECT_CHANNEL_RANGE_END
             ? DIRECT_CHANNEL_RANGE_END

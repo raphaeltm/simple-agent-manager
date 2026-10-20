@@ -43,7 +43,7 @@ export function GitHubTriggerFields({
   onLabelsChange,
 }: GitHubTriggerFieldsProps) {
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <div>
         <label
           htmlFor="github-event-type"
@@ -186,13 +186,13 @@ export function GitHubTriggerFields({
       )}
 
       {eventType === 'pull_request' && (
-        <label className="flex items-center gap-2 cursor-pointer">
+        <label className="flex min-h-11 items-center gap-3 cursor-pointer">
           <input
             type="checkbox"
+            className="h-5 w-5 rounded border-border-default"
             checked={ignoreDrafts}
             onChange={(event) => onIgnoreDraftsChange(event.target.checked)}
             disabled={disabled}
-            className="rounded border-border-default"
           />
           <span className="text-sm text-fg-primary">Ignore draft pull requests</span>
         </label>

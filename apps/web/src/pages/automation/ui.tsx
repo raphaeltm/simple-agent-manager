@@ -221,6 +221,34 @@ export function TextLink({ to, children }: { to: string; children: ReactNode }) 
   );
 }
 
+const BUTTON_LINK: Record<'primary' | 'ghost', string> = {
+  primary: 'bg-accent text-fg-on-accent border border-transparent',
+  ghost:
+    'bg-transparent text-fg-primary border border-border-default hover:bg-[var(--sam-form-focus-inset)]',
+};
+
+/** A link that looks like the design-system Button, for actions that navigate. */
+export function ButtonLink({
+  to,
+  children,
+  variant = 'ghost',
+  className = '',
+}: {
+  to: string;
+  children: ReactNode;
+  variant?: 'primary' | 'ghost';
+  className?: string;
+}) {
+  return (
+    <Link
+      to={to}
+      className={`inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 text-[0.95rem] font-semibold no-underline transition-all duration-150 ${BUTTON_LINK[variant]} ${className}`}
+    >
+      {children}
+    </Link>
+  );
+}
+
 const ROW =
   'group flex w-full min-w-0 items-center gap-3 border-0 border-b border-solid border-border-default bg-transparent px-4 py-3 text-left no-underline last:border-b-0 hover:bg-surface-hover';
 
@@ -245,11 +273,7 @@ export function RowLink({
   testId?: string;
 }) {
   return (
-    <Link
-      to={to}
-      className={`${ROW} min-h-16 ${muted ? 'opacity-70' : ''}`}
-      data-testid={testId}
-    >
+    <Link to={to} className={`${ROW} min-h-16 ${muted ? 'opacity-70' : ''}`} data-testid={testId}>
       {leading}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="line-clamp-2 break-words text-[15px] font-semibold leading-snug text-fg-primary">
@@ -277,17 +301,21 @@ export function Disclosure({
   defaultOpen,
   children,
   testId,
+  onToggle,
 }: {
   title: string;
   hint?: string;
   defaultOpen?: boolean;
   children: ReactNode;
   testId?: string;
+  /** Lets a caller mount expensive children only once the disclosure has been opened. */
+  onToggle?: (open: boolean) => void;
 }) {
   return (
     <details
       open={defaultOpen}
       data-testid={testId}
+      onToggle={onToggle ? (event) => onToggle(event.currentTarget.open) : undefined}
       className="group min-w-0 rounded-xl border border-border-default glass-surface"
     >
       <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 [&::-webkit-details-marker]:hidden">
@@ -457,7 +485,13 @@ export function LoadError({
 }
 
 /** A quiet one-line notice (read-only access, partial data). */
-export function Notice({ children, tone = 'muted' }: { children: ReactNode; tone?: 'muted' | 'info' }) {
+export function Notice({
+  children,
+  tone = 'muted',
+}: {
+  children: ReactNode;
+  tone?: 'muted' | 'info';
+}) {
   return (
     <p
       role="status"

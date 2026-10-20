@@ -75,7 +75,7 @@ function inputFor(overrides: Partial<UseSessionToolsInput> = {}): UseSessionTool
     onOpenFiles: vi.fn(),
     onOpenGit: vi.fn(),
     onOpenTimeline: vi.fn(),
-    onOpenEvents: vi.fn(),
+    onOpenAutomation: vi.fn(),
     onOpenComments: vi.fn(),
     onRetry: vi.fn(),
     onFork: vi.fn(),
@@ -137,7 +137,7 @@ describe('useSessionTools', () => {
       act(() => result.current.selectTool('files'));
       act(() => result.current.selectTool('git'));
       act(() => result.current.selectTool('timeline'));
-      act(() => result.current.selectTool('events'));
+      act(() => result.current.selectTool('automation'));
       act(() => result.current.selectTool('comments'));
       act(() => result.current.selectTool('retry'));
       act(() => result.current.selectTool('fork'));
@@ -145,7 +145,7 @@ describe('useSessionTools', () => {
       expect(input.onOpenFiles).toHaveBeenCalledTimes(1);
       expect(input.onOpenGit).toHaveBeenCalledTimes(1);
       expect(input.onOpenTimeline).toHaveBeenCalledTimes(1);
-      expect(input.onOpenEvents).toHaveBeenCalledTimes(1);
+      expect(input.onOpenAutomation).toHaveBeenCalledTimes(1);
       expect(input.onOpenComments).toHaveBeenCalledTimes(1);
       expect(input.onRetry).toHaveBeenCalledTimes(1);
       expect(input.onFork).toHaveBeenCalledTimes(1);
@@ -272,7 +272,7 @@ describe('useSessionTools', () => {
       onOpenFiles: vi.fn(),
       onOpenGit: vi.fn(),
       onOpenTimeline: vi.fn(),
-      onOpenEvents: vi.fn(),
+      onOpenAutomation: vi.fn(),
       onOpenComments: vi.fn(),
       onRetry: vi.fn(),
       onFork: vi.fn(),

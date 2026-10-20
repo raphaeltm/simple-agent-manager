@@ -30,7 +30,11 @@ export const AUTOMATION_ATTENTION_WINDOW_MS = positiveInt(
   DEFAULT_AUTOMATION_ATTENTION_WINDOW_MS
 );
 
-/** Recent runs fetched per trigger for the overview, attention rules and History. */
+/**
+ * Recent runs fetched per trigger. The API has no project-wide run feed, so the overview reads
+ * runs only for paused triggers (attention) and the few that fired most recently ("Recently");
+ * History reads them for every trigger.
+ */
 export const DEFAULT_AUTOMATION_RECENT_RUNS_PER_TRIGGER = 10;
 export const AUTOMATION_RECENT_RUNS_PER_TRIGGER = positiveInt(
   import.meta.env.VITE_AUTOMATION_RECENT_RUNS_PER_TRIGGER,
@@ -38,11 +42,11 @@ export const AUTOMATION_RECENT_RUNS_PER_TRIGGER = positiveInt(
 );
 
 /**
- * Pages of one-time schedules and watches the overview reads (25 per page). Bounded so a
- * project with a long history cannot fan out unbounded requests; the overview says when it
- * stopped early.
+ * Pages of one-time schedules and watches the overview reads, at the API's largest page size.
+ * Bounded so a project with a long history cannot fan out unbounded requests; the overview says
+ * when it stopped early.
  */
-export const DEFAULT_AUTOMATION_MAX_LIST_PAGES = 4;
+export const DEFAULT_AUTOMATION_MAX_LIST_PAGES = 2;
 export const AUTOMATION_MAX_LIST_PAGES = positiveInt(
   import.meta.env.VITE_AUTOMATION_MAX_LIST_PAGES,
   DEFAULT_AUTOMATION_MAX_LIST_PAGES
@@ -66,11 +70,14 @@ export const AUTOMATION_RUNS_PAGE_SIZE = positiveInt(
 export const DEFAULT_AUTOMATION_CHAT_PICKER_LIMIT = 100;
 export const AUTOMATION_CHAT_PICKER_LIMIT = Math.min(
   100,
-  positiveInt(import.meta.env.VITE_AUTOMATION_CHAT_PICKER_LIMIT, DEFAULT_AUTOMATION_CHAT_PICKER_LIMIT)
+  positiveInt(
+    import.meta.env.VITE_AUTOMATION_CHAT_PICKER_LIMIT,
+    DEFAULT_AUTOMATION_CHAT_PICKER_LIMIT
+  )
 );
 
-/** Channel catalog pages read when sorting channels by last activity. */
-export const DEFAULT_AUTOMATION_MAX_CHANNEL_PAGES = 8;
+/** Channel catalog pages (at the API's largest page size) read to sort channels by activity. */
+export const DEFAULT_AUTOMATION_MAX_CHANNEL_PAGES = 5;
 export const AUTOMATION_MAX_CHANNEL_PAGES = positiveInt(
   import.meta.env.VITE_AUTOMATION_MAX_CHANNEL_PAGES,
   DEFAULT_AUTOMATION_MAX_CHANNEL_PAGES

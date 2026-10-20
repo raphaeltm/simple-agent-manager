@@ -142,3 +142,26 @@ export function instantToZonedInput(ts: number, zone: string): string {
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
   return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
 }
+
+const pad2 = (value: number) => String(value).padStart(2, '0');
+
+/**
+ * The next instant after `from` that is `hour:minute` on the wall clock of `zone`, on one of
+ * `days` (0 = Sunday). Walks wall-clock dates, so DST changes and odd offsets resolve correctly.
+ */
+export function nextOccurrence(
+  from: number,
+  hour: number,
+  minute: number,
+  days: number[] = [0, 1, 2, 3, 4, 5, 6],
+  zone: string = viewerZone()
+): number {
+  for (let offset = 0; offset < 9; offset++) {
+    const date = instantToZonedInput(from + offset * DAY, zone).slice(0, 10);
+    const at = zonedInputToInstant(`${date}T${pad2(hour)}:${pad2(minute)}`, zone);
+    if (at === null || at <= from) continue;
+    const [y = 1970, m = 1, d = 1] = date.split('-').map(Number);
+    if (days.includes(new Date(Date.UTC(y, m - 1, d)).getUTCDay())) return at;
+  }
+  return from + DAY;
+}

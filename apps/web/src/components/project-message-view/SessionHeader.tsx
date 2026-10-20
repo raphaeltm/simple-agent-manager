@@ -23,6 +23,7 @@ import { Link } from 'react-router';
 
 import type { ChatSessionResponse } from '../../lib/api';
 import { getPortAccessUrl, getProjectTask, listChatMessages } from '../../lib/api';
+import { automationPaths } from '../../lib/automation-routes';
 import { stripMarkdown } from '../../lib/text-utils';
 import { sanitizeUrl } from '../../lib/url-utils';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
@@ -567,16 +568,16 @@ export function SessionHeader({
                 )}
                 <div className="flex items-center gap-2 mt-1">
                   <Link
-                    to={`/projects/${projectId}/triggers/${triggerDetail.trigger.id}`}
+                    to={automationPaths.detail(projectId, 'trigger', triggerDetail.trigger.id)}
                     className="text-accent-primary no-underline hover:underline"
                   >
-                    View Trigger
+                    View automation
                   </Link>
                   <Link
-                    to={`/projects/${projectId}/triggers/${triggerDetail.trigger.id}`}
+                    to={`${automationPaths.detail(projectId, 'trigger', triggerDetail.trigger.id)}#runs`}
                     className="text-fg-muted no-underline hover:underline"
                   >
-                    All Runs
+                    All runs
                   </Link>
                 </div>
               </div>

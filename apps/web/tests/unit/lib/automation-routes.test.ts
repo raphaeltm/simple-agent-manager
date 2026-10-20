@@ -17,7 +17,12 @@ describe('automation paths', () => {
     expect(automationPaths.create('p1', { sessionId: 'chat 1' })).toBe(
       '/projects/p1/automation/new?sessionId=chat+1'
     );
-    expect(automationPaths.detail('p1', 'watch', 'w/1')).toBe('/projects/p1/automation/watch/w%2F1');
+    expect(automationPaths.create('p1', { template: 'pr-summary' })).toBe(
+      '/projects/p1/automation/new?template=pr-summary'
+    );
+    expect(automationPaths.detail('p1', 'watch', 'w/1')).toBe(
+      '/projects/p1/automation/watch/w%2F1'
+    );
     expect(automationPaths.edit('p1', 'trigger', 't1')).toBe(
       '/projects/p1/automation/trigger/t1/edit'
     );
@@ -46,8 +51,14 @@ describe('old Events URLs', () => {
     expect(events('section=watches')).toBe('/projects/p1/automation?filter=reacting');
   });
 
-  it('keep a chat scope from the old chat drawer link', () => {
+  it('keep a chat scope from the old chat drawer link, whatever section it named', () => {
     expect(events('sessionId=chat-9')).toBe('/projects/p1/automation/behind?sessionId=chat-9');
+    expect(events('section=schedules&sessionId=chat-9')).toBe(
+      '/projects/p1/automation/behind?sessionId=chat-9'
+    );
+    expect(events('section=channels&sessionId=chat-9')).toBe(
+      '/projects/p1/automation/behind?tab=channels'
+    );
   });
 });
 

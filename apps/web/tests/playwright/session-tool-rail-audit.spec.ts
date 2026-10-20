@@ -395,7 +395,7 @@ test.describe('Session tool rail — discoverability', () => {
       'git',
       'timeline',
       'resources',
-      'events',
+      'automation',
       'comments',
       'retry',
       'fork',
@@ -422,7 +422,7 @@ test.describe('Session tool rail — discoverability', () => {
       ['git', 'Review uncommitted changes'],
       ['timeline', 'Jump through session history'],
       ['resources', 'Inspect session CPU, memory, I/O and tool-window correlation'],
-      ['events', 'Session events and schedules'],
+      ['automation', 'What this chat waits for, and reminders'],
       ['comments', 'Open comment threads on this session'],
       ['retry', 'Retry — re-run this task'],
       ['fork', 'Fork — start a new task from this session'],
@@ -627,7 +627,7 @@ test.describe('Session tool rail — layout', () => {
     if (metrics.scrollHeight <= metrics.clientHeight) {
       // Everything fits: nothing to scroll to, so assert the strong property instead —
       // every tool is already on screen.
-      for (const id of ['files', 'git', 'timeline', 'events']) {
+      for (const id of ['files', 'git', 'timeline', 'automation']) {
         await expect(page.getByTestId(`session-tool-${id}`)).toBeInViewport();
       }
       return;
@@ -635,7 +635,7 @@ test.describe('Session tool rail — layout', () => {
 
     // Report/Complete/Details are pinned outside this scroller — covered separately by
     // 'Report, Complete and Details stay pinned above the fold'.
-    for (const id of ['files', 'git', 'timeline', 'events']) {
+    for (const id of ['files', 'git', 'timeline', 'automation']) {
       const tool = page.getByTestId(`session-tool-${id}`);
       await tool.scrollIntoViewIfNeeded();
       await expect(tool).toBeInViewport();

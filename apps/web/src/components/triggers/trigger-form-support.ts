@@ -7,13 +7,6 @@ import type {
 export const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 
-export const VM_SIZES = [
-  { value: '', label: 'Project default' },
-  { value: 'small', label: 'Small (2 vCPU, 4 GB)' },
-  { value: 'medium', label: 'Medium (4 vCPU, 8 GB)' },
-  { value: 'large', label: 'Large (8 vCPU, 16 GB)' },
-];
-
 export const EFFORT_LABELS: Record<AgentEffort, string> = {
   auto: 'auto',
   low: 'low',

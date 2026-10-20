@@ -1,5 +1,5 @@
 /**
- * Pure cron <-> friendly-schedule conversion used by `SchedulePicker`.
+ * Pure cron <-> friendly-schedule conversion used by the Automation editor.
  *
  * Extracted from the component so the round-trip is unit-testable on its own —
  * it previously had zero test coverage, which is how the "editing a trigger
@@ -19,9 +19,6 @@ export interface ParsedSchedule {
   monthDay: number;
 }
 
-/** Schedule a brand-new trigger defaults to. */
-export const DEFAULT_CRON_EXPRESSION = '0 9 * * *';
-
 export const DAY_ABBREVIATIONS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
 const WEEKDAY_SET = [1, 2, 3, 4, 5];
@@ -35,6 +32,28 @@ const SCHEDULE_DEFAULTS = {
   weeklyDays: [1],
   monthDay: 1,
 };
+
+/**
+ * Days of week from a cron day-of-week field: a list (`1,3,5`), a range (`1-5`), or both
+ * (`1-3,5`). Onboarding writes ranges, so they must read the same as lists. `7` is Sunday.
+ * Null for anything else (`*`, steps, names), which then reads as a custom expression.
+ */
+export function parseDayList(field: string): number[] | null {
+  const days = new Set<number>();
+  for (const part of field.split(',')) {
+    const range = /^(\d)-(\d)$/.exec(part);
+    if (range) {
+      const from = Number(range[1]);
+      const to = Number(range[2]);
+      if (from > to || to > 7) return null;
+      for (let day = from; day <= to; day++) days.add(day % 7);
+      continue;
+    }
+    if (!/^\d$/.test(part) || Number(part) > 7) return null;
+    days.add(Number(part) % 7);
+  }
+  return days.size ? [...days].sort((a, b) => a - b) : null;
+}
 
 function isWeekdaySet(days: number[]): boolean {
   return days.length === 5 && WEEKDAY_SET.every((d) => days.includes(d));
@@ -91,12 +110,10 @@ export function parseCronToMode(cron: string): ParsedSchedule {
     };
   }
 
-  // Weekly: `M H * * 1,3,5`
+  // Weekly: `M H * * 1,3,5` (or a range such as `1-5`)
   if (domStr === '*' && dowStr !== '*') {
-    const days = dowStr
-      .split(',')
-      .map(Number)
-      .filter((n) => !isNaN(n));
+    const days = parseDayList(dowStr);
+    if (!days) return { mode: 'advanced', ...SCHEDULE_DEFAULTS };
 
     if (isWeekdaySet(days)) {
       return {
@@ -195,7 +212,8 @@ export function describeCron(cron: string): string {
   }
 
   if (dowStr !== '*' && domStr === '*') {
-    const days = dowStr.split(',').map(Number);
+    // Ranges (`1-5`) read like lists; anything else falls back to the valid numbers it lists.
+    const days = parseDayList(dowStr) ?? dowStr.split(',').map(Number);
     if (isWeekdaySet(days)) return `Weekdays at ${timeStr}`;
     if (isWeekendSet(days)) return `Weekends at ${timeStr}`;
     // A hand-typed advanced expression can contain out-of-range or non-numeric

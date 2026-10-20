@@ -113,7 +113,7 @@ describe('buildSessionToolActions — group assignment', () => {
     hasFilesHandler: true,
     hasGitHandler: true,
     hasTimelineHandler: true,
-    hasEventsHandler: true,
+    hasAutomationHandler: true,
     hasCommentsHandler: true,
     hasRetryHandler: true,
     hasForkHandler: true,
@@ -129,7 +129,7 @@ describe('buildSessionToolActions — group assignment', () => {
   it('assigns each tool to the group its builder owns', () => {
     const byId = new Map(buildSessionToolActions(fullInput()).map((a) => [a.id, a.group]));
 
-    for (const id of ['files', 'git', 'timeline', 'events', 'comments'] as const) {
+    for (const id of ['files', 'git', 'timeline', 'automation', 'comments'] as const) {
       expect(byId.get(id)).toBe('workspace');
     }
     for (const id of ['retry', 'fork'] as const) {
@@ -165,7 +165,7 @@ describe('buildSessionToolActions — shared sessions', () => {
     hasFilesHandler: true,
     hasGitHandler: true,
     hasTimelineHandler: true,
-    hasEventsHandler: true,
+    hasAutomationHandler: true,
     hasCommentsHandler: true,
     hasRetryHandler: true,
     hasForkHandler: true,
@@ -213,6 +213,6 @@ describe('buildSessionToolActions — shared sessions', () => {
     expect(viewer).not.toContain('files');
     expect(viewer).not.toContain('git');
     // Everything that stays inside the chat is still there.
-    expect(viewer).toEqual(expect.arrayContaining(['timeline', 'events', 'comments']));
+    expect(viewer).toEqual(expect.arrayContaining(['timeline', 'automation', 'comments']));
   });
 });

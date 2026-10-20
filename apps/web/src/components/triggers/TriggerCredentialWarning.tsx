@@ -4,9 +4,8 @@ import { AlertTriangle } from 'lucide-react';
 export function TriggerCredentialWarning({ trigger }: { trigger: TriggerResponse }) {
   if (!trigger.credentialAttribution?.multiplayerActive) return null;
 
-  const personalChecks = trigger.credentialAttribution?.checks.filter(
-    (check) => check.source === 'personal'
-  ) ?? [];
+  const personalChecks =
+    trigger.credentialAttribution?.checks.filter((check) => check.source === 'personal') ?? [];
   if (personalChecks.length === 0) return null;
 
   return (

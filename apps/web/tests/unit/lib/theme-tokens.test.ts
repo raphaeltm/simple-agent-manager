@@ -59,8 +59,9 @@ describe('Slice E theme token coverage', () => {
     'apps/web/src/pages/ProjectNotifications.tsx',
     'apps/web/src/pages/IdeasPage.tsx',
     'apps/web/src/pages/IdeaDetailPage.tsx',
-    'apps/web/src/pages/ProjectTriggers.tsx',
-    'apps/web/src/pages/ProjectTriggerDetail.tsx',
+    'apps/web/src/pages/automation/AutomationOverview.tsx',
+    'apps/web/src/pages/automation/TriggerDetail.tsx',
+    'apps/web/src/pages/automation/ui.tsx',
     'apps/web/src/components/library/CreateDirectoryDialog.tsx',
     'apps/web/src/components/library/FileGridCard.tsx',
     'apps/web/src/components/library/FileListItem.tsx',
@@ -69,7 +70,7 @@ describe('Slice E theme token coverage', () => {
     'apps/web/src/components/library/TagEditor.tsx',
     'apps/web/src/components/library/UploadProgressChips.tsx',
     'apps/web/src/components/project/TaskDelegateDialog.tsx',
-    'apps/web/src/components/triggers/SchedulePicker.tsx',
+    'apps/web/src/pages/automation/editor/when-schedule.tsx',
     'apps/web/src/components/NotificationCenter.tsx',
   ];
 

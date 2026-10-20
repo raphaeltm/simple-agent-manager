@@ -14,8 +14,6 @@ import {
   type WebhookDeliveryOutcome,
 } from '@simple-agent-manager/shared';
 
-/** Owner name SAM gives the relays it manages for agent-to-agent messages. */
-export const SAM_RELAY_OWNER_NAME = 'SAM agent messaging';
 export const LIFECYCLE_SOURCE = 'sam.lifecycle';
 
 const one = (value: string | string[] | undefined): string | undefined =>
@@ -142,9 +140,16 @@ export function describeEventFilter(filter: ProjectEventFilterV1): EventPhrase {
   if (known) return { noun: `${known.noun}${suffix}`, clause: `${known.clause}${suffix}` };
   const source = one(filter.source);
   const family =
-    source === 'github' ? 'GitHub activity' : source === LIFECYCLE_SOURCE ? 'SAM activity' : 'an event';
+    source === 'github'
+      ? 'GitHub activity'
+      : source === LIFECYCLE_SOURCE
+        ? 'SAM activity'
+        : 'an event';
   if (suffix) return { noun: `${family}${suffix}`, clause: `there is ${family}${suffix}` };
-  return { noun: `matching ${family === 'an event' ? 'events' : family}`, clause: 'a matching event arrives' };
+  return {
+    noun: `matching ${family === 'an event' ? 'events' : family}`,
+    clause: 'a matching event arrives',
+  };
 }
 
 /** Every set filter field as `field: a, b`, for the Advanced section. */
@@ -168,10 +173,16 @@ export function filterRows(filter: ProjectEventFilterV1): Array<[string, string]
 // Agent subscriptions ("Behind the scenes")
 // ---------------------------------------------------------------------------
 
-/** SAM's own relays that carry agent-to-agent messages. Hidden unless asked for. */
+/**
+ * SAM's own relays that carry agent-to-agent messages: they follow an `agent-dm.` pair channel
+ * (`agent-message-subscriptions.ts`). Hidden unless asked for, and never stoppable from here.
+ */
 export function isSamRelay(subscription: ProjectEventSubscriptionRecord): boolean {
-  if (subscription.owner.name === SAM_RELAY_OWNER_NAME) return true;
-  return list(subscription.filter.subjectId).some((id) => id.startsWith(AGENT_MESSAGE_CHANNEL_PREFIX));
+  const { filter } = subscription;
+  return (
+    list(filter.subjectType).includes('agent_channel') &&
+    list(filter.subjectId).some((id) => id.startsWith(AGENT_MESSAGE_CHANNEL_PREFIX))
+  );
 }
 
 /** Subscriptions owned by a watch or the platform; their owner manages them, not a person. */

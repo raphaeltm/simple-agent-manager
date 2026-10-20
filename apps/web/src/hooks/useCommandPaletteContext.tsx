@@ -1,7 +1,6 @@
 import {
   Bell,
   Brain,
-  Clock,
   Eye,
   FolderOpen,
   Lightbulb,
@@ -11,6 +10,7 @@ import {
   Rocket,
   Settings,
   UserCog,
+  Workflow,
   Zap,
 } from 'lucide-react';
 import { useMemo } from 'react';
@@ -74,14 +74,14 @@ const PROJECT_NAV_ITEMS: ProjectActionItem[] = [
   { id: 'ctx-project-library', label: 'Go to Library', icon: <FolderOpen size={14} />, path: 'library' },
   { id: 'ctx-project-agent-context', label: 'Go to Agent Context', icon: <Brain size={14} />, path: 'agent-context' },
   { id: 'ctx-project-notifications', label: 'Go to Notifications', icon: <Bell size={14} />, path: 'notifications' },
-  { id: 'ctx-project-triggers', label: 'Go to Triggers', icon: <Clock size={14} />, path: 'triggers' },
+  { id: 'ctx-project-automation', label: 'Go to Automation', icon: <Workflow size={14} />, path: 'automation' },
   { id: 'ctx-project-profiles', label: 'Go to Profiles', icon: <UserCog size={14} />, path: 'profiles' },
   { id: 'ctx-project-skills', label: 'Go to Skills', icon: <Zap size={14} />, path: 'skills' },
 ];
 
 // Project-scoped create actions. `?edit=new` opens the create editor on the target page.
 const PROJECT_CREATE_ITEMS: ProjectActionItem[] = [
-  { id: 'ctx-create-trigger', label: 'Create Trigger', icon: <Plus size={14} />, path: 'triggers?edit=new' },
+  { id: 'ctx-create-automation', label: 'Create Automation', icon: <Plus size={14} />, path: 'automation/new' },
   { id: 'ctx-create-profile', label: 'Create Profile', icon: <Plus size={14} />, path: 'profiles?edit=new' },
   { id: 'ctx-create-skill', label: 'Create Skill', icon: <Plus size={14} />, path: 'skills?edit=new' },
 ];

@@ -47,11 +47,18 @@ export const automationPaths = {
   overview: (projectId: string, filter?: OverviewFilter) =>
     withQuery(root(projectId), { filter: filter === 'all' ? undefined : filter }),
   /**
-   * The create flow. `start` skips the first step; `sessionId` makes "message this chat" the
-   * default action, which is how the chat panel's "Remind this chat later" opens it.
+   * The create flow. `start` or `template` opens it at step two; `sessionId` makes "message this
+   * chat" the default action, which is how the chat panel's "Remind this chat later" opens it.
    */
-  create: (projectId: string, options: { start?: AutomationStart; sessionId?: string } = {}) =>
-    withQuery(`${root(projectId)}/new`, { start: options.start, sessionId: options.sessionId }),
+  create: (
+    projectId: string,
+    options: { start?: AutomationStart; sessionId?: string; template?: string } = {}
+  ) =>
+    withQuery(`${root(projectId)}/new`, {
+      start: options.start,
+      sessionId: options.sessionId,
+      template: options.template,
+    }),
   detail: (projectId: string, kind: AutomationKind, id: string) =>
     `${root(projectId)}/${kind}/${encodeURIComponent(id)}`,
   edit: (projectId: string, kind: AutomationKind, id: string) =>
@@ -66,7 +73,9 @@ export const automationPaths = {
 };
 
 /** `kind:id` from a History `?item=` value, or null when it is malformed. */
-export function parseHistoryItem(value: string | null): { kind: AutomationKind; id: string } | null {
+export function parseHistoryItem(
+  value: string | null
+): { kind: AutomationKind; id: string } | null {
   if (!value) return null;
   const separator = value.indexOf(':');
   if (separator <= 0) return null;
@@ -84,12 +93,12 @@ export function legacyEventsTarget(projectId: string, search: URLSearchParams): 
   const section = search.get('section');
   const sessionId = search.get('sessionId') || undefined;
   if (section === 'channels') return automationPaths.behind(projectId, { tab: 'channels' });
+  // A chat-scoped link came from the chat's Events drawer. Its replacement, the chat-scoped view,
+  // shows what that chat waits for and every schedule and watch that messages it.
+  if (sessionId) return automationPaths.behind(projectId, { sessionId });
   if (section === 'schedules') return automationPaths.overview(projectId, 'once');
   if (section === 'watches') return automationPaths.overview(projectId, 'reacting');
-  // A session-scoped Events link came from the chat's Events drawer, whose first tab listed
-  // what that chat was waiting for.
-  if (section === 'subscriptions' || sessionId)
-    return automationPaths.behind(projectId, { sessionId });
+  if (section === 'subscriptions') return automationPaths.behind(projectId);
   return automationPaths.overview(projectId);
 }
 

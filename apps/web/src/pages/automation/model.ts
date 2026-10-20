@@ -7,9 +7,10 @@
  * the raw configuration stays on the source record for the Advanced sections.
  */
 import {
+  DEFAULT_PROJECT_EVENT_WATCH_MAX_EXECUTIONS,
   DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES,
-  type ProjectScheduledAction,
   type ProjectSchedule,
+  type ProjectScheduledAction,
   type ProjectStandingWatch,
   type TriggerExecutionResponse,
   type TriggerResponse,
@@ -34,15 +35,7 @@ export type StartKind = 'schedule' | 'once' | 'github' | 'webhook' | 'event' | '
  * - `done`, `cancelled`, `ended`: nothing more will happen.
  */
 export type AutomationState =
-  | 'on'
-  | 'paused'
-  | 'off'
-  | 'scheduled'
-  | 'late'
-  | 'starting'
-  | 'done'
-  | 'cancelled'
-  | 'ended';
+  'on' | 'paused' | 'off' | 'scheduled' | 'late' | 'starting' | 'done' | 'cancelled' | 'ended';
 
 export type AttentionFix = 'resume' | 'review-runs' | 'raise-limit' | 'check-receipt' | 'review';
 
@@ -160,7 +153,7 @@ export function triggerAttention(
     return {
       tone: 'danger',
       title: `Paused · its last ${streak} runs failed`,
-      body: reason || 'Check the recent runs, fix the cause, then resume it.',
+      body: `${reason ? `${reason} ` : ''}Fix the cause, then resume it. Resuming starts the count again.`,
       fix: 'resume',
       at,
     };
@@ -328,7 +321,9 @@ export function fromSchedule(
         ? `Waiting to start · it keeps trying until ${fullDate(schedule.expiresAt)}`
         : state === 'starting'
           ? 'Starting now'
-          : SCHEDULE_NOTES[schedule.state],
+          : schedule.state === 'cancelled' && schedule.lastError
+            ? `Cancelled: ${schedule.lastError}`
+            : SCHEDULE_NOTES[schedule.state],
     nextAt:
       state === 'scheduled' || state === 'late' ? (schedule.nextAttemptAt ?? schedule.dueAt) : null,
     lastRunAt: state === 'done' ? schedule.updatedAt : null,
@@ -342,27 +337,59 @@ export function fromSchedule(
 // Standing watches
 // ---------------------------------------------------------------------------
 
+/**
+ * Why the watch runner pauses a watch on its own. Must match the reasons in
+ * `apps/api/src/durable-objects/project-data/project-standing-watches-runner.ts`
+ * (`STANDING_WATCH_TARGET_NOT_OWNED` and the revoked-access pause). A person's own pause reason
+ * is stored in the same field, so only these two read as problems.
+ */
+export const WATCH_TARGET_NOT_OWNED = 'Standing watch creator does not own the target chat';
+export const WATCH_CREATOR_ACCESS_REVOKED = 'Creator project access was revoked';
+
+const RUNNER_PAUSES: Record<string, string> = {
+  [WATCH_TARGET_NOT_OWNED]:
+    'The person who created it no longer owns the chat it messages. Only they can point it at another chat; anyone who can edit automation can stop it.',
+  [WATCH_CREATOR_ACCESS_REVOKED]:
+    'The person who created it no longer has access to this project, so it cannot run. Create a new watch to keep it going, or stop this one.',
+};
+
 export function watchAttention(watch: ProjectStandingWatch): Attention | null {
   if (watch.state === 'revoked') return null;
-  if (watch.executionCount >= watch.maxExecutions) {
+  // Resuming a watch SAM paused would only pause it again, so the fix is to look at it.
+  const runnerPause =
+    watch.state === 'paused' && watch.lastError ? RUNNER_PAUSES[watch.lastError] : undefined;
+  if (runnerPause) {
     return {
-      tone: 'warning',
-      title: `Used all ${watch.maxExecutions} of its runs`,
-      body: 'It ignores new events until you give it more runs.',
-      fix: 'raise-limit',
+      tone: 'danger',
+      title: 'Paused by SAM',
+      body: runnerPause,
+      fix: 'review',
       at: watch.updatedAt,
     };
   }
-  if (watch.state === 'paused' && watch.lastError) {
+  if (watch.executionCount >= watch.maxExecutions) {
+    const atCap = watch.maxExecutions >= DEFAULT_PROJECT_EVENT_WATCH_MAX_EXECUTIONS;
     return {
-      tone: 'danger',
-      title: 'Paused after a problem',
-      body: watch.lastError,
-      fix: 'resume',
+      tone: 'warning',
+      title: `Used all ${watch.maxExecutions} of its runs`,
+      body: atCap
+        ? 'That is the most runs a watch can have. Create a new watch to keep going, or stop this one.'
+        : 'It ignores new events until you give it more runs.',
+      fix: atCap ? 'review' : 'raise-limit',
       at: watch.updatedAt,
     };
   }
   return null;
+}
+
+function watchStateNote(watch: ProjectStandingWatch): string {
+  if (watch.state === 'revoked')
+    return watch.lastError ? `Stopped for good: ${watch.lastError}` : 'Stopped for good';
+  if (watch.state === 'paused') {
+    if (watch.lastError && !RUNNER_PAUSES[watch.lastError]) return `Paused: ${watch.lastError}`;
+    return 'Paused · events are ignored until it is resumed';
+  }
+  return `${watch.executionCount} of ${watch.maxExecutions} runs used`;
 }
 
 export function fromWatch(watch: ProjectStandingWatch, lastRunAt: number | null): AutomationItem {
@@ -379,12 +406,7 @@ export function fromWatch(watch: ProjectStandingWatch, lastRunAt: number | null)
     when,
     action,
     state,
-    stateNote:
-      state === 'paused'
-        ? 'Paused · events are ignored until it is resumed'
-        : state === 'ended'
-          ? 'Stopped for good'
-          : `${watch.executionCount} of ${watch.maxExecutions} runs used`,
+    stateNote: watchStateNote(watch),
     nextAt: null,
     lastRunAt,
     createdAt: watch.createdAt,
