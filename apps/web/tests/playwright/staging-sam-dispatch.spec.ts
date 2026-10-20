@@ -328,6 +328,7 @@ test('one scoped Astra High dispatch, durable replay, follow-up and owned cleanu
   const observeSession = async (afterIds = new Set<string>()): Promise<void> => {
     const responseDeadline = deadline - (afterIds.size === 0 ? 330_000 : 150_000);
     while (Date.now() < responseDeadline) {
+      let observedHardwareReady = false;
       const task = await get(`${PROJECT_API}/tasks/${ledger.taskId}`);
       check(
         task.projectId === PROJECT && task.taskMode === 'conversation',
@@ -350,12 +351,25 @@ test('one scoped Astra High dispatch, durable replay, follow-up and owned cleanu
         ledger.nodeId = workspace.nodeId;
         await save();
         const node = await get(`${STAGING_API}/api/nodes/${workspace.nodeId}`);
+        const cpu = node.observedProviderInstanceVcpuCount;
+        const memory = node.observedProviderInstanceMemoryMb;
+        ledger.observedHardware = {
+          nodeId: node.id,
+          vcpuCount: cpu ?? null,
+          memoryMb: memory ?? null,
+          source: node.observedHardwareSource ?? null,
+          lastHeartbeatAt: node.lastHeartbeatAt,
+        };
+        await save(); // Preserve actual hardware evidence even if it exceeds the cap.
         check(
           node.vmSize === 'small' &&
-            (!node.providerInstanceVcpuCount || node.providerInstanceVcpuCount <= 2) &&
-            (!node.providerInstanceMemoryMb || node.providerInstanceMemoryMb <= 4096),
+            (cpu == null || (Number.isFinite(cpu) && cpu > 0 && cpu <= 2)) &&
+            (memory == null || (Number.isFinite(memory) && memory > 0 && memory <= 4096)),
           'Host remains within small VM budget'
         );
+        // Bootstrap can precede observed metadata. Missing values must wait, never pass.
+        observedHardwareReady =
+          cpu != null && memory != null && Date.parse(node.lastHeartbeatAt) >= startedAt;
         check(
           workspace.projectId === PROJECT && workspace.repository === REPOSITORY,
           'Workspace matches exact project repository'
@@ -401,6 +415,7 @@ test('one scoped Astra High dispatch, durable replay, follow-up and owned cleanu
       );
       if (
         answer &&
+        observedHardwareReady &&
         detail.state?.activity === 'idle' &&
         linked.some(
           (item: Json) =>
@@ -425,6 +440,7 @@ test('one scoped Astra High dispatch, durable replay, follow-up and owned cleanu
         };
         ledger.messageIds = messages.map((item) => item.id);
         ledger.checks.liveAgentHeartbeat = true;
+        ledger.checks.observedHardwareWithinBudget = true;
         await save();
         return;
       }
@@ -516,10 +532,7 @@ test('one scoped Astra High dispatch, durable replay, follow-up and owned cleanu
       'Previous pilot left SAM opted out'
     );
     const project = await get(PROJECT_API);
-    check(
-      project.name === 'TestProject1' && project.repository === REPOSITORY,
-      'Exact staging project'
-    );
+    check(project.id === PROJECT && project.repository === REPOSITORY, 'Exact staging project');
     baselineNodes = new Set(
       ((await get(`${STAGING_API}/api/nodes`)) as unknown as Json[]).map((x) => x.id)
     );
