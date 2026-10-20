@@ -79,6 +79,10 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 	}
 	h.promptMu.Lock()
 	promptActive := h.promptInFlight
+	// This monitor has verified the captured current process exited. A failed
+	// guarded stop no longer needs to fence admission through normal recovery.
+	h.guardedCancelPending = false
+	h.guardedCancelAttempt = nil
 	h.promptMu.Unlock()
 	if promptActive && !crashRecovery.inProgress && !intentionalPromptCancel && rollover == nil {
 		h.clearCurrentAgentSessionLocked()

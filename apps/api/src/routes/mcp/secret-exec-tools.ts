@@ -6,6 +6,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { errors } from '../../middleware/error';
+import { recordOperationalJob } from '../../services/operational-job-observations';
 import {
   getSecretExecutionEnv,
   resolveWorkspaceRuntimeAssetContext,
@@ -187,6 +188,24 @@ export async function handleSecretExec(
     }
     const snapshot = v.safeParse(ResultSchema, result);
     if (!snapshot.success) throw new Error('Invalid execution response');
+    if (token.chatSessionId) {
+      // Metadata capture must never change an already-executed command's outcome.
+      try {
+        await recordOperationalJob(
+          env,
+          {
+            projectId: token.projectId,
+            chatSessionId: token.chatSessionId,
+            userId: token.userId,
+            workspaceId: token.workspaceId,
+            agentSessionId: token.agentSessionId,
+          },
+          snapshot.output
+        );
+      } catch {
+        /* Read surfaces explicitly disclose incomplete observation coverage. */
+      }
+    }
     return jsonRpcSuccess(requestId, {
       content: [{ type: 'text', text: JSON.stringify(snapshot.output) }],
     });

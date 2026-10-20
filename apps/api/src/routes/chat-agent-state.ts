@@ -11,6 +11,8 @@ interface ResolveChatAgentStateInput {
   sessionId: string;
   lookupFailureEvent: string;
   stateFailureEvent?: string;
+  /** Operational readers must not synthesize activity from a persisted plan. */
+  includePlan?: boolean;
 }
 
 /**
@@ -127,18 +129,20 @@ async function resolveChatAgentState(
           (err) => logStateFailure(err)
         )
       : Promise.resolve(null),
-    safeRead<{ ok: boolean; plan: PersistedPlan }>(
-      async () => ({
-        ok: true,
-        plan: await projectDataService.getLatestPersistedPlan(
-          env,
-          input.projectId,
-          input.sessionId
+    input.includePlan === false
+      ? Promise.resolve({ ok: false, plan: null })
+      : safeRead<{ ok: boolean; plan: PersistedPlan }>(
+          async () => ({
+            ok: true,
+            plan: await projectDataService.getLatestPersistedPlan(
+              env,
+              input.projectId,
+              input.sessionId
+            ),
+          }),
+          { ok: false, plan: null },
+          (err) => logStateFailure(err)
         ),
-      }),
-      { ok: false, plan: null },
-      (err) => logStateFailure(err)
-    ),
   ]);
 
   let state: SessionStateSnapshot | null = agentSessionState ?? chatSessionState;

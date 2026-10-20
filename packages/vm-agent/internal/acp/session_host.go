@@ -267,10 +267,12 @@ type SessionHost struct {
 
 	// Prompt lifecycle state.
 	// promptMu guards promptInFlight (serialization gate only).
-	promptMu        sync.Mutex
-	promptInFlight  bool
-	evictionPending bool // promptMu: durable eviction owns this runtime; reject new work
-	promptSeq       uint64
+	promptMu             sync.Mutex
+	promptInFlight       bool
+	guardedCancelAttempt *promptAttempt // promptMu: owns any pending guarded stop
+	guardedCancelPending bool           // promptMu: a matched process stop still owns admission
+	evictionPending      bool           // promptMu: durable eviction owns this runtime; reject new work
+	promptSeq            uint64
 	// promptAttempt remains attached until the next accepted prompt so late
 	// terminal signals from the same runtime are absorbed by its exact-once
 	// arbiter instead of reaching the control plane twice.

@@ -529,6 +529,17 @@ func (h *SessionHost) markPromptStarted(attempt *promptAttempt, sessionID acpsdk
 // cancellation, and error (see finishPrompt / finishPromptCancelled /
 // finishPromptAttemptWithError).
 func (h *SessionHost) markPromptDone() {
+	h.promptMu.Lock()
+	guardedCancelPending := h.guardedCancelPending
+	h.promptMu.Unlock()
+	if guardedCancelPending {
+		// Local RPC completion is not remote process quiescence. Never publish
+		// idle while the guarded stop is pending or failed.
+		h.setStatus(HostError, "Guarded cancellation awaiting process termination")
+		h.stopPromptActivityRereport()
+		h.reportActivity("error")
+		return
+	}
 	h.setStatus(HostReady, "")
 	h.broadcastControl(MsgSessionPromptDone, nil)
 	h.stopPromptActivityRereport()

@@ -381,6 +381,19 @@ completion or permission to replay. The response includes `recovery.outcome` and
 
 Connector connection/client inventories accept `cursor` and return `nextCursor`. Own connections are enumerated through the OAuth provider's grant listing; the admin view uses the D1 grant index. Settings/Admin revocation and client blocking take effect immediately through D1 gates. Refresh-token reuse revokes the entire connection, enforced by atomic D1 admission after provider validation. OAuth protocol revocation is RFC 7009 at `/oauth/revoke`.
 
+### External operational MCP tools
+
+The full external registry includes `sam_chat_interrupt`, `sam_chat_status`,
+`sam_chat_delivery_get`, `sam_chat_interactions`, `sam_work_changes`,
+`sam_chat_jobs_list`, and `sam_operation_get`. Operational session reads require
+current session-writer authority; operation receipts are actor/project scoped.
+Interrupt requires a requestKey and preserves the task/workspace. Reads never
+contact or wake runtimes. Changes are coalesced snapshots, not a durable event
+stream. Job observations cover internal secret-execution responses only; generic
+harness history is unsupported. Safe diagnostics return allowlisted categories,
+never raw errors/logs/output. Pending and settled interaction reads do not approve
+anything; every agent answer still requires explicit user confirmation.
+
 ## Managed runtime secret execution
 
 `exec_with_secrets` accepts literal `argv` OR `command` + explicit `shell` (`bash`/`sh`), `secretNames`, optional absolute `cwd`, nonsecret `env`, `timeoutMs`, and `idempotencyKey`. `exec_with_secrets_status(jobId)` and `exec_with_secrets_cancel(jobId)` are scoped to the caller's verified workspace and agent session. See `specs/001-mvp/contracts/api.md` and public guide `guides/secret-execution.md` for the lifecycle and compatibility scope.

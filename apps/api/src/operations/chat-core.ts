@@ -1,10 +1,12 @@
 import { formatMessageCursor, parseMessageCursor } from '@simple-agent-manager/shared';
 
 import { VALID_MESSAGE_ROLES, validateRoles } from '../lib/message-roles';
+import { AppError } from '../middleware/error';
 import { connectorPendingInteractions } from '../services/connector-agent-answer';
 import { groupTokensIntoMessages } from '../services/message-groups';
 import * as projectDataService from '../services/project-data';
 import { describeRootSearchCoverage } from '../services/project-data-search-coverage';
+import { requireSessionWriter } from '../services/session-access';
 import { OperationError } from './errors';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
@@ -92,6 +94,17 @@ export async function readChat(
     });
   if (connector) result.reverse();
   const oldest = messages[0];
+  let writer = session.createdByUserId === ctx.actor.userId;
+  if (connector && !writer) {
+    try {
+      await requireSessionWriter(ctx.env, input.projectId, sessionId, ctx.actor.userId, {
+        action: 'read pending agent requests',
+      });
+      writer = true;
+    } catch (error) {
+      if (!(error instanceof AppError) || error.statusCode !== 403) throw error;
+    }
+  }
   return {
     ...(ctx.actor.via !== 'workspace-agent'
       ? {
@@ -114,7 +127,7 @@ export async function readChat(
     sessionId,
     topic: session.topic,
     taskId: session.taskId,
-    ...(connector && session.createdByUserId === ctx.actor.userId
+    ...(connector && writer
       ? {
           pendingInteractions: await connectorPendingInteractions(
             ctx.env,

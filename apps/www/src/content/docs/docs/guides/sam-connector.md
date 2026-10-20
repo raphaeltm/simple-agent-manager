@@ -128,6 +128,35 @@ This is your own connection to SAM, as a person. Agents running inside SAM alrea
 SAM tools; don't give them this URL or a personal token. For scripts, or to work with SAM from a
 terminal yourself, use the [SAM CLI](/docs/guides/cli/).
 
+## Follow work and recover safely
+
+Ask your connected app to check a chat's operational status, delivery receipt or recent changes.
+These reads do not wake sleeping agents. Status keeps task completion, the current prompt,
+background work, sleeping resources and confirmed runtime cleanup separate. Observations include
+source timestamps; unknown or last-reported state is not proof that a runtime is idle.
+
+- **Interrupt** cancels the current prompt and keeps the chat and workspace. Ask explicitly.
+  Interrupt uses the runtime/turn returned by status and fails safely on older runtimes that
+  do not support guarded cancellation. **Stop work** remains destructive and requires confirmation.
+- **Delivery lookup** uses the delivery ID returned when a reply is queued. It shows retries and
+  runtime receipts. Queued or visible in the transcript does not mean read or acted on.
+- **Changes** returns a cursor for bounded checks of current status and agent requests. It can
+  coalesce intermediate changes; it is not a lossless event history or a push notification.
+- **Agent requests** shows pending options/forms and retained settled answer outcomes for a chat
+  you own or currently control through sharing. Every answer still needs your confirmation.
+- **Diagnostics** shows safe error categories, without raw logs, command output or credentials.
+- **Jobs** shows retained observations of managed secret-execution jobs. Jobs are recorded when
+  their internal start/status/cancel responses are observed; a running record may be stale and a
+  missing outcome is unknown. Generic harness job history is not supported. The list is capped
+  by the installation's MCP message-list maximum. Child SAM tasks have their own task status.
+- **Operation lookup** inspects your own write receipt using its operation name and request key.
+  It never repeats the write. A saved response does not prove delivery or cleanup finished; a
+  pending receipt means the outcome is uncertain. Do not try a new request key to bypass it.
+
+Operational evidence and request details require current control of the session. Shared control
+does not grant node-wide log access. Ordinary replies already wake sleeping chats; standalone
+Sleep/Resume and model switching are not part of these controls.
+
 ## Disconnect an app
 
 In **Settings → Access → Connected apps**, select **Revoke** next to the app, then **Revoke
