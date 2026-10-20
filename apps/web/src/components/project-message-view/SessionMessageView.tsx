@@ -1,7 +1,7 @@
 import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent } from '@simple-agent-manager/acp-client';
 import { Spinner } from '@simple-agent-manager/ui';
-import { type FC, useCallback, useMemo, useRef, useState } from 'react';
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
 
 import { useAcpPermissionInteractions } from '../../hooks/useAcpPermissionInteractions';
@@ -115,6 +115,15 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   }, [lc.messages, undeliveredList]);
   // Owner and grantees drive the agent; every member can comment; the server enforces both.
   const viewer = resolveSessionViewerCapabilities(lc.session);
+  // A teammate's Files/Git panel closes when their access ends; the server already refuses
+  // its next read.
+  const canBrowseWorkspace = viewer.canBrowseWorkspace;
+  const couldBrowseWorkspace = useRef(canBrowseWorkspace);
+  const { setFilePanel } = lc;
+  useEffect(() => {
+    if (couldBrowseWorkspace.current && !canBrowseWorkspace) setFilePanel(null);
+    couldBrowseWorkspace.current = canBrowseWorkspace;
+  }, [canBrowseWorkspace, setFilePanel]);
   // One description per commented message ("the agent's reply", "Olivia's message"), shared by
   // the drawer rows and the desktop rail so they cannot name the same message differently.
   const ownerName = sessionOwnerLabel(lc.session);
@@ -240,7 +249,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     onOpenShare: lc.session?.access ? openShare : undefined,
     sharedWithCount: lc.session?.access?.grants.length ?? 0,
     canManageShare: viewer.canManageAccess,
-    canBrowseWorkspace: viewer.viewerAccess === 'owner',
+    canBrowseWorkspace,
   });
   const sessionToolRail = lc.session ? (
     <SessionToolRail

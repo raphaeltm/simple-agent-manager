@@ -72,6 +72,53 @@ describe('user message attribution', () => {
     expect(screen.getByText('Message shared')).toBeInTheDocument();
   });
 
+  it('names a teammate whose scheduled message arrived, and marks it scheduled', () => {
+    renderRows([
+      userRow(
+        'scheduled',
+        delivery({
+          source: 'scheduled_action',
+          scheduleId: 'schedule-1',
+          creatorUserId: 'grantee-1',
+          userId: 'grantee-1',
+          senderName: 'Ana Ruiz',
+          onBehalfOfUserId: 'owner-1',
+          grantId: 'grant-1',
+        })
+      ),
+      // The owner's own scheduled message stays the owner's bubble.
+      userRow(
+        'owner-scheduled',
+        delivery({ source: 'scheduled_action', scheduleId: 'schedule-2', creatorUserId: 'owner-1' })
+      ),
+    ]);
+
+    expect(screen.getAllByTestId('user-message-attribution')).toHaveLength(1);
+    expect(screen.getByTestId('user-message-attribution')).toHaveTextContent(
+      'Ana Ruiz · shared access · scheduled'
+    );
+    expect(screen.getByText('Message owner-scheduled')).toBeInTheDocument();
+  });
+
+  it('says a teammate’s scheduled message was not delivered after their access ended', () => {
+    renderRows([
+      userRow(
+        'scheduled-expired',
+        delivery({
+          source: 'scheduled_action',
+          senderName: 'Ana Ruiz',
+          onBehalfOfUserId: 'owner-1',
+          deliveryCancelled: 'sender_access_expired',
+        })
+      ),
+    ]);
+
+    expect(screen.getByText('Not delivered — access expired')).toBeInTheDocument();
+    expect(screen.getByTestId('user-message-attribution')).toHaveTextContent(
+      'Ana Ruiz · shared access · scheduled'
+    );
+  });
+
   it('names who sent a teammate’s comment to the agent', () => {
     renderRows([
       userRow(
