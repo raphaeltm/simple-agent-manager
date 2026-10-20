@@ -235,3 +235,11 @@ Product bugs to file as SAM ideas (not docs work), each now filed:
   (own subscription or key, or project credential; rests, usually asleep); full names in the
   sent-comment label; the Fork-box deploy time in this log. Collaboration spec ran 8/8 at both sizes.
   Dependency-badge bugs appended to `01M5BREXSE42RBT0BQMK3Z72FG`.
+- **Task-completion validator:** PASS; one MEDIUM (two research-paragraph product bugs lacked an idea
+  citation) fixed by citing `01M5BRE4WHCKVF0DTAHDVTJDTC` and `01M59MYE4GY91BWTE8TZF1ZB5D` above.
+
+### Round 7 (combined)
+
+- 2 LOW, no product bugs: the changelog's share sentence could read as the teammate's accounts (now
+  "keeps running on the owner's accounts"); the "When a task fails" and chat-features limit wording
+  now includes project credentials and qualifies the no-fail parenthetical.

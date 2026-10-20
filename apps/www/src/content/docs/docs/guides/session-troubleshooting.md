@@ -477,10 +477,10 @@ If a reason isn't in this list, or a fixable one keeps coming back after you fix
 
 A task can fail for reasons that have nothing to do with its work — nobody answered a question the
 agent asked with its `request_human_input` tool, or a usage limit ran out in the **SAM** provider
-mode or, on your own credentials, one SAM can't wait out (see
+mode or, on your own subscription or key or a project credential, one SAM can't wait out (see
 [Usage Limits](/docs/guides/agents/#usage-limits)). (A card in the chat that nobody answers doesn't
-fail the task when it expires; it only tells the agent no. A Claude Code or Codex plan limit, or a
-rate limit that says when it resets, doesn't fail it either:
+fail the task when it expires; it only tells the agent no. On those credentials, a Claude Code or
+Codex plan limit, or a rate limit that says when it resets, doesn't fail it either:
 [SAM waits for the reset](#waiting-for-a-provider-limit-reset).) When that
 happens while the workspace is still running, SAM tries to keep the workspace: it lets the agent's current turn end, snapshots the
 workspace, and puts the chat to sleep. That usually takes a few minutes, but if the agent was in the
