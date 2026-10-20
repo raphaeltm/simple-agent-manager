@@ -1,5 +1,6 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
+import type { Ref } from 'react';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
 import {
@@ -82,15 +83,22 @@ export function ReadOnlyFollowUp({
   onNewChat,
   ended = false,
   accessEnded = false,
+  noticeRef,
 }: {
   ownerLabel: string;
   onNewChat?: () => void;
   ended?: boolean;
   accessEnded?: boolean;
+  /** Lets the chat move focus here when it closes a panel this viewer can no longer use. */
+  noticeRef?: Ref<HTMLDivElement>;
 }) {
   return (
     <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
-      <div className="flex items-center gap-3 rounded-md border border-border-default bg-surface/50 px-3 py-2">
+      <div
+        ref={noticeRef}
+        tabIndex={-1}
+        className="flex items-center gap-3 rounded-md border border-border-default bg-surface/50 px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+      >
         <div className="min-w-0 flex-1">
           <div className="text-xs font-medium text-fg-primary break-words">
             {ended

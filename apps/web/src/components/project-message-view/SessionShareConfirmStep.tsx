@@ -87,17 +87,20 @@ export function SessionShareConfirmStep({
       </h3>
       <ul className="mt-2 mb-0 flex list-disc flex-col gap-2 pl-5 text-sm leading-relaxed text-fg-primary">
         <li>
-          {name} can send messages and files, schedule messages, look through the repository&apos;s
-          files and changes, stop or archive the chat, and answer the agent — just like you. The
-          terminal, open ports and the workspace page stay yours.
+          {name} can message and answer the agent, send files, schedule messages, and stop or
+          archive the chat — just like you.
+        </li>
+        <li>
+          They can also look through the repository&apos;s files and changes. The terminal, open
+          ports and the workspace page stay yours.
         </li>
         <li>
           Everything runs on {words.possessive} accounts: AI subscription or API key, GitHub access
           and compute. Agents it starts are billed to {words.object}.
         </li>
         <li>
-          The agent can read {words.possessive} keys, so {name} may be able to see them. Only share
-          with people you trust.
+          The agent can read {words.possessive} keys, so {name} may be able to see them, along with
+          files like .env. Only share with people you trust.
         </li>
         <li>
           Access ends on its own after the time you choose, or when it&apos;s revoked, and messages{' '}

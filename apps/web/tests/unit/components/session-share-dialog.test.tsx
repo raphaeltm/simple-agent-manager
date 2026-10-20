@@ -171,7 +171,12 @@ describe('SessionShareDialog — sharing', () => {
     expect(within(dialog).getByRole('heading', { name: 'Share with Dana Scully?' })).toHaveFocus();
     expect(
       within(dialog).getByText(
-        "Dana Scully can send messages and files, schedule messages, look through the repository's files and changes, stop or archive the chat, and answer the agent — just like you. The terminal, open ports and the workspace page stay yours."
+        'Dana Scully can message and answer the agent, send files, schedule messages, and stop or archive the chat — just like you.'
+      )
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        "They can also look through the repository's files and changes. The terminal, open ports and the workspace page stay yours."
       )
     ).toBeInTheDocument();
     expect(
@@ -181,7 +186,7 @@ describe('SessionShareDialog — sharing', () => {
     ).toBeInTheDocument();
     expect(
       within(dialog).getByText(
-        'The agent can read your keys, so Dana Scully may be able to see them. Only share with people you trust.'
+        'The agent can read your keys, so Dana Scully may be able to see them, along with files like .env. Only share with people you trust.'
       )
     ).toBeInTheDocument();
     expect(

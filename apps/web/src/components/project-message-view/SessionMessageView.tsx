@@ -1,7 +1,7 @@
 import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent } from '@simple-agent-manager/acp-client';
 import { Spinner } from '@simple-agent-manager/ui';
-import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useCallback, useMemo, useRef, useState } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
 
 import { useAcpPermissionInteractions } from '../../hooks/useAcpPermissionInteractions';
@@ -26,6 +26,7 @@ import type { ProjectMessageViewProps } from './SessionMessageView.types';
 import { SessionMessageViewDialogs } from './SessionMessageViewDialogs';
 import { SessionStatusBanners } from './SessionStatusBanners';
 import { SessionToolRail } from './SessionToolRail';
+import { useFilePanelAccessGate } from './useFilePanelAccessGate';
 import type { DisplayItem } from './tool-call-groups';
 import { groupToolCallItems } from './tool-call-groups';
 import { chatMessagesToConversationItems } from './types';
@@ -115,15 +116,13 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   }, [lc.messages, undeliveredList]);
   // Owner and grantees drive the agent; every member can comment; the server enforces both.
   const viewer = resolveSessionViewerCapabilities(lc.session);
-  // A teammate's Files/Git panel closes when their access ends; the server already refuses
-  // its next read.
-  const canBrowseWorkspace = viewer.canBrowseWorkspace;
-  const couldBrowseWorkspace = useRef(canBrowseWorkspace);
-  const { setFilePanel } = lc;
-  useEffect(() => {
-    if (couldBrowseWorkspace.current && !canBrowseWorkspace) setFilePanel(null);
-    couldBrowseWorkspace.current = canBrowseWorkspace;
-  }, [canBrowseWorkspace, setFilePanel]);
+  const accessNoticeRef = useRef<HTMLDivElement>(null);
+  const filePanelNotice = useFilePanelAccessGate({
+    canBrowseWorkspace: viewer.canBrowseWorkspace,
+    filePanelOpen: lc.filePanel !== null,
+    setFilePanel: lc.setFilePanel,
+    accessNoticeRef,
+  });
   // One description per commented message ("the agent's reply", "Olivia's message"), shared by
   // the drawer rows and the desktop rail so they cannot name the same message differently.
   const ownerName = sessionOwnerLabel(lc.session);
@@ -202,11 +201,13 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   // Expansion survives virtualization; the hook documents its live-tail signal.
   const groupRowState = useToolCallGroupRowState(displayItems, lc.completionDockWorking);
 
-  // Only pass a file-click handler through when the session can actually serve
-  // files; hoisted so `renderConversationItem` has a stable dependency instead of
-  // rebuilding the ternary (and therefore the callback) on every render.
+  // Only pass a file-click handler through when the session can serve files to this viewer;
+  // hoisted so `renderConversationItem` has a stable dependency instead of rebuilding the
+  // ternary (and therefore the callback) on every render.
   const fileClickHandler =
-    lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined;
+    lc.session?.workspaceId && lc.sessionState === 'active' && viewer.canBrowseWorkspace
+      ? lc.handleFileClick
+      : undefined;
   const permissionPlacement = useAcpPermissionPlacement({
     displayItems,
     interactions: permissionItems,
@@ -249,7 +250,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     onOpenShare: lc.session?.access ? openShare : undefined,
     sharedWithCount: lc.session?.access?.grants.length ?? 0,
     canManageShare: viewer.canManageAccess,
-    canBrowseWorkspace,
+    canBrowseWorkspace: viewer.canBrowseWorkspace,
   });
   const sessionToolRail = lc.session ? (
     <SessionToolRail
@@ -419,7 +420,11 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
         agentProfiles={agentProfiles}
         slashCommands={slashCommands}
         onNewChat={onNewChat}
+        accessNoticeRef={accessNoticeRef}
       />
+      <p role="status" className="sr-only">
+        {filePanelNotice}
+      </p>
 
       {/* File viewer slide-over panel */}
       {lc.filePanel && lc.session && (

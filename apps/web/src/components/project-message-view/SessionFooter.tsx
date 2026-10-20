@@ -3,7 +3,7 @@ import { PlanModal } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { isExpiredTask } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, type RefObject, useEffect, useMemo, useState } from 'react';
 
 import { ArchivedForkComposer } from './ArchivedForkComposer';
 import { CompletionDock } from './CompletionDock';
@@ -36,6 +36,8 @@ interface SessionFooterProps {
   slashCommands: SlashCommand[];
   onNewChat?: () => void;
   onFork?: () => void;
+  /** The read-only notice, focused when a teammate's open file panel closes on access loss. */
+  accessNoticeRef?: RefObject<HTMLDivElement | null>;
 }
 
 /**
@@ -58,6 +60,7 @@ export function SessionFooter({
   slashCommands,
   onNewChat,
   onFork,
+  accessNoticeRef,
 }: Readonly<SessionFooterProps>) {
   const [showPlanModal, setShowPlanModal] = useState(false);
 
@@ -198,6 +201,7 @@ export function SessionFooter({
           ownerLabel={sessionOwnerLabel}
           onNewChat={onNewChat}
           accessEnded={accessEnded}
+          noticeRef={accessNoticeRef}
         />
       )}
       {lc.sessionState === 'terminated' && lc.session?.status === 'stopped' && viewer.canFork && (

@@ -2,7 +2,6 @@ import { Spinner } from '@simple-agent-manager/ui';
 import {
   ArrowLeft,
   ChevronRight,
-  Download,
   FileText,
   Folder,
   Image,
@@ -14,7 +13,6 @@ import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'reac
 import { createPortal } from 'react-dom';
 
 import {
-  downloadSessionFile,
   type FileEntry,
   getSessionFileContent,
   getSessionFileIndex,
@@ -28,6 +26,7 @@ import { detectLanguage, formatFileSize, isImageFile } from '../../lib/file-util
 import { fuzzyFilterFiles } from '../../lib/fuzzy-match';
 import { CODE_THEME_BG, RenderedMarkdown, SyntaxHighlightedCode } from '../MarkdownRenderer';
 import { DiffRenderer, ImageViewer } from '../shared-file-viewer';
+import { DownloadFileButton, type FileDownloadError } from './chat-file-panel-download';
 import { GitStatusList, HighlightedFilePath } from './chat-file-panel-rows';
 import { buildBreadcrumbs, isMarkdownFile } from './chat-file-panel-utils';
 
@@ -66,6 +65,8 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+  // Cleared when a file is opened, and shown only for the file it is about.
+  const [downloadError, setDownloadError] = useState<FileDownloadError | null>(null);
 
   // Git status state
   const [gitStatus, setGitStatus] = useState<GitStatusData | null>(null);
@@ -249,6 +250,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
     }
     setFilePath(path);
     setMode('view');
+    setDownloadError(null);
     // Image files are rendered via <img src> — skip text content fetch
     if (!isImageFile(path)) {
       loadFile(path);
@@ -406,32 +408,12 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
           )}
 
           {mode === 'view' && filePath && (
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  const { blob, fileName: dlName } = await downloadSessionFile(
-                    projectId,
-                    sessionId,
-                    filePath
-                  );
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = dlName;
-                  document.body.appendChild(a);
-                  a.click();
-                  a.remove();
-                  URL.revokeObjectURL(url);
-                } catch (err) {
-                  console.error('Download failed:', err);
-                }
-              }}
-              aria-label="Download file"
-              className="p-3 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
-            >
-              <Download size={14} />
-            </button>
+            <DownloadFileButton
+              projectId={projectId}
+              sessionId={sessionId}
+              filePath={filePath}
+              onError={setDownloadError}
+            />
           )}
 
           <button
@@ -626,6 +608,15 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
               src={getSessionFileRawUrl(projectId, sessionId, filePath)}
               fileName={fileName}
             />
+          )}
+          {mode === 'view' && downloadError?.path === filePath && (
+            <div
+              role="alert"
+              className="m-4 p-3 bg-danger-tint rounded-lg text-xs"
+              style={{ color: 'var(--sam-color-tn-red)' }}
+            >
+              {downloadError.message}
+            </div>
           )}
           {mode === 'view' && !isImageFile(filePath) && (
             <>

@@ -54,6 +54,7 @@ const mocks = vi.hoisted(() => ({
   getProjectMembers: vi.fn(),
   getSessionAccess: vi.fn(),
   getSessionFileList: vi.fn(),
+  getSessionFileContent: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -71,6 +72,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getProjectMembers: mocks.getProjectMembers,
   getSessionAccess: mocks.getSessionAccess,
   getSessionFileList: mocks.getSessionFileList,
+  getSessionFileContent: mocks.getSessionFileContent,
 }));
 
 vi.mock('../../../src/lib/api/comments', async (importOriginal) => ({
@@ -127,8 +129,24 @@ vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
   return {
     ...actual,
     VoiceButton: () => <button data-testid="voice-button">Voice</button>,
-    MessageBubble: ({ text, role }: { text: string; role: string }) => (
-      <div data-testid={`acp-message-${role}`}>{text}</div>
+    // A file the agent mentions is a link only when the chat passes a file-click handler.
+    MessageBubble: ({
+      text,
+      role,
+      onFileClick,
+    }: {
+      text: string;
+      role: string;
+      onFileClick?: (path: string) => void;
+    }) => (
+      <div data-testid={`acp-message-${role}`}>
+        {text}
+        {onFileClick && text.includes('docs/guide.md') ? (
+          <button type="button" onClick={() => onFileClick('docs/guide.md')}>
+            Open docs/guide.md in file browser
+          </button>
+        ) : null}
+      </div>
     ),
     ToolCallCard: ({ toolCall }: { toolCall: { title: string } }) => (
       <div data-testid="acp-tool-call">{toolCall.title}</div>
@@ -1273,8 +1291,46 @@ describe('ProjectMessageView — Files and Git follow shared access', () => {
     await waitFor(() => expect(screen.queryByText('README.md')).toBeNull());
     expect(mocks.getSessionAccess).toHaveBeenCalledWith('proj-1', 'session-1');
     expect(screen.queryByRole('button', { name: 'Browse workspace files' })).toBeNull();
+    // Focus lands on the notice that says why, and a status line announces the close.
+    expect(document.activeElement?.textContent).toContain('Your shared access has ended');
+    expect(
+      screen.getByText('Your shared access ended, so the file panel closed.').getAttribute('role')
+    ).toBe('status');
     // Liveness: the chat itself is still on screen.
     expect(screen.getByText('Agent answer')).toBeTruthy();
+  });
+
+  it('opens a file the agent mentions for a teammate, but not for a member it is not shared with', async () => {
+    mocks.getSessionFileContent.mockResolvedValue({
+      content: 'Guide text',
+      filePath: 'docs/guide.md',
+    });
+    mocks.getChatSession.mockResolvedValue({
+      session: session('grantee'),
+      messages: [makeMessage('msg-1', 'session-1', 'See docs/guide.md')],
+      hasMore: false,
+    });
+    const { unmount } = render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Open docs/guide.md in file browser' })
+    );
+    expect(await screen.findByText('Guide text')).toBeTruthy();
+    expect(mocks.getSessionFileContent).toHaveBeenCalledWith(
+      'proj-1',
+      'session-1',
+      'docs/guide.md'
+    );
+    unmount();
+
+    mocks.getChatSession.mockResolvedValue({
+      session: session('reader'),
+      messages: [makeMessage('msg-1', 'session-1', 'See docs/guide.md')],
+      hasMore: false,
+    });
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    // Liveness: the message renders, without a link into a panel the reader cannot use.
+    expect(await screen.findByText('See docs/guide.md')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Open docs/guide.md in file browser' })).toBeNull();
   });
 
   it('does not offer Files or Git to a member the chat is not shared with', async () => {
