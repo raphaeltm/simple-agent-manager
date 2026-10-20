@@ -9,17 +9,17 @@ Dedicated design review of `/sam` and the settings opt-in, 2026-10-20.
 
 ## What was wrong at the reviewed head
 
-| # | Finding | Severity |
-| --- | --- | --- |
-| 1 | The conversation was ordinary page flow. It opened at the oldest loaded turn, and the composer sat below every turn, so long histories pushed it off screen. Errors in the composer could also land below the fold. | Blocking |
-| 2 | `bg-surface-secondary` and `bg-surface-primary` are not design tokens. The user bubble, action cards, composer and textarea rendered with no surface, so your messages looked the same as SAM's. | Blocking |
-| 3 | Destructive confirmation showed an internal name ("stop task"), raw JSON (in production only IDs) and "Confirm this action". It never said what would happen and offered no way to review the target. The mock used a non-existent operation (`sam_stop_task`). | Blocking |
-| 4 | The server strips every read receipt to `{}`, but each still rendered as a full card with an empty details box. A normal answer would carry several of these. Mocks never exercised it. | Blocking |
-| 5 | The settings switch was a text button labelled "On"/"Off", which reads as either state or action. The card took about 410px of the first mobile screen above all settings tabs. | Blocking |
-| 6 | The SAM and Chats nav items shared the `MessageSquare` icon, so they were indistinguishable in the collapsed sidebar and the mobile drawer. | Blocking |
-| 7 | Every turn showed "SAM · completed". The stop hint showed even with nothing running. The empty state carried an implementation disclaimer. | Polish |
-| 8 | 56px Voice/Send/Confirm buttons were much heavier than the project chat composer (44px). The 56px mandate was removed from agent guidance in June 2026 (`95c810a49`); the `apps/web/AGENTS.md` line is stale. The Automation page you approved uses ≥44px. | Polish |
-| 9 | Raw browser errors ("Failed to fetch"). In the uncertain receipt, the link and the "Check outcome" button touched. "Open source work" wording. Work cards fell back to raw IDs. | Polish |
+| #   | Finding                                                                                                                                                                                                                                                         | Severity |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| 1   | The conversation was ordinary page flow. It opened at the oldest loaded turn, and the composer sat below every turn, so long histories pushed it off screen. Errors in the composer could also land below the fold.                                             | Blocking |
+| 2   | `bg-surface-secondary` and `bg-surface-primary` are not design tokens. The user bubble, action cards, composer and textarea rendered with no surface, so your messages looked the same as SAM's.                                                                | Blocking |
+| 3   | Destructive confirmation showed an internal name ("stop task"), raw JSON (in production only IDs) and "Confirm this action". It never said what would happen and offered no way to review the target. The mock used a non-existent operation (`sam_stop_task`). | Blocking |
+| 4   | The server strips every read receipt to `{}`, but each still rendered as a full card with an empty details box. A normal answer would carry several of these. Mocks never exercised it.                                                                         | Blocking |
+| 5   | The settings switch was a text button labelled "On"/"Off", which reads as either state or action. The card took about 410px of the first mobile screen above all settings tabs.                                                                                 | Blocking |
+| 6   | The SAM and Chats nav items shared the `MessageSquare` icon, so they were indistinguishable in the collapsed sidebar and the mobile drawer.                                                                                                                     | Blocking |
+| 7   | Every turn showed "SAM · completed". The stop hint showed even with nothing running. The empty state carried an implementation disclaimer.                                                                                                                      | Polish   |
+| 8   | 56px Voice/Send/Confirm buttons were much heavier than the project chat composer (44px). The 56px mandate was removed from agent guidance in June 2026 (`95c810a49`); the `apps/web/AGENTS.md` line is stale. The Automation page you approved uses ≥44px.      | Polish   |
+| 9   | Raw browser errors ("Failed to fetch"). In the uncertain receipt, the link and the "Check outcome" button touched. "Open source work" wording. Work cards fell back to raw IDs.                                                                                 | Polish   |
 
 The independent security review found three more issues, all fixed here:
 
@@ -29,16 +29,16 @@ The independent security review found three more issues, all fixed here:
 
 ## What changed
 
-| Area | Change |
-| --- | --- |
-| Layout (`pages/Sam.tsx`, `sam/useStickToBottom.ts`) | Full-height chat like project chat: header, a scroller and a pinned composer. Opens at the newest turn. Follows new content only while you are at the bottom. Keeps your place when older messages load (manual anchoring, identical in Safari). Adds a "Scroll to bottom" button. |
-| Turns (`sam/SamTurn.tsx`) | User messages use the project chat `glass-msg-user` bubble. The status label appears only for exceptions: "SAM · working/cancelled/failed/interrupted". |
+| Area                                                   | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Layout (`pages/Sam.tsx`, `sam/useStickToBottom.ts`)    | Full-height chat like project chat: header, a scroller and a pinned composer. Opens at the newest turn. Follows new content only while you are at the bottom. Keeps your place when older messages load (manual anchoring, identical in Safari). Adds a "Scroll to bottom" button.                                                                                                                                                                                                         |
+| Turns (`sam/SamTurn.tsx`)                              | User messages use the project chat `glass-msg-user` bubble. The status label appears only for exceptions: "SAM · working/cancelled/failed/interrupted".                                                                                                                                                                                                                                                                                                                                    |
 | Receipts (`sam/ActionCard.tsx`, `sam/sam-receipts.ts`) | Completed reads become one quiet "Checked …" line. Each effect card has a plain title and states its status ("Needs your confirmation", "Done", "Outcome unknown", "Declined"). It names the project using the cached project list, links to the chat/task for review, and says what confirming does. Buttons are action-specific ("Confirm stop"/"Keep running", "Send answer"/"Don’t send"). Agent answers show the proposed answer. "Exact request" is open by default during approval. |
-| Composer (`sam/SamComposer.tsx`) | Auto-growing textarea, the shared `VoiceButton`, and 44px Send/Stop/Retry. Ctrl/Cmd+Enter sends, with a desktop hint. Errors show inside the pinned composer in plain words. Recording and transcribing state is shown in text. The stop hint shows only while a turn runs. |
-| Empty state | Centred prompt with three starters that fill the composer and never send. |
-| Settings (`SamSettingsCard.tsx`) | Compact card with the Notifications-style switch. The accessible name stays "Enable SAM assistant", with a visible On/Off word. |
-| Navigation (`NavSidebar.tsx`) | SAM uses the `Bot` icon. |
-| Voice (`packages/acp-client/.../VoiceButton.tsx`) | A capture epoch is invalidated on unmount, on disable and on a newer start. Late grants are released without recording. Recorder start-up failures release the stream. StrictMode resets `unmountedRef`. Stop stays usable during a recording. |
+| Composer (`sam/SamComposer.tsx`)                       | Auto-growing textarea, the shared `VoiceButton`, and 44px Send/Stop/Retry. Ctrl/Cmd+Enter sends, with a desktop hint. Errors show inside the pinned composer in plain words. Recording and transcribing state is shown in text. The stop hint shows only while a turn runs.                                                                                                                                                                                                                |
+| Empty state                                            | Centred prompt with three starters that fill the composer and never send.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Settings (`SamSettingsCard.tsx`)                       | Compact card with the Notifications-style switch. The accessible name stays "Enable SAM assistant", with a visible On/Off word.                                                                                                                                                                                                                                                                                                                                                            |
+| Navigation (`NavSidebar.tsx`)                          | SAM uses the `Bot` icon.                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Voice (`packages/acp-client/.../VoiceButton.tsx`)      | A capture epoch is invalidated on unmount, on disable and on a newer start. Late grants are released without recording. Recorder start-up failures release the stream. StrictMode resets `unmountedRef`. Stop stays usable during a recording.                                                                                                                                                                                                                                             |
 
 No API, schema, Worker, runtime, settings or permission behaviour changed. Default-OFF opt-in, navigation and direct-route gating, and the `/settings` deep link are preserved.
 
@@ -59,13 +59,13 @@ For settings, the alternative was a dedicated "SAM" settings tab. It would add a
 
 ## Rubric (final)
 
-| Category | Score | Notes |
-| --- | ---: | --- |
-| Visual hierarchy | 5 | Distinct bubbles, quiet receipts, exception-only status, confirmation card stands out. |
-| Interaction clarity | 5 | Action-specific buttons, review link before confirming, plain errors, visible recording state. |
-| Mobile usability | 5 | Pinned composer, newest turn on load, one-line composer at 320px, no overflow. |
-| Accessibility | 4 | Labelled switch, labelled receipt groups, `role=status` for progress and voice, keyboard send. The shared `VoiceButton` still uses light-theme gray hover classes. |
-| System consistency | 5 | Reuses the project chat bubble, `VoiceButton`, scroll button, switch pattern and design tokens. |
+| Category            | Score | Notes                                                                                                                                                              |
+| ------------------- | ----: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Visual hierarchy    |     5 | Distinct bubbles, quiet receipts, exception-only status, confirmation card stands out.                                                                             |
+| Interaction clarity |     5 | Action-specific buttons, review link before confirming, plain errors, visible recording state.                                                                     |
+| Mobile usability    |     5 | Pinned composer, newest turn on load, one-line composer at 320px, no overflow.                                                                                     |
+| Accessibility       |     4 | Labelled switch, labelled receipt groups, `role=status` for progress and voice, keyboard send. The shared `VoiceButton` still uses light-theme gray hover classes. |
+| System consistency  |     5 | Reuses the project chat bubble, `VoiceButton`, scroll button, switch pattern and design tokens.                                                                    |
 
 ## Notes for the release owner (outside this design change)
 
