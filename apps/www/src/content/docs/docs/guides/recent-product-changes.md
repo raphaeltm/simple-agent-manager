@@ -95,8 +95,9 @@ failing come in the first release after v2026.10.19.
   ([`GITHUB_TRIGGER_RECOVERY_*`](/docs/reference/configuration/#github-trigger-delivery-recovery),
   set as `GH_TRIGGER_RECOVERY_*`), chat attachment limits
   ([`ATTACHMENT_*`](/docs/reference/configuration/#chat-attachments)), archived-fork history
-  (`ARCHIVED_FORK_HISTORY_MAX_CHARS`), and, on the VM agent, Git credential retries (`GIT_TOKEN_*`,
-  `GIT_CREDENTIAL_TIMEOUT`) and secret execution (`SECRET_EXEC_*`; see
+  (`ARCHIVED_FORK_HISTORY_MAX_CHARS`). The VM agent also has new defaults for Git credential retries
+  (`GIT_TOKEN_*`, `GIT_CREDENTIAL_TIMEOUT`) and secret execution (`SECRET_EXEC_*`), but SAM doesn't
+  pass these to the machines it starts, so the defaults apply (see
   [VM Agent configuration](/docs/reference/vm-agent/#configuration)).
 
 There are no new secrets or Cloudflare token permissions, and the new database migrations run in the

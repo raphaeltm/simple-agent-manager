@@ -243,7 +243,7 @@ tab of their notifications, which doesn't add to the bell's count, so tell them 
 The chat is also in their **All sessions** list, though not under **My sessions**, because they
 didn't start it. Above the
 message box they see _You're chatting in Prakash's session. It runs on Prakash's accounts. Your
-access ends in 23 min (3:42 PM)._ Each of their messages is labelled, for example
+access ends in 23 min (2:43 PM)._ Each of their messages is labelled, for example
 **Ana · shared access**, and SAM tells the agent who is speaking.
 
 <picture>

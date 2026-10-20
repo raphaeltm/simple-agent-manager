@@ -283,7 +283,7 @@ In a project chat, the paperclip attaches files to your next message; see
 On a workspace's own page, the paperclip instead uploads files straight into the running workspace's
 `.private` directory, and the page shows "Uploaded N files: …" (the agent isn't told, so mention the
 files in your message). Those uploads allow up to 50 MB per file and 250 MB at a time, and file
-names may only use letters, digits, spaces, `.`, `_`, and `-`.
+names may only use unaccented letters (A–Z), digits, spaces, `.`, `_`, and `-`.
 
 ### Downloading Files
 

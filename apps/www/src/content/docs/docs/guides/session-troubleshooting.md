@@ -157,11 +157,12 @@ To move on:
 2. Once the limit has reset, continue in a new chat: **Fork** or **Retry** in the tool rail starts
    one from this chat (see [Conversation forking](/docs/guides/chat-features/#conversation-forking)).
    The new chat starts from your default branch, so tell its agent which pushed branch to build on.
-3. End the blocked task with **Complete** in the session tool rail (or, for a **Chat**, **Archive**
-   it, which also deletes its saved workspace). Don't reply in the blocked chat, before or after
-   **Complete**: the task only waits again, and SAM then refuses **Complete**. If SAM refuses it (the
-   agent never started, or someone replied), you can't end the task from the app yet. It won't run
-   by itself, so leave it and carry on in the new chat.
+3. End the blocked task with **Complete** in the session tool rail, or, for a **Chat** that's
+   asleep, **Archive** it, which, unlike **Complete**, deletes its saved workspace. Don't reply in the
+   blocked chat, before or after **Complete**: on a VM, a reply puts the task back in the queue, where
+   it stays **Blocked**, and SAM then refuses **Complete**. If SAM refuses it (the agent never
+   started, or someone replied), you can't end the task from the app yet. It won't run by itself, so
+   leave it and carry on in the new chat.
 
 ## SAM paused automatic check-ins
 

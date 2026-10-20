@@ -23,7 +23,7 @@ command that reads the variable directly gets the placeholder and fails to authe
 Nothing else changed: variables without **Secret** ticked keep their real values, and runtime files
 (including secret file content), agent sign-ins, Git access, and [MCP servers](/docs/guides/mcp-servers/)
 work as before. Chats that were already running when your instance updated keep their real values;
-a new chat, or a VM chat that wakes from sleep, gets placeholders.
+a new chat, or one that wakes from sleep, gets placeholders.
 
 ## Mark a variable as Secret
 
@@ -76,9 +76,9 @@ runtime file instead.
 - **"Managed environment contains an unsupported shell variable name".** A project, profile, or skill
   variable, Secret or not, is named `ENV`, `BASH_ENV`, `UID`, `EUID`, `PPID`, `SHELLOPTS`,
   `BASHOPTS`, or `BASH_VERSINFO`, so every `exec_with_secrets` call fails. Rename it.
-- **The output says `environmentMode: legacy`.** The workspace still has real values: it started
-  before your instance updated, or the variable was added or marked Secret after it started. Start a
-  new chat to get placeholders.
+- **The output says `environmentMode: legacy`.** The workspace's environment predates the Secret
+  setting: it started before your instance updated, or the variable was added or marked Secret after
+  it started. Start a new chat to get placeholders.
 
 ## Details for agents
 

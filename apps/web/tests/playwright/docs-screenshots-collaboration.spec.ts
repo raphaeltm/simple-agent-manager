@@ -368,7 +368,9 @@ test('docs: a chat as the teammate it is shared with sees it', async ({ page }) 
   await expect(page.getByTestId('session-tool-retry')).toBeVisible();
   if (!isMobile(page)) {
     // The session list (desktop only; phones show the chat alone) names who started the chat.
-    await expect(page.getByText('Prakash Rao', { exact: true }).first()).toBeVisible();
+    // Its creator label carries this title; the header's owner chip does not, so this can't
+    // pass on the chip alone.
+    await expect(page.getByTitle('Created by Prakash Rao')).toBeVisible();
   }
 
   await docsShot(
