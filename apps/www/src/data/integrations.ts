@@ -86,18 +86,18 @@ export const integrations: Integration[] = [
     logoPath: '/images/integrations/anthropic.svg',
     seoTitle: 'Run Claude Code in the Cloud | SAM',
     seoDescription:
-      'Run Claude Code agents in parallel on your own cloud VMs. SAM orchestrates Anthropic\'s Claude Code with isolated devcontainers, lifecycle management, and automatic PR creation.',
+      'Run Claude Code agents in parallel on your own cloud VMs. SAM orchestrates Anthropic\'s Claude Code with isolated devcontainers, lifecycle management, and pull requests when you ask for them.',
     features: [
       { title: 'Parallel Execution', description: 'Run dozens of Claude Code instances simultaneously, each tackling a different task or feature branch.' },
       { title: 'Dual Auth Support', description: 'Bring your Anthropic API key or use a Claude Max/Pro OAuth subscription — SAM handles both seamlessly.' },
       { title: 'Full Tool Access', description: 'Claude Code gets full Read, Edit, Bash, and other tool access inside the devcontainer, just like running it locally.' },
-      { title: 'Automatic PR Creation', description: 'When the agent finishes, SAM pushes changes and opens a pull request on your repo automatically.' },
+      { title: 'Pull Requests When You Ask', description: 'The agent works on its own branch. Ask, and it pushes its changes and opens a pull request on your repo for review.' },
     ],
     howItWorks: [
       { step: 'Create a Project', description: 'Link your GitHub repository and configure Claude Code as your agent.' },
       { step: 'Submit a Task', description: 'Describe what you want built — a feature, bug fix, refactor, or test suite.' },
       { step: 'SAM Provisions & Runs', description: 'SAM spins up a cloud VM, builds your devcontainer, and launches Claude Code with your task.' },
-      { step: 'Review the PR', description: 'Claude Code commits its work, pushes a branch, and opens a pull request for your review.' },
+      { step: 'Review the PR', description: 'Ask Claude Code to open a pull request, and it commits its work, pushes its branch, and opens one for your review.' },
     ],
     useCases: [
       { title: 'Parallelize feature development', description: 'Break a large project into tasks and run an agent on each simultaneously. Ship a week of work in hours.' },
@@ -137,7 +137,7 @@ export const integrations: Integration[] = [
       { step: 'Connect Your Account', description: 'Add your OpenAI API key or Codex OAuth credentials in project settings.' },
       { step: 'Choose Codex as Agent', description: 'Select OpenAI Codex from the agent dropdown when creating a project or submitting a task.' },
       { step: 'Submit Tasks', description: 'Describe your coding task in natural language. SAM provisions a VM and runs Codex.' },
-      { step: 'Get Results', description: 'Codex completes the work, and SAM pushes changes to a branch with a pull request.' },
+      { step: 'Get Results', description: 'Codex completes the work on its own branch, and pushes it or opens a pull request when you ask.' },
     ],
     useCases: [
       { title: 'Code generation at scale', description: 'Use Codex to generate boilerplate, API clients, or data models across multiple repositories simultaneously.' },
@@ -206,7 +206,7 @@ export const integrations: Integration[] = [
     logoPath: '/images/integrations/mistral.svg',
     seoTitle: 'Run Mistral Vibe Agents in Parallel | SAM',
     seoDescription:
-      'Run Mistral Vibe coding agents in parallel on your own cloud. SAM orchestrates Devstral-powered Vibe agents with full devcontainer support and automatic PR creation.',
+      'Run Mistral Vibe coding agents in parallel on your own cloud. SAM orchestrates Devstral-powered Vibe agents with full devcontainer support and pull requests when you ask for them.',
     features: [
       { title: 'Devstral Models', description: 'Vibe is powered by Devstral — Mistral\'s coding-specialized model available in 24B and 123B parameter sizes.' },
       { title: 'Python-Based Agent', description: 'Installed via uv (Python package manager), Vibe integrates smoothly with Python-heavy codebases and toolchains.' },
@@ -600,10 +600,10 @@ export const integrations: Integration[] = [
     logoPath: '/images/integrations/github.svg',
     seoTitle: 'GitHub Integration for AI Coding Agents | SAM',
     seoDescription:
-      'Connect your GitHub repos to SAM for automatic agent provisioning, branch management, and pull request creation. GitHub App integration with proper permissions.',
+      'Connect your GitHub repos to SAM for automatic agent provisioning, branch management, and pull requests opened by your agents. GitHub App integration with proper permissions.',
     features: [
       { title: 'GitHub App Integration', description: 'Install the SAM GitHub App for secure repository access — proper permissions without sharing personal tokens.' },
-      { title: 'Automatic PR Creation', description: 'Agents push to descriptive branches and open pull requests automatically when work is complete.' },
+      { title: 'Pull Requests From Agents', description: 'Agents work on descriptive branches, and push them or open pull requests when you ask.' },
       { title: 'Repository Discovery', description: 'SAM discovers your repos via the GitHub App installation — select a repo when creating a project.' },
       { title: 'OAuth Login', description: 'Sign in to SAM with your GitHub account — no separate account needed.' },
     ],
@@ -614,7 +614,7 @@ export const integrations: Integration[] = [
       { step: 'Agents Use GitHub', description: 'Agents clone, branch, commit, push, and open PRs using the GitHub App\'s credentials.' },
     ],
     useCases: [
-      { title: 'Automated PR workflows', description: 'Submit tasks and get pull requests. Agents create descriptive branches (sam/...), commit meaningful changes, and open PRs for your review.' },
+      { title: 'Pull request workflows', description: 'Submit a task and ask for a pull request. Agents work on descriptive branches (sam/...), commit meaningful changes, and open PRs for your review.' },
       { title: 'Multi-repo orchestration', description: 'Create projects for different repos and run agents across your entire codebase simultaneously.' },
       { title: 'Open source contribution', description: 'Use SAM to help maintain open source projects — triage issues, fix bugs, and generate PRs at scale.' },
     ],
