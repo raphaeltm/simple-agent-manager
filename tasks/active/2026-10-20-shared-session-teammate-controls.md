@@ -26,12 +26,12 @@ Implement (session-scoped):
   - Standing watches outlive any grant, so they may only message chats their creator owns; only the creator may change a watch's action. The watch runner pauses a pre-existing watch into a chat its creator does not own.
   - Found while doing this: any maintainer could change another member's standing-watch action (a confused deputy). Closed by the creator-only rule above.
 - [x] Attachments on a teammate's prompts: no refusal in `sendChat`; transfer reads the sender's own uploads into the owner's workspace only when the prompt is a shared-access prompt for that workspace's owner; the existing fence re-checks the grant before transfer and send (commit `9cc12b9fd`)
-- [ ] Files/Git panels for teammates, read-only, limited to the repository working tree:
-  - [ ] API: owner path unchanged; otherwise `requireSessionWriter` per request, relative paths only, a `confine=workdir` request, and the response must confirm the limit (`X-SAM-Path-Confinement: workdir`) or nothing is returned (older agents fail closed); upload stays owner-only; audit log per request
-  - [ ] VM agent: when `confine=workdir`, reject absolute and `~` paths and resolve the real path (`realpath -e`) under the real working directory for `files/list`, `files/raw`, `files/download`, `git/file` (working-tree read) and the untracked `git/diff` fallback; read the resolved path; set the response header
-  - [ ] Web: Files and Git in the rail for teammates; a clear message when the workspace agent is too old
-- [ ] Share dialog and notice copy: what teammates can now do, and what stays owner-only (terminal, ports, workspace page)
-- [ ] Docs: collaboration guide, security, API reference, API skill
+- [x] Files/Git panels for teammates, read-only, limited to the repository working tree:
+  - [x] API: owner path unchanged; otherwise `requireSessionWriter` per request, relative paths only, a `confine=workdir` request, and the response must confirm the limit (`X-SAM-Path-Confinement: workdir`) or nothing is returned (older agents fail closed); upload stays owner-only; audit log per request (`file_proxy.shared_read`) — commits `a3718cbd1` (split), `f4c21abef`
+  - [x] VM agent: when `confine=workdir`, reject absolute and `~` paths and resolve the real path (`realpath`, no flags, so busybox images work too) under the real working directory for `files/list`, `files/raw`, `files/download`, `git/file` (working-tree read) and the untracked `git/diff` fallback; read the resolved path; refuse `.git`; set the response header — commit `7305bc200`
+  - [x] Web: Files and Git in the rail for teammates; the panel closes when access ends; the older-agent message comes from the API (409) — commit `d61b75a7d`
+- [x] Share dialog and notice copy: what teammates can now do, and what stays owner-only (terminal, ports, workspace page) — commit `1169339e0`
+- [x] Docs: collaboration guide, scheduled actions, chat features, security, API reference, API skill — commit `5aefd65cc`
 
 Not implemented (reported for a decision):
 
@@ -59,6 +59,11 @@ No change needed:
 - Guards proven discriminating (each removed once, the intended tests went red, restored):
   - Schedules (`tests/workers/shared-session-schedules.test.ts`, unit `project-schedules.test.ts`): agent grant use (2 red), no writer check (8 red), legacy owner fallback (1), fire-time grant binding (2), cascade schedule cancel (3), queued scheduled-message cancel (1), delivery fence (1), watch creator check (1), admission re-check (unit, 1), watch pause (unit, 1).
   - Attachments (`tests/workers/shared-session-attachments.test.ts`): old owner-only uploader rule (2 red), fence before each file (1), uploads read from the sender's prefix (2).
+  - VM agent (`file_confinement_test.go`): no containment (all escape cases red), no `.git` exclusion (4), git diff fallback unresolved (1), confirmation header unset (all), git/file cat unresolved (5), relative-only pre-check (1).
+  - API (`tests/workers/shared-session-files.test.ts`): no grant check (4 red), no confine param (2), no confirmation check (1), no absolute pre-check (1), no owner match for the linked workspace (1).
+  - Web: Files gate owner-only again (1), panel stays open after access ends (1), scheduled message not attributed (2).
+- Found and filed: a sub-folder listing includes the folder itself, for owners too (`tasks/backlog/2026-10-20-file-list-shows-folder-inside-itself.md`).
+- Design decisions taken within the request (report them): teammates' agents (MCP) cannot use the teammate's grant to schedule; standing watches are owner-only (a lasting rule cannot be backed by a minutes-long grant); `.git` is excluded from teammates' Files reads; the Files limit does not stop the agent channel, which the share warning already covers.
 - Mutation script lesson: restoring a mutated file with `git checkout` loses uncommitted edits; commit before mutating.
 
 - Staging is shared with the peer task 01M5B6WMMD6RV7Z737XSZCSBN9; message it before deploying.
