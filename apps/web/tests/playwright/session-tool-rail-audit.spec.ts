@@ -960,6 +960,105 @@ test.describe('Session resource history drawer', () => {
   });
 });
 
+test.describe('Session automation panel', () => {
+  test('opens from the rail and shows what this chat waits for and what is coming', async ({
+    page,
+  }) => {
+    await openChat(page, { state: 'active' });
+    // Registered after openChat's catch-all, so these win for the panel's three reads.
+    await page.route('**/api/projects/*/event-subscriptions**', (route) =>
+      route.fulfill({
+        json: {
+          subscriptions: [
+            {
+              id: 'sub-rail-ci',
+              projectId: PROJECT_ID,
+              contractVersion: 1,
+              owner: { type: 'agent', id: `${PROJECT_ID}:${SESSION_ID}`, name: 'agent' },
+              idempotencyKey: 'k',
+              filter: {
+                version: 1,
+                source: 'github',
+                eventType: 'check_suite.completed',
+                subjectType: 'commit',
+                subjectId: 'abcdef1234567',
+              },
+              filterFingerprint: 'f',
+              matchKeyCount: 1,
+              deliveryPreference: {
+                requested: 'existing_session_prompt',
+                resolved: 'queued_for_prompt_delivery',
+                target: { sessionId: SESSION_ID, taskId: null, runtimeId: null, agentId: null },
+              },
+              state: 'active',
+              reason: null,
+              createdAt: NOW - 3_600_000,
+              updatedAt: NOW - 3_600_000,
+              expiresAt: NOW + 86_400_000,
+              cancelledAt: null,
+              cancelledBy: null,
+              cancelReason: null,
+              lastMatchedAt: null,
+            },
+          ],
+          hasMore: false,
+        },
+      })
+    );
+    await page.route('**/api/projects/*/schedules**', (route) =>
+      route.fulfill({
+        json: {
+          schedules: [
+            {
+              id: 'sch-rail-1',
+              projectId: PROJECT_ID,
+              creatorUserId: 'user-rail-1',
+              creatorChatSessionId: SESSION_ID,
+              reason: 'Check whether the canary held overnight',
+              action: {
+                kind: 'message_session',
+                sessionId: SESSION_ID,
+                prompt: 'Is the canary still healthy?',
+              },
+              state: 'pending',
+              dueAt: NOW + 2 * 3_600_000,
+              displayTimezone: 'UTC',
+              expiresAt: NOW + 26 * 3_600_000,
+              version: 1,
+              idempotencyKey: 'k',
+              createdAt: NOW - 600_000,
+              updatedAt: NOW - 600_000,
+              nextAttemptAt: null,
+              attemptCount: 0,
+              lastError: null,
+              eventId: null,
+              deliveryId: null,
+              resultTaskId: null,
+              resultSessionId: null,
+              watchId: null,
+              sourceEventId: null,
+            },
+          ],
+          nextCursor: null,
+        },
+      })
+    );
+    await page.route('**/api/projects/*/standing-watches**', (route) =>
+      route.fulfill({ json: { watches: [], nextCursor: null } })
+    );
+
+    await page.getByTestId('session-tool-automation').click();
+    const panel = page.getByRole('dialog', { name: 'Automation for this chat' });
+    await expect(panel).toBeVisible();
+    await expect(
+      panel.getByText('This chat is waiting for CI to finish', { exact: false })
+    ).toBeVisible();
+    await expect(panel.getByText('Check whether the canary held overnight')).toBeVisible();
+    await expect(panel.getByRole('link', { name: 'All automation' })).toBeVisible();
+    await capture(page, `automation-panel-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+});
+
 async function openResources(page: Page, resourceScenario: ResourceScenarioId) {
   await openChat(page, { state: 'active', resourceScenario });
   await page.getByTestId('session-tool-resources').click();
