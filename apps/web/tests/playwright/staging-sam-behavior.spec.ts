@@ -15,7 +15,7 @@ import { writeFile } from 'node:fs/promises';
 
 import { expect, type Page, test } from '@playwright/test';
 
-import { STAGING_API } from './staging-helpers';
+import { STAGING_API, STAGING_APP } from './staging-helpers';
 
 const SAM_API = `${STAGING_API}/api/sam`;
 const TURN_TIMEOUT_MS = 90_000;
@@ -221,8 +221,23 @@ test('bounded initial-model routing, ambiguity, constraints and quoted-text isol
 
     await runScenario(
       'status',
-      'Read-only staging verification. Use sam_projects_list to check my currently accessible projects and give a short status summary. If none exist, say so. Do not create or change anything, start work, send messages, or answer agent permission requests.',
-      (_output, turn) => ({
+      'Read-only staging verification. Use sam_projects_list with limit 2 to check the first page of my currently accessible projects and give a short status summary. If none exist, say so. Do not create or change anything, start work, send messages, or answer agent permission requests.',
+      (output, turn) => ({
+        disclosesPartialPage:
+          /\b(first page|partial (?:page|list|result)|more (?:projects|results|pages)|additional (?:projects|results|pages))\b/i.test(
+            output
+          ),
+        noFalseTotal:
+          !/\b(?:total of|only|you have)\s+(?:2|two)\s+(?:accessible\s+)?projects\b/i.test(output),
+        includesClickableSources:
+          [...output.matchAll(/\[[^\]]+\]\(([^\s)]+)\)/g)].filter((match) => {
+            try {
+              const url = new URL(match[1]!, STAGING_APP);
+              return url.origin === STAGING_APP && /^\/projects\/[A-Za-z0-9-]+$/.test(url.pathname);
+            } catch {
+              return false;
+            }
+          }).length === 2,
         actualProjectReadReceipt: turn.actions.some(
           (action) => action.operation === 'sam_projects_list' && action.state === 'completed'
         ),
