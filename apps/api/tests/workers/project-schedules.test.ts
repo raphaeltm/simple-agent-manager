@@ -231,6 +231,7 @@ describe('scheduled actions public boundaries', () => {
     const created = await service.createProjectSchedule(testEnv, f.projectId, {
       userId: f.userId,
       creatorChatSessionId: f.sessionId,
+      creator: 'agent',
       request: request(f.sessionId),
     });
     const result = await runInDurableObject(f.stub, async (instance, state) => {

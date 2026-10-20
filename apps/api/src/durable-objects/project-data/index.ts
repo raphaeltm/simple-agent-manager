@@ -74,7 +74,13 @@ import {
   requireChannelActorAuthority,
   requireChannelActorChat,
 } from './project-event-channels-authority';
-import { requireScheduleAction, requireScheduleMember } from './project-event-schedules-authority';
+import {
+  OWNER_ONLY_SCHEDULE,
+  requireScheduleAction,
+  requireScheduleMember,
+  type ScheduleCreator,
+  scheduleCreatorSharedAccess,
+} from './project-event-schedules-authority';
 import { scheduleLimits } from './project-event-schedules-config';
 import {
   reconcileSchedule,
@@ -86,6 +92,7 @@ import * as eventSchedules from './project-event-schedules-storage';
 import { normalizeScheduledAction } from './project-event-schedules-validation';
 import * as projectEvents from './project-events';
 import { resolveProjectEventLimits } from './project-events-limits';
+import { requireStandingWatchUpdate } from './project-standing-watches-authority';
 import { runStandingWatchAlarm } from './project-standing-watches-runner';
 import * as standingWatches from './project-standing-watches-storage';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
@@ -1650,6 +1657,8 @@ export class ProjectData extends DurableObject<Env> {
     projectId: string;
     userId: string;
     creatorChatSessionId: string | null;
+    /** Only a person may schedule into a chat shared with them; see `ScheduleCreator`. */
+    creator: ScheduleCreator;
     request: unknown;
   }) {
     this.ensureProjectId(input.projectId);
@@ -1672,13 +1681,27 @@ export class ProjectData extends DurableObject<Env> {
         )
         .toArray()[0];
     if (replay) await requireScheduleMember(this.env, input.projectId, input.userId);
-    else await requireScheduleAction(this.sql, this.env, input.projectId, input.userId, action);
+    const authority = replay
+      ? null
+      : await requireScheduleAction(
+          this.sql,
+          this.env,
+          input.projectId,
+          input.userId,
+          action,
+          scheduleCreatorSharedAccess(input.creator)
+        );
+    // No await separates the check above from this write, so the grant it read is still current.
     const result = this.ctx.storage.transactionSync(() =>
       eventSchedules.createSchedule(
         this.sql,
         this.env,
         input.projectId,
-        { userId: input.userId, chatSessionId: input.creatorChatSessionId },
+        {
+          userId: input.userId,
+          chatSessionId: input.creatorChatSessionId,
+          sharedAccessGrantId: authority?.writer.grantId ?? null,
+        },
         input.request,
         Date.now()
       )
@@ -1787,7 +1810,15 @@ export class ProjectData extends DurableObject<Env> {
       scheduleLimits(this.env),
       resolveProjectEventLimits(this.env)
     );
-    await requireScheduleAction(this.sql, this.env, input.projectId, input.userId, action);
+    // A standing watch outlives any grant, so it may only message chats its creator owns.
+    await requireScheduleAction(
+      this.sql,
+      this.env,
+      input.projectId,
+      input.userId,
+      action,
+      OWNER_ONLY_SCHEDULE
+    );
     const result = this.ctx.storage.transactionSync(() =>
       standingWatches.createWatch(
         this.sql,
@@ -1837,6 +1868,16 @@ export class ProjectData extends DurableObject<Env> {
     if (!['update', 'pause', 'revoke'].includes(input.operation))
       throw new projectEvents.ProjectEventValidationError('Invalid standing watch mutation');
     await requireScheduleMember(this.env, input.projectId, input.userId);
+    if (input.operation === 'update') {
+      await requireStandingWatchUpdate(
+        this.sql,
+        this.env,
+        input.projectId,
+        input.userId,
+        input.id,
+        input.request
+      );
+    }
     const result = this.ctx.storage.transactionSync(() =>
       input.operation === 'update'
         ? standingWatches.updateWatch(

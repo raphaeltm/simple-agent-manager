@@ -846,3 +846,125 @@ describe('standing watches — canonical matches, execution limits and revocatio
     expect(() => f.watch('too-fast', { cooldownMs: 19 })).toThrow(/controls/i);
   });
 });
+
+describe('shared chats — who may schedule into them (idea 01M59MYE4GY91BWTE8TZF1ZB5D)', () => {
+  const OWNER = 'chat-owner';
+  const GRANT = 'grant-1';
+
+  /** Make CHAT someone else's, shared with USER, as a share leaves it. */
+  function shareWithUser(f: ReturnType<typeof fixture>) {
+    f.db.prepare('UPDATE chat_sessions SET created_by_user_id = ? WHERE id = ?').run(OWNER, CHAT);
+    f.d1.prepare('UPDATE tasks SET user_id = ? WHERE id = ?').run(OWNER, TASK);
+    f.d1.prepare('INSERT INTO users (id,status,name) VALUES (?,?,?)').run(OWNER, 'active', 'Rae');
+    f.d1.prepare('UPDATE users SET name = ? WHERE id = ?').run('Ana', USER);
+    f.db
+      .prepare(
+        `INSERT INTO chat_session_access_grants
+          (id, session_id, grantee_user_id, granted_by_user_id, created_at, expires_at, duration_minutes)
+         VALUES (?, ?, ?, ?, ?, ?, 30)`
+      )
+      .run(GRANT, CHAT, USER, OWNER, NOW, NOW + 30 * 60_000);
+    return f.hooks.transactionSync(() =>
+      createSchedule(
+        f.sql,
+        f.env,
+        PROJECT,
+        { ...creator, sharedAccessGrantId: GRANT },
+        { action: messageAction, dueAt: NOW, displayTimezone: 'UTC', idempotencyKey: 'shared' },
+        NOW
+      )
+    ).schedule;
+  }
+
+  /** Run `during` while the runner reads the sender's name: its last await before admitting. */
+  function duringNameRead(f: ReturnType<typeof fixture>, during: () => void) {
+    const base = f.env.DATABASE;
+    f.env.DATABASE = {
+      ...base,
+      prepare(query: string) {
+        const statement = base.prepare(query);
+        if (!query.includes('FROM users WHERE id IN')) return statement;
+        return {
+          ...statement,
+          bind(...bindings: unknown[]) {
+            const bound = statement.bind(...bindings);
+            return {
+              ...bound,
+              async all() {
+                during();
+                return bound.all();
+              },
+            };
+          },
+        };
+      },
+    } as D1Database;
+  }
+
+  it('admits a teammate’s schedule while their grant is active, attributed to them', async () => {
+    const f = fixture();
+    const schedule = shareWithUser(f);
+    await runScheduleAlarm(f.sql, f.env, f.hooks);
+    expect(getSchedule(f.sql, PROJECT, schedule.id)?.state).toBe('admitted');
+    const row = f.db
+      .prepare("SELECT metadata FROM session_inbox WHERE source_kind = 'scheduled_action'")
+      .get() as { metadata: string };
+    expect(JSON.parse(row.metadata)).toMatchObject({
+      senderName: 'Ana',
+      onBehalfOfUserId: OWNER,
+      grantId: GRANT,
+    });
+  });
+
+  it('stops the admission when the grant ends during the last read before it', async () => {
+    const f = fixture();
+    const schedule = shareWithUser(f);
+    duringNameRead(f, () => {
+      f.db
+        .prepare('UPDATE chat_session_access_grants SET expires_at = ? WHERE id = ?')
+        .run(NOW - 1, GRANT);
+    });
+    await runScheduleAlarm(f.sql, f.env, f.hooks);
+    expect(getSchedule(f.sql, PROJECT, schedule.id)).toMatchObject({
+      state: 'failed',
+      lastError: "The sender's access to this session expired",
+    });
+    expect(f.effects().mailbox).toEqual([]);
+  });
+
+  it('keeps a chat without a recorded owner schedulable by its task’s owner', async () => {
+    // The fixture's chat has no `created_by_user_id`, like chats from before owners were
+    // recorded; its task belongs to USER.
+    const f = fixture();
+    const schedule = f.create('legacy').schedule;
+    await runScheduleAlarm(f.sql, f.env, f.hooks);
+    expect(getSchedule(f.sql, PROJECT, schedule.id)?.state).toBe('admitted');
+  });
+
+  it('pauses a standing watch made before only owners could point one at a chat', async () => {
+    const f = fixture();
+    f.db.prepare('UPDATE chat_sessions SET created_by_user_id = ? WHERE id = ?').run(OWNER, CHAT);
+    const watch = f.watch('cross-member').watch;
+    f.emit('one');
+    await runStandingWatchAlarm(f.sql, f.env, f.hooks);
+    expect(getWatch(f.sql, PROJECT, watch.id)).toMatchObject({
+      state: 'paused',
+      lastError: 'Standing watch creator does not own the target chat',
+      executionCount: 0,
+    });
+    expect(listSchedules(f.sql, f.env, PROJECT).schedules).toEqual([]);
+  });
+
+  it('runs the same watch when its creator owns the chat', async () => {
+    const f = fixture();
+    f.db.prepare('UPDATE chat_sessions SET created_by_user_id = ? WHERE id = ?').run(USER, CHAT);
+    const watch = f.watch('own-chat').watch;
+    f.emit('one');
+    await runStandingWatchAlarm(f.sql, f.env, f.hooks);
+    expect(getWatch(f.sql, PROJECT, watch.id)).toMatchObject({
+      state: 'active',
+      executionCount: 1,
+    });
+    expect(listSchedules(f.sql, f.env, PROJECT).schedules).toHaveLength(1);
+  });
+});

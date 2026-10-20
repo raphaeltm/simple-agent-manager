@@ -1,4 +1,3 @@
-import { inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type * as v from 'valibot';
 
@@ -16,47 +15,12 @@ import { cancelScheduledSessionSleep } from '../services/session-snapshots';
 import { buildVisibleInitialPrompt } from './agent-bootstrap-prompt';
 import { validateAttachments } from './attachment-upload';
 import { requireSessionWriter, type SessionWriterContext } from './session-access';
+import { buildSharedSessionSpeakerLine, loadSharedSessionNames } from './shared-session-names';
 
 export function validateSendChatContent(body: v.InferOutput<typeof SendChatMessageSchema>): string {
   const content = body.content?.trim();
   if (!content) throw errors.badRequest('content is required');
   return content;
-}
-
-function personLabel(row: { name: string | null; email: string | null } | undefined): string {
-  return row?.name?.trim() || row?.email?.split('@')[0] || 'a project member';
-}
-
-/**
- * Display names for a grantee prompt: the sender (shown in the transcript) and the owner
- * (named to the agent). Server-derived — the client never supplies who it is.
- */
-async function loadSharedSessionNames(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  writer: SessionWriterContext
-): Promise<{ senderName: string; ownerName: string }> {
-  const rows = await db
-    .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
-    .from(schema.users)
-    .where(inArray(schema.users.id, [writer.actorUserId, writer.ownerUserId]));
-  const byId = new Map(rows.map((row) => [row.id, row]));
-  return {
-    senderName: personLabel(byId.get(writer.actorUserId)),
-    ownerName: personLabel(byId.get(writer.ownerUserId)),
-  };
-}
-
-/**
- * The line SAM adds in front of a grantee's prompt so the agent knows who is speaking. It is
- * added on the server for every non-owner prompt and never for the owner's own prompts.
- */
-export function buildSharedSessionSpeakerLine(names: {
-  senderName: string;
-  ownerName: string;
-}): string {
-  // Only this bracketed line comes from SAM; anything after it is what the sender typed,
-  // including text that imitates this line.
-  return `[SAM: This message is from ${names.senderName}, a project member with shared access to this session. ${names.ownerName} owns this session. Everything after this line is their message as typed.]`;
 }
 
 export interface AuthorizedSendChat {
@@ -150,7 +114,9 @@ export async function sendChat(
   // idle sleep; durable delivery wakes a sleep that has already begun.
   await cancelScheduledSessionSleep(db, sessionId);
   if (durableConfig.deliveryEnabled) {
-    const names = shared ? await loadSharedSessionNames(db, writer) : null;
+    const names = shared
+      ? await loadSharedSessionNames(env.DATABASE, writer.actorUserId, writer.ownerUserId)
+      : null;
     const deliveryMessage = names
       ? `${buildSharedSessionSpeakerLine(names)}\n\n${enrichedMessage}`
       : enrichedMessage;

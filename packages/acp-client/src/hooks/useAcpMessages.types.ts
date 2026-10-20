@@ -27,6 +27,8 @@ export interface UserMessageAttribution {
   senderName: string | null;
   /** For `comment`: who wrote the comment. */
   commentAuthorName?: string | null;
+  /** For `shared_access`: the sender scheduled it earlier rather than typing it now. */
+  scheduled?: boolean;
   /**
    * The prompt was cancelled before reaching the agent because the sender's shared access
    * ended: revoked (or they left), or its chosen time ran out.

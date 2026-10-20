@@ -6,6 +6,10 @@ import { ProjectEventValidationError } from './project-events-contracts';
 import { readEventById } from './project-events-storage-helpers';
 import { readSubscriptionById } from './project-events-storage-helpers';
 import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
+import {
+  STANDING_WATCH_TARGET_NOT_OWNED,
+  standingWatchTargetNotOwned,
+} from './project-standing-watches-authority';
 import { mapWatch, pauseWatch, readWatchRow } from './project-standing-watches-storage';
 import type { Env } from './types';
 
@@ -88,6 +92,25 @@ export async function runStandingWatchAlarm(
     );
     try {
       await requireScheduleMember(env, projectId, watch.creatorUserId);
+      if (standingWatchTargetNotOwned(sql, watch)) {
+        // Made before only owners could point a watch at a chat: pause it rather than queue
+        // messages that fail when they come due.
+        hooks.transactionSync(() =>
+          pauseWatch(
+            sql,
+            env,
+            projectId,
+            watch.id,
+            {
+              expectedVersion: watch.version,
+              paused: true,
+              reason: STANDING_WATCH_TARGET_NOT_OWNED,
+            },
+            Date.now()
+          )
+        );
+        continue;
+      }
       hooks.transactionSync(() => {
         const current = readWatchRow(sql, projectId, watch.id);
         const now = Date.now();

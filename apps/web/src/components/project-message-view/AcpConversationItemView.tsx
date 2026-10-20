@@ -32,7 +32,7 @@ function UserMessageAttributionLine({ attribution }: { attribution: UserMessageA
       ? attribution.commentAuthorName && attribution.commentAuthorName !== attribution.senderName
         ? `${sender} sent ${attribution.commentAuthorName}'s comment to the agent`
         : `${sender} sent a comment to the agent`
-      : `${sender} · shared access`;
+      : `${sender} · shared access${attribution.scheduled ? ' · scheduled' : ''}`;
   return (
     <div
       className="mb-1 flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-xs text-fg-muted"

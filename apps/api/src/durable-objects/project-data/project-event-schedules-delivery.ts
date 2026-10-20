@@ -1,10 +1,55 @@
 import { parseProviderLimitWait } from '../../services/provider-limit-policy';
 import { isSessionRecoverySourceTaskGuardValid } from '../../services/session-recovery-authority';
 import { requireScheduleMember } from './project-event-schedules-authority';
-import { getSchedule } from './project-event-schedules-storage';
+import { getSchedule, scheduleSharedAccessGrantId } from './project-event-schedules-storage';
 import { ProjectEventValidationError } from './project-events-contracts';
 import type { PromptDeliveryClaim, PromptDeliveryResult } from './prompt-delivery';
+import {
+  grantEndedReason,
+  labelUndeliveredPrompt,
+  SENDER_ACCESS_ENDED_ERRORS,
+} from './session-access-store';
 import type { Env } from './types';
+
+/**
+ * A teammate's scheduled message is delivered only while the grant it was made under is active
+ * (idea 01M59MYE4GY91BWTE8TZF1ZB5D), the same fence their typed messages pass before every side
+ * effect. Only submit claims: a reconcile reads the receipt of a prompt already handed over.
+ */
+function scheduledSenderAccessEnded(
+  sql: SqlStorage,
+  projectId: string,
+  scheduleId: string,
+  creatorUserId: string,
+  claim: PromptDeliveryClaim
+): PromptDeliveryResult | null {
+  if (claim.mode !== 'submit') return null;
+  const grantId = scheduleSharedAccessGrantId(sql, projectId, scheduleId);
+  if (!grantId) return null;
+  const ended = grantEndedReason(
+    sql,
+    claim.message.targetSessionId,
+    creatorUserId,
+    grantId,
+    Date.now()
+  );
+  if (!ended) return null;
+  if (claim.message.promptMessageId) {
+    labelUndeliveredPrompt(
+      sql,
+      claim.message.targetSessionId,
+      claim.message.promptMessageId,
+      ended
+    );
+  }
+  return {
+    kind: 'failed',
+    reason: 'sender_unauthorized',
+    error: SENDER_ACCESS_ENDED_ERRORS[ended],
+    runtimeIdentity: claim.message.runtimeIdentity,
+    capabilities: null,
+  };
+}
 
 export async function invalidScheduledDeliveryTarget(
   sql: SqlStorage,
@@ -39,6 +84,10 @@ export async function invalidScheduledDeliveryTarget(
   };
   const schedule = local();
   if (!schedule) return invalid();
+  const accessEnded = () =>
+    scheduledSenderAccessEnded(sql, projectId, scheduleId, schedule.creatorUserId, claim);
+  const ended = accessEnded();
+  if (ended) return ended;
   try {
     await requireScheduleMember(env, projectId, schedule.creatorUserId);
     if (schedule.idempotencyKey.startsWith('provider-limit:')) {
@@ -61,7 +110,7 @@ export async function invalidScheduledDeliveryTarget(
       }))
     )
       return invalid();
-    return local() ? null : invalid();
+    return local() ? accessEnded() : invalid();
   } catch (error) {
     if (error instanceof ProjectEventValidationError) return invalid();
     if (claim.mode === 'reconcile')

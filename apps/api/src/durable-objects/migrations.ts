@@ -2521,6 +2521,19 @@ export const MIGRATIONS: Migration[] = [
         WHERE revoked_at IS NULL AND expiry_handled_at IS NULL`);
     },
   },
+  {
+    // A scheduled message a teammate created in a chat shared with them records the grant it
+    // was made under (idea 01M59MYE4GY91BWTE8TZF1ZB5D). It fires only while that grant is still
+    // active; the owner's own schedules leave it NULL.
+    //
+    // Existing rows keep NULL. That never removes an owner's schedule, which needs no grant. It
+    // stops a schedule someone made in another member's chat before this check existed, which is
+    // the gap this closes: it fails when it comes due.
+    name: '066-schedule-shared-access-grant',
+    run(sql) {
+      sql.exec('ALTER TABLE project_schedules ADD COLUMN shared_access_grant_id TEXT');
+    },
+  },
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
   // that ran it keep an unused `message_upload_parts` table, since DO migrations
   // never drop tables, so neither that migration name nor that table name may be reused.

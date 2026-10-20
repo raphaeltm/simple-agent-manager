@@ -262,6 +262,7 @@ export async function repairProviderLimitIntents(
   const scheduleResult = await projectData.createProjectSchedule(env, task.projectId, {
     userId: task.userId,
     creatorChatSessionId: task.chatSessionId,
+    creator: 'system',
     request: {
       action: {
         kind: 'message_session',

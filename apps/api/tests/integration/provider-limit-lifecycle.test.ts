@@ -22,7 +22,10 @@ import {
 } from '../../src/durable-objects/project-data/durability-foundation';
 import { resolveDurableExecutionConfig } from '../../src/durable-objects/project-data/durable-execution-config';
 import { persistMessage } from '../../src/durable-objects/project-data/messages';
-import { requireScheduleAction } from '../../src/durable-objects/project-data/project-event-schedules-authority';
+import {
+  OWNER_ONLY_SCHEDULE,
+  requireScheduleAction,
+} from '../../src/durable-objects/project-data/project-event-schedules-authority';
 import { runScheduleAlarm } from '../../src/durable-objects/project-data/project-event-schedules-runner';
 import {
   cancelSchedule,
@@ -133,7 +136,14 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
         input: { userId: string; creatorChatSessionId: string; request: unknown }
       ) => {
         const request = input.request as { action: ProjectScheduledAction };
-        await requireScheduleAction(sql, env as never, PROJECT, input.userId, request.action);
+        await requireScheduleAction(
+          sql,
+          env as never,
+          PROJECT,
+          input.userId,
+          request.action,
+          OWNER_ONLY_SCHEDULE
+        );
         return createSchedule(
           sql,
           env as never,

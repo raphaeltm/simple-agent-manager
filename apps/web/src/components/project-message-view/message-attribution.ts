@@ -18,7 +18,8 @@ function notDeliveredReason(value: unknown): UserMessageAttribution['notDelivere
 /**
  * Who really sent a user-role transcript row. Durable prompt deliveries carry the sender in
  * their tool metadata (server-written, never client-supplied): a teammate with shared access
- * (`onBehalfOfUserId` is present only for them), or a comment someone sent to the agent.
+ * (`onBehalfOfUserId` is present only for them, on a typed or scheduled message), or a comment
+ * someone sent to the agent.
  * The owner's own prompts carry neither and render as the owner's bubble, unchanged.
  *
  * `cancelled` is the session access summary's word that this row was never delivered: the
@@ -42,10 +43,16 @@ export function userMessageAttribution(
       ...(notDelivered ? { notDelivered } : {}),
     };
   }
-  if (meta.source === 'user_followup' && nonEmptyString(meta.onBehalfOfUserId)) {
+  // A teammate's own message, typed now or scheduled while they had access. The owner's
+  // scheduled messages carry no `onBehalfOfUserId` and stay the owner's bubble.
+  if (
+    (meta.source === 'user_followup' || meta.source === 'scheduled_action') &&
+    nonEmptyString(meta.onBehalfOfUserId)
+  ) {
     return {
       kind: 'shared_access',
       senderName: nonEmptyString(meta.senderName),
+      ...(meta.source === 'scheduled_action' ? { scheduled: true } : {}),
       ...(notDelivered ? { notDelivered } : {}),
     };
   }
