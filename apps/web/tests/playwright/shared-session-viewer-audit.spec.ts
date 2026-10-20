@@ -399,6 +399,8 @@ test.describe('Shared session — what each viewer sees', () => {
     await expect(page.getByText('Not delivered — access expired')).toBeVisible();
     // A message the teammate scheduled is theirs too, and says it was scheduled.
     await expectAttribution(page, `${LONG_GRANTEE} · shared access · scheduled`);
+    await assertNoOverflow(page);
+    await screenshot(page, slug('grantee-scheduled', page));
     // Six user messages, five labelled: the owner's own message carries no label.
     await expectUnlabelled(page, 'The checkout tests fail about one run in five. Find out why.');
 
