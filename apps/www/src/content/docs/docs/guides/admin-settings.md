@@ -5,7 +5,8 @@ description: Change SAM's sign-in providers, SAM Connector limits, anonymous tri
 
 A superadmin can change a set of platform settings from **Admin → Settings**, on a phone or a
 desktop. A change applies within a minute, with no redeploy. On a self-hosted instance this page
-arrived in v2026.10.17. Before that, sign-in providers and the SAM Connector were set in `/setup` and
+arrived in v2026.10.17, and its **Collaboration** group in the first release after v2026.10.19.
+Before that, sign-in providers and the SAM Connector were set in `/setup` and
 **Admin → Integrations**, trials on **Admin → Trials**, and the background-job switches only through
 GitHub Environment variables and KV.
 

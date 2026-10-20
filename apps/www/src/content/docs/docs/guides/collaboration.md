@@ -255,8 +255,8 @@ Your access ends in 23 min (2:43 PM)._ Each of their messages is labelled, for e
 </picture>
 
 Nothing warns them before the time runs out, and no notification is sent when it does: the message
-box locks with _Your shared access has ended. You can still read and comment. Ask Prakash to share it
-again to keep chatting._
+box locks with _Your shared access has ended. You can still read and comment. Ask Prakash Rao to share
+it again to keep chatting._
 
 A teammate with shared access can't open the chat's terminal, file browser, Git panel or port
 previews, or attach files: those reach the workspace directly rather than through the chat. They can

@@ -57,6 +57,9 @@ your work is safe and what to do next. Everything here applies to both
   → [Fork it or start a new chat](#the-session-has-ended)
 - **`git push` or `gh` fails to authenticate** in the workspace, or a workspace fails to start with
   **failed to fetch git token**. → [Check repository access](#git-push-or-gh-cant-authenticate)
+- **A variable you marked Secret reads `__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__…`**, or a
+  command that needs it fails to authenticate. The agent has to run that command with
+  `exec_with_secrets`. → [Run commands with secrets](/docs/guides/secret-execution/)
 - **A task finished, but there's no pull request** (or its branch isn't on GitHub). SAM doesn't
   open pull requests; the agent does when asked.
   → [Get one now](/docs/guides/idea-execution/#finished-without-a-pull-request)
@@ -473,9 +476,11 @@ If a reason isn't in this list, or a fixable one keeps coming back after you fix
 ## When a task fails
 
 A task can fail for reasons that have nothing to do with its work — nobody answered a question the
-agent asked with its `request_human_input` tool, or, in the **SAM** provider mode, a usage limit ran
-out. (A card in the chat that nobody answers doesn't fail the task when it expires; it only tells the
-agent no. On your own credentials a usage limit doesn't fail it either:
+agent asked with its `request_human_input` tool, or a usage limit ran out in the **SAM** provider
+mode or, on your own credentials, one SAM can't wait out (see
+[Usage Limits](/docs/guides/agents/#usage-limits)). (A card in the chat that nobody answers doesn't
+fail the task when it expires; it only tells the agent no. A Claude Code or Codex plan limit, or a
+rate limit that says when it resets, doesn't fail it either:
 [SAM waits for the reset](#waiting-for-a-provider-limit-reset).) When that
 happens while the workspace is still running, SAM tries to keep the workspace: it lets the agent's current turn end, snapshots the
 workspace, and puts the chat to sleep. That usually takes a few minutes, but if the agent was in the
