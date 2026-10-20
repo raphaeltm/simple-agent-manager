@@ -729,3 +729,29 @@ Staged objects remain available for delivery retries until the configured R2
 `PATCH /api/admin/settings` accepts `{expectedRevision, changes: [{name, value}]}`. Null removes an override and reveals compatibility/default resolution. Validate the complete proposed configuration, including OAuth pairs, before an atomic D1 revision/CAS, settings/credential mutation and audit batch. Reject stale revisions with 409, invalid configuration with 400, unauthorized roles/statuses with 401/403, and unavailable authoritative storage with a sanitized service error. Successful saves return a fresh snapshot and invalidate local settings/OAuth caches. Token-authorized initial setup remains separate; legacy writers share revision/audit/invalidation.
 
 Operational safety: cron/alarm legacy KV false or disabled vetoes enabled D1 settings. Explicit successful D1 enable clears that KV brake afterward; failure returns503 SETTINGS_PROPAGATION_UNCERTAIN, never a false rollback claim. Concurrent newer D1 disable remains effective. The D1 mutation/audit batch is atomic; subsequent KV propagation is not. Fresh admin snapshots read revision, values and history from the primary consistently or fail with503.
+
+## External operational MCP controls
+
+The user-level `/connect/mcp` registry exposes `sam_chat_status`,
+`sam_chat_delivery_get`, `sam_chat_interactions`, `sam_work_changes`,
+`sam_chat_jobs_list`, `sam_operation_get`, and non-destructive `sam_chat_interrupt`.
+Session operational reads require current session-writer authority; they read only
+persisted evidence and never contact/wake runtimes. Changes are coalesced snapshots;
+job coverage is retained internal secret-execution response metadata, not generic
+harness history. Unknown/stale/unsupported evidence is not completion proof.
+
+`sam_chat_interrupt` requires `projectId`, `sessionId`, `requestKey`,
+`expectedAgentSessionId`, and positive integer `expectedPromptStartedAt` from status.
+It preserves the task/workspace and never falls back to unfenced cancellation.
+Every `sam_agent_answer` still requires explicit user confirmation.
+
+Private node-management transport:
+`POST /workspaces/:workspaceId/agent-sessions/:sessionId/cancel-guarded`
+accepts only `{ expectedPromptStartedAt: integer > 0 }`, within a bounded JSON body.
+Management auth must bind the target workspace. It atomically matches the immutable
+prompt epoch, cancels that attempt and stops only its captured process while holding
+new-turn admission. Process-monitor recovery owns runtime status publication.
+Responses: 200 `{status:"cancelled"|"idle"}`, 412 `{status:"turn_changed"}`, or 503
+`{status:"unconfirmed"}` when termination cannot be confirmed. Invalid input is 400;
+missing/invalid management authorization is 401/403. Older agents return 404 and
+remain unsupported. No raw runtime error body is returned through the Connector.
