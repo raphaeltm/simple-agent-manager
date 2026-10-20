@@ -191,3 +191,65 @@ func TestGuardedCancelLateCompletionPreservesProcessMonitorState(t *testing.T) {
 		})
 	}
 }
+
+func TestGuardedCancelDetachedProcessNeedsExitProof(t *testing.T) {
+	for _, detach := range []string{"clear", "stop"} {
+		t.Run(detach, func(t *testing.T) {
+			h := NewSessionHost(SessionHostConfig{})
+			original, reader, writer := newFakeAgentProcess(time.Now(), false)
+			defer reader.Close()
+			defer writer.Close()
+			defer original.stdin.Close()
+			defer original.stdout.Close()
+			process := &guardedFailingProcess{original}
+			h.process = process
+			attempt, _ := h.beginPrompt(func() {}, nil)
+			if got := h.CancelPromptGuarded(attempt.startedAt.UnixMilli()); got != "unconfirmed" {
+				t.Fatalf("failed stop returned %s", got)
+			}
+			h.releasePrompt(attempt)
+			h.mu.Lock()
+			if detach == "clear" {
+				h.clearCurrentAgentSessionLocked()
+			} else {
+				h.stopCurrentAgentLocked()
+			}
+			replacement, replacementReader, replacementWriter := newFakeAgentProcess(time.Now(), false)
+			defer replacementReader.Close()
+			defer replacementWriter.Close()
+			defer replacement.stdin.Close()
+			defer replacement.stdout.Close()
+			h.process = replacement
+			h.mu.Unlock()
+			if _, admitted := h.beginPrompt(func() {}, nil); admitted {
+				t.Fatal("detachment admitted work without original process exit proof")
+			}
+			// Detached monitor must release its fence on exit without changing replacement ownership.
+			close(original.waitCh)
+			h.monitorProcessExit(process, "test", nil, nil)
+			next, admitted := h.beginPrompt(func() {}, nil)
+			if !admitted {
+				t.Fatal("exit proof left detached process fence stuck")
+			}
+			h.releasePrompt(next)
+			if h.process != replacement {
+				t.Fatal("old monitor replaced current process")
+			}
+		})
+	}
+}
+
+func TestGuardedCancelOldProcessExitCannotClearNewerFence(t *testing.T) {
+	h := NewSessionHost(SessionHostConfig{})
+	old := &guardedFailingProcess{}
+	newer := &guardedFailingProcess{}
+	attempt, _ := h.beginPrompt(func() {}, nil)
+	h.guardedCancelPending = true
+	h.guardedCancelAttempt = attempt
+	h.guardedCancelProcess = newer
+	h.releaseGuardedCancelForExitedProcess(old)
+	if !h.guardedCancelPending || h.guardedCancelAttempt != attempt || h.guardedCancelProcess != newer {
+		t.Fatal("old process exit cleared newer cancellation fence")
+	}
+	h.releasePrompt(attempt)
+}

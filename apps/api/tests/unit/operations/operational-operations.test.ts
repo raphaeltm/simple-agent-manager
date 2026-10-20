@@ -323,6 +323,28 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
     expect(result.harnessHistory).toBe('unsupported');
     expect(mocks.cancel).not.toHaveBeenCalled();
   });
+  it('can retrieve all retained job observations beyond the task-list cap', async () => {
+    const scope = {
+      projectId: 'p',
+      chatSessionId: 'chat',
+      userId: 'owner',
+      workspaceId: 'workspace',
+      agentSessionId: 'agent',
+    };
+    for (let index = 0; index < 60; index++) {
+      await recordOperationalJob(env, scope, {
+        jobId: `sx-${index.toString(16).padStart(64, '0')}`,
+        status: 'completed',
+        exitCode: 0,
+      });
+    }
+    const smaller = await samChatJobs.run(ctx(), { ...session, limit: 10 });
+    expect(smaller.jobs).toHaveLength(10);
+    expect(smaller.hasMore).toBe(true);
+    const retained = await samChatJobs.run(ctx(), session);
+    expect(retained.jobs).toHaveLength(60);
+    expect(retained.hasMore).toBe(false);
+  });
   it('looks up only the actor receipt and projects IDs rather than saved content', async () => {
     const receiptId = await operationReceiptId('p', 'owner', 'CONNECTOR', 'sam_chat_send', 'key');
     sqlite

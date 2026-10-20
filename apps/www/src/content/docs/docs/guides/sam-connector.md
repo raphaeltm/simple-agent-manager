@@ -148,7 +148,9 @@ source timestamps; unknown or last-reported state is not proof that a runtime is
 - **Jobs** shows retained observations of managed secret-execution jobs. Jobs are recorded when
   their internal start/status/cancel responses are observed; a running record may be stale and a
   missing outcome is unknown. Generic harness job history is not supported. The list is capped
-  by the installation's MCP message-list maximum. Child SAM tasks have their own task status.
+  by the installation's MCP message-list maximum, matching retention. By default it returns that
+  full retained window; if you request a smaller limit and see `hasMore`, increase the limit up
+  to that maximum to retrieve the window. Child SAM tasks have their own task status.
 - **Operation lookup** inspects your own write receipt using its operation name and request key.
   It never repeats the write. A saved response does not prove delivery or cleanup finished; a
   pending receipt means the outcome is uncertain. Do not try a new request key to bypass it.

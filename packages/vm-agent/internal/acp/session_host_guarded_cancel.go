@@ -32,6 +32,7 @@ func (h *SessionHost) CancelPromptGuarded(expectedStartedAt int64) string {
 	h.promptCancelRequested = true
 	h.guardedCancelPending = true
 	h.guardedCancelAttempt = attempt
+	h.guardedCancelProcess = h.process
 	attempt.guardedCancel.Store(true)
 	cancel, process := h.promptCancel, h.process
 	if process != nil {
@@ -61,7 +62,20 @@ func (h *SessionHost) CancelPromptGuarded(expectedStartedAt int64) string {
 	if h.guardedCancelAttempt == attempt {
 		h.guardedCancelPending = false
 		h.guardedCancelAttempt = nil
+		h.guardedCancelProcess = nil
 	}
 	h.promptMu.Unlock()
 	return "cancelled"
+}
+
+// releaseGuardedCancelForExitedProcess releases only the fence owned by a
+// process whose Wait has returned. Detachment alone is not termination proof.
+func (h *SessionHost) releaseGuardedCancelForExitedProcess(process agentProcess) {
+	h.promptMu.Lock()
+	defer h.promptMu.Unlock()
+	if h.guardedCancelPending && h.guardedCancelProcess == process {
+		h.guardedCancelPending = false
+		h.guardedCancelAttempt = nil
+		h.guardedCancelProcess = nil
+	}
 }

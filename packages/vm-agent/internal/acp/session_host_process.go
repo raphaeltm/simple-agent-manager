@@ -20,6 +20,9 @@ import (
 // See .claude/rules/71-request-context-must-not-outlive-its-request.md.
 func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string, cred *agentCredential, settings *agentSettingsPayload) {
 	err := process.Wait()
+	// Exit proof remains valid after lifecycle detachment/replacement. Clear
+	// only this process's fence before the current-process checks below.
+	h.releaseGuardedCancelForExitedProcess(process)
 
 	time.Sleep(100 * time.Millisecond)
 	stderrOutput := redactAgentDiagnosticText(h.getAndClearStderr())
@@ -79,10 +82,6 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 	}
 	h.promptMu.Lock()
 	promptActive := h.promptInFlight
-	// This monitor has verified the captured current process exited. A failed
-	// guarded stop no longer needs to fence admission through normal recovery.
-	h.guardedCancelPending = false
-	h.guardedCancelAttempt = nil
 	h.promptMu.Unlock()
 	if promptActive && !crashRecovery.inProgress && !intentionalPromptCancel && rollover == nil {
 		h.clearCurrentAgentSessionLocked()

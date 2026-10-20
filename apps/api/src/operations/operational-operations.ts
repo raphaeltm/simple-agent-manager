@@ -153,9 +153,9 @@ export const samChatJobs = defineOperation({
   async run(ctx, input) {
     const writer = await operationalSession(ctx, input.projectId, input.sessionId);
     const limit = clampOperationNumber(
-      input.limit ?? getPlatformOperationLimits(ctx.env).taskListLimit,
+      input.limit ?? getPlatformOperationLimits(ctx.env).messageListMax,
       1,
-      getPlatformOperationLimits(ctx.env).taskListMax,
+      getPlatformOperationLimits(ctx.env).messageListMax,
       'limit'
     );
     const result = await ctx.env.DATABASE.prepare(
