@@ -46,6 +46,24 @@ export {
   agentQueryKeys,
   projectSkillsQueryOptions,
 } from './agents';
+export {
+  automationQueryKeys,
+  type BoundedList,
+  type ChannelCatalog,
+  channelHistoryQueryOptions,
+  channelsQueryOptions,
+  isDirectChannel,
+  recentRunsQueryOptions,
+  runPagesQueryOptions,
+  scheduleDetailQueryOptions,
+  schedulesQueryOptions,
+  subscriptionDeliveriesQueryOptions,
+  subscriptionsQueryOptions,
+  triggerDetailQueryOptions,
+  watchDetailQueryOptions,
+  watchesQueryOptions,
+  webhookDeliveriesQueryOptions,
+} from './automation';
 export { capacityPoolQueryKeys, projectDefaultCapacityPoolsQueryOptions } from './capacity-pools';
 export {
   allChatsQueryOptions,

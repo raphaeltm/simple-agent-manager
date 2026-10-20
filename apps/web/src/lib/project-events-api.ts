@@ -9,8 +9,10 @@ import type {
   ProjectEventSubscriptionListResult,
   ProjectEventSubscriptionMutationResult,
   ProjectEventSubscriptionState,
+  ProjectSchedule,
   ProjectScheduleList,
   ProjectScheduleMutationResult,
+  ProjectStandingWatch,
   ProjectStandingWatchList,
   ProjectStandingWatchMutationResult,
   ReconcileProjectScheduleRequest,
@@ -61,6 +63,8 @@ export const getEventChannelHistory = (
   );
 export const listSchedules = (projectId: string, cursor?: string | null, sessionId?: string) =>
   request<ProjectScheduleList>(`${base(projectId)}/schedules?${query(cursor, sessionId)}`);
+export const getSchedule = (projectId: string, id: string) =>
+  request<{ schedule: ProjectSchedule }>(`${base(projectId)}/schedules/${encodeURIComponent(id)}`);
 export const createSchedule = (projectId: string, body: CreateProjectScheduleRequest) =>
   post<ProjectScheduleMutationResult>(`${base(projectId)}/schedules`, body);
 export const rescheduleSchedule = (
@@ -93,6 +97,10 @@ export const listStandingWatches = (
 ) =>
   request<ProjectStandingWatchList>(
     `${base(projectId)}/standing-watches?${query(cursor, sessionId)}`
+  );
+export const getStandingWatch = (projectId: string, id: string) =>
+  request<{ watch: ProjectStandingWatch }>(
+    `${base(projectId)}/standing-watches/${encodeURIComponent(id)}`
   );
 export const createStandingWatch = (projectId: string, body: CreateProjectStandingWatchRequest) =>
   post<ProjectStandingWatchMutationResult>(`${base(projectId)}/standing-watches`, body);
