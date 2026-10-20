@@ -254,6 +254,11 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
 		return
 	}
+	confined, err := requestedConfinement(w, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
@@ -279,8 +284,17 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.config.FileDownloadTimeout)
 	defer cancel()
 
+	readPath := filePath
+	if confined {
+		readPath, err = s.resolveConfinedPath(ctx, containerID, user, workDir, filePath)
+		if err != nil {
+			writeConfinementError(w, err)
+			return
+		}
+	}
+
 	// First check file exists and get size (no shell interpolation — pass path as arg)
-	sizeOutput, _, statErr := s.execInContainer(ctx, containerID, user, workDir, "stat", "-c", "%s", filePath)
+	sizeOutput, _, statErr := s.execInContainer(ctx, containerID, user, workDir, "stat", "-c", "%s", readPath)
 	if statErr != nil {
 		writeError(w, http.StatusNotFound, "file not found")
 		return
@@ -300,7 +314,7 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Read file content via workspace exec cat (no shell interpolation)
-	cmd, cmdErr := s.workspaceExecCommand(ctx, containerID, user, workDir, "cat", "--", filePath)
+	cmd, cmdErr := s.workspaceExecCommand(ctx, containerID, user, workDir, "cat", "--", readPath)
 	if cmdErr != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create read command")
 		return

@@ -34,6 +34,8 @@ func standaloneWorkspaceCommandPath(command string) (string, error) {
 		return "/usr/bin/printenv", nil
 	case "pwd":
 		return "/usr/bin/pwd", nil
+	case "realpath":
+		return "/usr/bin/realpath", nil
 	case "stat":
 		return "/usr/bin/stat", nil
 	case "rm":
