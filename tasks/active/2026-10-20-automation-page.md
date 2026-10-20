@@ -149,6 +149,76 @@ Ship the production version: one **Automation** page built on the existing APIs 
 - [ ] Playwright audit (375×667 + 1280×800): normal, long text, empty, many items, error,
       viewer; `assertNoOverflow`; tap-target sizes.
 
+### Fable review findings (task 01M5D3GGDGYVPN0XBE9V1QX4XB, library fileId 01M5D4GQ59PRANDYG19AZGRVSP)
+
+Must / High (all must ship in this PR):
+- [ ] F1 Watch edit sends `action` only when the editor is the creator; action fields locked for
+      others; "raise limit" sends only `expectedVersion` + `maxExecutions`.
+- [ ] F2 A watch paused with `lastError` (incl. creator-no-longer-owns-target) shows the error and
+      does not offer Resume as the attention fix.
+- [ ] F3 Run limit capped at `DEFAULT_PROJECT_EVENT_WATCH_MAX_EXECUTIONS` (100): a watch at the cap
+      gets "create a new watch or stop this one", not "raise".
+- [ ] F4 Skill picker for one-time and watch "start a chat"; trigger editor offers skill too, and
+      edits never send `skillId: null` / `description: null` unless the user changed them.
+- [ ] F5 Machine = real `ResourceRequirementsInput` (legacy vmSize migration, exclusive node,
+      `hideDisk`, validation errors).
+- [ ] F6 Incident triggers: never offered for create; no Run now; keep note, edit (prompt with
+      incident variables), pause, delete.
+- [ ] F7 Trigger description kept (editor + detail).
+- [ ] F8 Per-source prompt variables + length counter; GitHub event change resets actions to
+      `GITHUB_TRIGGER_DEFAULT_ACTIONS` and clears non-applicable fields; validate with
+      `areGitHubTriggerActionsValid`; edits use `buildGitHubConfigForForm`.
+- [ ] F9 Schedule picker keeps hourly-every-N and monthly; a cron that fits no preset opens as
+      custom with the stored text; `1-5` / `0,6` weekday crons read as weekdays/weekends; schedules
+      under 15 minutes rejected client-side; zone defaults to the viewer's (docs note).
+- [ ] F10 Webhook create and rotate end in `WebhookCredentialDialog`; webhook profile required;
+      every webhook filter needs a path.
+- [ ] F11 Chat-scoped view lists subscriptions targeting the chat plus schedules and watches that
+      message it; `/events?sessionId=X` lands on that view.
+
+API limits to design around:
+- [ ] F12 Recent runs: fetch per trigger only for paused triggers + the most recently fired few
+      (overview); History fetches all. Failure streak skips `skipped`, counts `failed`; copy says
+      "its last N runs failed" and "resuming starts the count again".
+- [ ] F13 Subscriptions: `state=active&limit=200` (client gains a `limit` param); say "most recent
+      200" when `hasMore`; relays detected by `subjectType === 'agent_channel'` + `agent-dm.` prefix.
+- [ ] F14 Channels: `limit=200` pages, filter, then sort by last activity; no "by" byline unless
+      the event carries a sender.
+- [ ] F15 Chat titles from `listChatSessions(scope 'all')`, falling back to a short id.
+- [ ] F16 One-time "Run it now" = reschedule(dueAt now, expiresAt within grace); change time sends
+      `expiresAt` within `[dueAt, dueAt + grace]`.
+- [ ] F17 Webhook URL prefers the server's `endpointUrl` when a credential response is in hand.
+- [ ] F18 Webhook preview shows `filterResult.reason`, `warnings` and the prompt.
+
+Links and entry points:
+- [ ] F19 Command palette "Go to Triggers"/"Create Trigger" → Automation (+ its tests).
+- [ ] F20 Credential-health and offboarding group label "Triggers" → "Automation" if UI-owned.
+- [ ] F21 Run "View chat" uses `Link`, not a full-reload `<a>`.
+- [ ] F22 Onboarding `StepAutomation.tsx` copy points at the Automation page.
+- [ ] F23 Docs: triggers.md, webhook-triggers.md, scheduled-actions.md, chat-features.md,
+      concepts.mdx:106, collaboration.md:199; marketing shots spec navigates to new URLs.
+
+Permissions:
+- [ ] F24 One `canWrite` rule; viewers may still preview webhook samples and read deliveries.
+- [ ] F25 Only human/agent-owned subscriptions can be stopped; SAM relays never; watch-owned rows
+      link to their watch.
+- [ ] F26 Message-a-chat picker says which chats qualify (watch: chats its creator owns; one time:
+      own or shared chats).
+- [ ] F27 Personal-key warning keeps per-check text and the multiplayer gate.
+- [ ] F28 Disabled trigger offers "Turn on" (status active).
+
+Other details users would miss:
+- [ ] F29 Runs: delete one (not running), "Clear stuck" only with a queued run, skip reasons, full
+      error text, confirms on both.
+- [ ] F30 Webhook deliveries: every outcome, error code, linked run, refresh + load more, 7-day
+      retention note.
+- [ ] F31 Facts kept: trigger run count / last / next; schedule attempts, next attempt, last error,
+      result chat, receipt state, submission deadline, two-step retry confirm; watch used/limit,
+      concurrency, cooldown, next eligible, last error; watch filter builder with severity and
+      OR-within / AND-across.
+- [ ] F32 Zone list keeps a stored zone the browser lacks; delete confirm says "and all its run
+      history"; friendly message when the per-project trigger limit is hit.
+
 ## Acceptance criteria
 
 - [ ] One "Automation" nav item replaces Events and Triggers on desktop and mobile.
