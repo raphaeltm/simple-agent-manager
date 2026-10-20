@@ -33,7 +33,7 @@ Implement (session-scoped):
 - [x] Share dialog and notice copy: what teammates can now do, and what stays owner-only (terminal, ports, workspace page) — commit `1169339e0`
 - [x] Docs: collaboration guide, scheduled actions, chat features, security, API reference, API skill — commit `5aefd65cc`
 
-Not implemented (reported for a decision):
+Not implemented (reported for a decision, `tasks/backlog/2026-10-20-shared-chat-terminal-and-ports-decision.md`):
 
 - Terminal (finding 2)
 - Ports (finding 3)

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -335,5 +336,19 @@ func TestSanitizeConfinedPath(t *testing.T) {
 		if _, err := sanitizeConfinedPath(path); err == nil {
 			t.Errorf("sanitizeConfinedPath(%q) accepted a path out of the working tree", path)
 		}
+	}
+}
+
+// The VM runtime runs the same resolution through docker exec, in the workspace's devcontainer,
+// as its user and from its working directory. The command must reach the container unchanged.
+func TestConfinedResolutionRunsInsideTheDevcontainer(t *testing.T) {
+	s := &Server{config: &config.Config{ContainerMode: true}}
+	cmd, err := s.workspaceExecCommand(context.Background(), "abc123", "node", "/workspaces/repo", "realpath", ".", "./README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{dockerBinaryPath, "exec", "-i", "-u", "node", "-w", "/workspaces/repo", "abc123", "realpath", ".", "./README.md"}
+	if strings.Join(cmd.Args, " ") != strings.Join(want, " ") {
+		t.Fatalf("docker exec args = %q, want %q", cmd.Args, want)
 	}
 }
