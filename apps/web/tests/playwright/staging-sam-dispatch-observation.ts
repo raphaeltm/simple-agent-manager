@@ -3,10 +3,12 @@ import { createHash } from 'node:crypto';
 import type { APIRequestContext } from '@playwright/test';
 
 import type { Json } from './staging-sam-dispatch-evidence';
+import { observationReserveMs } from './staging-sam-dispatch-provisioning';
 
 type Check = (condition: boolean, label: string) => void;
 const READ_PATHS: Array<[RegExp, string]> = [
   [/^\/api\/sam\/settings$/, '/api/sam/settings'],
+  [/^\/api\/auth\/get-session$/, '/api/auth/get-session'],
   [/^\/api\/sam\/turns$/, '/api/sam/turns'],
   [/^\/api\/projects\/[^/]+$/, '/api/projects/:project'],
   [/^\/api\/projects\/[^/]+\/tasks\/[^/]+$/, '/api/projects/:project/tasks/:task'],
@@ -15,6 +17,7 @@ const READ_PATHS: Array<[RegExp, string]> = [
   [/^\/api\/projects\/[^/]+\/agent-profiles(?:\/[^/]+)?$/, '/api/projects/:project/agent-profiles'],
   [/^\/api\/workspaces(?:\/[^/]+)?$/, '/api/workspaces'],
   [/^\/api\/nodes(?:\/[^/]+)?$/, '/api/nodes'],
+  [/^\/api\/nodes\/[^/]+\/events$/, '/api/nodes/:node/events'],
 ];
 
 export function dispatchReader(
@@ -66,6 +69,7 @@ interface ObservationInput {
   save: () => Promise<void>;
   get: (url: string) => Promise<Json>;
   wait: (ms: number) => Promise<void>;
+  observeProvisioning: () => Promise<void>;
 }
 
 export async function verifyAwakeBeforeStop(
@@ -128,8 +132,13 @@ export async function observeDispatchSession(
     get,
   } = input;
   const decode = (value: string | null): Json => (value ? JSON.parse(value) : {});
-  const responseDeadline = deadline - (afterIds.size === 0 ? 330_000 : 150_000);
+  const responseDeadline = deadline - observationReserveMs(input.stopOnly, afterIds.size > 0);
+  let nextProvisioningObservation = 0;
   while (Date.now() < responseDeadline) {
+    if (input.stopOnly && !ledger.workspaceId && Date.now() >= nextProvisioningObservation) {
+      await input.observeProvisioning();
+      nextProvisioningObservation = Date.now() + 30_000;
+    }
     let observedHardwareReady = false;
     let runtimeAwake = false;
     const task = await get(`${PROJECT_API}/tasks/${ledger.taskId}`);

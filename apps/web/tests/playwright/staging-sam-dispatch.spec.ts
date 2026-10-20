@@ -6,7 +6,7 @@
  * tests/playwright/staging-sam-dispatch.spec.ts \
  * --project='Desktop (1280x800)' --workers=1 --retries=0
  * Never rerun an ambiguous intent: exclusive ledgers retain SAME turn/action/task/session IDs.
- * Maximum 12 minutes work + 3 minutes cleanup, one VM lifecycle using the existing pool.
+ * Full journey: 12 minutes work; stop-only: 25 minutes work. Both reserve 3 minutes cleanup.
  * One dispatch/follow-up/approved stop; at most one explicit read-only private recovery turn.
  * SAM_DISPATCH_COVERAGE=controlled-stop-only tests awake-runtime confirmation, not report/follow-up.
  * Prior comparable small Codex profile: 01KV6N86TMHWNWPXNDAWZB13FJ.
@@ -35,16 +35,22 @@ import {
   observeDispatchSession,
   verifyAwakeBeforeStop,
 } from './staging-sam-dispatch-observation';
+import {
+  captureOwnedProvisioning,
+  dispatchWorkMs,
+  scopedDispatchQuery,
+  verifyNoWorkspaceAfterStop,
+} from './staging-sam-dispatch-provisioning';
 
 const PROJECT = '01KJNR9R3TEN3KX1ETE33852R8';
 const REPOSITORY = 'serverspresentation2025/crewai';
 const PROJECT_API = `${STAGING_API}/api/projects/${PROJECT}`;
 const SAM_API = `${STAGING_API}/api/sam`;
 const REQUEST_MS = 15_000;
-const WORK_MS = 12 * 60_000;
 const CLEANUP_MS = 3 * 60_000;
 const coverage = process.env.SAM_DISPATCH_COVERAGE ?? 'full-journey';
 const stopOnly = coverage === 'controlled-stop-only';
+const WORK_MS = dispatchWorkMs(stopOnly);
 
 test.describe.configure({ mode: 'serial' });
 test.use({ trace: 'off', video: 'off', screenshot: 'off' });
@@ -124,6 +130,7 @@ test(
     const save = () =>
       writeFile(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`, { mode: 0o600 });
     let authenticated = false;
+    let actorId = '';
     let phase: DispatchPhase = 'setup';
     let lastPrivateTurnState: unknown = null;
     let primaryFailure: Error | null = null;
@@ -140,6 +147,24 @@ test(
       expect(value, label).toBe(true);
     };
     const get = dispatchReader(page.request, ledger, check, REQUEST_MS);
+    const provision = (events = false) =>
+      captureOwnedProvisioning(
+        {
+          ledger,
+          userId: actorId,
+          projectId: PROJECT,
+          profileName: name,
+          marker,
+          baselineNodes,
+          stagingApi: STAGING_API,
+          get,
+          save,
+          account: cfAccount!,
+          token: cfToken!,
+          timeout: REQUEST_MS,
+        },
+        events
+      );
     const post = async (url: string, data: Json = {}): Promise<Json> => {
       const response = await page.request.post(url, { data, timeout: REQUEST_MS });
       expect(response.ok(), `Scoped mutation HTTP status ${response.status()}`).toBe(true);
@@ -348,6 +373,7 @@ test(
           save,
           get,
           wait: (ms) => page.waitForTimeout(ms),
+          observeProvisioning: () => provision(),
         },
         afterIds
       );
@@ -364,38 +390,13 @@ test(
       JOIN tasks t ON t.workspace_id=w.id AND t.user_id=a.user_id
       WHERE t.id=? AND t.project_id=? AND w.id=? AND w.chat_session_id=?
         AND a.agent_profile_id=? LIMIT 2`;
-      let result: Json;
-      try {
-        const response = await fetch(
-          `https://api.cloudflare.com/client/v4/accounts/${cfAccount}/d1/database/1cfaf5d4-8226-47d8-bf26-6ba727ce5718/query`,
-          {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${cfToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              sql,
-              params: [
-                ledger.taskId,
-                PROJECT,
-                ledger.workspaceId,
-                ledger.sessionId,
-                ledger.profileId,
-              ],
-            }),
-            signal: AbortSignal.timeout(REQUEST_MS),
-          }
-        );
-        check(response.ok, 'Scoped D1 evidence HTTP status');
-        result = (await response.json()) as Json;
-      } catch {
-        throw new Error(
-          'Scoped runtime evidence unavailable; no credential or response details retained'
-        );
-      }
-      check(
-        result.success === true && result.result?.[0]?.results?.length === 1,
-        'Exactly one own runtime launch contract'
+      const rows = await scopedDispatchQuery(
+        { account: cfAccount!, token: cfToken!, timeout: REQUEST_MS },
+        sql,
+        [ledger.taskId, PROJECT, ledger.workspaceId, ledger.sessionId, ledger.profileId]
       );
-      const row = result.result[0].results[0];
+      check(rows.length === 1, 'Exactly one own runtime launch contract');
+      const row = rows[0]!;
       ledger.runtimeContract = {
         agentSessionId: row.agentSessionId,
         profileId: row.profileId,
@@ -429,6 +430,11 @@ test(
       });
       expect(login.status(), 'Dedicated PRIMARY login').toBe(200);
       authenticated = true;
+      actorId = (await get(`${STAGING_API}/api/auth/get-session`)).user?.id;
+      check(
+        typeof actorId === 'string' && actorId.length > 0,
+        'Authenticated fixture user identified'
+      );
       check(
         (await get(`${SAM_API}/settings`)).enabled === false,
         'Previous pilot left SAM opted out'
@@ -651,6 +657,10 @@ test(
         `Dispatch journey failed during ${ledger.primaryFailure.phase}; private turn ${ledger.primaryFailure.lastPrivateTurnState}. Review saved checks and cleanup evidence.`
       );
     }
+    if (primaryFailure && phase === 'runtime-ready')
+      await provision(true).catch(() => {
+        ledger.provisioningDiagnosticStatus = 'unavailable';
+      });
     try {
       const cleanupDeadline = Math.min(
         Date.now() + CLEANUP_MS,
@@ -684,7 +694,11 @@ test(
         });
         await cleanup('workspace', async () => {
           if (!ledger.workspaceId) {
-            check(!ledger.startRequestKey, 'No unobserved launch requiring manual cleanup');
+            check(
+              !ledger.startRequestKey ||
+                (await verifyNoWorkspaceAfterStop(ledger, PROJECT_API, STAGING_API, get)),
+              'Scoped stopped task has no unobserved workspace'
+            );
             return;
           }
           check(
