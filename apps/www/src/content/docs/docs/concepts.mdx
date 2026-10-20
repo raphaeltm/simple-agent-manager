@@ -24,7 +24,7 @@ A workspace runs in one of two places:
 | **Instant** | A container on Cloudflare's network | Starts in seconds, no cloud account needed — but no devcontainer and no Docker |
 | **VM**      | A cloud VM on your provider account | Your full environment, at the cost of a minute or two of provisioning          |
 
-Which one you get is an [agent profile](#agent-profiles) setting: a profile whose runtime is **Instant container** starts chats on Instant; everything else you start in SAM or with the CLI runs on a VM, as a **Task** or a **Chat** depending on the profile (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)). Work an AI app starts through the [SAM Connector](/docs/guides/sam-connector/) with an **Auto** profile, or none, can run on Instant instead; see [Workspaces](/docs/guides/creating-workspaces/#two-kinds-of-workspace-instant-and-vm). A Task carries the work through to a pull request; a Chat is back-and-forth and doesn't commit or push for you. Instant needs no cloud provider credential, so it's how you work before connecting a cloud account.
+Which one you get is an [agent profile](#agent-profiles) setting: a profile whose runtime is **Instant container** starts chats on Instant; everything else you start in SAM or with the CLI runs on a VM, as a **Task** or a **Chat** depending on the profile (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)). Work an AI app starts through the [SAM Connector](/docs/guides/sam-connector/) with an **Auto** profile, or none, can run on Instant instead; see [Workspaces](/docs/guides/creating-workspaces/#two-kinds-of-workspace-instant-and-vm). A Task is tracked work; a Chat is back-and-forth. In either mode, the agent commits, pushes, and opens pull requests when instructed. Instant needs no cloud provider credential, so it's how you work before connecting a cloud account.
 
 Instant and VM sessions sleep when idle and restore from a runtime-neutral snapshot on wake. A VM wake provisions a replacement workspace after the original compute is removed. See [Instant Sessions and persistent sleep](/docs/guides/instant-sessions/).
 
@@ -71,7 +71,7 @@ You can set a **default provider** and **default location** per project, and the
 
 A **compute pool** (also called a node pool or capacity pool) is the set of cloud machines SAM is allowed to rent on your behalf. Pools exist at three scopes — **project**, **user**, and **installation** — and SAM uses the first one that exists, in that order.
 
-Each pool holds the credentials that pay for its machines and the list of concrete provider instance types it permits, discovered from your provider's live catalog rather than reduced to small/medium/large presets. Two settings shape what SAM does with that list: a **strategy** (which permitted machine to pick) and an **exhaustion policy** (what to do when none is available).
+Each pool holds the credentials that pay for its machines and the list of concrete provider instance types it permits, drawn from Hetzner's live catalog or standard sizes at the other providers, with estimated prices. Two settings shape what SAM does with that list: a **strategy** (which permitted machine to pick) and an **exhaustion policy** (what to do when none is available).
 
 You normally do not have to configure any of this — SAM creates and maintains a working pool for the credentials it can see. See the [Compute Pools guide](/docs/guides/compute-pools/) for the full picture.
 

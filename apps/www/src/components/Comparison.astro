@@ -3,7 +3,7 @@ const rows = [
   {
     label: 'Where your code runs',
     sam: 'Your own cloud account (Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, GCP), or Instant workspaces on your Cloudflare account alone',
-    vendor: "The vendor's cloud",
+    vendor: "The vendor's cloud by default; Claude Code and Cursor also support self-hosted runners",
     selfHosted: 'Your infra (AWS, GCP, K8s)',
     samWins: true,
   },
@@ -31,7 +31,7 @@ const rows = [
   {
     label: 'What you pay for compute',
     sam: 'You pay your cloud provider directly for servers, and Cloudflare for Instant workspaces',
-    vendor: 'Included in the plan, with usage caps or token charges',
+    vendor: 'Managed compute included in the plan, with usage caps or token charges; self-hosted compute is your bill',
     selfHosted: 'Your cloud bill + license fees',
     samWins: true,
   },
@@ -52,14 +52,14 @@ const rows = [
   {
     label: 'Comments the agent reads',
     sam: 'Comment on agent replies and send the thread to the agent, which can answer and resolve it',
-    vendor: 'Pull request comments, for example @codex or @cursor',
+    vendor: 'Pull request comments, for example @codex or @cursor; Claude Code also accepts inline diff comments',
     selfHosted: 'No agent-level comments',
     samWins: false,
   },
   {
     label: 'Mixing cloud providers',
     sam: '7 providers; you pick the machine types and how work is spread',
-    vendor: "No; fixed machine sizes on the vendor's cloud",
+    vendor: "Managed cloud sizes by default; Claude Code and Cursor self-hosted runners use your infrastructure",
     selfHosted: 'You wire it yourself',
     samWins: true,
   },

@@ -5,11 +5,11 @@ description: Simple Agent Manager — ephemeral AI coding environments on Cloudf
 
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
-**Simple Agent Manager (SAM)** is an open-source platform for getting real work done with AI coding agents. You import a GitHub repository, describe what you want in a chat, and SAM runs your choice of AI coding agent — Claude Code, OpenAI Codex, Gemini CLI, Mistral Vibe, OpenCode, or Amp — that reads your code, makes the change, and opens a pull request. SAM provisions the environment for you.
+**Simple Agent Manager (SAM)** is an open-source platform for getting real work done with AI coding agents. You import a GitHub repository, describe what you want in a chat, and SAM runs your choice of AI coding agent — Claude Code, OpenAI Codex, Gemini CLI, Mistral Vibe, OpenCode, or Amp — that can read your code, make changes, and open a pull request when you ask. SAM provisions the environment for you.
 
 ## Why SAM?
 
-AI coding agents need real development environments. SAM gives each agent an isolated environment behind a simple chat — a container that starts in seconds for conversation and focused edits, or a full cloud VM with your `.devcontainer`, Docker, and toolchain when the agent has to build and test your stack. You describe the outcome you want; SAM handles the servers, the setup, and the pull request.
+AI coding agents need real development environments. SAM gives each agent an isolated environment behind a simple chat — a container that starts in seconds for conversation and focused edits, or a full cloud VM with your `.devcontainer`, Docker, and toolchain when the agent has to build and test your stack. You describe the outcome you want; SAM handles the servers and the setup. The agent commits, pushes, and opens pull requests when instructed.
 
 <CardGrid>
   <Card title="Bring Your Own Cloud" icon="cloud">
@@ -38,7 +38,7 @@ AI coding agents need real development environments. SAM gives each agent an iso
 3. **Install the GitHub App** on the repositories you want to use
 4. **Import a project** — link a GitHub repo from the Dashboard
 5. **Chat** — describe what you want; SAM provisions a workspace and runs the agent for you
-6. **Review the PR** — the agent commits, pushes, and opens a pull request when it's done
+6. **Review the PR** — ask the agent to commit, push, and open a pull request when you want to publish its work
 
 ## Key Features
 
