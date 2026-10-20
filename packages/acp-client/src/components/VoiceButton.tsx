@@ -138,10 +138,23 @@ export function VoiceButton({
   // not upload audio whose transcription has nowhere left to land.
   const unmountedRef = useRef(false);
 
+  // Bumped whenever a capture still waiting on the microphone permission prompt
+  // must be abandoned: unmount, the host disabling voice input, or a newer start.
+  // A grant that resolves for a stale epoch is released at once and never
+  // reaches a recorder, the amplitude loop, or the network.
+  const captureEpochRef = useRef(0);
+
+  useEffect(() => {
+    if (disabled) captureEpochRef.current += 1;
+  }, [disabled]);
+
   // Clean up on unmount
   useEffect(() => {
+    // React StrictMode runs cleanup then setup again on the same instance.
+    unmountedRef.current = false;
     return () => {
       unmountedRef.current = true;
+      captureEpochRef.current += 1;
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
@@ -217,8 +230,16 @@ export function VoiceButton({
       return;
     }
 
+    const epoch = ++captureEpochRef.current;
+    const abandoned = () => epoch !== captureEpochRef.current || unmountedRef.current;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (abandoned()) {
+        // Granted after the host unmounted or disabled voice input: release the
+        // microphone without ever recording.
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
 
       // Start amplitude monitoring for visual feedback
@@ -316,6 +337,7 @@ export function VoiceButton({
       recorder.start();
       setState('recording');
     } catch (err) {
+      if (abandoned()) return;
       stopAmplitudeMonitor();
       setState('error');
       let msg: string;
@@ -349,7 +371,9 @@ export function VoiceButton({
     // Ignore clicks during processing or error states
   }, [state, startRecording, stopRecording]);
 
-  const isDisabled = disabled || state === 'processing';
+  // An active recording keeps its Stop control even if the host disables voice
+  // input, so the microphone can never be left running without a way to end it.
+  const isDisabled = state === 'processing' || (disabled && state !== 'recording');
 
   // Determine button styling based on state
   let buttonClasses =

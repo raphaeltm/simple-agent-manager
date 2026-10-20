@@ -10,6 +10,7 @@ import {
   effectTitle,
   linkLabel,
   prettyJson,
+  proposedAnswer,
   requestErrorText,
   resultLink,
   resultMessage,
@@ -86,6 +87,9 @@ export function ActionCard({
   const message = resultMessage(action.result_json);
   const result = available ? resultLink(action.result_json) : null;
   const target = available ? actionTarget(action) : null;
+  const answer = proposedAnswer(action);
+  // Read receipts arrive stripped to `{}`; there is nothing further to show for them.
+  const hasDetails = action.input_json !== '{}' || action.result_json !== null;
   const run = async (path: string, body: string, failure: string) => {
     setBusy(true);
     setError(null);
@@ -116,6 +120,14 @@ export function ActionCard({
       </div>
       {target && <p className="mt-1 text-fg-muted">In {projectName ?? 'one of your projects'}</p>}
       {needsConfirmation && <p className="mt-2 text-fg-primary">{copy.consequence}</p>}
+      {answer && (
+        <p className="mt-2 rounded-md bg-inset px-3 py-2 text-fg-primary">
+          <span className="block text-xs text-fg-muted">
+            {needsConfirmation ? 'Proposed answer' : 'Answer'}
+          </span>
+          {answer}
+        </p>
+      )}
       {available && action.state === 'uncertain' && (
         <p className="mt-2 text-fg-primary">
           SAM couldn’t confirm whether this finished. Check the project before asking again.
@@ -175,8 +187,9 @@ export function ActionCard({
           </Button>
         </div>
       )}
-      {available && (
-        <details className="group mt-2">
+      {available && hasDetails && (
+        // Open by default while approval is pending: confirm only what you can see.
+        <details className="group mt-2" open={needsConfirmation || undefined}>
           <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1 text-fg-muted [&::-webkit-details-marker]:hidden">
             <ChevronRight
               size={14}

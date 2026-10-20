@@ -20,7 +20,18 @@ const READ_LABELS: Record<string, string> = {
   sam_profiles_list: 'agent profiles',
 };
 
-const EFFECT_TITLES: Record<string, string> = {
+const ACTION_TITLES: Record<string, string> = {
+  sam_inbox_get: 'Check your inbox',
+  sam_projects_list: 'List projects',
+  sam_project_get: 'Look up a project',
+  sam_chats_list: 'List chats',
+  sam_chats_search: 'Search chats',
+  sam_chat_read: 'Read a chat',
+  sam_tasks_list: 'List tasks',
+  sam_task_get: 'Look up a task',
+  sam_ideas_search: 'Search ideas',
+  sam_idea_get: 'Look up an idea',
+  sam_profiles_list: 'List agent profiles',
   sam_chat_start: 'Start project work',
   sam_chat_send: 'Reply in a project chat',
   sam_idea_create: 'Create an idea',
@@ -46,7 +57,7 @@ const CONFIRMATIONS: Record<string, Confirmation> = {
   sam_agent_answer: {
     consequence: 'This sends your answer to the agent waiting in that chat.',
     confirm: 'Send answer',
-    decline: "Don't send",
+    decline: 'Don’t send',
     danger: false,
   },
 };
@@ -63,13 +74,11 @@ function humanize(operation: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+/** Only a read that completed joins the quiet summary; any other state keeps its own card. */
 export function isReadReceipt(action: Action): boolean {
+  if (action.state !== 'completed' || action.available === false) return false;
   return (
-    action.operation in READ_LABELS ||
-    (action.state === 'completed' &&
-      action.available !== false &&
-      action.input_json === '{}' &&
-      action.result_json === null)
+    action.operation in READ_LABELS || (action.input_json === '{}' && action.result_json === null)
   );
 }
 
@@ -85,11 +94,27 @@ export function describeReads(actions: Action[]): string {
 }
 
 export function effectTitle(operation: string): string {
-  return EFFECT_TITLES[operation] ?? humanize(operation);
+  return ACTION_TITLES[operation] ?? humanize(operation);
 }
 
 export function confirmationCopy(operation: string): Confirmation {
   return CONFIRMATIONS[operation] ?? DEFAULT_CONFIRMATION;
+}
+
+/**
+ * What an agent answer would send, in words, so it is visible before approval.
+ * Form values never pass through SAM (the server refuses them), so a recorded
+ * answer is a decline, a chosen option, or an attention answer.
+ */
+export function proposedAnswer(action: Action): string | null {
+  if (action.operation !== 'sam_agent_answer') return null;
+  const input = parseObject(action.input_json);
+  if (input?.decline === true) return 'Decline the agent\u2019s request';
+  const option = text(input?.optionId);
+  if (option) return `Choose \u201c${option}\u201d`;
+  const answer = text(input?.answer);
+  if (answer) return `Answer \u201c${answer}\u201d`;
+  return null;
 }
 
 function parseObject(json: string | null): Record<string, unknown> | null {

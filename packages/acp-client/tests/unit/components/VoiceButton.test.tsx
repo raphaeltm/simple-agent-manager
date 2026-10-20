@@ -1,5 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { VoiceButton } from '../../../src/components/VoiceButton';
 
 // Mock MediaRecorder
@@ -498,5 +500,153 @@ describe('VoiceButton', () => {
       const errorButton = screen.getByTitle(/microphone not supported/i);
       expect(errorButton).toBeTruthy();
     });
+  });
+
+  describe('a microphone grant that arrives late', () => {
+    /** A permission prompt the test answers later, plus the stream it will yield. */
+    function deferPermission() {
+      let grant!: () => void;
+      const stream = createMockStream();
+      const pending = new Promise<MediaStream>((resolve) => {
+        grant = () => resolve(stream);
+      });
+      Object.defineProperty(navigator, 'mediaDevices', {
+        value: { getUserMedia: vi.fn().mockReturnValue(pending) },
+        writable: true,
+        configurable: true,
+      });
+      const track = stream.getTracks()[0] as unknown as { stop: ReturnType<typeof vi.fn> };
+      return { grant, track };
+    }
+
+    beforeEach(() => {
+      MockMediaRecorder.lastInstance = null;
+    });
+
+    it('is released without recording when the host unmounted first', async () => {
+      const { grant, track } = deferPermission();
+      const { unmount } = render(
+        <VoiceButton
+          onTranscription={mockOnTranscription}
+          apiUrl="https://api.example.com/api/transcribe"
+        />
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /start voice input/i }));
+      });
+      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+
+      unmount();
+      await act(async () => {
+        grant();
+      });
+
+      expect(track.stop).toHaveBeenCalled();
+      expect(MockMediaRecorder.lastInstance).toBeNull();
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('is released without recording when the host disabled voice input first', async () => {
+      const { grant, track } = deferPermission();
+      const onStateChange = vi.fn();
+      const { rerender } = render(
+        <VoiceButton
+          onTranscription={mockOnTranscription}
+          apiUrl="https://api.example.com/api/transcribe"
+          onStateChange={onStateChange}
+        />
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /start voice input/i }));
+      });
+
+      // e.g. the user pressed Send while the browser permission prompt was still open.
+      rerender(
+        <VoiceButton
+          onTranscription={mockOnTranscription}
+          apiUrl="https://api.example.com/api/transcribe"
+          onStateChange={onStateChange}
+          disabled
+        />
+      );
+      await act(async () => {
+        grant();
+      });
+
+      expect(track.stop).toHaveBeenCalled();
+      expect(MockMediaRecorder.lastInstance).toBeNull();
+      expect(onStateChange).not.toHaveBeenCalledWith('recording');
+      // Liveness: the control is still present and simply idle and disabled.
+      const button = screen.getByRole('button', { name: /start voice input/i });
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('still records when nothing changed while the prompt was open (control)', async () => {
+      const { grant, track } = deferPermission();
+      render(
+        <VoiceButton
+          onTranscription={mockOnTranscription}
+          apiUrl="https://api.example.com/api/transcribe"
+        />
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /start voice input/i }));
+      });
+      await act(async () => {
+        grant();
+      });
+
+      expect(track.stop).not.toHaveBeenCalled();
+      expect(MockMediaRecorder.lastInstance?.state).toBe('recording');
+      expect(screen.getByRole('button', { name: /stop recording/i })).toBeTruthy();
+    });
+  });
+
+  it('keeps Stop usable when the host disables voice input mid-recording', async () => {
+    const { rerender } = render(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+      />
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /start voice input/i }));
+    });
+    rerender(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+        disabled
+      />
+    );
+
+    const stop = screen.getByRole('button', { name: /stop recording/i });
+    expect((stop as HTMLButtonElement).disabled).toBe(false);
+    const recorder = MockMediaRecorder.lastInstance;
+    await act(async () => {
+      fireEvent.click(stop);
+    });
+    expect(recorder?.state).toBe('inactive');
+  });
+
+  it('uploads normally under React StrictMode (double-invoked effects)', async () => {
+    render(
+      <StrictMode>
+        <VoiceButton
+          onTranscription={mockOnTranscription}
+          apiUrl="https://api.example.com/api/transcribe"
+        />
+      </StrictMode>
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /start voice input/i }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /stop recording/i }));
+    });
+
+    await waitFor(() => expect(mockOnTranscription).toHaveBeenCalledWith('Transcribed text'));
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 });

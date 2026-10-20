@@ -340,11 +340,13 @@ test('recent history loads older messages, renders source links and approval rec
     'href',
     /\/projects\/project-1\/chat\/session-1$/
   );
+  // While approval is pending the exact recorded request is already open: confirm what you see.
   const exactRequest = page.getByText('"sessionId": "session-1"');
+  await expect(exactRequest).toBeVisible();
+  await page.getByText('Exact request').click();
   await expect(exactRequest).toBeHidden();
   await page.getByText('Exact request').click();
   await expect(exactRequest).toBeVisible();
-  await page.getByText('Exact request').click();
   const originalViewport = page.viewportSize()!;
   const confirm = page.getByRole('button', { name: 'Confirm stop' });
   await checkTouchTarget(confirm);
@@ -365,6 +367,65 @@ test('recent history loads older messages, renders source links and approval rec
   expect(mock.confirmations).toEqual([true]);
   await page.getByLabel('Message SAM').fill('Draft kept while history refreshes');
   await expect(page.getByLabel('Message SAM')).toHaveValue('Draft kept while history refreshes');
+});
+
+test('an agent answer awaiting approval shows the proposed answer and target', async ({ page }) => {
+  const mock = await mockSam(page, {
+    turns: [
+      turn('answer', {
+        message: 'Let the deploy agent run the migration once',
+        response: 'I can answer its permission request. Please confirm below.',
+        actions: [
+          {
+            id: 'answer-1',
+            operation: 'sam_agent_answer',
+            input_json:
+              '{"interactionId":"int-1","optionId":"allow_once","projectId":"project-1","sessionId":"session-1"}',
+            state: 'approval_required',
+            result_json: null,
+          },
+        ],
+      }),
+    ],
+  });
+  await page.goto('/sam');
+  const card = page.getByRole('group', { name: 'Answer an agent' });
+  await expect(card.getByText('Needs your confirmation')).toBeVisible();
+  await expect(card.getByText('Proposed answer')).toBeVisible();
+  await expect(card.getByText('Choose “allow_once”')).toBeVisible();
+  await expect(card.getByText('In Website redesign')).toBeVisible();
+  await expect(card.getByRole('link', { name: 'Open chat' })).toHaveAttribute(
+    'href',
+    '/projects/project-1/chat/session-1'
+  );
+  await expect(card.getByText('"optionId": "allow_once"')).toBeVisible();
+  await checkTouchTarget(card.getByRole('button', { name: 'Send answer' }));
+  await checkLayout(page, 'sam-agent-answer');
+  await card.getByRole('button', { name: 'Don’t send' }).click();
+  expect(mock.confirmations).toEqual([false]);
+});
+
+test('only completed reads join the summary; others keep their own state', async ({ page }) => {
+  await mockSam(page, {
+    turns: [
+      turn('reads', {
+        actions: [
+          readAction('read-projects', 'sam_projects_list'),
+          { ...readAction('read-inbox', 'sam_inbox_get'), state: 'pending' },
+          { ...readAction('read-tasks', 'sam_tasks_list'), state: 'uncertain' },
+        ],
+      }),
+    ],
+  });
+  await page.goto('/sam');
+  await expect(page.getByText('Checked projects', { exact: true })).toBeVisible();
+  const inbox = page.getByRole('group', { name: 'Check your inbox' });
+  await expect(inbox.getByText('In progress')).toBeVisible();
+  const tasks = page.getByRole('group', { name: 'List tasks' });
+  await expect(tasks.getByText('Outcome unknown')).toBeVisible();
+  // Stripped read receipts have nothing further to disclose.
+  await expect(page.getByText('Exact request')).toHaveCount(0);
+  await checkLayout(page, 'sam-read-states');
 });
 
 test('declining a confirmation sends an explicit refusal', async ({ page }) => {
