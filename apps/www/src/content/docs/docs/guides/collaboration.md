@@ -157,8 +157,9 @@ Before you share, know what it means:
 - **The agent can read the owner's keys**, so a teammate who drives it can ask it to print them and
   keep using them after their access ends. That is the owner's AI key or Claude/Codex sign-in, and
   on GitLab projects the owner's GitLab sign-in, which reaches all of the owner's GitLab projects.
-  On GitHub projects the agent only has a one-hour token for the project's repository. Share only with people you trust. SAM asks you to confirm
-  before it shares.
+  On GitHub projects the agent only has a one-hour token for the project's repository. A teammate
+  can also open files such as `.env` in the **Files** panel. Share only with people you trust. SAM
+  asks you to confirm before it shares.
 - **Access lasts the time you choose.** You pick 5, 10, 30 or 60 minutes every time. There is no
   default and no "until removed" option. When the time is up, access ends on its own. Only the owner
   can extend it, with **Renew**, which starts a new period from now.
@@ -187,7 +188,8 @@ What SAM enforces:
   again before the message is sent.
 - A teammate can open the **Files** and **Git** panels, read-only and limited to the repository
   folder: they can list, view, download and diff any file in it, including untracked files such as
-  `.env`, but nothing outside it, nothing in `.git`, and no link that points outside it. This limits
+  `.env`, but nothing outside it, nothing in a `.git` folder (the repository's or a nested one's),
+  and no link that points outside it. This limits
   the panels only; the agent itself can still read anything in the workspace, as the warning above
   says. If the workspace runs an older agent that can't enforce the limit, the panel says so and
   shows nothing until the workspace restarts with a newer one.

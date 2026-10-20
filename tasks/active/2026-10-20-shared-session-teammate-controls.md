@@ -13,14 +13,15 @@ PR #2381 shipped shared chats with 5/10/30/60-minute grants. It left terminal, f
 3. **Ports**: the Worker proxies each request (`apps/api/src/index.ts:259`), but access rides a `sam_port_access` cookie (4 h default, signature-only check, not tied to a grant). WebSocket upgrades cannot be cut on revoke. Also, `expose_port` (`apps/api/src/routes/mcp/workspace-tools.ts:371`) returns a URL with an owner-signed `port_token`. If the agent posts that URL, every project member can read it (to verify).
 4. **Fork**: the rail's Fork and Retry already submit a new task as the viewer (`useProjectChatState.ts:745`, `parentTaskId` + context) on the viewer's own accounts; G5 keeps the parent's personal attribution. The only owner-only fork is the archived-chat composer (`sourceSessionId` → `requireArchivedForkSource`, creator only). It applies only to tasks cancelled because their snapshot expired (`isExpiredTask`), which happens days after sleep. A grant lasts at most 60 min and cannot be added to an ended chat, so a teammate practically never holds a grant on such a chat. It restores no files.
 5. **Attachments**: `sendChat` refuses a teammate's attachments. `transferPromptAttachments` (`apps/api/src/services/prompt-attachments.ts:23`) requires `senderId === workspace owner`. Uploads live under the uploader's R2 prefix (`buildAttachmentR2Key`). The adapter re-runs the sender fence immediately before transfer (`beforeTransfer`) and again before the send (`beforeExternalMutation`), in `apps/api/src/services/vm-prompt-delivery-adapter.ts:165`.
-6. **Gap in #2381: schedules.** A `message_session` schedule (`packages/shared/src/types/project-event-schedules.ts:4`) can target any active or sleeping chat in the project. `requireScheduleAction` (`project-event-schedules-authority.ts:42`) checks only the creator's membership and the target task. It runs at creation, reschedule, fire time (`project-event-schedules-runner.ts:464`) and recovery. The delivery sender fence covers only `user_followup`/`comment_directive`. So any member can queue prompts into another member's chat on that chat owner's accounts, and a teammate's schedule can fire after their grant ends.
+6. **Gap in #2381: schedules.** A `message_session` schedule (`packages/shared/src/types/project-event-schedules.ts:4`) can target any active or sleeping chat in the project. `requireScheduleAction` (`project-event-schedules-authority.ts:42`) checks only the creator's membership and the target task. It runs at creation, fire time (`project-event-schedules-runner.ts:464`) and recovery. The delivery sender fence covers only `user_followup`/`comment_directive`. So any member can queue prompts into another member's chat on that chat owner's accounts, and a teammate's schedule can fire after their grant ends.
 7. Event subscriptions are self-targeted (identity from the MCP token), so they are not a cross-chat write path.
 
 ## Plan
 
 Implement (session-scoped):
 
-- [x] Schedules: a `message_session` schedule requires the creator to own the target chat or hold an active grant, at creation, reschedule, fire time and recovery; attribution on a teammate's scheduled prompt; a teammate's pending schedules for the chat are cancelled on revoke and expiry (commit `0250e906a`)
+- [x] Schedules: a `message_session` schedule requires the creator to own the target chat or hold an active grant, at creation, fire time, recovery and before every delivery side effect; attribution on a teammate's scheduled prompt; a teammate's pending schedules for the chat are cancelled on revoke and expiry (commit `0250e906a`)
+  - Reschedule and cancel stay open to any project writer, as documented before this work ("Project writers can change it", `scheduled-actions.md`, commit `4e69007c8`). A reschedule changes only the due and expiry times, never the target or the prompt, and the fire-time check still applies to the creator.
   - Only a person may use a grant (REST `creator: 'person'`); an agent (MCP) or SAM (provider-limit parking) may schedule only into its user's own chats.
   - A teammate's schedule records its grant (DO migration 066, `shared_access_grant_id`) and fires only under that grant; the delivery fence re-checks it before every side effect.
   - Standing watches outlive any grant, so they may only message chats their creator owns; only the creator may change a watch's action. The watch runner pauses a pre-existing watch into a chat its creator does not own.
@@ -45,13 +46,13 @@ No change needed:
 
 ## Acceptance criteria
 
-- [ ] A member without a grant cannot create, reschedule or fire a schedule that prompts someone else's chat (real-SQLite attack test with an owner control and a grantee control)
-- [ ] A teammate's schedule does not fire after their grant ends or is revoked, and their pending schedules for that chat are cancelled
-- [ ] A teammate's prompt with attachments delivers the files into the shared chat's workspace while the grant is active; after expiry or revoke, neither the files nor the prompt are delivered
-- [ ] A teammate can list, view, download and diff files inside the repository, and nothing outside it (absolute, `~`, `..`, symlinked file, symlinked directory, untracked symlink in git diff), on both runtimes
-- [ ] An agent that does not confirm the limit returns nothing to a teammate
-- [ ] Owner behaviour is unchanged, including legacy chats without a recorded creator
-- [ ] Expiry and revoke end each new surface on the next request
+- [x] A member without a grant cannot create or fire a schedule that prompts someone else's chat (real-SQLite attack test with an owner control and a grantee control)
+- [x] A teammate's schedule does not fire after their grant ends or is revoked, and their pending schedules for that chat are cancelled
+- [x] A teammate's prompt with attachments delivers the files into the shared chat's workspace while the grant is active; after expiry or revoke, neither the files nor the prompt are delivered
+- [x] A teammate can list, view, download and diff files inside the repository, and nothing outside it (absolute, `~`, `..`, symlinked file, symlinked directory, untracked symlink in git diff, any `.git`), on both runtimes (Go tests run every case standalone and through `docker exec`)
+- [x] An agent that does not confirm the limit returns nothing to a teammate
+- [x] Owner behaviour is unchanged, including legacy chats without a recorded creator
+- [x] Expiry and revoke end each new surface on the next request
 - [ ] Two-account staging covers each surface, including expiry and revoke
 
 ## Notes
@@ -65,5 +66,13 @@ No change needed:
 - Found and filed: a sub-folder listing includes the folder itself, for owners too (`tasks/backlog/2026-10-20-file-list-shows-folder-inside-itself.md`).
 - Design decisions taken within the request (report them): teammates' agents (MCP) cannot use the teammate's grant to schedule; standing watches are owner-only (a lasting rule cannot be backed by a minutes-long grant); `.git` is excluded from teammates' Files reads; the Files limit does not stop the agent channel, which the share warning already covers.
 - Mutation script lesson: restoring a mutated file with `git checkout` loses uncommitted edits; commit before mutating.
+- Specialist review (2026-10-20), fixed in commits `85ead445a`, `632e8baa2`, `85033f04c`:
+  - Security (PASS): a VM agent timeout logged the URL with its `?token=`; `fetchWithTimeout` now leaves the query string out (pre-existing, now also teammate traffic). `stat` gets `--`. `.env` is named in the share warning and the guide.
+  - Go: nested `.git` directories are refused, not only the repository's; `..` answers 404 under confinement like every other escape; the `git/diff` untracked fallback answers a refused path with 404 instead of an empty diff; every confinement test runs on both runtimes, the VM one through `docker exec` with a docker CLI double.
+  - Go raised the gap between the `realpath` check and the read (TOCTOU) as HIGH; the security reviewer rated it LOW. Decision: accepted and documented (code comment, `security.md`). Making the swap needs a process running in the workspace, and such a process can already read every file there; a teammate reaches one only through the agent, which the share warning covers and whose commands show in the chat. An atomic fd-based read would need a helper inside arbitrary images.
+  - Test engineer: "reschedule/cancel by any writer" is documented behavior, not a new gap (see Plan). Listing every project schedule is likewise documented ("Project members can inspect automation"). Added: a standing watch paused through the real alarm, 304s under confinement.
+  - UI: focus and an announcement when a teammate's panel closes; file links in messages gated like the rail; a failed download says why; the first share bullet split in two.
+  - Cloudflare: the I/O comment now counts 8 round trips (at the rule-60 ceiling).
+  - Each fix proven discriminating: timeout query (1 red), Git refusal wording (1), 304 order (1), watch pause via alarm (1), nested `.git` (3 tests), `..` 404 (2), sanitize mapping (1), diff fallback (1), `stat --` (1), devcontainer path really used (1), focus (1), announcement (1), file-link gate (1), download error (1), stale error on reopen (1).
 
 - Staging is shared with the peer task 01M5B6WMMD6RV7Z737XSZCSBN9; message it before deploying.
