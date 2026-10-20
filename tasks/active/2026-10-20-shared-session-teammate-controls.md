@@ -20,8 +20,12 @@ PR #2381 shipped shared chats with 5/10/30/60-minute grants. It left terminal, f
 
 Implement (session-scoped):
 
-- [ ] Schedules: a `message_session` schedule requires the creator to own the target chat or hold an active grant, at creation, reschedule, fire time and recovery; attribution on a teammate's scheduled prompt; a teammate's pending schedules for the chat are cancelled on revoke and expiry
-- [ ] Attachments on a teammate's prompts: no refusal in `sendChat`; transfer reads the sender's own uploads into the owner's workspace only when the prompt is a shared-access prompt for that workspace's owner; the existing fence re-checks the grant before transfer and send
+- [x] Schedules: a `message_session` schedule requires the creator to own the target chat or hold an active grant, at creation, reschedule, fire time and recovery; attribution on a teammate's scheduled prompt; a teammate's pending schedules for the chat are cancelled on revoke and expiry (commit `0250e906a`)
+  - Only a person may use a grant (REST `creator: 'person'`); an agent (MCP) or SAM (provider-limit parking) may schedule only into its user's own chats.
+  - A teammate's schedule records its grant (DO migration 066, `shared_access_grant_id`) and fires only under that grant; the delivery fence re-checks it before every side effect.
+  - Standing watches outlive any grant, so they may only message chats their creator owns; only the creator may change a watch's action. The watch runner pauses a pre-existing watch into a chat its creator does not own.
+  - Found while doing this: any maintainer could change another member's standing-watch action (a confused deputy). Closed by the creator-only rule above.
+- [x] Attachments on a teammate's prompts: no refusal in `sendChat`; transfer reads the sender's own uploads into the owner's workspace only when the prompt is a shared-access prompt for that workspace's owner; the existing fence re-checks the grant before transfer and send (commit `9cc12b9fd`)
 - [ ] Files/Git panels for teammates, read-only, limited to the repository working tree:
   - [ ] API: owner path unchanged; otherwise `requireSessionWriter` per request, relative paths only, a `confine=workdir` request, and the response must confirm the limit (`X-SAM-Path-Confinement: workdir`) or nothing is returned (older agents fail closed); upload stays owner-only; audit log per request
   - [ ] VM agent: when `confine=workdir`, reject absolute and `~` paths and resolve the real path (`realpath -e`) under the real working directory for `files/list`, `files/raw`, `files/download`, `git/file` (working-tree read) and the untracked `git/diff` fallback; read the resolved path; set the response header
@@ -51,5 +55,10 @@ No change needed:
 - [ ] Two-account staging covers each surface, including expiry and revoke
 
 ## Notes
+
+- Guards proven discriminating (each removed once, the intended tests went red, restored):
+  - Schedules (`tests/workers/shared-session-schedules.test.ts`, unit `project-schedules.test.ts`): agent grant use (2 red), no writer check (8 red), legacy owner fallback (1), fire-time grant binding (2), cascade schedule cancel (3), queued scheduled-message cancel (1), delivery fence (1), watch creator check (1), admission re-check (unit, 1), watch pause (unit, 1).
+  - Attachments (`tests/workers/shared-session-attachments.test.ts`): old owner-only uploader rule (2 red), fence before each file (1), uploads read from the sender's prefix (2).
+- Mutation script lesson: restoring a mutated file with `git checkout` loses uncommitted edits; commit before mutating.
 
 - Staging is shared with the peer task 01M5B6WMMD6RV7Z737XSZCSBN9; message it before deploying.
