@@ -369,12 +369,12 @@ func parseRemoteBranches(output string) []GitBranchInfo {
 
 // ---------- Helpers ----------
 
-// sanitizeFilePath validates that a file path is safe for use in git/file commands.
-// Rejects path traversal and null bytes. Absolute paths are allowed because
-// the user owns the container and should be able to view any file in it.
 // errPathTraversal marks a path with a ".." component.
 var errPathTraversal = errors.New("path traversal is not allowed")
 
+// sanitizeFilePath validates that a file path is safe for use in git/file commands.
+// Rejects path traversal and null bytes. Absolute paths are allowed because
+// the user owns the container and should be able to view any file in it.
 func sanitizeFilePath(path string) error {
 	if path == "" {
 		return fmt.Errorf("file path is empty")
