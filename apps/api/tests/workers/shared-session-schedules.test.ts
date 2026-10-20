@@ -18,6 +18,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import type { ProjectData } from '../../src/durable-objects/project-data';
 import { resolveDurableExecutionConfig } from '../../src/durable-objects/project-data/durable-execution-config';
 import { runScheduleAlarm } from '../../src/durable-objects/project-data/project-event-schedules-runner';
+import { createSchedule as storeSchedule } from '../../src/durable-objects/project-data/project-event-schedules-storage';
 import { claimDuePromptDeliveries } from '../../src/durable-objects/project-data/prompt-delivery';
 import { runPromptDeliveryClaim } from '../../src/durable-objects/project-data/prompt-delivery-runner';
 import type { Env } from '../../src/env';
@@ -580,6 +581,31 @@ describe('scheduled messages into a shared chat', () => {
     expect(await scheduleRow(created.body.schedule.id)).toMatchObject({
       state: 'failed',
       last_error: 'The sender no longer has access to this session',
+    });
+  });
+
+  it('fails a schedule another member made in this chat before the check existed', async () => {
+    const chat = await ownerChat('Made before the fix');
+    // Written as the old admission allowed it: a member's message into someone else's chat.
+    const legacyId = await runInDurableObject(stub(), async (_instance, state) => {
+      const created = storeSchedule(
+        state.storage.sql,
+        testEnv,
+        PROJECT,
+        { userId: READER, chatSessionId: null },
+        scheduleRequest(chat.sessionId, Date.now() + MINUTE),
+        Date.now()
+      );
+      return created.schedule.id;
+    });
+    await makeDue(legacyId);
+    await fireSchedules();
+
+    expect(await scheduleRow(legacyId)).toMatchObject({
+      state: 'failed',
+      last_error:
+        'Only the chat owner, or someone it is shared with, can schedule messages into it',
+      delivery_id: null,
     });
   });
 
