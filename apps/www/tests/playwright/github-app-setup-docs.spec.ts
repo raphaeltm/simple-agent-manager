@@ -92,7 +92,7 @@ test.describe('Embedded docs GitHub App setup', () => {
       name: 'Scheduled actions and event watches',
     });
     await expect(title).toBeInViewport();
-    await expect(page.getByRole('heading', { name: 'Schedule once', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Run something once', exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page);
     await capture(page, 'scheduled-actions-docs-guide');
   });
