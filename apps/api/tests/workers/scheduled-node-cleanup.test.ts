@@ -694,11 +694,10 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       expect(await getWorkspaceStatus('ws-nc-failed-ended')).toMatchObject({ status: 'stopped' });
     });
 
-    it('reaps a failed task workspace once the sleep lifecycle can no longer take it', async () => {
-      // The reapers are the durable backstop for a preservation that cannot finish:
-      // an agent session that errored after the sleep was queued (the sweep can
-      // never claim it), or a sleep whose retry budget is spent. A queued sleep, or
-      // a failed one the sweep will still retry, stays exempt.
+    it('reaps an errored failed runtime while leaving exhausted capture cleanup to sleep', async () => {
+      // An errored agent cannot be claimed by sleep, so the orphan reaper owns it.
+      // Legacy failed rows remain sleep-owned even after capture attempts exhaust:
+      // the sleep lifecycle must perform guarded fallback teardown.
       await seedBaseData();
       const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
       const now = new Date().toISOString();
@@ -742,7 +741,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
 
       const result = await runNodeCleanupSweep(testEnv);
 
-      expect(result.orphanedWorkspacesFlagged).toBe(2);
+      expect(result.orphanedWorkspacesFlagged).toBe(1);
       expect(await getWorkspaceStatus('ws-nc-failed-backstop-queued')).toMatchObject({
         status: 'running',
       });
@@ -753,8 +752,16 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         status: 'running',
       });
       expect(await getWorkspaceStatus('ws-nc-failed-backstop-exhausted')).toMatchObject({
-        status: 'stopped',
+        status: 'running',
       });
+      expect(
+        await env.DATABASE.prepare(
+          `SELECT sleep_status, sleep_after, sleep_attempts
+        FROM session_snapshots WHERE id = ?`
+        )
+          .bind('snapshot-nc-failed-backstop-exhausted')
+          .first()
+      ).toMatchObject({ sleep_status: 'failed', sleep_after: null, sleep_attempts: 3 });
     });
 
     it('stops orphaned recovery workspace so it no longer blocks node cleanup forever', async () => {
