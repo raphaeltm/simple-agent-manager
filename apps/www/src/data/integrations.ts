@@ -619,7 +619,7 @@ export const integrations: Integration[] = [
       { title: 'Open source contribution', description: 'Use SAM to help maintain open source projects — triage issues, fix bugs, and generate PRs at scale.' },
     ],
     faq: [
-      { question: 'What GitHub permissions does SAM need?', answer: 'The SAM GitHub App needs read and write access to repository contents, so agents can push branches, and read access to metadata, pull requests, checks, actions and issues. Agents can open pull requests only when the App also has read and write access to pull requests. You choose exactly which repos to grant access to.' },
+      { question: 'What GitHub permissions does SAM need?', answer: 'Agents need read and write access to repository contents to push branches, and to pull requests to open them. The hosted SAM App has both, and GitHub lists all of its permissions when you install it. A self-hosted SAM App starts with read-only pull requests; the self-hosting guide shows how to let agents open them. You choose exactly which repos to grant access to.' },
       { question: 'Can SAM work with GitHub Enterprise?', answer: 'SAM is designed for GitHub.com. GitHub Enterprise Server support is on the roadmap for self-hosted deployments.' },
       { question: 'Do agents use my GitHub token?', answer: 'No — agents use the GitHub App\'s installation token for repository operations. Your personal OAuth token is only used for authentication to SAM itself.' },
     ],

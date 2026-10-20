@@ -196,7 +196,8 @@ SAM uses a **GitHub App** for both OAuth login and repository access. The app ne
 - **OAuth** — for user sign-in (BetterAuth handles session management)
 - **Contents: Read and write** — for cloning repos and pushing changes
 - **Email addresses: Read-only** — for user profile information
-- **Pull requests, Checks, and Actions: Read-only** — for project event facts from pull request, review, check, and workflow webhooks
+- **Pull requests, Checks, Actions, and Issues: Read-only** — for project event facts from pull request, review, check, workflow, and issue webhooks
+- **Pull requests: Read and write**, instead of read-only, if agents should open pull requests. The hosted SAM App has it; a self-hosted App starts without it (see [Let agents open pull requests](/docs/guides/self-hosting/#let-agents-open-pull-requests))
 
 <Aside type="caution">
   User credentials (cloud provider credentials and agent credentials) are encrypted at rest using

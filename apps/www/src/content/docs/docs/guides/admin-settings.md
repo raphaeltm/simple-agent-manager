@@ -49,7 +49,9 @@ secret. Enter a client ID and its secret together, and SAM checks them as a pair
 If someone else changed the settings since you opened the page, saving fails with **Settings changed
 since you loaded them.** Select **Reload current settings**, check your edits (the page keeps them),
 and save again. Any other failure shows **Save could not be confirmed**: reload before you retry,
-because the change may already have been saved.
+because the change may already have been saved. The same message appears when SAM refuses a value,
+for example a client secret that doesn't belong to its client ID. If the setting still shows its old
+value and **Source** after the reload, nothing was saved: check the value and try again.
 
 ## Undo a change
 
@@ -63,9 +65,16 @@ back.
 
 :::caution[Don't lock yourself out]
 SAM doesn't stop you from resetting or breaking the only sign-in provider your account uses. If
-nobody can sign in, set the `SETUP_FORCE` GitHub Environment variable to `true` and redeploy: that
-reopens `/setup`, where you can enter working sign-in credentials.
-:::
+nobody can sign in:
+
+1. Set the `SETUP_FORCE` GitHub Environment variable to `true` and run **Deploy Production**.
+2. Every deploy creates a new `SETUP_TOKEN`. Open the Cloudflare dashboard link the deploy prints,
+   copy the token, and open `/setup` with it (as in
+   [Verification](/docs/guides/self-hosting/#verification)).
+3. Enter working sign-in credentials.
+4. Once you can sign in again, delete `SETUP_FORCE` and deploy again. While it's set, `/setup`
+   stays open.
+   :::
 
 ## Which value wins
 

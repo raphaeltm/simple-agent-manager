@@ -11,8 +11,8 @@ your work is safe and what to do next. Everything here applies to both
 - **Needs input** in the session list. The agent, or SAM, is waiting for an answer from the person
   who started the chat. → [Find what it's waiting for](#the-agent-is-waiting-for-you)
 - **"Waiting for provider limit reset at…"**, or **Waiting** or **Blocked** on the task's Dashboard
-  card. The agent's subscription or key hit a usage limit; SAM carries on after the reset.
-  → [Usually nothing to do](#waiting-for-a-provider-limit-reset)
+  card. The agent's subscription or key hit a usage limit; SAM carries on after the reset, unless
+  it says **Blocked**. → [Usually nothing to do](#waiting-for-a-provider-limit-reset)
 - **"SAM paused automatic check-ins…"** The agent kept stopping without finishing, or its model was
   rejected, so SAM stopped nudging it. → [Look, then reply](#sam-paused-automatic-check-ins)
 - **A strip or failure card saying the agent's connection is missing or was rejected**, or that its
@@ -139,8 +139,8 @@ never switches to another model, profile, or credential to get around a limit.
   reset time, and its machine stays up meanwhile; despite the word "Blocked", it starts by itself
   after the reset.
 
-**Blocked** on its own means SAM stopped waiting. The task won't carry on by itself, and SAM leaves
-it as it is for you to decide:
+**Blocked** on its own means SAM stopped waiting. The task won't carry on by itself, and a reply in
+the chat doesn't restart it:
 
 - **Blocked: provider limit wait budget exhausted.** Three waits in a row didn't get the work going.
 - **Blocked: provider limit reset outlives the saved snapshot…** The reset comes after SAM stops
@@ -151,10 +151,14 @@ it as it is for you to decide:
 
 To move on:
 
-1. Look at what the agent got done: the chat, and anything it pushed.
-2. End the task: select **Complete** in the session tool rail, or **Archive** the chat.
-3. Once the limit has reset, continue in a new chat: **Fork** or **Retry** in the tool rail starts
+1. Look at what the agent got done: the chat, and anything it pushed. Work it didn't push stays in
+   the chat's saved workspace, which can't be woken while the task is **Blocked**.
+2. Once the limit has reset, continue in a new chat: **Fork** or **Retry** in the tool rail starts
    one from this chat (see [Conversation forking](/docs/guides/chat-features/#conversation-forking)).
+   The new chat starts from your default branch, so tell its agent which pushed branch to build on.
+3. End the blocked task with **Complete** in the session tool rail, which keeps its saved workspace
+   for the usual seven days. **Archive** deletes the saved workspace, and with it anything the agent
+   didn't push.
 
 ## SAM paused automatic check-ins
 

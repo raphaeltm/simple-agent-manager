@@ -117,13 +117,14 @@ For repository work, SAM lets a member's workspace use the project's GitHub App 
 Everyone in a project can read every chat in it. Use the session list's filter to switch between
 **All sessions** and **My sessions**, the chats you started.
 
-On a self-hosted instance, commenting on teammates' chats, sending a comment to the agent, and
-sharing a chat come with the first release after v2026.10.19.
+On a self-hosted instance, commenting on teammates' chats, @mentions, sending a teammate's comment to
+the agent, and sharing a chat come with the first release after v2026.10.19.
 
 | You want to…                                    | Do this                                                                                                                            |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Point a teammate at something in a chat         | [Comment](#comment-on-a-chat) on the message and [@mention](#mention-a-teammate) them                                              |
 | Tell the agent what a teammate said             | [Send their comment to the agent](#send-a-comment-to-the-agent)                                                                    |
+| Get the agent in a teammate's chat to act       | Comment on the message and @mention the chat's owner, who can **Send to agent** on your thread (or share the chat with you)        |
 | Let a teammate drive your chat while you're out | [Share the chat](#share-a-chat) for 5 minutes to an hour                                                                           |
 | Pick up where a teammate's chat left off        | Select **Fork** in its tool rail: the new chat is yours ([Conversation Forking](/docs/guides/chat-features/#conversation-forking)) |
 
@@ -188,7 +189,8 @@ once, and a resolved thread can't be sent.
 The agent gets the comment quoted with the message it's about and who wrote it, after its current
 turn ends, like any message you send. In the chat it's labelled with who sent it, for example
 **Grace sent Rae's comment to the agent**. Everyone else can comment, but not send: ask the chat's
-owner, or someone it's shared with, to send it.
+owner, or someone it's shared with, to send it, and @mention them so they get a **Mention**
+notification (a plain comment notification doesn't add to the bell's count).
 
 ### Share a chat
 
@@ -222,7 +224,8 @@ Before you share, know what it means:
 - **The agent can read the owner's keys**, so a teammate who drives it can ask it to print them and
   keep using them after their access ends. That is the owner's AI key or Claude/Codex sign-in, and
   on GitLab projects the owner's GitLab sign-in, which reaches all of the owner's GitLab projects.
-  On GitHub projects the agent only has a one-hour token for the project's repository. Share only with people you trust. SAM asks you to confirm
+  On GitHub projects the agent only has a one-hour token for the project's repository and any
+  repositories added under the project's **Repository Access**. Share only with people you trust. SAM asks you to confirm
   before it shares.
 - **Access lasts the time you choose.** When the time is up, access ends on its own. Only the owner
   can extend it, with **Renew**, which starts a new period from now.

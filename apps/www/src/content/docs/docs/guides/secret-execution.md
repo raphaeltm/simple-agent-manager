@@ -60,8 +60,9 @@ the values it's given, and a value written to a file, encoded, or transformed is
 A program that reads the variable when it starts, outside `exec_with_secrets`, sees the
 placeholder. That includes a dev server you start in the terminal, an MCP server from the
 repository's own config, and hooks. Either start it through `exec_with_secrets` (its one-hour limit
-applies), untick **Secret** for that variable (the agent can then read the value), or deliver the
-value as a runtime file instead.
+applies), save the variable again under the same name with **Secret** unticked (SAM never shows a
+secret's value, so enter it again; the agent can then read it), or deliver the value as a runtime
+file instead.
 
 ## Troubleshooting
 
