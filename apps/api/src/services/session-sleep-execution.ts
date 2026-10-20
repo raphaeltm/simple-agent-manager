@@ -29,6 +29,7 @@ import {
   type SleepWorkspace,
   type SleepWorkspaceSessionResult,
 } from './session-sleep-teardown';
+import { sanitizeSessionLifecycleMessage } from './session-snapshot-persistence';
 import {
   beginSessionSnapshotStopping,
   claimSessionSnapshotSleep,
@@ -228,11 +229,14 @@ export async function sleepWorkspaceSession(
         identityMatches && verified?.sleepFallbackJson
           ? await confirmSessionSleepFallbackStopping(env, verified, new Date())
           : null;
+      const episodeTrigger = verified
+        ? sessionSleepEpisodeTrigger(verified, new Date(), sessionSleepEpisodeConfig(env))
+        : null;
       if (
         !fallbackRecord &&
         identityMatches &&
         verified &&
-        sessionSleepEpisodeTrigger(verified, new Date(), sessionSleepEpisodeConfig(env)) &&
+        episodeTrigger &&
         (Date.parse(verified.expiresAt) <= Date.now() ||
           verified.status !== 'available' ||
           verified.degradation !== 'none' ||
@@ -243,12 +247,12 @@ export async function sleepWorkspaceSession(
         const record = {
           version: 1 as const,
           outcome: 'slept' as const,
-          trigger: 'retry_ceiling' as const,
+          trigger: episodeTrigger,
           blockedReason: null,
           decidedAt: new Date().toISOString(),
           episodeStartedAt: verified.sleepEpisodeStartedAt,
           failedAttempts: verified.sleepEpisodeFailures ?? 0,
-          lastError: verified.sleepError,
+          lastError: sanitizeSessionLifecycleMessage(env, verified.sleepError),
           recoveryPoint: null,
         };
         const promoted = await db

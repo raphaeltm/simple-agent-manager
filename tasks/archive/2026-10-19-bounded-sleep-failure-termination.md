@@ -77,3 +77,7 @@ Release gates pending: PR exact-head CI, best-effort CodeRabbit request/wait, me
 ### PR quality reconciliation
 
 PR2382 CI found identical force/non-force snapshot-status branches; simplified to the same single five-status array without changing behavior. Independent lifecycle review PASS and focused lifecycle/bounded regressions pass. A separate merged-main web clock assertion failed18-vs19-minute rounding; owner notified, no sleep-runtime failure indicated. Final candidate staging deployment/smoke and fresh exact-head CI will cover the simplification before merge.
+
+### CodeRabbit review correction
+
+Review5580242397 found stopping-retry promotion stored a fixed trigger and raw lifecycle error. Promotion now derives and stores the actual existing-budget trigger and sanitizes the error through the shared redactor before persistence or notice publication; identity/capture/claim/CAS guards are unchanged. Two real SQLite regressions reproduced incorrect trigger and synthetic token/control-character disclosure on old source, then passed with the fix. Four relevant suites149/149 pass; independent adversarial lifecycle/security review PASS. Updated CI, staging deploy/smoke/navigation and incremental review window remain release gates.

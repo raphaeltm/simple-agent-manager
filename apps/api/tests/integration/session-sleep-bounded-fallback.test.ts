@@ -1391,6 +1391,48 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       }
     );
 
+    it.each([
+      ['attempt_budget', 3, 10],
+      ['elapsed_budget', 1, 20],
+    ] as const)(
+      'promotes expired stopping recovery with truthful %s and sanitized diagnostics',
+      async (trigger, failures, retryTick) => {
+        await seedStaleStoppingTasks(['a']);
+        const token = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        const rawError = `Authorization: Bearer ${token}\u0007 rejected`;
+        sqlite
+          .prepare(
+            `UPDATE session_snapshots SET expires_at = ?, sleep_episode_started_at = ?,
+        sleep_episode_failures = ?, sleep_fallback_json = NULL, sleep_error = ?
+        WHERE chat_session_id = 'chat-a'`
+          )
+          .run(tick(1).toISOString(), START.toISOString(), failures, rawError);
+        expect(row().sleep_error).toContain(token);
+        vi.setSystemTime(tick(retryTick));
+        notices.length = 0;
+
+        await sleepWorkspaceSession(env, {
+          workspaceId: 'ws-a',
+          userId: 'user-1',
+          reason: 'Retry interrupted teardown',
+          sleepClaimId: 'promotion-retry',
+        });
+
+        expect(row()).toMatchObject({ sleep_status: 'sleeping' });
+        expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledOnce();
+        expect
+          .soft(fallbackRecord())
+          .toMatchObject({ trigger, failedAttempts: failures, recoveryPoint: null });
+        expect.soft(fallbackRecord()?.lastError).toContain('[REDACTED]');
+        expect.soft(fallbackRecord()?.lastError).not.toContain(token);
+        expect.soft(fallbackRecord()?.lastError).not.toContain('\u0007');
+        expect(notices).toHaveLength(1);
+        expect.soft(notices[0]?.content).toContain('[REDACTED]');
+        expect.soft(notices[0]?.content).not.toContain(token);
+        expect.soft(notices[0]?.content).not.toContain('\u0007');
+      }
+    );
+
     it('counts a failed final convergence claim once', async () => {
       await seedStaleStoppingTasks(['a']);
       const failures = row().sleep_episode_failures;
