@@ -35,7 +35,7 @@
     "dompurify": "3.4.13",
     "idb-keyval": "^6.2.1",
     "lucide-react": "catalog:",
-    "mermaid": "11.14.0",
+    "mermaid": "12.2.0",
     "prism-react-renderer": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",

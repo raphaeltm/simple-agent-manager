@@ -28,7 +28,7 @@
     "@agentclientprotocol/sdk": "1.8.0",
     "dompurify": "3.4.13",
     "lucide-react": "catalog:",
-    "mermaid": "11.14.0",
+    "mermaid": "12.2.0",
     "prism-react-renderer": "catalog:",
     "react-markdown": "catalog:",
     "react-virtuoso": "catalog:",
