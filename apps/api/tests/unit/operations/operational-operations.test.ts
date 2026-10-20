@@ -80,10 +80,11 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
       '0189_cli_operation_receipts.sql',
       '0191_connector_execution.sql',
       '0199_operational_job_observations.sql',
-    ])
-      sqlite.exec(
-        readFileSync(new URL(`../../../src/db/migrations/${name}`, import.meta.url), 'utf8')
-      );
+    ]) {
+      // Execute production migrations as behavioral fixtures, never assert on source text.
+      const migrationUrl = new URL(`../../../src/db/migrations/${name}`, import.meta.url);
+      sqlite.exec(readFileSync(migrationUrl, 'utf8'));
+    }
     sqlite.exec(`INSERT INTO projects(id,name) VALUES ('p','Project'),('foreign','Other');
       INSERT INTO users(id,name,email) VALUES ('owner','Owner','o@example.com'),('grantee','Shared','g@example.com'),('reader','Reader','r@example.com');
       INSERT INTO project_members(project_id,user_id,role,status) VALUES ('p','owner','owner','active'),('p','grantee','maintainer','active'),('p','reader','viewer','active');
