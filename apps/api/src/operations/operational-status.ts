@@ -2,6 +2,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import { expectJsonRecord } from '../lib/runtime-validation';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { attachWakeState } from '../routes/chat/wake-state';
 import { resolveChatAgentState } from '../routes/chat-agent-state';
@@ -93,8 +94,8 @@ export async function chatStatus(ctx: OperationContext, projectId: string, sessi
   let reservation: Record<string, unknown> | null = null;
   try {
     const parsed: unknown = JSON.parse(workspace?.reservation ?? 'null');
-    if (parsed && typeof parsed === 'object') {
-      const row = parsed as Record<string, unknown>;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const row = expectJsonRecord(parsed, 'connector.resource_reservation');
       reservation = Object.fromEntries(
         ['cpuMillis', 'memoryMb', 'diskMb']
           .filter((k) => typeof row[k] === 'number' && Number.isFinite(row[k]))

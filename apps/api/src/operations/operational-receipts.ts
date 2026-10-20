@@ -1,3 +1,4 @@
+import { expectJsonRecord } from '../lib/runtime-validation';
 import { operationReceiptId } from '../services/cli-operation-receipts';
 import { requireSessionWriter } from '../services/session-access';
 import { authorizeProjectOperation } from './authorization';
@@ -57,7 +58,7 @@ export async function readOperation(
   try {
     const value: unknown = JSON.parse(row.response_json ?? 'null');
     if (value && typeof value === 'object' && !Array.isArray(value)) {
-      const saved = value as Record<string, unknown>;
+      const saved = expectJsonRecord(value, 'connector.operation_receipt');
       if (typeof saved.sessionId === 'string') {
         await requireSessionWriter(ctx.env, input.projectId, saved.sessionId, ctx.actor.userId, {
           action: 'inspect this operation result',
