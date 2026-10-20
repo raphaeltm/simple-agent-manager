@@ -1,10 +1,11 @@
-import { Alert, Button, PageLayout } from '@simple-agent-manager/ui';
+import { Button, PageLayout } from '@simple-agent-manager/ui';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Loader2, Settings } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
 import { EarlierSamHistory } from '../components/sam/EarlierSamHistory';
+import { RetryAlert } from '../components/sam/RetryAlert';
 import { requestErrorText } from '../components/sam/sam-receipts';
 import { SamComposer } from '../components/sam/SamComposer';
 import { isActiveTurn, SamTurn, type Turn } from '../components/sam/SamTurn';
@@ -81,12 +82,11 @@ export function Sam() {
             Open Settings
           </Link>
           {settings.error && (
-            <Alert variant="error">
-              {settings.error.message}{' '}
-              <Button variant="secondary" onClick={() => void settings.refetch()}>
-                Try again
-              </Button>
-            </Alert>
+            <RetryAlert
+              error={settings.error}
+              fallback="Couldn’t load your SAM setting."
+              onRetry={() => void settings.refetch()}
+            />
           )}
         </div>
       )}
@@ -275,12 +275,11 @@ function SamConversation() {
               </p>
             )}
             {history.error && (
-              <Alert variant="error">
-                {history.error.message}{' '}
-                <Button variant="secondary" onClick={() => void history.refetch()}>
-                  Try again
-                </Button>
-              </Alert>
+              <RetryAlert
+                error={history.error}
+                fallback="Couldn’t load your conversation."
+                onRetry={() => void history.refetch()}
+              />
             )}
             {history.data?.pages[0]?.legacyHistoryAvailable &&
               history.data.pages[0].conversationId && (

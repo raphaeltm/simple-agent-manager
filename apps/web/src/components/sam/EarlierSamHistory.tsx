@@ -1,4 +1,4 @@
-import { Alert, Button } from '@simple-agent-manager/ui';
+import { Button } from '@simple-agent-manager/ui';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { ChevronRight } from 'lucide-react';
 import { useState } from 'react';
@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { request } from '../../lib/api/client';
 import { RenderedMarkdown } from '../MarkdownRenderer';
+import { RetryAlert } from './RetryAlert';
 
 interface EarlierMessage {
   id: string;
@@ -62,12 +63,11 @@ export function EarlierSamHistory({ conversationId }: { conversationId: string }
         <div className="space-y-4 pb-3">
           {history.isPending && <p role="status">Loading earlier history…</p>}
           {history.error && (
-            <Alert variant="error">
-              {history.error.message}{' '}
-              <Button variant="secondary" onClick={() => void history.refetch()}>
-                Retry earlier history
-              </Button>
-            </Alert>
+            <RetryAlert
+              error={history.error}
+              fallback="Couldn’t load earlier history."
+              onRetry={() => void history.refetch()}
+            />
           )}
           {history.hasNextPage && (
             <Button
