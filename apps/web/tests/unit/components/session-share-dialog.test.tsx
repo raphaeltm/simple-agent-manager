@@ -327,10 +327,18 @@ describe('SessionShareDialog — people with access', () => {
   });
 
   it('shows the time left by the server’s clock', () => {
-    // The server is 5 minutes ahead of this device.
-    recordServerTime(Date.now() + 5 * MINUTE);
-    const { dialog } = renderDialog({ access: accessFor('owner', [grant('g-bea', BEA, OWNER)]) });
-    expect(within(dialog).getByTestId('grant-time-left')).toHaveTextContent(/^ends in 18 min/);
+    // Keep the server reading, receipt time, grant and render on one clock sample.
+    // A 1 ms difference at this exact minute boundary rounds 18 min up to 19 min.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 9, 20, 12));
+    try {
+      // The server is 5 minutes ahead of this device.
+      recordServerTime(Date.now() + 5 * MINUTE);
+      const { dialog } = renderDialog({ access: accessFor('owner', [grant('g-bea', BEA, OWNER)]) });
+      expect(within(dialog).getByTestId('grant-time-left')).toHaveTextContent(/^ends in 18 min/);
+    } finally {
+      clock.mockRestore();
+      resetServerClock();
+    }
   });
 
   it('marks access that has run out as ended, with nothing left to revoke', () => {

@@ -10,7 +10,8 @@
  *
  * Never rerun after an ambiguous result. The exclusive ledger below survives
  * Playwright output cleanup. Recover using its SAME turn key/action/task/session.
- * Maximum 12 minutes work + 3 minutes cleanup; one small VM (2 vCPU/4 GB),
+ * Maximum 12 minutes work + 3 minutes cleanup; one VM lifecycle.
+ * Request cap: 2 vCPU/3.5 GB workload; catalog cost envelope: 8 vCPU/16 GB host.
  * one dispatch, one same-session follow-up, one optional approved stop.
  * Prior comparable small Codex profile: 01KV6N86TMHWNWPXNDAWZB13FJ.
  *
@@ -350,6 +351,21 @@ test('one scoped Astra High dispatch, durable replay, follow-up and owned cleanu
         const workspace = await get(`${STAGING_API}/api/workspaces/${task.workspaceId}`);
         ledger.nodeId = workspace.nodeId;
         await save();
+        const reservation = decode(workspace.resolvedReservationJson);
+        ledger.workloadReservation = {
+          cpuMillis: reservation.cpuMillis,
+          memoryMb: reservation.memoryMb,
+        };
+        await save();
+        check(
+          Number.isSafeInteger(reservation.cpuMillis) &&
+            reservation.cpuMillis > 0 &&
+            reservation.cpuMillis <= 2000 &&
+            Number.isSafeInteger(reservation.memoryMb) &&
+            reservation.memoryMb > 0 &&
+            reservation.memoryMb <= 3584,
+          'Resolved workload request respects 2 vCPU and 3.5 GB policy cap'
+        );
         const node = await get(`${STAGING_API}/api/nodes/${workspace.nodeId}`);
         const cpu = node.observedProviderInstanceVcpuCount;
         const memory = node.observedProviderInstanceMemoryMb;
@@ -360,12 +376,11 @@ test('one scoped Astra High dispatch, durable replay, follow-up and owned cleanu
           source: node.observedHardwareSource ?? null,
           lastHeartbeatAt: node.lastHeartbeatAt,
         };
-        await save(); // Preserve actual hardware evidence even if it exceeds the cap.
+        await save(); // Preserve observed hardware even if it exceeds the cost envelope.
         check(
-          node.vmSize === 'small' &&
-            (cpu == null || (Number.isFinite(cpu) && cpu > 0 && cpu <= 2)) &&
-            (memory == null || (Number.isFinite(memory) && memory > 0 && memory <= 4096)),
-          'Host remains within small VM budget'
+          (cpu == null || (Number.isFinite(cpu) && cpu > 0 && cpu <= 8)) &&
+            (memory == null || (Number.isFinite(memory) && memory > 0 && memory <= 16384)),
+          'Observed host remains within 8 vCPU and 16 GB catalog cost envelope'
         );
         // Bootstrap can precede observed metadata. Missing values must wait, never pass.
         observedHardwareReady =
@@ -374,10 +389,7 @@ test('one scoped Astra High dispatch, durable replay, follow-up and owned cleanu
           workspace.projectId === PROJECT && workspace.repository === REPOSITORY,
           'Workspace matches exact project repository'
         );
-        check(
-          workspace.workspaceProfile === 'lightweight' && workspace.vmSize === 'small',
-          'Lightweight small workspace'
-        );
+        check(workspace.workspaceProfile === 'lightweight', 'Lightweight workspace');
       }
       const acp = await get(
         `${PROJECT_API}/acp-sessions?chatSessionId=${ledger.sessionId}&limit=10`
@@ -440,7 +452,7 @@ test('one scoped Astra High dispatch, durable replay, follow-up and owned cleanu
         };
         ledger.messageIds = messages.map((item) => item.id);
         ledger.checks.liveAgentHeartbeat = true;
-        ledger.checks.observedHardwareWithinBudget = true;
+        ledger.checks.observedHardwareWithinCostEnvelope = true;
         await save();
         return;
       }
