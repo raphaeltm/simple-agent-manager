@@ -1292,7 +1292,9 @@ describe('ProjectMessageView — Files and Git follow shared access', () => {
     expect(mocks.getSessionAccess).toHaveBeenCalledWith('proj-1', 'session-1');
     expect(screen.queryByRole('button', { name: 'Browse workspace files' })).toBeNull();
     // Focus lands on the notice that says why, and a status line announces the close.
-    expect(document.activeElement?.textContent).toContain('Your shared access has ended');
+    const notice = screen.getByText('Your shared access has ended').closest('[tabindex="-1"]');
+    expect(notice).not.toBeNull();
+    expect(document.activeElement).toBe(notice);
     expect(
       screen.getByText('Your shared access ended, so the file panel closed.').getAttribute('role')
     ).toBe('status');
