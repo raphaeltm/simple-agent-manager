@@ -23,6 +23,7 @@ Ship the production version: one **Automation** page built on the existing APIs 
 ## Research findings
 
 ### Today's surfaces (to replace)
+
 - `apps/web/src/pages/ProjectEvents.tsx` + `components/project-events/*` (Subscriptions, Schedules,
   Standing watches, Channels panels; EventActionFields, EventUi, ScheduleExecution,
   SubscriptionDeliveryHistory). No unit tests; Playwright `project-events-audit.spec.ts`.
@@ -42,6 +43,7 @@ Ship the production version: one **Automation** page built on the existing APIs 
 - Nav: `components/NavSidebar.tsx` `PROJECT_NAV_ITEMS` (Events, Triggers); mobile drawer reuses it.
 
 ### Reusable pieces (keep)
+
 - `lib/project-events-api.ts` (all schedule/watch/subscription/channel calls), `lib/api/triggers.ts`.
 - `lib/query-options/triggers.ts`, `projectChatSessionsQueryOptions`, `agentProfilesQueryOptions`,
   `projectSkillsQueryOptions`, `useProjectMembers`, `useQueryScope`.
@@ -53,6 +55,7 @@ Ship the production version: one **Automation** page built on the existing APIs 
 - `lib/event-state-tone.ts` stays (admin inspector).
 
 ### API facts that shape the UI
+
 - Write access: owner/admin/maintainer (`task:write`); viewers read-only
   (`apps/api/src/middleware/project-auth.ts`). Same gate for triggers, schedules, watches,
   subscription cancel.
@@ -82,6 +85,7 @@ Ship the production version: one **Automation** page built on the existing APIs 
 ## Implementation checklist
 
 ### Foundations
+
 - [x] `lib/query-options/automation.ts`: identity-scoped query options for trigger detail,
       executions (infinite), webhook deliveries (infinite), schedules, watches, subscriptions,
       subscription deliveries, channels, channel history; export from the barrel.
@@ -96,6 +100,7 @@ Ship the production version: one **Automation** page built on the existing APIs 
 - [x] Access hook: `canWrite` (owner/admin/maintainer, active member or project owner).
 
 ### Pages and routes
+
 - [x] Routes in `App.tsx`: `automation`, `automation/new`, `automation/history`,
       `automation/behind`, `automation/:kind/:id`, `automation/:kind/:id/edit`; lazy loaded.
 - [x] Legacy redirects: `events` (+`?section`, `?sessionId`), `triggers` (+`?edit=new|<id>`),
@@ -131,6 +136,7 @@ Ship the production version: one **Automation** page built on the existing APIs 
       (fix "New" bug); SessionHeader trigger links → new route.
 
 ### Cleanup
+
 - [x] Delete replaced pages/components and their tests; `components/triggers/index.ts` deleted
       (nothing imports the barrel); update `theme-tokens.test.ts` file list.
 - [x] Replace Playwright specs: `project-events-audit.spec.ts`, `triggers-ui-audit.spec.ts` →
@@ -138,11 +144,13 @@ Ship the production version: one **Automation** page built on the existing APIs 
       `docs-screenshots-sessions.spec.ts`, `marketing-shots-events.spec.ts`.
 
 ### Docs
+
 - [x] `apps/www` guides: `triggers.md`, `webhook-triggers.md`, `scheduled-actions.md`,
       `chat-features.md` (tool rail), any other "Events page"/"Triggers page" mention; new docs
       images; marketing `data/features/events.json` + regenerated images.
 
 ### Tests
+
 - [x] Unit: model/attention/describe helpers; editor state → request mappers for every kind
       (every field reaches the API call); legacy redirect mapping.
 - [x] Component: overview attention + Resume; detail actions with confirms; editor submit per
@@ -153,6 +161,7 @@ Ship the production version: one **Automation** page built on the existing APIs 
 ### Fable review findings (task 01M5D3GGDGYVPN0XBE9V1QX4XB, library fileId 01M5D4GQ59PRANDYG19AZGRVSP)
 
 Must / High (all must ship in this PR):
+
 - [x] F1 Watch edit sends `action` only when the editor is the creator; action fields locked for
       others; "raise limit" sends only `expectedVersion` + `maxExecutions`.
 - [x] F2 A watch paused with `lastError` (incl. creator-no-longer-owns-target) shows the error and
@@ -178,6 +187,7 @@ Must / High (all must ship in this PR):
       message it; `/events?sessionId=X` lands on that view.
 
 API limits to design around:
+
 - [x] F12 Recent runs: fetch per trigger only for paused triggers + the most recently fired few
       (overview); History fetches all. Failure streak skips `skipped`, counts `failed`; copy says
       "its last N runs failed" and "resuming starts the count again".
@@ -192,6 +202,7 @@ API limits to design around:
 - [x] F18 Webhook preview shows `filterResult.reason`, `warnings` and the prompt.
 
 Links and entry points:
+
 - [x] F19 Command palette "Go to Triggers"/"Create Trigger" → Automation (+ its tests).
 - [x] F20 Credential-health and offboarding group label "Triggers" → "Automation" if UI-owned.
 - [x] F21 Run "View chat" uses `Link`, not a full-reload `<a>`.
@@ -200,6 +211,7 @@ Links and entry points:
       concepts.mdx:106, collaboration.md:199; marketing shots spec navigates to new URLs.
 
 Permissions:
+
 - [x] F24 One `canWrite` rule; viewers may still preview webhook samples and read deliveries.
 - [x] F25 Only human/agent-owned subscriptions can be stopped; SAM relays never; watch-owned rows
       link to their watch.
@@ -209,6 +221,7 @@ Permissions:
 - [x] F28 Disabled trigger offers "Turn on" (status active).
 
 Other details users would miss:
+
 - [x] F29 Runs: delete one (not running), "Clear stuck" only with a queued run, skip reasons, full
       error text, confirms on both.
 - [x] F30 Webhook deliveries: every outcome, error code, linked run, refresh + load more, 7-day
