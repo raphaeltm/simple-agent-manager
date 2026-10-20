@@ -108,6 +108,7 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
   const authenticated: Page[] = [];
   let pageErrors = 0;
   let consoleErrors = 0;
+  let disableRequestMs: number | null = null;
   for (const observed of [page, secondary]) {
     observed.on('pageerror', () => {
       pageErrors += 1;
@@ -214,6 +215,8 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
       ).toBe(true);
       await stagingShot(page, 'sam-durable-chat-mobile');
+      await page.getByRole('button', { name: 'Send', exact: true }).scrollIntoViewIfNeeded();
+      await stagingShot(page, 'sam-composer-mobile');
       await page.setViewportSize({ width: 1280, height: 800 });
     });
 
@@ -268,7 +271,15 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
         await settingsTab.goto(`${STAGING_APP}/settings`);
         const toggle = settingsTab.getByRole('switch', { name: 'Enable SAM assistant' });
         await expect(toggle).toHaveAttribute('aria-checked', 'true');
+        const started = Date.now();
+        const disabledResponse = settingsTab.waitForResponse(
+          (response) =>
+            response.url() === `${SAM_API}/settings` && response.request().method() === 'PATCH',
+          { timeout: 30_000 }
+        );
         await toggle.click();
+        expect((await disabledResponse).status(), 'Disable request succeeds').toBe(200);
+        disableRequestMs = Date.now() - started;
         await expect(toggle).toHaveAttribute('aria-checked', 'false');
         await expectDisabledApi(page, `after-disable-${runId}`);
         await page.bringToFront();
@@ -303,6 +314,7 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
       body: JSON.stringify({
         pageErrors,
         consoleErrors,
+        disableRequestMs,
         note: 'Counts only; no credential-bearing browser log text retained',
       }),
       contentType: 'application/json',
