@@ -27,6 +27,12 @@ export function whenLabel(ts: number, now = Date.now()) {
   return dateFmt.format(ts);
 }
 
+/** Like {@link whenLabel}, but always with the time: "Today 9:44 AM", "Oct 30 9:00 AM". */
+export function dateTimeLabel(ts: number, now = Date.now()) {
+  const diff = dayIndex(ts) - dayIndex(now);
+  return Math.abs(diff) < 7 ? whenLabel(ts, now) : `${dateFmt.format(ts)} ${clock(ts)}`;
+}
+
 /** The day part of {@link whenLabel}: "Today", "Tomorrow", "Wed", "Oct 8". */
 export function dayLabel(ts: number, now = Date.now()) {
   const diff = dayIndex(ts) - dayIndex(now);

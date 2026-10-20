@@ -18,7 +18,7 @@ import { subscriptionsQueryOptions } from '../../lib/query-options';
 import { useProjectContext } from '../ProjectContext';
 import type { ActivityEntry } from './activity';
 import { useAutomationAccess, useAutomationData, useAutomationLookups } from './data';
-import { isSamRelay } from './describe';
+import { isManagedSubscription, isSamRelay } from './describe';
 import { TEMPLATES } from './editor/templates';
 import {
   AllAutomations,
@@ -108,8 +108,11 @@ export function AutomationOverview() {
     ...subscriptionsQueryOptions(queryScope, projectId, null, 'active'),
     enabled: Boolean(queryScope),
   });
+  // Waits agents set up themselves: not SAM's relays, not a watch's own subscription.
   const waitingCount = waiting.data
-    ? waiting.data.subscriptions.filter((subscription) => !isSamRelay(subscription)).length
+    ? waiting.data.subscriptions.filter(
+        (subscription) => !isSamRelay(subscription) && !isManagedSubscription(subscription)
+      ).length
     : null;
 
   const names = useMemo(

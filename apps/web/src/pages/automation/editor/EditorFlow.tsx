@@ -195,7 +195,7 @@ export function EditorFlow({
     <div
       className={
         isMobile
-          ? 'sticky bottom-0 z-10 -mx-3 flex items-center justify-between gap-3 border-0 border-t border-solid border-border-default px-3 py-3 glass-chrome'
+          ? 'sticky bottom-0 z-10 -mx-3 flex items-center justify-between gap-3 border-0 border-t border-solid border-border-default bg-canvas px-3 py-3'
           : 'flex items-center justify-between gap-3 border-0 border-t border-solid border-border-default pt-5'
       }
     >

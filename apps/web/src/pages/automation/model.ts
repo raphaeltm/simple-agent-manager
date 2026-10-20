@@ -24,7 +24,7 @@ import {
   INCIDENT_TRIGGER_WHEN,
   webhookTriggerWhen,
 } from './describe';
-import { fullDate, viewerZone } from './time';
+import { dateTimeLabel, viewerZone } from './time';
 
 /** What starts an automation, which is also how the overview groups it. */
 export type StartKind = 'schedule' | 'once' | 'github' | 'webhook' | 'event' | 'incident';
@@ -108,7 +108,9 @@ export function titleFromPrompt(prompt: string, fallback: string): string {
     .map((part) => part.trim())
     .find(Boolean);
   if (!line) return fallback;
-  return line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line;
+  if (line.length > 80) return `${line.slice(0, 79).trimEnd()}…`;
+  // A sentence makes a fine name, but names do not end with a full stop.
+  return line.replace(/\.$/, '');
 }
 
 const zoneNote = (zone: string) => (zone && zone !== viewerZone() ? `${zone} time` : undefined);
@@ -218,11 +220,12 @@ export function fromTrigger(
       skillId: trigger.skillId,
     },
     state,
+    // The state pill already says "Paused" or "Off"; the note says what that means.
     stateNote:
       state === 'paused'
-        ? 'Paused · nothing starts until it is resumed'
+        ? 'Nothing starts until it is resumed'
         : state === 'off'
-          ? 'Turned off'
+          ? 'Nothing starts until it is turned on'
           : undefined,
     nextAt: state === 'on' && trigger.sourceType === 'cron' ? ms(trigger.nextFireAt) : null,
     lastRunAt: ms(trigger.lastTriggeredAt),
@@ -293,7 +296,6 @@ const SCHEDULE_NOTES: Partial<Record<ProjectSchedule['state'], string>> = {
   admitted: 'Ran',
   failed: 'Did not run',
   ambiguous: 'Ran, but could not be confirmed',
-  cancelled: 'Cancelled',
   expired: 'Expired before it could run',
 };
 
@@ -312,17 +314,17 @@ export function fromSchedule(
     name:
       schedule.reason?.trim() ||
       titleFromPrompt(action.prompt, action.kind === 'message' ? 'Message a chat' : 'Start a chat'),
-    when: fullDate(schedule.dueAt, schedule.displayTimezone),
-    whenNote: zoneNote(schedule.displayTimezone),
+    // In the viewer's own time, like everything else in lists; the stored zone is in Advanced.
+    when: dateTimeLabel(schedule.dueAt),
     action,
     state,
     stateNote:
       state === 'late'
-        ? `Waiting to start · it keeps trying until ${fullDate(schedule.expiresAt)}`
+        ? `It keeps trying until ${dateTimeLabel(schedule.expiresAt)}`
         : state === 'starting'
           ? 'Starting now'
           : schedule.state === 'cancelled' && schedule.lastError
-            ? `Cancelled: ${schedule.lastError}`
+            ? `Reason: ${schedule.lastError}`
             : SCHEDULE_NOTES[schedule.state],
     nextAt:
       state === 'scheduled' || state === 'late' ? (schedule.nextAttemptAt ?? schedule.dueAt) : null,
@@ -387,7 +389,7 @@ function watchStateNote(watch: ProjectStandingWatch): string {
     return watch.lastError ? `Stopped for good: ${watch.lastError}` : 'Stopped for good';
   if (watch.state === 'paused') {
     if (watch.lastError && !RUNNER_PAUSES[watch.lastError]) return `Paused: ${watch.lastError}`;
-    return 'Paused · events are ignored until it is resumed';
+    return 'Events are ignored until it is resumed';
   }
   return `${watch.executionCount} of ${watch.maxExecutions} runs used`;
 }

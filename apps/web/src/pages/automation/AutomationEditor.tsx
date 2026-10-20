@@ -213,7 +213,8 @@ export function AutomationEditor() {
   const { projectId } = useProjectContext();
   const queryScope = useQueryScope();
   const access = useAutomationAccess();
-  const { kind, id } = useParams<{ kind?: string; id?: string }>();
+  // Not `id`: the project route above already owns that name.
+  const { kind, automationId: id } = useParams<{ kind?: string; automationId?: string }>();
   const editing = Boolean(id && isAutomationKind(kind));
   const trigger = useQuery({
     ...triggerDetailQueryOptions(queryScope, projectId, id ?? ''),

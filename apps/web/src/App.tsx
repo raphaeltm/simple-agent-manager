@@ -362,9 +362,9 @@ export default function App() {
                         <Route path="automation/new" element={page(<AutomationEditor />)} />
                         <Route path="automation/history" element={page(<AutomationHistory />)} />
                         <Route path="automation/behind" element={page(<AutomationBehind />)} />
-                        <Route path="automation/:kind/:id" element={page(<AutomationDetail />)} />
+                        <Route path="automation/:kind/:automationId" element={page(<AutomationDetail />)} />
                         <Route
-                          path="automation/:kind/:id/edit"
+                          path="automation/:kind/:automationId/edit"
                           element={page(<AutomationEditor />)}
                         />
                         {/* The pages Automation replaced; the API still links to triggers/:id. */}

@@ -216,7 +216,7 @@ describe('one-time schedules', () => {
   it('reads a past-due pending schedule as waiting to start', () => {
     const item = fromSchedule(schedule({ dueAt: NOW - HOUR }), NOW, WINDOW);
     expect(item.state).toBe('late');
-    expect(item.stateNote).toMatch(/^Waiting to start/);
+    expect(item.stateNote).toMatch(/^It keeps trying until/);
   });
 
   it('raises unconfirmed and failed schedules only inside the attention window', () => {

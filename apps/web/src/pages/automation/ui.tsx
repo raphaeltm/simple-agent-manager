@@ -99,13 +99,24 @@ const STATE_PILLS: Record<AutomationItem['state'], [Tone, string]> = {
   ended: ['muted', 'Ended'],
 };
 
-/** A pill only when the state is worth noticing, unless `always` (detail headers). */
-export function StatePill({ item, always = false }: { item: AutomationItem; always?: boolean }) {
+/**
+ * The pill for an item, or null. Lists show one only when the state is worth noticing (a running
+ * automation stays quiet); detail headers (`always`) always name the state.
+ */
+function pillFor(item: AutomationItem, always: boolean): [Tone, string] | null {
   if (item.attention && (item.state === 'done' || item.state === 'ended'))
-    return <Pill tone="warning">Check</Pill>;
-  if (!always && (item.state === 'on' || item.state === 'scheduled')) return null;
-  const [tone, label] = STATE_PILLS[item.state];
-  return <Pill tone={tone}>{label}</Pill>;
+    return ['warning', 'Check'];
+  if (always) return STATE_PILLS[item.state];
+  if (item.state === 'on' || item.state === 'scheduled')
+    return item.attention ? ['warning', 'Check'] : null;
+  return STATE_PILLS[item.state];
+}
+
+export const hasStatePill = (item: AutomationItem) => pillFor(item, false) !== null;
+
+export function StatePill({ item, always = false }: { item: AutomationItem; always?: boolean }) {
+  const pill = pillFor(item, always);
+  return pill ? <Pill tone={pill[0]}>{pill[1]}</Pill> : null;
 }
 
 export const OUTCOME_META: Record<Outcome, { Icon: IconType; color: string; label: string }> = {
@@ -252,14 +263,17 @@ export function ButtonLink({
 const ROW =
   'group flex w-full min-w-0 items-center gap-3 border-0 border-b border-solid border-border-default bg-transparent px-4 py-3 text-left no-underline last:border-b-0 hover:bg-surface-hover';
 
-/** Full-width row that opens something: leading icon, two lines, trailing slot, chevron. */
+/**
+ * Full-width row that opens something: leading icon, two lines, a status badge, chevron. On
+ * phones the badge sits under the text, so a long label never squeezes the title.
+ */
 export function RowLink({
   to,
   leading,
   title,
   subtitle,
   meta,
-  trailing,
+  badge,
   muted,
   testId,
 }: {
@@ -268,7 +282,7 @@ export function RowLink({
   title: ReactNode;
   subtitle?: ReactNode;
   meta?: ReactNode;
-  trailing?: ReactNode;
+  badge?: ReactNode;
   muted?: boolean;
   testId?: string;
 }) {
@@ -283,8 +297,9 @@ export function RowLink({
           <span className="line-clamp-2 break-words text-[13px] text-fg-muted">{subtitle}</span>
         )}
         {meta && <span className="break-words text-xs text-fg-muted">{meta}</span>}
+        {badge && <span className="mt-1 flex sm:hidden">{badge}</span>}
       </span>
-      {trailing}
+      {badge && <span className="hidden shrink-0 sm:flex">{badge}</span>}
       <ChevronRight
         size={18}
         aria-hidden
@@ -353,23 +368,30 @@ export function KeyValues({ rows, mono }: { rows: Array<[string, ReactNode]>; mo
   );
 }
 
-/** Filter chips that scroll sideways on phones instead of wrapping into a wall. */
+/** Filter chips that scroll sideways on phones instead of wrapping into a wall (unless `wrap`). */
 export function Chips<T extends string>({
   options,
   value,
   onChange,
   label,
+  wrap = false,
 }: {
   options: Array<{ id: T; label: string; count?: number }>;
   value: T;
   onChange: (id: T) => void;
   label: string;
+  /** Wrap on phones too: for form choices, where a hidden option is easy to miss. */
+  wrap?: boolean;
 }) {
   return (
     <div
       role="radiogroup"
       aria-label={label}
-      className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 sm:mx-0 sm:flex-wrap sm:px-0"
+      className={
+        wrap
+          ? 'flex flex-wrap gap-2'
+          : '-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 sm:mx-0 sm:flex-wrap sm:px-0'
+      }
     >
       {options.map((option) => {
         const active = option.id === value;
@@ -437,6 +459,7 @@ export function PageHeader({
 export function Page({ children, wide }: { children: ReactNode; wide?: boolean }) {
   return (
     <div
+      data-testid="automation-root"
       className={`mx-auto flex w-full min-w-0 flex-col gap-6 pb-16 ${wide ? 'max-w-[1180px]' : 'max-w-[860px]'}`}
     >
       {children}

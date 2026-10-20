@@ -150,12 +150,8 @@ export function TriggerDetail({
   const main = (
     <>
       {item.attention && (
+        // Resume is already in the action bar above; the card only adds the way to the runs.
         <AttentionCard attention={item.attention}>
-          {access.canWrite && item.attention.fix === 'resume' && (
-            <Button onClick={() => setStatus.mutate('active')} loading={setStatus.isPending}>
-              Resume
-            </Button>
-          )}
           {item.attention.fix === 'review-runs' && (
             <Button
               variant="ghost"

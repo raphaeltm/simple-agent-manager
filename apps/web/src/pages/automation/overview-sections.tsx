@@ -30,6 +30,7 @@ import {
   Panel,
   RowLink,
   SectionTitle,
+  hasStatePill,
   StatePill,
   TextLink,
 } from './ui';
@@ -75,7 +76,7 @@ export function AutomationRow({
         )
       }
       meta={rowMeta(item)}
-      trailing={<StatePill item={item} />}
+      badge={hasStatePill(item) ? <StatePill item={item} /> : undefined}
       muted={item.state === 'off'}
       testId="automation-row"
     />

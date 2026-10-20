@@ -1,4 +1,4 @@
-/** `automation/:kind/:id`: the page for one trigger, one-time automation or watch. */
+/** `automation/:kind/:automationId`: the page for one trigger, one-time automation or watch. */
 import { Navigate, useLocation, useParams } from 'react-router';
 
 import { automationPaths, isAutomationKind } from '../../lib/automation-routes';
@@ -9,7 +9,8 @@ import { WatchDetail } from './WatchDetail';
 
 export function AutomationDetail() {
   const { projectId } = useProjectContext();
-  const { kind, id } = useParams<{ kind: string; id: string }>();
+  // Not `id`: the project route above already owns that name.
+  const { kind, automationId: id } = useParams<{ kind: string; automationId: string }>();
   const { hash } = useLocation();
   if (!id || !isAutomationKind(kind))
     return <Navigate to={automationPaths.overview(projectId)} replace />;

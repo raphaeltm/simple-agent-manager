@@ -85,10 +85,19 @@ export function WaitCard({
     { success: 'Stopped waiting', failure: 'Could not stop it' }
   );
   const target = subscription.deliveryPreference.target?.sessionId;
-  const who = target ? lookups.chatTitle(target) : subscription.owner.name || 'An agent';
+  const managed = isManagedSubscription(subscription);
+  // Agent owner names are raw session ids, so a chat title (or a plain role) reads better.
+  const who = target
+    ? lookups.chatTitle(target)
+    : subscription.owner.type === 'standing_watch'
+      ? 'A watch'
+      : subscription.owner.type === 'human'
+        ? 'Someone'
+        : managed
+          ? 'SAM'
+          : 'An agent';
   const what = describeEventFilter(subscription.filter).noun;
   const relay = isSamRelay(subscription);
-  const managed = isManagedSubscription(subscription);
   const active = subscription.state === 'active';
   return (
     <Panel className="flex flex-col gap-3 p-4" label={`${who} waits for ${what}`}>

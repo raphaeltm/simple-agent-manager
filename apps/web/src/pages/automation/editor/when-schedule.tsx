@@ -35,6 +35,7 @@ export function ScheduleWhen({
       <div className="flex flex-col gap-3">
         <span className="text-sm font-semibold text-fg-primary">How often?</span>
         <Chips
+          wrap
           label="How often"
           value={value.preset}
           onChange={(preset) =>
