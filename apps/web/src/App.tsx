@@ -147,6 +147,11 @@ const ProjectTriggerDetail = lazyNamed(
 const ProjectTriggers = lazyNamed(() => import('./pages/ProjectTriggers'), 'ProjectTriggers');
 const ProjectEvents = lazyNamed(() => import('./pages/ProjectEvents'), 'ProjectEvents');
 const SamPrototype = lazyNamed(() => import('./pages/SamPrototype'), 'SamPrototype');
+// PROTOTYPE (dev-only) — Automation redesign. Remove with its directory before merging to main.
+const AutomationPrototype = lazyNamed(
+  () => import('./pages/automation-prototype'),
+  'AutomationPrototype'
+);
 const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
 const ConnectorConsent = lazyNamed(() => import('./pages/ConnectorConsent'), 'ConnectorConsent');
@@ -234,6 +239,7 @@ export const DEV_ONLY_ROUTE_PATHS = [
   '/__test/trial-chat-gate',
   '/__test/error-boundary',
   '/ui-standards',
+  '/prototype/automation',
 ] as const;
 
 /** TEMP audit-only harness — forces ErrorBoundary crash screen for Playwright review. Reverted after use. */
@@ -272,6 +278,11 @@ export default function App() {
                       <>
                         {/* SAM prototype — local/test only, no auth */}
                         <Route path="/sam" element={page(<SamPrototype />)} />
+                        {/* Automation redesign prototype — local/test only, mock data, no auth */}
+                        <Route
+                          path="/prototype/automation"
+                          element={page(<AutomationPrototype />)}
+                        />
                         {/* Harness for Playwright audits — mounts trial components with mock data */}
                         <Route
                           path="/__test/trial-chat-gate"
