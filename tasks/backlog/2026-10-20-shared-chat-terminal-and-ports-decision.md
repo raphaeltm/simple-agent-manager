@@ -1,12 +1,12 @@
-# Shared chats: decide whether teammates get the terminal and port previews
+# Shared chats: check owner-signed port links in transcripts (terminal and ports decided out of scope)
 
 ## Problem
 
 PR #2381 shipped shared chats (a teammate gets owner-equivalent control of one chat for 5, 10, 30 or
 60 minutes). PR #2383 extended what a teammate can do: attachments, one-off schedules and the Files
 and Git panels limited to the repository folder. The terminal and port previews stay with the
-owner, because neither can be made session-scoped with the current design. This needs a product and
-security decision from Raphaël before any work starts.
+owner, because neither can be made session-scoped with the current design. Raphaël decided they stay
+that way (see Decision).
 
 ## Why they are not session-scoped today
 
@@ -23,7 +23,16 @@ security decision from Raphaël before any work starts.
   if an agent posts that URL in a chat, every project member who reads the chat can open it. That
   last point predates shared chats and should be checked on its own.
 
-## Decision needed
+## Decision (2026-10-20)
+
+Raph, 07:43 UTC: "I just want the ability to send prompts properly. Terminal doesn't matter. It
+would be good for files and git to work." The terminal and port previews stay with the chat's
+owner; giving them to teammates is out of scope, not pending work. The collaboration guide already
+says both stay with the owner.
+
+What remains is item 3 below, which predates shared chats and is worth checking on its own.
+
+## Original questions (answered above, kept for context)
 
 1. Should a teammate get the terminal at all? If yes, what is acceptable: a terminal that keeps
    running until it is closed after access ends, or only one SAM can cut (a grant-bound, revocable
@@ -35,7 +44,7 @@ security decision from Raphaël before any work starts.
 
 ## Acceptance Criteria
 
-- [ ] Raphaël's decision recorded here (or in an idea) before any implementation starts
-- [ ] If implemented: access ends on every open connection at revoke and at the grant's end time,
-      proven on staging with two accounts
-- [ ] If not implemented: the collaboration guide keeps saying both stay with the owner
+- [x] Raphaël's decision recorded here: terminal and ports stay with the owner (out of scope)
+- [x] The collaboration guide keeps saying both stay with the owner
+- [ ] Check whether `expose_port` URLs carrying an owner-signed `port_token` can reach a transcript
+      other project members read, and if so, stop them appearing there or scope the token

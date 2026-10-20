@@ -34,10 +34,9 @@ Implement (session-scoped):
 - [x] Share dialog and notice copy: what teammates can now do, and what stays owner-only (terminal, ports, workspace page) — commit `1169339e0`
 - [x] Docs: collaboration guide, scheduled actions, chat features, security, API reference, API skill — commit `5aefd65cc`
 
-Not implemented (reported for a decision, `tasks/backlog/2026-10-20-shared-chat-terminal-and-ports-decision.md`):
+Out of scope (Raph, 2026-10-20 07:43 UTC: "I just want the ability to send prompts properly. Terminal doesn't matter. It would be good for files and git to work."):
 
-- Terminal (finding 2)
-- Ports (finding 3)
+- Terminal (finding 2) and ports (finding 3) stay with the owner. The owner-signed `port_token` question is kept in `tasks/backlog/2026-10-20-shared-chat-terminal-and-ports-decision.md`.
 
 No change needed:
 
@@ -53,7 +52,7 @@ No change needed:
 - [x] An agent that does not confirm the limit returns nothing to a teammate
 - [x] Owner behaviour is unchanged, including legacy chats without a recorded creator
 - [x] Expiry and revoke end each new surface on the next request
-- [ ] Two-account staging covers each surface, including expiry and revoke
+- [x] Two-account staging covers each surface, including expiry and revoke (Instant and VM, 12/12 steps each)
 
 ## Notes
 
@@ -76,3 +75,9 @@ No change needed:
   - Each fix proven discriminating: timeout query (1 red), Git refusal wording (1), 304 order (1), watch pause via alarm (1), nested `.git` (3 tests), `..` 404 (2), sanitize mapping (1), diff fallback (1), `stat --` (1), devcontainer path really used (1), focus (1), announcement (1), file-link gate (1), download error (1), stale error on reopen (1).
 
 - Staging is shared with the peer task 01M5B6WMMD6RV7Z737XSZCSBN9; message it before deploying.
+- Staging (deploy 39376917583, head `6a575dd6a`), two synthetic accounts:
+  - Instant chat `bbb25809`: 12/12 steps (06:22-06:30 UTC). VM chat `0c10659f` on a fresh node running agent `6a575dd6a`: 12/12 steps (07:05-07:12 UTC).
+  - A chat started during Cloudflare's container image rollout (06:10) landed on the previous agent and got the designed 409 with no file content.
+  - The first VM chat (`1cdf29f2`) showed a teammate's pending schedule cancelled at the grant's end time (06:20:22) with no revoke.
+  - Test-script fixes only: replies stored as several chunks; the revoke confirmation matched by text; the sign-in rate limit (20/hour/IP) waited out.
+  - Cleanup (07:12) verified at 09:20 after a workspace restore lost the job log: 5 chats stopped, 0 grants, no pending schedules, 5 workspaces and 4 nodes (1 VM) deleted, temporary profiles gone, no snapshots kept. Found: archiving a chat that was already asleep leaves its task `sleeping` (`tasks/backlog/2026-10-20-archive-leaves-sleeping-task-sleeping.md`).
