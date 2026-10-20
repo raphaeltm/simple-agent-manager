@@ -78,7 +78,8 @@ runtime file instead.
   `BASHOPTS`, or `BASH_VERSINFO`, so every `exec_with_secrets` call fails. Rename it.
 - **The output says `environmentMode: legacy`.** The workspace's environment predates the Secret
   setting: it started before your instance updated, or the variable was added or marked Secret after
-  it started. Start a new chat to get placeholders.
+  it started. Start a new chat, or, in a **Chat**, select **Sleep** and then send a message to wake
+  it, to get placeholders.
 
 ## Details for agents
 

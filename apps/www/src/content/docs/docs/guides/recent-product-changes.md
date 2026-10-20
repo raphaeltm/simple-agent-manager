@@ -19,8 +19,8 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
   in your message, or put it in a profile's **System Prompt (append)**. A Task's agent is still told
   to push its branch before it finishes.
   → [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands)
-- **A usage limit pauses the work instead of failing it.** When your own Claude, Codex, or API
-  limit runs out mid-task, the chat says **Waiting for provider limit reset at…**, sleeps, and carries
+- **A usage limit pauses the work instead of failing it.** When Claude Code or Codex hits your own
+  plan's limit mid-task, or a provider's rate limit says when it resets, the chat says **Waiting for provider limit reset at…**, sleeps, and carries
   on by itself after the reset (unless it ends up **Blocked**). → [Waiting for a provider limit reset](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset)
 - **A workspace whose snapshots keep failing is shut down instead of left running.** After three
   failed attempts or 15 minutes, SAM stops the idle workspace and says in the chat what was kept.

@@ -21,8 +21,8 @@ The agent receives the files only when you send the message, together with each 
 its workspace. You can attach files to a sleeping chat without waking it; sending the message wakes
 it, and the files are delivered once it's up.
 
-Limits: up to 20 files and 200 MB per message, 50 MB per file, and file names made only of letters,
-digits, spaces, `.`, `_`, and `-`. Someone a chat is [shared with](/docs/guides/collaboration/#share-a-chat)
+Limits: up to 20 files and 200 MB per message, 50 MB per file, and file names made only of
+unaccented letters (A–Z), digits, spaces, `.`, `_`, and `-`. Someone a chat is [shared with](/docs/guides/collaboration/#share-a-chat)
 can't attach files to it.
 
 ## Real-Time Streaming
