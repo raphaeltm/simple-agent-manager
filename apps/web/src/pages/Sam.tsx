@@ -68,7 +68,10 @@ export function Sam() {
               ? 'SAM is temporarily unavailable on this installation.'
               : 'SAM is off. Enable it in Settings to check your projects and manage work from one conversation.'}
           </p>
-          <Link className="text-accent underline" to="/settings">
+          <Link
+            className="inline-flex min-h-14 items-center justify-center rounded-md bg-accent px-5 font-semibold text-fg-on-accent"
+            to="/settings"
+          >
             Open Settings
           </Link>
           {settings.error && (
@@ -304,6 +307,7 @@ function SamConversation() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Button
             type="button"
+            size="lg"
             variant="secondary"
             onClick={voice.toggle}
             disabled={voice.state === 'processing' || sending || Boolean(pending)}
@@ -317,6 +321,7 @@ function SamConversation() {
           {active ? (
             <Button
               type="button"
+              size="lg"
               variant="secondary"
               disabled={cancelling}
               onClick={() => void cancel()}
@@ -326,6 +331,7 @@ function SamConversation() {
           ) : (
             <Button
               type="submit"
+              size="lg"
               disabled={
                 sending ||
                 !message.trim() ||

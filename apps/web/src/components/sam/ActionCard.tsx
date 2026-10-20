@@ -98,7 +98,7 @@ export function ActionCard({
         )}
       {action.available !== false && action.state === 'approval_required' && (
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button disabled={busy} onClick={() => void confirm(true)}>
+          <Button size="lg" disabled={busy} onClick={() => void confirm(true)}>
             Confirm this action
           </Button>
           <Button variant="secondary" disabled={busy} onClick={() => void confirm(false)}>

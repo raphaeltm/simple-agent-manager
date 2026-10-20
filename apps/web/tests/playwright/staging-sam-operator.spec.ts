@@ -7,14 +7,26 @@
  * most two read-only model turns; never dispatches project work. Both accounts
  * must start opted out, and both are opted out again in cleanup.
  */
-import { expect as baseExpect, type Page, test } from '@playwright/test';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 
-import { dismissStagingOnboarding, STAGING_API, STAGING_APP, stagingShot } from './staging-helpers';
+import {
+  expect as baseExpect,
+  type Page,
+  type Request,
+  type Response,
+  test,
+} from '@playwright/test';
+
+import { dismissStagingOnboarding, STAGING_API, STAGING_APP } from './staging-helpers';
 
 const expect = baseExpect.configure({ timeout: 20_000 });
 const SAM_API = `${STAGING_API}/api/sam`;
 const MODEL_TIMEOUT_MS = 150_000;
 const REQUEST_TIMEOUT_MS = 20_000;
+const NAVIGATION_TIMEOUT_MS = 30_000;
+const SCREENSHOT_TIMEOUT_MS = 15_000;
+const CLEANUP_TIMEOUT_MS = 30_000;
 
 interface Turn {
   id: string;
@@ -34,6 +46,24 @@ test.describe.configure({ mode: 'serial' });
 test.use({ trace: 'off', video: 'off' });
 test.setTimeout(300_000);
 
+async function writeDiagnostic(name: string, data: unknown): Promise<void> {
+  const path = test.info().outputPath(`${name}.json`);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(data, null, 2));
+  await test.info().attach(name, { path, contentType: 'application/json' });
+}
+
+async function stagingShot(page: Page, name: string): Promise<void> {
+  console.info(`[sam-operator] screenshot-start ${name}`);
+  await page.waitForTimeout(800);
+  await page.screenshot({
+    path: `../../.codex/tmp/staging-screenshots/${name}-${page.viewportSize()?.width ?? 0}.png`,
+    fullPage: false,
+    timeout: SCREENSHOT_TIMEOUT_MS,
+  });
+  console.info(`[sam-operator] screenshot-finished ${name}`);
+}
+
 async function login(page: Page, token: string): Promise<void> {
   const response = await page.request.post(`${STAGING_API}/api/auth/token-login`, {
     data: { token },
@@ -43,14 +73,99 @@ async function login(page: Page, token: string): Promise<void> {
   expect(response.status(), 'Dedicated staging account token-login succeeds').toBe(200);
 }
 
-async function openSam(page: Page): Promise<void> {
-  const settings = page.waitForResponse(
-    (response) => response.url() === `${SAM_API}/settings` && response.request().method() === 'GET',
-    { timeout: 30_000 }
-  );
-  await page.goto(`${STAGING_APP}/sam`);
-  expect((await settings).status(), 'Browser settings request succeeds').toBe(200);
-  await dismissStagingOnboarding(page);
+/** Observe only this navigation, without changing requests, auth state, or assertion budgets. */
+async function observeNavigation(
+  page: Page,
+  label: string,
+  navigateAndAssert: () => Promise<void>
+): Promise<void> {
+  const requests = new Map<
+    Request,
+    {
+      path: string;
+      status: number | 'pending' | 'failed';
+      started: number;
+      durationMs?: number;
+    }
+  >();
+  const onRequest = (request: Request) => {
+    const url = new URL(request.url());
+    // Exact non-sensitive paths only. Never retain query strings, headers, bodies,
+    // cookies, auth response payloads, project/resource IDs, or failure messages.
+    const allowed =
+      url.origin === STAGING_API
+        ? ['/api/auth/get-session', '/api/sam/settings', '/api/sam/turns'].includes(url.pathname)
+        : url.origin === STAGING_APP &&
+          (['/sam', '/settings'].includes(url.pathname) ||
+            (url.pathname.startsWith('/assets/') && url.pathname.endsWith('.js')));
+    if (allowed)
+      requests.set(request, {
+        path: url.pathname,
+        status: 'pending',
+        started: performance.now(),
+      });
+  };
+  const onResponse = (response: Response) => {
+    const record = requests.get(response.request());
+    if (record) record.status = response.status();
+  };
+  const onFinished = (request: Request) => {
+    const record = requests.get(request);
+    if (record) record.durationMs = Math.round(performance.now() - record.started);
+  };
+  const onFailed = (request: Request) => {
+    const record = requests.get(request);
+    if (record) {
+      record.status = 'failed';
+      record.durationMs = Math.round(performance.now() - record.started);
+    }
+  };
+  page.on('request', onRequest);
+  page.on('response', onResponse);
+  page.on('requestfinished', onFinished);
+  page.on('requestfailed', onFailed);
+  console.info(`[sam-operator] navigation-start ${label}`);
+  try {
+    await navigateAndAssert();
+    console.info(`[sam-operator] navigation-ready ${label}`);
+  } finally {
+    page.off('request', onRequest);
+    page.off('response', onResponse);
+    page.off('requestfinished', onFinished);
+    page.off('requestfailed', onFailed);
+    await writeDiagnostic(
+      `navigation-timing-${label}`,
+      [...requests.values()].map((record) => ({
+        path: record.path,
+        status:
+          record.durationMs === undefined && typeof record.status === 'number'
+            ? `${record.status}:pending-body`
+            : record.status,
+        durationMs: record.durationMs ?? Math.round(performance.now() - record.started),
+      }))
+    );
+    console.info(`[sam-operator] navigation-diagnostics-saved ${label}`);
+  }
+}
+
+async function openSam(page: Page, label: string): Promise<void> {
+  await observeNavigation(page, label, async () => {
+    // Consume the waiter inside this scope even when navigation itself fails.
+    const settings = page
+      .waitForResponse(
+        (response) =>
+          response.url() === `${SAM_API}/settings` && response.request().method() === 'GET',
+        { timeout: 30_000 }
+      )
+      .then(
+        (response) => ({ response }),
+        () => ({ response: null })
+      );
+    await page.goto(`${STAGING_APP}/sam`);
+    const { response } = await settings;
+    expect(response?.status(), 'Browser settings request succeeds').toBe(200);
+    await dismissStagingOnboarding(page);
+  });
 }
 
 async function history(page: Page): Promise<History> {
@@ -104,6 +219,8 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
   );
 
   const secondaryContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  page.context().setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
+  secondaryContext.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
   const secondary = await secondaryContext.newPage();
   const authenticated: Page[] = [];
   let pageErrors = 0;
@@ -134,7 +251,7 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
         expect(await response.json()).toEqual({ enabled: false, available: true });
         await expectDisabledApi(account, `disabled-${runId}`);
       }
-      await openSam(page);
+      await openSam(page, 'primary-default-off');
       await expect(page.getByRole('link', { name: 'Open Settings', exact: true })).toBeVisible();
       await expect(page.getByLabel('Message SAM', { exact: true })).toHaveCount(0);
       await expect(page.getByRole('link', { name: 'SAM', exact: true })).toHaveCount(0);
@@ -147,14 +264,18 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
       await expect(toggle).toHaveAttribute('aria-checked', 'false');
       await toggle.click();
       await expect(toggle).toHaveAttribute('aria-checked', 'true');
-      await page.reload();
-      await expect(toggle).toHaveAttribute('aria-checked', 'true');
+      await observeNavigation(page, 'primary-settings-reload', async () => {
+        await page.reload();
+        await expect(toggle).toHaveAttribute('aria-checked', 'true');
+      });
       await expect(page.getByRole('link', { name: 'SAM', exact: true }).first()).toBeVisible();
       // A primary-account preference cannot opt in the secondary account.
       await expectDisabledApi(secondary, `secondary-disabled-${runId}`);
       await setEnabled(secondary, true);
-      await page.goto(`${STAGING_APP}/sam`);
-      await expect(page.getByLabel('Message SAM', { exact: true })).toBeVisible();
+      await observeNavigation(page, 'primary-after-enable', async () => {
+        await page.goto(`${STAGING_APP}/sam`);
+        await expect(page.getByLabel('Message SAM', { exact: true })).toBeVisible();
+      });
     });
 
     let acceptedId = '';
@@ -191,8 +312,10 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
 
       // Destroy the current app tree, then reconnect using the real persisted API state.
       await page.goto('about:blank');
-      await page.goto(`${STAGING_APP}/sam`);
-      await expect(page.getByText(message, { exact: true })).toBeVisible();
+      await observeNavigation(page, 'primary-durable-reconnect', async () => {
+        await page.goto(`${STAGING_APP}/sam`);
+        await expect(page.getByText(message, { exact: true })).toBeVisible();
+      });
       await expect
         .poll(
           async () => {
@@ -236,7 +359,7 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
       // Legacy history returns an empty page for an unknown ID in this user's DO.
       expect(foreignHistory.status()).toBe(200);
       expect(await foreignHistory.json()).toEqual({ messages: [], nextCursor: null });
-      await openSam(secondary);
+      await openSam(secondary, 'secondary-isolation');
       await expect(secondary.getByLabel('Message SAM', { exact: true })).toBeVisible();
       await expect(secondary.getByText(message, { exact: true })).toHaveCount(0);
       await stagingShot(secondary, 'sam-secondary-isolation');
@@ -245,8 +368,7 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
     await test.step('Cancel an accepted turn and preserve its receipt on replay', async () => {
       const input = {
         requestKey: `cancel-${runId}`,
-        message:
-          'Read-only cancellation check. Do not use tools, access project resources, or change anything. Reply with the word cancelled.',
+        message: `Read-only cancellation check ${runId}. Do not use tools, access project resources, or change anything. Reply with the word cancelled.`,
       };
       const accepted = await page.request.post(`${SAM_API}/turns`, { data: input });
       expect(accepted.status()).toBe(202);
@@ -261,7 +383,12 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
         turn: { id: turn.id, state: 'cancelled' },
       });
       await page.reload();
-      await expect(page.getByText('SAM · cancelled', { exact: true })).toBeVisible();
+      await expect(
+        page
+          .locator('article')
+          .filter({ hasText: input.message })
+          .getByText('SAM · cancelled', { exact: true })
+      ).toBeVisible();
       await stagingShot(page, 'sam-cancelled-turn');
     });
 
@@ -310,24 +437,27 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
       expect(pageErrors, 'No uncaught browser JavaScript errors').toBe(0);
     });
   } finally {
-    await testInfo.attach('browser-error-counts', {
-      body: JSON.stringify({
+    // Preserve the main 300s budget. Only cleanup gets a separate bounded allowance.
+    testInfo.setTimeout(testInfo.timeout + CLEANUP_TIMEOUT_MS);
+    console.info('[sam-operator] cleanup-start');
+    try {
+      await writeDiagnostic('browser-error-counts', {
         pageErrors,
         consoleErrors,
         disableRequestMs,
         note: 'Counts only; no credential-bearing browser log text retained',
-      }),
-      contentType: 'application/json',
-    });
-    // Attempt both cleanups even if either fails; never leave an account enabled
-    // because the other account's cleanup request was rejected.
-    const cleanups = await Promise.allSettled(
-      authenticated.map((account) => setEnabled(account, false))
-    );
-    await secondaryContext.close();
-    expect(
-      cleanups.every((result) => result.status === 'fulfilled'),
-      'Both authenticated accounts are opted out in cleanup'
-    ).toBe(true);
+      });
+    } finally {
+      // Attempt both cleanups even if diagnostics or either account fails.
+      const cleanups = await Promise.allSettled(
+        authenticated.map((account) => setEnabled(account, false))
+      );
+      await secondaryContext.close();
+      expect(
+        cleanups.every((result) => result.status === 'fulfilled'),
+        'Both authenticated accounts are opted out in cleanup'
+      ).toBe(true);
+      console.info('[sam-operator] cleanup-finished');
+    }
   }
 });

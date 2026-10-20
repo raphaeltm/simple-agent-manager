@@ -58,3 +58,17 @@ CI corrections: admin registry only (no new Env controls or deployment diff), ex
 Staging run [39403971268](https://github.com/raphaeltm/simple-agent-manager/actions/runs/39403971268) succeeded on `b3d99023d2b4b323deaa28eb15d660f09eca1ce3`. Cloudflare API deployment `3d844005-fd50-4948-beda-dcf0fc172f5b`, Worker version `7ac00d91-ea0f-4e08-885a-d40680da86b0`, serves that commit at100%. Subsequent changes are test/evidence only. Dedicated-account live browser verification has started; no completed live journey is claimed yet.
 
 CI found source-inspection tests still targeting the extracted submission wrapper and signup tests expecting pre-opt-in behavior. Corrected source paths preserve every assertion;389 tests across11 suites passed. Updated real-Worker signup tests cover default-OFF behavior and approval enforcement on all new endpoints;46 tests passed. API typecheck and scoped lint passed. Final-head CI still must pass.
+
+## 2026-10-20 final-candidate corrections
+
+CI [39411694385](https://github.com/raphaeltm/simple-agent-manager/actions/runs/39411694385) passed on `d75f052844f3be139ec2d40f47413b069140755b`. Staging [39408844036](https://github.com/raphaeltm/simple-agent-manager/actions/runs/39408844036) passed on `f11f10700938a1b74005aac93dbd15089250590a`. New corrections below require another final-head CI/deployment.
+
+Six bounded live read/planning scenarios passed with independently checked project links/pagination and gateway correlation: seven uncached successful requests, 39,729 input/1,653 output tokens, reported USD0.00419359965133667. Public evidence contains hashes and receipt metadata, not private response excerpts. This is not dispatch, long-context retrieval, or overall launch verification.
+
+Long-context staging exposed a successful HTTP200 model response with empty content. The runtime now marks empty/whitespace answers interrupted while preserving receipts/accounting; same-key replay does not run inference again. Three new native regression cases fail before the fix and pass afterward; all22 native tests pass. Independent architecture/security review passed. The live long-context case remains incomplete and its failed-run ledger is preserved.
+
+All SAM primary controls now use56px targets. The final local mock audit passed28/28 on desktop/mobile/320px with12 reviewed screenshots under `primary-cta-56px/`. Scoped lint and API/web typechecks passed. Main live browser diagnostics now persist safe timings and bound navigation/screenshots; a complete live journey is still required.
+
+VM dispatch is explicitly held pending coordinator/user approval details. Rule09 caps the workload request at2vCPU/3.5GB usable memory; no OOM or requirement for larger hardware was observed. Existing pool placement can select larger hosts and this SAM dispatch path cannot enforce a host ceiling. The conservative€0.10 VM allowance is not a combined VM/model maximum; a defensible combined cap is unestablished. No VM has been provisioned. Continue independent verification without treating this hold as approval, completion, or a waiver of live coverage.
+
+Bounded main staging browser journey passed on `f11f10700938a1b74005aac93dbd15089250590a`: default-OFF settings/API/direct-route/navigation, enable and persisted refresh, durable chat/reconnect, request replay/conflict, cancellation, isolation, and stale-tab revocation. Both dedicated accounts were disabled in successful cleanup. Final corrected deployment still requires verification.

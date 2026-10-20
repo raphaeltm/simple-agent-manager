@@ -121,5 +121,8 @@ export async function runOperatorAgent(options: {
     },
   });
   assertCurrent();
+  // A successful transport can still contain no answer. Preserve receipts and
+  // accounting, but let the controller interrupt rather than report completion.
+  if (!result.text.trim()) throw new Error('SAM model returned no answer');
   return result.text;
 }

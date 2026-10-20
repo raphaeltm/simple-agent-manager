@@ -38,11 +38,15 @@ export function SamSettingsCard() {
         </div>
         <div className="flex shrink-0 items-center gap-3">
           {settings.enabled && (
-            <Link className="text-accent underline" to="/sam">
+            <Link
+              className="inline-flex min-h-14 items-center px-3 text-accent underline"
+              to="/sam"
+            >
               Open SAM
             </Link>
           )}
           <Button
+            size="lg"
             variant="secondary"
             role="switch"
             aria-checked={settings.data?.enabled ?? false}

@@ -1,6 +1,7 @@
 /** Real SamSession SQLite and Mastra Agent; only model HTTP is stubbed. */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { modelReply } from './support/sam-model-reply';
 import { type SamRuntimeStub, startSamRuntime } from './support/sam-native-runtime';
 
 type Turn = {
@@ -21,6 +22,7 @@ const MODEL = '@cf/google/gemma-4-26b-a4b-it';
 const modelRequests: Array<{ url: string; body: Record<string, unknown>; headers: Headers }> = [];
 const http = vi.fn<typeof fetch>();
 let modelDelay: Promise<void> | null = null;
+let modelText: string | undefined;
 let requestedTool: { name: string; arguments: Record<string, unknown> } | null = null;
 let env: Awaited<ReturnType<typeof startSamRuntime>>;
 beforeAll(async () => {
@@ -29,38 +31,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await env?.close();
 });
-
-function modelReply(text = 'Hello from the actual Mastra runtime', stream = false): Response {
-  const base = { id: 'completion-test', model: MODEL, created: 1 };
-  if (stream) {
-    return new Response(
-      [
-        {
-          ...base,
-          object: 'chat.completion.chunk',
-          choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }],
-        },
-        {
-          ...base,
-          object: 'chat.completion.chunk',
-          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-          usage: { prompt_tokens: 10, completion_tokens: 7, total_tokens: 17 },
-        },
-      ]
-        .map((event) => `data: ${JSON.stringify(event)}\n\n`)
-        .join('') + 'data: [DONE]\n\n',
-      {
-        headers: { 'content-type': 'text/event-stream' },
-      }
-    );
-  }
-  return Response.json({
-    ...base,
-    object: 'chat.completion',
-    choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],
-    usage: { prompt_tokens: 10, completion_tokens: 7, total_tokens: 17 },
-  });
-}
 
 async function setup(enabled = true) {
   await env.DATABASE.prepare(
@@ -102,6 +72,7 @@ describe('SamSession durable operator in workerd', () => {
   beforeEach(() => {
     modelRequests.length = 0;
     modelDelay = null;
+    modelText = undefined;
     requestedTool = null;
     http.mockReset();
     http.mockImplementation(async (input, init) => {
@@ -129,7 +100,7 @@ describe('SamSession durable operator in workerd', () => {
       await modelDelay;
       if (url.includes('/anthropic/')) return anthropicReply(body.stream === true);
       if (requestedTool && modelRequests.length === 1) return modelToolReply(body.stream === true);
-      return modelReply(undefined, body.stream === true);
+      return modelReply(modelText, body.stream === true);
     });
   });
 
@@ -291,6 +262,48 @@ describe('SamSession durable operator in workerd', () => {
     expect(JSON.stringify(result?.content)).toContain('PRIVATE_LOOKUP_TOKEN');
     expect(JSON.stringify(result?.content)).toContain('archived constraint');
   });
+
+  it.each([
+    { label: 'empty', text: '', withReceipt: false },
+    { label: 'whitespace', text: '   ', withReceipt: false },
+    { label: 'empty after a recorded action', text: '', withReceipt: true },
+  ])(
+    'interrupts $label output without replaying inference or receipts',
+    async ({ text, withReceipt }) => {
+      const { request, stub, userId } = await setup();
+      modelText = text;
+      if (withReceipt) requestedTool = { name: 'sam_projects_list', arguments: { limit: 1 } };
+      const input = { requestKey: 'empty-answer', message: 'Answer the request' };
+      const { turn } = (await (await request('/turns', 'POST', input)).json()) as { turn: Turn };
+      await vi.waitFor(
+        async () => {
+          const page = (await (await request('/turns')).json()) as History;
+          expect(page.turns.find((item) => item.id === turn.id)).toMatchObject({
+            state: 'interrupted',
+            response: null,
+            error: expect.stringContaining('Review recorded actions'),
+          });
+        },
+        { timeout: 5000, interval: 20 }
+      );
+      const expectedCalls = withReceipt ? 2 : 1;
+      expect(modelRequests).toHaveLength(expectedCalls);
+      expect(await (await request('/turns', 'POST', input)).json()).toMatchObject({
+        replayed: true,
+        turn: { id: turn.id, state: 'interrupted' },
+      });
+      expect(modelRequests).toHaveLength(expectedCalls);
+      const actions = await stub.testSql('SELECT state FROM operator_actions WHERE turn_id=?', [
+        turn.id,
+      ]);
+      expect(actions).toEqual(withReceipt ? [expect.objectContaining({ state: 'completed' })] : []);
+      const date = new Date().toISOString().slice(0, 10);
+      expect(await env.KV.get(`ai-budget:${userId}:${date}`, 'json')).toEqual({
+        inputTokens: withReceipt ? 13 : 10,
+        outputTokens: withReceipt ? 9 : 7,
+      });
+    }
+  );
 
   it('executes shared project reads through the same native schema bridge with current user scope', async () => {
     const { request, stub, userId } = await setup();

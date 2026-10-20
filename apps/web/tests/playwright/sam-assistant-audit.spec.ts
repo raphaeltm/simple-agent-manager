@@ -1,4 +1,4 @@
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 
 import {
   assertNoClippedOverflow,
@@ -149,6 +149,22 @@ async function checkLayout(page: Page, name: string) {
   await assertNoClippedOverflow(page);
 }
 
+async function checkTouchTarget(control: Locator) {
+  const box = await control.boundingBox();
+  expect(box, 'Primary control has a measurable touch target').not.toBeNull();
+  expect(box!.height, 'Primary control is at least 56 CSS pixels tall').toBeGreaterThanOrEqual(56);
+  expect(box!.width, 'Primary control is at least 56 CSS pixels wide').toBeGreaterThanOrEqual(56);
+}
+
+async function checkComposerTouchTargets(page: Page) {
+  const buttons = page.getByLabel('Message SAM').locator('..').getByRole('button');
+  await expect(buttons).toHaveCount(2);
+  for (const button of await buttons.all()) await checkTouchTarget(button);
+  await page.getByLabel('Message SAM').locator('..').screenshot({
+    path: test.info().outputPath(`composer-${page.viewportSize()?.width}.png`),
+  });
+}
+
 test('off by default gates direct entry and the navigation; settings toggle enables SAM', async ({
   page,
 }) => {
@@ -158,16 +174,32 @@ test('off by default gates direct entry and the navigation; settings toggle enab
   await expect(page.getByLabel('Message SAM')).toHaveCount(0);
   expect(mock.historyReads()).toBe(0);
   await expect(page.locator('a[href="/sam"]')).toHaveCount(0);
+  const originalViewport = page.viewportSize()!;
+  const openSettings = page.getByRole('link', { name: 'Open Settings' });
+  await checkTouchTarget(openSettings);
   await checkLayout(page, 'sam-off');
-  await page.getByRole('link', { name: 'Open Settings' }).click();
+  await page.setViewportSize({ width: 320, height: 667 });
+  await checkTouchTarget(openSettings);
+  await checkLayout(page, 'sam-off-narrow');
+  await page.setViewportSize(originalViewport);
+  await openSettings.click();
   const toggle = page.getByRole('switch', { name: 'Enable SAM assistant' });
   await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await checkTouchTarget(toggle);
   await checkLayout(page, 'sam-settings-off');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  const openSam = page.getByRole('link', { name: 'Open SAM', exact: true });
+  await checkTouchTarget(openSam);
   await checkLayout(page, 'sam-settings-on');
-  await page.getByRole('link', { name: 'Open SAM', exact: true }).click();
+  await page.setViewportSize({ width: 320, height: 667 });
+  await checkTouchTarget(toggle);
+  await checkTouchTarget(openSam);
+  await checkLayout(page, 'sam-settings-on-narrow');
+  await page.setViewportSize(originalViewport);
+  await openSam.click();
   await expect(page.getByLabel('Message SAM')).toBeVisible();
+  await checkComposerTouchTargets(page);
   await checkLayout(page, 'sam-empty');
   if (page.viewportSize()!.width < 768) {
     await page.getByRole('button', { name: 'Open navigation menu' }).click();
@@ -229,7 +261,14 @@ test('recent history loads older messages, renders source links and approval rec
     'href',
     /\/projects\/project-1\/chat\/session-1$/
   );
+  const originalViewport = page.viewportSize()!;
+  const confirm = page.getByRole('button', { name: 'Confirm this action' });
+  await checkTouchTarget(confirm);
   await checkLayout(page, 'sam-actions');
+  await page.setViewportSize({ width: 320, height: 667 });
+  await checkTouchTarget(confirm);
+  await checkLayout(page, 'sam-actions-narrow');
+  await page.setViewportSize(originalViewport);
   await page.getByRole('button', { name: 'Load older messages' }).click();
   await expect(page.locator('article')).toHaveCount(31);
   expect(mock.cursors).toContain('1720:tuple-id');
@@ -275,6 +314,11 @@ test('active turn can stop without cancelling project work', async ({ page }) =>
   await mockSam(page, { turns: [turn('running', { state: 'running', response: null })] });
   await page.goto('/sam');
   await expect(page.getByText('Working… You can leave this page and return.')).toBeVisible();
+  await checkComposerTouchTargets(page);
+  await checkLayout(page, 'sam-active-composer');
+  await page.setViewportSize({ width: 320, height: 667 });
+  await checkComposerTouchTargets(page);
+  await checkLayout(page, 'sam-active-composer-narrow');
   await page.getByLabel('Message SAM').fill('My next draft');
   await page.getByRole('button', { name: 'Stop SAM turn' }).click();
   await expect(page.getByText('SAM · cancelled', { exact: true })).toBeVisible();
@@ -319,6 +363,7 @@ test('320px layout keeps the composer and long text within bounds', async ({ pag
   });
   await page.goto('/sam');
   await expect(page.getByLabel('Message SAM')).toBeVisible();
+  await checkComposerTouchTargets(page);
   await checkLayout(page, 'sam-narrow');
 });
 
