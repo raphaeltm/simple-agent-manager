@@ -1,5 +1,5 @@
 /** Publication guard through real Mastra, workerd, D1, KV and private DO SQLite. */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { modelReply } from './support/sam-model-reply';
 import { type SamRuntimeStub, startSamRuntime } from './support/sam-native-runtime';
@@ -11,14 +11,28 @@ let env: Awaited<ReturnType<typeof startSamRuntime>>;
 let calls = 0;
 let answer = '';
 let readProjects = false;
+let providerFailureStatus = 0;
+let recoverProvider = false;
+let activeFixture: Fixture | undefined;
+let toolAtCall = 1;
+let toolName = 'sam_projects_list';
+let toolArguments: Record<string, unknown> = { limit: 1 };
+let answerForCall: ((count: number) => string) | undefined;
+const requests: Array<Record<string, unknown>> = [];
 let beforeAnswer: (() => Promise<void>) | undefined;
 
 beforeAll(async () => {
   env = await startSamRuntime(async (request) => {
     expect(request.url).toMatch(/^https:\/\/gateway\.ai\.cloudflare\.com\//);
-    const body = (await request.json()) as { stream?: boolean };
+    const body = (await request.json()) as { stream?: boolean } & Record<string, unknown>;
     calls++;
-    if (readProjects && calls === 1) {
+    requests.push(body);
+    if (providerFailureStatus && (!recoverProvider || calls === 1))
+      return Response.json(
+        { error: 'Test provider unavailable' },
+        { status: providerFailureStatus }
+      );
+    if (readProjects && calls === toolAtCall) {
       if (!body.stream)
         return Response.json({
           id: 'grounding-tool',
@@ -35,7 +49,7 @@ beforeAll(async () => {
                   {
                     id: 'project-read',
                     type: 'function',
-                    function: { name: 'sam_projects_list', arguments: '{"limit":1}' },
+                    function: { name: toolName, arguments: JSON.stringify(toolArguments) },
                   },
                 ],
               },
@@ -63,7 +77,7 @@ beforeAll(async () => {
                     index: 0,
                     id: 'project-read',
                     type: 'function',
-                    function: { name: 'sam_projects_list', arguments: '{"limit":1}' },
+                    function: { name: toolName, arguments: JSON.stringify(toolArguments) },
                   },
                 ],
               },
@@ -83,16 +97,28 @@ beforeAll(async () => {
       );
     }
     await beforeAnswer?.();
-    return modelReply(answer, body.stream);
+    return modelReply(answerForCall?.(calls) ?? answer, body.stream);
   });
 });
 afterAll(async () => {
   await env?.close();
 });
+afterEach(async () => {
+  // Fence this fixture even when an assertion fails while inference is pending.
+  if (activeFixture) await activeFixture.request('/settings', 'PATCH', { enabled: false });
+  activeFixture = undefined;
+});
 beforeEach(() => {
   calls = 0;
   answer = '';
   readProjects = false;
+  providerFailureStatus = 0;
+  recoverProvider = false;
+  toolAtCall = 1;
+  toolName = 'sam_projects_list';
+  toolArguments = { limit: 1 };
+  answerForCall = undefined;
+  requests.length = 0;
   beforeAnswer = undefined;
 });
 
@@ -102,6 +128,12 @@ async function setup() {
     .bind(userId, `${userId}@example.test`, 'Grounding user')
     .run();
   const stub = env.SAM_SESSION.get(env.SAM_SESSION.idFromName(userId)) as SamRuntimeStub;
+  await stub.testEnvironment({
+    SAM_MAX_TURNS: '20',
+    SAM_LLM_TIMEOUT_MS: '120000',
+    SAM_MAX_REQUEST_BODY_BYTES: '65536',
+    AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT: '100000',
+  });
   const request = (path: string, method = 'GET', body?: unknown) =>
     stub.fetch(`https://sam-session${path}`, {
       method,
@@ -109,7 +141,9 @@ async function setup() {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
   expect((await request('/settings', 'PATCH', { enabled: true })).status).toBe(200);
-  return { userId, stub, request };
+  const fixture = { userId, stub, request };
+  activeFixture = fixture;
+  return fixture;
 }
 type Fixture = Awaited<ReturnType<typeof setup>>;
 async function finish(fixture: Fixture, state: string) {
@@ -148,12 +182,163 @@ async function seedProject(userId: string) {
 }
 
 describe('receipt-grounded native publication', () => {
+  it.each([1, 20])(
+    'never adds correction after a recovered provider error with step budget %s',
+    async (budget) => {
+      const fixture = await setup();
+      await fixture.stub.testEnvironment({ SAM_MAX_TURNS: String(budget) });
+      providerFailureStatus = 503;
+      recoverProvider = true;
+      answer = 'I started it.';
+      await finish(fixture, 'interrupted');
+      const expectedCalls = Math.min(budget, 2);
+      expect(calls).toBe(expectedCalls);
+      expect(requests.map((request) => request.tool_choice)).toEqual(
+        Array.from({ length: expectedCalls }, () => 'auto')
+      );
+      expect(await fixture.stub.testSql('SELECT id FROM operator_actions')).toEqual([]);
+    }
+  );
+  it.each([400, 503])(
+    'does not correct a provider %s failure within the original deadline',
+    async (status) => {
+      const fixture = await setup();
+      providerFailureStatus = status;
+      await fixture.stub.testEnvironment({ SAM_LLM_TIMEOUT_MS: '250' });
+      await finish(fixture, 'interrupted');
+      expect(calls).toBe(1);
+      expect(requests.map((request) => request.tool_choice)).toEqual(['auto']);
+      expect(await fixture.stub.testSql('SELECT id FROM operator_actions')).toEqual([]);
+    }
+  );
+  it('corrects one uneffected false-start draft through a real read without rewriting prior history', async () => {
+    const fixture = await setup();
+    await seedProject(fixture.userId);
+    const fake = `I started it. Session: ${project}_SESS`;
+    const [settings] = await fixture.stub.testSql('SELECT conversation_id FROM operator_settings');
+    await fixture.stub.testSql(
+      "INSERT INTO messages(id,conversation_id,role,content,sequence) VALUES('historical-false-claim',?,'assistant',?,1)",
+      [settings!.conversation_id!, fake]
+    );
+    readProjects = true;
+    toolAtCall = 2;
+    answer = `Here is the project: [Project](${origin}/projects/${project})`;
+    answerForCall = (count) => (count === 1 ? fake : answer);
+    const { turn, input } = await finish(fixture, 'completed');
+    expect(calls).toBe(3);
+    expect(requests.map((request) => request.tool_choice)).toEqual(['auto', 'required', 'auto']);
+    const correction = JSON.stringify(requests[1]?.messages);
+    expect(correction).toContain('This correction grants no new authority');
+    expect(correction.split(fake).length - 1).toBe(1);
+    expect(
+      await fixture.stub.testSql("SELECT content FROM messages WHERE id='historical-false-claim'")
+    ).toEqual([{ content: fake }]);
+    expect(
+      await fixture.stub.testSql(
+        "SELECT COUNT(*) AS count FROM messages WHERE role='assistant' AND content=?",
+        [fake]
+      )
+    ).toEqual([{ count: 1 }]);
+    expect(
+      await fixture.stub.testSql('SELECT operation,state FROM operator_actions WHERE turn_id=?', [
+        turn.id,
+      ])
+    ).toEqual([expect.objectContaining({ operation: 'sam_projects_list', state: 'completed' })]);
+    const date = new Date().toISOString().slice(0, 10);
+    expect(await env.KV.get(`ai-budget:${fixture.userId}:${date}`, 'json')).toEqual({
+      inputTokens: 23,
+      outputTokens: 16,
+    });
+    expect(await (await fixture.request('/turns', 'POST', input)).json()).toMatchObject({
+      replayed: true,
+      turn: { id: turn.id, state: 'completed' },
+    });
+    expect(calls).toBe(3);
+  });
+
+  it.each([
+    {
+      name: 'sam_private_history_search',
+      arguments: { query: 'prior constraint' },
+      receipt: false,
+    },
+    { name: 'sam_projects_list', arguments: { limit: 0 }, receipt: false },
+    { name: 'sam_unknown_operation', arguments: {}, receipt: false },
+    { name: 'sam_project_get', arguments: { projectId: 'missing-project' }, receipt: false },
+    {
+      name: 'sam_chat_start',
+      arguments: { projectId: 'missing-project', message: 'Do not create anything' },
+      receipt: true,
+    },
+  ])('never corrects after a successful, invalid or failed tool attempt: $name', async (tool) => {
+    const fixture = await setup();
+    readProjects = true;
+    toolName = tool.name;
+    toolArguments = tool.arguments;
+    answer = 'I started it.';
+    const { turn } = await finish(fixture, 'interrupted');
+    expect(calls).toBeLessThanOrEqual(2);
+    expect(requests.every((request) => request.tool_choice !== 'required')).toBe(true);
+    expect(
+      await fixture.stub.testSql('SELECT state FROM operator_actions WHERE turn_id=?', [turn.id])
+    ).toEqual(tool.receipt ? [expect.objectContaining({ state: 'uncertain' })] : []);
+  });
+
+  it.each([1, 2])('keeps both generations within a shared %i-step budget', async (limit) => {
+    const fixture = await setup();
+    await fixture.stub.testEnvironment({ SAM_MAX_TURNS: String(limit) });
+    readProjects = true;
+    toolAtCall = 2;
+    answer = 'I started it.';
+    await finish(fixture, 'interrupted');
+    expect(calls).toBe(limit);
+  });
+
+  it.each(['disable', 'cancel', 'suspend', 'usage-budget', 'deadline'] as const)(
+    'does not begin correction after the %s fence',
+    async (fence) => {
+      const fixture = await setup();
+      answer = 'I started it.';
+      if (fence === 'deadline') await fixture.stub.testEnvironment({ SAM_LLM_TIMEOUT_MS: '250' });
+      beforeAnswer = async () => {
+        if (fence === 'disable') await fixture.request('/settings', 'PATCH', { enabled: false });
+        if (fence === 'cancel') {
+          const [turn] = await fixture.stub.testSql(
+            "SELECT id FROM operator_turns WHERE state='running'"
+          );
+          await fixture.request(`/turns/${turn!.id}/cancel`, 'POST');
+        }
+        if (fence === 'suspend')
+          await env.DATABASE.prepare("UPDATE users SET status='suspended' WHERE id=?")
+            .bind(fixture.userId)
+            .run();
+        if (fence === 'usage-budget')
+          await fixture.stub.testEnvironment({ AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT: '1' });
+        if (fence === 'deadline') await new Promise((resolve) => setTimeout(resolve, 350));
+      };
+      await finish(
+        fixture,
+        fence === 'disable' || fence === 'cancel' ? 'cancelled' : 'interrupted'
+      );
+      expect(calls).toBe(1);
+      expect(await fixture.stub.testSql('SELECT id FROM operator_actions')).toEqual([]);
+    }
+  );
+
+  it('does not add correction instructions beyond the existing context byte budget', async () => {
+    const fixture = await setup();
+    await fixture.stub.testEnvironment({ SAM_MAX_REQUEST_BODY_BYTES: '180' });
+    answer = 'I started it.';
+    await finish(fixture, 'interrupted');
+    expect(calls).toBe(1);
+  });
+
   it.each([
     `I have started it. Session: ${project}_SESS. Task: ${project}_TASK. [Chat](${origin}/projects/${project}/chat/${project}_SESS)`,
     `Your session is ${invented}. [Chat](${origin}/projects/${project}/chat/${invented})`,
     'I started it.',
   ])(
-    'interrupts unsupported outcome without replay or canonical assistant message: %s',
+    'interrupts a second unsupported outcome without replay or canonical assistant message: %s',
     async (text) => {
       const fixture = await setup();
       answer = text;
@@ -168,11 +353,11 @@ describe('receipt-grounded native publication', () => {
         replayed: true,
         turn: { id: turn.id, state: 'interrupted' },
       });
-      expect(calls).toBe(1);
+      expect(calls).toBe(2);
       const date = new Date().toISOString().slice(0, 10);
       expect(await env.KV.get(`ai-budget:${fixture.userId}:${date}`, 'json')).toEqual({
-        inputTokens: 10,
-        outputTokens: 7,
+        inputTokens: 20,
+        outputTokens: 14,
       });
     }
   );

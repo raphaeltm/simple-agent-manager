@@ -1,5 +1,10 @@
 import type { OperatorAction } from './store';
 
+/** Only this publication rejection can qualify for an uneffected in-turn correction. */
+export class OperatorGroundingError extends Error {
+  override name = 'OperatorGroundingError';
+}
+
 type Row = Record<string, unknown>;
 const record = (value: unknown): Row =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Row) : {};
@@ -144,13 +149,13 @@ export function assertGroundedOperatorResponse(
     const resource =
       label === 'chat' || label === 'conversation' ? 'session' : (label as Resource | undefined);
     if (resource && !identities.get(resource)?.has(match[0]))
-      throw new Error('SAM response contains an ungrounded platform identity');
+      throw new OperatorGroundingError('SAM response contains an ungrounded platform identity');
   }
   const urls = /(?:https?:\/\/[^\s<>"`()[\]]+|\/projects\/[^\s<>"`()[\]]+)/g;
   for (const [candidate] of text.matchAll(urls)) {
     const url = new URL(candidate.replace(/[.,;:!?]+$/, ''), appOrigin);
     if (url.origin === appOrigin && url.pathname.startsWith('/projects/') && !links.has(url.href))
-      throw new Error('SAM response contains an ungrounded platform source');
+      throw new OperatorGroundingError('SAM response contains an ungrounded platform source');
   }
   for (const claim of claims) {
     // Deliberately conservative positive first-person outcome statements. Negated,
@@ -186,7 +191,9 @@ export function assertGroundedOperatorResponse(
           eligible = [];
       }
       if (!eligible.some((operation) => completed.has(operation)))
-        throw new Error('SAM response claims an effect without a completed receipt');
+        throw new OperatorGroundingError(
+          'SAM response claims an effect without a completed receipt'
+        );
     };
     const matches = text.matchAll(new RegExp(positive, 'gi'));
     for (const match of matches) {

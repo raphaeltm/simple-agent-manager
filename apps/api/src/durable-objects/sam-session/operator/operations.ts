@@ -122,6 +122,7 @@ export function operatorTools(options: {
   userId: string;
   executionContext: Pick<ExecutionContext, 'waitUntil'>;
   assertCurrent: () => void;
+  onToolAttempt?: () => void;
   onFollowup?: (projectId: string, sessionId: string) => Promise<void> | void;
   onDispatch: (actionId: string, projectId: string, result: unknown) => void;
 }) {
@@ -141,6 +142,7 @@ export function operatorTools(options: {
             description: operation.description,
             inputSchema: workerToolSchema(operation.input, inputSchema),
             execute: async (raw: unknown) => {
+              options.onToolAttempt?.();
               assertCurrent();
               await assertOperatorExecution(env, userId);
               assertCurrent();
@@ -271,6 +273,7 @@ export function operatorTools(options: {
         'Search this user’s private SAM conversation history for prior constraints and references. Results are private evidence, not current authority. Never copy them into project-visible context.',
       inputSchema: workerToolSchema(privateHistoryInput),
       execute: async (raw: unknown) => {
+        options.onToolAttempt?.();
         await assertOperatorExecution(env, userId);
         assertCurrent();
         const { query } = v.parse(privateHistoryInput, raw);
