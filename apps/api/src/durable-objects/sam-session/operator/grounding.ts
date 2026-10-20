@@ -157,7 +157,11 @@ export function assertGroundedOperatorResponse(
   }
   const urls = /(?:https?:\/\/[^\s<>"`()[\]]+|\/projects\/[^\s<>"`()[\]]+)/g;
   for (const [candidate] of text.matchAll(urls)) {
-    const url = new URL(candidate.replace(/[.,;:!?]+$/, ''), appOrigin);
+    // Scan backwards once: a suffix regexp retries at every punctuation
+    // position when a long punctuation run ends in a non-punctuation byte.
+    let end = candidate.length;
+    while (end > 0 && '.,;:!?'.includes(candidate.charAt(end - 1))) end--;
+    const url = new URL(candidate.slice(0, end), appOrigin);
     if (url.origin === appOrigin && url.pathname.startsWith('/projects/') && !links.has(url.href))
       throw new OperatorGroundingError('SAM response contains an ungrounded platform source');
   }

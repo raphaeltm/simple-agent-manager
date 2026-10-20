@@ -318,19 +318,39 @@ export class OperatorStore {
   contextMessages(
     limit: number
   ): Array<{ role: 'user'; content: string } | { role: 'assistant'; content: string }> {
+    return this.contextEntries(limit).map(({ role, content }) => ({ role, content }));
+  }
+
+  contextEntries(
+    limit: number
+  ): Array<{ id: string; role: 'user' | 'assistant'; content: string }> {
     return this.sql
       .exec(
-        "SELECT role,content FROM messages WHERE conversation_id=? AND role IN ('user','assistant') ORDER BY sequence DESC LIMIT ?",
+        "SELECT id,role,content FROM messages WHERE conversation_id=? AND role IN ('user','assistant') ORDER BY sequence DESC LIMIT ?",
         required(this.settings().conversationId),
         limit
       )
       .toArray()
       .reverse()
-      .map((row) =>
-        row.role === 'user'
-          ? { role: 'user' as const, content: String(row.content) }
-          : { role: 'assistant' as const, content: String(row.content) }
-      );
+      .map((row) => ({
+        id: String(row.id),
+        role: row.role === 'user' ? ('user' as const) : ('assistant' as const),
+        content: String(row.content),
+      }));
+  }
+
+  hasContextSource(turn: OperatorTurn, role: 'user' | 'assistant', content: string): boolean {
+    return (
+      this.sql
+        .exec(
+          'SELECT 1 FROM messages WHERE id=? AND conversation_id=? AND role=? AND content=? LIMIT 1',
+          `operator:${turn.id}:${role}`,
+          turn.conversation_id,
+          role,
+          content
+        )
+        .toArray().length === 1
+    );
   }
 
   searchHistory(query: string, limit: number) {

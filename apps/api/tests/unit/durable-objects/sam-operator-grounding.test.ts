@@ -65,6 +65,12 @@ describe('operator publication grounding', () => {
       ])
     ).not.toThrow();
   });
+  it('handles long punctuation without changing exact source matching', () => {
+    const punctuation = '.,;:!?'.repeat(8_000);
+    const actions = [receipt('sam_chat_read', { link })];
+    expect(() => check(`${link}${punctuation}`, actions)).not.toThrow();
+    expect(() => check(`${link}${punctuation}x`, actions)).toThrow('ungrounded platform source');
+  });
   it.each(['chat', 'tasks', 'ideas'])(
     'allows only the canonical project parent of a %s source',
     (kind) => {

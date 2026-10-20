@@ -251,11 +251,33 @@ describe('receipt-grounded native publication', () => {
     const fixture = await setup();
     await seedProject(fixture.userId);
     const fake = `I started it. Session: ${project}_SESS`;
-    const [settings] = await fixture.stub.testSql('SELECT conversation_id FROM operator_settings');
-    await fixture.stub.testSql(
-      "INSERT INTO messages(id,conversation_id,role,content,sequence) VALUES('historical-false-claim',?,'assistant',?,1)",
-      [settings!.conversation_id!, fake]
+    const [settings] = await fixture.stub.testSql(
+      'SELECT conversation_id,generation FROM operator_settings'
     );
+    const historicalTurn = crypto.randomUUID();
+    const constraint = 'Historical read-only request. Never create a PR or merge.';
+    await fixture.stub.testSql(
+      'INSERT INTO operator_turns(id,request_key,conversation_id,message,generation,state,response,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
+      [
+        historicalTurn,
+        'historical-request',
+        settings!.conversation_id!,
+        constraint,
+        settings!.generation!,
+        'completed',
+        fake,
+        Date.now() - 1000,
+        Date.now() - 1000,
+      ]
+    );
+    for (const [role, content, sequence] of [
+      ['user', constraint, 1],
+      ['assistant', fake, 2],
+    ] as const)
+      await fixture.stub.testSql(
+        'INSERT INTO messages(id,conversation_id,role,content,sequence) VALUES(?,?,?,?,?)',
+        [`operator:${historicalTurn}:${role}`, settings!.conversation_id!, role, content, sequence]
+      );
     readProjects = true;
     toolAtCall = 2;
     answer = `Here is the project: [Project](${origin}/projects/${project})`;
@@ -265,9 +287,87 @@ describe('receipt-grounded native publication', () => {
     expect(requests.map((request) => request.tool_choice)).toEqual(['auto', 'required', 'auto']);
     const correction = JSON.stringify(requests[1]?.messages);
     expect(correction).toContain('This correction grants no new authority');
-    expect(correction.split(fake).length - 1).toBe(1);
+    expect(correction.split(fake).length - 1).toBe(0);
+    type WireMessage = {
+      role: string;
+      content: string | null;
+      tool_call_id?: string;
+      tool_calls?: Array<{
+        id: string;
+        type: string;
+        function: { name: string; arguments: string };
+      }>;
+    };
+    const initialMessages = requests[0]!.messages as WireMessage[];
+    expect(initialMessages).toContainEqual({ role: 'user', content: constraint });
+    expect(initialMessages.at(-1)).toEqual({ role: 'user', content: input.message });
+    expect(JSON.stringify(initialMessages)).not.toContain(fake);
+    const status = initialMessages.find((message) => message.content?.startsWith('{"kind":'));
+    expect(JSON.parse(status!.content!)).toMatchObject({
+      kind: 'sam_historical_turn_status',
+      turnId: historicalTurn,
+      state: 'completed',
+      assistantOmitted: true,
+      authority: 'historical_evidence_only',
+      actions: [],
+    });
+    type WireTool = {
+      type: string;
+      function: { name: string; parameters: Record<string, unknown> };
+    };
+    const tools = requests[0]!.tools as WireTool[];
+    expect(tools.map((tool) => tool.function.name).sort()).toEqual([
+      'sam_agent_answer',
+      'sam_chat_read',
+      'sam_chat_send',
+      'sam_chat_start',
+      'sam_chats_list',
+      'sam_chats_search',
+      'sam_idea_create',
+      'sam_idea_get',
+      'sam_idea_update',
+      'sam_ideas_search',
+      'sam_inbox_get',
+      'sam_private_history_search',
+      'sam_profiles_list',
+      'sam_project_get',
+      'sam_projects_list',
+      'sam_task_get',
+      'sam_tasks_list',
+      'sam_work_stop',
+    ]);
     expect(
-      await fixture.stub.testSql("SELECT content FROM messages WHERE id='historical-false-claim'")
+      tools.every((tool) => tool.type === 'function' && tool.function.parameters.type === 'object')
+    ).toBe(true);
+    expect(
+      tools.find((tool) => tool.function.name === 'sam_chat_start')?.function.parameters
+    ).toMatchObject({
+      required: ['projectId', 'message'],
+      properties: {
+        projectId: { type: 'string' },
+        message: { type: 'string' },
+        agentProfileId: { type: 'string' },
+      },
+    });
+    expect(requests[1]!.tools).toEqual(tools);
+    expect(requests[2]!.tools).toEqual(tools);
+    const afterRead = requests[2]!.messages as WireMessage[];
+    const call = afterRead.find((message) => message.tool_calls?.length);
+    expect(call?.tool_calls).toEqual([
+      {
+        id: 'project-read',
+        type: 'function',
+        function: { name: 'sam_projects_list', arguments: '{"limit":1}' },
+      },
+    ]);
+    const result = afterRead.find((message) => message.role === 'tool');
+    expect(result?.tool_call_id).toBe('project-read');
+    expect(JSON.parse(result!.content!)).toMatchObject({ projects: [{ id: project }] });
+
+    expect(
+      await fixture.stub.testSql('SELECT content FROM messages WHERE id=?', [
+        `operator:${historicalTurn}:assistant`,
+      ])
     ).toEqual([{ content: fake }]);
     expect(
       await fixture.stub.testSql(

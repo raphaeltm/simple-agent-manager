@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import type { APIRequestContext } from '@playwright/test';
 
 import type { Json } from './staging-sam-dispatch-evidence';
-import { observationReserveMs } from './staging-sam-dispatch-provisioning';
+import { correlatedFollowupAnswer, type FollowupDelivery } from './staging-sam-dispatch-followup';
+import { dispatchObservationBudget } from './staging-sam-dispatch-provisioning';
 
 type Check = (condition: boolean, label: string) => void;
 const READ_PATHS: Array<[RegExp, string]> = [
@@ -65,6 +66,7 @@ interface ObservationInput {
   reportFixture: string;
   privateCanary: string;
   stopOnly: boolean;
+  followupDelivery?: FollowupDelivery;
   check: Check;
   save: () => Promise<void>;
   get: (url: string) => Promise<Json>;
@@ -132,10 +134,19 @@ export async function observeDispatchSession(
     get,
   } = input;
   const decode = (value: string | null): Json => (value ? JSON.parse(value) : {});
-  const responseDeadline = deadline - observationReserveMs(input.stopOnly, afterIds.size > 0);
+  check(Number.isFinite(ledger.dispatchAcceptedAt), 'Dispatch acceptance observation is recorded');
+  ledger.observationBudget = dispatchObservationBudget(
+    deadline,
+    ledger.dispatchAcceptedAt,
+    Date.now(),
+    input.stopOnly,
+    afterIds.size > 0,
+    ledger.followupOriginalState === 'interrupted'
+  );
+  const responseDeadline = ledger.observationBudget.endsAt;
   let nextProvisioningObservation = 0;
   while (Date.now() < responseDeadline) {
-    if (input.stopOnly && !ledger.workspaceId && Date.now() >= nextProvisioningObservation) {
+    if (!ledger.workspaceId && Date.now() >= nextProvisioningObservation) {
       await input.observeProvisioning();
       nextProvisioningObservation = Date.now() + 30_000;
     }
@@ -160,6 +171,20 @@ export async function observeDispatchSession(
       await save(); // Record identity before subsequent assertions or cleanup.
       check(!baselineWorkspaces.has(task.workspaceId), 'Workspace was created by this run');
       const workspace = await get(`${STAGING_API}/api/workspaces/${task.workspaceId}`);
+      if (ledger.nodeId && ledger.nodeId !== workspace.nodeId) {
+        ledger.unexpectedAllocation = {
+          workspaceId: task.workspaceId,
+          previousNodeId: ledger.nodeId,
+          observedNodeId: workspace.nodeId,
+          requiresManualReconciliation: true,
+        };
+        ledger.cleanup.unexpectedAllocation = 'unconfirmed: root must inspect saved identities';
+        await save(); // Preserve evidence without adopting a second automatic deletion target.
+      }
+      check(
+        !ledger.nodeId || ledger.nodeId === workspace.nodeId,
+        'The journey never replaces its allocated node'
+      );
       ledger.nodeId = workspace.nodeId;
       await save();
       const reservation = decode(workspace.resolvedReservationJson);
@@ -230,12 +255,14 @@ export async function observeDispatchSession(
       }
       previousRole = item.role;
     }
-    const answer = messages.find(
-      (item) =>
-        item.role === 'assistant' &&
-        !afterIds.has(item.id) &&
-        String(item.content ?? '').trim().length > 0
-    );
+    const answer =
+      afterIds.size > 0
+        ? input.followupDelivery
+          ? correlatedFollowupAnswer(messages, input.followupDelivery, afterIds)
+          : null
+        : messages.find(
+            (item) => item.role === 'assistant' && String(item.content ?? '').trim().length > 0
+          );
     const freshAgent = linked.some(
       (item: Json) =>
         Number(item.lastHeartbeatAt) >= startedAt &&
@@ -283,6 +310,13 @@ export async function observeDispatchSession(
         characters: String(answer.content).length,
         sha256: createHash('sha256').update(String(answer.content)).digest('hex'),
       };
+      if (input.followupDelivery && afterIds.size > 0)
+        ledger.followupAnswer = {
+          messageId: input.followupDelivery.messageId,
+          deliveryId: input.followupDelivery.deliveryId,
+          answerId: answer.id,
+          acknowledgementMatched: true,
+        };
       ledger.messageIds = messages.map((item) => item.id);
       ledger.checks.liveAgentHeartbeat = true;
       ledger.checks.observedHardwareVerified = true;
@@ -293,5 +327,11 @@ export async function observeDispatchSession(
     check(!['failed', 'cancelled'].includes(task.status), 'Project task has not failed');
     await input.wait(5_000);
   }
-  check(false, 'Bounded project observation deadline reached before readiness');
+  await save();
+  check(
+    false,
+    ledger.observationBudget.limitedBy === 'test-work-reserve'
+      ? 'Test phase budget exhausted; downstream work and cleanup remain reserved'
+      : 'Platform readiness observation allowance exhausted'
+  );
 }

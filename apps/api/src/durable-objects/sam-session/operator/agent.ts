@@ -13,6 +13,7 @@ import {
   incrementTokenUsage,
 } from '../../../services/ai-token-budget';
 import { buildAnthropicGatewayUrl } from '../agent-loop-helpers';
+import { projectOperatorContext } from './context';
 import { assertGroundedOperatorResponse, OperatorGroundingError } from './grounding';
 import { assertOperatorExecution, operatorTools } from './operations';
 import type { OperatorStore, OperatorTurn } from './store';
@@ -106,12 +107,17 @@ export async function runOperatorAgent(options: {
     }),
   });
   // The canonical per-user history is projected into Mastra; no second framework memory.
-  const messages = store.contextMessages(config.contextWindow);
-  let bytes = new TextEncoder().encode(JSON.stringify(messages)).byteLength;
-  while (messages.length > 1 && bytes > config.maxRequestBodyBytes) {
-    messages.shift();
-    bytes = new TextEncoder().encode(JSON.stringify(messages)).byteLength;
-  }
+  const appOrigin = new URL(getTrustedApiOrigin(env));
+  if (appOrigin.hostname.startsWith('api.'))
+    appOrigin.hostname = `app.${appOrigin.hostname.slice(4)}`;
+  const { messages, bytes } = projectOperatorContext({
+    store,
+    turn,
+    appOrigin: appOrigin.origin,
+    limit: config.contextWindow,
+    maxBytes: config.maxRequestBodyBytes,
+    maxActionRefs: config.maxTurns,
+  });
   const generate = (correcting: boolean) =>
     agent.generate(messages, {
       abortSignal: options.signal,
@@ -166,9 +172,6 @@ export async function runOperatorAgent(options: {
   // A successful transport can still contain no answer. Preserve receipts and
   // accounting, but let the controller interrupt rather than report completion.
   if (!result.text.trim()) throw new Error('SAM model returned no answer');
-  const appOrigin = new URL(getTrustedApiOrigin(env));
-  if (appOrigin.hostname.startsWith('api.'))
-    appOrigin.hostname = `app.${appOrigin.hostname.slice(4)}`;
   try {
     assertGroundedOperatorResponse(result.text, store.actions(turn.id), appOrigin.origin);
   } catch (error) {

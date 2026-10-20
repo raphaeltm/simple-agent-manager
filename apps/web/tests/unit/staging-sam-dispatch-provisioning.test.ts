@@ -2,8 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   captureOwnedProvisioning,
-  dispatchWorkMs,
+  DISPATCH_WORK_MS,
+  dispatchObservationBudget,
   observationReserveMs,
+  PRIVATE_TURN_MS,
+  privateTurnReserveMs,
   type ProvisioningInput,
   provisioningSummary,
   verifyNoWorkspaceAfterStop,
@@ -37,12 +40,50 @@ function database(rows: unknown[]) {
   return fetch;
 }
 describe('bounded dispatch provisioning evidence', () => {
-  it('gives stop-only a realistic boot window while preserving full-journey limits', () => {
-    expect(dispatchWorkMs(false)).toBe(720_000);
-    expect(dispatchWorkMs(true)).toBe(1_500_000);
-    expect(observationReserveMs(false, false)).toBe(330_000);
-    expect(observationReserveMs(false, true)).toBe(150_000);
+  it('reserves follow-up, optional recovery and confirmation inside the fixed work budget', () => {
+    expect(DISPATCH_WORK_MS).toBe(1_500_000);
+    expect(DISPATCH_WORK_MS - observationReserveMs(false, false)).toBe(900_000);
+    expect(observationReserveMs(false, true)).toBe(240_000);
+    expect(observationReserveMs(false, true, true)).toBe(390_000);
     expect(observationReserveMs(true, false)).toBe(210_000);
+    expect(PRIVATE_TURN_MS + privateTurnReserveMs('followup')).toBe(540_000);
+    expect(PRIVATE_TURN_MS + privateTurnReserveMs('followup-recovery')).toBe(390_000);
+    expect(PRIVATE_TURN_MS + privateTurnReserveMs('stop')).toBe(240_000);
+  });
+  it('labels a shortened initial window as test budget, not platform readiness failure', () => {
+    const budget = dispatchObservationBudget(
+      DISPATCH_WORK_MS,
+      120_000,
+      180_000,
+      false,
+      false,
+      false
+    );
+    expect(budget).toMatchObject({
+      endsAt: 900_000,
+      platformReadinessEndsAt: 1_020_000,
+      limitedBy: 'test-work-reserve',
+    });
+    expect(DISPATCH_WORK_MS - budget.endsAt).toBe(600_000);
+  });
+  it('uses the full 900s from accepted dispatch when downstream reservations fit', () => {
+    expect(
+      dispatchObservationBudget(DISPATCH_WORK_MS, 120_000, 180_000, true, false, false)
+    ).toMatchObject({ endsAt: 1_020_000, limitedBy: 'readiness' });
+  });
+  it('keeps an optional recovery and stop reserve after a late follow-up observation', () => {
+    const budget = dispatchObservationBudget(
+      DISPATCH_WORK_MS,
+      120_000,
+      1_100_000,
+      false,
+      true,
+      true
+    );
+    expect(budget).toMatchObject({ phase: 'followup-answer', endsAt: 1_110_000 });
+    expect(DISPATCH_WORK_MS - budget.endsAt).toBe(
+      PRIVATE_TURN_MS + privateTurnReserveMs('followup-recovery')
+    );
   });
   it('retains only fixed provisioning phases, statuses, timestamps and durations', () => {
     const result = provisioningSummary({

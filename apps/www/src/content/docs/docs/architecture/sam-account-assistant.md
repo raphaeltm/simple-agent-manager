@@ -17,7 +17,9 @@ An account-local `operator_conversation_tasks` row supplies the conversation's b
 
 `operator_turns` and `operator_actions` retain admission keys, state, exact action inputs, dispatch reservations and outcomes. They are execution receipts alongside the canonical transcript, not a replacement transcript. Read-only earlier history remains available through the existing conversation/message API.
 
-Mastra receives a bounded projection of canonical user/assistant messages, plus bounded unresolved-action references and tool evidence. Old projected messages are dropped according to context/request limits; retained history can be searched privately. Mastra does not maintain a second persistent memory database. Tool results and event records are evidence, not human authorization.
+Mastra receives a bounded, turn-aware projection of canonical user/assistant messages, plus bounded unresolved-action references and tool evidence. Server-generated message identities link historical turns to their recorded state and action references, including copied private-fork history. Historical assistant claims that fail grounding against their own receipts are excluded from model input; the canonical transcript, UI history and search index remain unchanged. Retained historical assistant prose is escaped data inside a server-generated status record, so it cannot impersonate a separate status record. Historical user constraints are retained within the selected window, and status records identify earlier requests as historical evidence rather than current authorization. No raw action inputs or results are added by these status records.
+
+Old projected turn groups are dropped together according to context/request limits, including their status metadata. The exact current request is always last and is never partially truncated. Retained history can still be searched privately. Mastra does not maintain a second persistent memory database. Tool results and event records are evidence, not human authorization. This projection improves provenance; it does not guarantee a model will select a tool or complete the requested workflow.
 
 ## Execution and authorization
 

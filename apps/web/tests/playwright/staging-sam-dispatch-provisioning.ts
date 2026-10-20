@@ -1,8 +1,40 @@
 import type { Json } from './staging-sam-dispatch-evidence';
 
-export const dispatchWorkMs = (stopOnly: boolean) => (stopOnly ? 25 : 12) * 60_000;
-export const observationReserveMs = (stopOnly: boolean, followup: boolean) =>
-  stopOnly ? 210_000 : followup ? 150_000 : 330_000;
+export const DISPATCH_WORK_MS = 25 * 60_000;
+export const PRIVATE_TURN_MS = 150_000;
+export const STOP_CONFIRMATION_MS = 90_000;
+// Full readiness gets at most 900s of the work budget; downstream work cannot
+// consume the separate cleanup allowance. Recovery is optional, never unbounded.
+export const observationReserveMs = (stopOnly: boolean, followup: boolean, recovery = false) =>
+  stopOnly
+    ? 210_000
+    : followup
+      ? PRIVATE_TURN_MS + STOP_CONFIRMATION_MS + (recovery ? PRIVATE_TURN_MS : 0)
+      : 600_000;
+export function privateTurnReserveMs(kind: string): number {
+  if (kind === 'followup') return PRIVATE_TURN_MS * 2 + STOP_CONFIRMATION_MS;
+  if (kind === 'followup-recovery') return PRIVATE_TURN_MS + STOP_CONFIRMATION_MS;
+  if (kind === 'stop') return STOP_CONFIRMATION_MS;
+  return 0;
+}
+export function dispatchObservationBudget(
+  deadline: number,
+  acceptedAt: number,
+  beganAt: number,
+  stopOnly: boolean,
+  followup: boolean,
+  recovery: boolean
+) {
+  const workCutoff = deadline - observationReserveMs(stopOnly, followup, recovery);
+  const readinessCutoff = acceptedAt + 900_000;
+  return {
+    phase: followup ? 'followup-answer' : 'initial-readiness',
+    beganAt,
+    endsAt: followup ? workCutoff : Math.min(workCutoff, readinessCutoff),
+    platformReadinessEndsAt: followup ? null : readinessCutoff,
+    limitedBy: followup || workCutoff < readinessCutoff ? 'test-work-reserve' : 'readiness',
+  };
+}
 
 interface D1Input {
   account: string;
