@@ -7,8 +7,9 @@ import {
   DEFAULT_PROJECT_EVENT_SCHEDULE_MAX_HORIZON_MS,
 } from '@simple-agent-manager/shared';
 
+import { formatSpanWords } from '../../lib/time-utils';
 import { Field, INPUT_CLASS, ZoneSelect } from './fields';
-import { durationLabel, fullDate, instantToZonedInput, zonedInputToInstant } from './time';
+import { fullDate, instantToZonedInput, zonedInputToInstant } from './time';
 
 const MIN = 60_000;
 
@@ -20,7 +21,7 @@ export const GIVE_UP_OPTIONS = [
   DEFAULT_PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS,
 ]
   .filter((ms) => ms <= DEFAULT_PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS)
-  .map((ms) => ({ ms, label: durationLabel(ms) }));
+  .map((ms) => ({ ms, label: formatSpanWords(ms) }));
 
 export const DEFAULT_GIVE_UP_MS = DEFAULT_PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS;
 
@@ -55,7 +56,7 @@ export function resolveOnceTime(
   if (dueAt <= now) return { error: 'Choose a time in the future.' };
   if (dueAt - now > DEFAULT_PROJECT_EVENT_SCHEDULE_MAX_HORIZON_MS)
     return {
-      error: `Choose a time within the next ${durationLabel(DEFAULT_PROJECT_EVENT_SCHEDULE_MAX_HORIZON_MS)}.`,
+      error: `Choose a time within the next ${formatSpanWords(DEFAULT_PROJECT_EVENT_SCHEDULE_MAX_HORIZON_MS)}.`,
     };
   return { dueAt, expiresAt: dueAt + time.giveUpMs };
 }

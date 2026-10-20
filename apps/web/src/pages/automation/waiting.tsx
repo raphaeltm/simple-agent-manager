@@ -14,13 +14,14 @@ import { useQueryScope } from '../../hooks/useQueryScope';
 import { automationPaths } from '../../lib/automation-routes';
 import { cancelEventSubscription } from '../../lib/project-events-api';
 import { subscriptionDeliveriesQueryOptions } from '../../lib/query-options';
+import { formatTimeFromNow } from '../../lib/time-utils';
 import { useProjectContext } from '../ProjectContext';
 import type { AutomationLookups } from './data';
 import { describeEventFilter, filterRows, isManagedSubscription, isSamRelay } from './describe';
 import { useAutomationAction } from './detail-parts';
 import { CheckRow, Field } from './fields';
 import { LoadError, Loading } from './page';
-import { fullDate, relative } from './time';
+import { fullDate } from './time';
 import { ButtonLink, Disclosure, KeyValues, Panel } from './ui';
 
 const DELIVERY_WORDS: Record<string, string> = {
@@ -55,7 +56,7 @@ function DeliveryOutcomes({ subscriptionId }: { subscriptionId: string }) {
           </span>
           <span className="text-fg-muted">
             {fullDate(delivery.createdAt)}
-            {delivery.ackedAt ? ` · read ${relative(delivery.ackedAt)}` : ''}
+            {delivery.ackedAt ? ` · read ${formatTimeFromNow(delivery.ackedAt)}` : ''}
             {delivery.terminalReason ? ` · ${delivery.terminalReason}` : ''}
           </span>
         </li>
@@ -118,16 +119,16 @@ export function WaitCard({
           </p>
           <span className="text-[13px] text-fg-muted">
             {active
-              ? `Since ${relative(subscription.createdAt)}${
+              ? `Since ${formatTimeFromNow(subscription.createdAt)}${
                   subscription.expiresAt
                     ? subscription.expiresAt > Date.now()
-                      ? ` · gives up ${relative(subscription.expiresAt)}`
+                      ? ` · gives up ${formatTimeFromNow(subscription.expiresAt)}`
                       : ' · past its end time'
                     : ''
                 }`
-              : `${subscription.state === 'expired' ? 'Expired' : 'Stopped'} ${relative(subscription.cancelledAt ?? subscription.updatedAt)}${subscription.cancelReason ? `: ${subscription.cancelReason}` : ''}`}
+              : `${subscription.state === 'expired' ? 'Expired' : 'Stopped'} ${formatTimeFromNow(subscription.cancelledAt ?? subscription.updatedAt)}${subscription.cancelReason ? `: ${subscription.cancelReason}` : ''}`}
             {subscription.lastMatchedAt
-              ? ` · last matched ${relative(subscription.lastMatchedAt)}`
+              ? ` · last matched ${formatTimeFromNow(subscription.lastMatchedAt)}`
               : ''}
           </span>
           {relay && (

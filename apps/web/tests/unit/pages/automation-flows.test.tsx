@@ -311,6 +311,22 @@ describe('overview', () => {
     );
   });
 
+  it('lets a project member who is not the owner change automation', async () => {
+    scope.userId = 'member-1';
+    api.getProjectMembers.mockResolvedValue({
+      members: [member('owner', 'owner'), member('member-1', 'member')],
+    });
+    api.listTriggers.mockResolvedValue({ triggers: [trigger()] });
+    api.listTriggerExecutions.mockResolvedValue({
+      executions: [failedRun('r3', 1), failedRun('r2', 25), failedRun('r1', 49)],
+      nextCursor: null,
+    });
+    renderAt('/projects/p1/automation');
+    const card = await screen.findByRole('region', { name: 'Dependency audit' });
+    expect(await within(card).findByRole('button', { name: 'Resume' })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /New/ }).length).toBeGreaterThan(0);
+  });
+
   it('shows a viewer everything but no controls', async () => {
     scope.userId = 'viewer';
     api.listTriggers.mockResolvedValue({ triggers: [trigger()] });
@@ -345,6 +361,9 @@ describe('create flow', () => {
         headerName: 'Authorization',
       },
     });
+    api.getTrigger.mockResolvedValue(
+      trigger({ id: 'trg-new', sourceType: 'webhook', status: 'active', cronExpression: null })
+    );
     renderAt('/projects/p1/automation/new');
     await user.click(await screen.findByRole('radio', { name: /When another service calls SAM/ }));
     await user.click(screen.getByRole('button', { name: 'Continue' }));
@@ -392,6 +411,37 @@ describe('create flow', () => {
         '/projects/p1/automation/trigger/trg-new'
       )
     );
+  });
+
+  it('creates a GitHub automation through its own fields', async () => {
+    const user = userEvent.setup();
+    api.createTrigger.mockResolvedValue(
+      trigger({ id: 'trg-gh', sourceType: 'github', status: 'active', cronExpression: null })
+    );
+    api.getTrigger.mockResolvedValue(
+      trigger({ id: 'trg-gh', sourceType: 'github', status: 'active', cronExpression: null })
+    );
+    renderAt('/projects/p1/automation/new');
+    await user.click(
+      await screen.findByRole('radio', { name: /When something happens on GitHub/ })
+    );
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.selectOptions(screen.getByLabelText('GitHub event'), 'pull_request');
+    await user.type(screen.getByLabelText(/Required labels/), 'needs-review');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.type(screen.getByLabelText('What should it do?'), 'Review the pull request');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Create automation' }));
+    await waitFor(() => expect(api.createTrigger).toHaveBeenCalledTimes(1));
+    const [, body] = api.createTrigger.mock.calls[0] ?? [];
+    expect(body).toMatchObject({
+      sourceType: 'github',
+      promptTemplate: 'Review the pull request',
+      githubConfig: {
+        eventType: 'pull_request',
+        filters: expect.objectContaining({ actions: ['opened'], labels: ['needs-review'] }),
+      },
+    });
   });
 
   it('reminds a chat later with a one-time message to that chat', async () => {
@@ -492,6 +542,31 @@ describe('watches', () => {
     const [, , body] = events.updateStandingWatch.mock.calls[0] ?? [];
     expect(body).not.toHaveProperty('action');
     expect(body).toMatchObject({ expectedVersion: 5, filter: existing.filter, maxExecutions: 10 });
+  });
+
+  it('lets the watch creator change what it does', async () => {
+    const user = userEvent.setup();
+    const mine = watch({ creatorUserId: 'owner', executionCount: 2 });
+    events.getStandingWatch.mockResolvedValue({ watch: mine });
+    events.updateStandingWatch.mockResolvedValue({ watch: mine, changed: true, idempotent: false });
+    renderAt('/projects/p1/automation/watch/w1/edit');
+    expect(await screen.findByText(/Step 1 of 3/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.queryByText(/can change what this watch does/)).toBeNull();
+    const prompt = screen.getByLabelText('What should it do?');
+    await user.clear(prompt);
+    await user.type(prompt, 'Investigate and post a summary');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(events.updateStandingWatch).toHaveBeenCalledTimes(1));
+    const [, , body] = events.updateStandingWatch.mock.calls[0] ?? [];
+    expect(body).toMatchObject({
+      expectedVersion: 5,
+      action: expect.objectContaining({
+        kind: 'start_session',
+        prompt: 'Investigate and post a summary',
+      }),
+    });
   });
 
   it('raises the run limit with only the limit', async () => {
@@ -619,6 +694,69 @@ describe('trigger page', () => {
     ).toBeInTheDocument();
     expect(within(calls).getByText('Ignored: did not match the filters')).toBeInTheDocument();
     expect(within(calls).getAllByText(/listed under Recent runs/)).toHaveLength(2);
+  });
+
+  it('deletes one run only after confirming, and says so when the API refuses', async () => {
+    const user = userEvent.setup();
+    api.getTrigger.mockResolvedValue(trigger({ status: 'active' }));
+    api.listTriggerExecutions.mockResolvedValue({
+      executions: [failedRun('r1', 2)],
+      nextCursor: null,
+    });
+    api.deleteExecution.mockRejectedValueOnce(new Error('Not allowed for this run'));
+    renderAt('/projects/p1/automation/trigger/trg-deps');
+    await user.click(await screen.findByRole('button', { name: /Delete the run from/ }));
+    expect(api.deleteExecution).not.toHaveBeenCalled();
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete run' })
+    );
+    await waitFor(() => expect(api.deleteExecution).toHaveBeenCalledWith('p1', 'trg-deps', 'r1'));
+    expect(await screen.findByText('Not allowed for this run')).toBeInTheDocument();
+  });
+
+  it('offers to clear stuck runs only while one is queued, and clears after confirming', async () => {
+    const user = userEvent.setup();
+    api.getTrigger.mockResolvedValue(trigger({ status: 'active' }));
+    api.listTriggerExecutions.mockResolvedValue({
+      executions: [{ ...failedRun('r2', 1), status: 'queued', completedAt: null }],
+      nextCursor: null,
+    });
+    api.cleanupStuckExecutions.mockResolvedValue({ cleaned: 1 });
+    renderAt('/projects/p1/automation/trigger/trg-deps');
+    await user.click(await screen.findByRole('button', { name: 'Clear stuck runs' }));
+    expect(api.cleanupStuckExecutions).not.toHaveBeenCalled();
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Clear stuck runs' })
+    );
+    await waitFor(() => expect(api.cleanupStuckExecutions).toHaveBeenCalledWith('p1', 'trg-deps'));
+    expect(await screen.findByText('Cleared 1 stuck run')).toBeInTheDocument();
+  });
+
+  it('keeps showing the automation when a background refresh fails (rule 48)', async () => {
+    const user = userEvent.setup();
+    const active = trigger({ status: 'active' });
+    api.getTrigger.mockResolvedValueOnce(active).mockRejectedValue(new Error('Network down'));
+    api.updateTrigger.mockResolvedValue({ ...active, status: 'paused' });
+    renderAt('/projects/p1/automation/trigger/trg-deps');
+    expect(
+      await screen.findByRole('heading', { name: /Dependency audit/, level: 1 })
+    ).toBeInTheDocument();
+    // Pausing refreshes everything; the trigger read now fails.
+    await user.click(screen.getByRole('button', { name: /Pause/ }));
+    await waitFor(() => expect(api.getTrigger.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(screen.getByRole('heading', { name: /Dependency audit/, level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText(/is not available/)).toBeNull();
+  });
+
+  it('does not offer to clear stuck runs when none is queued', async () => {
+    api.getTrigger.mockResolvedValue(trigger({ status: 'active' }));
+    api.listTriggerExecutions.mockResolvedValue({
+      executions: [failedRun('r1', 2)],
+      nextCursor: null,
+    });
+    renderAt('/projects/p1/automation/trigger/trg-deps');
+    expect(await screen.findByRole('button', { name: /Delete the run from/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear stuck runs' })).toBeNull();
   });
 
   it('never offers run now for an incident trigger', async () => {

@@ -11,11 +11,12 @@ import { useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { channelHistoryQueryOptions, channelsQueryOptions } from '../../lib/query-options';
+import { formatTimeFromNow } from '../../lib/time-utils';
 import { useProjectContext } from '../ProjectContext';
 import type { AutomationLookups } from './data';
 import { CheckRow } from './fields';
 import { LoadError, Loading, Notice } from './page';
-import { fullDate, relative } from './time';
+import { fullDate } from './time';
 import { Panel } from './ui';
 
 function ChannelHistory({ channel, lookups }: { channel: string; lookups: AutomationLookups }) {
@@ -115,7 +116,7 @@ function ChannelRow({
           </span>
           <span className="text-[13px] text-fg-muted">
             {channel.lifetimeCount} {channel.lifetimeCount === 1 ? 'post' : 'posts'} · last{' '}
-            {relative(channel.lastPublishedAt)}
+            {formatTimeFromNow(channel.lastPublishedAt)}
           </span>
         </span>
         <span className="shrink-0 text-sm font-semibold text-accent">{open ? 'Hide' : 'Read'}</span>

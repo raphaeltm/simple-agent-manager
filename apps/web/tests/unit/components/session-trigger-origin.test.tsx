@@ -27,4 +27,16 @@ describe('SessionTriggerOrigin', () => {
       '/projects/p1/automation/trigger/trg-1#runs'
     );
   });
+
+  it('renders nothing for an ordinary chat no automation started', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <SessionTriggerOrigin
+          projectId="p1"
+          detail={{ trigger: null, triggerExecution: null } as unknown as TaskDetailResponse}
+        />
+      </MemoryRouter>
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
 });

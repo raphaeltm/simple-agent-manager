@@ -8,6 +8,7 @@ import type {
 import { describe, expect, it } from 'vitest';
 
 import { buildActivity, scheduleEntry } from '../../../src/pages/automation/activity';
+import { triggersNeedingRuns } from '../../../src/pages/automation/data';
 import {
   describeEventFilter,
   executionText,
@@ -438,5 +439,44 @@ describe('event wording fallbacks', () => {
         subjectId: 'trig-webhook-stripe',
       }).noun
     ).toBe('a webhook call to webhook trig-webhook');
+  });
+});
+
+describe('which triggers get their runs read', () => {
+  const fired = (
+    id: string,
+    hoursAgo: number | null,
+    status: TriggerResponse['status'] = 'active'
+  ) =>
+    trigger({
+      id,
+      status,
+      lastTriggeredAt:
+        hoursAgo === null
+          ? null
+          : new Date(Date.UTC(2026, 9, 20, 12) - hoursAgo * 3_600_000).toISOString(),
+    });
+
+  it('reads paused triggers first, then the most recently fired, within the cap', () => {
+    const triggers = [
+      fired('old', 30),
+      fired('paused-old', 50, 'paused'),
+      fired('new', 1),
+      fired('never', null),
+      fired('paused-new', 2, 'paused'),
+    ];
+    const all = triggersNeedingRuns(triggers, 'overview', 25);
+    expect(all.read.map((item) => item.id)).toEqual(['paused-new', 'paused-old', 'new', 'old']);
+    expect(all.unread).toBe(0);
+    const capped = triggersNeedingRuns(triggers, 'overview', 3);
+    expect(capped.read.map((item) => item.id)).toEqual(['paused-new', 'paused-old', 'new']);
+    expect(capped.unread).toBe(1);
+  });
+
+  it('reads every trigger on History, most recently fired first, and counts what the cap left out', () => {
+    const triggers = [fired('a', 5), fired('b', 1), fired('c', null), fired('d', 3)];
+    const history = triggersNeedingRuns(triggers, 'all', 2);
+    expect(history.read.map((item) => item.id)).toEqual(['b', 'd']);
+    expect(history.unread).toBe(2);
   });
 });

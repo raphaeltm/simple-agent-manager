@@ -6,12 +6,14 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 
+import { AUTOMATION_MAX_RUN_READS } from '../../lib/automation-config';
 import { automationPaths, parseHistoryItem } from '../../lib/automation-routes';
+import { formatTimeFromNow } from '../../lib/time-utils';
 import { useProjectContext } from '../ProjectContext';
 import { type ActivityEntry, isProblem } from './activity';
 import { useAutomationData } from './data';
 import { LoadError, Loading, Notice, Page, PageHeader } from './page';
-import { dayHeading, relative } from './time';
+import { dayHeading } from './time';
 import { Chips, OutcomeIcon, Panel, TextLink } from './ui';
 
 function HistoryRow({ entry, name }: { entry: ActivityEntry; name: string }) {
@@ -35,7 +37,7 @@ function HistoryRow({ entry, name }: { entry: ActivityEntry; name: string }) {
           <span className="line-clamp-2 text-[13px] text-fg-muted [overflow-wrap:anywhere]">
             {entry.text}
           </span>
-          <span className="text-xs text-fg-muted">{relative(entry.at)}</span>
+          <span className="text-xs text-fg-muted">{formatTimeFromNow(entry.at)}</span>
         </span>
       </Link>
       {chatTo && (
@@ -103,6 +105,12 @@ export function AutomationHistory() {
       )}
       {data.runsFailed && (
         <Notice>Some runs could not be loaded, so this history may be missing a few.</Notice>
+      )}
+      {data.unreadRuns > 0 && (
+        <Notice>
+          Showing runs of the {AUTOMATION_MAX_RUN_READS} most recently active recurring and reacting
+          automations. Open one of the others to see its runs.
+        </Notice>
       )}
       {data.isPending ? (
         <Loading label="Loading history…" />

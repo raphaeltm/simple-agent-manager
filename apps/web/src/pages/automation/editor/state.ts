@@ -9,6 +9,8 @@ import {
   type GitHubTriggerEventType,
   PROJECT_EVENT_CHANNEL_SOURCE,
   PROJECT_EVENT_CHANNEL_TYPE,
+  PROJECT_LIFECYCLE_EVENT_SOURCE,
+  PROJECT_LIFECYCLE_EVENT_TYPES,
   type ProjectEventFilterV1,
   type ProjectStandingWatch,
   type TriggerResponse,
@@ -23,7 +25,6 @@ import {
 import { parseCronToMode } from '../../../components/triggers/schedule-cron';
 import { joinList } from '../../../components/triggers/trigger-form-support';
 import type { AutomationStart } from '../../../lib/automation-routes';
-import { LIFECYCLE_SOURCE } from '../describe';
 import { type OnceTime, onceTimeFrom } from '../schedule-time';
 import { viewerZone } from '../time';
 import { canonicalCron, type ScheduleChoice, type SchedulePreset, toCron } from './cron';
@@ -59,17 +60,25 @@ export const WATCH_PRESETS = {
     source: 'github',
     eventType: 'pull_request_review.submitted',
   },
-  'task-failed': { label: 'A task fails', source: LIFECYCLE_SOURCE, eventType: 'task.failed' },
-  'chat-failed': { label: 'A chat fails', source: LIFECYCLE_SOURCE, eventType: 'session.failed' },
+  'task-failed': {
+    label: 'A task fails',
+    source: PROJECT_LIFECYCLE_EVENT_SOURCE,
+    eventType: PROJECT_LIFECYCLE_EVENT_TYPES.taskFailed,
+  },
+  'chat-failed': {
+    label: 'A chat fails',
+    source: PROJECT_LIFECYCLE_EVENT_SOURCE,
+    eventType: PROJECT_LIFECYCLE_EVENT_TYPES.sessionFailed,
+  },
   'release-failed': {
     label: 'A release fails',
-    source: LIFECYCLE_SOURCE,
-    eventType: 'deployment.release.failed',
+    source: PROJECT_LIFECYCLE_EVENT_SOURCE,
+    eventType: PROJECT_LIFECYCLE_EVENT_TYPES.releaseFailed,
   },
   'release-applied': {
     label: 'A release goes live',
-    source: LIFECYCLE_SOURCE,
-    eventType: 'deployment.release.applied',
+    source: PROJECT_LIFECYCLE_EVENT_SOURCE,
+    eventType: PROJECT_LIFECYCLE_EVENT_TYPES.releaseApplied,
   },
 } as const;
 

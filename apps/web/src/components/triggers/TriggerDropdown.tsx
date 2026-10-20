@@ -14,7 +14,7 @@ import { useNavigate } from 'react-router';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { automationPaths } from '../../lib/automation-routes';
 import { triggersQueryOptions } from '../../lib/query-options';
-import { FOCUS_RING } from './trigger-presentation';
+import { FOCUS_RING } from './trigger-form-support';
 
 const POPOVER_WIDTH = 288;
 const POPOVER_MARGIN = 8;

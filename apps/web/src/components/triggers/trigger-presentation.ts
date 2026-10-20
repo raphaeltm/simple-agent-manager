@@ -1,10 +1,4 @@
-/**
- * Presentation helpers shared by the trigger field components and the Automation page.
- */
-
-/** Shared focus ring. Also exported from `trigger-form-support` for form fields. */
-export const FOCUS_RING =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
+/** Presentation helpers for trigger runs, shared by the Automation page. */
 
 /**
  * Wall-clock duration between two ISO timestamps, e.g. "1m 5s".

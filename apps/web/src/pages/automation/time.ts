@@ -55,29 +55,6 @@ export function dayHeading(ts: number, now = Date.now()) {
   }).format(ts);
 }
 
-/** "just now", "3 min ago", "2 h ago", "4 days ago", "in 5 min", "in 6 days". */
-export function relative(ts: number, now = Date.now()) {
-  const delta = ts - now;
-  const abs = Math.abs(delta);
-  if (abs < MIN) return 'just now';
-  let text: string;
-  if (abs < 60 * MIN) text = `${Math.round(abs / MIN)} min`;
-  else if (abs < DAY) text = `${Math.round(abs / (60 * MIN))} h`;
-  else {
-    const days = Math.round(abs / DAY);
-    text = `${days} ${days === 1 ? 'day' : 'days'}`;
-  }
-  return delta > 0 ? `in ${text}` : `${text} ago`;
-}
-
-/** A length of time in words: "15 minutes", "1 hour", "24 hours", "30 days". */
-export function durationLabel(ms: number) {
-  const unit = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
-  if (ms >= 2 * DAY && ms % DAY === 0) return unit(ms / DAY, 'day');
-  if (ms >= 60 * MIN && ms % (60 * MIN) === 0) return unit(ms / (60 * MIN), 'hour');
-  return unit(Math.max(1, Math.round(ms / MIN)), 'minute');
-}
-
 /** A full timestamp with its zone, for detail views: "Tue, Oct 21, 9:00 AM GMT+2". */
 export function fullDate(ts: number, zone?: string) {
   return new Intl.DateTimeFormat(undefined, {

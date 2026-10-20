@@ -34,6 +34,18 @@ export const AUTOMATION_RECENT_RUNS_PER_TRIGGER = positiveInt(
 );
 
 /**
+ * Most triggers whose runs one page reads, one request each (there is no project-wide run
+ * feed). The overview reads paused triggers first, then the few that fired most recently;
+ * History reads the most recently fired. Both say when the cap left some out. The default
+ * covers the default per-project trigger limit with room to spare.
+ */
+export const DEFAULT_AUTOMATION_MAX_RUN_READS = 25;
+export const AUTOMATION_MAX_RUN_READS = positiveInt(
+  import.meta.env.VITE_AUTOMATION_MAX_RUN_READS,
+  DEFAULT_AUTOMATION_MAX_RUN_READS
+);
+
+/**
  * Pages of one-time schedules and watches the overview reads, at the API's largest page size.
  * Bounded so a project with a long history cannot fan out unbounded requests; the overview says
  * when it stopped early.

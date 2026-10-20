@@ -12,12 +12,13 @@ import { Link } from 'react-router';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useToast } from '../../hooks/useToast';
 import { automationPaths } from '../../lib/automation-routes';
+import { formatTimeFromNow } from '../../lib/time-utils';
 import { useProjectContext } from '../ProjectContext';
 import { type AutomationLookups, useInvalidateAutomation } from './data';
 import { errorText, isVersionConflict } from './errors';
 import type { Attention, AutomationItem } from './model';
 import { Page, PageHeader } from './page';
-import { relative, whenLabel } from './time';
+import { whenLabel } from './time';
 import { KindIcon, Panel, PromptText, START_META, StatePill } from './ui';
 
 /**
@@ -151,14 +152,14 @@ export function NextFact({ item }: { item: AutomationItem }) {
     const zoneHint = item.whenNote && item.kind === 'trigger' ? ' your time' : '';
     return (
       <Fact label={item.kind === 'schedule' ? 'Runs' : 'Next'}>
-        {`${whenLabel(item.nextAt)}${zoneHint} (${relative(item.nextAt)})`}
+        {`${whenLabel(item.nextAt)}${zoneHint} (${formatTimeFromNow(item.nextAt)})`}
       </Fact>
     );
   }
   if (item.kind === 'schedule') return <Fact label="Result">{item.stateNote ?? 'Done'}</Fact>;
   if (item.lastRunAt)
     return (
-      <Fact label="Last ran">{`${whenLabel(item.lastRunAt)} (${relative(item.lastRunAt)})`}</Fact>
+      <Fact label="Last ran">{`${whenLabel(item.lastRunAt)} (${formatTimeFromNow(item.lastRunAt)})`}</Fact>
     );
   return (
     <Fact label="Last ran">

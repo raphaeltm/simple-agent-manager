@@ -61,7 +61,7 @@ project overview, and **Open as a page** shows the same view full size.
   commit or a review on a pull request, and which chat is waiting. **Details** on each shows the
   exact filter, how delivery was asked for and how it was resolved, and its recent deliveries.
   **Show waits that ended** adds stopped and expired ones. Waits that SAM manages itself, such as
-  the relays that carry messages between agents, are hidden until you turn on **Show SAM's own
+  the relays that carry messages between agents, are hidden until you turn on **Show SAM’s own
   message relays** and can't be stopped here; a watch's own wait is managed from the watch.
 - **Channels** lists the channels agents post on, newest activity first; **Read** shows the
   posts. Channels belong to the whole project, not to one chat. The private threads SAM keeps for

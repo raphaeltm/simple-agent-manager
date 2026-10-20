@@ -8,13 +8,13 @@ import {
   type GitHubTriggerEventType,
   type GitHubTriggerFilters,
   PROJECT_EVENT_CHANNEL_SOURCE,
+  PROJECT_LIFECYCLE_EVENT_SOURCE,
+  PROJECT_LIFECYCLE_EVENT_TYPES,
   type ProjectEventFilterV1,
   type ProjectEventSubscriptionRecord,
   type TriggerExecution,
   type WebhookDeliveryOutcome,
 } from '@simple-agent-manager/shared';
-
-export const LIFECYCLE_SOURCE = 'sam.lifecycle';
 
 const one = (value: string | string[] | undefined): string | undefined =>
   Array.isArray(value) ? (value.length === 1 ? value[0] : undefined) : value;
@@ -100,12 +100,18 @@ const EVENT_PHRASES: Record<string, EventPhrase> = {
   'workflow_run.completed': { noun: 'a workflow run to finish', clause: 'a workflow run finishes' },
   'task.started': { noun: 'a task to start', clause: 'a task starts' },
   'task.completed': { noun: 'a task to finish', clause: 'a task finishes' },
-  'task.failed': { noun: 'a failed task', clause: 'a task fails' },
+  [PROJECT_LIFECYCLE_EVENT_TYPES.taskFailed]: { noun: 'a failed task', clause: 'a task fails' },
   'task.cancelled': { noun: 'a cancelled task', clause: 'a task is cancelled' },
-  'session.failed': { noun: 'a failed chat', clause: 'a chat fails' },
+  [PROJECT_LIFECYCLE_EVENT_TYPES.sessionFailed]: { noun: 'a failed chat', clause: 'a chat fails' },
   'session.archived': { noun: 'a chat to be archived', clause: 'a chat is archived' },
-  'deployment.release.applied': { noun: 'a release going live', clause: 'a release goes live' },
-  'deployment.release.failed': { noun: 'a failed release', clause: 'a release fails' },
+  [PROJECT_LIFECYCLE_EVENT_TYPES.releaseApplied]: {
+    noun: 'a release going live',
+    clause: 'a release goes live',
+  },
+  [PROJECT_LIFECYCLE_EVENT_TYPES.releaseFailed]: {
+    noun: 'a failed release',
+    clause: 'a release fails',
+  },
   'webhook.accepted': { noun: 'a webhook call', clause: 'a webhook call is accepted' },
   'webhook.filtered': {
     noun: 'an ignored webhook call',
@@ -156,7 +162,7 @@ export function describeEventFilter(filter: ProjectEventFilterV1): EventPhrase {
   const family =
     source === 'github'
       ? 'GitHub activity'
-      : source === LIFECYCLE_SOURCE
+      : source === PROJECT_LIFECYCLE_EVENT_SOURCE
         ? 'SAM activity'
         : 'an event';
   // One event type nobody wrote words for yet: name it rather than say "matching activity".
@@ -166,7 +172,7 @@ export function describeEventFilter(filter: ProjectEventFilterV1): EventPhrase {
     const where =
       source === 'github'
         ? 'GitHub '
-        : source === LIFECYCLE_SOURCE
+        : source === PROJECT_LIFECYCLE_EVENT_SOURCE
           ? 'SAM '
           : source
             ? `${source} `

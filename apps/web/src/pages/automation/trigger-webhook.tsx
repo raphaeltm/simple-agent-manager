@@ -13,7 +13,7 @@ import {
 import { Button } from '@simple-agent-manager/ui';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { Check, Copy, RotateCw } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { WebhookCredentialDialog } from '../../components/triggers/WebhookCredentialDialog';
@@ -22,12 +22,13 @@ import { useToast } from '../../hooks/useToast';
 import { previewWebhookTrigger, rotateWebhookTriggerToken } from '../../lib/api';
 import { API_URL } from '../../lib/api/client';
 import { webhookDeliveriesQueryOptions } from '../../lib/query-options';
+import { formatTimeFromNow } from '../../lib/time-utils';
 import { useProjectContext } from '../ProjectContext';
 import { deliveryText } from './describe';
 import { useAutomationAction } from './detail-parts';
 import { errorText } from './errors';
 import { LoadError, Loading } from './page';
-import { fullDate, relative } from './time';
+import { fullDate } from './time';
 import { OutcomeIcon, Panel, SectionTitle } from './ui';
 
 /** The ingest endpoint is the same for every webhook: the API origin plus a fixed path. */
@@ -35,9 +36,17 @@ export const WEBHOOK_INGEST_URL = `${API_URL.replace(/\/$/, '')}/api/webhooks/in
 
 const DEFAULT_SAMPLE = '{\n  "event": { "action": "created" }\n}';
 
+/** How long the copy button shows its check mark (as the shared log CopyButton does). */
+const COPIED_FEEDBACK_MS = 1500;
+
 function CopyButton({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
   const toast = useToast();
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
   return (
     <button
       type="button"
@@ -95,9 +104,9 @@ export function ConnectWebhook({
           <span className="text-[15px] text-fg-primary">
             Ending in <span className="font-mono">••••{config?.tokenLastFour ?? '????'}</span>
             {config?.tokenRotatedAt
-              ? ` · replaced ${relative(Date.parse(config.tokenRotatedAt))}`
+              ? ` · replaced ${formatTimeFromNow(Date.parse(config.tokenRotatedAt))}`
               : config?.tokenCreatedAt
-                ? ` · created ${relative(Date.parse(config.tokenCreatedAt))}`
+                ? ` · created ${formatTimeFromNow(Date.parse(config.tokenCreatedAt))}`
                 : ''}
           </span>
           <span className="text-[13px] text-fg-muted">
@@ -293,7 +302,7 @@ export function WebhookDeliveries({ trigger }: { trigger: TriggerResponse }) {
                     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <span className="text-sm font-semibold text-fg-primary">{text}</span>
                       <span className="text-xs text-fg-muted" title={fullDate(received)}>
-                        {relative(received)} ·{' '}
+                        {formatTimeFromNow(received)} ·{' '}
                         {delivery.outcome === 'processing'
                           ? 'in progress'
                           : `HTTP ${delivery.httpStatus}`}{' '}

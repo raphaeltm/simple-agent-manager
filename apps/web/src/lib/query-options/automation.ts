@@ -110,6 +110,9 @@ export function recentRunsQueryOptions(
   return queryOptions({
     queryKey: automationQueryKeys.recentRuns(queryScope, projectId, triggerId, limit),
     queryFn: async () => (await listTriggerExecutions(projectId, triggerId, { limit })).executions,
+    // One request per trigger already; a failing API should not multiply them. Pages say
+    // when some runs could not be loaded.
+    retry: 1,
   });
 }
 

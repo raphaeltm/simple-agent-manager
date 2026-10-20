@@ -1693,6 +1693,7 @@ Project event MCP tools use the ProjectData event limits above: `PROJECT_EVENT_L
 | `VITE_AUTOMATION_POLL_MS`                    | `30000`            | Automation page refresh cadence for schedules and watches while the tab is visible                   |
 | `VITE_AUTOMATION_ATTENTION_WINDOW_MS`        | `259200000` (3 d)  | How long a failed one-time automation stays under **Needs your attention**                           |
 | `VITE_AUTOMATION_RECENT_RUNS_PER_TRIGGER`    | `10`               | Runs read per trigger for the Automation overview, and shown on a watch's page                       |
+| `VITE_AUTOMATION_MAX_RUN_READS`              | `25`               | Most triggers whose runs the Automation overview or History reads, one request each                  |
 | `VITE_AUTOMATION_MAX_LIST_PAGES`             | `2`                | Pages of schedules and watches the Automation overview reads                                         |
 | `VITE_AUTOMATION_PREVIEW_ROWS`               | `5`                | Rows shown in the Automation overview's **Coming up** and **Recently**                               |
 | `VITE_AUTOMATION_RUNS_PAGE_SIZE`             | `20`               | Runs per page on a trigger's Automation page                                                         |

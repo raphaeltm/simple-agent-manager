@@ -8,6 +8,7 @@ import { useIsMobile } from '../../hooks/useIsMobile';
 import { updateTrigger } from '../../lib/api';
 import { AUTOMATION_PREVIEW_ROWS } from '../../lib/automation-config';
 import { automationPaths, type OverviewFilter } from '../../lib/automation-routes';
+import { formatTimeFromNow } from '../../lib/time-utils';
 import { useProjectContext } from '../ProjectContext';
 import type { ActivityEntry } from './activity';
 import type { AutomationLookups } from './data';
@@ -22,7 +23,7 @@ import {
   isReaction,
   isStopped,
 } from './model';
-import { clock, dayLabel, relative, whenLabel } from './time';
+import { clock, dayLabel, whenLabel } from './time';
 import {
   Chips,
   hasStatePill,
@@ -43,11 +44,11 @@ export function actionText(action: AutomationAction, lookups: AutomationLookups)
 
 function rowMeta(item: AutomationItem) {
   if (isStopped(item) || item.state === 'late' || item.state === 'starting') return item.stateNote;
-  if (item.kind === 'schedule' && item.nextAt) return `Runs ${relative(item.nextAt)}`;
+  if (item.kind === 'schedule' && item.nextAt) return `Runs ${formatTimeFromNow(item.nextAt)}`;
   if (item.nextAt) return `Next: ${whenLabel(item.nextAt)}${item.whenNote ? ' your time' : ''}`;
   if (item.kind === 'watch') return item.stateNote;
   if (item.kind === 'schedule') return item.stateNote;
-  if (item.lastRunAt) return `Last ran ${relative(item.lastRunAt)}`;
+  if (item.lastRunAt) return `Last ran ${formatTimeFromNow(item.lastRunAt)}`;
   return 'Has not run yet';
 }
 
@@ -213,7 +214,9 @@ export function ComingUp({
                       {item.state === 'late' ? 'Waiting' : clock(item.nextAt)}
                     </span>
                     <span className="text-xs text-fg-muted">
-                      {item.state === 'late' ? relative(item.nextAt) : dayLabel(item.nextAt)}
+                      {item.state === 'late'
+                        ? formatTimeFromNow(item.nextAt)
+                        : dayLabel(item.nextAt)}
                     </span>
                   </span>
                   <span className="flex min-w-0 flex-col gap-0.5">
@@ -346,7 +349,7 @@ export function ActivityRow({ entry, name }: { entry: ActivityEntry; name: strin
       leading={<OutcomeIcon outcome={entry.outcome} />}
       title={name}
       subtitle={entry.text}
-      meta={relative(entry.at)}
+      meta={formatTimeFromNow(entry.at)}
     />
   );
 }

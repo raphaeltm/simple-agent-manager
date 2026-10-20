@@ -801,6 +801,10 @@ function registerSharedMatrixCases(theme: MatrixTheme, viewport: MatrixViewport)
 
 for (const theme of ['dark', 'light'] as const) {
   test.describe(`Tab placement matrix — mobile / ${theme}`, () => {
+    // Pinned like the desktop matrix below, so the mobile cases stay mobile when the spec
+    // runs under a desktop project (labels mode only overlays on a phone).
+    test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
+
     registerSharedMatrixCases(theme, 'mobile');
 
     test(`hidden tab clears a TALL header`, async ({ page }) => {

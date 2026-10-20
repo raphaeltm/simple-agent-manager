@@ -14,11 +14,12 @@ import { formatDuration } from '../../components/triggers/trigger-presentation';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { cleanupStuckExecutions, deleteExecution } from '../../lib/api/triggers';
 import { runPagesQueryOptions } from '../../lib/query-options';
+import { formatTimeFromNow } from '../../lib/time-utils';
 import { useProjectContext } from '../ProjectContext';
 import { executionOutcome, executionText } from './describe';
 import { useAutomationAction } from './detail-parts';
 import { LoadError, Loading } from './page';
-import { fullDate, relative } from './time';
+import { fullDate } from './time';
 import { OutcomeIcon, Panel, SectionTitle } from './ui';
 
 /** Runs the API lets you delete: anything not running right now. */
@@ -108,7 +109,7 @@ export function TriggerRuns({
                       className="text-xs text-fg-muted"
                       title={fullDate(Date.parse(runTime(run)))}
                     >
-                      {relative(Date.parse(runTime(run)))}
+                      {formatTimeFromNow(Date.parse(runTime(run)))}
                       {run.startedAt && run.completedAt
                         ? ` · took ${formatDuration(run.startedAt, run.completedAt)}`
                         : ''}

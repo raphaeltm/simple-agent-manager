@@ -7,7 +7,7 @@
 import { expect, type Page, test, type TestInfo } from '@playwright/test';
 
 import { assertNoClippedOverflow, assertNoOverflow, screenshot } from './audit-helpers';
-import { PROJECT_ID, setupAutomationMocks, VIEWER_ID } from './automation-fixtures';
+import { PROJECT_ID, setupAutomationMocks, SPECIAL_TEXT, VIEWER_ID } from './automation-fixtures';
 
 const BASE = `/projects/${PROJECT_ID}/automation`;
 
@@ -128,6 +128,16 @@ test.describe('Automation overview', () => {
     await expect(page.getByTestId('automation-row').first()).toBeVisible();
     expect(await page.getByTestId('automation-row').count()).toBeGreaterThan(30);
     await audit(page, 'automation-many-long');
+  });
+
+  test('markup, emoji and accents in names render as plain text', async ({ page }) => {
+    await setupAutomationMocks(page, { special: true });
+    await page.goto(BASE);
+    await expect(page.getByText(SPECIAL_TEXT).first()).toBeVisible();
+    expect(
+      await page.evaluate(() => (window as { __automationXss?: number }).__automationXss)
+    ).toBeUndefined();
+    await audit(page, 'automation-special-characters');
   });
 
   test('failing lists say what failed and keep what loaded', async ({ page }) => {

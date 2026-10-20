@@ -1,5 +1,6 @@
 /** Steps 1 and 2 of the create/edit flow: what starts it, and the details of when. */
 import { GITHUB_TRIGGER_DEFAULT_ACTIONS } from '@simple-agent-manager/shared';
+import { StatusBadge } from '@simple-agent-manager/ui';
 
 import { GitHubTriggerFields } from '../../../components/triggers/GitHubTriggerFields';
 import { WebhookTriggerFields } from '../../../components/triggers/WebhookTriggerFields';
@@ -7,7 +8,7 @@ import type { AutomationStart } from '../../../lib/automation-routes';
 import { ChoiceCards } from '../fields';
 import { Notice } from '../page';
 import { OnceTimeFields } from '../schedule-time';
-import { KindIcon, Pill } from '../ui';
+import { KindIcon } from '../ui';
 import type { Errors } from './requests';
 import type { EditorState } from './state';
 import { ScheduleWhen } from './when-schedule';
@@ -62,7 +63,7 @@ export function StepStart({
         icon: (
           <span className="flex items-center gap-2">
             <KindIcon start={start.id} />
-            {start.advanced && <Pill tone="muted">Advanced</Pill>}
+            {start.advanced && <StatusBadge status="pending" label="Advanced" pulse={false} />}
           </span>
         ),
       }))}

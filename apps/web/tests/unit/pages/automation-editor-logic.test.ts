@@ -31,12 +31,9 @@ import {
   scheduleFromCron,
 } from '../../../src/pages/automation/editor/state';
 import { templateById } from '../../../src/pages/automation/editor/templates';
+import { formatSpanWords, formatTimeFromNow } from '../../../src/lib/time-utils';
 import { GIVE_UP_OPTIONS } from '../../../src/pages/automation/schedule-time';
-import {
-  durationLabel,
-  instantToZonedInput,
-  zonedInputToInstant,
-} from '../../../src/pages/automation/time';
+import { instantToZonedInput, zonedInputToInstant } from '../../../src/pages/automation/time';
 
 const NOW = Date.parse('2026-10-20T12:00:00Z');
 const CAN = { canChangeAction: true, now: NOW };
@@ -281,10 +278,16 @@ describe('one-time automations', () => {
 
 describe('duration wording', () => {
   it('words lengths of time from the shared limits instead of fixed text', () => {
-    expect(durationLabel(15 * 60_000)).toBe('15 minutes');
-    expect(durationLabel(60 * 60_000)).toBe('1 hour');
-    expect(durationLabel(24 * 60 * 60_000)).toBe('24 hours');
-    expect(durationLabel(30 * 24 * 60 * 60_000)).toBe('30 days');
+    expect(formatSpanWords(15 * 60_000)).toBe('15 minutes');
+    expect(formatSpanWords(60 * 60_000)).toBe('1 hour');
+    expect(formatSpanWords(24 * 60 * 60_000)).toBe('24 hours');
+    expect(formatSpanWords(30 * 24 * 60 * 60_000)).toBe('30 days');
+    // Rounds before picking the unit: just under an hour or a day reads as the larger unit.
+    const now = Date.parse('2026-10-20T12:00:00Z');
+    expect(formatTimeFromNow(now - 59.6 * 60_000, now)).toBe('1 h ago');
+    expect(formatTimeFromNow(now + 23.7 * 3_600_000, now)).toBe('in 1 day');
+    expect(formatTimeFromNow(now - 3 * 60_000, now)).toBe('3 min ago');
+    expect(formatTimeFromNow(now + 20_000, now)).toBe('just now');
     expect(GIVE_UP_OPTIONS.map((option) => option.label)).toEqual([
       '15 minutes',
       '1 hour',
@@ -435,6 +438,18 @@ describe('validation', () => {
   it('skips prompt checks when the action is locked', () => {
     const state = newEditorState({ start: 'event' }, NOW);
     expect(validateStep(state, 'what', { canChangeAction: false })).toEqual({});
+  });
+
+  it('rejects a severity the API does not know', () => {
+    const base = newEditorState({ start: 'event' }, NOW);
+    const custom = {
+      ...base,
+      watch: { ...base.watch, preset: 'custom' as const, source: 'github', severity: 'urgent' },
+    };
+    expect(validateStep(custom, 'when', CAN).watch).toBe('Unknown severity: urgent.');
+    expect(
+      validateStep({ ...custom, watch: { ...custom.watch, severity: 'error' } }, 'when', CAN).watch
+    ).toBeUndefined();
   });
 
   it('keeps watch limits inside what the API accepts', () => {

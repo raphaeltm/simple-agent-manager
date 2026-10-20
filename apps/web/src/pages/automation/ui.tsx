@@ -6,6 +6,7 @@
  * gaps). Every control is at least 44 px tall. Status pills appear only for states worth
  * noticing; a running automation stays quiet.
  */
+import { buttonClassName, StatusBadge } from '@simple-agent-manager/ui';
 import {
   AlarmClock,
   Ban,
@@ -66,56 +67,40 @@ export function KindIcon({ start, size = 'md' }: { start: StartKind; size?: 'sm'
   );
 }
 
-export type Tone = 'success' | 'warning' | 'danger' | 'info' | 'muted';
-const TONE_CLASS: Record<Tone, string> = {
-  success: 'bg-success-tint text-success-fg',
-  warning: 'bg-warning-tint text-warning-fg',
-  danger: 'bg-danger-tint text-danger-fg',
-  info: 'bg-info-tint text-info-fg',
-  muted: 'bg-surface-hover text-fg-muted',
+/**
+ * Each state's colour comes from the shared StatusBadge (one badge language across the app);
+ * the words are the Automation page's own.
+ */
+const STATE_BADGES: Record<AutomationItem['state'], [status: string, label: string]> = {
+  on: ['active', 'On'],
+  paused: ['paused', 'Paused'],
+  off: ['disabled', 'Off'],
+  scheduled: ['ready', 'Scheduled'],
+  late: ['ready', 'Waiting to start'],
+  starting: ['in_progress', 'Starting'],
+  done: ['completed', 'Done'],
+  cancelled: ['cancelled', 'Cancelled'],
+  ended: ['stopped', 'Ended'],
 };
-
-export function Pill({ tone, children }: { tone: Tone; children: ReactNode }) {
-  return (
-    <span
-      className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${TONE_CLASS[tone]}`}
-    >
-      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current" />
-      {children}
-    </span>
-  );
-}
-
-const STATE_PILLS: Record<AutomationItem['state'], [Tone, string]> = {
-  on: ['success', 'On'],
-  paused: ['warning', 'Paused'],
-  off: ['muted', 'Off'],
-  scheduled: ['info', 'Scheduled'],
-  late: ['info', 'Waiting to start'],
-  starting: ['info', 'Starting'],
-  done: ['muted', 'Done'],
-  cancelled: ['muted', 'Cancelled'],
-  ended: ['muted', 'Ended'],
-};
+const CHECK_BADGE: [string, string] = ['warning', 'Check'];
 
 /**
- * The pill for an item, or null. Lists show one only when the state is worth noticing (a running
- * automation stays quiet); detail headers (`always`) always name the state.
+ * The badge for an item, or null. Lists show one only when the state is worth noticing (a
+ * running automation stays quiet); detail headers (`always`) always name the state.
  */
-function pillFor(item: AutomationItem, always: boolean): [Tone, string] | null {
-  if (item.attention && (item.state === 'done' || item.state === 'ended'))
-    return ['warning', 'Check'];
-  if (always) return STATE_PILLS[item.state];
-  if (item.state === 'on' || item.state === 'scheduled')
-    return item.attention ? ['warning', 'Check'] : null;
-  return STATE_PILLS[item.state];
+function badgeFor(item: AutomationItem, always: boolean): [string, string] | null {
+  if (item.attention && (item.state === 'done' || item.state === 'ended')) return CHECK_BADGE;
+  if (always) return STATE_BADGES[item.state];
+  if (item.state === 'on' || item.state === 'scheduled') return item.attention ? CHECK_BADGE : null;
+  return STATE_BADGES[item.state];
 }
 
-export const hasStatePill = (item: AutomationItem) => pillFor(item, false) !== null;
+export const hasStatePill = (item: AutomationItem) => badgeFor(item, false) !== null;
 
 export function StatePill({ item, always = false }: { item: AutomationItem; always?: boolean }) {
-  const pill = pillFor(item, always);
-  return pill ? <Pill tone={pill[0]}>{pill[1]}</Pill> : null;
+  const badge = badgeFor(item, always);
+  // Configuration, not live activity: no pulse (as on the old trigger list).
+  return badge ? <StatusBadge status={badge[0]} label={badge[1]} pulse={false} /> : null;
 }
 
 export const OUTCOME_META: Record<Outcome, { Icon: IconType; color: string; label: string }> = {
@@ -231,12 +216,6 @@ export function TextLink({ to, children }: { to: string; children: ReactNode }) 
   );
 }
 
-const BUTTON_LINK: Record<'primary' | 'ghost', string> = {
-  primary: 'bg-accent text-fg-on-accent border border-transparent',
-  ghost:
-    'bg-transparent text-fg-primary border border-border-default hover:bg-[var(--sam-form-focus-inset)]',
-};
-
 /** A link that looks like the design-system Button, for actions that navigate. */
 export function ButtonLink({
   to,
@@ -250,10 +229,7 @@ export function ButtonLink({
   className?: string;
 }) {
   return (
-    <Link
-      to={to}
-      className={`inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 text-[0.95rem] font-semibold no-underline transition-all duration-150 ${BUTTON_LINK[variant]} ${className}`}
-    >
+    <Link to={to} className={`${buttonClassName({ variant })} no-underline ${className}`}>
       {children}
     </Link>
   );

@@ -17,6 +17,9 @@ export const NOW = Date.now();
 const iso = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
 const zone = 'UTC';
 
+/** Markup, entities, quotes, emoji and accents: must render as text, never as HTML. */
+export const SPECIAL_TEXT = '<img src=x onerror="window.__automationXss=1"> & “quotes” 🚀 Ünïcödé';
+
 export const LONG_NAME =
   'Nightly dependency audit across every package in the monorepo, including the marketing site, the VM agent and all shared libraries, with a summary for the release channel';
 
@@ -468,6 +471,8 @@ export interface AutomationMockOptions {
   many?: boolean;
   failLists?: boolean;
   long?: boolean;
+  /** Names and prompts with markup, emoji and accents. */
+  special?: boolean;
 }
 
 /** Thirty extra recurring automations, to see how long lists and filters behave. */
@@ -512,9 +517,17 @@ export async function setupAutomationMocks(page: Page, options: AutomationMockOp
   };
   const triggers = options.empty
     ? []
-    : [...Object.values(TRIGGERS), ...(options.many ? manyTriggers() : [])].map((item) =>
-        options.long ? { ...item, name: `${item.name} ${LONG_NAME}` } : item
-      );
+    : [...Object.values(TRIGGERS), ...(options.many ? manyTriggers() : [])]
+        .map((item) => (options.long ? { ...item, name: `${item.name} ${LONG_NAME}` } : item))
+        .map((item) =>
+          options.special
+            ? {
+                ...item,
+                name: `${item.name} ${SPECIAL_TEXT}`,
+                promptTemplate: `${item.promptTemplate} <script>window.__automationXss=1</script>`,
+              }
+            : item
+        );
   const schedules = options.empty ? [] : SCHEDULES;
   const watches = options.empty ? [] : WATCHES;
   const members = {

@@ -12,6 +12,7 @@ import { useQueryScope } from '../../hooks/useQueryScope';
 import {
   AUTOMATION_ATTENTION_WINDOW_MS,
   AUTOMATION_CHAT_PICKER_LIMIT,
+  AUTOMATION_MAX_RUN_READS,
   AUTOMATION_PREVIEW_ROWS,
   AUTOMATION_RECENT_RUNS_PER_TRIGGER,
 } from '../../lib/automation-config';
@@ -38,22 +39,31 @@ function combineRuns(results: RunsResult[]): RunsResult[] {
   return results.map((result) => ({ data: result.data, isError: result.isError }));
 }
 
+const byLastFired = (a: TriggerResponse, b: TriggerResponse) =>
+  (b.lastTriggeredAt ?? '').localeCompare(a.lastTriggeredAt ?? '');
+
 /**
- * Triggers whose runs the overview needs. There is no project-wide run feed, so this is one
- * request per trigger: paused ones (the attention rule reads their failure streak) and the few
- * that fired most recently ("Recently"). History asks for all of them.
+ * Triggers whose runs a page reads, one request each (there is no project-wide run feed),
+ * capped at `max`. The overview needs paused triggers (the attention rule reads their failure
+ * streak) and the few that fired most recently ("Recently"), paused first; History needs every
+ * trigger, most recently fired first. `unread` counts the triggers the cap left out.
  */
-export function triggersNeedingRuns(triggers: TriggerResponse[], scope: 'overview' | 'all') {
-  if (scope === 'all') return triggers;
-  const recent = [...triggers]
-    .filter((trigger) => trigger.lastTriggeredAt)
-    .sort((a, b) => (b.lastTriggeredAt ?? '').localeCompare(a.lastTriggeredAt ?? ''))
-    .slice(0, AUTOMATION_PREVIEW_ROWS);
-  const wanted = new Set([
-    ...triggers.filter((trigger) => trigger.status === 'paused').map((trigger) => trigger.id),
-    ...recent.map((trigger) => trigger.id),
-  ]);
-  return triggers.filter((trigger) => wanted.has(trigger.id));
+export function triggersNeedingRuns(
+  triggers: TriggerResponse[],
+  scope: 'overview' | 'all',
+  max = AUTOMATION_MAX_RUN_READS
+): { read: TriggerResponse[]; unread: number } {
+  const fired = [...triggers].sort(byLastFired);
+  const candidates =
+    scope === 'all'
+      ? fired
+      : [
+          ...fired.filter((trigger) => trigger.status === 'paused'),
+          ...fired
+            .filter((trigger) => trigger.lastTriggeredAt && trigger.status !== 'paused')
+            .slice(0, AUTOMATION_PREVIEW_ROWS),
+        ];
+  return { read: candidates.slice(0, max), unread: Math.max(0, candidates.length - max) };
 }
 
 /** Everything the overview, History and the chat panel read, as one view model. */
@@ -75,7 +85,7 @@ export function useAutomationData(
     refetchInterval: AUTOMATION_POLL_MS,
   });
   const triggerList = triggers.data;
-  const runTriggers = useMemo(
+  const { read: runTriggers, unread: unreadRuns } = useMemo(
     () => triggersNeedingRuns(triggerList ?? [], runScope),
     [runScope, triggerList]
   );
@@ -135,6 +145,8 @@ export function useAutomationData(
       watches.isError ? 'event watches' : null,
     ].filter((name): name is string => name !== null),
     runsFailed: runResults.some((result) => result.isError),
+    /** Triggers whose runs were not read because of AUTOMATION_MAX_RUN_READS. */
+    unreadRuns,
     truncated: Boolean(schedules.data?.truncated || watches.data?.truncated),
     refetch: () => Promise.all(sources.map((query) => query.refetch())),
   };

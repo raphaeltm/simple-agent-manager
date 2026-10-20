@@ -27,6 +27,7 @@ import {
   schedulesQueryOptions,
   watchDetailQueryOptions,
 } from '../../lib/query-options';
+import { formatTimeFromNow } from '../../lib/time-utils';
 import { useProjectContext } from '../ProjectContext';
 import { scheduleEntry } from './activity';
 import { watchAdvancedRows } from './advanced-rows';
@@ -44,7 +45,6 @@ import {
 import { Field, INPUT_CLASS } from './fields';
 import { fromWatch } from './model';
 import { Loading, Notice } from './page';
-import { relative } from './time';
 import {
   ButtonLink,
   Disclosure,
@@ -160,7 +160,7 @@ function WatchRuns({ watchId, runs }: { watchId: string; runs: ProjectSchedule[]
                   entry?.text ??
                   (run.state === 'cancelled' ? 'Cancelled before it ran' : 'Waiting to run')
                 }
-                meta={relative(run.updatedAt)}
+                meta={formatTimeFromNow(run.updatedAt)}
               />
             );
           })

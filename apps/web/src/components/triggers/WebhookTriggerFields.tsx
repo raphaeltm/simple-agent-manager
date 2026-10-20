@@ -1,7 +1,7 @@
 import type { WebhookTriggerFilter } from '@simple-agent-manager/shared';
 import { Plus, Trash2 } from 'lucide-react';
 
-import { FOCUS_RING } from './trigger-presentation';
+import { FOCUS_RING } from './trigger-form-support';
 
 /** Number inputs are not covered by the app's global form styles in `index.css`. */
 const NUMBER_INPUT =

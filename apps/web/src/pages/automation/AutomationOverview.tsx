@@ -9,6 +9,7 @@ import { useSearchParams } from 'react-router';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { useQueryScope } from '../../hooks/useQueryScope';
+import { AUTOMATION_MAX_RUN_READS } from '../../lib/automation-config';
 import {
   automationPaths,
   isOverviewFilter,
@@ -141,6 +142,12 @@ export function AutomationOverview() {
       {data.truncated && (
         <Notice>
           Showing the newest one-time automations and watches. Older finished ones are not listed.
+        </Notice>
+      )}
+      {data.unreadRuns > 0 && (
+        <Notice>
+          Recent runs were checked for {AUTOMATION_MAX_RUN_READS} automations only, so a problem
+          with one of the others shows on its own page, not here.
         </Notice>
       )}
     </>

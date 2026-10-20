@@ -74,3 +74,32 @@ export function formatMsSpan(ms: number): string {
   }
   return `${Math.max(1, Math.ceil(ms / MS_PER_MINUTE))}m`;
 }
+
+/**
+ * A past or future Unix-ms time relative to `now`, in words for prose: "just now", "3 min ago",
+ * "2 h ago", "4 days ago", "in 5 min", "in 6 days". It rounds before picking the unit, so
+ * 59.6 minutes reads "1 h", never "60 min".
+ */
+export function formatTimeFromNow(timestamp: number, now = Date.now()): string {
+  const delta = timestamp - now;
+  const abs = Math.abs(delta);
+  if (abs < MS_PER_MINUTE) return 'just now';
+  const minutes = Math.round(abs / MS_PER_MINUTE);
+  const hours = Math.round(abs / MS_PER_HOUR);
+  const days = Math.round(abs / MS_PER_DAY);
+  const text =
+    minutes < 60
+      ? `${minutes} min`
+      : hours < 24
+        ? `${hours} h`
+        : `${days} ${days === 1 ? 'day' : 'days'}`;
+  return delta > 0 ? `in ${text}` : `${text} ago`;
+}
+
+/** A length of time in words, in its largest whole unit: "15 minutes", "1 hour", "30 days". */
+export function formatSpanWords(ms: number): string {
+  const unit = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+  if (ms >= 2 * MS_PER_DAY && ms % MS_PER_DAY === 0) return unit(ms / MS_PER_DAY, 'day');
+  if (ms >= MS_PER_HOUR && ms % MS_PER_HOUR === 0) return unit(ms / MS_PER_HOUR, 'hour');
+  return unit(Math.max(1, Math.round(ms / MS_PER_MINUTE)), 'minute');
+}

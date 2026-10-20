@@ -39,6 +39,7 @@ interface ImportMetaEnv {
   readonly VITE_AUTOMATION_POLL_MS?: string;
   readonly VITE_AUTOMATION_ATTENTION_WINDOW_MS?: string;
   readonly VITE_AUTOMATION_RECENT_RUNS_PER_TRIGGER?: string;
+  readonly VITE_AUTOMATION_MAX_RUN_READS?: string;
   readonly VITE_AUTOMATION_MAX_LIST_PAGES?: string;
   readonly VITE_AUTOMATION_PREVIEW_ROWS?: string;
   readonly VITE_AUTOMATION_RUNS_PAGE_SIZE?: string;
