@@ -65,6 +65,61 @@ describe('operator publication grounding', () => {
       ])
     ).not.toThrow();
   });
+  it.each(['chat', 'tasks', 'ideas'])(
+    'allows only the canonical project parent of a %s source',
+    (kind) => {
+      const child = `${origin}/projects/${project}/${kind}/${session}`;
+      const operation =
+        kind === 'chat' ? 'sam_chat_read' : kind === 'tasks' ? 'sam_task_get' : 'sam_idea_get';
+      const action = receipt(operation, { link: child });
+      expect(() =>
+        check(`[Project](${origin}/projects/${project}) [Source](${child})`, [action])
+      ).not.toThrow();
+      for (const path of [
+        `/projects/${invented}`,
+        `/projects/${project}/chat/${invented}`,
+        `/projects/${project}/tasks/${invented}`,
+        `/projects/${project}?taskId=${invented}`,
+        `/projects/${project}#invented`,
+      ])
+        expect(() => check(`[Source](${origin}${path})`, [action])).toThrow();
+    }
+  );
+  it.each(['approval_required', 'uncertain', 'failed'] as const)(
+    'does not derive parent sources from a %s receipt',
+    (state) => {
+      expect(() =>
+        check(`[Project](${origin}/projects/${project})`, [
+          receipt(
+            'sam_chat_start',
+            { sessionId: session, taskId: 'task', status: 'queued', link },
+            state
+          ),
+        ])
+      ).toThrow();
+    }
+  );
+  it('does not derive parents from queries, fragments, foreign origins, or untrusted report content', () => {
+    for (const source of [
+      `${link}?extra=1`,
+      `${link}#extra`,
+      link.replace(origin, 'https://other.test'),
+    ])
+      expect(() =>
+        check(`[Project](${origin}/projects/${project})`, [
+          receipt('sam_chat_read', { link: source }),
+        ])
+      ).toThrow();
+    expect(() =>
+      check(`[Project](${origin}/projects/${invented})`, [
+        receipt('sam_chat_read', {
+          link,
+          messages: [{ link: `${origin}/projects/${invented}/chat/${session}` }],
+          preview: `${origin}/projects/${invented}`,
+        }),
+      ])
+    ).toThrow();
+  });
   it('allows a currently authorized read source without interpreting it as a new effect', () => {
     const read = receipt('sam_chat_read', { projectId: project, sessionId: session, link });
     expect(() => check(`Here is the report: [Chat](${link})`, [read])).not.toThrow();
@@ -119,6 +174,9 @@ describe('operator publication grounding', () => {
   ])('rejects effect claims from a completed receipt with unsuccessful result %j', (result) => {
     expect(() => check('I started it.', [receipt('sam_chat_start', result)])).toThrow();
     expect(() => check(`[Chat](${link})`, [receipt('sam_chat_start', result)])).toThrow();
+    expect(() =>
+      check(`[Project](${origin}/projects/${project})`, [receipt('sam_chat_start', result)])
+    ).toThrow();
   });
   it('does not substitute profile/project identities for a task or session', () => {
     const reads = [

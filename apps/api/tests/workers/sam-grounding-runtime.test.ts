@@ -182,6 +182,42 @@ async function seedProject(userId: string) {
 }
 
 describe('receipt-grounded native publication', () => {
+  it('publishes a completed dispatch with its exact chat and canonical parent project links', async () => {
+    const fixture = await setup();
+    const task = '00000000-0000-4000-8000-000000000001';
+    const link = `${origin}/projects/${project}/chat/${invented}`;
+    answer = `I started the session in [Test Project](${origin}/projects/${project}). Task: ${task}. Session: ${invented}. [Open chat](${link}). The request is queued.`;
+    beforeAnswer = async () => {
+      const [turn] = await fixture.stub.testSql(
+        "SELECT id FROM operator_turns WHERE state='running'"
+      );
+      // A completed server receipt isolates publication from external provisioning.
+      await fixture.stub.testSql(
+        'INSERT INTO operator_actions(id,turn_id,operation,input_json,state,result_json,created_at) VALUES(?,?,?,?,?,?,?)',
+        [
+          'dispatch-receipt',
+          turn!.id!,
+          'sam_chat_start',
+          '{}',
+          'completed',
+          JSON.stringify({ taskId: task, sessionId: invented, status: 'queued', link }),
+          Date.now(),
+        ]
+      );
+    };
+    const { turn, input } = await finish(fixture, 'completed');
+    expect(calls).toBe(1);
+    expect(
+      await fixture.stub.testSql('SELECT operation,state FROM operator_actions WHERE turn_id=?', [
+        turn.id,
+      ])
+    ).toEqual([{ operation: 'sam_chat_start', state: 'completed' }]);
+    expect(await (await fixture.request('/turns', 'POST', input)).json()).toMatchObject({
+      replayed: true,
+      turn: { id: turn.id, state: 'completed' },
+    });
+    expect(calls).toBe(1);
+  });
   it.each([1, 20])(
     'never adds correction after a recovered provider error with step budget %s',
     async (budget) => {

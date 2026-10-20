@@ -127,6 +127,10 @@ export function assertGroundedOperatorResponse(
           );
           if (source?.[1]) {
             addIdentity('project', decodeURIComponent(source[1]));
+            // A canonical child source also proves its exact parent project.
+            // It grants no sibling links or model-added query/fragment payload.
+            if (source[3] && !url.search && !url.hash)
+              links.add(new URL(`/projects/${source[1]}`, appOrigin).href);
             if (source[3])
               addIdentity(
                 source[2] === 'chat' ? 'session' : source[2] === 'tasks' ? 'task' : 'idea',
