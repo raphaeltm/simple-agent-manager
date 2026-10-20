@@ -256,7 +256,7 @@ export const integrations: Integration[] = [
       { step: 'Configure Provider', description: 'Set your inference provider credentials — Scaleway API key, Google Vertex config, or a custom endpoint.' },
       { step: 'Select OpenCode', description: 'Choose OpenCode as the agent for your project.' },
       { step: 'Submit a Task', description: 'Describe your coding task. SAM provisions a VM and launches OpenCode.' },
-      { step: 'Agent Delivers', description: 'OpenCode completes the work, and SAM commits and pushes the changes.' },
+      { step: 'Agent Delivers', description: 'OpenCode works on its own branch, and pushes it or opens a pull request when you ask.' },
     ],
     useCases: [
       { title: 'Self-hosted AI stack', description: 'Pair OpenCode with a self-hosted inference endpoint for a fully private AI coding setup — no data leaves your infrastructure.' },
@@ -619,7 +619,7 @@ export const integrations: Integration[] = [
       { title: 'Open source contribution', description: 'Use SAM to help maintain open source projects — triage issues, fix bugs, and generate PRs at scale.' },
     ],
     faq: [
-      { question: 'What GitHub permissions does SAM need?', answer: 'The SAM GitHub App requests repository read/write access for code, pull requests, and issues. You choose exactly which repos to grant access to.' },
+      { question: 'What GitHub permissions does SAM need?', answer: 'The SAM GitHub App needs read and write access to repository contents, so agents can push branches, and read access to metadata, pull requests, checks, actions and issues. Agents can open pull requests only when the App also has read and write access to pull requests. You choose exactly which repos to grant access to.' },
       { question: 'Can SAM work with GitHub Enterprise?', answer: 'SAM is designed for GitHub.com. GitHub Enterprise Server support is on the roadmap for self-hosted deployments.' },
       { question: 'Do agents use my GitHub token?', answer: 'No — agents use the GitHub App\'s installation token for repository operations. Your personal OAuth token is only used for authentication to SAM itself.' },
     ],
