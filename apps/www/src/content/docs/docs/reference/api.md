@@ -291,7 +291,7 @@ The list returns `{ pending, settled, cursor }` and needs `task:read` on the pro
 
 ### Shared chat access
 
-A chat's creator can give another project member the same controls in that one chat (see [Share a chat](/docs/guides/collaboration/#share-a-chat)). Every route that drives a chat — `POST .../prompt`, cancel, stop, archive, `POST .../comments/:threadId/send`, idle reset, answering agent requests, and the two below — accepts the creator or an active grantee, and returns `403` to other members. For a grantee, the server also requires that the grantee and the creator are both still active members with `task:write`; nothing else is checked. Grantee prompts must use durable delivery (`409` when it is off) and cannot carry attachments (`400`). Work still resolves resources and credentials as the session's creator; the grantee is recorded as the sender.
+A chat's creator can give another project member the same controls in that one chat (see [Share a chat](/docs/guides/collaboration/#share-a-chat)). Every route that drives a chat — `POST .../prompt`, cancel, stop, archive, `POST .../comments/:threadId/send`, idle reset, answering agent requests, and the two below — accepts the creator or an active grantee, and returns `403` to other members. For a grantee, the server also requires that the grantee and the creator are both still active members with `task:write`; nothing else is checked. Grantee prompts must use durable delivery (`409` when it is off); their attachments must be the grantee's own uploads (`400` otherwise) and are copied only into the chat's workspace. Work still resolves resources and credentials as the session's creator; the grantee is recorded as the sender.
 
 | Method | Endpoint                                                                      | Purpose                                               |
 | ------ | ----------------------------------------------------------------------------- | ----------------------------------------------------- |
@@ -568,6 +568,8 @@ Submit an idea for autonomous execution. This is the chat-first path used by the
 ## File Proxy (Project Chat)
 
 These endpoints proxy file operations to the workspace's VM agent, accessed through a project chat session.
+
+The workspace's owner can use all of them. A member the chat is [shared with](/docs/guides/collaboration/#share-a-chat) can use the read endpoints (list, find, view, download, raw, git status and diff) while their access lasts; upload stays owner-only. For them every path must be relative to the repository working tree: absolute and `~` paths return `404`, and the VM agent refuses anything outside the working tree, inside `.git`, or reached through a link that points outside it (`404`). If the workspace's agent cannot confirm that limit, the request returns `409` and nothing from the agent. Other members get `403`.
 
 ### `GET /api/projects/:id/sessions/:sessionId/files/list`
 

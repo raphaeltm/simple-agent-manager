@@ -143,10 +143,11 @@ the message it is about, and shows who sent it. Only the chat's owner and people
 
 ### Share a chat
 
-The owner of a chat can let a teammate drive it for 5, 10, 30 or 60 minutes: send messages,
-interrupt the agent, stop, sleep or archive the chat, and answer the agent's questions. These are
-the same controls the owner has in that chat. Open the chat, select **Share** in the tool rail, then
-**Add a teammate**, choose how long, and confirm.
+The owner of a chat can let a teammate drive it for 5, 10, 30 or 60 minutes: send messages with
+files, schedule messages, interrupt the agent, stop, sleep or archive the chat, answer the agent's
+questions, and look through the repository's files and changes. These are the same controls the
+owner has in that chat. Open the chat, select **Share** in the tool rail, then **Add a teammate**,
+choose how long, and confirm.
 
 Before you share, know what it means:
 
@@ -181,9 +182,24 @@ What SAM enforces:
 - A chat can be shared with up to 10 people at a time by default (an admin setting).
 - Each message shows who sent it (for example **Ana · shared access**), and the agent is told who
   is speaking.
-- A teammate with shared access can't open the chat's terminal, file browser, Git panel or port
-  previews, fork the chat, or attach files. Those reach the workspace directly rather than through
-  the chat.
+- A teammate can attach files to their messages. The files are their own uploads, and they go only
+  into this chat's workspace, checked against their access just before each file is copied and
+  again before the message is sent.
+- A teammate can open the **Files** and **Git** panels, read-only and limited to the repository
+  folder: they can list, view, download and diff any file in it, including untracked files such as
+  `.env`, but nothing outside it, nothing in `.git`, and no link that points outside it. This limits
+  the panels only; the agent itself can still read anything in the workspace, as the warning above
+  says. If the workspace runs an older agent that can't enforce the limit, the panel says so and
+  shows nothing until the workspace restarts with a newer one.
+- A teammate can schedule a one-off message into the chat (see
+  [Scheduled actions](/docs/guides/scheduled-actions/)). It shows as theirs, marked **scheduled**,
+  is sent only while their access lasts, and is cancelled when their access ends. A teammate's
+  agent can't schedule into the chat for them. Standing watches are lasting rules, so only the owner
+  can point one at their chat.
+- The terminal, port previews and the workspace page stay with the owner: they reach the whole
+  workspace, and SAM can't cut off a live terminal or port connection when access ends. **Fork**
+  and **Retry** in the rail work for a teammate and run on the teammate's own accounts; forking an
+  archived chat, which restores the owner's saved files, stays with the owner.
 - If either person stops being an active project member, the teammate loses access at once.
 
 ### Remove access
@@ -192,7 +208,8 @@ Access ends on its own when its time is up. To end it sooner, open **Share** and
 **Revoke now** next to a person, or **Leave** to remove yourself. Access ends immediately, and
 their open page locks without a reload, even while the chat is asleep. Their
 messages that haven't reached the agent yet are cancelled and marked
-**Not delivered — access was removed**. A message the agent already received can't be taken back,
+**Not delivered — access was removed**, and their scheduled messages that haven't been sent are
+cancelled. A message the agent already received can't be taken back,
 and work it has started keeps running. When a member is removed from the project, SAM also deletes
 the access they held and the access on chats they own.
 
