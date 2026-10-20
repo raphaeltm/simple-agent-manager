@@ -1,7 +1,7 @@
 /**
  * Documentation screenshots for working together in a chat (the Collaboration guide): the
  * Share dialog's confirmation step, the chat as the teammate it was shared with sees it, and
- * the @mention list in the comment box.
+ * the comment box with its @mention list and with Send to agent chosen.
  *
  * Every capture drives the REAL production components with mocked API data, opens each
  * surface the way a person does, and asserts on what rendered, so a component that stops
@@ -353,9 +353,8 @@ test('docs: a chat as the teammate it is shared with sees it', async ({ page }) 
   );
 });
 
-test('docs: mention a teammate in a comment', async ({ page }) => {
-  await usePhoneHeight(page, 812);
-  await openChat(page, 'owner');
+/** Opens the comment box on the agent's last reply, as its owner does. */
+async function openCommentBox(page: Page) {
   const message = page.locator('[data-conversation-item-id="msg-4"]');
   await message.getByRole('button', { name: 'Comment on this message' }).click();
   // Desktop docks the comment box in the Comments panel; phones show it under the message.
@@ -363,19 +362,37 @@ test('docs: mention a teammate in a comment', async ({ page }) => {
   await expect(field).toBeVisible();
   if (isMobile(page)) {
     // On a phone the box opens under the message: show the reply it's about above it,
-    // just below the floating header (which overlays the top of the conversation).
-    const headerBox = (await page.getByTestId('session-floating-header').boundingBox())!;
-    const messageBox = (await message.boundingBox())!;
-    const offset = messageBox.y - (headerBox.y + headerBox.height + 16);
-    await page
-      .locator('[data-sam-conversation-scroller="true"]')
-      .first()
-      .evaluate((scroller, by) => scroller.scrollBy(0, by), offset);
-    await expectClearOfChatHeader(page, message.getByText(/passed 20 of 20 runs/));
+    // just below the floating header (which overlays the top of the conversation). The list
+    // re-measures while the box mounts and can scroll again, so repeat until it stays put.
+    const header = page.getByTestId('session-floating-header');
+    const scroller = page.locator('[data-sam-conversation-scroller="true"]').first();
+    await expect(async () => {
+      const headerBox = (await header.boundingBox())!;
+      const target = headerBox.y + headerBox.height + 16;
+      const offset = (await message.boundingBox())!.y - target;
+      if (Math.abs(offset) > 2) await scroller.evaluate((el, by) => el.scrollBy(0, by), offset);
+      await page.waitForTimeout(300);
+      expect(Math.abs((await message.boundingBox())!.y - target)).toBeLessThan(3);
+    }).toPass({ timeout: 10_000 });
   }
-  // Keep the pointer off the list, so it opens with its first entry active, as it does when
-  // someone types.
+  // Keep the pointer off lists and buttons, so nothing in the capture shows a hover state.
   await page.mouse.move(2, 2);
+  return field;
+}
+
+/** On a phone, the reply the comment is about is still in the capture, clear of the header. */
+async function expectReplyInView(page: Page) {
+  if (!isMobile(page)) return;
+  const reply = page.locator('[data-conversation-item-id="msg-4"]');
+  await expectClearOfChatHeader(page, reply.getByText(/passed 20 of 20 runs/));
+}
+
+test('docs: mention a teammate in a comment', async ({ page }) => {
+  await usePhoneHeight(page, 812);
+  await openChat(page, 'owner');
+  // With the pointer away, the list opens with its first entry active, as it does when
+  // someone types.
+  const field = await openCommentBox(page);
   await field.fill('Can you double-check the empty-cart case, @');
   const palette = page.getByRole('listbox', { name: 'Mention a teammate' });
   await expect(palette).toBeVisible();
@@ -384,6 +401,31 @@ test('docs: mention a teammate in a comment', async ({ page }) => {
   const form = page.locator('form').filter({ has: field });
   await expect(form.getByRole('radio', { name: 'Add note' })).toBeChecked();
   await expect(form.getByRole('radio', { name: 'Send to agent' })).toBeAttached();
+  await expectReplyInView(page);
 
   await docsShot(page, isMobile(page) ? 'collaboration-mention-mobile' : 'collaboration-mention');
+});
+
+test('docs: send a comment to the agent', async ({ page }) => {
+  await usePhoneHeight(page, 812);
+  await openChat(page, 'owner');
+  const field = await openCommentBox(page);
+  await field.fill('Also run it with the slow-network profile before you open the pull request.');
+  const form = page.locator('form').filter({ has: field });
+  // A note is the default; choosing Send to agent turns the comment into a message for the agent.
+  await expect(form.getByRole('radio', { name: 'Add note' })).toBeChecked();
+  await form.getByRole('radio', { name: 'Send to agent' }).check();
+  await expect(
+    form.getByText('Send to agent creates a follow-up instruction with the quoted message context.')
+  ).toBeVisible();
+  const send = form.getByRole('button', { name: 'Comment & send' });
+  await expect(send).toBeEnabled();
+  // The whole box, down to its button, is on screen in the capture, below the reply.
+  await expect(send).toBeInViewport();
+  await expectReplyInView(page);
+
+  await docsShot(
+    page,
+    isMobile(page) ? 'collaboration-send-to-agent-mobile' : 'collaboration-send-to-agent'
+  );
 });

@@ -177,6 +177,14 @@ you started it, or it's [shared with you](#share-a-chat) — the comment box off
 **Send to agent** on an open thread later, including a teammate's comment. Each thread can be sent
 once, and a resolved thread can't be sent.
 
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/collaboration-send-to-agent-mobile.png 2x" />
+  <img
+    src="/images/docs/collaboration-send-to-agent.png"
+    alt="A comment being written on the agent's reply by the chat's owner, in the Comments panel on a desktop or under the message on a phone: &quot;Also run it with the slow-network profile before you open the pull request.&quot; Below the text, Send to agent is chosen instead of Add note, with the hint &quot;Send to agent creates a follow-up instruction with the quoted message context.&quot;, and the button reads Comment &amp; send."
+  />
+</picture>
+
 The agent gets the comment quoted with the message it's about and who wrote it, after its current
 turn ends, like any message you send. In the chat it's labelled with who sent it, for example
 **Grace sent Rae's comment to the agent**. Everyone else can comment, but not send: ask the chat's
