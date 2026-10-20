@@ -10,7 +10,7 @@ This is an implementation checkpoint, not a release certificate. No staging or p
 - SQLite-backed operator security:13 tests passed. Shared dispatch/Instant paths independently tested with duplicate/lost-ack/effect-fence scenarios.
 - Mocked browser audit:26 mobile/desktop cases; additional final control/receipt regressions passed. Eight latest cases cover unavailable receipts and uncertain dispatch across four viewport sizes.
 - Screenshots in this directory are mocked local visual evidence. They do not establish live model quality, project dispatch, or staging correctness.
-- Final event-watch budget/retry/scheduling correction and final-head quality checks remain pending at this checkpoint. Earlier broad passes do not prove those latest changes.
+- Final event-watch correction verified on implementation commit `4727aeb5e367d70909a146ec87ec62cc3ee01c2a`:34 work/settings/security tests,19 native Worker/Mastra tests,62 deployment configuration tests, API typecheck, scoped lint and instruction-context budget passed. Full CI remains pending.
 
 ## Release blockers and pending evidence
 

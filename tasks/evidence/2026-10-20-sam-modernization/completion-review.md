@@ -145,3 +145,7 @@ The prepared `staging-sam-operator.spec.ts` already covers basic real-model resp
 - No live staging requests, token changes, deployments, commits, grants, SAM progress mutations, archive operations, or production edits were performed in this review.
 
 Before declaring completion: finish and test the existing architecture correction; record a bounded initial-model behavioral evaluation; refresh only the existing invalid dedicated staging token and complete staged journeys/cleanup; reconcile final-head evidence and documentation; finish draft PR/independent reviews, CI/CodeRabbit/rebase, then the separately authorized exact-commit production deployment and minimal smoke. Keep user accounts OFF unless individually opted in.
+
+## Follow-up after review
+
+The final event-watch correction passed34 work/settings/security tests,19 native runtime tests,62 deployment-configuration tests, API typecheck/scoped lint and context-budget validation on implementation commit `4727aeb5e367d70909a146ec87ec62cc3ee01c2a`. Architecture reviewer returned PASS. The medium event-verification finding is addressed. Live behavioral/staging/release findings remain open; the task-completion verdict remains FAIL until those gates are met.

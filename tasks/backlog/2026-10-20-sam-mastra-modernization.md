@@ -39,10 +39,14 @@ All checklist items verified with concrete evidence. Disabled users cannot activ
 - Broad local baseline: `pnpm test`21 successful workspace tasks; API907 files/12869 tests passed,1file/2tests skipped (excluded from pass counts). `pnpm typecheck`19/19, `pnpm build`9/9 and `pnpm check:fast` passed.
 - Actual bundled Mastra/native workerd19/19 passed, including both provider adapters, accounting and real tool roundtrips with outbound HTTP model fixtures. The Workers-incompatible AJV code generation was replaced with a StandardSchema/Valibot bridge, without unsafe eval.
 - Local mocked mobile/desktop browser audit26 cases passed, plus6 final security/UI regressions. These are not live model or staging evidence.
-- Final control-loop correction: bounded25-watch scan/view, persisted pre-await progress/deadline, retry limit and exhaustion state. Its final tests/review are pending; earlier broad passes do not prove this newest correction.
+- Final control-loop correction: bounded25-watch scan/view, persisted pre-await progress/deadline, retry limit and exhaustion state. Final correction passed34 work/settings/security tests,19 native runtime tests,62 deployment config tests, API typecheck/scoped lint/context budget. Architecture/constitution/Cloudflare reviewer PASS.
 - [ ] Bounded initial-model behavioral evaluation: ambiguous project scope, code-question dispatch, selected profile and exact constraints, malicious report/history handling, private-context canaries, retrieval of older constraints, evidence-backed completion claims. Record actual operation inputs/results and sample sizes; no unearned quality percentage.
 - Final-head quality checks, draft PR/CI/review, dedicated-identity staging including bounded VM lifecycle, and production exact-commit verification remain pending.
 
 ## Live verification blocker
 
 Existing `SAM_PLAYWRIGHT_PRIMARY_USER` is present but staging `POST https://api.sammy.party/api/auth/token-login` rejects it with HTTP401 `Invalid token format`. User asked to refresh existing smoke credentials through the environment. No new secrets/grants created; no accounts enabled; no deployments. Live model behavior, dispatch/VM lifecycle, staging checks and production release remain unverified.
+
+## Delivery checkpoint
+
+Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2386. Implementation commit: `4727aeb5e367d70909a146ec87ec62cc3ee01c2a`. Screenshot evidence comment: https://github.com/raphaeltm/simple-agent-manager/pull/2386#issuecomment-6288048540. CI running; staging blocked as above. Task and release remain incomplete.
