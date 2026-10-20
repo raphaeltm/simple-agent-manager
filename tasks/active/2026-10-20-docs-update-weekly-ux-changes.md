@@ -206,3 +206,17 @@ reply mislabel.
   reset-bearing rate limits are parked (agents); previous-cycle Fork wording. Product notes appended
   to `01M5BREXSE42RBT0BQMK3Z72FG` (24 h hold, badge outlives the task) and `01M59MYE4GY91BWTE8TZF1ZB5D`
   (Complete for any member, hard-coded ⌘⏎).
+
+### Round 5 (journey + fact-check)
+
+- **Journey reviewer** (7 LOW incl. 2 product bugs). Fixed: Blocked steps split into branches, the
+  BLOCKED badge outlives the task, continuing straight away with another agent, usage-limit scope
+  consistent across agents/troubleshooting/changelog, ASCII attachment names, Sleep-and-wake clears
+  legacy secret mode. Product bugs appended to `01M5BREXSE42RBT0BQMK3Z72FG` (Blocked subtask shows
+  "Waiting on: parent"; Complete dialog promises a resumable session).
+- **Fact-check reviewer** (1 MEDIUM test defect, 6 LOW). The round-4 `getByTitle` assertion matched
+  both the header chip and the list label (strict-mode failure; I had misread a truncated run as a
+  pass): now scoped to the `Chat sessions` nav, all 8 scenes pass, and removing the creator fails
+  exactly that assertion. Fixed: dependency-wait BLOCKED badge, full names and time in collaboration
+  examples, 16 October for the Fork box (first prod deploy 23:26 UTC), list "and", A–Z/a–z. New idea
+  `01M5C0GS9KXT1HFB801Z7XF2KV` (dead Tasks page, `stop_subtask` statuses).

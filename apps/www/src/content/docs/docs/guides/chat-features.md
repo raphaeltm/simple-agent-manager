@@ -22,7 +22,7 @@ its workspace. You can attach files to a sleeping chat without waking it; sendin
 it, and the files are delivered once it's up.
 
 Limits: up to 20 files and 200 MB per message, 50 MB per file, and file names made only of
-unaccented letters (A–Z), digits, spaces, `.`, `_`, and `-`. Someone a chat is [shared with](/docs/guides/collaboration/#share-a-chat)
+unaccented letters (A–Z, a–z), digits, spaces, `.`, `_`, and `-`. Someone a chat is [shared with](/docs/guides/collaboration/#share-a-chat)
 can't attach files to it.
 
 ## Real-Time Streaming
@@ -283,7 +283,7 @@ In a project chat, the paperclip attaches files to your next message; see
 On a workspace's own page, the paperclip instead uploads files straight into the running workspace's
 `.private` directory, and the page shows "Uploaded N files: …" (the agent isn't told, so mention the
 files in your message). Those uploads allow up to 50 MB per file and 250 MB at a time, and file
-names may only use unaccented letters (A–Z), digits, spaces, `.`, `_`, and `-`.
+names may only use unaccented letters (A–Z, a–z), digits, spaces, `.`, `_`, and `-`.
 
 ### Downloading Files
 

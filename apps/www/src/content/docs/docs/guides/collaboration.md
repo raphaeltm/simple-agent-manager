@@ -242,9 +242,9 @@ Your teammate gets a **Shared Session** notification that opens the chat. It's i
 tab of their notifications, which doesn't add to the bell's count, so tell them you've shared it.
 The chat is also in their **All sessions** list, though not under **My sessions**, because they
 didn't start it. Above the
-message box they see _You're chatting in Prakash's session. It runs on Prakash's accounts. Your
-access ends in 23 min (2:43 PM)._ Each of their messages is labelled, for example
-**Ana · shared access**, and SAM tells the agent who is speaking.
+message box they see _You're chatting in Prakash Rao's session. It runs on Prakash Rao's accounts.
+Your access ends in 23 min (2:43 PM)._ Each of their messages is labelled, for example
+**Ana Ruiz · shared access**, and SAM tells the agent who is speaking.
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/collaboration-shared-view-mobile.png 2x" />
@@ -269,8 +269,8 @@ answer them, so a teammate driving the chat should keep it open.
 
 ### If it isn't your chat
 
-Without shared access, a teammate's chat shows _Only Prakash can message this agent. You can leave
-comments on any message, or ask Prakash to share this chat._ and a **Start your own chat** button.
+Without shared access, a teammate's chat shows _Only Prakash Rao can message this agent. You can
+leave comments on any message, or ask Prakash Rao to share this chat._ and a **Start your own chat** button.
 You can still [comment](#comment-on-a-chat), [@mention](#mention-a-teammate) people, and fork the
 chat from its tool rail. Only the chat's owner, and people it's shared with, can answer the agent's
 questions and permission requests. The tool rail also shows **Complete**, which ends the owner's
@@ -286,7 +286,7 @@ task: leave that to them.
   on every open page as well as after a reload.
 - People a chat is shared with can share it onward, but never for longer than their own access lasts,
   and can remove anyone's access. Removing someone also removes anyone they added.
-- **Share** shows when each person's access ends, for example _added by you · ends in 23 min_.
+- **Share** shows when each person's access ends, for example _added by you · ends in 23 min (2:43 PM)_.
 - A chat can be shared with up to 10 people at a time by default (a superadmin can change this in
   **Admin → Settings**).
 - If either person stops being an active project member, the teammate loses access at once.

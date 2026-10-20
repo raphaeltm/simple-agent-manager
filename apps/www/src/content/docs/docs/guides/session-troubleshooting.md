@@ -11,8 +11,9 @@ your work is safe and what to do next. Everything here applies to both
 - **Needs input** in the session list. The agent, or SAM, is waiting for an answer from the person
   who started the chat. → [Find what it's waiting for](#the-agent-is-waiting-for-you)
 - **"Waiting for provider limit reset at…"**, **Waiting** or **Blocked** on the task's Dashboard
-  card, or a red **BLOCKED** badge on the chat in the session list. The agent hit a usage limit;
-  SAM carries on after the reset, unless it says **Blocked**.
+  card, or a red **BLOCKED** badge on the chat in the session list (on a subtask that shows
+  "Waiting on: …", that badge can instead mean it's waiting for another task). The agent hit a
+  usage limit; SAM carries on after the reset, unless it says **Blocked**.
   → [Usually nothing to do](#waiting-for-a-provider-limit-reset)
 - **"SAM paused automatic check-ins…"** The agent kept stopping without finishing, or its model was
   rejected, so SAM stopped nudging it. → [Look, then reply](#sam-paused-automatic-check-ins)

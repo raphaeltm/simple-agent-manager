@@ -94,7 +94,7 @@ failing come in the first release after v2026.10.19.
 - **New optional settings**, all with working defaults: GitHub trigger delivery retries
   ([`GITHUB_TRIGGER_RECOVERY_*`](/docs/reference/configuration/#github-trigger-delivery-recovery),
   set as `GH_TRIGGER_RECOVERY_*`), chat attachment limits
-  ([`ATTACHMENT_*`](/docs/reference/configuration/#chat-attachments)), archived-fork history
+  ([`ATTACHMENT_*`](/docs/reference/configuration/#chat-attachments)), and archived-fork history
   (`ARCHIVED_FORK_HISTORY_MAX_CHARS`). The VM agent also has new defaults for Git credential retries
   (`GIT_TOKEN_*`, `GIT_CREDENTIAL_TIMEOUT`) and secret execution (`SECRET_EXEC_*`), but SAM doesn't
   pass these to the machines it starts, so the defaults apply (see
@@ -157,7 +157,7 @@ offers it. See [Choosing a model](/docs/guides/agents/#choosing-a-model).
   pre-filled with the old session's IDs, and its agent reads the original conversation itself.
   Retry pre-fills the original request. → [Conversation Forking](/docs/guides/chat-features/#conversation-forking)
 - **An expired chat says so.** A chat that slept longer than its saved workspace is kept shows
-  **Expired** and offers **Fork conversation** (since 17 October, a **Fork** box where the message
+  **Expired** and offers **Fork conversation** (since 16 October, a **Fork** box where the message
   box was), instead of failing when you try to wake it.
   → [Expired saved workspace](/docs/guides/session-troubleshooting/#expired-saved-workspace)
 - **A failed wake keeps the chat asleep.** If a VM chat can't wake, it goes back to sleep on the
