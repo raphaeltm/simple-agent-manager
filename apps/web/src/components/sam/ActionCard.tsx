@@ -1,7 +1,19 @@
 import { Alert, Button } from '@simple-agent-manager/ui';
+import { AlertTriangle, Check, ChevronRight, ExternalLink } from 'lucide-react';
 import { useState } from 'react';
+import { Link } from 'react-router';
 
 import { request } from '../../lib/api/client';
+import {
+  actionTarget,
+  confirmationCopy,
+  effectTitle,
+  linkLabel,
+  prettyJson,
+  requestErrorText,
+  resultLink,
+  resultMessage,
+} from './sam-receipts';
 
 export interface Action {
   available?: boolean;
@@ -11,102 +23,181 @@ export interface Action {
   state: string;
   result_json: string | null;
 }
-function resultLink(json: string | null): string | null {
-  try {
-    const value: unknown = JSON.parse(json ?? 'null');
-    if (!value || typeof value !== 'object' || !('link' in value) || typeof value.link !== 'string')
-      return null;
-    const url = new URL(value.link, window.location.origin);
-    return url.protocol === 'https:' ||
-      (url.protocol === 'http:' && url.origin === window.location.origin)
-      ? url.href
-      : null;
-  } catch {
-    return null;
+
+const DECLINED_MESSAGE = 'Declined by user';
+
+function ActionStatus({ action, message }: { action: Action; message: string | null }) {
+  if (action.available === false) return <span className="text-fg-muted">No longer available</span>;
+  switch (action.state) {
+    case 'approval_required':
+      return (
+        <span className="inline-flex items-center gap-1 font-medium text-warning-fg">
+          <AlertTriangle size={14} aria-hidden="true" />
+          Needs your confirmation
+        </span>
+      );
+    case 'completed':
+      return (
+        <span className="inline-flex items-center gap-1 text-success-fg">
+          <Check size={14} aria-hidden="true" />
+          Done
+        </span>
+      );
+    case 'uncertain':
+      return (
+        <span className="inline-flex items-center gap-1 font-medium text-warning-fg">
+          <AlertTriangle size={14} aria-hidden="true" />
+          Outcome unknown
+        </span>
+      );
+    case 'rejected':
+      return (
+        <span className="text-fg-muted">
+          {message === DECLINED_MESSAGE ? 'Declined' : 'Not run'}
+        </span>
+      );
+    default:
+      return <span className="text-fg-muted">In progress</span>;
   }
 }
 
+const linkClass =
+  'inline-flex min-h-11 items-center gap-1 font-medium text-accent underline underline-offset-2';
+
+/**
+ * One recorded SAM effect. The card says in plain words what SAM did or wants to
+ * do, where, and what confirming will cause; the exact recorded request stays
+ * one tap away for anyone who wants to check it.
+ */
 export function ActionCard({
   action,
+  projectName,
   refresh,
 }: {
   action: Action;
+  projectName?: string;
   refresh: () => Promise<unknown>;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const link = resultLink(action.result_json);
-  const confirm = async (approved: boolean) => {
+  const available = action.available !== false;
+  const needsConfirmation = available && action.state === 'approval_required';
+  const copy = confirmationCopy(action.operation);
+  const message = resultMessage(action.result_json);
+  const result = available ? resultLink(action.result_json) : null;
+  const target = available ? actionTarget(action) : null;
+  const run = async (path: string, body: string, failure: string) => {
     setBusy(true);
     setError(null);
     try {
-      await request(`/api/sam/actions/${encodeURIComponent(action.id)}/confirm`, {
+      await request(`/api/sam/actions/${encodeURIComponent(action.id)}/${path}`, {
         method: 'POST',
-        body: JSON.stringify({ approved }),
+        body,
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not confirm action');
-    } finally {
-      await refresh();
-      setBusy(false);
-    }
-  };
-  const reconcile = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await request(`/api/sam/actions/${encodeURIComponent(action.id)}/reconcile`, {
-        method: 'POST',
-        body: '{}',
-      });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not check the outcome');
+      setError(requestErrorText(cause, failure));
     } finally {
       await refresh();
       setBusy(false);
     }
   };
   return (
-    <div className="mt-3 min-w-0 rounded-lg border border-border-default bg-surface-secondary p-3 text-sm [overflow-wrap:anywhere]">
-      <p className="font-medium">
-        {action.operation.replace(/^sam_/, '').replaceAll('_', ' ')}{' '}
-        <span className="font-normal text-fg-muted">· {action.state.replaceAll('_', ' ')}</span>
-      </p>
-      {link && (
-        <a className="mt-2 inline-block text-accent underline" href={link}>
-          Open source work
-        </a>
+    <div
+      className={`mt-3 min-w-0 rounded-lg border p-3 text-sm [overflow-wrap:anywhere] ${
+        needsConfirmation ? 'border-warning/40 bg-warning-tint' : 'border-border-default bg-surface'
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <p className="font-semibold text-fg-primary">{effectTitle(action.operation)}</p>
+        <ActionStatus action={action} message={message} />
+      </div>
+      {target && <p className="mt-1 text-fg-muted">In {projectName ?? 'one of your projects'}</p>}
+      {needsConfirmation && <p className="mt-2 text-fg-primary">{copy.consequence}</p>}
+      {available && action.state === 'uncertain' && (
+        <p className="mt-2 text-fg-primary">
+          SAM couldn’t confirm whether this finished. Check the project before asking again.
+        </p>
       )}
-      <details className="mt-2" open={action.state === 'approval_required'}>
-        <summary className="cursor-pointer text-accent">Details and recorded result</summary>
-        <pre className="mt-2 whitespace-pre-wrap break-all text-xs">{action.input_json}</pre>
-        {action.result_json && (
-          <pre className="mt-2 whitespace-pre-wrap break-all text-xs">{action.result_json}</pre>
-        )}
-      </details>
-      {action.available !== false &&
-        action.state === 'uncertain' &&
-        action.operation === 'sam_chat_start' && (
+      {!available && message && <p className="mt-2 text-fg-muted">{message}</p>}
+      {result ? (
+        result.internal ? (
+          <Link className={linkClass} to={result.href}>
+            {result.label}
+          </Link>
+        ) : (
+          <a className={linkClass} href={result.href} target="_blank" rel="noopener noreferrer">
+            {result.label}
+            <ExternalLink size={14} aria-hidden="true" />
+          </a>
+        )
+      ) : (
+        target &&
+        action.state !== 'rejected' && (
+          <Link className={linkClass} to={target.path}>
+            {linkLabel(target.path)}
+          </Link>
+        )
+      )}
+      {needsConfirmation && (
+        <div className="mt-2 flex flex-wrap gap-2">
           <Button
-            className="mt-3"
+            variant={copy.danger ? 'danger' : 'primary'}
+            disabled={busy}
+            onClick={() =>
+              void run('confirm', JSON.stringify({ approved: true }), 'Could not confirm')
+            }
+          >
+            {copy.confirm}
+          </Button>
+          <Button
             variant="secondary"
             disabled={busy}
-            onClick={() => void reconcile()}
+            onClick={() =>
+              void run('confirm', JSON.stringify({ approved: false }), 'Could not decline')
+            }
           >
-            {busy ? 'Checking…' : 'Check outcome'}
-          </Button>
-        )}
-      {action.available !== false && action.state === 'approval_required' && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button size="lg" disabled={busy} onClick={() => void confirm(true)}>
-            Confirm this action
-          </Button>
-          <Button variant="secondary" disabled={busy} onClick={() => void confirm(false)}>
-            Decline
+            {copy.decline}
           </Button>
         </div>
       )}
-      {error && <Alert variant="error">{error}</Alert>}
+      {available && action.state === 'uncertain' && action.operation === 'sam_chat_start' && (
+        <Button
+          className="mt-2"
+          variant="secondary"
+          disabled={busy}
+          onClick={() => void run('reconcile', '{}', 'Could not check the outcome')}
+        >
+          {busy ? 'Checking…' : 'Check outcome'}
+        </Button>
+      )}
+      {available && (
+        <details className="group mt-2">
+          <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1 text-fg-muted [&::-webkit-details-marker]:hidden">
+            <ChevronRight
+              size={14}
+              aria-hidden="true"
+              className="transition-transform group-open:rotate-90"
+            />
+            Exact request
+          </summary>
+          <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-inset p-2 text-xs [overflow-wrap:anywhere]">
+            {prettyJson(action.input_json)}
+          </pre>
+          {action.result_json && (
+            <>
+              <p className="mt-2 text-xs text-fg-muted">Recorded result</p>
+              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-inset p-2 text-xs [overflow-wrap:anywhere]">
+                {prettyJson(action.result_json)}
+              </pre>
+            </>
+          )}
+        </details>
+      )}
+      {error && (
+        <Alert variant="error" className="mt-2">
+          {error}
+        </Alert>
+      )}
     </div>
   );
 }

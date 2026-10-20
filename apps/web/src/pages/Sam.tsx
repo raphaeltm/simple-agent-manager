@@ -1,27 +1,22 @@
 import { Alert, Button, PageLayout } from '@simple-agent-manager/ui';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronDown, Loader2, Settings } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
-import { RenderedMarkdown } from '../components/MarkdownRenderer';
-import { type Action, ActionCard } from '../components/sam/ActionCard';
 import { EarlierSamHistory } from '../components/sam/EarlierSamHistory';
-import { type Work, WorkCard } from '../components/sam/WorkCard';
+import { requestErrorText } from '../components/sam/sam-receipts';
+import { SamComposer } from '../components/sam/SamComposer';
+import { isActiveTurn, SamTurn, type Turn } from '../components/sam/SamTurn';
+import { useStickToBottom } from '../components/sam/useStickToBottom';
+import { type Work, WorkPanel } from '../components/sam/WorkCard';
+import { useProjectList } from '../hooks/useProjectData';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { useSamSettings } from '../hooks/useSamSettings';
-import { API_URL, ApiClientError, request } from '../lib/api/client';
+import { ApiClientError, request } from '../lib/api/client';
 import { SAM_ACTIVE_POLL_MS } from '../lib/poll-intervals';
-import { useVoiceInput } from './sam-prototype/voice-input';
+import { PROJECT_LIST_LIMIT } from '../lib/project-query-config';
 
-interface Turn {
-  id: string;
-  request_key: string;
-  message: string;
-  state: string;
-  response: string | null;
-  error: string | null;
-  actions: Action[];
-}
 interface History {
   conversationId?: string;
   legacyHistoryAvailable?: boolean;
@@ -33,7 +28,13 @@ interface PendingMessage {
   requestKey: string;
   message: string;
 }
-const isActive = (turn: Turn) => turn.state === 'running' || turn.state === 'accepted';
+
+/** Starters fill the composer for review; nothing is sent until the user presses Send. */
+const SUGGESTIONS = [
+  'What needs my attention?',
+  'What is running across my projects?',
+  'Show my recent ideas',
+];
 
 function readPending(storageKey: string): PendingMessage | null {
   try {
@@ -56,20 +57,25 @@ function readPending(storageKey: string): PendingMessage | null {
 export function Sam() {
   const settings = useSamSettings();
   const scope = useQueryScope();
+  // The conversation fills the shell like project chat: its own scroller and a pinned composer.
+  if (!settings.isPending && settings.enabled) return <SamConversation key={scope} />;
   return (
     <PageLayout title="SAM" maxWidth="xl">
       {settings.isPending ? (
-        <p role="status">Loading your SAM setting…</p>
-      ) : !settings.enabled ? (
+        <p role="status" className="inline-flex items-center gap-2 text-fg-muted">
+          <Loader2 size={16} aria-hidden="true" className="motion-safe:animate-spin" />
+          Loading your SAM setting…
+        </p>
+      ) : (
         <div className="max-w-xl space-y-3">
-          <h2 className="text-xl font-semibold">Your private SAM assistant</h2>
+          <h2 className="sam-type-section-heading text-fg-primary">Your private SAM assistant</h2>
           <p className="text-fg-muted">
             {settings.data?.available === false
               ? 'SAM is temporarily unavailable on this installation.'
-              : 'SAM is off. Enable it in Settings to check your projects and manage work from one conversation.'}
+              : 'SAM is off. Turn it on in Settings to check your projects and manage work from one conversation.'}
           </p>
           <Link
-            className="inline-flex min-h-14 items-center justify-center rounded-md bg-accent px-5 font-semibold text-fg-on-accent"
+            className="inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-4 font-semibold text-fg-on-accent"
             to="/settings"
           >
             Open Settings
@@ -83,8 +89,6 @@ export function Sam() {
             </Alert>
           )}
         </div>
-      ) : (
-        <SamConversation key={scope} />
       )}
     </PageLayout>
   );
@@ -99,16 +103,7 @@ function SamConversation() {
   const [sending, setSending] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const amplitude = useRef(0);
-  const transcribed = useCallback(
-    (text: string) => setMessage((previous) => (previous ? `${previous}\n${text}` : text)),
-    []
-  );
-  const voice = useVoiceInput({
-    transcribeUrl: `${API_URL}/api/transcribe`,
-    amplitudeRef: amplitude,
-    onTranscription: transcribed,
-  });
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const key = ['auth', scope, 'sam', 'turns'] as const;
   const history = useInfiniteQuery({
     queryKey: key,
@@ -126,7 +121,7 @@ function SamConversation() {
         (page) =>
           page.turns.some(
             (turn) =>
-              isActive(turn) ||
+              isActiveTurn(turn) ||
               turn.actions.some(
                 (action) => action.state === 'pending' || action.state === 'running'
               )
@@ -138,14 +133,25 @@ function SamConversation() {
         ? SAM_ACTIVE_POLL_MS
         : false,
   });
+  // Shares the sidebar's cached project list, so naming an action's project costs no request.
+  const { projects } = useProjectList({
+    queryScope: scope,
+    limit: PROJECT_LIST_LIMIT,
+    pollInterval: 0,
+  });
+  const projectNames = useMemo(
+    () => new Map(projects.map((project) => [project.id, project.name])),
+    [projects]
+  );
   const turns =
     history.data?.pages
       .slice()
       .reverse()
       .flatMap((page) => page.turns) ?? [];
   const work = history.data?.pages[0]?.work ?? [];
+  const scroll = useStickToBottom(turns[0]?.id);
   const refresh = () => client.invalidateQueries({ queryKey: ['auth', scope, 'sam'] });
-  const active = turns.find(isActive);
+  const active = turns.find(isActiveTurn);
   const pendingRecorded = pending && turns.some((turn) => turn.request_key === pending.requestKey);
   // Only a matching server receipt clears an uncertain submission. Polling must
   // never overwrite an ordinary draft or clear an unrelated request.
@@ -164,6 +170,7 @@ function SamConversation() {
     if (!message.trim() || sending || active || history.isPending || history.isError) return;
     setSending(true);
     setError(null);
+    scroll.scrollToBottom();
     const submission = pending ?? { requestKey: crypto.randomUUID(), message };
     try {
       // Persist before the network request: a lost response followed by a reload
@@ -179,9 +186,7 @@ function SamConversation() {
         sessionStorage.removeItem(storageKey);
         setPending(null);
       }
-      setError(
-        cause instanceof Error ? cause.message : 'Could not send. Retry uses the same request.'
-      );
+      setError(requestErrorText(cause, 'Could not send. Retry uses the same request.'));
     } finally {
       await refresh();
       setSending(false);
@@ -197,159 +202,147 @@ function SamConversation() {
         body: '{}',
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not cancel turn');
+      setError(requestErrorText(cause, 'Could not stop SAM'));
     } finally {
       await refresh();
       setCancelling(false);
     }
   };
+  const suggest = (text: string) => {
+    setMessage(text);
+    textareaRef.current?.focus();
+  };
   return (
-    <div className="mx-auto flex min-w-0 w-full max-w-3xl flex-col gap-4 pb-6">
-      <p className="text-sm text-fg-muted">
-        Private to you · Project work opens a visible project session.{' '}
-        <Link className="text-accent underline" to="/settings">
-          Settings
-        </Link>
-      </p>
-      {history.isPending && <p role="status">Loading conversation…</p>}
-      {history.error && (
-        <Alert variant="error">
-          {history.error.message}{' '}
-          <Button variant="secondary" onClick={() => void history.refetch()}>
-            Retry history
-          </Button>
-        </Alert>
-      )}
-      {history.hasNextPage && (
-        <Button
-          variant="secondary"
-          disabled={history.isFetchingNextPage}
-          onClick={() => void history.fetchNextPage()}
-        >
-          {history.isFetchingNextPage ? 'Loading…' : 'Load older messages'}
-        </Button>
-      )}
-      {history.data && turns.length === 0 && (
-        <div className="rounded-xl border border-border-default p-6">
-          <h2 className="text-xl font-semibold">What would you like to work on?</h2>
-          <p className="mt-2 text-fg-muted">
-            Ask what needs your attention, explore an idea, or start work in a project. Settings,
-            connections and infrastructure controls remain in their existing pages.
-          </p>
-        </div>
-      )}
-      {history.data?.pages[0]?.legacyHistoryAvailable && history.data.pages[0].conversationId && (
-        <EarlierSamHistory conversationId={history.data.pages[0].conversationId} />
-      )}
-      {work.length > 0 && (
-        <details className="min-w-0 rounded-lg border border-border-default p-3 text-sm">
-          <summary className="cursor-pointer font-medium">
-            Project work · {work.length}{' '}
-            {work.some((item) => item.attention) ? '· Needs attention' : ''}
-            {work.some((item) => item.updates?.unread) ? ' · New updates' : ''}
-          </summary>
-          <ul className="mt-3 space-y-3">
-            {work.map((item) => (
-              <WorkCard key={item.actionId} item={item} refresh={refresh} />
-            ))}
-          </ul>
-        </details>
-      )}
-      <div aria-label="Conversation" className="space-y-5">
-        {turns.map((turn) => (
-          <article key={turn.id} className="min-w-0 space-y-3 [overflow-wrap:anywhere]">
-            <div className="rounded-xl bg-surface-secondary p-4">
-              <p className="text-xs font-medium text-fg-muted">You</p>
-              <p className="mt-1 whitespace-pre-wrap">{turn.message}</p>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <header className="shrink-0 border-b border-border-default">
+        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-4 py-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="sam-type-card-title text-fg-primary">SAM</h1>
+              <span className="rounded-full bg-accent-tint px-2 py-0.5 text-xs font-medium text-accent">
+                Preview
+              </span>
             </div>
-            <div className="min-w-0 px-1">
-              <p className="text-xs font-medium text-fg-muted">
-                SAM · {turn.state.replaceAll('_', ' ')}
-              </p>
-              {turn.response && <RenderedMarkdown content={turn.response} inline />}
-              {turn.error && <Alert variant="warning">{turn.error}</Alert>}
-              {isActive(turn) && (
-                <p className="mt-2 text-sm" role="status">
-                  Working… You can leave this page and return.
-                </p>
-              )}
-              {turn.actions.map((action) => (
-                <ActionCard key={action.id} action={action} refresh={refresh} />
-              ))}
-            </div>
-          </article>
-        ))}
-      </div>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void send();
-        }}
-        className="space-y-3 rounded-xl border border-border-default bg-surface-secondary p-3"
-      >
-        <label htmlFor="sam-message" className="block text-sm font-medium">
-          Message SAM
-        </label>
-        <textarea
-          id="sam-message"
-          className="min-h-28 w-full resize-y rounded-lg border border-border-default bg-surface-primary p-3 text-fg-primary focus-visible:outline-2 focus-visible:outline-accent"
-          value={message}
-          onChange={(event) => setMessage(event.target.value)}
-          placeholder="What needs my attention across my projects?"
-          readOnly={sending || Boolean(pending)}
-        />
-        {pending && (
-          <p className="text-sm text-fg-muted">
-            This message is saved in this tab until delivery is confirmed. Retry safely sends the
-            same request.
-          </p>
-        )}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <Button
-            type="button"
-            size="lg"
-            variant="secondary"
-            onClick={voice.toggle}
-            disabled={voice.state === 'processing' || sending || Boolean(pending)}
+            <p className="text-xs text-fg-muted">
+              Private to you · Project work runs in visible project chats
+            </p>
+          </div>
+          <Link
+            to="/settings"
+            aria-label="SAM settings"
+            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-sm text-fg-muted hover:text-fg-primary"
           >
-            {voice.state === 'recording'
-              ? 'Stop recording'
-              : voice.state === 'processing'
-                ? 'Transcribing…'
-                : 'Voice input'}
-          </Button>
-          {active ? (
-            <Button
-              type="button"
-              size="lg"
-              variant="secondary"
-              disabled={cancelling}
-              onClick={() => void cancel()}
-            >
-              {cancelling ? 'Stopping…' : 'Stop SAM turn'}
-            </Button>
-          ) : (
-            <Button
-              type="submit"
-              size="lg"
-              disabled={
-                sending ||
-                !message.trim() ||
-                history.isPending ||
-                history.isError ||
-                voice.state === 'recording' ||
-                voice.state === 'processing'
-              }
-            >
-              {sending ? 'Sending…' : pending ? 'Retry message' : 'Send'}
-            </Button>
-          )}
+            <Settings size={16} aria-hidden="true" />
+            <span className="hidden sm:inline">Settings</span>
+          </Link>
         </div>
-        {(error || voice.errorMsg) && <Alert variant="error">{error ?? voice.errorMsg}</Alert>}
-        <p className="text-xs text-fg-muted">
-          Stopping this turn does not cancel project work already dispatched.
-        </p>
-      </form>
+        {work.length > 0 && (
+          <div className="mx-auto w-full max-w-3xl px-4 pb-2">
+            <WorkPanel work={work} projectNames={projectNames} refresh={refresh} />
+          </div>
+        )}
+      </header>
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={scroll.scrollerRef}
+          onScroll={scroll.onScroll}
+          data-testid="sam-conversation-scroller"
+          className="h-full overflow-y-auto overflow-x-hidden"
+        >
+          <div
+            ref={scroll.contentRef}
+            className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-4 px-4 py-4"
+          >
+            {history.hasNextPage && (
+              <Button
+                variant="ghost"
+                className="self-center"
+                disabled={history.isFetchingNextPage}
+                onClick={() => {
+                  scroll.holdPosition();
+                  void history.fetchNextPage();
+                }}
+              >
+                {history.isFetchingNextPage ? 'Loading…' : 'Load older messages'}
+              </Button>
+            )}
+            {history.isPending && (
+              <p role="status" className="inline-flex items-center gap-2 text-fg-muted">
+                <Loader2 size={16} aria-hidden="true" className="motion-safe:animate-spin" />
+                Loading conversation…
+              </p>
+            )}
+            {history.error && (
+              <Alert variant="error">
+                {history.error.message}{' '}
+                <Button variant="secondary" onClick={() => void history.refetch()}>
+                  Try again
+                </Button>
+              </Alert>
+            )}
+            {history.data?.pages[0]?.legacyHistoryAvailable &&
+              history.data.pages[0].conversationId && (
+                <EarlierSamHistory conversationId={history.data.pages[0].conversationId} />
+              )}
+            {history.data && turns.length === 0 && (
+              <div className="my-auto py-6 text-center">
+                <h2 className="sam-type-section-heading text-fg-primary">
+                  What would you like to work on?
+                </h2>
+                <p className="mx-auto mt-2 max-w-md text-fg-muted">
+                  Ask what needs your attention, explore an idea, or start work in one of your
+                  projects.
+                </p>
+                {!pending && (
+                  <div className="mt-4 flex flex-wrap justify-center gap-2">
+                    {SUGGESTIONS.map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => suggest(suggestion)}
+                        className="min-h-11 rounded-full border border-border-default bg-surface px-4 text-sm text-fg-primary transition-colors hover:bg-surface-hover"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <p className="mt-4 text-xs text-fg-muted">
+                  Settings, connections and infrastructure stay on their own pages.
+                </p>
+              </div>
+            )}
+            <section aria-label="Conversation" className="space-y-6">
+              {turns.map((turn) => (
+                <SamTurn key={turn.id} turn={turn} projectNames={projectNames} refresh={refresh} />
+              ))}
+            </section>
+          </div>
+        </div>
+        {scroll.showJump && (
+          <button
+            type="button"
+            onClick={scroll.scrollToBottom}
+            aria-label="Scroll to bottom"
+            className="absolute bottom-3 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-[var(--sam-form-border)] bg-[var(--sam-form-bg)] shadow-md hover:bg-page"
+          >
+            <ChevronDown size={16} aria-hidden="true" className="text-fg-muted" />
+          </button>
+        )}
+      </div>
+      <SamComposer
+        message={message}
+        setMessage={setMessage}
+        onSend={() => void send()}
+        onStop={() => void cancel()}
+        active={Boolean(active)}
+        sending={sending}
+        cancelling={cancelling}
+        pending={Boolean(pending)}
+        blocked={history.isPending || history.isError}
+        error={error}
+        textareaRef={textareaRef}
+      />
     </div>
   );
 }

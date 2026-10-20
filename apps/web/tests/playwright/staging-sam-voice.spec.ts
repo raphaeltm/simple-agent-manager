@@ -130,7 +130,7 @@ test('one real transcription populates a reviewable draft without sending', asyn
   const composer = page.getByLabel('Message SAM');
   await expect(composer).toBeVisible({ timeout: 15_000 });
   await expect(composer).toHaveValue('');
-  await page.getByRole('button', { name: 'Voice input', exact: true }).click();
+  await page.getByRole('button', { name: 'Start voice input', exact: true }).click();
   const stop = page.getByRole('button', { name: 'Stop recording', exact: true });
   await expect(stop).toBeVisible({ timeout: 5_000 });
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
@@ -152,7 +152,7 @@ test('one real transcription populates a reviewable draft without sending', asyn
   expect(transcript.toLowerCase()).toContain('voice');
   expect(transcript.toLowerCase()).toContain('draft');
   await expect(composer).toHaveValue(transcript);
-  await expect(page.getByRole('button', { name: 'Voice input', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Start voice input', exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
   expect(transcriptions, 'Exactly one real transcription request').toBe(1);
   expect(blockedWrites, 'No automatic send or unexpected mutation beyond page analytics').toBe(0);

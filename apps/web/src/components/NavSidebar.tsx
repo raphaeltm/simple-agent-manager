@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bell,
+  Bot,
   Brain,
   ChevronDown,
   ChevronRight,
@@ -52,7 +53,7 @@ export function getGlobalNavItems(samEnabled: boolean): NavItem[] {
   return samEnabled
     ? [
         ...GLOBAL_NAV_ITEMS.slice(0, 1),
-        { label: 'SAM', path: '/sam', icon: <MessageSquare size={18} /> },
+        { label: 'SAM', path: '/sam', icon: <Bot size={18} /> },
         ...GLOBAL_NAV_ITEMS.slice(1),
       ]
     : GLOBAL_NAV_ITEMS;

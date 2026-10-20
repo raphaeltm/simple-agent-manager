@@ -1,5 +1,6 @@
 import { Alert, Button } from '@simple-agent-manager/ui';
 import { useInfiniteQuery } from '@tanstack/react-query';
+import { ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
@@ -43,15 +44,22 @@ export function EarlierSamHistory({ conversationId }: { conversationId: string }
       ) ?? [];
   return (
     <details
-      className="min-w-0 rounded-lg border border-border-default p-3"
+      className="group min-w-0 rounded-lg border border-border-default bg-surface px-3"
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary className="cursor-pointer text-sm font-medium">Earlier SAM history</summary>
-      <p className="mt-2 text-xs text-fg-muted">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm [&::-webkit-details-marker]:hidden">
+        <ChevronRight
+          size={16}
+          aria-hidden="true"
+          className="text-fg-muted transition-transform group-open:rotate-90"
+        />
+        <span className="font-medium text-fg-primary">Earlier SAM history</span>
+      </summary>
+      <p className="pb-2 text-xs text-fg-muted">
         Read-only messages from your earlier conversation. Current actions and status appear below.
       </p>
       {open && (
-        <div className="mt-3 space-y-4">
+        <div className="space-y-4 pb-3">
           {history.isPending && <p role="status">Loading earlier history…</p>}
           {history.error && (
             <Alert variant="error">
@@ -78,7 +86,7 @@ export function EarlierSamHistory({ conversationId }: { conversationId: string }
           {messages.map((message) => (
             <div key={message.id} className="min-w-0 [overflow-wrap:anywhere]">
               <p className="text-xs font-medium text-fg-muted">
-                {message.role === 'user' ? 'You' : 'SAM'} · Earlier history
+                {message.role === 'user' ? 'You' : 'SAM'}
               </p>
               {message.role === 'assistant' ? (
                 <RenderedMarkdown content={message.content} inline />

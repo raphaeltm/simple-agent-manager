@@ -37,7 +37,7 @@ export async function confirmAwakeDispatchStop(input: {
   await page
     .locator('article')
     .filter({ hasText: input.stopMessage })
-    .getByRole('button', { name: 'Confirm this action', exact: true })
+    .getByRole('button', { name: 'Confirm stop', exact: true })
     .click();
   check((await confirmed)?.ok() === true, 'Scoped stop confirmation accepted');
   const stopped = await record((await get(`${input.samApi}/turns`)).turns);
