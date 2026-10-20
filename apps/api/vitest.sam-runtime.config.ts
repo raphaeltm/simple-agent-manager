@@ -7,7 +7,10 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
   test: {
-    include: ['tests/workers/sam-session-do.test.ts'],
+    include: [
+      'tests/workers/sam-session-do.test.ts',
+      'tests/workers/sam-grounding-runtime.test.ts',
+    ],
     testTimeout: 20_000,
     hookTimeout: 60_000,
     fileParallelism: false,

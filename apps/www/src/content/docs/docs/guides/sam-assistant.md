@@ -19,6 +19,8 @@ Actions that require confirmation show their exact recorded input before **Confi
 
 A failed send keeps the pending message in the same browser tab so **Retry message** can reuse its request identity, including after refresh. If a dispatch outcome is uncertain, **Check outcome** looks for the already-reserved work; it does not create a replacement task. An unresolved outcome is not evidence that nothing happened.
 
+An interrupted answer can mean SAM could not substantiate its response. Review the recorded actions before asking it to continue; interruption does not undo an action that already completed.
+
 **Stop SAM turn** stops the account assistant's current turn. Project work already dispatched continues until stopped through its own controls. Turning SAM off prevents new assistant actions and keeps your history and existing project work.
 
 ## History and updates

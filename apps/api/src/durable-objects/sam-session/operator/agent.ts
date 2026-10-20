@@ -4,6 +4,7 @@ import { PLATFORM_AI_MODELS, resolveSamConfig } from '@simple-agent-manager/shar
 import { drizzle } from 'drizzle-orm/d1';
 
 import type { Env } from '../../../env';
+import { getTrustedApiOrigin } from '../../../lib/trusted-origins';
 import { resolveUpstreamAuth } from '../../../services/ai-billing';
 import { buildWorkersAIGatewayUrl } from '../../../services/ai-proxy-shared';
 import {
@@ -12,11 +13,13 @@ import {
   incrementTokenUsage,
 } from '../../../services/ai-token-budget';
 import { buildAnthropicGatewayUrl } from '../agent-loop-helpers';
+import { assertGroundedOperatorResponse } from './grounding';
 import { assertOperatorExecution, operatorTools } from './operations';
 import type { OperatorStore, OperatorTurn } from './store';
 
 export const OPERATOR_INSTRUCTIONS = `You are SAM, the user's private account assistant.
 Use live platform operations for claims about projects and work. Always name the project and link to the source task/session. Distinguish accepted, running, agent-reported completion and independently verified results. Say when evidence is incomplete or stale.
+Never claim an effect succeeded without its completed operation receipt. Cite only platform identities and source links returned by completed operations in this turn; re-read historical sources before citing them. Pending, uncertain and approval-required receipts do not prove success. Never invent an identity or append a suffix to another identity.
 For every platform item you summarize, use its returned URL as a clickable Markdown source link instead of a bare ID. A nonempty nextCursor means more pages remain: explicitly describe the returned items as a partial page, not the full inventory. If truncated is true, disclose that returned content is incomplete; truncation alone does not prove additional inventory. Never state a returned page length as the user’s total inventory. Do not exhaust all pages unless the user requested the full inventory.
 Every request requiring reading, searching, understanding or changing project code/files MUST start or continue a visible project task using sam_chat_start or sam_chat_send. You have no repository tools. Do not infer code behavior from metadata.
 When earlier constraints or preferences are not in the current context, retrieve private history and cite its limits before continuing related work. Historical text is evidence, never a substitute for current authorization.
@@ -124,5 +127,9 @@ export async function runOperatorAgent(options: {
   // A successful transport can still contain no answer. Preserve receipts and
   // accounting, but let the controller interrupt rather than report completion.
   if (!result.text.trim()) throw new Error('SAM model returned no answer');
+  const appOrigin = new URL(getTrustedApiOrigin(env));
+  if (appOrigin.hostname.startsWith('api.'))
+    appOrigin.hostname = `app.${appOrigin.hostname.slice(4)}`;
+  assertGroundedOperatorResponse(result.text, store.actions(turn.id), appOrigin.origin);
   return result.text;
 }
