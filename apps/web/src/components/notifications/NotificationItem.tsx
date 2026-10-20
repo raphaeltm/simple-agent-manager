@@ -226,11 +226,11 @@ export function NotificationGroup({
               onClick={() => onNotificationClick(notification)}
               onDismiss={(e) => {
                 e.stopPropagation();
-                onDismiss(notification.id);
+                void onDismiss(notification.id);
               }}
               onMarkRead={(e) => {
                 e.stopPropagation();
-                onMarkRead(notification.id);
+                void onMarkRead(notification.id);
               }}
               onViewInProject={
                 projectId && onViewInProject ? () => onViewInProject(projectId) : undefined

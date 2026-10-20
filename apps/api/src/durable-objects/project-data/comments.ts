@@ -142,7 +142,10 @@ function serializeMentions(mentions: CommentMention[] | undefined): string | nul
  */
 function mentionFingerprint(mentions: CommentMention[] | undefined): string[] {
   if (!mentions || mentions.length === 0) return [];
-  return ['mentions', ...mentions.map((mention) => mention.userId).sort()];
+  // Code-unit order, the default sort's order that stored fingerprints were made with. Not
+  // localeCompare, which would reorder mixed-case ids and break replays of stored mutations.
+  const userIds = mentions.map((mention) => mention.userId);
+  return ['mentions', ...userIds.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))];
 }
 
 type ThreadRow = v.InferOutput<typeof ThreadRowSchema>;

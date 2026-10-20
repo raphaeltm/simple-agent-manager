@@ -138,6 +138,43 @@ describe('ProjectData message comments', () => {
     });
   });
 
+  it('replays a thread that names the same people in another order; other people conflict', () => {
+    seedSession('session-a');
+    seedMessage('session-a', 'message-a', 1);
+    const input = {
+      sessionId: 'session-a',
+      messageId: 'message-a',
+      body: 'Please look',
+      clientMutationId: 'mention-key',
+      actor: HUMAN,
+    };
+    const created = comments.createCommentThread(sql, env, {
+      ...input,
+      mentions: [
+        { userId: 'b-user', displayName: 'B' },
+        { userId: 'A-user', displayName: 'A' },
+      ],
+    });
+    expect(created.idempotent).toBe(false);
+
+    const replay = comments.createCommentThread(sql, env, {
+      ...input,
+      mentions: [
+        { userId: 'A-user', displayName: 'A' },
+        { userId: 'b-user', displayName: 'B' },
+      ],
+    });
+    expect(replay.idempotent).toBe(true);
+    expect(replay.thread.id).toBe(created.thread.id);
+
+    expect(() =>
+      comments.createCommentThread(sql, env, {
+        ...input,
+        mentions: [{ userId: 'A-user', displayName: 'A' }],
+      })
+    ).toThrow(comments.CommentIdempotencyConflictError);
+  });
+
   it('appends replies and status transitions with stable sequence and version semantics', () => {
     seedSession('session-a');
     seedMessage('session-a', 'message-a', 1);
