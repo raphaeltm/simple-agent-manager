@@ -68,11 +68,15 @@ Full reports (local only): `.tmp/docs-update/research-*.md`. Headlines:
 - **#2360/#2305/#2379/#2377/#2358/#2350**: small fixes and changelog entries; Git access troubleshooting entry.
 - Policy: `reference/roadmap.md:73` mentions missions (public content must not).
 
-Product bugs to file as SAM ideas (not docs work): GitLab agents told "SAM will create a GitLab merge
-request" (`instruction-tools.ts:346`); "Output on branch" notification text; onboarding/profile-card/runtime
-hints still implying automatic delivery; admin settings errors shown only as "Save could not be confirmed",
-PATCH cap of 23 changes vs 26 settings, Settings missing from the command palette; possible Send-to-agent-on-a-
-reply mislabel.
+Product bugs to file as SAM ideas (not docs work), each now filed:
+
+- GitLab agents told "SAM will create a GitLab merge request" (`instruction-tools.ts:346`), the "Output on
+  branch" notification text, and onboarding/profile-card/runtime hints implying automatic delivery →
+  `01M5BRDZF2314EAE7S8HBD37NX`.
+- Admin settings errors shown only as "Save could not be confirmed", the PATCH cap of 23 changes vs 26
+  settings, and Settings missing from the command palette → `01M5BRE4WHCKVF0DTAHDVTJDTC`.
+- Send to agent on a reply (sends a reply as the thread author's comment and errors on an already-sent
+  thread) → appended to `01M59MYE4GY91BWTE8TZF1ZB5D` (confirmed in code in round 1).
 
 ## Implementation checklist
 
@@ -88,7 +92,8 @@ reply mislabel.
 - [x] Playwright docs screenshots (real components, mock data), desktop and mobile, reviewed: share
       dialog, teammate view, comment + mention, rail with Share, archived/expired Fork composer, fork
       composer, admin settings, compute pool
-- [x] File product bugs as SAM ideas; update stale "Comments feature" knowledge (shipped access is timed):
+- [x] File product bugs as SAM ideas; update stale "Comments feature" knowledge (shipped access is timed;
+      observation `b4900f72-3f0b-466f-a55c-ee8e3062abab` superseded by `b225f195-2877-4a94-9d5e-a98d826432d5`):
       new ideas `01M5BRDZF2314EAE7S8HBD37NX` (publication leftovers, GitLab MR instruction),
       `01M5BRE4WHCKVF0DTAHDVTJDTC` (admin settings UX), `01M5BREXSE42RBT0BQMK3Z72FG` (provider-limit
       "Blocked" label); appended to `01M4SW64BE2CXX18F5TN2TMWR2` and `01M59MYE4GY91BWTE8TZF1ZB5D`
