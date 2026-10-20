@@ -104,7 +104,6 @@ theme-foundation-audit.spec.ts
 theme-switcher-audit.spec.ts
 trial-chat-gate-audit.spec.ts
 trial-ui-audit.spec.ts
-triggers-ui-audit.spec.ts
 uncovered-pages-audit.spec.ts
 wake-progress-audit.spec.ts
 workspace-node-chrome-light-audit.spec.ts

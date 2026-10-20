@@ -70,10 +70,13 @@ export function WaitCard({
   subscription,
   lookups,
   canWrite,
+  hereSessionId,
 }: {
   subscription: ProjectEventSubscriptionRecord;
   lookups: AutomationLookups;
   canWrite: boolean;
+  /** The chat this list is shown for; its own waits read "This chat" with no link to itself. */
+  hereSessionId?: string;
 }) {
   const { projectId } = useProjectContext();
   const [confirm, setConfirm] = useState(false);
@@ -87,15 +90,18 @@ export function WaitCard({
   const target = subscription.deliveryPreference.target?.sessionId;
   const managed = isManagedSubscription(subscription);
   // Agent owner names are raw session ids, so a chat title (or a plain role) reads better.
-  const who = target
-    ? lookups.chatTitle(target)
-    : subscription.owner.type === 'standing_watch'
-      ? 'A watch'
-      : subscription.owner.type === 'human'
-        ? 'Someone'
-        : managed
-          ? 'SAM'
-          : 'An agent';
+  const here = Boolean(target && target === hereSessionId);
+  const who = here
+    ? 'This chat'
+    : target
+      ? lookups.chatTitle(target)
+      : subscription.owner.type === 'standing_watch'
+        ? 'A watch'
+        : subscription.owner.type === 'human'
+          ? 'Someone'
+          : managed
+            ? 'SAM'
+            : 'An agent';
   const what = describeEventFilter(subscription.filter).noun;
   const relay = isSamRelay(subscription);
   const active = subscription.state === 'active';
@@ -111,7 +117,13 @@ export function WaitCard({
           </p>
           <span className="text-[13px] text-fg-muted">
             {active
-              ? `Since ${relative(subscription.createdAt)}${subscription.expiresAt ? ` · gives up ${relative(subscription.expiresAt)}` : ''}`
+              ? `Since ${relative(subscription.createdAt)}${
+                  subscription.expiresAt
+                    ? subscription.expiresAt > Date.now()
+                      ? ` · gives up ${relative(subscription.expiresAt)}`
+                      : ' · past its end time'
+                    : ''
+                }`
               : `${subscription.state === 'expired' ? 'Expired' : 'Stopped'} ${relative(subscription.cancelledAt ?? subscription.updatedAt)}${subscription.cancelReason ? `: ${subscription.cancelReason}` : ''}`}
             {subscription.lastMatchedAt
               ? ` · last matched ${relative(subscription.lastMatchedAt)}`
@@ -155,7 +167,7 @@ export function WaitCard({
         {detailsOpened && <DeliveryOutcomes subscriptionId={subscription.id} />}
       </Disclosure>
       <div className="flex flex-wrap gap-3">
-        {target && (
+        {target && !here && (
           <ButtonLink
             to={`/projects/${encodeURIComponent(projectId)}/chat/${encodeURIComponent(target)}`}
           >
@@ -211,11 +223,13 @@ export function WaitList({
   lookups,
   canWrite,
   emptyText,
+  hereSessionId,
 }: {
   subscriptions: ProjectEventSubscriptionRecord[];
   lookups: AutomationLookups;
   canWrite: boolean;
   emptyText: string;
+  hereSessionId?: string;
 }) {
   const [showRelays, setShowRelays] = useState(false);
   const relays = subscriptions.filter(isSamRelay);
@@ -235,6 +249,7 @@ export function WaitList({
             subscription={subscription}
             lookups={lookups}
             canWrite={canWrite}
+            hereSessionId={hereSessionId}
           />
         ))
       )}

@@ -13,10 +13,10 @@ const BASE = `/projects/${PROJECT_ID}/automation`;
 
 function onlyOn(names: string[]) {
   return ({ page: _page }: { page: Page }, testInfo: TestInfo) => {
-    test.skip(!names.includes(testInfo.project.name), 'audited on iPhone SE and desktop');
+    test.skip(!names.includes(testInfo.project.name), 'audited on phones and desktop');
   };
 }
-test.beforeEach(onlyOn(['iPhone SE (375x667)', 'Desktop (1280x800)']));
+test.beforeEach(onlyOn(['iPhone SE (375x667)', 'iPhone 14 (390x844)', 'Desktop (1280x800)']));
 
 /** Interactive elements inside the page content that are shorter than 44 px. */
 async function smallTargets(page: Page): Promise<string[]> {

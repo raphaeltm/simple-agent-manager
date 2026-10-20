@@ -74,6 +74,7 @@ export function ChatAutomation({ sessionId }: { sessionId: string }) {
             subscriptions={waits.data.subscriptions}
             lookups={lookups}
             canWrite={access.canWrite}
+            hereSessionId={sessionId}
             emptyText="This chat is not waiting for anything."
           />
         )}

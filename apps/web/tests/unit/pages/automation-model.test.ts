@@ -404,3 +404,24 @@ describe('activity', () => {
     expect(scheduleEntry(schedule({ state: 'cancelled' }))).toBeNull();
   });
 });
+
+describe('event wording fallbacks', () => {
+  it('names an event type nobody wrote words for, instead of saying "matching activity"', () => {
+    expect(
+      describeEventFilter({ version: 1, source: 'github', eventType: 'repository.renamed' }).noun
+    ).toBe('a GitHub “repository renamed” event');
+    expect(describeEventFilter({ version: 1, eventType: 'custom.thing_done' }).clause).toBe(
+      'a “custom thing done” event arrives'
+    );
+    expect(
+      describeEventFilter({
+        version: 1,
+        source: 'github',
+        eventType: 'pull_request.review_requested',
+      }).clause
+    ).toBe('someone requests a PR review');
+    expect(describeEventFilter({ version: 1, source: 'github' }).noun).toBe(
+      'matching GitHub activity'
+    );
+  });
+});

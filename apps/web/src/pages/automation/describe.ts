@@ -82,6 +82,10 @@ const EVENT_PHRASES: Record<string, EventPhrase> = {
   'pull_request.opened': { noun: 'a new pull request', clause: 'a pull request is opened' },
   'pull_request.closed': { noun: 'a pull request closing', clause: 'a pull request is closed' },
   'pull_request.synchronize': { noun: 'new commits on a PR', clause: 'a PR gets new commits' },
+  'pull_request.review_requested': {
+    noun: 'a review request',
+    clause: 'someone requests a PR review',
+  },
   'pull_request_review.submitted': { noun: 'a PR review', clause: 'a PR review is submitted' },
   'pull_request_review_comment.created': {
     noun: 'a review comment',
@@ -145,6 +149,21 @@ export function describeEventFilter(filter: ProjectEventFilterV1): EventPhrase {
       : source === LIFECYCLE_SOURCE
         ? 'SAM activity'
         : 'an event';
+  // One event type nobody wrote words for yet: name it rather than say "matching activity".
+  const single = eventTypes.length === 1 ? eventTypes[0] : undefined;
+  if (single) {
+    const words = single.replaceAll('.', ' ').replaceAll('_', ' ');
+    const where =
+      source === 'github'
+        ? 'GitHub '
+        : source === LIFECYCLE_SOURCE
+          ? 'SAM '
+          : source
+            ? `${source} `
+            : '';
+    const event = `a ${where}“${words}” event`;
+    return { noun: `${event}${suffix}`, clause: `${event} arrives${suffix}` };
+  }
   if (suffix) return { noun: `${family}${suffix}`, clause: `there is ${family}${suffix}` };
   return {
     noun: `matching ${family === 'an event' ? 'events' : family}`,

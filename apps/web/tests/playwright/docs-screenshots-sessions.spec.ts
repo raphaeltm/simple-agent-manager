@@ -149,6 +149,61 @@ function conversation() {
 const RESOURCES = buildResourceScenario('overnight', SESSION_ID, NOW);
 
 // ---------------------------------------------------------------------------
+/** Two recurring and reacting automations for the Automation page capture. */
+const AUTOMATION_TRIGGERS = [
+  {
+    id: 'trg-docs-summary',
+    projectId: PROJECT_ID,
+    userId: 'user-docs-1',
+    name: 'Morning pull request summary',
+    description: null,
+    status: 'active',
+    sourceType: 'cron',
+    cronExpression: '0 9 * * 1,2,3,4,5',
+    cronHumanReadable: 'Every weekday at 9:00 AM UTC',
+    cronTimezone: 'UTC',
+    skipIfRunning: true,
+    promptTemplate: 'Summarize the open pull requests and what each one needs.',
+    agentProfileId: null,
+    skillId: null,
+    taskMode: 'task',
+    vmSizeOverride: null,
+    maxConcurrent: 1,
+    lastTriggeredAt: new Date(NOW - 3 * 3_600_000).toISOString(),
+    triggerCount: 18,
+    nextFireAt: new Date(NOW + 20 * 3_600_000).toISOString(),
+    createdAt: new Date(NOW - 30 * 86_400_000).toISOString(),
+    updatedAt: new Date(NOW - 86_400_000).toISOString(),
+  },
+  {
+    id: 'trg-docs-sam',
+    projectId: PROJECT_ID,
+    userId: 'user-docs-1',
+    name: 'Answer /sam comments',
+    description: null,
+    status: 'active',
+    sourceType: 'github',
+    cronExpression: null,
+    cronTimezone: 'UTC',
+    skipIfRunning: true,
+    promptTemplate: '{{github.actor}} asked: {{github.comment}}',
+    agentProfileId: null,
+    skillId: null,
+    taskMode: 'task',
+    vmSizeOverride: null,
+    maxConcurrent: 1,
+    lastTriggeredAt: new Date(NOW - 50 * 60_000).toISOString(),
+    triggerCount: 7,
+    nextFireAt: null,
+    createdAt: new Date(NOW - 20 * 86_400_000).toISOString(),
+    updatedAt: new Date(NOW - 86_400_000).toISOString(),
+    githubConfig: {
+      eventType: 'issue_comment',
+      filters: { actions: ['created'], commandPrefix: '/sam' },
+    },
+  },
+];
+
 // Events: subscriptions, schedules, and a standing watch.
 // ---------------------------------------------------------------------------
 
@@ -380,6 +435,11 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       return json({ sessions: [MOCK_SESSION], total: 1 });
     }
 
+    if (pathname === `/api/projects/${PROJECT_ID}/triggers`)
+      return json({ triggers: AUTOMATION_TRIGGERS });
+    if (/\/triggers\/[^/]+\/executions$/.test(pathname))
+      return json({ executions: [], nextCursor: null });
+    if (pathname === `/api/projects/${PROJECT_ID}/skills`) return json({ items: [] });
     if (pathname.endsWith('/event-subscriptions')) return json(EVENT_SUBSCRIPTIONS);
     if (pathname.endsWith('/schedules')) return json(EVENT_SCHEDULES);
     if (pathname.endsWith('/standing-watches')) return json(EVENT_WATCHES);
@@ -464,7 +524,7 @@ test('docs: session tool rail with labels', async ({ page }) => {
   const rail = page.getByTestId('session-tool-rail');
   // Assert through the rendered rail, not the fixture: if an action stops being built
   // the capture fails instead of shipping an image that no longer matches the docs table.
-  for (const id of ['timeline', 'resources', 'events', 'comments', 'report', 'details']) {
+  for (const id of ['timeline', 'resources', 'automation', 'comments', 'report', 'details']) {
     await expect(page.getByTestId(`session-tool-${id}`)).toBeVisible();
   }
   await docsShot(page, 'session-tool-rail', rail);
@@ -503,41 +563,43 @@ test('docs: session resources drawer on mobile', async ({ page }) => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. The Events drawer
+// 3. The chat's Automation panel
 // ---------------------------------------------------------------------------
 
-test('docs: session events drawer', async ({ page }) => {
+test('docs: session automation panel', async ({ page }) => {
   test.skip(isMobile(page), 'desktop capture');
+  // The fixtures are pinned to NOW; pin the page clock too so "since 1 h ago" stays true.
+  await page.clock.setFixedTime(NOW);
   await openChat(page);
-  await page.getByTestId('session-tool-events').click();
+  await page.getByTestId('session-tool-automation').click();
 
-  const drawer = page.getByRole('dialog', { name: 'Session events' });
-  await expect(drawer).toBeVisible();
-  await expect(drawer.getByRole('tab', { name: 'Subscriptions' })).toBeVisible();
-  await expect(drawer.getByRole('link', { name: 'View full page' })).toBeVisible();
+  const panel = page.getByRole('dialog', { name: 'Automation for this chat' });
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole('link', { name: /Remind this chat later/ })).toBeVisible();
+  await expect(panel.getByRole('heading', { name: 'Waiting for' })).toBeVisible();
 
   await opaqueBackdrop(page);
-  await docsShot(page, 'session-events-drawer', drawer);
+  await docsShot(page, 'session-automation-panel', panel);
 });
 
 // ---------------------------------------------------------------------------
-// 4. The project Events page
+// 4. The project Automation page
 // ---------------------------------------------------------------------------
 
-test('docs: project events page', async ({ page }) => {
+test('docs: project automation page', async ({ page }) => {
   test.skip(isMobile(page), 'desktop capture');
+  await page.clock.setFixedTime(NOW);
   await seedTheme(page, 'dark');
   await setupMocks(page);
-  await page.goto(`/projects/${PROJECT_ID}/events`);
+  await page.goto(`/projects/${PROJECT_ID}/automation`);
 
-  await expect(page.getByRole('heading', { name: 'Events', level: 1 })).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Automation', level: 1 })).toBeVisible({
     timeout: 20000,
   });
-  for (const label of ['Subscriptions', 'Schedules', 'Standing watches', 'Channels']) {
-    await expect(page.getByRole('button', { name: new RegExp(`^${label}`) })).toBeVisible();
-  }
+  await expect(page.getByRole('heading', { name: 'Your automations' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Coming up' })).toBeVisible();
 
-  await docsShot(page, 'project-events-page', page.getByRole('main').first());
+  await docsShot(page, 'automation-page', page.getByTestId('automation-root'));
 });
 
 // ---------------------------------------------------------------------------
