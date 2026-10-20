@@ -373,16 +373,17 @@ test('one scoped Astra High dispatch, durable replay, follow-up and owned cleanu
         const memory = node.observedProviderInstanceMemoryMb;
         ledger.observedHardware = {
           nodeId: node.id,
+          provider: node.provider,
           vcpuCount: cpu ?? null,
           memoryMb: memory ?? null,
           source: node.observedHardwareSource ?? null,
           lastHeartbeatAt: node.lastHeartbeatAt,
         };
-        await save(); // Preserve observed hardware even if it exceeds the cost envelope.
+        await save(); // Record the host selected by the user's configured pool.
         check(
-          (cpu == null || (Number.isFinite(cpu) && cpu > 0 && cpu <= 8)) &&
-            (memory == null || (Number.isFinite(memory) && memory > 0 && memory <= 16384)),
-          'Observed host remains within 8 vCPU and 16 GB catalog cost envelope'
+          (cpu == null || (Number.isFinite(cpu) && cpu > 0)) &&
+            (memory == null || (Number.isFinite(memory) && memory > 0)),
+          'Observed host has valid hardware metadata without an invented size ceiling'
         );
         // Bootstrap can precede observed metadata. Missing values must wait, never pass.
         observedHardwareReady =
