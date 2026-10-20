@@ -33,6 +33,7 @@ export type DispatchPhase =
   | 'setup'
   | 'dispatch'
   | 'initial-answer'
+  | 'runtime-ready'
   | 'runtime-evidence'
   | 'followup'
   | 'followup-answer'

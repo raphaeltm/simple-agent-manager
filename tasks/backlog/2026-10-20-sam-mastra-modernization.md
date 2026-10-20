@@ -23,7 +23,7 @@ Implement canonical idea 01KQ720TE8Y8ZGVTZPBM8Y4NH0 with Mastra, default-OFF use
 - [x] Shared operations adapter with durable receipts, explicit destructive-action confirmation, stable dispatch identity and uncertain-effect reconciliation.
 - [x] Authorized event subscription/inbox integration for own dispatched work, dedup/replay and noninterrupting presentation.
 - [x] Live mobile/desktop chat, task/result/attention cards, source links and settings opt-in; retain voice input.
-- [ ] Unit/integration/security/Worker regression tests for enable/refresh/disable, stale tabs/in-flight, isolation, duplicate dispatch, interrupted/repeated flows, cancellation and reconnect.
+- [x] Unit/integration/security/Worker regression tests for enable/refresh/disable, stale tabs/in-flight, isolation, duplicate dispatch, interrupted/repeated flows, cancellation and reconnect.
 - [x] Documentation/capability matrix and rollback; visual audit mobile/desktop.
 - [ ] Draft PR, independent Astra High specialist/security/completion review; final-head lint/typecheck/test/build/CI.
 - [ ] Coordinate staging ownership, dedicated test identities, full live staging E2E and cleanup.
