@@ -140,6 +140,8 @@ with the `list_message_comment_threads` MCP tool). Each thread shows who wrote i
 **Open**, **Sent to agent**, or **Resolved**, and anyone can **Reply** to it, **Resolve** it, or
 **Reopen** it. **Comments** in the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail)
 opens all of a chat's threads, with resolved ones collapsed; its badge counts the unresolved ones.
+On a narrow screen, such as a phone, it opens as a list instead, filtered to **Needs you** when
+something is waiting for you.
 
 To see the threads across the whole project, open **Comments** in the project's navigation. It sorts
 them into **Needs you** (open threads where someone else had the last word), **With agent**,
@@ -260,9 +262,10 @@ A teammate with shared access can't open the chat's terminal, file browser, Git 
 previews, or attach files: those reach the workspace directly rather than through the chat. They can
 use **Fork** and **Retry** in the tool rail, which start a chat of their own, on their own accounts.
 
-Notifications about the chat itself, such as the agent asking a question or finishing its work,
-still go to the owner. A teammate driving the chat should keep it open, where the agent's questions
-appear as cards they can answer.
+Notifications about the chat itself still go to the owner: the agent finishing its work, and
+questions it asks with its `request_human_input` tool. The cards the agent puts in the chat
+(permission requests, questions, and links) notify no one, and a teammate with shared access can
+answer them, so a teammate driving the chat should keep it open.
 
 ### If it isn't your chat
 

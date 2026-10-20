@@ -75,8 +75,8 @@ failing come in the first release after v2026.10.19.
   release misbehaves, update to a newer one.
   → [Update forward, not back](/docs/guides/self-hosting/#option-a-update-self-hosted-instance-workflow-recommended)
 - **Admin → Settings** (from v2026.10.17) lets superadmins change sign-in providers, Connector
-  limits, trials, and background jobs without redeploying, and collaboration limits from the next
-  release. A value saved
+  limits, trials, and background jobs without redeploying, and collaboration limits from the first
+  release after v2026.10.19. A value saved
   there wins over its GitHub Environment variable, so once someone saves, for example, the Connector
   switch, `CONNECTOR_ENABLED` no longer applies, and the `trials:enabled` KV switch only counts while
   no trials value is saved. → [Admin Settings](/docs/guides/admin-settings/)

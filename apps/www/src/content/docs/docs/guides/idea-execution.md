@@ -74,10 +74,10 @@ How a session ends depends on whether it's a **Task** or a **Chat** (the session
 one; see [Chat or Task](/docs/guides/chat-features/#chat-or-task)):
 
 - **A Task** ends when its agent reports the work complete (SAM tells a Task's agent to push its
-  branch first) or when you select **Complete** in the session tool rail. You get a **Task
-  completed** notification, which links the pull request if the agent reported one, and an idea
-  shows **Done**. The session then goes to sleep: its workspace is saved for seven days, and a
-  follow-up message wakes it.
+  branch first) or when you select **Complete** in the session tool rail. When the agent reports
+  it, you get a **Task completed** notification, which links the pull request if the agent reported
+  one; completing it yourself sends no notification. An idea then shows **Done**, and the session
+  goes to sleep: its workspace is saved for seven days, and a follow-up message wakes it.
 - **A Chat** stays open for more messages until you put it to **Sleep** or **Archive** it.
 
 SAM itself never commits, pushes, or opens a pull request for either one; see

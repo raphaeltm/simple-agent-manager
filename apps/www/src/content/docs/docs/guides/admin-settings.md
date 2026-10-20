@@ -92,7 +92,7 @@ to a value SAM can't use is ignored, and the code default applies.
 
 One exception: the emergency KV switches for cron sweeps and Durable Object alarms still stop that
 work when set to `false` or `disabled`, even over a saved **Enabled**. The card then shows
-**Disabled** and **Source: kv**, up to 30 seconds later.
+**Disabled** and **Source: kv** once Cloudflare KV serves the new value, usually within a minute.
 
 ## The settings
 

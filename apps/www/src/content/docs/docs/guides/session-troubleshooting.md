@@ -157,8 +157,9 @@ To move on:
    one from this chat (see [Conversation forking](/docs/guides/chat-features/#conversation-forking)).
    The new chat starts from your default branch, so tell its agent which pushed branch to build on.
 3. End the blocked task with **Complete** in the session tool rail, which keeps its saved workspace
-   for the usual seven days. **Archive** deletes the saved workspace, and with it anything the agent
-   didn't push.
+   for the usual seven days. If its agent never started, or you've replied in the chat since, SAM
+   refuses **Complete**: use **Archive**, which deletes the saved workspace and with it anything the
+   agent didn't push.
 
 ## SAM paused automatic check-ins
 

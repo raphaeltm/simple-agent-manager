@@ -262,10 +262,10 @@ After an agent update, an older machine can still count toward the limit while b
 accept new work. When that blocks queued work on a managed machine provisioned by a SAM task,
 SAM requests sleep for its persistent sessions.
 Working sessions keep running; idle sessions sleep through the normal bounded snapshot process.
-Existing sleep retries and blocked sessions keep their current state. Once the machine empties,
+Sessions already retrying sleep carry on with it. Once the machine empties,
 normal retention and cleanup free its slot so queued work can use a current machine. SAM does
 not raise the pool limit or rent an extra replacement while the old machine still holds the slot.
-If a session cannot safely sleep, it stays awake and the capacity wait can still expire.
+A session that is still working stays awake, so the capacity wait can still expire.
 
 Cancelling queued work revokes its admission authority. A later free slot cannot restart that
 task or provision a machine for it. If cancellation races a new allocation, SAM retires only
