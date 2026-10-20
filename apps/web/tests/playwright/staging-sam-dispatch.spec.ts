@@ -79,6 +79,8 @@ test('one scoped Astra High dispatch, durable replay, follow-up and owned cleanu
     'Explicit live journey authorization required'
   );
   test.skip(testInfo.project.name !== 'Desktop (1280x800)', 'One serialized account execution');
+  page.setDefaultTimeout(REQUEST_MS);
+  page.setDefaultNavigationTimeout(2 * REQUEST_MS);
   const runId = process.env.SAM_DISPATCH_RUN_ID ?? '';
   expect(/^[a-f0-9-]{36}$/i.test(runId), 'Supply a new UUID, preserved for recovery').toBe(true);
   const token = process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
