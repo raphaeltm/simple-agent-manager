@@ -7,7 +7,13 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
-import { seedInstallation, seedProject, seedTask, seedUser, seedWorkspace } from './helpers/seed-d1';
+import {
+  seedInstallation,
+  seedProject,
+  seedTask,
+  seedUser,
+  seedWorkspace,
+} from './helpers/seed-d1';
 import {
   captureProjectDataExpectedError,
   type ProjectDataTestDouble,
@@ -205,7 +211,8 @@ describe('ProjectData Durable Object', () => {
 
       const stub = getStub(projectId);
       await stub.ensureProjectId(projectId);
-      const sessionId = await stub.createSession(workspaceId, 'Deleted Instant wake');
+      // Created by the person who then sends the prompt, as every session-creating route does.
+      const sessionId = await stub.createSession(workspaceId, 'Deleted Instant wake', null, userId);
       expect(await stub.sleepSession(sessionId)).toBe(true);
       await env.DATABASE.prepare(
         `INSERT INTO session_snapshots
@@ -1000,13 +1007,29 @@ describe('ProjectData Durable Object', () => {
       const retryId = crypto.randomUUID();
       const diagnosticId = crypto.randomUUID();
       await stub.persistMessageBatch(sessionId, [
-        { messageId: promptId, role: 'user', content: 'start sign-in', toolMetadata: null, timestamp },
-        { messageId: retryId, role: 'user', content: 'try another method', toolMetadata: null, timestamp },
+        {
+          messageId: promptId,
+          role: 'user',
+          content: 'start sign-in',
+          toolMetadata: null,
+          timestamp,
+        },
+        {
+          messageId: retryId,
+          role: 'user',
+          content: 'try another method',
+          toolMetadata: null,
+          timestamp,
+        },
       ]);
       await stub.persistMessageBatch(sessionId, [
-        { messageId: diagnosticId, role: 'system',
+        {
+          messageId: diagnosticId,
+          role: 'system',
           content: 'This sign-in flow requires a local callback that this session cannot complete.',
-          toolMetadata: JSON.stringify({ promptMessageId: promptId }), timestamp },
+          toolMetadata: JSON.stringify({ promptMessageId: promptId }),
+          timestamp,
+        },
       ]);
       const { messages } = await stub.getMessages(sessionId);
       expect(messages.map((message) => message.id)).toEqual([promptId, retryId, diagnosticId]);

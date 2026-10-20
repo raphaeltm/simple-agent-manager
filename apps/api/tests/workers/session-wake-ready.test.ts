@@ -57,7 +57,8 @@ async function fixture(runtime: 'vm' | 'cf-container') {
     env.PROJECT_DATA.idFromName(projectId)
   ) as DurableObjectStub<ProjectData>;
   await stub.ensureProjectId(projectId);
-  const chatSessionId = await stub.createSession(workspaceId, 'Wake ready');
+  // The prompts below come from the person who created the chat, as sendChat's always do.
+  const chatSessionId = await stub.createSession(workspaceId, 'Wake ready', taskId, userId);
   await seedWorkspace(workspaceId, nodeId, userId, { projectId, chatSessionId });
   await seedAgentSession(agentSessionId, workspaceId, userId);
   await seedTask(taskId, projectId, userId, { status: 'in_progress', chatSessionId, workspaceId });
@@ -108,6 +109,7 @@ async function fixture(runtime: 'vm' | 'cf-container') {
         targetSessionId: chatSessionId,
         displayContent: 'First real prompt',
         senderType: 'human',
+        senderId: userId,
         sourceKind: 'user_followup',
         ttlMs: config.ttlMs,
       }
@@ -120,6 +122,7 @@ async function fixture(runtime: 'vm' | 'cf-container') {
         targetSessionId: chatSessionId,
         displayContent: 'Second real prompt',
         senderType: 'human',
+        senderId: userId,
         sourceKind: 'user_followup',
         ttlMs: config.ttlMs,
       }
