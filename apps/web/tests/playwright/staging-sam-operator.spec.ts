@@ -7,10 +7,11 @@
  * most two read-only model turns; never dispatches project work. Both accounts
  * must start opted out, and both are opted out again in cleanup.
  */
-import { expect, type Page, test } from '@playwright/test';
+import { expect as baseExpect, type Page, test } from '@playwright/test';
 
 import { dismissStagingOnboarding, STAGING_API, STAGING_APP, stagingShot } from './staging-helpers';
 
+const expect = baseExpect.configure({ timeout: 20_000 });
 const SAM_API = `${STAGING_API}/api/sam`;
 const MODEL_TIMEOUT_MS = 150_000;
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -40,6 +41,16 @@ async function login(page: Page, token: string): Promise<void> {
   });
   // Never include the auth response body or request data in assertion messages.
   expect(response.status(), 'Dedicated staging account token-login succeeds').toBe(200);
+}
+
+async function openSam(page: Page): Promise<void> {
+  const settings = page.waitForResponse(
+    (response) => response.url() === `${SAM_API}/settings` && response.request().method() === 'GET',
+    { timeout: 30_000 }
+  );
+  await page.goto(`${STAGING_APP}/sam`);
+  expect((await settings).status(), 'Browser settings request succeeds').toBe(200);
+  await dismissStagingOnboarding(page);
 }
 
 async function history(page: Page): Promise<History> {
@@ -122,8 +133,7 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
         expect(await response.json()).toEqual({ enabled: false, available: true });
         await expectDisabledApi(account, `disabled-${runId}`);
       }
-      await page.goto(`${STAGING_APP}/sam`);
-      await dismissStagingOnboarding(page);
+      await openSam(page);
       await expect(page.getByRole('link', { name: 'Open Settings', exact: true })).toBeVisible();
       await expect(page.getByLabel('Message SAM', { exact: true })).toHaveCount(0);
       await expect(page.getByRole('link', { name: 'SAM', exact: true })).toHaveCount(0);
@@ -223,8 +233,7 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
       // Legacy history returns an empty page for an unknown ID in this user's DO.
       expect(foreignHistory.status()).toBe(200);
       expect(await foreignHistory.json()).toEqual({ messages: [], nextCursor: null });
-      await secondary.goto(`${STAGING_APP}/sam`);
-      await dismissStagingOnboarding(secondary);
+      await openSam(secondary);
       await expect(secondary.getByLabel('Message SAM', { exact: true })).toBeVisible();
       await expect(secondary.getByText(message, { exact: true })).toHaveCount(0);
       await stagingShot(secondary, 'sam-secondary-isolation');
