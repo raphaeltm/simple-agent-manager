@@ -12,6 +12,7 @@ import {
 import { fetchNodeAgent } from '../../services/node-agent';
 import { normalizeFileProxyPath } from './_helpers';
 import {
+  confineForSharedReader,
   createSizeLimitedStream,
   DEFAULT_FILE_DOWNLOAD_MAX_BYTES,
   DEFAULT_FILE_DOWNLOAD_TIMEOUT_MS,
@@ -21,8 +22,15 @@ import {
   DEFAULT_FILE_UPLOAD_TIMEOUT_MS,
   FORWARDED_RESPONSE_HEADERS,
   proxyToVmAgent,
+  requireConfinedResponse,
   resolveSessionWorkspace,
 } from './session-workspace-proxy';
+
+/**
+ * Read routes also serve a teammate the chat is shared with, confined by the VM agent to the
+ * repository working tree (idea 01M59MYE4GY91BWTE8TZF1ZB5D). Upload stays owner-only.
+ */
+const SHARED_READ = { allowSharedReader: true } as const;
 
 const fileProxyRoutes = new Hono<{ Bindings: Env }>();
 
@@ -41,22 +49,11 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/find', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
-    c.env,
-    projectId,
-    sessionId,
-    userId
-  );
+  const target = await resolveSessionWorkspace(c.env, projectId, sessionId, userId, SHARED_READ);
+  const params = new URLSearchParams();
+  confineForSharedReader(target, 'files/find', params);
 
-  return proxyToVmAgent(
-    c.env,
-    nodeId,
-    workspaceUrl,
-    workspaceId,
-    token,
-    'files/find',
-    new URLSearchParams()
-  );
+  return proxyToVmAgent(c.env, target, 'files/find', params);
 });
 
 /** GET /:id/sessions/:sessionId/files/list — Proxy directory listing */
@@ -65,18 +62,15 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/list', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
-    c.env,
-    projectId,
-    sessionId,
-    userId
-  );
+  const target = await resolveSessionWorkspace(c.env, projectId, sessionId, userId, SHARED_READ);
 
   const params = new URLSearchParams();
   const rawPath = c.req.query('path');
-  if (rawPath) params.set('path', normalizeFileProxyPath(rawPath));
+  const path = rawPath ? normalizeFileProxyPath(rawPath) : undefined;
+  if (path) params.set('path', path);
+  confineForSharedReader(target, 'files/list', params, path);
 
-  return proxyToVmAgent(c.env, nodeId, workspaceUrl, workspaceId, token, 'files/list', params);
+  return proxyToVmAgent(c.env, target, 'files/list', params);
 });
 
 /** GET /:id/sessions/:sessionId/files/view — Proxy file content (via git/file on VM agent) */
@@ -85,18 +79,14 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/view', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
-    c.env,
-    projectId,
-    sessionId,
-    userId
-  );
+  const target = await resolveSessionWorkspace(c.env, projectId, sessionId, userId, SHARED_READ);
 
   const params = new URLSearchParams();
   const path = requireSafePath(c.req.query('path'));
   params.set('path', path);
+  confineForSharedReader(target, 'git/file', params, path);
 
-  return proxyToVmAgent(c.env, nodeId, workspaceUrl, workspaceId, token, 'git/file', params);
+  return proxyToVmAgent(c.env, target, 'git/file', params);
 });
 
 /** GET /:id/sessions/:sessionId/git/status — Proxy git status */
@@ -105,22 +95,11 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/status', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
-    c.env,
-    projectId,
-    sessionId,
-    userId
-  );
+  const target = await resolveSessionWorkspace(c.env, projectId, sessionId, userId, SHARED_READ);
+  const params = new URLSearchParams();
+  confineForSharedReader(target, 'git/status', params);
 
-  return proxyToVmAgent(
-    c.env,
-    nodeId,
-    workspaceUrl,
-    workspaceId,
-    token,
-    'git/status',
-    new URLSearchParams()
-  );
+  return proxyToVmAgent(c.env, target, 'git/status', params);
 });
 
 /** GET /:id/sessions/:sessionId/git/diff — Proxy git diff for a file */
@@ -129,20 +108,17 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/diff', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
-    c.env,
-    projectId,
-    sessionId,
-    userId
-  );
+  const target = await resolveSessionWorkspace(c.env, projectId, sessionId, userId, SHARED_READ);
 
   const params = new URLSearchParams();
   const rawPath = c.req.query('path');
-  if (rawPath) params.set('path', normalizeFileProxyPath(rawPath));
+  const path = rawPath ? normalizeFileProxyPath(rawPath) : undefined;
+  if (path) params.set('path', path);
   const staged = c.req.query('staged');
   if (staged === 'true' || staged === '1') params.set('staged', staged);
+  confineForSharedReader(target, 'git/diff', params, path);
 
-  return proxyToVmAgent(c.env, nodeId, workspaceUrl, workspaceId, token, 'git/diff', params);
+  return proxyToVmAgent(c.env, target, 'git/diff', params);
 });
 
 /** GET /:id/sessions/:sessionId/files/raw — Proxy raw binary file content */
@@ -151,16 +127,13 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
-    c.env,
-    projectId,
-    sessionId,
-    userId
-  );
+  const target = await resolveSessionWorkspace(c.env, projectId, sessionId, userId, SHARED_READ);
+  const { workspaceUrl, workspaceId, nodeId, token } = target;
 
   const params = new URLSearchParams();
   const path = requireSafePath(c.req.query('path'));
   params.set('path', path);
+  confineForSharedReader(target, 'files/raw', params, path);
 
   const timeoutMs = parseInt(c.env.FILE_PROXY_TIMEOUT_MS ?? String(DEFAULT_FILE_PROXY_TIMEOUT_MS));
   const maxBytes = parseInt(
@@ -197,6 +170,8 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
             : 'VM agent request failed'
     );
   }
+
+  await requireConfinedResponse(target, res, 'files/raw');
 
   // For 304, just forward the status
   if (res.status === 304) {
@@ -242,6 +217,7 @@ fileProxyRoutes.post('/:id/sessions/:sessionId/files/upload', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
+  // Writing into the workspace stays with its owner: no teammate path here.
   const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
     c.env,
     projectId,
@@ -305,12 +281,8 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/download', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
-    c.env,
-    projectId,
-    sessionId,
-    userId
-  );
+  const target = await resolveSessionWorkspace(c.env, projectId, sessionId, userId, SHARED_READ);
+  const { workspaceUrl, workspaceId, nodeId, token } = target;
 
   const filePath = c.req.query('path');
   if (!filePath) throw errors.badRequest('path query parameter is required');
@@ -324,6 +296,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/download', async (c) => {
   );
 
   const params = new URLSearchParams({ path: safePath, token });
+  confineForSharedReader(target, 'files/download', params, safePath);
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/download?${params.toString()}`;
 
   const res = await fetchNodeAgent(nodeId, c.env, url, {}, timeoutMs);
@@ -341,6 +314,7 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/download', async (c) => {
     if (res.status >= 500) throw errors.internal('Workspace agent unavailable');
     throw errors.badRequest('Download failed');
   }
+  await requireConfinedResponse(target, res, 'files/download');
 
   // Guard against oversized responses
   const cl = parseInt(res.headers.get('Content-Length') ?? '0');

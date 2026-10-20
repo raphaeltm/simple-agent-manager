@@ -2,7 +2,7 @@
  * Session file proxy plumbing: resolve a chat session's workspace on the VM agent and proxy a
  * request to it. Split out of `files.ts` (`.claude/rules/18-file-size-limits.md`).
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -13,6 +13,7 @@ import { requireProjectAccess } from '../../middleware/project-auth';
 import { signTerminalToken } from '../../services/jwt';
 import { fetchNodeAgent } from '../../services/node-agent';
 import * as projectDataService from '../../services/project-data';
+import { requireSessionWriter } from '../../services/session-access';
 
 /** Default timeout for VM agent proxy requests (configurable via FILE_PROXY_TIMEOUT_MS). */
 export const DEFAULT_FILE_PROXY_TIMEOUT_MS = 15_000;
@@ -40,57 +41,86 @@ export const FORWARDED_RESPONSE_HEADERS = [
 ];
 
 /**
- * Resolve workspace from a chat session and build the VM agent URL + token.
- * Looks up the workspace by chatSessionId in D1 (workspaces table).
- * Returns { workspaceUrl, workspaceId, token } or throws if unavailable.
+ * A teammate reading a chat shared with them (idea 01M59MYE4GY91BWTE8TZF1ZB5D). Every read is
+ * confined to the repository working tree by the VM agent, and nothing is returned unless the
+ * agent confirms it (`requireConfinedResponse`).
+ */
+export interface SharedWorkspaceReader {
+  actorUserId: string;
+  ownerUserId: string;
+  grantId: string;
+}
+
+export interface SessionWorkspace {
+  workspaceUrl: string;
+  workspaceId: string;
+  nodeId: string;
+  /** For this request only; never returned to the browser. */
+  token: string;
+  /** Set when a teammate the chat is shared with is reading; null for the workspace owner. */
+  sharedReader: SharedWorkspaceReader | null;
+}
+
+/** The VM agent's answer that it confined a request to the working tree. */
+export const PATH_CONFINEMENT_HEADER = 'X-SAM-Path-Confinement';
+export const PATH_CONFINEMENT_WORKDIR = 'workdir';
+
+const WORKSPACE_COLUMNS = {
+  id: schema.workspaces.id,
+  status: schema.workspaces.status,
+  projectId: schema.workspaces.projectId,
+  nodeId: schema.workspaces.nodeId,
+  userId: schema.workspaces.userId,
+};
+
+/**
+ * Resolve a chat session's workspace on the VM agent and sign a token for this request.
+ *
+ * The workspace's owner reads it as before. With `allowSharedReader`, a teammate the chat is
+ * shared with reads the owner's workspace: `requireSessionWriter` re-checks their grant, and
+ * both people's membership, on every request, so expiry and revoke end access at the next one.
  */
 export async function resolveSessionWorkspace(
   env: Env,
   projectId: string,
   sessionId: string,
-  userId: string
-) {
+  userId: string,
+  options: { allowSharedReader?: boolean } = {}
+): Promise<SessionWorkspace> {
   const db = drizzle(env.DATABASE, { schema });
 
   // Verify project ownership
   await requireProjectAccess(db, projectId, userId);
 
-  // Strategy 1: Find workspace by chatSessionId in D1 (canonical path)
-  const workspaces = await db
-    .select({
-      id: schema.workspaces.id,
-      status: schema.workspaces.status,
-      projectId: schema.workspaces.projectId,
-      nodeId: schema.workspaces.nodeId,
-    })
+  // Strategy 1: Find workspace by chatSessionId in D1 (canonical path). The caller's own
+  // workspace sorts first; any other row is a teammate's candidate, checked below.
+  const linked = await db
+    .select(WORKSPACE_COLUMNS)
     .from(schema.workspaces)
     .where(
       and(
         eq(schema.workspaces.chatSessionId, sessionId),
-        eq(schema.workspaces.projectId, projectId),
-        eq(schema.workspaces.userId, userId)
+        eq(schema.workspaces.projectId, projectId)
       )
     )
+    .orderBy(sql`(${schema.workspaces.userId} = ${userId}) DESC`)
     .limit(1);
 
-  let workspace = workspaces[0];
+  let workspace = linked[0]?.userId === userId ? linked[0] : undefined;
   let lookupStrategy = workspace ? 'chatSessionId' : 'none';
+  let sharedReader: SharedWorkspaceReader | null = null;
 
   // Strategy 2: Fall back to the session's workspaceId from the ProjectData DO.
   // This handles the case where chatSessionId was not written to D1 (e.g., DO
-  // crash during workspace creation left the link incomplete).
-  if (!workspace) {
+  // crash during workspace creation left the link incomplete). A linked row of someone else's
+  // means the link was written, so there is nothing to fall back to.
+  if (!workspace && !linked[0]) {
     const session = await projectDataService.getSession(env, projectId, sessionId);
     const raw = session?.workspaceId;
     const sessionWorkspaceId = typeof raw === 'string' && raw.length > 0 ? raw : undefined;
     if (sessionWorkspaceId) {
       const fallbackWorkspaces = await db
-        .select({
-          id: schema.workspaces.id,
-          status: schema.workspaces.status,
-          projectId: schema.workspaces.projectId,
-          nodeId: schema.workspaces.nodeId,
-        })
+        .select(WORKSPACE_COLUMNS)
         .from(schema.workspaces)
         .where(
           and(
@@ -102,6 +132,26 @@ export async function resolveSessionWorkspace(
         .limit(1);
       workspace = fallbackWorkspaces[0];
       if (workspace) lookupStrategy = 'sessionWorkspaceId-fallback';
+    }
+  }
+
+  // Not the caller's workspace: a teammate the chat is shared with reads its owner's, found
+  // by the chat link alone. A teammate's read costs 7 round trips: project access, the link,
+  // the grant read and two membership checks, the node's runtime and the VM agent.
+  const candidate = linked[0];
+  if (!workspace && options.allowSharedReader && candidate) {
+    const writer = await requireSessionWriter(env, projectId, sessionId, userId, {
+      db,
+      action: 'read files in this session',
+    });
+    if (writer.role === 'grantee' && writer.grantId && writer.ownerUserId === candidate.userId) {
+      workspace = candidate;
+      lookupStrategy = 'shared-access';
+      sharedReader = {
+        actorUserId: userId,
+        ownerUserId: writer.ownerUserId,
+        grantId: writer.grantId,
+      };
     }
   }
 
@@ -120,6 +170,7 @@ export async function resolveSessionWorkspace(
     workspaceStatus: workspace.status,
     nodeId: workspace.nodeId,
     lookupStrategy,
+    ...(sharedReader ?? {}),
   });
 
   if (workspace.status !== 'running' && workspace.status !== 'recovery') {
@@ -136,9 +187,63 @@ export async function resolveSessionWorkspace(
   const protocol = env.VM_AGENT_PROTOCOL || 'https';
   const port = env.VM_AGENT_PORT || '8443';
   const workspaceUrl = `${protocol}://${workspace.nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`;
-  const { token } = await signTerminalToken(userId, workspace.id, env);
+  // The workspace's owner, also for a teammate: the token selects the owner's resource.
+  const { token } = await signTerminalToken(workspace.userId, workspace.id, env);
 
-  return { workspaceUrl, workspaceId: workspace.id, nodeId: workspace.nodeId, token };
+  return {
+    workspaceUrl,
+    workspaceId: workspace.id,
+    nodeId: workspace.nodeId,
+    token,
+    sharedReader,
+  };
+}
+
+/**
+ * Ask the VM agent to confine a teammate's request to the working tree, and record the read.
+ * The owner's requests are unchanged. A teammate's path must be relative; the agent enforces
+ * the rest.
+ */
+export function confineForSharedReader(
+  target: SessionWorkspace,
+  vmPath: string,
+  params: URLSearchParams,
+  path?: string
+): void {
+  if (!target.sharedReader) return;
+  if (path !== undefined && (path.startsWith('/') || path.startsWith('~'))) {
+    throw errors.notFound('File or resource');
+  }
+  params.set('confine', PATH_CONFINEMENT_WORKDIR);
+  log.info('file_proxy.shared_read', {
+    workspaceId: target.workspaceId,
+    vmPath,
+    path: path ?? null,
+    ...target.sharedReader,
+  });
+}
+
+/**
+ * A teammate gets nothing from an agent that did not confirm the confinement: an agent that
+ * predates it would have read the path as given.
+ */
+export async function requireConfinedResponse(
+  target: SessionWorkspace,
+  res: Response,
+  vmPath: string
+): Promise<void> {
+  if (!target.sharedReader) return;
+  if (res.headers.get(PATH_CONFINEMENT_HEADER) === PATH_CONFINEMENT_WORKDIR) return;
+  await res.body?.cancel();
+  log.warn('file_proxy.confinement_unsupported', {
+    workspaceId: target.workspaceId,
+    vmPath,
+    status: res.status,
+    ...target.sharedReader,
+  });
+  throw errors.conflict(
+    'This workspace runs an older agent that cannot limit files to the repository. Teammates can browse files after it restarts.'
+  );
 }
 
 /**
@@ -147,13 +252,11 @@ export async function resolveSessionWorkspace(
  */
 export async function proxyToVmAgent(
   env: Env,
-  nodeId: string,
-  workspaceUrl: string,
-  workspaceId: string,
-  token: string,
+  target: SessionWorkspace,
   vmPath: string,
   queryParams: URLSearchParams
 ): Promise<Response> {
+  const { nodeId, workspaceUrl, workspaceId, token } = target;
   const timeoutMs = parseInt(env.FILE_PROXY_TIMEOUT_MS ?? String(DEFAULT_FILE_PROXY_TIMEOUT_MS));
   const maxBytes = parseInt(
     env.FILE_PROXY_MAX_RESPONSE_BYTES ?? String(DEFAULT_FILE_PROXY_MAX_RESPONSE_BYTES)
@@ -198,6 +301,8 @@ export async function proxyToVmAgent(
     }
     throw errors.badRequest('VM agent returned an error');
   }
+
+  await requireConfinedResponse(target, res, vmPath);
 
   // Guard against oversized responses
   const contentLength = parseInt(res.headers.get('Content-Length') ?? '0');
