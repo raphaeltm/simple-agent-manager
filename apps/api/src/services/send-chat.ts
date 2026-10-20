@@ -83,12 +83,6 @@ export async function sendChat(
   // scheduled sleep), so a refused prompt changes nothing.
   const durableConfig = resolveDurableExecutionConfig(env);
   const attachments = body.attachments ?? [];
-  if (attachments.length > 0 && shared) {
-    // Attachments are stored under the uploader and delivered only when the uploader owns the
-    // target workspace (prompt-attachments.ts). Refuse up front instead of queueing a prompt
-    // whose files can never arrive.
-    throw errors.badRequest('Attachments are not supported in a shared session yet');
-  }
   if (shared && !durableConfig.deliveryEnabled) {
     // Durable delivery is what carries sender attribution and lets revocation cancel a queued
     // prompt; the live fallback has neither.
