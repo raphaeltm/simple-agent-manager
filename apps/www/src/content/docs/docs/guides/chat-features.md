@@ -214,9 +214,10 @@ the conversation you are in rather than opening something beside it.)
 ![The session tool rail in icons-and-labels mode, listing Files, Git, Timeline, Resources, Events and Comments, then Retry and Fork after a divider, with Report, Complete and Details pinned at the bottom.](/images/docs/session-tool-rail.png)
 
 **Files** and **Git** need a linked workspace and a live session, so they disappear once the
-session sleeps or stops. They are also only for the chat's owner: someone the chat is shared with
-doesn't see them. Everything else stays, which matters: inspecting resources, reading the
-timeline, or reporting a problem is usually something you want to do _after_ a session has ended.
+session sleeps or stops. Someone the chat is shared with sees them too while their access lasts,
+limited to the repository folder; other members don't. Everything else stays, which matters:
+inspecting resources, reading the timeline, or reporting a problem is usually something you want to
+do _after_ a session has ended.
 
 The rail is grouped by what each tool acts on: the workspace and its history at the top, the task
 behind the session in the middle, and cross-cutting actions pinned to the bottom so they stay
