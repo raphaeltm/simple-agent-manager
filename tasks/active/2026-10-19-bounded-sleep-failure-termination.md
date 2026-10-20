@@ -61,3 +61,9 @@ No PR or staging deployment yet. Shared-sessions task01M59TN50JX53TPVXV0VTAN5JV 
 - Preserved concurrency tests; added claim-time episode-budget recheck so a callback resetting a selected episode cannot trigger stale fallback teardown.
 - Legacy failed/no-deadline pre-episode rows carry forward actual recorded attempts; a nine-attempt row performs no new capture and reports nine failures honestly.
 - Focused lifecycle suites125/125 PASS; independent final lifecycle/security PASS. Full API suite rerunning after initial broad run exposed stale expectations (other20root tasks passed).
+
+### Staging findings and final correction (2026-10-20)
+
+Staging deployment39345094176 succeeded. Real completed VM fixture with missing Git HEAD reached three snapshot failures, then guarded scheduler fallback at00:46:22 with null recovery point, retained HOME backup/transcript, honest loss notice. Physical workspace deletion confirmed00:51:26; normal owner node deletion completed00:52:11 with strict provider proof. Other normal snapshots and intentional warm retention verified. Original production incident had already been removed through owner lifecycle at23:02:24 before this change; retained provider-proof event confirms it, no production reconciliation mutation needed.
+
+Instant fallback stopped compute but staging fresh continuation exposed cleanupTaskRun deleting its logical identity. Narrow correction preserves committed unexpired fallback identities with workspace/node/user/project/generation verification; malformed/unconfirmed/replaced records remain destructive. Real SQLite regression fails on old source, passes with correction; independent lifecycle/security review PASS. Final candidate staging redeploy and fresh Instant continuation validation remain pending; all paid test resources currently off. Chats/backups retained, two temporary test profiles await cleanup. No PR or production rollout yet.

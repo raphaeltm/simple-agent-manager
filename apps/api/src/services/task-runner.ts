@@ -28,6 +28,7 @@ import { log } from '../lib/logger';
 import { stopWorkspaceOnNode } from './node-agent';
 import { handOffEmptyWorkspaceNode } from './node-warm-handoff';
 import { stopNodeResources } from './nodes';
+import { sleptFallbackRecord } from './session-sleep-episode';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
 function getCleanupDelayMs(env: Env): number {
@@ -121,6 +122,14 @@ export async function cleanupTaskRun(
             status: schema.sessionSnapshots.status,
             degradation: schema.sessionSnapshots.degradation,
             expiresAt: schema.sessionSnapshots.expiresAt,
+            sleepStatus: schema.sessionSnapshots.sleepStatus,
+            sleepingAt: schema.sessionSnapshots.sleepingAt,
+            sleepFallbackJson: schema.sessionSnapshots.sleepFallbackJson,
+            snapshotGeneration: schema.sessionSnapshots.snapshotGeneration,
+            workspaceId: schema.sessionSnapshots.workspaceId,
+            nodeId: schema.sessionSnapshots.nodeId,
+            userId: schema.sessionSnapshots.userId,
+            projectId: schema.sessionSnapshots.projectId,
           })
           .from(schema.sessionSnapshots)
           .where(eq(schema.sessionSnapshots.chatSessionId, workspace.chatSessionId))
@@ -128,9 +137,19 @@ export async function cleanupTaskRun(
       : [];
     const preserveSleepingSnapshot =
       workspace.status === 'sleeping' &&
-      snapshot?.status === 'available' &&
-      snapshot.degradation === 'none' &&
-      Date.parse(snapshot.expiresAt) > Date.now();
+      snapshot &&
+      Date.parse(snapshot.expiresAt) > Date.now() &&
+      ((snapshot.status === 'available' && snapshot.degradation === 'none') ||
+        // A committed bounded fallback has already stopped paid compute. Keep
+        // its logical Instant identity so a message can start fresh from the
+        // transcript. A stopping/unconfirmed or replaced runtime is not proof.
+        (snapshot.sleepStatus === 'sleeping' &&
+          snapshot.sleepingAt !== null &&
+          snapshot.workspaceId === workspace.id &&
+          snapshot.nodeId === workspace.nodeId &&
+          snapshot.userId === workspace.userId &&
+          snapshot.projectId === workspace.projectId &&
+          Boolean(sleptFallbackRecord(snapshot))));
     if (preserveSleepingSnapshot) {
       log.info('task_run.cleanup.cf_container_sleep_preserved', {
         taskId,
