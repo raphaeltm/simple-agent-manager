@@ -246,9 +246,9 @@ Other details users would miss:
 - [x] SAM-internal relays (agent-dm) are hidden by default and reachable via a switch.
 - [x] No tap target under 44 px; no horizontal overflow at 375 px; mobile + desktop screenshots.
 - [x] No API/schema changes (so staging may be skipped per Raphaël).
-- [ ] CI green on the PR.
+- [x] CI green on the PR (#2389, 24 checks passed on 4cc02a2ee).
 - [x] Fable first-pass findings (F1–F32) addressed; docs and marketing updated.
-- [ ] Fable PR review (second pass) addressed.
+- [x] Fable PR review (second pass) addressed (4cc02a2ee; one LOW deferred to backlog).
 
 ## Implementation notes (2026-10-20)
 
