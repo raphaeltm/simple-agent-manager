@@ -19,7 +19,7 @@ Comments do not become prompts by themselves. The agent can inspect them when ap
 
 ## Sharing is a temporary hand on the controls
 
-Sometimes a teammate needs to do more than leave a note. The chat owner can share one running or sleeping chat for 5, 10, 30, or 60 minutes. A teammate with access can send messages, answer the agent's questions, and use the chat's controls. The owner chooses a duration each time; access expires automatically, and only the owner can renew it.
+Sometimes a teammate needs to do more than leave a note. The chat owner can share one running or sleeping chat for 5, 10, 30, or 60 minutes. A teammate with access can send messages, answer the agent's questions, and use the chat's controls. They can also share access onward, but only until their own access expires. Only the owner can renew access, choosing a new duration of 5, 10, 30, or 60 minutes; every grant expires automatically.
 
 That temporary access still carries real responsibility. Messages run through the owner's agent, compute, and workspace. The agent may read credentials and repository files available there, so the owner should share only with someone they trust. When access ends, SAM stops accepting that teammate's actions, but it cannot undo work already requested or revoke a key the teammate copied.
 
