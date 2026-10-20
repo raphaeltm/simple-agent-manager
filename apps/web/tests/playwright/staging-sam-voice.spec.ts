@@ -102,15 +102,22 @@ test('one real transcription populates a reviewable draft without sending', asyn
   page.on('console', (message) => {
     if (message.type() === 'error') consoleErrors += 1;
   });
-  // Only unexpected writes are blocked. The one transcription reaches real staging unchanged.
+  // Existing page analytics and one transcription reach staging unchanged.
+  // Every SAM/project mutation remains blocked, including an automatic send.
   await page.route(`${STAGING_API}/api/**`, async (route) => {
     const request = route.request();
+    const path = new URL(request.url()).pathname;
     if (['GET', 'HEAD', 'OPTIONS'].includes(request.method())) return route.continue();
-    if (new URL(request.url()).pathname === '/api/transcribe' && request.method() === 'POST') {
+    if (path === '/api/t' && request.method() === 'POST') return route.continue();
+    if (path === '/api/transcribe' && request.method() === 'POST') {
       transcriptions += 1;
       if (transcriptions === 1) return route.continue();
     }
     blockedWrites += 1;
+    // Safe routing metadata only; never log request bodies, queries or headers.
+    console.info(
+      `[sam-voice] blocked unexpected write ${request.method()} ${new URL(request.url()).pathname}`
+    );
     return route.abort('blockedbyclient');
   });
   const browserSettings = page.waitForResponse(
@@ -148,7 +155,7 @@ test('one real transcription populates a reviewable draft without sending', asyn
   await expect(page.getByRole('button', { name: 'Voice input', exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
   expect(transcriptions, 'Exactly one real transcription request').toBe(1);
-  expect(blockedWrites, 'The UI must not attempt automatic send or another write').toBe(0);
+  expect(blockedWrites, 'No automatic send or unexpected mutation beyond page analytics').toBe(0);
   expect(pageErrors, 'No uncaught browser errors').toBe(0);
   expect(consoleErrors, 'No browser console errors').toBe(0);
   const after = await page.request.get(`${samApi}/turns`, { timeout: requestTimeoutMs });
