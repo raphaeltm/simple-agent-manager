@@ -62,6 +62,29 @@ function fixture() {
   const get = vi.fn(async (url: string) => {
     if (url.endsWith('/workspaces/workspace')) return workspace;
     if (url.endsWith('/nodes/node')) return node;
+    if (url.endsWith('/nodes/node/events?limit=100'))
+      return {
+        events: click.mock.calls.length
+          ? [
+              {
+                id: '0123456789abcdef',
+                nodeId: 'node',
+                workspaceId: 'workspace',
+                type: 'workspace.stopped',
+                createdAt: new Date(Math.floor(Date.now() / 1000) * 1000).toISOString(),
+                message: 'PRIVATE_EVENT_MESSAGE',
+                detail: { secret: 'PRIVATE_EVENT_DETAIL' },
+              },
+            ]
+          : [
+              {
+                id: '1111111111111111',
+                nodeId: 'node',
+                type: 'provision.ready',
+                createdAt: new Date(now).toISOString(),
+              },
+            ],
+      };
     if (url.includes('/acp-sessions?')) return { sessions: [agent] };
     if (url.endsWith('/sam/turns')) return { turns: rows };
     if (url.endsWith('/tasks/task')) return { status: 'cancelled' };
@@ -112,7 +135,8 @@ describe('awake stop confirmation and repeated effect evidence', () => {
     expect(input.ledger.stopConfirmation).toEqual({
       actionId: 'stop',
       repeatedSameReceipt: true,
-      teardownVerified: true,
+      controlPlaneStopVerified: true,
+      runtimeStopAcknowledged: true,
     });
   });
   it('accepts the observed 18.097s stop ACK beyond ordinary 15s reads', async () => {
@@ -135,7 +159,7 @@ describe('awake stop confirmation and repeated effect evidence', () => {
     });
     expect(input.click).toHaveBeenCalledExactlyOnceWith({ timeout: 15_000 });
     expect(input.post).toHaveBeenCalledOnce(); // Only the completed-receipt idempotency check.
-    expect(input.ledger.stopConfirmation.teardownVerified).toBe(true);
+    expect(input.ledger.stopConfirmation.controlPlaneStopVerified).toBe(true);
   });
   it('caps the ACK by remaining work time while retaining verification reserve', async () => {
     vi.useFakeTimers();
@@ -333,6 +357,155 @@ describe('awake stop confirmation and repeated effect evidence', () => {
       url.endsWith('/workspaces') ? ([{ id: 'workspace' }] as unknown as Json) : original(url);
     await expect(confirmAwakeDispatchStop(input)).rejects.toThrow('before fallback cleanup');
     expect(input.ledger.stopConfirmation).toBeUndefined();
+  });
+  it.each(['cancelled', 'completed', 'failed'])(
+    'accepts a %s task with stopped session and retained stopped workspace awaiting TTL deletion',
+    async (status) => {
+      const input = fixture();
+      const original = input.get;
+      input.get = async (url) => {
+        if (url.endsWith('/tasks/task')) return { status };
+        if (url.endsWith('/workspaces'))
+          return [{ id: 'workspace', status: 'stopped' }] as unknown as Json;
+        return original(url);
+      };
+      const saved: Json[] = [];
+      input.save.mockImplementation(async () => {
+        saved.push(structuredClone(input.ledger));
+      });
+      await confirmAwakeDispatchStop(input);
+      expect(input.ledger.stopTeardownObservation).toEqual({
+        taskStatus: status,
+        sessionStatus: 'stopped',
+        workspacePresent: true,
+        workspaceStatus: 'stopped',
+      });
+      expect(saved.some((row) => row.stopTeardownObservation?.workspaceStatus === 'stopped')).toBe(
+        true
+      );
+      expect(input.ledger.stopConfirmation.controlPlaneStopVerified).toBe(true);
+    }
+  );
+  it.each(['running', 'recovery', 'pending', 'sleeping', 'stopping', 'PRIVATE_UNKNOWN_STATUS'])(
+    'rejects a retained %s workspace and records only safe scalar state',
+    async (status) => {
+      const input = fixture();
+      const original = input.get;
+      input.get = async (url) =>
+        url.endsWith('/workspaces')
+          ? ([{ id: 'workspace', status, message: 'PRIVATE_BODY' }] as unknown as Json)
+          : original(url);
+      await expect(confirmAwakeDispatchStop(input)).rejects.toThrow('before fallback cleanup');
+      expect(input.ledger.stopTeardownObservation).toMatchObject({
+        workspacePresent: true,
+        workspaceStatus: status.startsWith('PRIVATE_') ? 'unknown' : status,
+      });
+      expect(JSON.stringify(input.ledger)).not.toContain('PRIVATE_');
+      expect(input.ledger.stopConfirmation).toBeUndefined();
+    }
+  );
+  it.each(['task', 'session'])(
+    'rejects a still-running %s even when the workspace is absent',
+    async (kind) => {
+      const input = fixture();
+      const original = input.get;
+      input.get = async (url) => {
+        if (kind === 'task' && url.endsWith('/tasks/task')) return { status: 'running' };
+        if (kind === 'session' && url.includes('/sessions/session?'))
+          return { session: { status: 'active' } };
+        return original(url);
+      };
+      await expect(confirmAwakeDispatchStop(input)).rejects.toThrow('before fallback cleanup');
+      expect(input.ledger.stopConfirmation).toBeUndefined();
+    }
+  );
+  it.each([
+    'empty',
+    'unavailable',
+    'stale',
+    'wrong-node',
+    'wrong-workspace',
+    'wrong-type',
+    'known-id',
+    'malformed-id',
+    'future',
+    'invalid-date',
+  ])(
+    'rejects %s runtime evidence despite a completed receipt and stopped D1 state',
+    async (kind) => {
+      const input = fixture();
+      const original = input.get;
+      const event: Json = {
+        id: '0123456789abcdef',
+        nodeId: 'node',
+        workspaceId: 'workspace',
+        type: 'workspace.stopped',
+        createdAt: new Date().toISOString(),
+        message: 'PRIVATE_EVENT',
+        detail: { prompt: 'PRIVATE_BODY' },
+      };
+      if (kind === 'stale') event.createdAt = new Date(0).toISOString();
+      if (kind === 'wrong-node') event.nodeId = 'other';
+      if (kind === 'wrong-workspace') event.workspaceId = 'other';
+      if (kind === 'wrong-type') event.type = 'workspace.started';
+      if (kind === 'malformed-id') event.id = 'PRIVATE_EVENT_ID';
+      if (kind === 'future') event.createdAt = new Date(Date.now() + 60_000).toISOString();
+      if (kind === 'invalid-date') event.createdAt = 'PRIVATE_DATE';
+      input.get = async (url) => {
+        if (!url.endsWith('/nodes/node/events?limit=100')) return original(url);
+        if (!input.click.mock.calls.length)
+          return kind === 'known-id' ? { events: [event] } : original(url);
+        return kind === 'empty'
+          ? { events: [] }
+          : kind === 'unavailable'
+            ? { events: [event], unavailableReason: 'node_not_running' }
+            : { events: [event] };
+      };
+      await expect(confirmAwakeDispatchStop(input)).rejects.toThrow(
+        'Fresh scoped VM stop acknowledgement'
+      );
+      expect(input.click).toHaveBeenCalledOnce();
+      expect(input.post).not.toHaveBeenCalled();
+      expect(input.ledger.stopConfirmation).toBeUndefined();
+      expect(input.ledger.stopRuntimeObservation.acknowledged).toBe(false);
+      expect(JSON.stringify(input.ledger)).not.toContain('PRIVATE_');
+    }
+  );
+  it.each([
+    { events: null },
+    { events: [] },
+    { events: [], unavailableReason: 'node_agent_unreachable' },
+    {
+      events: [
+        {
+          id: '1111111111111111',
+          nodeId: 'other',
+          type: 'provision.ready',
+          createdAt: new Date(0).toISOString(),
+        },
+      ],
+    },
+  ])('never confirms without a usable pre-click event baseline: %j', async (baseline) => {
+    const input = fixture();
+    const original = input.get;
+    input.get = async (url) => (url.endsWith('/events?limit=100') ? baseline : original(url));
+    await expect(confirmAwakeDispatchStop(input)).rejects.toThrow(
+      'Scoped VM event baseline is available'
+    );
+    expect(input.click).not.toHaveBeenCalled();
+    expect(input.post).not.toHaveBeenCalled();
+  });
+  it('stores only exact fresh event identity and timestamp, not raw runtime messages', async () => {
+    const input = fixture();
+    await confirmAwakeDispatchStop(input);
+    expect(input.ledger.stopRuntimeObservation).toMatchObject({
+      acknowledged: true,
+      eventId: '0123456789abcdef',
+    });
+    expect(JSON.stringify(input.ledger)).not.toContain('PRIVATE_');
+    expect(
+      vi.mocked(input.get).mock.calls.filter(([url]) => url.endsWith('/events?limit=100'))
+    ).toHaveLength(2);
   });
   it('rejects a changed result on repeated confirmation', async () => {
     const input = fixture();

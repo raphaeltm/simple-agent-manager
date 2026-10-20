@@ -20,6 +20,8 @@ export type TerminalTaskCleanupStatus = 'completed' | 'failed' | 'cancelled';
 
 export interface TerminalTaskCleanupOptions {
   status: TerminalTaskCleanupStatus;
+  /** SAM confirmation must retain uncertainty when the node stop is unacknowledged. */
+  requireStopAcknowledgement?: boolean;
   errorMessage?: string | null;
   requiredUserId?: string;
   logContext?: Record<string, unknown>;
@@ -96,6 +98,9 @@ export async function cleanupTerminalTaskResources(
     });
   });
 
+  if (options.requireStopAcknowledgement && (!task || !task.projectId)) {
+    throw new Error('SAM stop target identity is unconfirmed');
+  }
   if (!task?.workspaceId || !task.projectId) {
     return;
   }
@@ -115,6 +120,9 @@ export async function cleanupTerminalTaskResources(
     workspace?.chatSessionId &&
     !options.destructiveSessionEnd
   ) {
+    if (options.requireStopAcknowledgement) {
+      throw new Error('Queued sleep cannot acknowledge a SAM stop');
+    }
     await options.beforeSideEffect?.();
     await queueWorkspaceSessionSleep(env, {
       workspaceId: task.workspaceId,
@@ -126,6 +134,9 @@ export async function cleanupTerminalTaskResources(
   }
 
   if (options.status === 'failed' && !options.destructiveSessionEnd) {
+    if (options.requireStopAcknowledgement) {
+      throw new Error('Work preservation cannot acknowledge a SAM stop');
+    }
     await options.beforeSideEffect?.();
     const source =
       typeof options.logContext?.source === 'string' ? options.logContext.source : null;
@@ -184,5 +195,11 @@ export async function cleanupTerminalTaskResources(
   }
 
   await options.beforeSideEffect?.();
-  await cleanupTaskRun(taskId, env, undefined, options.requiredUserId);
+  if (options.requireStopAcknowledgement) {
+    await cleanupTaskRun(taskId, env, undefined, options.requiredUserId, {
+      requireStopAcknowledgement: true,
+    });
+  } else {
+    await cleanupTaskRun(taskId, env, undefined, options.requiredUserId);
+  }
 }

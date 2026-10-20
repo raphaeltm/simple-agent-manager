@@ -54,10 +54,7 @@ function successfulEffect(operation: string, result: Row): boolean {
     case 'sam_chat_send':
       return result.accepted === true && result.status === 'queued' && nonempty(result.deliveryId);
     case 'sam_work_stop':
-      return (
-        (result.status === 'stopped' && result.workspaceDeleted === true) ||
-        (result.status === 'cancelled' && nonempty(result.taskId))
-      );
+      return result.status === 'stopped' && result.workspaceStopped === true;
     case 'sam_idea_create':
       return nonempty(result.ideaId) && result.status === 'draft';
     case 'sam_idea_update':

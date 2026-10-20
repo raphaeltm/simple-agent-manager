@@ -27,6 +27,28 @@ const check = (text: string, receipts: OperatorAction[] = []) =>
   assertGroundedOperatorResponse(text, receipts, origin);
 
 describe('operator publication grounding', () => {
+  it('grounds a stopped workspace without claiming deletion', () => {
+    expect(() =>
+      check('I stopped the workspace.', [
+        receipt('sam_work_stop', { status: 'stopped', workspaceStopped: true }),
+      ])
+    ).not.toThrow();
+  });
+  it('does not accept legacy cancellation-only task state as current stop proof', () => {
+    expect(() =>
+      check('I stopped the workspace.', [
+        receipt('sam_work_stop', { status: 'cancelled', taskId: session }),
+      ])
+    ).toThrow();
+  });
+  it('does not accept a legacy deletion-only stop result as current stop proof', () => {
+    expect(() =>
+      check('I stopped the workspace.', [
+        receipt('sam_work_stop', { status: 'stopped', workspaceDeleted: true }),
+      ])
+    ).toThrow();
+  });
+
   it.each([
     `I have started it: ${project}_SESS`,
     `Session: ${invented}`,

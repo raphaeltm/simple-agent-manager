@@ -30,6 +30,7 @@ interface StopRouteContext {
   /** The person archiving (the owner or a grantee): recorded as the actor. */
   actorUserId: string;
   assertEffectAllowed?: () => Promise<void>;
+  requireStopAcknowledgement?: boolean;
 }
 
 type TaskForStop = {
@@ -121,6 +122,7 @@ async function stopTaskBackedSession(
     status: cleanupStatus,
     errorMessage: cleanupStatus === 'failed' ? (task?.errorMessage ?? null) : 'Archived by user',
     destructiveSessionEnd: true,
+    requireStopAcknowledgement: context.requireStopAcknowledgement,
     logContext: {
       projectId: context.projectId,
       sessionId: context.sessionId,
@@ -228,7 +230,8 @@ export async function stopChat(
   userId: string,
   projectId: string,
   sessionId: string,
-  assertEffectAllowed?: () => Promise<void>
+  assertEffectAllowed?: () => Promise<void>,
+  options: { requireStopAcknowledgement?: boolean } = {}
 ) {
   const db = drizzle(env.DATABASE, { schema });
 
@@ -244,6 +247,7 @@ export async function stopChat(
     userId: writer.ownerUserId,
     actorUserId: userId,
     assertEffectAllowed,
+    requireStopAcknowledgement: options.requireStopAcknowledgement,
   };
   await assertEffectAllowed?.();
   const backingTask = await ensureSessionTaskBacked(db, env, {
@@ -258,5 +262,9 @@ export async function stopChat(
   await assertEffectAllowed?.();
   await chatPersistence.stopChatSession(env, projectId, sessionId);
 
-  return { status: 'stopped', workspaceDeleted: true };
+  // VM stop retains the workspace row for deferred deletion. SAM must not
+  // present a stop acknowledgement as proof that the workspace was deleted.
+  return options.requireStopAcknowledgement
+    ? { status: 'stopped', workspaceStopped: true }
+    : { status: 'stopped', workspaceDeleted: true };
 }

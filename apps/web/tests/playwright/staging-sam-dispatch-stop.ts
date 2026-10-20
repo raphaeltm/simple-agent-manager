@@ -38,6 +38,26 @@ export async function confirmAwakeDispatchStop(input: {
     return input.post(url, body);
   };
   await verifyAwakeBeforeStop({ ...input, get });
+  const eventsUrl = `${input.stagingApi}/api/nodes/${ledger.nodeId}/events?limit=100`;
+  const beforeEvents = await get(eventsUrl);
+  check(
+    Array.isArray(beforeEvents.events) &&
+      !beforeEvents.unavailableReason &&
+      beforeEvents.events.some(
+        (event: Json | null) =>
+          event != null &&
+          event.nodeId === ledger.nodeId &&
+          typeof event.id === 'string' &&
+          /^[a-f0-9]{16}$/.test(event.id) &&
+          typeof event.type === 'string' &&
+          event.type.length > 0 &&
+          typeof event.createdAt === 'string' &&
+          Number.isFinite(Date.parse(event.createdAt)) &&
+          Date.parse(event.createdAt) <= Date.now()
+      ),
+    'Scoped VM event baseline is available'
+  );
+  const previousEventIds = new Set(beforeEvents.events.map((event: Json | null) => event?.id));
   // Stop awaits two background agent signals (5s each), a cleanup delay (5s),
   // and an interactive workspace stop (30s), plus durable bookkeeping. Keep
   // ordinary requests at 15s; reserve two such slots after the bounded ACK.
@@ -123,6 +143,38 @@ export async function confirmAwakeDispatchStop(input: {
     .flatMap((turn) => turn.actions)
     .find((action) => action.id === input.actionId);
   check(stopReceipt?.state === 'completed', 'Scoped stop completed');
+  const afterEvents = await get(eventsUrl);
+  // VM appendNodeEvent timestamps have whole-second precision. Require a new
+  // exact scoped event as well as a current timestamp, never a D1 stopped flag
+  // or the diagnostic API's empty response when the agent is unavailable.
+  const acknowledged =
+    Array.isArray(afterEvents.events) && !afterEvents.unavailableReason
+      ? afterEvents.events.find((event: Json | null) => {
+          const timestamp =
+            typeof event?.createdAt === 'string' ? Date.parse(event.createdAt) : NaN;
+          return (
+            event?.type === 'workspace.stopped' &&
+            event.nodeId === ledger.nodeId &&
+            event.workspaceId === ledger.workspaceId &&
+            typeof event.id === 'string' &&
+            /^[a-f0-9]{16}$/.test(event.id) &&
+            !previousEventIds.has(event.id) &&
+            Number.isFinite(timestamp) &&
+            timestamp >= Math.floor(attemptedAt / 1000) * 1000 &&
+            timestamp <= Date.now()
+          );
+        })
+      : undefined;
+  ledger.stopRuntimeObservation = {
+    acknowledged: Boolean(acknowledged),
+    eventId: acknowledged?.id ?? null,
+    createdAt: acknowledged ? new Date(acknowledged.createdAt).toISOString() : null,
+  };
+  await input.save();
+  check(
+    Boolean(acknowledged),
+    'Fresh scoped VM stop acknowledgement observed before fallback cleanup'
+  );
   const repeated = await post(`${input.samApi}/actions/${input.actionId}/confirm`, {
     approved: true,
   });
@@ -141,16 +193,57 @@ export async function confirmAwakeDispatchStop(input: {
   const task = await get(`${input.projectApi}/tasks/${ledger.taskId}`);
   const session = await get(`${input.projectApi}/sessions/${ledger.sessionId}?limit=1`);
   const workspaces = await get(`${input.stagingApi}/api/workspaces`);
+  const workspace = (workspaces as unknown as Json[]).find(
+    (candidate) => candidate.id === ledger.workspaceId
+  );
+  const safeStatus = (value: unknown, allowed: string[]) =>
+    typeof value === 'string' && allowed.includes(value) ? value : 'unknown';
+  ledger.stopTeardownObservation = {
+    taskStatus: safeStatus(task.status, [
+      'queued',
+      'assigned',
+      'running',
+      'completed',
+      'failed',
+      'cancelled',
+    ]),
+    sessionStatus: safeStatus(session.session.status, [
+      'active',
+      'idle',
+      'sleeping',
+      'stopped',
+      'failed',
+    ]),
+    workspacePresent: Boolean(workspace),
+    workspaceStatus: workspace
+      ? safeStatus(workspace.status, [
+          'pending',
+          'creating',
+          'running',
+          'recovery',
+          'sleeping',
+          'stopping',
+          'stopped',
+          'deleted',
+          'error',
+        ])
+      : 'absent',
+  };
+  await input.save();
+  // Archive preserves already-terminal tasks and retains the stopped D1 row
+  // until deletion TTL. These control-plane reads complement the separate VM
+  // acknowledgement above; neither claims container or provider deletion.
   check(
-    task.status === 'cancelled' &&
+    ['cancelled', 'completed', 'failed'].includes(task.status) &&
       session.session.status === 'stopped' &&
-      !(workspaces as unknown as Json[]).some((workspace) => workspace.id === ledger.workspaceId),
-    'Confirmed stop cancels task and removes its awake workspace before fallback cleanup'
+      (!workspace || workspace.status === 'stopped'),
+    'Confirmed stop leaves terminal task and stopped control-plane session and workspace before fallback cleanup'
   );
   check(Date.now() < phaseDeadline, 'Stop verification finishes within the work deadline');
   ledger.stopConfirmation = {
     actionId: input.actionId,
     repeatedSameReceipt: true,
-    teardownVerified: true,
+    controlPlaneStopVerified: true,
+    runtimeStopAcknowledged: true,
   };
 }

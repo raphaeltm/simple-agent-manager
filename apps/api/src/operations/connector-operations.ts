@@ -266,12 +266,21 @@ export const samWorkStop = defineOperation({
           const updated = await cancelTask(ctx.env, db, task, ctx.actor.userId, {
             reason: 'Stopped by user through Connector',
             source: 'connector.work_stop',
+            requireStopAcknowledgement: ctx.actor.via === 'sam',
           });
-          return {
-            status: updated.status,
-            taskId: task.id,
-            link: operationLink(ctx, input.projectId),
-          };
+          return ctx.actor.via === 'sam'
+            ? {
+                status: 'stopped',
+                workspaceStopped: true,
+                taskStatus: updated.status,
+                taskId: task.id,
+                link: operationLink(ctx, input.projectId),
+              }
+            : {
+                status: updated.status,
+                taskId: task.id,
+                link: operationLink(ctx, input.projectId),
+              };
         });
       }
     }
@@ -281,13 +290,9 @@ export const samWorkStop = defineOperation({
     });
     const target = sessionId;
     return executeConnectorWrite(ctx, 'sam_work_stop', input, () =>
-      stopChat(
-        ctx.env,
-        ctx.actor.userId,
-        input.projectId,
-        target,
-        ...(ctx.assertEffectAllowed ? ([ctx.assertEffectAllowed] as const) : ([] as const))
-      )
+      stopChat(ctx.env, ctx.actor.userId, input.projectId, target, ctx.assertEffectAllowed, {
+        requireStopAcknowledgement: ctx.actor.via === 'sam',
+      })
     );
   },
 });
