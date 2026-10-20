@@ -87,7 +87,9 @@ export function SessionShareConfirmStep({
       </h3>
       <ul className="mt-2 mb-0 flex list-disc flex-col gap-2 pl-5 text-sm leading-relaxed text-fg-primary">
         <li>
-          {name} can send messages, stop or archive the chat, and answer the agent — just like you.
+          {name} can send messages and files, schedule messages, look through the repository&apos;s
+          files and changes, stop or archive the chat, and answer the agent — just like you. The
+          terminal, open ports and the workspace page stay yours.
         </li>
         <li>
           Everything runs on {words.possessive} accounts: AI subscription or API key, GitHub access
@@ -98,9 +100,9 @@ export function SessionShareConfirmStep({
           with people you trust.
         </li>
         <li>
-          Access ends on its own after the time you choose, or when it&apos;s revoked. Ending it
-          doesn&apos;t undo what {name} did or stop work the agent already started, and keys they
-          copied keep working until they&apos;re replaced.
+          Access ends on its own after the time you choose, or when it&apos;s revoked, and messages{' '}
+          {name} scheduled are cancelled. Ending it doesn&apos;t undo what {name} did or stop work
+          the agent already started, and keys they copied keep working until they&apos;re replaced.
         </li>
       </ul>
 

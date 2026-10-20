@@ -6,8 +6,9 @@ import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
  * Visual audit for how a chat looks to each kind of viewer once sessions can be shared
  * (idea 01M59MYE4GY91BWTE8TZF1ZB5D): the owner, a teammate it was shared with, and any other
  * project member. Covers the composer area, the shared-session notice, sender attribution on
- * transcript rows, and the session rail's Share/Files tools. The share dialog, comment
- * mentions and reader comment hint are audited in shared-session-collaboration-audit.spec.ts.
+ * transcript rows, the session rail's Share/Files tools, and the Files/Git panels a teammate
+ * now gets. The share dialog, comment mentions and reader comment hint are audited in
+ * shared-session-collaboration-audit.spec.ts.
  */
 
 const PROJECT_ID = 'proj-shared-viewer';
@@ -176,6 +177,20 @@ const MESSAGES = [
     }),
   },
   {
+    id: 'msg-scheduled',
+    role: 'user',
+    content: 'Re-run the checkout suite now that CI has finished.',
+    toolMetadata: durable({
+      source: 'scheduled_action',
+      scheduleId: 'schedule-1',
+      creatorUserId: 'grantee-1',
+      userId: 'grantee-1',
+      senderName: LONG_GRANTEE,
+      onBehalfOfUserId: 'owner-1',
+      grantId: 'grant-1',
+    }),
+  },
+  {
     id: 'msg-agent-2',
     role: 'assistant',
     content: 'Done: the explicit wait passes 20 of 20 runs, including the empty cart.',
@@ -184,9 +199,33 @@ const MESSAGES = [
 ].map((message, index) => ({
   ...message,
   sessionId: SESSION_ID,
-  createdAt: NOW - (7 - index) * 30_000,
+  createdAt: NOW - (8 - index) * 30_000,
   sequence: index + 1,
 }));
+
+/** The repository folder as the workspace agent lists it: many entries, some long names. */
+const FILE_LISTING = {
+  path: '.',
+  entries: [
+    { name: 'src', type: 'dir', size: 0, modifiedAt: '2026-10-19T09:00:00Z' },
+    { name: 'tests', type: 'dir', size: 0, modifiedAt: '2026-10-19T09:00:00Z' },
+    ...Array.from({ length: 32 }, (_, index) => ({
+      name:
+        index === 3
+          ? `checkout-payment-reconciliation-with-a-deliberately-long-file-name-that-has-no-breaks-${index}.test.ts`
+          : `file-${index}.ts`,
+      type: 'file',
+      size: 1200 + index,
+      modifiedAt: '2026-10-19T09:00:00Z',
+    })),
+  ],
+};
+
+const GIT_STATUS = {
+  staged: [{ path: 'src/checkout/cart.ts', status: 'M' }],
+  unstaged: [{ path: 'tests/checkout/cart.test.ts', status: 'M' }],
+  untracked: [{ path: 'tests/checkout/empty-cart.test.ts', status: '??' }],
+};
 
 async function setupMocks(page: Page, session: ReturnType<typeof makeSession>) {
   const wide = (page.viewportSize()?.width ?? 0) >= 1024;
@@ -231,6 +270,10 @@ async function setupMocks(page: Page, session: ReturnType<typeof makeSession>) {
     const subPath = projectMatch[2] || '';
 
     if (subPath === `/sessions/${SESSION_ID}/comments`) return respond(200, { comments: [] });
+    if (subPath === `/sessions/${SESSION_ID}/files/list`) return respond(200, FILE_LISTING);
+    if (subPath === `/sessions/${SESSION_ID}/files/find`)
+      return respond(200, { files: FILE_LISTING.entries.map((entry) => entry.name) });
+    if (subPath === `/sessions/${SESSION_ID}/git/status`) return respond(200, GIT_STATUS);
     if (subPath === `/sessions/${SESSION_ID}/access`) return respond(200, session.access);
     if (subPath === '/sessions') {
       return respond(200, { sessions: [session], total: 1, hasMore: false });
@@ -321,7 +364,9 @@ test.describe('Shared session — what each viewer sees', () => {
     await expect(page.getByText('Not delivered — access was removed')).toBeVisible();
     await scrollConversationUntil(page, 'And open a PR when the suite is green.');
     await expect(page.getByText('Not delivered — access expired')).toBeVisible();
-    // Five user messages, four labelled: the owner's own message carries no label.
+    // A message the teammate scheduled is theirs too, and says it was scheduled.
+    await expectAttribution(page, `${LONG_GRANTEE} · shared access · scheduled`);
+    // Six user messages, five labelled: the owner's own message carries no label.
     await expectUnlabelled(page, 'The checkout tests fail about one run in five. Find out why.');
 
     await assertNoOverflow(page);
@@ -507,17 +552,56 @@ test.describe('Shared session — what each viewer sees', () => {
     await expect(page.getByRole('button', { name: 'Review uncommitted changes' })).toBeVisible();
   });
 
-  test('a grantee does not get Files or Git, which reach the workspace directly', async ({
-    page,
-  }) => {
-    const viewport = page.viewportSize();
-    test.skip(!viewport || viewport.width < 1024, 'The labelled tool rail is desktop-only');
-    // The same live session that shows Files to its owner (previous test).
+  test('a grantee gets Files and Git, which read the repository folder', async ({ page }) => {
     await setupMocks(page, makeSession('grantee', LIVE));
     await openChat(page);
 
-    // Liveness: the rail rendered (Share is present) before asserting what it lacks.
-    await expect(page.getByRole('button', { name: /Share/ }).first()).toBeVisible();
+    await page.getByRole('button', { name: 'Browse workspace files' }).click();
+    await expect(page.getByText('file-0.ts')).toBeVisible();
+    const longName = FILE_LISTING.entries[5]!.name;
+    await expect(page.getByText(longName)).toBeVisible();
+
+    await assertNoOverflow(page);
+    await screenshot(page, slug('grantee-files', page));
+
+    // Git changes come from the same repository folder.
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Review uncommitted changes' }).click();
+    await expect(page.getByText('tests/checkout/empty-cart.test.ts')).toBeVisible();
+    await assertNoOverflow(page);
+    await screenshot(page, slug('grantee-git', page));
+  });
+
+  test('a grantee sees why an older workspace agent shows no files', async ({ page }) => {
+    await setupMocks(page, makeSession('grantee', LIVE));
+    // Registered after setupMocks, so it answers first: the agent cannot confirm the limit.
+    await page.route(`**/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/files/list**`, (route) =>
+      route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: 'CONFLICT',
+          message:
+            'This workspace runs an older agent that cannot limit files to the repository. Teammates can browse files after it restarts.',
+        }),
+      })
+    );
+    await openChat(page);
+
+    await page.getByRole('button', { name: 'Browse workspace files' }).click();
+    await expect(page.getByText(/older agent that cannot limit files/)).toBeVisible();
+    await expect(page.getByText('file-0.ts')).toHaveCount(0);
+
+    await assertNoOverflow(page);
+    await screenshot(page, slug('grantee-files-old-agent', page));
+  });
+
+  test('a member it is not shared with gets neither Files nor Git', async ({ page }) => {
+    await setupMocks(page, makeSession('reader', LIVE));
+    await openChat(page);
+
+    // Liveness: the rail rendered before asserting what it lacks.
+    await expect(page.getByRole('button', { name: 'Jump through session history' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Browse workspace files' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Review uncommitted changes' })).toHaveCount(0);
   });

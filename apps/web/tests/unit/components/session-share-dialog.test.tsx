@@ -171,7 +171,7 @@ describe('SessionShareDialog — sharing', () => {
     expect(within(dialog).getByRole('heading', { name: 'Share with Dana Scully?' })).toHaveFocus();
     expect(
       within(dialog).getByText(
-        'Dana Scully can send messages, stop or archive the chat, and answer the agent — just like you.'
+        "Dana Scully can send messages and files, schedule messages, look through the repository's files and changes, stop or archive the chat, and answer the agent — just like you. The terminal, open ports and the workspace page stay yours."
       )
     ).toBeInTheDocument();
     expect(
@@ -186,7 +186,7 @@ describe('SessionShareDialog — sharing', () => {
     ).toBeInTheDocument();
     expect(
       within(dialog).getByText(
-        "Access ends on its own after the time you choose, or when it's revoked. Ending it doesn't undo what Dana Scully did or stop work the agent already started, and keys they copied keep working until they're replaced."
+        "Access ends on its own after the time you choose, or when it's revoked, and messages Dana Scully scheduled are cancelled. Ending it doesn't undo what Dana Scully did or stop work the agent already started, and keys they copied keep working until they're replaced."
       )
     ).toBeInTheDocument();
 
