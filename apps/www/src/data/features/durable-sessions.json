@@ -5,7 +5,7 @@
   "subtitle": "Sessions you leave idle go to sleep and keep their work for up to seven days.",
   "summary": "Sessions survive runtime teardown, agents coordinate with each other, and Compose releases deploy straight from the project.",
   "highlights": [
-    "Sessions normally restore home and repository state from a 7-day snapshot; VM fallback preserves the transcript and a verified Git recovery point",
+    "Sessions normally restore home and repository state from a 7-day snapshot; fallback keeps the transcript and available backups",
     "Agents dispatch subtasks to peers and send durable messages that can interrupt a busy agent",
     "App deployments run Compose releases with environments, configuration, and logs",
     "Six agent harnesses: Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp"
@@ -27,7 +27,7 @@
   "details": [
     {
       "headline": "Close the tab. The session waits.",
-      "body": "SAM normally restores the agent’s home directory and repository work from a verified snapshot for up to seven days. After repeated snapshot failures, an idle VM session can sleep with its transcript and a verified Git recovery point instead. SAM shows a notice, and the agent starts fresh on wake. Without a safe recovery point, sleep is blocked.",
+      "body": "SAM normally restores the agent’s home directory and repository work from a verified snapshot for up to seven days. After repeated snapshot failures, SAM releases idle compute and keeps the transcript and available backups. SAM shows a notice that unpublished files and saved agent state may be lost. Continuation uses a verified Git recovery point when one exists, or starts fresh from the transcript.",
       "screenshot": {
         "src": "/images/features/sam-session-sleeping.png",
         "alt": "A finished chat session in the Sleeping state, with the full transcript still visible and a composer that reads Send a message to wake the agent",
