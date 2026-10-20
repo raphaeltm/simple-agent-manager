@@ -96,7 +96,7 @@ async function observeNavigation(
       url.origin === STAGING_API
         ? ['/api/auth/get-session', '/api/sam/settings', '/api/sam/turns'].includes(url.pathname)
         : url.origin === STAGING_APP &&
-          (['/sam', '/settings'].includes(url.pathname) ||
+          (['/sam', '/settings', '/dashboard', '/projects'].includes(url.pathname) ||
             (url.pathname.startsWith('/assets/') && url.pathname.endsWith('.js')));
     if (allowed)
       requests.set(request, {
@@ -426,14 +426,18 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
         ['/dashboard', 'Simple Agent Manager'],
         ['/projects', 'Projects'],
       ]) {
-        await page.goto(`${STAGING_APP}${path}`);
-        await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
+        await observeNavigation(page, `existing-${path.slice(1)}`, async () => {
+          await page.goto(`${STAGING_APP}${path}`);
+          await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
+        });
       }
-      await page.goto(`${STAGING_APP}/settings`);
-      await expect(page.getByRole('switch', { name: 'Enable SAM assistant' })).toHaveAttribute(
-        'aria-checked',
-        'false'
-      );
+      await observeNavigation(page, 'existing-settings', async () => {
+        await page.goto(`${STAGING_APP}/settings`);
+        await expect(page.getByRole('switch', { name: 'Enable SAM assistant' })).toHaveAttribute(
+          'aria-checked',
+          'false'
+        );
+      });
       expect(pageErrors, 'No uncaught browser JavaScript errors').toBe(0);
     });
   } finally {
