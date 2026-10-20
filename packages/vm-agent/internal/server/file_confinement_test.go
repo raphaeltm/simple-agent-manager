@@ -1,8 +1,8 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,20 +21,79 @@ import (
 )
 
 // Working-tree confinement, through the real handlers and real commands against a real
-// filesystem (the standalone runtime runs them directly, as on an Instant container). A
-// teammate's request carries ?confine=workdir; the owner's carries nothing and is unchanged.
+// filesystem. A teammate's request carries ?confine=workdir; the owner's carries nothing and is
+// unchanged. Each behavioral test runs on both runtimes: standalone runs the commands directly,
+// as on an Instant container; devcontainer runs them through docker exec, as on a VM, with a
+// docker CLI double whose "container" is this machine.
 
-const confinementWorkspaceID = "WS_CONFINE"
+const (
+	confinementWorkspaceID = "WS_CONFINE"
+	confinementContainerID = "0123456789ab"
+)
+
+type confinementRuntime string
+
+const (
+	confinementStandalone   confinementRuntime = "standalone"
+	confinementDevcontainer confinementRuntime = "devcontainer"
+)
 
 type confinementFixture struct {
 	handler http.Handler
 	cookie  string
 	repo    string
+	// dockerCalls lists the docker CLI invocations, one per line; nil on standalone.
+	dockerCalls func() []string
 }
 
-func newConfinementFixture(t *testing.T) confinementFixture {
+// fakeDevcontainerDockerCLI stands in for the docker CLI on a VM. It finds one running
+// devcontainer, and docker exec runs the command on this machine from the -w directory. Every
+// call is logged.
+func fakeDevcontainerDockerCLI(t *testing.T) (string, func() []string) {
 	t.Helper()
-	for _, bin := range []string{"/usr/bin/realpath", "/usr/bin/git", "/usr/bin/find", "/usr/bin/stat", "/usr/bin/cat"} {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "calls.log")
+	path := filepath.Join(dir, "docker")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> '` + logPath + `'
+case "$1" in
+  ps) printf '%s\t%s\n' '` + confinementContainerID + `' '2026-10-20 00:00:00 +0000 UTC'; exit 0 ;;
+  inspect) echo true; exit 0 ;;
+  exec) shift ;;
+  *) echo "unexpected docker command: $1" >&2; exit 64 ;;
+esac
+workdir=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -i) shift ;;
+    -e|-u) shift 2 ;;
+    -w) workdir=$2; shift 2 ;;
+    *) break ;;
+  esac
+done
+[ "$1" = '` + confinementContainerID + `' ] || { echo "unexpected container: $1" >&2; exit 65; }
+shift
+cd "$workdir" || exit 66
+exec "$@"
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path, func() []string {
+		data, err := os.ReadFile(logPath)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Split(strings.TrimSpace(string(data)), "\n")
+	}
+}
+
+func newConfinementFixture(t *testing.T, runtime confinementRuntime) confinementFixture {
+	t.Helper()
+	for _, bin := range []string{"/usr/bin/realpath", "/usr/bin/git", "/usr/bin/find", "/usr/bin/stat", "/usr/bin/cat", "/bin/sh"} {
 		if _, err := os.Stat(bin); err != nil {
 			t.Skipf("%s is required: %v", bin, err)
 		}
@@ -41,7 +101,7 @@ func newConfinementFixture(t *testing.T) confinementFixture {
 	root := t.TempDir()
 	repo := filepath.Join(root, "repo")
 	outside := filepath.Join(root, "outside")
-	for _, dir := range []string{filepath.Join(repo, "sub"), outside} {
+	for _, dir := range []string{filepath.Join(repo, "sub"), filepath.Join(repo, "vendor", "lib", ".git"), outside} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -73,6 +133,8 @@ func newConfinementFixture(t *testing.T) confinementFixture {
 	git("add", "README.md", "sub/ok.txt")
 	git("commit", "-q", "-m", "init")
 	write(filepath.Join(repo, ".git", "sam-test-marker"), "inside .git\n")
+	// A vendored repository's own .git, which can hold a remote with a token in it.
+	write(filepath.Join(repo, "vendor", "lib", ".git", "config"), "inside .git: nested remote token\n")
 	// Links the agent could have made, committed or not.
 	link(filepath.Join(outside, "secret.txt"), filepath.Join(repo, "abs-link"))
 	link("../outside/secret.txt", filepath.Join(repo, "rel-link"))
@@ -87,29 +149,49 @@ func newConfinementFixture(t *testing.T) confinementFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{
-		config: &config.Config{
-			Role:                 config.RoleStandalone,
-			WorkspaceDir:         repo,
-			GitExecTimeout:       10 * time.Second,
-			GitFileMaxSize:       1 << 20,
-			FileListTimeout:      10 * time.Second,
-			FileListMaxEntries:   1000,
-			FileFindTimeout:      10 * time.Second,
-			FileFindMaxEntries:   1000,
-			FileRawMaxSize:       1 << 20,
-			FileRawTimeout:       10 * time.Second,
-			FileDownloadTimeout:  10 * time.Second,
-			FileDownloadMaxBytes: 1 << 20,
-		},
-		sessionManager:  sm,
-		workspaces:      map[string]*WorkspaceRuntime{},
-		workspaceEvents: map[string][]EventRecord{},
+	cfg := &config.Config{
+		WorkspaceDir:         repo,
+		GitExecTimeout:       10 * time.Second,
+		GitFileMaxSize:       1 << 20,
+		FileListTimeout:      10 * time.Second,
+		FileListMaxEntries:   1000,
+		FileFindTimeout:      10 * time.Second,
+		FileFindMaxEntries:   1000,
+		FileRawMaxSize:       1 << 20,
+		FileRawTimeout:       10 * time.Second,
+		FileDownloadTimeout:  10 * time.Second,
+		FileDownloadMaxBytes: 1 << 20,
 	}
-	s.workspaces[confinementWorkspaceID] = &WorkspaceRuntime{
+	workspace := &WorkspaceRuntime{
 		ID:               confinementWorkspaceID,
 		Status:           "running",
 		ContainerWorkDir: repo,
+	}
+	fixture := confinementFixture{cookie: sess.ID, repo: repo}
+	switch runtime {
+	case confinementStandalone:
+		cfg.Role = config.RoleStandalone
+	case confinementDevcontainer:
+		dockerPath, calls := fakeDevcontainerDockerCLI(t)
+		previous := dockerBinaryPath
+		dockerBinaryPath = dockerPath
+		t.Cleanup(func() { dockerBinaryPath = previous })
+		t.Setenv("SAM_DOCKER_CLI_PATH", dockerPath)
+		cfg.Role = config.RoleWorkspace
+		cfg.ContainerMode = true
+		cfg.ContainerLabelKey = "devcontainer.local_folder"
+		cfg.ContainerCacheTTL = time.Minute
+		workspace.ContainerLabelValue = "confine-test"
+		workspace.ContainerUser = "node"
+		fixture.dockerCalls = calls
+	default:
+		t.Fatalf("unknown runtime %q", runtime)
+	}
+	s := &Server{
+		config:          cfg,
+		sessionManager:  sm,
+		workspaces:      map[string]*WorkspaceRuntime{confinementWorkspaceID: workspace},
+		workspaceEvents: map[string][]EventRecord{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /workspaces/{workspaceId}/git/status", s.handleGitStatus)
@@ -119,10 +201,33 @@ func newConfinementFixture(t *testing.T) confinementFixture {
 	mux.HandleFunc("GET /workspaces/{workspaceId}/files/find", s.handleFileFind)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/files/raw", s.handleFileRaw)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/files/download", s.handleFileDownload)
-	return confinementFixture{handler: mux, cookie: sess.ID, repo: repo}
+	fixture.handler = mux
+	return fixture
+}
+
+// forEachConfinementRuntime runs a test on both runtimes. On the devcontainer runtime it also
+// checks the requests went through docker exec, so a test cannot pass by never reaching it.
+func forEachConfinementRuntime(t *testing.T, test func(t *testing.T, f confinementFixture)) {
+	t.Helper()
+	for _, runtime := range []confinementRuntime{confinementStandalone, confinementDevcontainer} {
+		t.Run(string(runtime), func(t *testing.T) {
+			f := newConfinementFixture(t, runtime)
+			test(t, f)
+			if f.dockerCalls != nil && !slices.ContainsFunc(f.dockerCalls(), func(call string) bool {
+				return strings.HasPrefix(call, "exec ")
+			}) {
+				t.Fatal("no request reached docker exec")
+			}
+		})
+	}
 }
 
 func (f confinementFixture) get(t *testing.T, endpoint string, params map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	return f.request(t, endpoint, params, nil)
+}
+
+func (f confinementFixture) request(t *testing.T, endpoint string, params, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	query := url.Values{}
 	for key, value := range params {
@@ -131,6 +236,9 @@ func (f confinementFixture) get(t *testing.T, endpoint string, params map[string
 	req := httptest.NewRequest(http.MethodGet,
 		"/workspaces/"+confinementWorkspaceID+"/"+endpoint+"?"+query.Encode(), nil)
 	req.AddCookie(&http.Cookie{Name: "session", Value: f.cookie})
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
 	rec := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec, req)
 	return rec
@@ -153,147 +261,219 @@ func bodyOf(t *testing.T, rec *httptest.ResponseRecorder) string {
 	return string(data)
 }
 
-// Every read endpoint refuses each way out of the working tree, and says nothing about what
-// lies beyond it.
+// Every read endpoint refuses each way out of the working tree the same way, as not found, and
+// says nothing about what lies beyond it.
 func TestConfinedReadsRefuseEveryPathOutOfTheWorkingTree(t *testing.T) {
-	f := newConfinementFixture(t)
-	escapes := map[string]string{
-		"absolute path":               "/etc/hostname",
-		"home-relative path":          "~/.bashrc",
-		"symlink to an absolute file": "abs-link",
-		"symlink to a relative file":  "rel-link",
-		"through a symlinked dir":     "dir-link/secret.txt",
-		"inside .git":                 ".git/sam-test-marker",
-		"the .git directory itself":   ".git",
-	}
-	for _, endpoint := range []string{"files/raw", "files/download", "git/file"} {
-		for name, path := range escapes {
-			t.Run(endpoint+"/"+name, func(t *testing.T) {
-				rec := f.get(t, endpoint, confined(map[string]string{"path": path}))
-				if rec.Code == http.StatusOK {
-					t.Fatalf("%s %q was served: %s", endpoint, path, bodyOf(t, rec))
-				}
-				if body := bodyOf(t, rec); strings.Contains(body, "outside secret") || strings.Contains(body, "inside .git") {
-					t.Fatalf("%s %q leaked content: %s", endpoint, path, body)
-				}
-				if got := rec.Header().Get(pathConfinementHeader); got != pathConfinementWorkDir {
-					t.Fatalf("%s did not confirm confinement (header %q)", endpoint, got)
+	forEachConfinementRuntime(t, func(t *testing.T, f confinementFixture) {
+		escapes := map[string]string{
+			"absolute path":               "/etc/hostname",
+			"home-relative path":          "~/.bashrc",
+			"traversal":                   "../outside/secret.txt",
+			"symlink to an absolute file": "abs-link",
+			"symlink to a relative file":  "rel-link",
+			"through a symlinked dir":     "dir-link/secret.txt",
+			"inside .git":                 ".git/sam-test-marker",
+			"the .git directory itself":   ".git",
+			"inside a nested .git":        "vendor/lib/.git/config",
+		}
+		for _, endpoint := range []string{"files/raw", "files/download", "git/file"} {
+			for name, path := range escapes {
+				t.Run(endpoint+"/"+name, func(t *testing.T) {
+					rec := f.get(t, endpoint, confined(map[string]string{"path": path}))
+					body := bodyOf(t, rec)
+					if rec.Code != http.StatusNotFound {
+						t.Fatalf("%s %q: status %d, want 404: %s", endpoint, path, rec.Code, body)
+					}
+					if strings.Contains(body, "outside secret") || strings.Contains(body, "inside .git") {
+						t.Fatalf("%s %q leaked content: %s", endpoint, path, body)
+					}
+					if got := rec.Header().Get(pathConfinementHeader); got != pathConfinementWorkDir {
+						t.Fatalf("%s did not confirm confinement (header %q)", endpoint, got)
+					}
+				})
+			}
+		}
+		for name, path := range map[string]string{
+			"absolute dir":           "/etc",
+			"traversal":              "../outside",
+			"symlinked dir":          "dir-link",
+			"symlinked dir, slashed": "dir-link/",
+			".git":                   ".git",
+			"a nested .git":          "vendor/lib/.git",
+		} {
+			t.Run("files/list/"+name, func(t *testing.T) {
+				rec := f.get(t, "files/list", confined(map[string]string{"path": path}))
+				if rec.Code != http.StatusNotFound {
+					t.Fatalf("listing %q: status %d, want 404: %s", path, rec.Code, bodyOf(t, rec))
 				}
 			})
 		}
-	}
-	for name, path := range map[string]string{
-		"absolute dir":           "/etc",
-		"symlinked dir":          "dir-link",
-		"symlinked dir, slashed": "dir-link/",
-		".git":                   ".git",
-	} {
-		t.Run("files/list/"+name, func(t *testing.T) {
-			rec := f.get(t, "files/list", confined(map[string]string{"path": path}))
-			if rec.Code == http.StatusOK {
-				t.Fatalf("listing %q was served: %s", path, bodyOf(t, rec))
-			}
-		})
-	}
+	})
 }
 
 // Control: the same endpoints serve the working tree, including a symlink that stays inside.
 func TestConfinedReadsServeTheWorkingTree(t *testing.T) {
-	f := newConfinementFixture(t)
-	for _, endpoint := range []string{"files/raw", "files/download"} {
-		for path, want := range map[string]string{"README.md": "hello from the repo", "sub/ok.txt": "inside", "inside-link": "inside"} {
-			rec := f.get(t, endpoint, confined(map[string]string{"path": path}))
-			if rec.Code != http.StatusOK || !strings.Contains(bodyOf(t, rec), want) {
-				t.Fatalf("%s %q: status %d body %q", endpoint, path, rec.Code, bodyOf(t, rec))
+	forEachConfinementRuntime(t, func(t *testing.T, f confinementFixture) {
+		for _, endpoint := range []string{"files/raw", "files/download"} {
+			for path, want := range map[string]string{"README.md": "hello from the repo", "sub/ok.txt": "inside", "inside-link": "inside"} {
+				rec := f.get(t, endpoint, confined(map[string]string{"path": path}))
+				if rec.Code != http.StatusOK || !strings.Contains(bodyOf(t, rec), want) {
+					t.Fatalf("%s %q: status %d body %q", endpoint, path, rec.Code, bodyOf(t, rec))
+				}
+				if rec.Header().Get(pathConfinementHeader) != pathConfinementWorkDir {
+					t.Fatalf("%s did not confirm confinement", endpoint)
+				}
 			}
-			if rec.Header().Get(pathConfinementHeader) != pathConfinementWorkDir {
-				t.Fatalf("%s did not confirm confinement", endpoint)
+		}
+		file := f.get(t, "git/file", confined(map[string]string{"path": "sub/ok.txt"}))
+		if file.Code != http.StatusOK || !strings.Contains(bodyOf(t, file), "inside") {
+			t.Fatalf("git/file: %d %s", file.Code, bodyOf(t, file))
+		}
+		committed := f.get(t, "git/file", confined(map[string]string{"path": "README.md", "ref": "HEAD"}))
+		if committed.Code != http.StatusOK || !strings.Contains(bodyOf(t, committed), "hello from the repo") {
+			t.Fatalf("git/file at HEAD: %d %s", committed.Code, bodyOf(t, committed))
+		}
+		// A teammate sees exactly the listing the owner sees inside the tree.
+		names := func(rec *httptest.ResponseRecorder) []string {
+			t.Helper()
+			var listing FileListResponse
+			if err := json.Unmarshal([]byte(bodyOf(t, rec)), &listing); err != nil || rec.Code != http.StatusOK {
+				t.Fatalf("files/list: %d %v", rec.Code, err)
+			}
+			out := make([]string, 0, len(listing.Entries))
+			for _, entry := range listing.Entries {
+				out = append(out, entry.Type+":"+entry.Name)
+			}
+			return out
+		}
+		teammateSub := names(f.get(t, "files/list", confined(map[string]string{"path": "sub"})))
+		ownerSub := names(f.get(t, "files/list", map[string]string{"path": "sub"}))
+		if strings.Join(teammateSub, ",") != strings.Join(ownerSub, ",") || !strings.Contains(strings.Join(teammateSub, ","), "file:ok.txt") {
+			t.Fatalf("files/list sub: teammate %v, owner %v", teammateSub, ownerSub)
+		}
+		// A vendored folder lists normally; only its .git is refused.
+		vendor := names(f.get(t, "files/list", confined(map[string]string{"path": "vendor/lib"})))
+		if !strings.Contains(strings.Join(vendor, ","), ".git") {
+			t.Fatalf("files/list vendor/lib: %v", vendor)
+		}
+		root := f.get(t, "files/list", confined(nil))
+		if root.Code != http.StatusOK || root.Header().Get(pathConfinementHeader) != pathConfinementWorkDir {
+			t.Fatalf("files/list root: %d", root.Code)
+		}
+		for _, endpoint := range []string{"files/find", "git/status"} {
+			rec := f.get(t, endpoint, confined(nil))
+			if rec.Code != http.StatusOK || rec.Header().Get(pathConfinementHeader) != pathConfinementWorkDir {
+				t.Fatalf("%s: %d header %q", endpoint, rec.Code, rec.Header().Get(pathConfinementHeader))
+			}
+			if strings.Contains(bodyOf(t, rec), "secret") {
+				t.Fatalf("%s listed something outside the tree", endpoint)
 			}
 		}
-	}
-	file := f.get(t, "git/file", confined(map[string]string{"path": "sub/ok.txt"}))
-	if file.Code != http.StatusOK || !strings.Contains(bodyOf(t, file), "inside") {
-		t.Fatalf("git/file: %d %s", file.Code, bodyOf(t, file))
-	}
-	committed := f.get(t, "git/file", confined(map[string]string{"path": "README.md", "ref": "HEAD"}))
-	if committed.Code != http.StatusOK || !strings.Contains(bodyOf(t, committed), "hello from the repo") {
-		t.Fatalf("git/file at HEAD: %d %s", committed.Code, bodyOf(t, committed))
-	}
-	// A teammate sees exactly the listing the owner sees inside the tree.
-	names := func(rec *httptest.ResponseRecorder) []string {
-		t.Helper()
-		var listing FileListResponse
-		if err := json.Unmarshal([]byte(bodyOf(t, rec)), &listing); err != nil || rec.Code != http.StatusOK {
-			t.Fatalf("files/list: %d %v", rec.Code, err)
+	})
+}
+
+// A cached confined read answers 304 and still confirms the confinement, so the control plane
+// can tell a confined 304 from an old agent's.
+func TestConfinedNotModifiedKeepsTheConfinementHeader(t *testing.T) {
+	forEachConfinementRuntime(t, func(t *testing.T, f confinementFixture) {
+		first := f.get(t, "files/raw", confined(map[string]string{"path": "README.md"}))
+		etag := first.Header().Get("ETag")
+		if first.Code != http.StatusOK || etag == "" {
+			t.Fatalf("files/raw: %d etag %q", first.Code, etag)
 		}
-		out := make([]string, 0, len(listing.Entries))
-		for _, entry := range listing.Entries {
-			out = append(out, entry.Type+":"+entry.Name)
+		cached := f.request(t, "files/raw", confined(map[string]string{"path": "README.md"}), map[string]string{"If-None-Match": etag})
+		if cached.Code != http.StatusNotModified {
+			t.Fatalf("files/raw with a matching ETag: %d, want 304", cached.Code)
 		}
-		return out
-	}
-	teammateSub := names(f.get(t, "files/list", confined(map[string]string{"path": "sub"})))
-	ownerSub := names(f.get(t, "files/list", map[string]string{"path": "sub"}))
-	if strings.Join(teammateSub, ",") != strings.Join(ownerSub, ",") || !strings.Contains(strings.Join(teammateSub, ","), "file:ok.txt") {
-		t.Fatalf("files/list sub: teammate %v, owner %v", teammateSub, ownerSub)
-	}
-	root := f.get(t, "files/list", confined(nil))
-	if root.Code != http.StatusOK || root.Header().Get(pathConfinementHeader) != pathConfinementWorkDir {
-		t.Fatalf("files/list root: %d", root.Code)
-	}
-	for _, endpoint := range []string{"files/find", "git/status"} {
-		rec := f.get(t, endpoint, confined(nil))
-		if rec.Code != http.StatusOK || rec.Header().Get(pathConfinementHeader) != pathConfinementWorkDir {
-			t.Fatalf("%s: %d header %q", endpoint, rec.Code, rec.Header().Get(pathConfinementHeader))
+		if cached.Header().Get(pathConfinementHeader) != pathConfinementWorkDir {
+			t.Fatal("a confined 304 did not confirm confinement")
 		}
-		if strings.Contains(bodyOf(t, rec), "secret") {
-			t.Fatalf("%s listed something outside the tree", endpoint)
-		}
-	}
+	})
 }
 
 // The untracked fallback in git/diff cats the file, which follows symlinks.
 func TestConfinedGitDiffDoesNotCatAnUntrackedSymlinkOut(t *testing.T) {
-	f := newConfinementFixture(t)
-	rec := f.get(t, "git/diff", confined(map[string]string{"path": "rel-link"}))
-	if strings.Contains(bodyOf(t, rec), "outside secret") {
-		t.Fatalf("git/diff followed an untracked symlink out of the tree: %s", bodyOf(t, rec))
-	}
-	if rec.Header().Get(pathConfinementHeader) != pathConfinementWorkDir {
-		t.Fatal("git/diff did not confirm confinement")
-	}
-	// Control: an untracked file inside the tree still shows as all additions.
-	if err := os.WriteFile(filepath.Join(f.repo, "new.txt"), []byte("brand new\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	inside := f.get(t, "git/diff", confined(map[string]string{"path": "new.txt"}))
-	if inside.Code != http.StatusOK || !strings.Contains(bodyOf(t, inside), "+brand new") {
-		t.Fatalf("git/diff of an untracked file: %d %s", inside.Code, bodyOf(t, inside))
-	}
-	absolute := f.get(t, "git/diff", confined(map[string]string{"path": "/etc/hostname"}))
-	if absolute.Code == http.StatusOK {
-		t.Fatalf("git/diff served an absolute path: %s", bodyOf(t, absolute))
-	}
+	forEachConfinementRuntime(t, func(t *testing.T, f confinementFixture) {
+		for _, path := range []string{"rel-link", "vendor/lib/.git/config"} {
+			rec := f.get(t, "git/diff", confined(map[string]string{"path": path}))
+			body := bodyOf(t, rec)
+			if strings.Contains(body, "outside secret") || strings.Contains(body, "inside .git") {
+				t.Fatalf("git/diff %q read out of the working tree: %s", path, body)
+			}
+			// Refused like every other endpoint, not answered as an empty diff.
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("git/diff %q: status %d, want 404: %s", path, rec.Code, body)
+			}
+			if rec.Header().Get(pathConfinementHeader) != pathConfinementWorkDir {
+				t.Fatal("git/diff did not confirm confinement")
+			}
+		}
+		// Control: an untracked file inside the tree still shows as all additions.
+		if err := os.WriteFile(filepath.Join(f.repo, "new.txt"), []byte("brand new\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		inside := f.get(t, "git/diff", confined(map[string]string{"path": "new.txt"}))
+		if inside.Code != http.StatusOK || !strings.Contains(bodyOf(t, inside), "+brand new") {
+			t.Fatalf("git/diff of an untracked file: %d %s", inside.Code, bodyOf(t, inside))
+		}
+		for _, path := range []string{"/etc/hostname", "../outside/secret.txt"} {
+			rec := f.get(t, "git/diff", confined(map[string]string{"path": path}))
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("git/diff %q: status %d, want 404: %s", path, rec.Code, bodyOf(t, rec))
+			}
+		}
+	})
 }
 
 // The owner's requests carry no confine parameter: unchanged, and not marked as confined.
 func TestUnconfinedReadsAreUnchangedForTheOwner(t *testing.T) {
-	f := newConfinementFixture(t)
-	rec := f.get(t, "files/raw", map[string]string{"path": "dir-link/secret.txt"})
-	if rec.Code != http.StatusOK || !strings.Contains(bodyOf(t, rec), "outside secret") {
-		t.Fatalf("owner read through a symlinked dir: %d %s", rec.Code, bodyOf(t, rec))
+	forEachConfinementRuntime(t, func(t *testing.T, f confinementFixture) {
+		rec := f.get(t, "files/raw", map[string]string{"path": "dir-link/secret.txt"})
+		if rec.Code != http.StatusOK || !strings.Contains(bodyOf(t, rec), "outside secret") {
+			t.Fatalf("owner read through a symlinked dir: %d %s", rec.Code, bodyOf(t, rec))
+		}
+		if rec.Header().Get(pathConfinementHeader) != "" {
+			t.Fatal("an unconfined response must not claim confinement")
+		}
+		file := f.get(t, "git/file", map[string]string{"path": "abs-link"})
+		if file.Code != http.StatusOK || !strings.Contains(bodyOf(t, file), "outside secret") {
+			t.Fatalf("owner git/file through a symlink: %d %s", file.Code, bodyOf(t, file))
+		}
+		// The owner's traversal answer keeps its wording.
+		traversal := f.get(t, "files/raw", map[string]string{"path": "../outside/secret.txt"})
+		if traversal.Code != http.StatusBadRequest || !strings.Contains(bodyOf(t, traversal), "path traversal is not allowed") {
+			t.Fatalf("owner traversal: %d %s", traversal.Code, bodyOf(t, traversal))
+		}
+	})
+}
+
+// On a VM the resolution, the stat and the read all run through docker exec, in the workspace's
+// devcontainer, as its user and from its working directory.
+func TestConfinedReadsRunThroughDockerExecOnAVM(t *testing.T) {
+	f := newConfinementFixture(t, confinementDevcontainer)
+	rec := f.get(t, "files/raw", confined(map[string]string{"path": "README.md"}))
+	if rec.Code != http.StatusOK || !strings.Contains(bodyOf(t, rec), "hello from the repo") {
+		t.Fatalf("files/raw: %d %s", rec.Code, bodyOf(t, rec))
 	}
-	if rec.Header().Get(pathConfinementHeader) != "" {
-		t.Fatal("an unconfined response must not claim confinement")
+	resolved, err := filepath.EvalSymlinks(f.repo)
+	if err != nil {
+		t.Fatal(err)
 	}
-	file := f.get(t, "git/file", map[string]string{"path": "abs-link"})
-	if file.Code != http.StatusOK || !strings.Contains(bodyOf(t, file), "outside secret") {
-		t.Fatalf("owner git/file through a symlink: %d %s", file.Code, bodyOf(t, file))
+	prefix := "exec -i -u node -w " + f.repo + " " + confinementContainerID + " "
+	calls := f.dockerCalls()
+	for _, want := range []string{
+		prefix + "realpath . ./README.md",
+		prefix + "stat -c %F\t%s\t%Y -- " + resolved + "/README.md",
+		prefix + "cat -- " + resolved + "/README.md",
+	} {
+		if !slices.Contains(calls, want) {
+			t.Fatalf("missing docker call %q in %q", want, calls)
+		}
 	}
 }
 
 func TestUnknownConfinementIsRefused(t *testing.T) {
-	f := newConfinementFixture(t)
+	f := newConfinementFixture(t, confinementStandalone)
 	for _, endpoint := range []string{"files/raw", "files/list", "files/find", "git/status", "git/file", "git/diff", "files/download"} {
 		rec := f.get(t, endpoint, map[string]string{pathConfinementParam: "everything", "path": "README.md"})
 		if rec.Code != http.StatusBadRequest {
@@ -313,7 +493,11 @@ func TestConfineResolvedPath(t *testing.T) {
 		{"/w/repo", "/w", false},
 		{"/w/repo", "/w/repo/.git", false},
 		{"/w/repo", "/w/repo/.git/config", false},
+		{"/w/repo", "/w/repo/vendor/lib/.git", false},
+		{"/w/repo", "/w/repo/vendor/lib/.git/config", false},
 		{"/w/repo", "/w/repo/.gitignore", true},
+		{"/w/repo", "/w/repo/.github/workflows/ci.yml", true},
+		{"/w/repo", "/w/repo/vendor/.git-backup/x", true},
 		{"/", "/etc/passwd", false},
 		{"relative", "/w/repo", false},
 	}
@@ -332,23 +516,17 @@ func TestSanitizeConfinedPath(t *testing.T) {
 			t.Errorf("sanitizeConfinedPath(%q) = %q, %v; want %q", path, got, err, want)
 		}
 	}
-	for _, path := range []string{"/etc/passwd", "~/.ssh/id_rsa", "~", "../x", "a/../../x", "a\nb", "a\rb", ""} {
-		if _, err := sanitizeConfinedPath(path); err == nil {
-			t.Errorf("sanitizeConfinedPath(%q) accepted a path out of the working tree", path)
+	// Ways out of the working tree read as not found.
+	for _, path := range []string{"/etc/passwd", "~/.ssh/id_rsa", "~", "../x", "a/../../x"} {
+		if _, err := sanitizeConfinedPath(path); !errors.Is(err, errPathOutsideWorkTree) {
+			t.Errorf("sanitizeConfinedPath(%q) err=%v, want errPathOutsideWorkTree", path, err)
 		}
 	}
-}
-
-// The VM runtime runs the same resolution through docker exec, in the workspace's devcontainer,
-// as its user and from its working directory. The command must reach the container unchanged.
-func TestConfinedResolutionRunsInsideTheDevcontainer(t *testing.T) {
-	s := &Server{config: &config.Config{ContainerMode: true}}
-	cmd, err := s.workspaceExecCommand(context.Background(), "abc123", "node", "/workspaces/repo", "realpath", ".", "./README.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{dockerBinaryPath, "exec", "-i", "-u", "node", "-w", "/workspaces/repo", "abc123", "realpath", ".", "./README.md"}
-	if strings.Join(cmd.Args, " ") != strings.Join(want, " ") {
-		t.Fatalf("docker exec args = %q, want %q", cmd.Args, want)
+	// Malformed paths are bad requests.
+	for _, path := range []string{"a\nb", "a\rb", ""} {
+		_, err := sanitizeConfinedPath(path)
+		if err == nil || errors.Is(err, errPathOutsideWorkTree) {
+			t.Errorf("sanitizeConfinedPath(%q) err=%v, want a malformed-path error", path, err)
+		}
 	}
 }

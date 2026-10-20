@@ -266,7 +266,7 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := sanitizeFilePath(filePath); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writePathError(w, err, confined)
 		return
 	}
 
@@ -294,7 +294,7 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// First check file exists and get size (no shell interpolation — pass path as arg)
-	sizeOutput, _, statErr := s.execInContainer(ctx, containerID, user, workDir, "stat", "-c", "%s", readPath)
+	sizeOutput, _, statErr := s.execInContainer(ctx, containerID, user, workDir, "stat", "-c", "%s", "--", readPath)
 	if statErr != nil {
 		writeError(w, http.StatusNotFound, "file not found")
 		return

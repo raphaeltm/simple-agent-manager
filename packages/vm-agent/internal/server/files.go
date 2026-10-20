@@ -53,6 +53,10 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 	}
 	if dirPath != "." {
 		if err := sanitizeFilePath(dirPath); err != nil {
+			if confined {
+				writePathError(w, err, confined)
+				return
+			}
 			http.Error(w, fmt.Sprintf(`{"error":"invalid path: %s"}`, err.Error()), http.StatusBadRequest)
 			return
 		}
@@ -247,7 +251,7 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := sanitizeFilePath(filePath); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writePathError(w, err, confined)
 		return
 	}
 
@@ -277,7 +281,7 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
 	// Stat the file to get type, size, and mtime. Uses direct args (no shell)
 	// to avoid injection. Format: file_type\tsize_bytes\tmtime_epoch
 	statOut, statStderr, statErr := s.execInContainer(ctx, containerID, user, workDir,
-		"stat", "-c", "%F\t%s\t%Y", readPath)
+		"stat", "-c", "%F\t%s\t%Y", "--", readPath)
 	if statErr != nil {
 		slog.Warn("stat failed for raw file",
 			"path", filePath, "workspace", workspaceID,

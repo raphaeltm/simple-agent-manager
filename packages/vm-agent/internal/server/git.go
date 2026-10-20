@@ -143,7 +143,7 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := sanitizeFilePath(filePath); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writePathError(w, err, confined)
 		return
 	}
 	// Git reads a confined path from the working tree root; it never leaves the repository.
@@ -187,13 +187,14 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 		readPath := filePath
 		if confined {
 			// cat follows symlinks, so an untracked one must still resolve inside the tree.
-			readPath, err = s.resolveConfinedPath(ctx, containerID, user, workDir, filePath)
-		}
-		if err == nil {
-			content, _, catErr := s.execInContainer(ctx, containerID, user, workDir, "cat", "--", readPath)
-			if catErr == nil && content != "" {
-				diff = formatAsAdditions(filePath, content)
+			if readPath, err = s.resolveConfinedPath(ctx, containerID, user, workDir, filePath); err != nil {
+				writeConfinementError(w, err)
+				return
 			}
+		}
+		content, _, catErr := s.execInContainer(ctx, containerID, user, workDir, "cat", "--", readPath)
+		if catErr == nil && content != "" {
+			diff = formatAsAdditions(filePath, content)
 		}
 	}
 
@@ -227,7 +228,7 @@ func (s *Server) handleGitFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := sanitizeFilePath(filePath); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writePathError(w, err, confined)
 		return
 	}
 
@@ -371,6 +372,9 @@ func parseRemoteBranches(output string) []GitBranchInfo {
 // sanitizeFilePath validates that a file path is safe for use in git/file commands.
 // Rejects path traversal and null bytes. Absolute paths are allowed because
 // the user owns the container and should be able to view any file in it.
+// errPathTraversal marks a path with a ".." component.
+var errPathTraversal = errors.New("path traversal is not allowed")
+
 func sanitizeFilePath(path string) error {
 	if path == "" {
 		return fmt.Errorf("file path is empty")
@@ -383,13 +387,13 @@ func sanitizeFilePath(path string) error {
 	// Check for path traversal
 	cleaned := filepath.Clean(path)
 	if strings.HasPrefix(cleaned, "..") {
-		return fmt.Errorf("path traversal is not allowed")
+		return errPathTraversal
 	}
 
 	// Also reject any component that is ".."
 	for _, part := range strings.Split(cleaned, string(filepath.Separator)) {
 		if part == ".." {
-			return fmt.Errorf("path traversal is not allowed")
+			return errPathTraversal
 		}
 	}
 

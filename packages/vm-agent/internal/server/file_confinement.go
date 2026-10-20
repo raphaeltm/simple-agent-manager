@@ -14,7 +14,7 @@ import (
 // A teammate a chat is shared with reads the workspace through the control plane, which asks
 // for ?confine=workdir. Every path is then relative to the repository working tree, every
 // symlink in it is resolved inside the workspace, and the real path must stay inside the
-// working tree and outside its .git directory. The response carries pathConfinementHeader;
+// working tree and outside any .git directory. The response carries pathConfinementHeader;
 // the control plane returns nothing to a teammate without it, so an agent that predates this
 // code fails closed. The owner's requests carry no confine parameter and are unchanged.
 const (
@@ -24,7 +24,7 @@ const (
 )
 
 // errPathOutsideWorkTree marks a path that is not available under confinement: outside the
-// working tree, inside .git, or unresolvable. It answers as not found.
+// working tree, inside a .git directory, or unresolvable. It answers as not found.
 var errPathOutsideWorkTree = errors.New("path is outside the repository working tree")
 
 // requestedConfinement reports whether the request asks for working-tree confinement and, if
@@ -46,6 +46,9 @@ func requestedConfinement(w http.ResponseWriter, r *http.Request) (bool, error) 
 // "./" so no command reads it as an option.
 func sanitizeConfinedPath(path string) (string, error) {
 	if err := sanitizeFilePath(path); err != nil {
+		if errors.Is(err, errPathTraversal) {
+			return "", errPathOutsideWorkTree
+		}
 		return "", err
 	}
 	if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "~") {
@@ -74,6 +77,12 @@ func confinedGitPath(path string) (string, error) {
 // resolveConfinedPath resolves every symlink in path, inside the workspace and as its user,
 // and returns the real path when it is the working tree or inside it. The caller reads the
 // returned path, not the requested one.
+//
+// The check and the read are separate commands, so a process inside the workspace could swap
+// a path for a symlink between them. That is accepted: only code running in the workspace can
+// make the swap, and such code can already read every file there itself. A teammate gets that
+// only through the agent, which the share dialog warns about and whose commands show in the
+// chat.
 func (s *Server) resolveConfinedPath(ctx context.Context, containerID, user, workDir, path string) (string, error) {
 	confined, err := sanitizeConfinedPath(path)
 	if err != nil {
@@ -104,13 +113,27 @@ func confineResolvedPath(root, target string) (string, error) {
 	if root == string(filepath.Separator) {
 		return "", errPathOutsideWorkTree
 	}
-	inside := target == root || strings.HasPrefix(target, root+string(filepath.Separator))
-	gitDir := filepath.Join(root, ".git")
-	inGitDir := target == gitDir || strings.HasPrefix(target, gitDir+string(filepath.Separator))
-	if !inside || inGitDir {
+	if target != root && !strings.HasPrefix(target, root+string(filepath.Separator)) {
 		return "", errPathOutsideWorkTree
 	}
+	// No .git directory, the repository's or a nested one's: they hold remotes and
+	// credentials, not working files.
+	rel := strings.TrimPrefix(strings.TrimPrefix(target, root), string(filepath.Separator))
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == ".git" {
+			return "", errPathOutsideWorkTree
+		}
+	}
 	return target, nil
+}
+
+// writePathError answers a path parameter that failed validation. Under confinement a
+// traversal answers as not found, like every other way out of the working tree.
+func writePathError(w http.ResponseWriter, err error, confined bool) {
+	if confined && errors.Is(err, errPathTraversal) {
+		err = errPathOutsideWorkTree
+	}
+	writeConfinementError(w, err)
 }
 
 // writeConfinementError answers a refused confined path. A malformed path is a bad request;
