@@ -50,7 +50,13 @@ function app() {
   return root;
 }
 
-function call(userId: string, method: string, path: string, body?: unknown) {
+function call(
+  userId: string,
+  method: string,
+  path: string,
+  body?: unknown,
+  headers: Record<string, string> = {}
+) {
   return app().request(
     `/api/projects/${PROJECT}${path}`,
     {
@@ -58,6 +64,7 @@ function call(userId: string, method: string, path: string, body?: unknown) {
       headers: {
         Cookie: cookies[userId]!,
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...headers,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     },
@@ -86,6 +93,10 @@ function installVm(nodeId: string, options: { confines: boolean }) {
       headers.set('X-SAM-Path-Confinement', 'workdir');
     }
     const path = url.searchParams.get('path') ?? '';
+    // The real agent answers a matching ETag with 304, confinement header included.
+    if (url.pathname.endsWith('/files/raw') && request.headers.get('If-None-Match')) {
+      return new Response(null, { status: 304, headers });
+    }
     if (url.pathname.endsWith('/git/file')) {
       return new Response(JSON.stringify({ content: `content of ${path}`, filePath: path }), {
         headers,
@@ -229,6 +240,35 @@ describe('Files and Git for a teammate in a shared chat', () => {
     }
   });
 
+  it('passes a 304 through only when the agent confirms the confinement', async () => {
+    const etag = { 'If-None-Match': '"readme-etag"' };
+    const confined = await ownerChat('Cached read');
+    await share(confined.sessionId);
+    const vm = installVm(confined.nodeId, { confines: true });
+    const cached = await call(
+      TEAMMATE,
+      'GET',
+      `/sessions/${confined.sessionId}/files/raw?path=README.md`,
+      undefined,
+      etag
+    );
+    expect(cached.status).toBe(304);
+    expect(vm.at(-1)!.params.get('confine')).toBe('workdir');
+
+    vi.mocked(globalThis.fetch).mockRestore();
+    const old = await ownerChat('Cached read, old agent');
+    await share(old.sessionId);
+    installVm(old.nodeId, { confines: false });
+    const refused = await call(
+      TEAMMATE,
+      'GET',
+      `/sessions/${old.sessionId}/files/raw?path=README.md`,
+      undefined,
+      etag
+    );
+    expect(refused.status).toBe(409);
+  });
+
   it('refuses absolute and home paths before reaching the agent', async () => {
     const chat = await ownerChat('Absolute paths');
     await share(chat.sessionId);
@@ -289,6 +329,10 @@ describe('Files and Git for a teammate in a shared chat', () => {
     for (const { route } of READ_ROUTES) {
       const response = await call(READER, 'GET', `/sessions/${chat.sessionId}/${route}`);
       expect(response.status, route).toBe(403);
+      // The refusal names what was asked for.
+      expect(await response.text(), route).toContain(
+        route.startsWith('git/') ? 'review changes in this session' : 'read files in this session'
+      );
     }
     expect(vm).toEqual([]);
   });

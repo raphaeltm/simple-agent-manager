@@ -31,6 +31,10 @@ import {
  * repository working tree (idea 01M59MYE4GY91BWTE8TZF1ZB5D). Upload stays owner-only.
  */
 const SHARED_READ = { allowSharedReader: true } as const;
+const SHARED_GIT_READ = {
+  allowSharedReader: true,
+  action: 'review changes in this session',
+} as const;
 
 const fileProxyRoutes = new Hono<{ Bindings: Env }>();
 
@@ -95,7 +99,13 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/status', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const target = await resolveSessionWorkspace(c.env, projectId, sessionId, userId, SHARED_READ);
+  const target = await resolveSessionWorkspace(
+    c.env,
+    projectId,
+    sessionId,
+    userId,
+    SHARED_GIT_READ
+  );
   const params = new URLSearchParams();
   confineForSharedReader(target, 'git/status', params);
 
@@ -108,7 +118,13 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/diff', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
 
-  const target = await resolveSessionWorkspace(c.env, projectId, sessionId, userId, SHARED_READ);
+  const target = await resolveSessionWorkspace(
+    c.env,
+    projectId,
+    sessionId,
+    userId,
+    SHARED_GIT_READ
+  );
 
   const params = new URLSearchParams();
   const rawPath = c.req.query('path');

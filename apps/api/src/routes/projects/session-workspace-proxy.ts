@@ -85,7 +85,7 @@ export async function resolveSessionWorkspace(
   projectId: string,
   sessionId: string,
   userId: string,
-  options: { allowSharedReader?: boolean } = {}
+  options: { allowSharedReader?: boolean; action?: string } = {}
 ): Promise<SessionWorkspace> {
   const db = drizzle(env.DATABASE, { schema });
 
@@ -136,13 +136,14 @@ export async function resolveSessionWorkspace(
   }
 
   // Not the caller's workspace: a teammate the chat is shared with reads its owner's, found
-  // by the chat link alone. A teammate's read costs 7 round trips: project access, the link,
-  // the grant read and two membership checks, the node's runtime and the VM agent.
+  // by the chat link alone. A teammate's read costs 8 round trips: project access (the project
+  // and the membership), the link, the grant read and two membership checks, the node's runtime
+  // and the VM agent.
   const candidate = linked[0];
   if (!workspace && options.allowSharedReader && candidate) {
     const writer = await requireSessionWriter(env, projectId, sessionId, userId, {
       db,
-      action: 'read files in this session',
+      action: options.action ?? 'read files in this session',
     });
     if (writer.role === 'grantee' && writer.grantId && writer.ownerUserId === candidate.userId) {
       workspace = candidate;

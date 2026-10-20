@@ -19,6 +19,8 @@ import type { ProjectData } from '../../src/durable-objects/project-data';
 import { resolveDurableExecutionConfig } from '../../src/durable-objects/project-data/durable-execution-config';
 import { runScheduleAlarm } from '../../src/durable-objects/project-data/project-event-schedules-runner';
 import { createSchedule as storeSchedule } from '../../src/durable-objects/project-data/project-event-schedules-storage';
+import { admitProjectEvent } from '../../src/durable-objects/project-data/project-events';
+import { createWatch as storeWatch } from '../../src/durable-objects/project-data/project-standing-watches-storage';
 import { claimDuePromptDeliveries } from '../../src/durable-objects/project-data/prompt-delivery';
 import { runPromptDeliveryClaim } from '../../src/durable-objects/project-data/prompt-delivery-runner';
 import type { Env } from '../../src/env';
@@ -237,6 +239,33 @@ async function runAlarm() {
   await runInDurableObject(stub(), async (instance) => {
     await (instance as unknown as { alarm(): Promise<void> }).alarm();
   });
+}
+
+type WatchRow = { state: string; last_error: string | null; execution_count: number };
+
+async function watchRow(id: string) {
+  return sql(
+    (s) =>
+      s
+        .exec(
+          'SELECT state, last_error, execution_count FROM project_standing_watches WHERE id = ?',
+          id
+        )
+        .toArray()[0] as WatchRow
+  );
+}
+
+/**
+ * The alarm runs standing watches under `waitUntil`, after `alarm()` returns, so wait for each
+ * watch to leave its starting state. Bounded, so a watch the alarm never reaches fails the test.
+ */
+async function settledWatches(ids: string[], settled: (row: WatchRow) => boolean) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const rows = await Promise.all(ids.map(watchRow));
+    if (rows.every(settled)) return rows;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return Promise.all(ids.map(watchRow));
 }
 
 /**
@@ -617,6 +646,54 @@ describe('scheduled messages into a shared chat', () => {
 
     expect((await createSchedule(OWNER, chat.sessionId)).status).toBe(201);
     expect((await createSchedule(READER, chat.sessionId)).status).toBe(400);
+  });
+
+  it('pauses, from the real alarm, a standing watch made before only owners could aim one at a chat', async () => {
+    const chat = await ownerChat('Watch made before the fix');
+    // Written as the old admission allowed it: a teammate's watch messaging the owner's chat.
+    const legacyId = await runInDurableObject(stub(), async (_instance, state) =>
+      state.storage.transactionSync(
+        () =>
+          storeWatch(
+            state.storage.sql,
+            testEnv,
+            PROJECT,
+            TEAMMATE,
+            watchRequest(chat.sessionId),
+            Date.now()
+          ).watch.id
+      )
+    );
+    // Control: the owner's own watch on the same chat, which the same alarm must run.
+    const owned = await call(OWNER, 'POST', '/standing-watches', watchRequest(chat.sessionId));
+    expect(owned.status).toBe(201);
+    const ownedId = ((await owned.json()) as ProjectStandingWatchMutationResult).watch.id;
+    await runInDurableObject(stub(), async (_instance, state) => {
+      state.storage.transactionSync(() =>
+        admitProjectEvent(state.storage.sql, testEnv, PROJECT, {
+          projectId: PROJECT,
+          source: 'github',
+          eventType: 'check.completed',
+          subject: { type: 'check', id: legacyId },
+          deliveryKey: `check-${legacyId}`,
+          payloadFingerprint: `check-${legacyId}`,
+          metadata: { result: 'failed' },
+        })
+      );
+    });
+
+    await runAlarm();
+
+    const [legacy, own] = await settledWatches(
+      [legacyId, ownedId],
+      (row) => row.state !== 'active' || row.execution_count > 0
+    );
+    expect(legacy).toMatchObject({
+      state: 'paused',
+      last_error: 'Standing watch creator does not own the target chat',
+      execution_count: 0,
+    });
+    expect(own).toMatchObject({ state: 'active', execution_count: 1 });
   });
 
   it('lets only the chat’s owner point a standing watch at it, and only its creator change it', async () => {

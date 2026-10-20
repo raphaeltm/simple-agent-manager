@@ -107,6 +107,31 @@ describe('fetchWithTimeout', () => {
     );
   });
 
+  it('leaves the query string, which can carry a token, out of the timeout message', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const err = new Error('The operation was aborted');
+          err.name = 'AbortError';
+          reject(err);
+        });
+      });
+    });
+
+    const failure = await fetchWithTimeout(
+      'https://ws-abc.vm.example.test:8443/workspaces/ws-abc/files/raw?path=README.md&token=secret-token#top',
+      {},
+      50
+    ).catch((err: unknown) => err);
+
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    expect(message).toBe(
+      'Request timed out after 50ms: https://ws-abc.vm.example.test:8443/workspaces/ws-abc/files/raw'
+    );
+    expect(message).not.toContain('secret-token');
+  });
+
   it('propagates non-timeout errors', async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('Network error'));
 
