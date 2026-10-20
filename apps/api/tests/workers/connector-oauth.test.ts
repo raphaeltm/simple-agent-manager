@@ -206,7 +206,18 @@ describe('Connector OAuth real Workers/KV conformance', () => {
       );
     };
     const catalog = (await readMcp(listed)) as { result: { tools: Array<{ name: string }> } };
-    expect(catalog.result.tools).toHaveLength(18);
+    expect(catalog.result.tools).toHaveLength(25);
+    expect(catalog.result.tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining([
+        'sam_chat_interrupt',
+        'sam_chat_status',
+        'sam_chat_delivery_get',
+        'sam_chat_interactions',
+        'sam_work_changes',
+        'sam_chat_jobs_list',
+        'sam_operation_get',
+      ])
+    );
     const called = await invoke({
       jsonrpc: '2.0',
       id: 2,
