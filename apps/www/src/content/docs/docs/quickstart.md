@@ -31,7 +31,11 @@ From the **Dashboard**, click **Import Project** and pick a repository that has 
 
 ### 5. Chat
 
-Open your project and type what you want done in the chat — for example, "add input validation to the signup form and write tests." SAM automatically provisions a workspace, runs your chosen agent, streams its progress back to you in real time, while the agent works. Ask the agent to commit, push and open a pull request when you want the work published. If SAM first asks you to create a profile, choose **Build and open PRs**, then **Cloud VM**, for work like this: **Chat and explore** and **Instant container** profiles use a conversation workflow. In either workflow, ask the agent explicitly when you want commits, pushes or a pull request.
+Open your project and type what you want done in the chat — for example, "add input validation to the signup form, write tests, and open a pull request." SAM provisions a workspace, starts your chosen agent, and streams its progress to you as it works.
+
+**Say when you want a pull request.** SAM doesn't commit, push, or open one for you, so put it in your message, or ask the agent once the work looks right. (To make it the default for a profile, add the instruction to the profile's **System Prompt (append)**.)
+
+If SAM first asks you to create a profile, choose **Build and open PRs**, then **Cloud VM**, for work like this. **Chat and explore** and **Instant container** profiles are for questions and back-and-forth: their chats stay open for your next message instead of finishing on their own.
 
 ### 6. Come Back Later
 
@@ -41,7 +45,7 @@ Each card shows the task's status, the project it belongs to, when you submitted
 
 A sleeping conversation still counts as active — you can wake it for up to a week — which is why the list is ranked by recent messages rather than by start time: whatever you touched most recently stays on top, and dormant work drops off. The list only includes your own tasks that are queued, in progress, or asleep: finished, cancelled, and failed tasks are left out (even a failed task whose chat you can still wake), and so are teammates' tasks in a shared project. Find those in the project's session list. To hear when a task finishes or needs you, see [Notifications](/docs/guides/notifications/). An agent that stops to ask permission or a question inside the chat doesn't send a notification and isn't flagged on these cards: its chat is marked **Needs input** in the project's session list instead — see [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
 
-That's the whole loop: **import → chat → review the PR.** No terminal or server setup required.
+That's the whole loop: **import → chat → ask for a pull request → review it.** No terminal or server setup required.
 
 ## Self-Hosting
 
@@ -75,6 +79,6 @@ For detailed step-by-step instructions, see the [Self-Hosting Guide](/docs/guide
 ## Next Steps
 
 - [AI Agents](/docs/guides/agents/) — choose and configure your coding agent
-- [Idea Execution](/docs/guides/idea-execution/) — how chatting turns into finished pull requests
+- [Idea Execution](/docs/guides/idea-execution/) — what happens after you send work, and where it lands
 - [Core Concepts](/docs/concepts/) — the vocabulary behind projects, agents, and workspaces
 - [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/) — check on your work and start chats from the AI app you already use

@@ -9,13 +9,12 @@ SAM combines an in-app notification center with optional Web Push delivery for a
 
 | Type               | Urgency | When It Fires                                                                                                                              |
 | ------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **task_complete**  | Medium  | A task finishes executing successfully (includes PR URL or branch name)                                                                    |
+| **task_complete**  | Medium  | A task is marked complete. It reads **PR ready for review** with the pull request the agent reported, or else **Output on branch** with the task's branch name, which doesn't mean anything was pushed |
 | **needs_input**    | High    | An agent calls `request_human_input` because it needs your decision                                                                        |
 | **error**          | High    | Execution fails with an error                                                                                                              |
 | **progress**       | Low     | An agent reports incremental progress via `update_task_status`                                                                             |
 | **session_ended**  | Medium  | A conversation-mode session turn completes                                                                                                 |
-| **pr_created**     | Medium  | An agent creates a pull request                                                                                                            |
-| **cron_failure**   | High    | A five-minute operational recovery sweep fails, or a sweep opens a project's ProjectData archive circuit breaker (active superadmins only) |
+| **cron_failure**   | High    | A five-minute operational recovery sweep fails, a sweep opens a project's ProjectData archive circuit breaker, or SAM gives up retrying a GitHub trigger delivery (active superadmins only) |
 | **mention**        | Medium  | A teammate @mentions you in a chat comment or reply                                                                                        |
 | **comment**        | Low     | A teammate comments on a chat you own, or replies in a comment thread you are part of                                                      |
 | **session_access** | Medium  | A teammate shares a chat with you (saying for how long), extends or removes your access, or shares a chat you own with someone else        |
@@ -23,6 +22,24 @@ SAM combines an in-app notification center with optional Web Push delivery for a
 A permission request, question, or link card that an agent puts in the chat while it waits does
 **not** send a notification. Those show up as **Needs input** beside the chat in the project's
 session list — see [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
+
+**Settings → Notifications** still lists a **PR Created** switch, but SAM no longer sends that
+notification: SAM doesn't open pull requests itself, so a pull request link arrives in the agent's
+**Task Complete** notification when the agent reports one.
+
+### Attention and Updates
+
+The bell opens a panel with two tabs. **Attention** holds what needs you: an agent's question, a
+failure, a mention, and (for superadmins) an operational failure. Only these count toward the
+number on the bell. Everything else, including finished tasks, comments on your chats, and shared
+chats, is under **Updates**.
+
+Selecting a **Mention** or **Comment** notification opens the chat at that comment thread. A
+**Shared Session** notification says how long you can use the chat; nothing tells you when that time
+runs out (see [Share a chat](/docs/guides/collaboration/#share-a-chat)).
+
+To stop a kind of notification, switch it off in **Settings → Notifications**; the newer ones are
+**Mentions**, **Comments on your sessions**, and **Shared sessions**.
 
 ## Delivery Channels
 
@@ -38,6 +55,9 @@ SAM uses one standards-based Declarative Web Push payload for Safari, Chrome, an
 On iPhone and iPad, install SAM to the Home Screen before enabling push. Other supported
 browsers can enable push directly. Browser permission is requested only after you select
 **Enable push**, never on page load.
+
+Comment notifications are low urgency, so they stay in the app and are never pushed. Mentions and
+shared-chat notifications are pushed when push is on.
 
 ## Agent-Initiated Notifications
 

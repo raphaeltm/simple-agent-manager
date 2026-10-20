@@ -115,41 +115,8 @@ The servers on this page are third-party tools you give your agents. SAM's own b
 let agents create schedule, GitHub, and webhook triggers for their project; see
 [Ask an agent to set one up](/docs/guides/triggers/#ask-an-agent-to-set-one-up).
 
-## Keep release PR ownership explicit
+## Pull requests that agents take over
 
-When an agent takes responsibility for a PR after its task was dispatched, it can call
-`associate_pull_request` with the exact `prUrl`, caller-reported `prHeadBranch`, a `disposition` of `owned` or `held`,
-and a `reason` recording the assignment. One task can associate several PRs.
-The tool reuses current user and project-installation GitHub access to read the PR's
-current head branch. The supplied branch must match that read; missing access,
-failed reads and stale hints refuse the association without requesting grants or secrets.
-The atomic ownership check uses the verified branch, so an existing branch-only
-writer blocks its PR while unrelated active task/workspace branches remain independent.
-This read and the D1 write are not a cross-service transaction: associations remain
-responsibility evidence, and release actions still require fresh ordinary checks.
-The PR read uses the existing `SAM_GITHUB_TIMEOUT_MS` bound.
-URL, branch, predecessor and cursor fields use the configured MCP dispatch reference
-length bound; reasons use the configured activity message bound. Oversized inputs are rejected.
-`list_project_agents(prUrl)` includes these exact associations when finding active owners.
-
-Use `list_pull_request_associations(prUrl)` to inspect retained ownership evidence,
-including completed owners and held artifacts. Results are bounded by the existing
-configured task list page size/maximum. Supply `limit` and pass the returned
-`nextCursor` as `cursor` with the same `prUrl` filter to read subsequent pages.
-`hasMore` explicitly identifies incomplete evidence; read all pages before drawing
-conclusions. The composite URL/task cursor preserves same-PR continuation history.
-Pages are live reads, not a snapshot; absence never authorizes takeover. An association is evidence of responsibility,
-not permission to merge, close, or clean up a PR. A held artifact stays held.
-
-An explicitly authorized continuation can supply `previousTaskId` for a terminal task owned by the same user in the same project
-that has the same exact output PR or association. The predecessor stays terminal and
-its association history is retained. An active competing owner (including branch and description evidence) or a retained
-hold blocks reassignment. The tools derive identity from the agent token and recheck
-current project access; they do not reopen tasks or make merging a condition of completing
-research or draft-only work. Association records are append-only; correcting a hold is
-outside this initial slice.
-
-Deleting an owner task leaves its association evidence and holds intact; the list reports
-`ownerStatus: null` when that task no longer exists. An authorized continuation can name
-the retained predecessor association owned by the same user. Explicitly deleting the
-whole project removes its associations. These operations never merge or close GitHub PRs.
+SAM's built-in tools also let an agent record that it's responsible for a pull request it didn't
+open, such as a release PR it was asked to shepherd; see
+[Pull requests an agent takes over](/docs/guides/agents/#pull-requests-an-agent-takes-over).
