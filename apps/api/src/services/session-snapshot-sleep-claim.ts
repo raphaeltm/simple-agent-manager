@@ -80,12 +80,13 @@ export async function claimSessionSnapshotSleep(
   // capture is meant to repair. Explicit sleep may also replace expired state.
   // How many failures the episode may spend is decided by the caller from the
   // persisted episode (`sessionSleepEpisodePhase`), not by this claim.
-  const claimableSnapshotCondition = inArray(
-    snapshots.status,
-    input.force
-      ? ['pending', 'available', 'degraded', 'failed', 'expired']
-      : ['pending', 'available', 'degraded', 'failed', 'expired']
-  );
+  const claimableSnapshotCondition = inArray(snapshots.status, [
+    'pending',
+    'available',
+    'degraded',
+    'failed',
+    'expired',
+  ]);
   const staleClaim = and(
     eq(snapshots.sleepStatus, 'preparing'),
     or(isNull(snapshots.sleepClaimedAt), lte(snapshots.sleepClaimedAt, staleBefore))
