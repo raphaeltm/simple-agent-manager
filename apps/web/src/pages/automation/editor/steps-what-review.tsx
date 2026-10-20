@@ -19,6 +19,7 @@ import {
   INCIDENT_TEMPLATE_VARIABLES,
   WEBHOOK_TEMPLATE_VARIABLES,
 } from '../../../components/triggers/trigger-form-support';
+import { AUTOMATION_CHAT_PICKER_LIMIT } from '../../../lib/automation-config';
 import type { AutomationLookups } from '../data';
 import {
   describeEventFilter,
@@ -99,8 +100,13 @@ export function StepWhat({
     });
   };
 
-  const chats = lookups.chats;
+  // A watch acts as its creator, and may only message chats they own (the runner pauses it
+  // otherwise), so it offers only those. A one-time message may also go to a chat shared with
+  // you, which the list cannot tell apart; the API checks that when it is sent.
+  const chats =
+    state.start === 'event' ? lookups.chats.filter((chat) => chat.isMine !== false) : lookups.chats;
   const knownChat = chats.some((chat) => chat.id === action.sessionId);
+  const truncated = lookups.chats.length >= AUTOMATION_CHAT_PICKER_LIMIT;
   return (
     <div className="flex flex-col gap-6">
       {canMessageChat(state.start) && (
@@ -131,11 +137,15 @@ export function StepWhat({
         <Field
           label="Which chat?"
           error={errors.sessionId}
-          hint={
+          hint={`${
             state.start === 'event'
               ? 'A watch acts as the person who creates it, so it can only message chats they own.'
               : 'A chat you own, or one shared with you. If it is busy, the message waits its turn.'
-          }
+          }${
+            truncated
+              ? ` Only the ${AUTOMATION_CHAT_PICKER_LIMIT} most recent chats are listed; for an older one, open it and use Automation → Remind this chat later.`
+              : ''
+          }`}
         >
           {({ id, describedBy, invalid }) => (
             <select

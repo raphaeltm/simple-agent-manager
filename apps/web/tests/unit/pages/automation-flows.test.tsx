@@ -427,6 +427,35 @@ describe('create flow', () => {
   });
 });
 
+describe('choosing a chat to message', () => {
+  const sessions = [
+    { id: 'chat-mine', topic: 'My release chat', status: 'active', isMine: true },
+    { id: 'chat-theirs', topic: 'Teammate chat', status: 'active', isMine: false },
+  ];
+
+  it('offers a watch only the chats its creator owns', async () => {
+    const user = userEvent.setup();
+    api.listChatSessions.mockResolvedValue({ sessions, total: sessions.length });
+    renderAt('/projects/p1/automation/new?start=event');
+    await user.click(await screen.findByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('radio', { name: /Message a chat/ }));
+    const picker = screen.getByLabelText('Which chat?');
+    expect(within(picker).getByRole('option', { name: 'My release chat' })).toBeInTheDocument();
+    expect(within(picker).queryByRole('option', { name: 'Teammate chat' })).toBeNull();
+  });
+
+  it('offers a one-time message every listed chat, since shared chats qualify too', async () => {
+    const user = userEvent.setup();
+    api.listChatSessions.mockResolvedValue({ sessions, total: sessions.length });
+    renderAt('/projects/p1/automation/new?start=once');
+    await user.click(await screen.findByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('radio', { name: /Message a chat/ }));
+    const picker = screen.getByLabelText('Which chat?');
+    expect(within(picker).getByRole('option', { name: 'My release chat' })).toBeInTheDocument();
+    expect(within(picker).getByRole('option', { name: 'Teammate chat' })).toBeInTheDocument();
+  });
+});
+
 describe('editing a trigger', () => {
   it('opens on the schedule that was saved, not a default', async () => {
     api.getTrigger.mockResolvedValue(
