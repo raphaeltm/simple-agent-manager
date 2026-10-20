@@ -291,6 +291,37 @@ async function setupMocks(page: Page, session: ReturnType<typeof makeSession>) {
   });
 }
 
+/**
+ * A grant that ends at `expiresAt` by the page's own clock. The access route answers like the
+ * server: its own clock, and an ended grant is gone.
+ */
+async function setupExpiringGrant(
+  page: Page,
+  expiresAt: number,
+  overrides: Record<string, unknown> = {}
+) {
+  const accessNow = () => {
+    const base = accessSummary('grantee', 3);
+    const ended = Date.now() >= expiresAt;
+    return {
+      ...base,
+      viewerAccess: ended ? 'reader' : 'grantee',
+      grants: ended
+        ? base.grants.slice(1)
+        : [{ ...base.grants[0]!, expiresAt }, ...base.grants.slice(1)],
+      serverTime: Date.now(),
+    };
+  };
+  await setupMocks(page, makeSession('grantee', { ...overrides, access: accessNow() }));
+  await page.route(`**/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/access`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(accessNow()),
+    })
+  );
+}
+
 /** Scroll the virtualized conversation from the top until `label` is rendered, then assert it. */
 async function scrollConversationUntil(page: Page, text: string) {
   const scroller = page.locator('[data-sam-conversation-scroller="true"]').first();
@@ -460,28 +491,7 @@ test.describe('Shared session — what each viewer sees', () => {
   test('a teammate whose time runs out: the composer locks and says why', async ({ page }) => {
     // Real time passes in this test: the grant ends 12 s after the mocks are set up.
     test.setTimeout(90_000);
-    const expiresAt = Date.now() + 12_000;
-    // Answers like the server: its own clock, and an ended grant is gone.
-    const accessNow = () => {
-      const base = accessSummary('grantee', 3);
-      const ended = Date.now() >= expiresAt;
-      return {
-        ...base,
-        viewerAccess: ended ? 'reader' : 'grantee',
-        grants: ended
-          ? base.grants.slice(1)
-          : [{ ...base.grants[0]!, expiresAt }, ...base.grants.slice(1)],
-        serverTime: Date.now(),
-      };
-    };
-    await setupMocks(page, makeSession('grantee', { access: accessNow() }));
-    await page.route(`**/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/access`, (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(accessNow()),
-      })
-    );
+    await setupExpiringGrant(page, Date.now() + 12_000);
     await openChat(page);
 
     await expect(page.getByTestId('shared-session-time-left')).toHaveText(
@@ -596,6 +606,68 @@ test.describe('Shared session — what each viewer sees', () => {
 
     await assertNoOverflow(page);
     await screenshot(page, slug('grantee-files-old-agent', page));
+  });
+
+  test('a grantee whose download is refused sees why', async ({ page }) => {
+    await setupMocks(page, makeSession('grantee', LIVE));
+    await page.route(`**/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/files/view**`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ content: 'export const total = 0;\n', filePath: 'file-0.ts' }),
+      })
+    );
+    // The access ended between opening the file and downloading it.
+    await page.route(
+      `**/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/files/download**`,
+      (route) =>
+        route.fulfill({
+          status: 403,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'FORBIDDEN',
+            message:
+              'Only the session owner or someone they shared it with can read files in this session.',
+          }),
+        })
+    );
+    await openChat(page);
+
+    await page.getByRole('button', { name: 'Browse workspace files' }).click();
+    await page.getByText('file-0.ts').click();
+    const panel = page.getByRole('dialog');
+    await expect(panel).toContainText('export const total = 0;');
+    await page.getByRole('button', { name: 'Download file' }).click();
+    await expect(panel.getByRole('alert')).toHaveText(
+      'Download failed. Only the session owner or someone they shared it with can read files in this session.'
+    );
+
+    await assertNoOverflow(page);
+    await screenshot(page, slug('grantee-download-refused', page));
+  });
+
+  test('a grantee’s open Files panel closes when access ends, and focus lands on why', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await setupExpiringGrant(page, Date.now() + 15_000, LIVE);
+    await openChat(page);
+
+    await page.getByRole('button', { name: 'Browse workspace files' }).click();
+    await expect(page.getByText('file-0.ts')).toBeVisible();
+
+    await expect(page.getByText('file-0.ts')).toHaveCount(0, { timeout: 40_000 });
+    await expect(
+      page.locator('[tabindex="-1"]').filter({ hasText: 'Your shared access has ended' })
+    ).toBeFocused();
+    await expect(
+      page
+        .getByRole('status')
+        .filter({ hasText: 'Your shared access ended, so the file panel closed.' })
+    ).toHaveCount(1);
+
+    await assertNoOverflow(page);
+    await screenshot(page, slug('files-closed-on-access-end', page));
   });
 
   test('a member it is not shared with gets neither Files nor Git', async ({ page }) => {
