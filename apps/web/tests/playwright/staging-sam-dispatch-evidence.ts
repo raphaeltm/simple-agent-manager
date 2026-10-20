@@ -49,6 +49,7 @@ export type DispatchPhase =
   | 'initial-answer'
   | 'runtime-ready'
   | 'runtime-evidence'
+  | 'source-link'
   | 'followup'
   | 'followup-answer'
   | 'followup-recovery'

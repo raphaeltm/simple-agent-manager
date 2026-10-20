@@ -36,6 +36,7 @@ import {
   followupDelivery,
   verifyCompletedFollowupReplay,
 } from './staging-sam-dispatch-followup';
+import { expectDispatchSourceLink } from './staging-sam-dispatch-link';
 import { dispatchReader, observeDispatchSession } from './staging-sam-dispatch-observation';
 import {
   captureOwnedProvisioning,
@@ -549,8 +550,9 @@ test(
       await observeSession();
       phase = 'runtime-evidence';
       await verifyRuntimeContract();
+      phase = 'source-link';
       await page.reload();
-      await expect(page.locator(`a[href="${ledger.sourceLink}"]`).first()).toBeVisible();
+      await expectDispatchSourceLink(page, ledger.sourceLink);
       check(
         (await get(`${SAM_API}/turns`)).work.some(
           (item: Json) => item.taskId === ledger.taskId && item.sessionId === ledger.sessionId

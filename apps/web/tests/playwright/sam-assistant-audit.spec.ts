@@ -6,6 +6,7 @@ import {
   makeMockUser,
   screenshot,
 } from './audit-helpers';
+import { expectDispatchSourceLink } from './staging-sam-dispatch-link';
 
 const user = makeMockUser({
   userId: 'sam-user',
@@ -744,6 +745,11 @@ test('completed and declined receipts read plainly with a link to the work', asy
   await expect(started.getByRole('link', { name: 'Open chat' })).toHaveAttribute(
     'href',
     '/projects/project-1/chat/session-9'
+  );
+  // Use the live journey assertion against the real Router-rendered relative link.
+  await expectDispatchSourceLink(
+    page,
+    new URL('/projects/project-1/chat/session-9', page.url()).href
   );
   await expect(page.getByText('Declined', { exact: true })).toBeVisible();
   // A declined effect offers nothing to act on.
