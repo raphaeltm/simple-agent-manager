@@ -16,7 +16,8 @@ const READ_PATHS: Array<[RegExp, string]> = [
   [/^\/api\/projects\/[^/]+\/acp-sessions$/, '/api/projects/:project/acp-sessions'],
   [/^\/api\/projects\/[^/]+\/sessions\/[^/]+$/, '/api/projects/:project/sessions/:session'],
   [/^\/api\/projects\/[^/]+\/agent-profiles(?:\/[^/]+)?$/, '/api/projects/:project/agent-profiles'],
-  [/^\/api\/workspaces(?:\/[^/]+)?$/, '/api/workspaces'],
+  [/^\/api\/workspaces$/, '/api/workspaces'],
+  [/^\/api\/workspaces\/[^/]+$/, '/api/workspaces/:workspace'],
   [/^\/api\/nodes(?:\/[^/]+)?$/, '/api/nodes'],
   [/^\/api\/nodes\/[^/]+\/events$/, '/api/nodes/:node/events'],
 ];
@@ -35,12 +36,29 @@ export function dispatchReader(
       category: 'pending',
     };
     ledger.lastRead = read;
-    const response = await request.get(url, { timeout }).catch((error: unknown) => {
-      read.category =
-        error instanceof Error && error.name === 'TimeoutError' ? 'timeout' : 'transport-error';
-      check(false, 'Scoped read transport completed');
-      throw new Error('Scoped read transport failed');
-    });
+    const deadline = Date.now() + timeout;
+    const attempt = () =>
+      request.get(url, { timeout: Math.max(1, deadline - Date.now()) }).catch((error: unknown) => {
+        read.category =
+          error instanceof Error && error.name === 'TimeoutError' ? 'timeout' : 'transport-error';
+        check(false, 'Scoped read transport completed');
+        throw new Error('Scoped read transport failed');
+      });
+    let response = await attempt();
+    // Only safe, allowlisted reads may recover; all attempts share one deadline.
+    for (
+      let count = 1;
+      count < 3 && read.path !== 'other' && [500, 502, 503, 504].includes(response.status());
+      count++
+    ) {
+      ledger.readFailures ??= [];
+      ledger.readFailures.push({ path: read.path, status: response.status(), attempt: count });
+      if (ledger.readFailures.length > 100) ledger.readFailures.shift();
+      if (Date.now() + 100 >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (Date.now() >= deadline) break;
+      response = await attempt();
+    }
     read.status = response.status();
     read.category = response.status() === 200 ? 'parsing' : 'http-status';
     check(response.status() === 200, 'Scoped read HTTP status is 200');
