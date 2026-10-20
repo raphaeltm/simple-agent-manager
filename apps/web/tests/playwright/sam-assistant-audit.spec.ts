@@ -637,6 +637,13 @@ test('uncertain dispatch checks its existing outcome without resubmitting work',
   });
   await page.goto('/sam');
   await expect(page.getByText('Outcome unknown')).toBeVisible();
+  // The review link and the action button must never touch (measured, not eyeballed).
+  const openProject = (await page.getByRole('link', { name: 'Open project' }).boundingBox())!;
+  const checkOutcome = (await page.getByRole('button', { name: 'Check outcome' }).boundingBox())!;
+  const sameRow = Math.abs(openProject.y - checkOutcome.y) < openProject.height;
+  if (sameRow)
+    expect(checkOutcome.x - (openProject.x + openProject.width)).toBeGreaterThanOrEqual(8);
+  else expect(checkOutcome.y).toBeGreaterThanOrEqual(openProject.y + openProject.height);
   await checkLayout(page, 'sam-uncertain');
   await page.getByRole('button', { name: 'Check outcome' }).click();
   await expect(page.getByRole('button', { name: 'Check outcome' })).toHaveCount(0);
@@ -706,6 +713,7 @@ test('voice recording shows a stop control, blocks sending, then appends the tra
   await expect(stop).toBeVisible();
   await checkTouchTarget(stop);
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+  await expect(page.getByText('Recording… Tap stop when you’re done.')).toBeVisible();
   await checkLayout(page, 'sam-voice-recording');
   await stop.click();
   await expect(composer).toHaveValue('Check the deploy and summarize the open reviews');

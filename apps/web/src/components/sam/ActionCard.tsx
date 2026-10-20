@@ -122,25 +122,37 @@ export function ActionCard({
         </p>
       )}
       {!available && message && <p className="mt-2 text-fg-muted">{message}</p>}
-      {result ? (
-        result.internal ? (
-          <Link className={linkClass} to={result.href}>
-            {result.label}
-          </Link>
+      {/* Links and actions share one wrapping row so they never touch. */}
+      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-2">
+        {result ? (
+          result.internal ? (
+            <Link className={linkClass} to={result.href}>
+              {result.label}
+            </Link>
+          ) : (
+            <a className={linkClass} href={result.href} target="_blank" rel="noopener noreferrer">
+              {result.label}
+              <ExternalLink size={14} aria-hidden="true" />
+            </a>
+          )
         ) : (
-          <a className={linkClass} href={result.href} target="_blank" rel="noopener noreferrer">
-            {result.label}
-            <ExternalLink size={14} aria-hidden="true" />
-          </a>
-        )
-      ) : (
-        target &&
-        action.state !== 'rejected' && (
-          <Link className={linkClass} to={target.path}>
-            {linkLabel(target.path)}
-          </Link>
-        )
-      )}
+          target &&
+          action.state !== 'rejected' && (
+            <Link className={linkClass} to={target.path}>
+              {linkLabel(target.path)}
+            </Link>
+          )
+        )}
+        {available && action.state === 'uncertain' && action.operation === 'sam_chat_start' && (
+          <Button
+            variant="secondary"
+            disabled={busy}
+            onClick={() => void run('reconcile', '{}', 'Could not check the outcome')}
+          >
+            {busy ? 'Checking…' : 'Check outcome'}
+          </Button>
+        )}
+      </div>
       {needsConfirmation && (
         <div className="mt-2 flex flex-wrap gap-2">
           <Button
@@ -162,16 +174,6 @@ export function ActionCard({
             {copy.decline}
           </Button>
         </div>
-      )}
-      {available && action.state === 'uncertain' && action.operation === 'sam_chat_start' && (
-        <Button
-          className="mt-2"
-          variant="secondary"
-          disabled={busy}
-          onClick={() => void run('reconcile', '{}', 'Could not check the outcome')}
-        >
-          {busy ? 'Checking…' : 'Check outcome'}
-        </Button>
       )}
       {available && (
         <details className="group mt-2">

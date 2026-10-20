@@ -150,6 +150,12 @@ export function SamComposer({
           <p className="text-xs text-fg-muted">
             Stopping SAM won’t cancel project work it already started.
           </p>
+        ) : voiceBusy ? (
+          <p className="text-xs text-fg-muted" role="status">
+            {voiceState === 'recording'
+              ? 'Recording… Tap stop when you’re done.'
+              : 'Transcribing your recording…'}
+          </p>
         ) : (
           !isMobile && <p className="text-xs text-fg-muted">{getSendShortcutHint()}</p>
         )}
