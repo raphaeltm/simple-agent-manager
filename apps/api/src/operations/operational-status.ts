@@ -2,12 +2,16 @@ import { and, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import { expectJsonRecord } from '../lib/runtime-validation';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { expectJsonRecord } from '../lib/runtime-validation';
 import { attachWakeState } from '../routes/chat/wake-state';
 import { resolveChatAgentState } from '../routes/chat-agent-state';
 import { requireSessionWriter } from '../services/session-access';
-import { classifySessionIdleness, parseHarnessWorkConfig } from '../services/session-idleness';
+import {
+  classifySessionIdleness,
+  getFreshHarnessWorkLeaseExpiry,
+  parseHarnessWorkConfig,
+} from '../services/session-idleness';
 import { DEFAULT_SESSION_SLEEP_AFTER_MS } from '../services/session-snapshots';
 import { authorizeProjectOperation } from './authorization';
 import { diagnostic } from './operational-projections';
@@ -81,14 +85,28 @@ export async function chatStatus(ctx: OperationContext, projectId: string, sessi
     sessionId,
     sessionStatus: writer.session.status,
   });
+  // Plan persistence can create a raw session_state row with idle/default activity.
+  // Only an attributed activity observation is evidence of a prompt transition.
+  const reportedState = resolved.state?.activitySource ? resolved.state : null;
+  const now = new Date();
+  const harnessWorkConfig = parseHarnessWorkConfig(ctx.env);
+  const freshWork = getFreshHarnessWorkLeaseExpiry(
+    resolved.state,
+    now,
+    harnessWorkConfig.leaseMs,
+    harnessWorkConfig.maxDurationMs
+  );
+  const classificationState =
+    reportedState ??
+    (freshWork ? { ...resolved.state, activity: undefined, activityAt: undefined } : null);
   // A wake placeholder is not runtime activity evidence. Classify only the original observation.
   const idleness = classifySessionIdleness({
     taskStatus: task?.status ?? null,
     taskCompletedAt: task?.completedAt,
-    state: resolved.state,
-    now: new Date(),
+    state: classificationState,
+    now,
     idleAfterMs: parsePositiveInt(ctx.env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS),
-    harnessWorkConfig: parseHarnessWorkConfig(ctx.env),
+    harnessWorkConfig,
     policy: 'prompt-turn-ended',
   });
   let reservation: Record<string, unknown> | null = null;
@@ -123,14 +141,15 @@ export async function chatStatus(ctx: OperationContext, projectId: string, sessi
       : null,
     runtime: {
       agentType: resolved.agentType,
-      activity: resolved.state?.activity ?? 'unknown',
-      activityAt: resolved.state?.activityAt ?? null,
-      promptStartedAt: resolved.state?.promptStartedAt ?? null,
+      activity: reportedState?.activity ?? 'unknown',
+      activityAt: reportedState?.activityAt ?? null,
+      promptStartedAt: reportedState?.promptStartedAt ?? null,
       workState: resolved.state?.runtimeWorkState ?? 'unknown',
       workCount: resolved.state?.runtimeWorkCount ?? null,
       workUpdatedAt: resolved.state?.runtimeWorkUpdatedAt ?? null,
       workProgressAt: resolved.state?.runtimeWorkProgressAt ?? null,
-      evidence: resolved.state ? 'last_reported' : 'unknown',
+      evidence: reportedState ? 'last_reported' : 'unknown',
+      activitySource: reportedState?.activitySource ?? null,
       freshness: 'not_live_verified',
       idleness,
     },

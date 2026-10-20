@@ -4,6 +4,11 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import { runMigrations } from '../../../src/durable-objects/migrations';
+import {
+  getSessionState,
+  updateCurrentPlan,
+} from '../../../src/durable-objects/project-data/session-state';
 import type { Env } from '../../../src/env';
 import {
   samChatDeliveryGet,
@@ -19,6 +24,7 @@ import type { OperationContext } from '../../../src/operations/types';
 import { operationReceiptId } from '../../../src/services/cli-operation-receipts';
 import { recordOperationalJob } from '../../../src/services/operational-job-observations';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createSqlStorage } from '../durable-objects/sql-storage-test-utils';
 
 const mocks = vi.hoisted(() => ({
   access: vi.fn(),
@@ -133,6 +139,56 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
     expect(mocks.cancel).not.toHaveBeenCalled();
     expect(sqlite.prepare('SELECT status FROM workspaces').get()).toEqual({ status: 'running' });
   });
+  it('does not mistake an actual plan-only Durable Object row for an idle report', async () => {
+    const runtimeDb = new Database(':memory:');
+    try {
+      const sql = createSqlStorage(runtimeDb);
+      runMigrations(sql);
+      updateCurrentPlan(sql, 'agent', JSON.stringify([{ content: 'Plan', status: 'pending' }]));
+      const planOnlyState = getSessionState(sql, 'agent');
+      expect(planOnlyState?.activity).toBe('idle'); // legacy hydration default, not an observation
+      expect(planOnlyState?.activitySource).toBeNull();
+      mocks.resolve.mockResolvedValue({
+        agentSessionId: 'agent',
+        agentType: null,
+        state: planOnlyState,
+      });
+      for (const [status, completedAt] of [
+        ['in_progress', null],
+        ['completed', new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()],
+        ['completed', null],
+      ]) {
+        sqlite.prepare('UPDATE tasks SET status=?, completed_at=?').run(status, completedAt);
+        const result = await samChatStatus.run(ctx(), session);
+        expect(result.runtime.activity).toBe('unknown');
+        expect(result.runtime.evidence).toBe('unknown');
+        expect(result.runtime.idleness).toMatchObject({
+          idle: false,
+          conclusive: false,
+          reason: 'prompt_turn_unknown',
+        });
+      }
+      mocks.resolve.mockResolvedValue({
+        agentSessionId: 'agent',
+        agentType: null,
+        state: {
+          ...planOnlyState,
+          runtimeWorkState: 'active',
+          runtimeWorkCount: 1,
+          runtimeWorkUpdatedAt: Date.now(),
+          runtimeWorkProgressAt: Date.now(),
+        },
+      });
+      const working = await samChatStatus.run(ctx(), session);
+      expect(working.runtime.idleness).toMatchObject({
+        idle: false,
+        conclusive: true,
+        reason: 'runtime_work_lease_active',
+      });
+    } finally {
+      runtimeDb.close();
+    }
+  });
   it('keeps a recently completed task with an active prompt non-idle', async () => {
     const now = Date.now();
     sqlite.prepare('UPDATE tasks SET completed_at=?').run(new Date(now).toISOString());
@@ -141,6 +197,7 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
       agentType: 'claude-code',
       state: {
         activity: 'prompting',
+        activitySource: 'vm_report',
         activityAt: now,
         promptStartedAt: now,
         runtimeWorkState: null,
