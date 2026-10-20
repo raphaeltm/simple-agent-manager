@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test';
 
 import type { Json, Turn } from './staging-sam-dispatch-evidence';
 import { verifyAwakeBeforeStop } from './staging-sam-dispatch-observation';
+import { STOP_CONFIRMATION_MS } from './staging-sam-dispatch-provisioning';
 
 /** Verify stop and repeated confirmation before fallback cleanup can mask a failure. */
 export async function confirmAwakeDispatchStop(input: {
@@ -19,27 +20,104 @@ export async function confirmAwakeDispatchStop(input: {
   get: (url: string) => Promise<Json>;
   post: (url: string, body: Json) => Promise<Json>;
   record: (turns: Turn[]) => Promise<Turn[]>;
+  save: () => Promise<void>;
 }) {
-  const { page, ledger, check, get, post, record } = input;
-  await verifyAwakeBeforeStop(input);
+  const { page, ledger, check, record } = input;
+  const phaseDeadline = Math.min(input.deadline, Date.now() + STOP_CONFIRMATION_MS);
+  const checkRequestBudget = () =>
+    check(
+      Date.now() + input.requestMs < phaseDeadline,
+      'Controlled stop request fits within the work deadline'
+    );
+  const get = (url: string) => {
+    checkRequestBudget();
+    return input.get(url);
+  };
+  const post = (url: string, body: Json) => {
+    checkRequestBudget();
+    return input.post(url, body);
+  };
+  await verifyAwakeBeforeStop({ ...input, get });
+  // Stop awaits two background agent signals (5s each), a cleanup delay (5s),
+  // and an interactive workspace stop (30s), plus durable bookkeeping. Keep
+  // ordinary requests at 15s; reserve two such slots after the bounded ACK.
+  const verificationReserveMs = 2 * input.requestMs;
+  const ackBudget = () =>
+    Math.min(
+      STOP_CONFIRMATION_MS - verificationReserveMs,
+      phaseDeadline - Date.now() - verificationReserveMs
+    );
   check(
-    Date.now() + input.requestMs < input.deadline,
+    ackBudget() > input.requestMs,
     'Controlled stop confirmation fits within the work deadline'
   );
+  const attemptedAt = Date.now();
+  const attempt = {
+    actionId: input.actionId,
+    attemptedAt,
+    elapsedMs: 0,
+    timeoutMs: 0,
+    phaseDeadline,
+    status: null as number | null,
+    category: 'pending',
+    readback: { category: 'not-needed', state: null as string | null },
+  };
+  ledger.stopConfirmationAttempt = attempt;
+  await input.save(); // Record the exact intent before the single UI click.
+  // Saving evidence is asynchronous: never use a stale pre-save deadline.
+  const timeoutMs = ackBudget();
+  check(timeoutMs > input.requestMs, 'Controlled stop confirmation fits within the work deadline');
+  attempt.timeoutMs = timeoutMs;
   const confirmed = page
     .waitForResponse(
       (response) =>
         response.url() === `${input.samApi}/actions/${input.actionId}/confirm` &&
         response.request().method() === 'POST',
-      { timeout: input.requestMs }
+      { timeout: timeoutMs }
     )
-    .catch(() => null);
+    .then((response) => ({ response, category: 'http-response' }))
+    .catch((error: unknown) => ({
+      response: null,
+      category: error instanceof Error && error.name === 'TimeoutError' ? 'timeout' : 'wait-error',
+    }));
   await page
     .locator('article')
     .filter({ hasText: input.stopMessage })
     .getByRole('button', { name: 'Confirm stop', exact: true })
-    .click();
-  check((await confirmed)?.ok() === true, 'Scoped stop confirmation accepted');
+    .click({ timeout: Math.min(input.requestMs, timeoutMs) });
+  const outcome = await confirmed;
+  attempt.elapsedMs = Math.max(0, Date.now() - attemptedAt);
+  attempt.status = outcome.response?.status() ?? null;
+  attempt.category = outcome.category;
+  const accepted = outcome.response?.ok() === true;
+  if (!accepted) {
+    // Observe once without re-confirming. A completed receipt cannot erase the
+    // original missing/rejected acknowledgement, and no raw payload enters evidence.
+    attempt.readback.category = 'deadline-exhausted';
+    if (Date.now() + input.requestMs < phaseDeadline) {
+      try {
+        const history = await get(`${input.samApi}/turns`);
+        const action = (history.turns as Turn[])
+          .flatMap((turn) => turn.actions)
+          .find((item) => item.id === input.actionId && item.operation === 'sam_work_stop');
+        if (!action) attempt.readback.category = 'not-found';
+        else if (
+          ['pending', 'approval_required', 'completed', 'rejected', 'uncertain'].includes(
+            action.state
+          )
+        ) {
+          attempt.readback = { category: 'observed', state: action.state };
+        } else attempt.readback.category = 'invalid-state';
+      } catch {
+        attempt.readback.category = 'read-failed';
+      }
+    }
+    // Preserve the confirmation failure even if saving diagnostic evidence fails.
+    await input.save().catch(() => {
+      ledger.stopConfirmationDiagnosticSaveFailed = true;
+    });
+  } else await input.save();
+  check(accepted, 'Scoped stop confirmation accepted');
   const stopped = await record((await get(`${input.samApi}/turns`)).turns);
   const stopReceipt = stopped
     .flatMap((turn) => turn.actions)
@@ -69,7 +147,7 @@ export async function confirmAwakeDispatchStop(input: {
       !(workspaces as unknown as Json[]).some((workspace) => workspace.id === ledger.workspaceId),
     'Confirmed stop cancels task and removes its awake workspace before fallback cleanup'
   );
-  check(Date.now() < input.deadline, 'Stop verification finishes within the work deadline');
+  check(Date.now() < phaseDeadline, 'Stop verification finishes within the work deadline');
   ledger.stopConfirmation = {
     actionId: input.actionId,
     repeatedSameReceipt: true,
