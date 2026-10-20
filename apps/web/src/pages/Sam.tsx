@@ -247,7 +247,9 @@ function SamConversation() {
           ref={scroll.scrollerRef}
           onScroll={scroll.onScroll}
           data-testid="sam-conversation-scroller"
-          className="h-full overflow-y-auto overflow-x-hidden"
+          // useStickToBottom anchors prepends itself (Safari has no scroll anchoring);
+          // Chromium's native anchoring is off so every browser behaves the same.
+          className="h-full overflow-y-auto overflow-x-hidden [overflow-anchor:none]"
         >
           <div
             ref={scroll.contentRef}
