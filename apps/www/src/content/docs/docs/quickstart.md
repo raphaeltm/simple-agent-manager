@@ -33,9 +33,9 @@ From the **Dashboard**, click **Import Project** and pick a repository that has 
 
 Open your project and type what you want done in the chat — for example, "add input validation to the signup form, write tests, and open a pull request." SAM provisions a workspace, starts your chosen agent, and streams its progress to you as it works.
 
-**Say when you want a pull request.** SAM doesn't commit, push, or open one for you, so put it in your message, or ask the agent once the work looks right. (To make it the default for a profile, add the instruction to the profile's **System Prompt (append)**.)
+**Say when you want a pull request.** SAM itself doesn't commit, push, or open pull requests, and the agent opens one only when asked: put it in your message, or ask once the work looks right. To make it the default for a profile, edit the profile on the project's **Profiles** page, expand **Execution**, and add the instruction to **System Prompt (append)**.
 
-If SAM first asks you to create a profile, choose **Build and open PRs**, then **Cloud VM**, for work like this. **Chat and explore** and **Instant container** profiles are for questions and back-and-forth: their chats stay open for your next message instead of finishing on their own.
+If SAM first asks you to create a profile, choose **Build and open PRs**, then **Cloud VM**, for work like this. Despite its name, that choice doesn't tell the agent to open pull requests: it sets the profile up to work as a Task on a VM, so you still ask for the pull request. **Chat and explore** and **Instant container** profiles are for questions and back-and-forth: their chats stay open for your next message instead of finishing on their own.
 
 ### 6. Come Back Later
 

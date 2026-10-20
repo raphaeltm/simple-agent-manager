@@ -309,7 +309,7 @@ Ways to run nested containers without `privileged`, such as a user-namespaced co
 ## Security Best Practices
 
 - **Rotate keys quarterly** — regenerate JWT and encryption keys
-- **Minimal GitHub App permissions** — only Contents (read/write), Metadata (read-only), and Email addresses (read-only)
+- **Minimal GitHub App permissions** — Contents (read/write), plus read-only Metadata, Email addresses, Pull requests, Checks, Actions, and Issues, which is what the self-hosting setup wizard requests. Grant Pull requests (read/write) only if agents should open pull requests (see [Let agents open pull requests](/docs/guides/self-hosting/#let-agents-open-pull-requests))
 - **HTTPS everywhere** — all traffic encrypted via Cloudflare
 - **Session isolation** — each workspace JWT is scoped to a specific workspace ID
 - **Per-user credential isolation** — each user's cloud/agent secrets are encrypted with a per-credential IV and are never shared between users

@@ -33,11 +33,11 @@ get rented, _how big_ they are, or _what happens when your provider is out of ca
 
 Pools exist at three **scopes**, each edited in a different place:
 
-| Scope               | Where to edit it                                                                                   |
-| ------------------- | -------------------------------------------------------------------------------------------------- |
-| **Project**         | Project → Settings → Infrastructure. Owners and admins can edit; maintainers can view and refresh. |
-| **User** (personal) | Settings → Infrastructure. Yours alone.                                                            |
-| **Installation**    | Admin → Infrastructure. Platform superadmins only.                                                 |
+| Scope               | Where to edit it                                                                 |
+| ------------------- | -------------------------------------------------------------------------------- |
+| **Project**         | Project → Settings → Infrastructure. The project's owner and admins can edit it. |
+| **User** (personal) | Settings → Infrastructure. Yours alone.                                          |
+| **Installation**    | Admin → Infrastructure. Platform superadmins only.                               |
 
 Each panel sums the pool up in one sentence (which provider, which regions, the smallest and
 largest machine), lists its settings in plain words, and shows the machine types it allows with the
@@ -508,7 +508,7 @@ remove it so a lower scope applies.
 | A new machine is provisioned for every task                            | Requirements ask for an exclusive node, each request fills a machine, or **Spread** has not reached the pool's **Machine limit**.                                                                                                                                             |
 | Workspace machines are bigger or pricier than expected                 | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor. Then open **Resources** on a finished session to see what it actually used ([Session Resource History](/docs/guides/session-resources/)). |
 | A deployment machine is bigger than expected                           | Check the service CPU and memory limits in its deployment manifest, the pool's deployment strategy, and which smaller offerings the pool allows.                                                                                                                              |
-| There's no **Edit** button                                             | Project pools need owner or admin (`secret:write`); maintainers can view and refresh but not edit, so the button isn't shown to them.                                                                                                                                         |
+| There's no **Edit** button                                             | Editing a project's pool takes the project's owner or admin role (everyone who joins through an invite is an admin), and the installation pool takes a superadmin.                                                                                                            |
 | The project ignores your personal pool                                 | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                                                                                                               |
 | Everything lands on one cloud although the pool allows several         | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                                                                                                 |
 | Too many, or too few, workspaces share a machine                       | Adjust explicit CPU, memory, and disk requirements, use **Exclusive node** for isolation, or change the pool strategy and **Machine limit**. [Session Resource History](/docs/guides/session-resources/) is the evidence for what the requirements should be.                 |

@@ -62,8 +62,9 @@ Note that the **Full** workspace profile does not override this: workspace profi
 
 ## What happens to your work
 
-**SAM doesn't commit, push, or open a pull request for you**, on Instant or anywhere else: ask the
-agent when you want the work published (see
+**SAM doesn't commit, push, or open a pull request for you**, on Instant or anywhere else. A Task's
+agent is told to push its branch before it finishes; otherwise, ask the agent when you want the work
+pushed or a pull request opened (see
 [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands)). What differs is whether
 the work gets a branch of its own:
 

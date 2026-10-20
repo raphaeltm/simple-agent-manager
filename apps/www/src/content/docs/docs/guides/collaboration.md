@@ -117,6 +117,9 @@ For repository work, SAM lets a member's workspace use the project's GitHub App 
 Everyone in a project can read every chat in it. Use the session list's filter to switch between
 **All sessions** and **My sessions**, the chats you started.
 
+On a self-hosted instance, commenting on teammates' chats, sending a comment to the agent, and
+sharing a chat come with the first release after v2026.10.19.
+
 | You want to…                                    | Do this                                                                                                                            |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Point a teammate at something in a chat         | [Comment](#comment-on-a-chat) on the message and [@mention](#mention-a-teammate) them                                              |
@@ -135,7 +138,11 @@ Everyone in the project can read the comment, and so can agents in the project (
 with the `list_message_comment_threads` MCP tool). Each thread shows who wrote it and whether it is
 **Open**, **Sent to agent**, or **Resolved**, and anyone can **Reply** to it, **Resolve** it, or
 **Reopen** it. **Comments** in the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail)
-shows a chat's unresolved threads.
+opens all of a chat's threads, with resolved ones collapsed; its badge counts the unresolved ones.
+
+To see the threads across the whole project, open **Comments** in the project's navigation. It sorts
+them into **Needs you** (open threads where someone else had the last word), **With agent**,
+**Open**, and **Resolved**, and selecting one takes you to it.
 
 A comment never messages the agent by itself: an agent that reads comments treats them as
 background, not instructions, unless someone [sends one to it](#send-a-comment-to-the-agent). If you
@@ -159,8 +166,8 @@ comment by default.
 
 The owner of a chat is also notified about new comments on it, and people in a thread are notified
 about replies. These **Comment** notifications are grouped: each person gets at most one per chat
-every 10 minutes. A **Mention** is never grouped. Admins can change both limits under
-[Admin settings → Collaboration](/docs/guides/admin-settings/#collaboration).
+every 10 minutes. A **Mention** is never grouped. On a self-hosted instance, a superadmin can change
+both limits in [**Admin → Settings**](/docs/guides/admin-settings/#collaboration).
 
 ### Send a comment to the agent
 
@@ -182,8 +189,9 @@ messages, answer the agent's questions, and use **Interrupt**, **Sleep**, and **
 controls the owner has in that chat.
 
 1. Open the chat and select **Share** in the
-   [session tool rail](/docs/guides/chat-features/#the-session-tool-rail). The **Share chat access**
-   dialog lists **People with access**, then **Add a teammate**.
+   [session tool rail](/docs/guides/chat-features/#the-session-tool-rail) (when the rail shows only
+   icons, it's the two-people icon). The **Share chat access** dialog lists **People with access**,
+   then **Add a teammate**.
 2. Select **Add** beside the teammate. With more than six people to choose from, search for them
    first.
 3. Under **How long?**, choose **5 min**, **10 min**, **30 min**, or **1 hour**. Nothing is chosen for
@@ -217,8 +225,10 @@ Before you share, know what it means:
 
 ### What your teammate sees
 
-Your teammate gets a **Shared Session** notification that opens the chat. The chat is also in their
-**All sessions** list, though not under **My sessions**, because they didn't start it. Above the
+Your teammate gets a **Shared Session** notification that opens the chat. It's in the **Updates**
+tab of their notifications, which doesn't add to the bell's count, so tell them you've shared it.
+The chat is also in their **All sessions** list, though not under **My sessions**, because they
+didn't start it. Above the
 message box they see _You're chatting in Prakash's session. It runs on Prakash's accounts. Your
 access ends in 23 min (3:42 PM)._ Each of their messages is labelled, for example
 **Ana · shared access**, and SAM tells the agent who is speaking.
@@ -239,6 +249,10 @@ A teammate with shared access can't open the chat's terminal, file browser, Git 
 previews, or attach files: those reach the workspace directly rather than through the chat. They can
 use **Fork** and **Retry** in the tool rail, which start a chat of their own, on their own accounts.
 
+Notifications about the chat itself, such as the agent asking a question or finishing its work,
+still go to the owner. A teammate driving the chat should keep it open, where the agent's questions
+appear as cards they can answer.
+
 ### If it isn't your chat
 
 Without shared access, a teammate's chat shows _Only Prakash can message this agent. You can leave
@@ -258,7 +272,8 @@ questions and permission requests.
 - People a chat is shared with can share it onward, but never for longer than their own access lasts,
   and can remove anyone's access. Removing someone also removes anyone they added.
 - **Share** shows when each person's access ends, for example _added by you · ends in 23 min_.
-- A chat can be shared with up to 10 people at a time by default (an admin setting).
+- A chat can be shared with up to 10 people at a time by default (a superadmin can change this in
+  **Admin → Settings**).
 - If either person stops being an active project member, the teammate loses access at once.
 - Access never carries over to a fork of the chat, or to chats its agent starts.
 

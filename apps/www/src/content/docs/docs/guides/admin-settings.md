@@ -5,8 +5,9 @@ description: Change SAM's sign-in providers, SAM Connector limits, anonymous tri
 
 A superadmin can change a set of platform settings from **Admin → Settings**, on a phone or a
 desktop. A change applies within a minute, with no redeploy. On a self-hosted instance this page
-arrived in v2026.10.17; on earlier releases these values come only from GitHub Environment variables
-and KV.
+arrived in v2026.10.17. Before that, sign-in providers and the SAM Connector were set in `/setup` and
+**Admin → Integrations**, trials on **Admin → Trials**, and the background-job switches only through
+GitHub Environment variables and KV.
 
 ## Open the settings
 
@@ -20,7 +21,8 @@ named after the setting, split into words — `operations.cronSweepsEnabled` sho
 **operations · cron Sweeps Enabled** — and shows:
 
 - **Source**: where the value in effect comes from (see [Which value wins](#which-value-wins)), and
-  whether the setting is **Configured**.
+  whether the setting is **Configured**. **Not configured** means nothing has set it, so the code
+  default applies, which for a switch can still read **Enabled**.
 - The value, as a field, an **Enabled**/**Disabled** choice, or a list with one entry per line.
 - **Code default** (SAM's built-in value) and, for numbers, the allowed **Range**.
 
@@ -76,11 +78,12 @@ For each setting SAM uses the first of these that exists:
 4. The code default (**Source: default**).
 
 So once a value is saved in the app, changing its GitHub Environment variable does nothing until you
-select **Reset override**. A variable set to a value SAM can't use is ignored, and the code default
-applies.
+select **Reset override**; and a changed variable only reaches SAM when you redeploy. A variable set
+to a value SAM can't use is ignored, and the code default applies.
 
 One exception: the emergency KV switches for cron sweeps and Durable Object alarms still stop that
-work when set to `false` or `disabled`, even if the page says **Enabled**.
+work when set to `false` or `disabled`, even over a saved **Enabled**. The card then shows
+**Disabled** and **Source: kv**, up to 30 seconds later.
 
 ## The settings
 

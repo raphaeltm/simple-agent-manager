@@ -55,6 +55,9 @@ your work is safe and what to do next. Everything here applies to both
   → [Fork it or start a new chat](#the-session-has-ended)
 - **`git push` or `gh` fails to authenticate** in the workspace, or a workspace fails to start with
   **failed to fetch git token**. → [Check repository access](#git-push-or-gh-cant-authenticate)
+- **A task finished, but there's no pull request** (or its branch isn't on GitHub). SAM doesn't
+  open pull requests; the agent does when asked.
+  → [Get one now](/docs/guides/idea-execution/#finished-without-a-pull-request)
 - **No message at all: the agent just stopped mid-sentence** (VM). It may have run out of memory.
   → [Check the Resources panel](#none-of-these-fit)
 - **The chat showed Sleeping on its own, then woke again** (VM). Its machine ran short of memory,
@@ -129,24 +132,29 @@ already done before it carries on, so it doesn't blindly repeat the step that hi
 never switches to another model, profile, or credential to get around a limit.
 
 - **If the provider didn't say when the limit resets**, the message reads **Waiting for provider
-  limit reset (time unknown); bounded retry 1/3 at 14:05 UTC.** SAM tries again after a few
-  minutes, waiting longer each time (up to 30 minutes).
+  limit reset (time unknown); bounded retry 1/3 at 14:05 UTC.** SAM tries again after 5 minutes,
+  then 10, then 20. If the limit still hasn't lifted, the task is **Blocked**.
 - **A new task that uses the same credential waits too**, before its agent starts. If its workspace
   was already being prepared, its card reads **Blocked before provider prompt:** followed by the
   reset time, and its machine stays up meanwhile; despite the word "Blocked", it starts by itself
   after the reset.
 
-**Blocked** on its own means SAM stopped waiting, and the task won't retry by itself, even if you
-rerun it:
+**Blocked** on its own means SAM stopped waiting. The task won't carry on by itself, and SAM leaves
+it as it is for you to decide:
 
 - **Blocked: provider limit wait budget exhausted.** Three waits in a row didn't get the work going.
 - **Blocked: provider limit reset outlives the saved snapshot…** The reset comes after SAM stops
   keeping the saved workspace, so the chat can't be woken where it left off.
 - **Blocked: selected provider credential changed…** The credential was replaced while the task
   waited.
+- Any other reason that starts with **Blocked:** means the same thing.
 
-Look at what the agent got done (the chat, and anything it pushed), then cancel the task and start a
-new one once the limit has reset.
+To move on:
+
+1. Look at what the agent got done: the chat, and anything it pushed.
+2. End the task: select **Complete** in the session tool rail, or **Archive** the chat.
+3. Once the limit has reset, continue in a new chat: **Fork** or **Retry** in the tool rail starts
+   one from this chat (see [Conversation forking](/docs/guides/chat-features/#conversation-forking)).
 
 ## SAM paused automatic check-ins
 
@@ -554,7 +562,8 @@ SAM gives each workspace access to the project's repository: through SAM's GitHu
 project, or your GitLab sign-in on a GitLab project. On a GitHub project it checks, every time Git
 asks, that the person whose workspace it is can still reach the repository. When access is refused,
 `git push`, `git fetch`, or `gh` in the workspace fails with an ordinary authentication error, and a
-new workspace fails to start with **failed to fetch git token: git-token authorization_denied (HTTP 403)**.
+new workspace fails to start with **failed to fetch git token: git-token authorization_denied (HTTP 403); check
+control-plane availability or repository authorization**.
 
 - **Access was removed.** If you lost access to the repository on GitHub, or the GitHub App was
   removed from it, restore that access and ask the agent to try again. There's nothing to wait for:

@@ -118,8 +118,9 @@ cancels the agent's unused link.
   the trigger the next time it would run. Fix the cause, then select **Resume**, which starts the
   count again.
 - **A GitHub event isn't lost if its run fails to start.** SAM saves each GitHub delivery before
-  acknowledging it, and if starting the run fails, it keeps trying for about two hours, with the
-  trigger's settings from when the event arrived. Each delivery starts at most one run per trigger,
+  acknowledging it, and if starting the run fails, it keeps trying for about two hours. Each try
+  checks the trigger again, so one you pause, delete, or re-filter in the meantime doesn't run. Each
+  delivery starts at most one run per trigger,
   so **Redeliver** in GitHub's webhook log never starts a second one — and doesn't restart a run SAM
   gave up on (a superadmin is notified when that happens). To run it again, start the work yourself.
   (Since 14 October 2026; on a self-hosted instance, from v2026.10.15.)
@@ -138,9 +139,10 @@ Agents manage triggers with `list_triggers`, `create_trigger`, `update_trigger`,
 - **GitHub** (`"github"`): `githubConfig` with an `eventType` (`issues`, `issue_comment`,
   `pull_request`, or `push`) and optional `filters`: `actions`, `labels`, `ignoreActors`,
   `commandPrefix`, `bodyContains`, `branches`, and `ignoreDrafts`. SAM rejects `actions` that GitHub
-  never sends for the event, and any `actions` on `push`. Unlike the form, which starts with each
-  event's usual actions selected, a trigger created without `actions` runs on every action of the
-  event — for `issues`, that includes `edited`, `labeled`, and `closed`.
+  never sends for the event, and any `actions` on `push`. Unlike the form, which fills in one action
+  (`opened` for issues and pull requests, `created` for comments), a trigger created without
+  `actions` runs on every action of the event — for `issues`, that includes `edited`, `labeled`, and
+  `closed`.
 
   ```json
   {

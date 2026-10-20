@@ -185,11 +185,12 @@ The difference is how the session ends:
 - **A Chat** stays open for your next message, and its agent never marks it complete. It goes to
   sleep when idle (your next message wakes it), and you're done with it when you **Archive** it.
 
-Neither commits, pushes, or opens a pull request on its own. Ask for one in your message, or add
-the request to the profile's **System Prompt (append)**; see
+SAM doesn't commit, push, or open a pull request for either one. Ask for a pull request in your
+message, or add the request to the profile's **System Prompt (append)**; see
 [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands). For build-and-ship work,
 use a VM profile whose **Task Mode** is **Task**, such as one you create with **Build and open PRs**
-and **Cloud VM**, so that a script or another agent can wait for it to finish.
+and **Cloud VM**, so that a script or another agent can wait for it to finish. Choosing **Build and
+open PRs** sets that up; it doesn't add an instruction to open pull requests, so ask for one.
 
 ## Message Actions
 
@@ -467,8 +468,9 @@ A chat that was archived, or whose saved workspace
 its message box was: _"Fork into a new chat with retained history. The archived chat stays
 unchanged. Prior workspace files are not restored."_ It's the quickest way to carry on:
 
-1. Type what should happen next. If the project has more than one profile, choose one under
-   **Agent**.
+1. Type what should happen next. If the project has more than one profile, check the one under
+   **Agent**: it starts on the first profile in the list, not necessarily the one the original chat
+   used.
 2. Select **Fork**. SAM opens the new chat.
 
 The new chat is always a **Chat**, linked to the original. SAM gives its agent the original's most

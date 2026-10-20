@@ -80,21 +80,25 @@ one; see [Chat or Task](/docs/guides/chat-features/#chat-or-task)):
   follow-up message wakes it.
 - **A Chat** stays open for more messages until you put it to **Sleep** or **Archive** it.
 
-Neither one commits, pushes, or opens a pull request on its own; see
+SAM itself never commits, pushes, or opens a pull request for either one; see
 [Where the work lands](#where-the-work-lands). If the work ran on a VM SAM provisioned and nothing
 else is running on it, the VM stays **warm** for a while so follow-up work starts quickly (see
 [Warm Reuse](#warm-reuse-for-fast-follow-ups)).
 
 ## Where the work lands
 
-**SAM doesn't commit, push, or open pull requests for you. The agent does, when it's told to.** To
-get a pull request, say so when you send the work, for example "…and open a pull request when the
-tests pass". For work you always want delivered that way, add the instruction to the profile's
-**System Prompt (append)** field, and every chat with that profile gets it. SAM also tells a
-**Task**'s agent to push its branch before it reports the task complete; a **Chat**'s agent pushes
-only when you ask. (Until 16 October 2026, and on self-hosted releases before v2026.10.17, SAM itself
-committed and pushed a Task's work, and opened its pull request, after each turn that ended without
-an error.)
+**SAM doesn't commit, push, or open pull requests for you. The agent does, when it's told to.** SAM
+tells a **Task**'s agent to push its branch before it reports the task complete, so a finished
+Task's work is normally on its branch already. A **Chat**'s agent pushes only when you ask.
+
+A pull request is never automatic. To get one, say so when you send the work, for example "…and
+open a pull request when the tests pass". For work you always want delivered that way, put the
+instruction in the profile: on the project's **Profiles** page, edit the profile, expand
+**Execution**, and add it to **System Prompt (append)**. Every chat with that profile then gets it.
+On a GitLab project, the agent pushes its branch, and you open the merge request in GitLab.
+
+(Until 16 October 2026, and on self-hosted releases before v2026.10.17, SAM itself committed and
+pushed a Task's work, and opened its pull request, after each turn that ended without an error.)
 
 Every **submitted task** gets its own **output branch** — a prefixed name derived from your description, `sam/` by default (self-hosters can change the prefix with `BRANCH_NAME_PREFIX`). This covers work you submit as a task and work an agent creates with `dispatch_task`, on either runtime. A message-box chat on an [Instant](/docs/guides/instant-sessions/) profile, without attachments or explicit resource overrides and not started with an idea's **Execute** button, is the exception: it gets no branch at all — see [What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work). Having a branch does not mean SAM publishes to it: commits, pushes and pull requests are agent-directed on both runtimes. The workspace is now checked out on that branch from the moment it's created: SAM clones your project's default branch as the base, then creates and checks out the output branch before the agent starts. Run `git branch --show-current` inside a task workspace and you'll see the task branch, not `main`.
 
@@ -103,13 +107,33 @@ nothing is published, until the agent runs `git push`.
 
 If you pass an explicit `branch` when starting work (via the API or `dispatch_task`), that branch is used instead — the meaning is "continue the work already on this branch."
 
+### Finished without a pull request?
+
+A task that finishes without a pull request usually wasn't asked for one. (On a self-hosted instance,
+the GitHub App may also lack the permission; see
+[Let agents open pull requests](/docs/guides/self-hosting/#let-agents-open-pull-requests).) Either:
+
+- Open it yourself on GitHub from the task's branch, which the **Task completed** notification
+  names.
+- Or reply in the chat, for example "open a pull request for this". The reply wakes the session
+  (within the seven days its workspace is kept), and the agent pushes and opens it.
+
+If the branch isn't on GitHub, the agent didn't push it. Replying "push your branch" works the same
+way.
+
 ### Work that hasn't been pushed yet
 
-Unpushed work isn't lost when a session sleeps. The sleep snapshot keeps the repository's changed
-files, staged changes, and local commits for seven days, and waking the chat brings them back. Taking
-the snapshot doesn't push anything or switch branches. Files outside the repository's working tree,
+Unpushed work normally survives a sleep. The sleep snapshot keeps the repository's changed files,
+staged changes, and local commits for seven days, and waking the chat brings them back. Taking the
+snapshot doesn't push anything or switch branches. Files outside the repository's working tree,
 such as a second worktree next to it, aren't covered. **Archive** deletes the saved workspace, so ask
 the agent to push anything you want to keep first.
+
+The exception is a snapshot that keeps failing. After three failed attempts or 15 minutes, SAM shuts
+the idle workspace down anyway rather than leave it running, and the chat says what was kept. Changes
+that no successful snapshot saved can be lost; see
+[SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot).
+Pushing is the only way to be sure work is kept.
 
 Agents push with your project's GitHub access, so use branch protection rules on your default branch
 if agents shouldn't push to it directly.

@@ -124,4 +124,27 @@ reply mislabel.
 
 ## Review log
 
-_(rounds recorded here)_
+### Round 1 (two local reviewers: user-journey critique + code fact-check)
+
+- **Journey reviewer** (3 HIGH, 4 MEDIUM, 7 LOW). Fixed: OpenCode integration step and GitHub
+  permissions FAQ still implied SAM publishes; **Build and open PRs** doesn't add a PR instruction
+  (quickstart, chat-features); no rollback path (self-hosting caution + migration-tag troubleshooting +
+  changelog); "Finished without a pull request?" recovery (idea-execution + troubleshooting symptom);
+  Shared Session notification is under **Updates** and owner-only agent notifications
+  (collaboration); real steps for a **Blocked** provider-limit task; GitLab sign-in subsection; changelog
+  wording; CI-wait subscription call; superadmin wording, self-host version, Share icon, project
+  **Comments** inbox; admin settings "Not configured" and pre-v2026.10.17 sources; Fork box **Agent**
+  default; compute pool roles; orchestrator var descriptions.
+  Pushed back: `sam chat cancel` only interrupts the in-flight prompt (`routes/chat-cancel.ts`), so it is
+  not offered as a way to end a Blocked task; GitLab "agents open merge requests" claim removed instead of
+  expanded (nothing opens GitLab MRs; agents are told SAM will, filed in idea `01M5BRDZF2314EAE7S8HBD37NX`).
+- **Fact-check reviewer** (0 CRITICAL/HIGH, 5 MEDIUM, 10 LOW, rebase needed). Fixed: #2371 storage
+  activation is manual (changelog); a Task's agent pushes without being asked (instant-sessions,
+  integrations, quickstart); #2377 wake-budget bullet narrowed; collaboration limits release
+  (configuration); emergency KV switch shows Disabled · kv (admin-settings); trigger retries re-check the
+  trigger; Comments panel shows resolved threads collapsed; three notification tabs; provider-limit
+  backoff 5/10/20 min; full git-token error text; trigger form fills one action; secret placeholders
+  wording; PR takeover wording; security.md permission list; mission wording.
+- **Rebase onto main** (#2382, #2384, #2385): conflicts in concepts, overview and troubleshooting
+  resolved in favour of main's sleep-failure notices; #2382 (idle runtime terminated after repeated
+  snapshot failures, unpushed files may be lost) added to idea-execution and the changelog.

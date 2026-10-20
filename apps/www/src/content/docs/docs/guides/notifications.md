@@ -29,10 +29,10 @@ notification: SAM doesn't open pull requests itself, so a pull request link arri
 
 ### Attention and Updates
 
-The bell opens a panel with two tabs. **Attention** holds what needs you: an agent's question, a
+The bell opens a panel with three tabs. **Attention** holds what needs you: an agent's question, a
 failure, a mention, and (for superadmins) an operational failure. Only these count toward the
 number on the bell. Everything else, including finished tasks, comments on your chats, and shared
-chats, is under **Updates**.
+chats, is under **Updates**, and **All** shows both.
 
 Selecting a **Mention** or **Comment** notification opens the chat at that comment thread. A
 **Shared Session** notification says how long you can use the chat; nothing tells you when that time

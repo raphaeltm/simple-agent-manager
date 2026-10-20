@@ -9,9 +9,10 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ### For everyone
 
-- **Work on a chat together.** Anyone in a project can now comment on any message in any chat,
-  @mention a teammate, and send a comment on to the agent. The person who started a chat can share it
-  with a teammate for 5 minutes to an hour, so they can drive it while you're away, on your accounts.
+- **Work on a chat together.** Anyone in a project can now comment on any message in any chat and
+  @mention a teammate, and whoever can drive the chat can send a comment on to its agent. The person
+  who started a chat can share it with a teammate for 5 minutes to an hour, so they can drive it while
+  you're away, on your accounts.
   → [Work together in a chat](/docs/guides/collaboration/#work-together-in-a-chat)
 - **Ask the agent for a pull request.** SAM no longer commits, pushes, or opens pull requests for you
   at the end of a turn or a task: the agent does, when it's told to. Say "…and open a pull request"
@@ -21,6 +22,12 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 - **A usage limit pauses the work instead of failing it.** When your own Claude, Codex, or API
   limit runs out mid-task, the chat says **Waiting for provider limit reset at…**, sleeps, and carries
   on by itself after the reset. → [Waiting for a provider limit reset](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset)
+- **A workspace whose snapshots keep failing is shut down instead of left running.** After three
+  failed attempts or 15 minutes, SAM stops the idle workspace and says in the chat what was kept.
+  Changes that no successful snapshot saved can be lost, so push work you want to keep. Send a
+  message to carry on in a fresh workspace. (Until 20 October, a session with no safe recovery point
+  kept its workspace running.)
+  → [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot)
 - **Fork straight from an archived or expired chat.** Its message box becomes a **Fork** box: type
   what's next, and a new chat starts with the old one's recent history.
   → [Fork an archived or expired chat](/docs/guides/chat-features/#fork-an-archived-or-expired-chat)
@@ -36,8 +43,9 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 Also changed this week:
 
-- **A chat stuck on "SAM spent the wake retry budget for this sleep snapshot." can wake again.**
-  Since 19 October, send a message, wait about 15 minutes, and send it again.
+- **Some VM chats stuck on "SAM spent the wake retry budget for this sleep snapshot." wake again.**
+  If an earlier failed wake had left the chat tied to a deleted workspace, sending a message now
+  wakes it (since 19 October). → [Wake failed](/docs/guides/session-troubleshooting/#wake-failed)
 - **An agent moved off a VM that ran short of memory carries on in a Chat too**, not only in a
   Task, if it was in the middle of something.
 - **An answered permission card stays where it was asked**, instead of following you to the bottom of
@@ -48,8 +56,9 @@ Also changed this week:
   effect on the next Git command. → [`git push` or `gh` can't authenticate](/docs/guides/session-troubleshooting/#git-push-or-gh-cant-authenticate)
 - **A GitHub event whose run fails to start is retried** for about two hours, and **Redeliver** in
   GitHub never starts a second run. → [When a trigger runs](/docs/guides/triggers/#when-a-trigger-runs)
-- **Agents can take over a pull request they didn't open** and record it, so other agents leave it
-  alone. → [Pull requests an agent takes over](/docs/guides/agents/#pull-requests-an-agent-takes-over)
+- **Agents can take over a pull request they didn't open** and record that they're responsible for
+  it, which other agents can look up.
+  → [Pull requests an agent takes over](/docs/guides/agents/#pull-requests-an-agent-takes-over)
 - **Agents waiting on CI use exact event names** (`check_run.completed`, with the full commit SHA);
   bare names like `check_run` never matched.
 
@@ -58,25 +67,30 @@ Also changed this week:
 **Update to v2026.10.17 or later.** Cloudflare's R2 API now rejects the CORS request that releases
 up to v2026.10.16 send, so their deploys stop at **Configure R2 CORS**
 ([Troubleshooting](/docs/guides/self-hosting/#deploy-fails-at-configure-r2-cors-http-400-code-10029)).
-Shared chats and comments come in the first release after v2026.10.19.
+Shared chats, comments on teammates' chats, and the shut-down of workspaces whose snapshots keep
+failing come in the first release after v2026.10.19.
 
-- **Plan to update forward, not roll back.** From v2026.10.18 a Durable Object migration runs at
-  deploy, and once it has, deploying an older release fails its migration check.
+- **Plan to update forward, not roll back.** Once v2026.10.18 or later has deployed, deploying an
+  older release fails with "Deployed Durable Object migration tag "v22" is not present…". If a
+  release misbehaves, update to a newer one.
+  → [Update forward, not back](/docs/guides/self-hosting/#option-a-update-self-hosted-instance-workflow-recommended)
 - **Admin → Settings** (from v2026.10.17) lets superadmins change sign-in providers, Connector
   limits, trials, and background jobs without redeploying, and collaboration limits from the next
   release. A value saved
   there wins over its GitHub Environment variable, so once someone saves, for example, the Connector
   switch, `CONNECTOR_ENABLED` no longer applies, and the `trials:enabled` KV switch only counts while
   no trials value is saved. → [Admin Settings](/docs/guides/admin-settings/)
-- **Agents now open pull requests themselves** (from v2026.10.17). The GitHub App that self-hosted
+- **Agents, not SAM, open pull requests, when asked** (from v2026.10.17). The GitHub App that self-hosted
   SAM creates can only read pull requests, so give it **Pull requests: Read and write** if you want
   agents to open them. VMs already running when you update keep publishing the old way until they're
   replaced. → [Let agents open pull requests](/docs/guides/self-hosting/#let-agents-open-pull-requests)
 - **Empty VMs are cleaned up** (from v2026.10.17): an empty managed VM is gone within about an hour.
   The grace period before SAM catches a missed one is `NODE_EMPTY_WARM_HANDOFF_GRACE_MS` (30 minutes).
-- **Secret variables are placeholders** (from v2026.10.14), on nodes started after the update.
-- **MCP rate counters and workspace boot logs move into Durable Objects** (v2026.10.18). The deploy
-  sets it up; there's nothing to do.
+- **Secret variables are placeholders** (from v2026.10.14) for agents started after you update;
+  `exec_with_secrets` needs nodes started after it.
+- **Durable Object storage for MCP rate limits and workspace boot logs** (v2026.10.18; this
+  migration is why you can't roll back). Your instance keeps using KV for them until someone runs the
+  **Reliability Storage Activation** workflow, and nothing breaks if nobody does.
 - **New optional settings**, all with working defaults: GitHub trigger delivery retries
   ([`GITHUB_TRIGGER_RECOVERY_*`](/docs/reference/configuration/#github-trigger-delivery-recovery),
   set as `GH_TRIGGER_RECOVERY_*`), chat attachment limits
@@ -107,7 +121,7 @@ Until 16 October, after every turn that ended without an error, SAM itself commi
 changes, pushed its branch, and opened a pull request. Now nothing is published unless the agent
 does it. SAM still creates the Task's `sam/…` branch and checks it out, tells a Task's agent to push
 it before reporting the task complete, and keeps unpushed changes in the sleep snapshot for seven
-days. Whether there's a pull request is up to you: ask for one. The completion notification links
+days (unless snapshots keep failing; see above). Whether there's a pull request is up to you: ask for one. The completion notification links
 one when the agent reports it. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands).
 
 ### Model changes
@@ -843,7 +857,7 @@ See [Compute Pools](/docs/guides/compute-pools/).
 
 Task workspaces are now checked out on the task's `sam/…` output branch from the moment they're created — cloned from your default branch, then switched. This gives the agent a branch to work on; creating that branch does not publish changes or open a pull request. Ask the agent to commit, push and open a PR when you want to publish.
 
-SAM no longer stages, commits, pushes or creates pull requests at turn end or task completion. Agents publish explicitly; independent sleep snapshots preserve supported workspace files and local commits. Keep repository branch protection rules for agent-directed pushes.
+Since 16 October, SAM no longer stages, commits, pushes or creates pull requests at turn end or task completion ([SAM leaves publishing to the agent](#sam-leaves-publishing-to-the-agent)). Agents publish explicitly; independent sleep snapshots preserve supported workspace files and local commits. Keep repository branch protection rules for agent-directed pushes.
 
 See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands).
 
