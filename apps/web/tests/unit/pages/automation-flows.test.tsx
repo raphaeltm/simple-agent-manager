@@ -543,6 +543,55 @@ describe('trigger page', () => {
     expect(api.rotateWebhookTriggerToken).toHaveBeenCalledWith('p1', 'trg-hook');
   });
 
+  it('says what each webhook call did with its run', async () => {
+    api.getTrigger.mockResolvedValue(
+      trigger({
+        id: 'trg-hook',
+        status: 'active',
+        sourceType: 'webhook',
+        cronExpression: null,
+        webhookConfig: {
+          sourceLabel: 'CI',
+          filterMode: 'all',
+          filters: [],
+          includedHeaders: [],
+          tokenLastFour: 'abcd',
+          tokenCreatedAt: new Date(NOW).toISOString(),
+          tokenRotatedAt: null,
+        },
+      })
+    );
+    const call = (id: string, outcome: string, executionId: string | null) => ({
+      id,
+      triggerId: 'trg-hook',
+      outcome,
+      httpStatus: 202,
+      bodyBytes: 120,
+      executionId,
+      errorCode: null,
+      receivedAt: new Date(NOW - HOUR).toISOString(),
+      processedAt: new Date(NOW - HOUR).toISOString(),
+    });
+    api.listWebhookDeliveries.mockResolvedValue({
+      deliveries: [
+        call('d1', 'accepted', 'exec-started'),
+        call('d2', 'still_running', 'exec-skip-record'),
+        call('d3', 'filtered', null),
+      ],
+      nextCursor: null,
+    });
+    renderAt('/projects/p1/automation/trigger/trg-hook');
+    const calls = await screen.findByRole('region', { name: 'Calls received' });
+    expect(
+      await within(calls).findByText('Started a run, listed under Recent runs')
+    ).toHaveAttribute('title', 'Run ID exec-started');
+    expect(
+      within(calls).getByText('Recorded as a skipped run, listed under Recent runs')
+    ).toBeInTheDocument();
+    expect(within(calls).getByText('Ignored: did not match the filters')).toBeInTheDocument();
+    expect(within(calls).getAllByText(/listed under Recent runs/)).toHaveLength(2);
+  });
+
   it('never offers run now for an incident trigger', async () => {
     api.getTrigger.mockResolvedValue(
       trigger({ id: 'trg-inc', status: 'active', sourceType: 'incident', cronExpression: null })

@@ -260,10 +260,10 @@
             "light": "/images/scenes/events-window-tile0-light.webp"
           },
           "box": {
-            "left": 1.25,
-            "top": 9,
-            "width": 97.4167,
-            "height": 23.2
+            "left": 0.6667,
+            "top": 13.8,
+            "width": 66.8333,
+            "height": 17.6
           }
         },
         {
@@ -272,10 +272,10 @@
             "light": "/images/scenes/events-window-tile1-light.webp"
           },
           "box": {
-            "left": 1.25,
-            "top": 32.1,
-            "width": 97.4167,
-            "height": 17
+            "left": 0.6667,
+            "top": 47.1,
+            "width": 66.8333,
+            "height": 9.3
           }
         },
         {
@@ -284,10 +284,10 @@
             "light": "/images/scenes/events-window-tile2-light.webp"
           },
           "box": {
-            "left": 1.25,
-            "top": 49,
-            "width": 97.4167,
-            "height": 16.9
+            "left": 0.6667,
+            "top": 59.3,
+            "width": 66.8333,
+            "height": 40.7
           }
         },
         {
@@ -296,10 +296,10 @@
             "light": "/images/scenes/events-window-tile3-light.webp"
           },
           "box": {
-            "left": 1.25,
-            "top": 65.8,
-            "width": 97.4167,
-            "height": 16.9
+            "left": 69.6667,
+            "top": 13.8,
+            "width": 30.3333,
+            "height": 16.3
           }
         },
         {
@@ -308,10 +308,10 @@
             "light": "/images/scenes/events-window-tile4-light.webp"
           },
           "box": {
-            "left": 1.25,
-            "top": 82.6,
-            "width": 97.4167,
-            "height": 17.2
+            "left": 69.6667,
+            "top": 37,
+            "width": 30.3333,
+            "height": 43.4
           }
         }
       ]

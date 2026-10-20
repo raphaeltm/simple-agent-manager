@@ -201,6 +201,12 @@ describe('trigger presentation', () => {
       'When a pull request is opened or updated with new commits'
     );
     expect(githubTriggerWhen('push', { branches: ['main'] })).toBe('When code is pushed to main');
+    expect(
+      githubTriggerWhen('pull_request', { actions: ['labeled'], labels: ['needs-review'] })
+    ).toBe('When a pull request is labeled needs-review');
+    expect(githubTriggerWhen('issues', { actions: ['opened'], labels: ['bug'] })).toBe(
+      'When an issue labeled bug is opened'
+    );
   });
 });
 
@@ -423,5 +429,14 @@ describe('event wording fallbacks', () => {
     expect(describeEventFilter({ version: 1, source: 'github' }).noun).toBe(
       'matching GitHub activity'
     );
+    expect(
+      describeEventFilter({
+        version: 1,
+        source: 'webhook',
+        eventType: 'webhook.accepted',
+        subjectType: 'webhook_trigger',
+        subjectId: 'trig-webhook-stripe',
+      }).noun
+    ).toBe('a webhook call to webhook trig-webhook');
   });
 });

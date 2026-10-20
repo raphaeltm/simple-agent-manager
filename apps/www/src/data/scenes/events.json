@@ -1,31 +1,31 @@
 {
   "slug": "events",
-  "description": "Animated preview of SAM's real triggers page with a sample project: trigger cards appear, a highlight moves from a cron schedule to a GitHub issues trigger to a Datadog webhook trigger and back to the schedule, as a task-completed notification for the nightly dependency audit rises. Timing is simulated.",
+  "description": "Animated preview of SAM's real Automation page with a sample project: the attention card, the schedule and reaction lists, and the coming-up and recent panels appear, then a highlight moves from a weekday schedule to a GitHub issue reaction to a Datadog webhook and back to the schedule, as a task-completed notification for the nightly dependency audit rises. Timing is simulated.",
   "aspect": { "wide": 1.15, "narrow": 0.95 },
   "beats": [0, 600, 1300, 1900, 2500, 3200, 3900],
   "layers": [
     {
       "id": "window",
       "source": "sam-triggers-sources",
-      "box": { "x": 316, "y": 70, "w": 1584, "h": 1320 },
+      "box": { "x": 300, "y": 50, "w": 1600, "h": 1333 },
       "outWidth": 1200,
       "place": { "wide": { "x": 2, "y": 2, "w": 84 }, "narrow": { "x": 1, "y": 1, "w": 98 } },
       "depth": 0,
       "tiles": [
-        { "box": { "x": 336, "y": 190, "w": 1542, "h": 305 }, "at": 2 },
-        { "box": { "x": 336, "y": 495, "w": 1542, "h": 222 }, "at": 2 },
-        { "box": { "x": 336, "y": 717, "w": 1542, "h": 222 }, "at": 2 },
-        { "box": { "x": 336, "y": 939, "w": 1542, "h": 222 }, "at": 2 },
-        { "box": { "x": 336, "y": 1161, "w": 1542, "h": 226 }, "at": 2 }
+        { "box": { "x": 311, "y": 235, "w": 1069, "h": 233 }, "at": 2 },
+        { "box": { "x": 311, "y": 678, "w": 1069, "h": 123 }, "at": 2 },
+        { "box": { "x": 311, "y": 841, "w": 1069, "h": 542 }, "at": 2 },
+        { "box": { "x": 1415, "y": 235, "w": 484, "h": 216 }, "at": 2 },
+        { "box": { "x": 1415, "y": 544, "w": 484, "h": 577 }, "at": 2 }
       ],
       "rings": [
         {
           "tone": "mint",
           "stops": [
-            { "at": 3, "box": { "x": 438, "y": 269, "w": 264, "h": 36 } },
-            { "at": 4, "box": { "x": 438, "y": 800, "w": 156, "h": 36 } },
-            { "at": 5, "box": { "x": 438, "y": 1245, "w": 246, "h": 36 } },
-            { "at": 6, "box": { "x": 438, "y": 269, "w": 264, "h": 36 } }
+            { "at": 3, "box": { "x": 398, "y": 724, "w": 186, "h": 36 } },
+            { "at": 4, "box": { "x": 398, "y": 1114, "w": 213, "h": 36 } },
+            { "at": 5, "box": { "x": 398, "y": 887, "w": 269, "h": 36 } },
+            { "at": 6, "box": { "x": 398, "y": 724, "w": 186, "h": 36 } }
           ],
           "until": 7
         }

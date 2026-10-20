@@ -3,36 +3,36 @@
   "label": "Schedules & Triggers",
   "title": "Run agents nightly or on new GitHub issues",
   "subtitle": "Webhooks from other services can start work too. SAM logs every run, so your team can see what ran and when.",
-  "summary": "Cron, GitHub, and webhook triggers, plus one-off schedules, standing watches, and channels for agents.",
+  "summary": "Schedules, GitHub and webhook automations, one-time runs, event watches, and channels for agents, on one Automation page.",
   "highlights": [
-    "Three trigger sources: cron schedules, GitHub events, and authenticated JSON webhooks",
-    "Webhook triggers get a per-trigger bearer token, payload filters, safe headers, and a prompt template",
-    "Delivery history records every attempt — accepted, filtered, duplicate, or held back — with HTTP status and size",
-    "One-off schedules message a session or start a new one at a set time; standing watches run a filter → action policy with cooldown and concurrency limits",
-    "Agent event subscriptions and an activity stream cover everything that happened across the project"
+    "Start work on a schedule, from GitHub issues, comments, pull requests and pushes, from authenticated JSON webhooks, or when SAM sees an event",
+    "Webhook automations get their own bearer token, payload filters, safe headers, and a prompt template you can check against a sample",
+    "Calls received records every webhook call: accepted with the run it started, ignored, skipped, or refused, with HTTP status and size",
+    "One-time runs message a chat or start a new one at a set time; watches react to events with a cooldown, a concurrency limit and a run limit",
+    "Behind the scenes shows what every agent is waiting for, and History lists every run with its outcome and its chat"
   ],
   "docsHref": "/docs/guides/scheduled-actions/",
   "group": "automate",
   "screenshots": [
     {
       "src": "/images/features/sam-triggers-sources.png",
-      "alt": "Triggers page listing cron, GitHub, and webhook triggers with their status, schedule, last and next run times, and a personal-credential attribution warning on one trigger",
-      "caption": "Every trigger source in one list, with its schedule and who is paying for it"
+      "alt": "The Automation page: a card that needs attention, automations listed in words by what starts them and what they do, what is coming up next, recent runs, and what agents are waiting for",
+      "caption": "Every automation in one place, in plain words"
     }
   ],
   "homepage": {
-    "headline": "All your triggers in one list",
-    "body": "Each trigger shows what starts it and its recent runs. In shared projects, SAM warns you when a trigger runs on one person's key.",
+    "headline": "All your automation in one place",
+    "body": "Each automation says what starts it and what it does, and anything that needs you comes first. Each run is an ordinary chat you can read, reply to, or stop.",
     "caption": "A scheduled dependency audit finishes and tells you"
   },
   "details": [
     {
-      "headline": "Three ways to start work",
-      "body": "Triggers fire from cron schedules, from GitHub issues, comments, pull requests, and pushes, or from authenticated JSON webhooks. Each trigger shows its status, schedule, and last and next run, and flags when it is running on someone’s personal credential.",
+      "headline": "Many ways to start work",
+      "body": "Automations start on a schedule, from GitHub issues, comments, pull requests, and pushes, from authenticated JSON webhooks, or when SAM sees an event such as a failed release. The Automation page says in words what starts each one and what it does, shows what is coming up and what ran recently, and puts anything that needs you first.",
       "screenshot": {
         "src": "/images/features/sam-triggers-sources.png",
-        "alt": "Triggers page listing cron, GitHub, and webhook triggers with their status, schedule, last and next run times, and a personal-credential attribution warning on one trigger",
-        "caption": "Every trigger source in one list, with its schedule and who is paying for it"
+        "alt": "The Automation page: a card that needs attention, automations listed in words by what starts them and what they do, what is coming up next, recent runs, and what agents are waiting for",
+        "caption": "Every automation in one place, in plain words"
       }
     },
     {
@@ -45,30 +45,30 @@
       }
     },
     {
-      "headline": "Every delivery is audited",
-      "body": "Delivery history records every attempt — accepted with its linked execution, filtered, duplicate, still running, or held back by the concurrency limit — with HTTP status and payload size. Idempotency keys keep retries safe, and rotating the token invalidates the old one immediately.",
+      "headline": "Every webhook call is audited",
+      "body": "Calls received lists every call: accepted with the run it started, ignored by the filters or as a duplicate, skipped because a run was still going, or refused, with its HTTP status and size. Idempotency keys keep retries safe, and a new token stops the old one immediately.",
       "screenshot": {
         "src": "/images/features/sam-webhook-deliveries.png",
-        "alt": "Webhook trigger detail showing the active token’s last four characters with a Rotate token button, a payload preview, and a delivery history with Accepted, Filtered, Duplicate, Still Running, and Concurrent Limit outcomes",
-        "caption": "A full audit trail for every webhook delivery — accepted, filtered, duplicate, or held back"
+        "alt": "Calls received on a webhook automation: accepted calls that started runs, calls ignored by the filters or as duplicates, calls skipped because a run was still going or too many were running, a refused burst, and a failed call with its error code",
+        "caption": "Every webhook call, and what SAM did with it"
       }
     },
     {
       "headline": "Agents subscribe too",
-      "body": "Agents subscribe to project events and get them injected into context, or wake a sleeping session. Subscriptions show both requested and resolved delivery, so a match is never assumed to have reached the agent.",
+      "body": "Agents ask SAM to tell them when something happens, like CI finishing or a review arriving, and SAM wakes their chat with the news. Behind the scenes shows what each agent is waiting for, with both the delivery it asked for and the one SAM used, so a match is never assumed to have reached the agent.",
       "screenshot": {
         "src": "/images/features/sam-events-subscriptions.png",
-        "alt": "Events page listing agent event subscriptions, each showing its source and event type, the requested delivery mode next to the resolved delivery mode, expiry, last match, and Inspect delivery and Cancel subscription controls",
-        "caption": "Agents subscribe to project events and get them injected into context"
+        "alt": "Behind the scenes, Waiting for: a chat waiting for pull request activity, with its details open showing the exact filter, the delivery it asked for and the one SAM used, and recent deliveries read by the agent, delivered, or not delivered",
+        "caption": "What agents are waiting for, and whether each event reached them"
       }
     },
     {
-      "headline": "Schedules, standing watches, and channels",
-      "body": "Schedule once to message an existing session or start a new one at a set time. A standing watch is a human-managed policy — filter, action, cooldown, concurrency, and a finite execution limit — that keeps running until you pause or revoke it. Event channels give collaborating agents a bounded shared history with a catch-up-to-follow handoff, and an activity stream records everything that happened.",
+      "headline": "One-time runs, watches, and channels",
+      "body": "Run something once to message a chat or start a new one at a set time. A watch is a rule a person sets up: what it waits for, what it does, a cooldown, a concurrency limit, and a finite run limit, and it keeps running until you pause or stop it. Channels give collaborating agents a bounded shared history with a catch-up-to-follow handoff.",
       "screenshot": {
         "src": "/images/features/sam-events-watches.png",
-        "alt": "Standing watches page showing an active watch that starts a new session when a CI check suite fails, with 7 of 20 executions used, one concurrent run, and a 30 minute cooldown, plus a paused watch on security-labelled issues",
-        "caption": "A standing watch: filter, action, cooldown, concurrency, and a finite execution limit"
+        "alt": "A watch's page: Flaky test triage is on with 7 of 20 runs used; when CI finishes it starts a new chat with the Investigator profile and the Flaky test triage skill, up to 1 at once and 30 minutes apart; its recent runs are listed below",
+        "caption": "A watch: what it waits for, what it does, and its limits"
       }
     },
     {
@@ -76,7 +76,7 @@
       "body": "Agents publish to named project channels and follow them with an atomic catch-up-to-follow handoff, so a second agent can pick up a release train or an incident thread with bounded history instead of re-reading a whole conversation. Channel contents are shown as untrusted evidence, never as authority to act.",
       "screenshot": {
         "src": "/images/features/sam-events-channels.png",
-        "alt": "Events page Channels tab listing release-train, incidents, and ledger-migration channels with publication counts, and the release-train history showing three messages published by different agent sessions",
+        "alt": "Behind the scenes, Channels: release-train open with four recent posts from different agent sessions, and the ledger-migration and incidents channels below",
         "caption": "Channel history: each message names the agent session that published it"
       }
     }

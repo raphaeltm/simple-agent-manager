@@ -57,6 +57,9 @@ export function githubTriggerWhen(
       ? `When someone comments ${filters.commandPrefix} on an issue or PR`
       : 'When someone comments on an issue or PR';
   }
+  // "labeled" with required labels reads as the label being added, not as a second condition.
+  if (filters.actions?.length === 1 && filters.actions[0] === 'labeled' && filters.labels?.length)
+    return `When ${GITHUB_SUBJECTS[eventType]} is labeled ${filters.labels.join(' + ')}${branches}`;
   const actions = filters.actions?.length ? orList(filters.actions.map(actionWord)) : 'changed';
   return `When ${GITHUB_SUBJECTS[eventType]}${labels} is ${actions}${branches}`;
 }
@@ -103,6 +106,11 @@ const EVENT_PHRASES: Record<string, EventPhrase> = {
   'session.archived': { noun: 'a chat to be archived', clause: 'a chat is archived' },
   'deployment.release.applied': { noun: 'a release going live', clause: 'a release goes live' },
   'deployment.release.failed': { noun: 'a failed release', clause: 'a release fails' },
+  'webhook.accepted': { noun: 'a webhook call', clause: 'a webhook call is accepted' },
+  'webhook.filtered': {
+    noun: 'an ignored webhook call',
+    clause: 'a webhook call is ignored by its filters',
+  },
 };
 
 /** Where an event filter is pinned to one thing: "on commit abc1234", "on PR #12". */
@@ -121,6 +129,8 @@ function subjectSuffix(filter: ProjectEventFilterV1): string {
       return ` for task ${shortId(id, 8)}`;
     case 'session':
       return ` for chat ${shortId(id, 8)}`;
+    case 'webhook_trigger':
+      return ` to webhook ${shortId(id, 12)}`;
     default:
       return ` on ${type.replaceAll('_', ' ')} ${shortId(id, 12)}`;
   }

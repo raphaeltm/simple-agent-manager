@@ -43,7 +43,7 @@ export const START_META: Record<StartKind, { label: string; Icon: IconType; colo
   once: { label: 'One time', Icon: AlarmClock, color: 'var(--sam-color-info-fg)' },
   github: { label: 'GitHub', Icon: Github, color: 'var(--sam-color-fg-primary)' },
   webhook: { label: 'Webhook', Icon: Webhook, color: 'var(--sam-color-purple)' },
-  event: { label: 'SAM event', Icon: Radio, color: 'var(--sam-color-warning-fg)' },
+  event: { label: 'Event watch', Icon: Radio, color: 'var(--sam-color-warning-fg)' },
   incident: { label: 'Admin', Icon: ShieldAlert, color: 'var(--sam-color-fg-muted)' },
 };
 

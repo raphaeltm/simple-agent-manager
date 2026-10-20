@@ -8,6 +8,7 @@ import {
   type TriggerPreviewResponse,
   type TriggerResponse,
   type WebhookCredential,
+  type WebhookDelivery,
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { useInfiniteQuery } from '@tanstack/react-query';
@@ -233,6 +234,14 @@ export function TryWebhook({ trigger }: { trigger: TriggerResponse }) {
   );
 }
 
+/** What a call's linked run is: the run it started, or the record of the run it skipped. */
+function deliveryRunText(outcome: WebhookDelivery['outcome']) {
+  if (outcome === 'accepted') return 'Started a run';
+  if (outcome === 'still_running' || outcome === 'concurrent_limit')
+    return 'Recorded as a skipped run';
+  return 'Linked to a run';
+}
+
 export function WebhookDeliveries({ trigger }: { trigger: TriggerResponse }) {
   const { projectId } = useProjectContext();
   const queryScope = useQueryScope();
@@ -296,9 +305,11 @@ export function WebhookDeliveries({ trigger }: { trigger: TriggerResponse }) {
                         </span>
                       )}
                       {delivery.executionId && (
-                        <span className="text-xs text-fg-muted [overflow-wrap:anywhere]">
-                          Started run <code>{delivery.executionId.slice(0, 8)}</code>, listed under
-                          Recent runs
+                        <span
+                          className="text-xs text-fg-muted"
+                          title={`Run ID ${delivery.executionId}`}
+                        >
+                          {deliveryRunText(delivery.outcome)}, listed under Recent runs
                         </span>
                       )}
                     </div>
