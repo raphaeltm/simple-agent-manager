@@ -427,6 +427,21 @@ describe('create flow', () => {
   });
 });
 
+describe('editing a trigger', () => {
+  it('opens on the schedule that was saved, not a default', async () => {
+    api.getTrigger.mockResolvedValue(
+      trigger({ status: 'active', cronExpression: '30 2 * * *', cronTimezone: 'Europe/Paris' })
+    );
+    renderAt('/projects/p1/automation/trigger/trg-deps/edit');
+    expect(await screen.findByRole('radio', { name: 'Every day' })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
+    expect(screen.getByLabelText('At')).toHaveValue('02:30');
+    expect(screen.getByLabelText('Time zone')).toHaveValue('Europe/Paris');
+  });
+});
+
 describe('watches', () => {
   it('lets a maintainer edit a watch someone else made without changing what it does', async () => {
     const user = userEvent.setup();

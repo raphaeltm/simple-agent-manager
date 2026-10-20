@@ -27,6 +27,7 @@ import { Link } from 'react-router';
 
 import type { Outcome } from './describe';
 import type { AutomationItem, StartKind } from './model';
+import { useRadioKeys } from './radio-keys';
 
 type IconType = ComponentType<{ size?: number; className?: string; 'aria-hidden'?: boolean }>;
 
@@ -381,6 +382,7 @@ export function Chips<T extends string>({
   /** Wrap on phones too: for form choices, where a hidden option is easy to miss. */
   wrap?: boolean;
 }) {
+  const keys = useRadioKeys(options, value, onChange);
   return (
     <div
       role="radiogroup"
@@ -391,11 +393,12 @@ export function Chips<T extends string>({
           : '-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 sm:mx-0 sm:flex-wrap sm:px-0'
       }
     >
-      {options.map((option) => {
+      {options.map((option, index) => {
         const active = option.id === value;
         return (
           <button
             key={option.id}
+            {...keys(index)}
             type="button"
             role="radio"
             aria-checked={active}

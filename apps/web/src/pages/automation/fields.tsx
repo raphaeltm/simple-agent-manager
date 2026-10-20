@@ -5,6 +5,7 @@
  */
 import { type ReactNode, useId, useMemo } from 'react';
 
+import { useRadioKeys } from './radio-keys';
 import { viewerZone, zoneOptions } from './time';
 
 export const INPUT_CLASS =
@@ -97,13 +98,15 @@ export function ChoiceCards<T extends string>({
   columns?: 1 | 2 | 3;
 }) {
   const grid = columns === 3 ? 'sm:grid-cols-3' : columns === 2 ? 'sm:grid-cols-2' : '';
+  const keys = useRadioKeys(options, value, onChange);
   return (
     <div role="radiogroup" aria-label={label} className={`grid grid-cols-1 gap-3 ${grid}`}>
-      {options.map((option) => {
+      {options.map((option, index) => {
         const selected = option.id === value;
         return (
           <button
             key={option.id}
+            {...keys(index)}
             type="button"
             role="radio"
             aria-checked={selected}
