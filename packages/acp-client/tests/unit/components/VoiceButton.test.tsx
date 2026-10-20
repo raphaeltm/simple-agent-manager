@@ -15,12 +15,17 @@ class MockMediaRecorder {
   static isTypeSupported = vi.fn().mockReturnValue(true);
   /** Lets a test reach the recorder the component created, to fire deferred events. */
   static lastInstance: MockMediaRecorder | null = null;
+  /** Failures a real browser can raise after the microphone was already granted. */
+  static constructError: Error | null = null;
+  static startError: Error | null = null;
 
   constructor() {
+    if (MockMediaRecorder.constructError) throw MockMediaRecorder.constructError;
     MockMediaRecorder.lastInstance = this;
   }
 
   start() {
+    if (MockMediaRecorder.startError) throw MockMediaRecorder.startError;
     this.state = 'recording';
   }
 
@@ -61,6 +66,8 @@ describe('VoiceButton', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    MockMediaRecorder.constructError = null;
+    MockMediaRecorder.startError = null;
     originalMediaDevices = navigator.mediaDevices;
     originalMediaRecorder = globalThis.MediaRecorder;
 
@@ -648,5 +655,49 @@ describe('VoiceButton', () => {
 
     await waitFor(() => expect(mockOnTranscription).toHaveBeenCalledWith('Transcribed text'));
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  describe('a recorder that fails after the microphone was granted', () => {
+    function grantedStream() {
+      const stream = createMockStream();
+      Object.defineProperty(navigator, 'mediaDevices', {
+        value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
+        writable: true,
+        configurable: true,
+      });
+      return stream.getTracks()[0] as unknown as { stop: ReturnType<typeof vi.fn> };
+    }
+
+    it.each([
+      ['start() throws', 'startError'],
+      ['construction throws', 'constructError'],
+    ] as const)('releases the microphone when %s', async (_label, hook) => {
+      const track = grantedStream();
+      // Browsers raise a NotSupportedError DOMException here (jsdom's DOMException is
+      // not an Error subclass, so the test uses an Error carrying the same name).
+      MockMediaRecorder[hook] = Object.assign(new Error('Recorder not supported'), {
+        name: 'NotSupportedError',
+      });
+      const onError = vi.fn();
+      render(
+        <VoiceButton
+          onTranscription={mockOnTranscription}
+          apiUrl="https://api.example.com/api/transcribe"
+          onError={onError}
+        />
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /start voice input/i }));
+      });
+
+      expect(track.stop).toHaveBeenCalled();
+      // The failure is visible, and no recording control or upload follows.
+      expect(screen.getByTitle('Recorder not supported')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /stop recording/i })).toBeNull();
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'Recorder not supported' })
+      );
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
   });
 });

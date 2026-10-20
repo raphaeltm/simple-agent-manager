@@ -232,8 +232,11 @@ export function VoiceButton({
 
     const epoch = ++captureEpochRef.current;
     const abandoned = () => epoch !== captureEpochRef.current || unmountedRef.current;
+    // Held outside the try so a failure after the grant can still release the microphone.
+    let acquired: MediaStream | null = null;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      acquired = stream;
       if (abandoned()) {
         // Granted after the host unmounted or disabled voice input: release the
         // microphone without ever recording.
@@ -337,6 +340,14 @@ export function VoiceButton({
       recorder.start();
       setState('recording');
     } catch (err) {
+      // e.g. MediaRecorder construction or start() threw NotSupportedError after the
+      // grant: never leave the microphone live behind an error or idle button.
+      if (acquired) {
+        acquired.getTracks().forEach((track) => track.stop());
+        if (streamRef.current === acquired) streamRef.current = null;
+        mediaRecorderRef.current = null;
+      }
+      // A superseded attempt must not tear down the newer capture's monitor.
       if (abandoned()) return;
       stopAmplitudeMonitor();
       setState('error');
