@@ -22,8 +22,8 @@ command that reads the variable directly gets the placeholder and fails to authe
 
 Nothing else changed: variables without **Secret** ticked keep their real values, and runtime files
 (including secret file content), agent sign-ins, Git access, and [MCP servers](/docs/guides/mcp-servers/)
-work as before. Chats that were already running when your instance updated keep their real values
-until they restart or wake.
+work as before. Chats that were already running when your instance updated keep their real values;
+a new chat, or a VM chat that wakes from sleep, gets placeholders.
 
 ## Mark a variable as Secret
 
@@ -61,8 +61,8 @@ A program that reads the variable when it starts, outside `exec_with_secrets`, s
 placeholder. That includes a dev server you start in the terminal, an MCP server from the
 repository's own config, and hooks. Either start it through `exec_with_secrets` (its one-hour limit
 applies), save the variable again under the same name with **Secret** unticked (SAM never shows a
-secret's value, so enter it again; the agent can then read it), or deliver the value as a runtime
-file instead.
+secret's value, so enter it again; chats started after that can read it), or deliver the value as a
+runtime file instead.
 
 ## Troubleshooting
 
@@ -71,17 +71,20 @@ file instead.
   started before your instance updated (start a new chat); or 8 commands are already running on
   that machine.
 - **The agent won't start, with "managed secret … conflicts with harness environment
-  authentication".** A Secret variable has the same name as the agent's own sign-in variable, such
-  as `ANTHROPIC_API_KEY`. Rename the variable, or connect the agent's credential under **Settings →
-  Connections** instead.
-- **The output says `environmentMode: legacy`.** The workspace still has the real values from before
-  the update. Start a new chat to get placeholders.
+  authentication".** A Secret variable has the same name as the variable the agent's own connected
+  credential is passed in, such as `ANTHROPIC_API_KEY`. Rename the variable or delete it.
+- **"Managed environment contains an unsupported shell variable name".** A project, profile, or skill
+  variable, Secret or not, is named `ENV`, `BASH_ENV`, `UID`, `EUID`, `PPID`, `SHELLOPTS`,
+  `BASHOPTS`, or `BASH_VERSINFO`, so every `exec_with_secrets` call fails. Rename it.
+- **The output says `environmentMode: legacy`.** The workspace still has real values: it started
+  before your instance updated, or the variable was added or marked Secret after it started. Start a
+  new chat to get placeholders.
 
 ## Details for agents
 
 `exec_with_secrets` takes either `argv` (a literal command, without shell expansion) or `command`
 with an explicit `shell` of `bash` or `sh`, plus `secretNames`, an optional absolute `cwd`, an
-optional `timeoutMs`, and an `idempotencyKey`:
+optional `timeoutMs`, and an optional `idempotencyKey`:
 
 ```json
 {
@@ -99,15 +102,15 @@ key only to retry the identical request. Output is kept to 64 KiB per stream, fr
 
 Each job is a new non-interactive process: terminal exports, aliases, functions, activated
 environments, and the terminal's current directory don't carry over, so source any setup the command
-needs. Environment overrides are for non-secret values. `ENV` and `BASH_ENV` can't be selected or
-overridden, and `UID`, `EUID`, `PPID`, `SHELLOPTS`, `BASHOPTS`, and `BASH_VERSINFO` are rejected. The
-container needs Bash and `setsid`; without them the job fails rather than SAM replacing the
-container.
+needs. Environment overrides are for non-secret values. `ENV`, `BASH_ENV`, `UID`, `EUID`, `PPID`,
+`SHELLOPTS`, `BASHOPTS`, and `BASH_VERSINFO` can't be selected or overridden, and a managed variable
+with one of these names makes every call fail. The container needs Bash and `setsid`; without them
+the job fails rather than SAM replacing the container.
 
 Cancelling stops the command's process group, but anything it started outside that group, such as
 containers from `docker compose up -d`, keeps running. Stopping the session or workspace cancels its
-jobs. If the VM agent restarts, unfinished jobs are marked `interrupted` and are never re-run
-automatically.
+jobs. If the VM agent stops, unfinished jobs end (`cancelled` after a clean shutdown, `interrupted`
+after a crash) and are never re-run automatically.
 
 Starting or restarting an agent fetches its environment from SAM each time. If that request fails,
 the start fails and can be retried, rather than falling back to cached values that might hold real

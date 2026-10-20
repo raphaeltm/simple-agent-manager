@@ -281,9 +281,9 @@ In a project chat, the paperclip attaches files to your next message; see
 [Attach Files to a Message](#attach-files-to-a-message).
 
 On a workspace's own page, the paperclip instead uploads files straight into the running workspace's
-`.private` directory and adds an "Uploaded N files" message to the chat. Those uploads allow up to
-50 MB per file and 250 MB at a time (self-hosters can change these with `FILE_UPLOAD_MAX_BYTES` and
-`FILE_UPLOAD_BATCH_MAX_BYTES`), and file names must not contain shell metacharacters.
+`.private` directory, and the page shows "Uploaded N files: …" (the agent isn't told, so mention the
+files in your message). Those uploads allow up to 50 MB per file and 250 MB at a time, and file
+names may only use letters, digits, spaces, `.`, `_`, and `-`.
 
 ### Downloading Files
 
@@ -476,9 +476,9 @@ unchanged. Prior workspace files are not restored."_ It's the quickest way to ca
 2. Select **Fork**. SAM opens the new chat.
 
 The new chat is always a **Chat**, linked to the original. SAM gives its agent the original's most
-recent messages — up to 200 messages and 24,000 characters, leaving out tool calls, system messages,
-and approvals, with secrets redacted — plus the repository, the branch, and the commit SAM last
-saved. You can read what the agent was given in the system message at the top of the new chat. The
+recent messages from you and the agent — up to 24,000 characters from the last 200 stored entries,
+leaving out tool calls, system messages, and approvals, with secrets redacted — plus the repository
+and branch, and the commit SAM last saved if it still has one. You can read what the agent was given in the system message at the top of the new chat. The
 original chat doesn't change, and its files aren't restored: the new chat starts from your default
 branch, so tell the agent which branch to continue from.
 
@@ -570,7 +570,7 @@ Persistent chat sessions can sleep and recover on both [Instant and VM-backed ru
 - **Snapshots that keep failing.** If SAM cannot save a complete snapshot after a few tries (three, or 15 minutes, by default), it stops retrying and shuts the idle workspace down anyway, and the chat says what was kept. A VM session can fall back on an earlier snapshot: a complete one brings back everything it saved, and one that saved the repository's exact commit brings back the repository but not every other file. Otherwise SAM keeps only the conversation and any successful backups. Either way, changes made after the last successful snapshot can be lost, so push what you want to keep. [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot) explains each case.
 - **Recovery.** SAM is rebuilding the session's runtime and restoring its saved state. Wait for it to finish instead of resending.
 - **Wake failed.** SAM could not safely wake the sleeping session or the queued wake prompt expired before delivery. The session is marked **Wake failed** in the list and a system message in the chat explains the reason, so the failure is visible instead of hidden in retry state. [Wake failed](/docs/guides/session-troubleshooting/#wake-failed) lists the reasons and what to do about each.
-- **Failed tasks.** When a task fails while its workspace is still running, SAM snapshots the workspace and puts the conversation to sleep instead of deleting it. That covers a question the agent sent with its `request_human_input` tool that nobody answered, an agent that went quiet after a SAM check-in, and, in the **SAM** provider mode, a usage limit. (On your own credentials SAM [waits for a usage limit to reset](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset) instead of failing the task.) If the agent is still working when the task fails, SAM waits for its turn to end first (up to 8 hours by default). The failure banner stays, and sending a message wakes the same chat with its files restored. If SAM could not save the workspace, or the snapshot is incomplete, the chat says so. If SAM cannot safely snapshot the failed runtime, uncommitted changes may be lost; the chat explains what could not be saved. **Archive** still deletes it right away. [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails) shows how to tell which happened.
+- **Failed tasks.** When a task fails while its workspace is still running, SAM snapshots the workspace and puts the conversation to sleep instead of deleting it. That covers a question the agent sent with its `request_human_input` tool that nobody answered, an agent that went quiet after a SAM check-in, and, in the **SAM** provider mode, a usage limit. (On your own credentials SAM [waits for a usage limit to reset](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset) instead of failing the task.) If the agent is still working when the task fails, SAM waits for its turn to end first (up to 8 hours by default). The failure banner stays, and sending a message wakes the same chat with its files restored. If SAM could not save the workspace, or the snapshot is incomplete, the chat says so. If SAM cannot safely snapshot the failed runtime, uncommitted changes may be lost; the chat explains what could not be saved. The saved workspace is kept for seven days, like any sleeping chat's. [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails) shows how to tell which happened.
 
 You may also see a banner telling you a message was saved but its delivery was interrupted. **That one needs a decision from you** — SAM will not replay the message automatically, because replaying a prompt that already half-ran duplicates commits and pull requests. See [Your prompt may or may not have run](/docs/guides/session-troubleshooting/#your-prompt-may-or-may-not-have-run).
 

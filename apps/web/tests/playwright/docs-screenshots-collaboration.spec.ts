@@ -27,6 +27,7 @@ test.use({ timezoneId: 'UTC', locale: 'en-US' });
 
 const PROJECT_ID = '01KH2ZQ7M4R9T6V3X8B5N1C0DW';
 const SESSION_ID = '7d1e4c92-3a6b-4f08-9b2e-5c7a1d0e8f63';
+const TASK_ID = '01KH9B3C5D7E9F1G3H5J7K9M1N';
 const NOW = Date.parse('2026-10-20T14:20:00Z');
 const MINUTE = 60_000;
 
@@ -114,7 +115,21 @@ function session(viewer: Viewer) {
     id: SESSION_ID,
     projectId: PROJECT_ID,
     workspaceId: 'ws-docs-collab',
-    taskId: null,
+    // A Chat backed by a task, as every project chat is: the task is what puts Fork and Retry
+    // in the tool rail, for the teammate too.
+    taskId: TASK_ID,
+    task: {
+      id: TASK_ID,
+      status: 'in_progress',
+      executionStep: 'awaiting_followup',
+      outputBranch: 'sam/fix-flaky-checkout-tests',
+      outputPrUrl: null,
+      errorMessage: null,
+      outputSummary: null,
+      finalizedAt: null,
+      taskMode: 'conversation',
+      agentProfileHint: null,
+    },
     topic: 'Fix the flaky checkout tests',
     status: 'active',
     messageCount: 4,
@@ -132,6 +147,8 @@ function session(viewer: Viewer) {
     agentSessionId: null,
     agentType: 'claude-code',
     isMine: viewer === 'owner',
+    // Who started it: the teammate's session list names Prakash instead of "You".
+    createdByUserId: PRAKASH.id,
     createdBy: { id: PRAKASH.id, name: PRAKASH.name, email: 'prakash@example.com' },
     viewerAccess: viewer,
     access: accessSummary(viewer),
@@ -346,6 +363,13 @@ test('docs: a chat as the teammate it is shared with sees it', async ({ page }) 
   // The teammate can write, but has no paperclip: attachments stay with the owner.
   await expect(page.getByPlaceholder(/Send a message/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Attach files' })).toHaveCount(0);
+  // Fork and Retry start a chat of the teammate's own, so the rail offers them too.
+  await expect(page.getByTestId('session-tool-fork')).toBeVisible();
+  await expect(page.getByTestId('session-tool-retry')).toBeVisible();
+  if (!isMobile(page)) {
+    // The session list (desktop only; phones show the chat alone) names who started the chat.
+    await expect(page.getByText('Prakash Rao', { exact: true }).first()).toBeVisible();
+  }
 
   await docsShot(
     page,

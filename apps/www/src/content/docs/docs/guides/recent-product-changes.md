@@ -21,7 +21,7 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
   → [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands)
 - **A usage limit pauses the work instead of failing it.** When your own Claude, Codex, or API
   limit runs out mid-task, the chat says **Waiting for provider limit reset at…**, sleeps, and carries
-  on by itself after the reset. → [Waiting for a provider limit reset](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset)
+  on by itself after the reset (unless it ends up **Blocked**). → [Waiting for a provider limit reset](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset)
 - **A workspace whose snapshots keep failing is shut down instead of left running.** After three
   failed attempts or 15 minutes, SAM stops the idle workspace and says in the chat what was kept.
   Changes that no successful snapshot saved can be lost, so push work you want to keep. Send a
@@ -111,8 +111,8 @@ reaches the agent, labelled with who sent it.
 
 To hand a chat over for a while, its owner selects **Share** in the tool rail, picks a teammate and
 5, 10, 30, or 60 minutes, and confirms that the chat runs on their own accounts. The teammate gets a
-notification, sees how long they have above the message box, and can do what the owner does in that
-chat until the time is up or the owner revokes it. See
+notification, sees how long they have above the message box, and can message the agent, answer it,
+and interrupt, sleep or archive the chat until the time is up or the owner revokes it. See
 [Work together in a chat](/docs/guides/collaboration/#work-together-in-a-chat).
 
 ### SAM leaves publishing to the agent

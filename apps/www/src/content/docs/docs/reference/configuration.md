@@ -846,11 +846,11 @@ tune how SAM stores and delivers requests internally and rarely need changing; t
 
 ## ACP Session Lifecycle
 
-| Variable                          | Default          | Description                                                                                                                                                                                                                                 |
-| --------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ACP_SESSION_DETECTION_WINDOW_MS` | `300000` (5 min) | Stale ProjectData ACP heartbeat detection window. VM sessions are not interrupted solely from stale/missing ProjectData heartbeat rows; the timeout must be paired with conclusive runtime/workspace evidence.                              |
-| `ACP_SESSION_MAX_FORK_DEPTH`      | `10`             | Maximum session fork chain depth                                                                                                                                                                                                            |
-| `ARCHIVED_FORK_HISTORY_MAX_CHARS` | `24000`          | Most characters of conversation history SAM hands the agent when you [fork an archived or expired chat](/docs/guides/chat-features/#fork-an-archived-or-expired-chat) (at most 200 messages either way). Set it in `wrangler.toml` `[vars]` |
+| Variable                          | Default          | Description                                                                                                                                                                                                                                          |
+| --------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ACP_SESSION_DETECTION_WINDOW_MS` | `300000` (5 min) | Stale ProjectData ACP heartbeat detection window. VM sessions are not interrupted solely from stale/missing ProjectData heartbeat rows; the timeout must be paired with conclusive runtime/workspace evidence.                                       |
+| `ACP_SESSION_MAX_FORK_DEPTH`      | `10`             | Maximum session fork chain depth                                                                                                                                                                                                                     |
+| `ARCHIVED_FORK_HISTORY_MAX_CHARS` | `24000`          | Most characters of conversation history SAM hands the agent when you [fork an archived or expired chat](/docs/guides/chat-features/#fork-an-archived-or-expired-chat) (from at most the last 200 stored entries). Set it in `wrangler.toml` `[vars]` |
 
 ## ACP Protocol (VM Agent)
 
@@ -1609,8 +1609,9 @@ Applied via cloud-init on each node:
 
 Files attached to a project chat message are staged in R2 and delivered with the message
 ([Attach Files to a Message](/docs/guides/chat-features/#attach-files-to-a-message)). The browser
-enforces the built-in limits as well, so lowering these takes effect but raising them doesn't. Set
-them in `wrangler.toml` `[vars]`.
+enforces the built-in size and count limits as well, so lowering those takes effect but raising
+them doesn't; the upload-link lifetime isn't checked in the browser. Set them in `wrangler.toml`
+`[vars]`.
 
 | Variable                            | Default              | Description                  |
 | ----------------------------------- | -------------------- | ---------------------------- |
@@ -1622,7 +1623,10 @@ them in `wrangler.toml` `[vars]`.
 ### Workspace uploads and downloads
 
 These apply to files uploaded straight into a workspace from its own page, and to files downloaded
-from a workspace.
+from a workspace. `FILE_UPLOAD_MAX_BYTES` and `FILE_UPLOAD_TIMEOUT` are VM agent settings that SAM
+doesn't pass to the machines it starts, so their defaults apply. On the Worker,
+`FILE_UPLOAD_BATCH_MAX_BYTES` is an early check: it can lower the batch limit, but not raise it past
+the VM agent's 250 MB.
 
 | Variable                      | Default              | Description                     |
 | ----------------------------- | -------------------- | ------------------------------- |

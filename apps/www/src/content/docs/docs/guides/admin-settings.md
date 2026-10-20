@@ -68,8 +68,9 @@ SAM doesn't stop you from resetting or breaking the only sign-in provider your a
 nobody can sign in:
 
 1. Set the `SETUP_FORCE` GitHub Environment variable to `true` and run **Deploy Production**.
-2. Every deploy creates a new `SETUP_TOKEN`. Open the Cloudflare dashboard link the deploy prints,
-   copy the token, and open `/setup` with it (as in
+2. Every deploy creates a new `SETUP_TOKEN`. In the deploy's log, the **Sync Wrangler Config** step
+   prints a Cloudflare dashboard link ("Setup token is available in Cloudflare dashboard
+   variables: …"). Copy the token there, and open `/setup` with it (as in
    [Verification](/docs/guides/self-hosting/#verification)).
 3. Enter working sign-in credentials.
 4. Once you can sign in again, delete `SETUP_FORCE` and deploy again. While it's set, `/setup`

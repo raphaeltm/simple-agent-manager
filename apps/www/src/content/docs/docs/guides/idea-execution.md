@@ -114,7 +114,8 @@ the GitHub App may also lack the permission; see
 [Let agents open pull requests](/docs/guides/self-hosting/#let-agents-open-pull-requests).) Either:
 
 - Open it yourself on GitHub from the task's branch, which the **Task completed** notification
-  names.
+  names. (If you completed the task yourself there's no notification; once the branch is pushed, it's
+  listed in the project's **Files** tab.)
 - Or reply in the chat, for example "open a pull request for this". The reply wakes the session
   (within the seven days its workspace is kept), and the agent pushes and opens it.
 

@@ -135,9 +135,9 @@ never switches to another model, profile, or credential to get around a limit.
   limit reset (time unknown); bounded retry 1/3 at 14:05 UTC.** SAM tries again after 5 minutes,
   then 10, then 20. If the limit still hasn't lifted, the task is **Blocked**.
 - **A new task that uses the same credential waits too**, before its agent starts. If its workspace
-  was already being prepared, its card reads **Blocked before provider prompt:** followed by the
-  reset time, and its machine stays up meanwhile; despite the word "Blocked", it starts by itself
-  after the reset.
+  was already being prepared, its card says **Waiting**, with the reason **Blocked before provider
+  prompt:** followed by the reset time, and its machine stays up meanwhile; despite the word
+  "Blocked", it starts by itself after the reset.
 
 **Blocked** on its own means SAM stopped waiting. The task won't carry on by itself, and a reply in
 the chat doesn't restart it:
@@ -152,14 +152,16 @@ the chat doesn't restart it:
 To move on:
 
 1. Look at what the agent got done: the chat, and anything it pushed. Work it didn't push stays in
-   the chat's saved workspace, which can't be woken while the task is **Blocked**.
+   the chat's saved workspace, which can't be woken while the task is **Blocked**, so don't count on
+   getting it back.
 2. Once the limit has reset, continue in a new chat: **Fork** or **Retry** in the tool rail starts
    one from this chat (see [Conversation forking](/docs/guides/chat-features/#conversation-forking)).
    The new chat starts from your default branch, so tell its agent which pushed branch to build on.
-3. End the blocked task with **Complete** in the session tool rail, which keeps its saved workspace
-   for the usual seven days. If its agent never started, or you've replied in the chat since, SAM
-   refuses **Complete**: use **Archive**, which deletes the saved workspace and with it anything the
-   agent didn't push.
+3. End the blocked task with **Complete** in the session tool rail (or, for a **Chat**, **Archive**
+   it, which also deletes its saved workspace). Don't reply in the blocked chat, before or after
+   **Complete**: the task only waits again, and SAM then refuses **Complete**. If SAM refuses it (the
+   agent never started, or someone replied), you can't end the task from the app yet. It won't run
+   by itself, so leave it and carry on in the new chat.
 
 ## SAM paused automatic check-ins
 
@@ -553,8 +555,9 @@ message box depends on how it ended:
   given this one's recent history — see
   [Fork an archived or expired chat](/docs/guides/chat-features/#fork-an-archived-or-expired-chat).
 - **"This session has ended."** on a chat that failed and couldn't be kept.
-- **This chat has ended** and **Only … can fork it to continue.** on someone else's chat. Select
-  **Start your own chat**, or use **Fork** in the tool rail (below), which starts a chat of your own.
+- **This chat has ended** and **Only … can fork it to continue.** on someone else's chat, with
+  **"This session has ended."** under it if that chat failed. Select **Start your own chat**, or use
+  **Fork** in the tool rail (below), which starts a chat of your own.
 
 You can also start again from the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail):
 **Retry** opens a new chat pre-filled with the task's original request, and **Fork** opens one
@@ -566,8 +569,9 @@ re-explain it. None of these bring the old chat's files; check GitHub for what t
 SAM gives each workspace access to the project's repository: through SAM's GitHub App on a GitHub
 project, or your GitLab sign-in on a GitLab project. On a GitHub project it checks, every time Git
 asks, that the person whose workspace it is can still reach the repository. When access is refused,
-`git push`, `git fetch`, or `gh` in the workspace fails with an ordinary authentication error, and a
-new workspace fails to start with **failed to fetch git token: git-token authorization_denied (HTTP 403); check
+`git push` or `git fetch` in the workspace fails with an ordinary authentication error (`gh` can keep
+working until its current token expires, within the hour), and on a VM a new workspace fails to
+start with **failed to fetch git token: git-token authorization_denied (HTTP 403); check
 control-plane availability or repository authorization**.
 
 - **Access was removed.** If you lost access to the repository on GitHub, or the GitHub App was
