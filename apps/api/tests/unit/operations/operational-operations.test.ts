@@ -14,6 +14,7 @@ import {
   samOperationGet,
   samWorkChanges,
 } from '../../../src/operations/operational-operations';
+import { samChatRead } from '../../../src/operations/platform-operations';
 import type { OperationContext } from '../../../src/operations/types';
 import { operationReceiptId } from '../../../src/services/cli-operation-receipts';
 import { recordOperationalJob } from '../../../src/services/operational-job-observations';
@@ -31,6 +32,8 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('../../../src/services/project-data', () => ({
   getSessionAccess: mocks.access,
+  getSession: vi.fn(async () => ({ id: 'chat', createdByUserId: 'owner' })),
+  getMessages: vi.fn(async () => ({ messages: [], hasMore: false })),
   getMailboxMessage: mocks.mailbox,
   recordActivityEvent: vi.fn(async () => undefined),
   getSessionState: mocks.state,
@@ -214,6 +217,22 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
     expect(result.pending[0]).toMatchObject({ formSchema: { type: 'object' }, canDecline: true });
     expect(result.settled[0]).toMatchObject({ state: 'delivery_unconfirmed', answeredAt: 4 });
     expect(JSON.stringify(result)).not.toContain(secret);
+  });
+  it('existing transcript read exposes pending options to active grantees but not readers', async () => {
+    mocks.pending.mockResolvedValue([
+      {
+        interactionId: 'permission',
+        kind: 'permission',
+        detail: { options: [{ id: 'allow-once', name: 'Allow once' }] },
+      },
+    ]);
+    expect(await samChatRead.run(ctx('grantee'), session)).toMatchObject({
+      pendingInteractions: [
+        expect.objectContaining({ answerOptions: [{ id: 'allow-once', name: 'Allow once' }] }),
+      ],
+    });
+    const reader = await samChatRead.run(ctx('reader'), session);
+    expect(reader).not.toHaveProperty('pendingInteractions');
   });
   it('changes cursor tracks retained state and rejects actor/session cursor reuse', async () => {
     const initial = await samWorkChanges.run(ctx(), session);

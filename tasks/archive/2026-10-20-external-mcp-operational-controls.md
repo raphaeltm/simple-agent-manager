@@ -17,7 +17,7 @@ Shared registry in operations/registry.ts feeds connector-mcp.ts. Existing cance
 - [x] Add typed persisted job results with explicit adapter coverage.
 - [x] Add actor-scoped uncertain requestKey operation lookup without replay.
 - [x] Add unit/integration authorization, redaction, fencing and read-side-effect tests.
-- [ ] Document tool schemas, limitations and data flow; review security, Cloudflare, completion/docs/constitution.
+- [x] Document tool schemas, limitations and data flow; review security, Cloudflare, completion/docs/constitution.
 - [ ] Exact-final-head CI green, CodeRabbit requested/waited, merge and production deploy/smoke.
 
 ## Acceptance
@@ -34,4 +34,6 @@ Seven actual registry tools: interrupt, status, delivery get, interaction snapsh
 
 ## Validation/release state
 
-Focused TS operation/protocol tests and focused Go race/auth tests pass. Security, Cloudflare/constitution and completeness/docs review findings addressed; final Go review and broad suites running. Staging intentionally skipped by user; no production permission grants or live interruption tests. Required final-head CI and normal production workflow remain pending. Task-file direct main push was rejected by branch protection; no retry, all publication through PR.
+Full API suite: 12,818 passed, 2 skipped. Full VM-agent suite passed. Repository-wide lint/typecheck/build passed. Local Workers approval suite: 5 passed. Latest targeted Go race/auth and shared-transcript tests pass. Security, Cloudflare/constitution, completeness/docs and final Go review findings addressed. Staging intentionally skipped by user; no production permission grants or live interruption tests. Required final-head CI and normal production workflow remain pending. Task-file direct main push was rejected by branch protection; no retry, all publication through PR.
+
+Final Go review correction: immutable attempt-owned cancellation completion policy yields recovering/ready/error publication to process monitor, preventing a late local completion from overwriting restarted runtime state. Deterministic state-preservation and race tests pass.

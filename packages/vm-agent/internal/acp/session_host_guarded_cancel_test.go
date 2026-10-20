@@ -175,3 +175,19 @@ func TestGuardedCancelLateStopCannotClearNewerCancellation(t *testing.T) {
 		t.Fatal("old stop cleared newer cancellation fence")
 	}
 }
+
+func TestGuardedCancelLateCompletionPreservesProcessMonitorState(t *testing.T) {
+	for _, status := range []SessionHostStatus{HostStarting, HostReady, HostError} {
+		t.Run(string(status), func(t *testing.T) {
+			h := NewSessionHost(SessionHostConfig{})
+			attempt, _ := h.beginPrompt(func() {}, nil)
+			attempt.guardedCancel.Store(true)
+			h.releasePrompt(attempt)
+			h.setStatus(status, "")
+			h.markPromptDoneForAttempt(attempt)
+			if h.Status() != status {
+				t.Fatalf("late completion changed monitor state %s to %s", status, h.Status())
+			}
+		})
+	}
+}

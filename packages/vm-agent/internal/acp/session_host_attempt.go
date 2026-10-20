@@ -43,6 +43,7 @@ type promptAttempt struct {
 	checkpointOwned     bool
 	observer            PromptTerminalObserver
 	checkpointRequested atomic.Bool
+	guardedCancel       atomic.Bool // guarded stop/process monitor owns terminal activity
 }
 
 type checkpointRolloverEpisode struct {
