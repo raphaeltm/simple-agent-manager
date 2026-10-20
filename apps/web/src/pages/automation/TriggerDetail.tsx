@@ -28,9 +28,10 @@ import {
   WhenAndThen,
 } from './detail-parts';
 import { fromTrigger } from './model';
+import { Loading, Notice } from './page';
 import { TriggerRuns, useTriggerRuns } from './trigger-runs';
 import { ConnectWebhook, TryWebhook, WebhookDeliveries } from './trigger-webhook';
-import { ButtonLink, Disclosure, KeyValues, Loading, Notice } from './ui';
+import { ButtonLink, Disclosure, KeyValues } from './ui';
 
 export function TriggerDetail({
   triggerId,

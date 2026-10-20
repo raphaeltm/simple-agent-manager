@@ -8,17 +8,19 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { Field, INPUT_CLASS, ZoneSelect } from './fields';
-import { fullDate, instantToZonedInput, zonedInputToInstant } from './time';
+import { durationLabel, fullDate, instantToZonedInput, zonedInputToInstant } from './time';
 
 const MIN = 60_000;
 
 /** How long SAM may keep trying after the due time; the API allows up to the late grace. */
 export const GIVE_UP_OPTIONS = [
-  { ms: 15 * MIN, label: '15 minutes' },
-  { ms: 60 * MIN, label: '1 hour' },
-  { ms: 6 * 60 * MIN, label: '6 hours' },
-  { ms: DEFAULT_PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS, label: '24 hours' },
-].filter((option) => option.ms <= DEFAULT_PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS);
+  15 * MIN,
+  60 * MIN,
+  6 * 60 * MIN,
+  DEFAULT_PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS,
+]
+  .filter((ms) => ms <= DEFAULT_PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS)
+  .map((ms) => ({ ms, label: durationLabel(ms) }));
 
 export const DEFAULT_GIVE_UP_MS = DEFAULT_PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS;
 
@@ -52,7 +54,9 @@ export function resolveOnceTime(
   if (dueAt === null) return { error: 'Choose a date and time.' };
   if (dueAt <= now) return { error: 'Choose a time in the future.' };
   if (dueAt - now > DEFAULT_PROJECT_EVENT_SCHEDULE_MAX_HORIZON_MS)
-    return { error: 'Choose a time within the next 30 days.' };
+    return {
+      error: `Choose a time within the next ${durationLabel(DEFAULT_PROJECT_EVENT_SCHEDULE_MAX_HORIZON_MS)}.`,
+    };
   return { dueAt, expiresAt: dueAt + time.giveUpMs };
 }
 

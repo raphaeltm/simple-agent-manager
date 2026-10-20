@@ -27,17 +27,8 @@ import {
   NeedsAttention,
   Recently,
 } from './overview-sections';
-import {
-  ButtonLink,
-  KindIcon,
-  LoadError,
-  Loading,
-  Notice,
-  Page,
-  PageHeader,
-  Panel,
-  SectionTitle,
-} from './ui';
+import { LoadError, Loading, Notice, Page, PageHeader } from './page';
+import { ButtonLink, KindIcon, Panel, SectionTitle } from './ui';
 
 function EmptyAutomation({ canWrite }: { canWrite: boolean }) {
   const { projectId } = useProjectContext();

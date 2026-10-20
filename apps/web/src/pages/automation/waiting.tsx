@@ -19,8 +19,9 @@ import type { AutomationLookups } from './data';
 import { describeEventFilter, filterRows, isManagedSubscription, isSamRelay } from './describe';
 import { useAutomationAction } from './detail-parts';
 import { CheckRow, Field } from './fields';
+import { LoadError, Loading } from './page';
 import { fullDate, relative } from './time';
-import { ButtonLink, Disclosure, KeyValues, LoadError, Loading, Panel } from './ui';
+import { ButtonLink, Disclosure, KeyValues, Panel } from './ui';
 
 const DELIVERY_WORDS: Record<string, string> = {
   pending: 'Waiting to be delivered',

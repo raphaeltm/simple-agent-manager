@@ -10,18 +10,9 @@ import { automationPaths, parseHistoryItem } from '../../lib/automation-routes';
 import { useProjectContext } from '../ProjectContext';
 import { type ActivityEntry, isProblem } from './activity';
 import { useAutomationData } from './data';
+import { LoadError, Loading, Notice, Page, PageHeader } from './page';
 import { dayHeading, relative } from './time';
-import {
-  Chips,
-  LoadError,
-  Loading,
-  Notice,
-  OutcomeIcon,
-  Page,
-  PageHeader,
-  Panel,
-  TextLink,
-} from './ui';
+import { Chips, OutcomeIcon, Panel, TextLink } from './ui';
 
 function HistoryRow({ entry, name }: { entry: ActivityEntry; name: string }) {
   const { projectId } = useProjectContext();

@@ -37,6 +37,7 @@ import {
   buildGitHubFilters,
   splitList,
 } from '../../../components/triggers/trigger-form-support';
+import { isVersionConflict } from '../errors';
 import { resolveOnceTime } from '../schedule-time';
 import { cronError, toCron } from './cron';
 import { type EditorState, WATCH_PRESETS } from './state';
@@ -338,6 +339,11 @@ export function validateStep(
 /** API refusals the editor can explain, keyed to the field that should change. */
 export function friendlySaveError(error: unknown): { field?: string; message: string } {
   const message = error instanceof Error ? error.message : 'Could not save it';
+  if (isVersionConflict(error))
+    return {
+      message:
+        'Someone changed this automation while you were editing. Open it again to see their change, then make yours.',
+    };
   const limit = /Maximum triggers per project \((\d+)\) reached/.exec(message);
   if (limit)
     return {

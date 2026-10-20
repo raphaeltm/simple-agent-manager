@@ -18,7 +18,8 @@ import { useProjectContext } from '../ProjectContext';
 import { useAutomationAccess, useAutomationLookups } from './data';
 import { fromSchedule, fromWatch, isFinished } from './model';
 import { AutomationRow } from './overview-sections';
-import { ButtonLink, LoadError, Loading, Panel, SectionTitle } from './ui';
+import { LoadError, Loading } from './page';
+import { ButtonLink, Panel, SectionTitle } from './ui';
 import { WaitList } from './waiting';
 
 export function ChatAutomation({ sessionId }: { sessionId: string }) {

@@ -44,7 +44,7 @@ import {
   newEditorState,
 } from './editor/state';
 import { templateById } from './editor/templates';
-import { Loading, Notice, Page, PageHeader } from './ui';
+import { Loading, Notice, Page, PageHeader } from './page';
 
 type Saved = { kind: 'trigger' | 'schedule' | 'watch'; id: string; credential?: WebhookCredential };
 

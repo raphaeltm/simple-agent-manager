@@ -75,6 +75,7 @@ import { AutomationBehind } from '../../../src/pages/automation/AutomationBehind
 import { AutomationDetail } from '../../../src/pages/automation/AutomationDetail';
 import { AutomationEditor } from '../../../src/pages/automation/AutomationEditor';
 import { AutomationOverview } from '../../../src/pages/automation/AutomationOverview';
+import { VERSION_CONFLICT_TEXT } from '../../../src/pages/automation/errors';
 import { ProjectContext } from '../../../src/pages/ProjectContext';
 import { createTestQueryClient } from '../../test-utils/query-test-utils';
 
@@ -358,6 +359,11 @@ describe('create flow', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await user.clear(screen.getByLabelText('Name'));
     await user.type(screen.getByLabelText('Name'), 'Alerts');
+    // Overlap controls apply to every trigger kind, not only schedules.
+    await user.click(screen.getByText('Advanced options'));
+    await user.click(screen.getByRole('checkbox', { name: /Skip a run if the last one/ }));
+    await user.clear(screen.getByLabelText('Most runs at once'));
+    await user.type(screen.getByLabelText('Most runs at once'), '3');
     await user.click(screen.getByRole('button', { name: 'Create automation' }));
     await waitFor(() =>
       expect(api.createTrigger).toHaveBeenCalledWith(
@@ -366,6 +372,8 @@ describe('create flow', () => {
           name: 'Alerts',
           sourceType: 'webhook',
           agentProfileId: 'prof-1',
+          skipIfRunning: false,
+          maxConcurrent: 3,
           promptTemplate: 'Look into the alert',
           webhookConfig: expect.objectContaining({
             sourceLabel: 'PagerDuty',
@@ -551,6 +559,41 @@ describe('one-time automation page', () => {
         expectedVersion: 3,
         reason: 'Release moved',
       })
+    );
+  });
+});
+
+describe('someone else changed it first', () => {
+  it('says so in words, loads the latest, and retries with the new version', async () => {
+    const user = userEvent.setup();
+    events.getSchedule
+      .mockResolvedValueOnce({ schedule: schedule({ version: 3 }) })
+      .mockResolvedValue({ schedule: schedule({ version: 4 }) });
+    events.cancelSchedule
+      .mockRejectedValueOnce(new Error('Schedule version conflict'))
+      .mockResolvedValue({
+        schedule: schedule({ state: 'cancelled', version: 5 }),
+        changed: true,
+        idempotent: false,
+        actionAlreadyAdmitted: false,
+      });
+    renderAt('/projects/p1/automation/schedule/sch-1');
+    const cancelOnce = async () => {
+      await user.click(await screen.findByRole('button', { name: /Cancel/ }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel it' }));
+    };
+    await cancelOnce();
+    expect(await screen.findByText(VERSION_CONFLICT_TEXT)).toBeInTheDocument();
+    expect(screen.queryByText('Schedule version conflict')).not.toBeInTheDocument();
+    await waitFor(() => expect(events.getSchedule).toHaveBeenCalledTimes(2));
+    await cancelOnce();
+    await waitFor(() =>
+      expect(events.cancelSchedule).toHaveBeenLastCalledWith(
+        'p1',
+        'sch-1',
+        expect.objectContaining({ expectedVersion: 4 })
+      )
     );
   });
 });

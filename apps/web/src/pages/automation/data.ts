@@ -12,10 +12,10 @@ import { useQueryScope } from '../../hooks/useQueryScope';
 import {
   AUTOMATION_ATTENTION_WINDOW_MS,
   AUTOMATION_CHAT_PICKER_LIMIT,
-  AUTOMATION_POLL_MS,
   AUTOMATION_PREVIEW_ROWS,
   AUTOMATION_RECENT_RUNS_PER_TRIGGER,
 } from '../../lib/automation-config';
+import { AUTOMATION_POLL_MS } from '../../lib/poll-intervals';
 import {
   agentProfilesQueryOptions,
   automationQueryKeys,

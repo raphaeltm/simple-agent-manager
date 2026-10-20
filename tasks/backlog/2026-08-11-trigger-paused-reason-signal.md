@@ -57,3 +57,9 @@ COLUMN`, never a table recreation — `triggers` is a CASCADE child of
 - `apps/api/src/services/trigger-admission.ts` — the auto-pause write
 - `.claude/rules/42-no-untracked-degrading-placeholders.md` — this task is the
   tracking record for the removed signal
+
+## Note (2026-10-20)
+
+The Automation page (branch `sam/automation-page`) reads recent runs for paused triggers and shows
+only what they prove: "Paused · its last N runs failed". It still cannot say whether SAM or a person
+paused the trigger, so the backend signal proposed above is still needed.

@@ -37,9 +37,10 @@ import {
 } from './detail-parts';
 import { Field } from './fields';
 import { fromSchedule } from './model';
+import { Loading, Notice } from './page';
 import { type OnceTime, OnceTimeFields, onceTimeFrom, resolveOnceTime } from './schedule-time';
 import { fullDate } from './time';
-import { Disclosure, KeyValues, Loading, Notice, Panel, SectionTitle, TextLink } from './ui';
+import { Disclosure, KeyValues, Panel, SectionTitle, TextLink } from './ui';
 
 const chatPath = (projectId: string, sessionId: string) =>
   `/projects/${encodeURIComponent(projectId)}/chat/${encodeURIComponent(sessionId)}`;

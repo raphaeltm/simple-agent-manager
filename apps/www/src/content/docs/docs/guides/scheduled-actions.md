@@ -1,133 +1,178 @@
 ---
 title: Scheduled actions and event watches
-description: Schedule a message or a new session and manage project event automation.
+description: Run something once at a set time, react to project events, and see what agents are waiting for.
 ---
 
-Open **Events** in a project to schedule work, watch for events, and see what automation is
-already running. Every chat session carries a scoped version of the same thing.
+Open **Automation** in a project to see everything that starts on its own and to set up more.
+Every chat carries a version of the same view, narrowed to that conversation.
 
-Open-ended recurring automation that starts new work, such as a nightly schedule, a reaction to
-GitHub issues, or a webhook from another service, is set up as a [trigger](/docs/guides/triggers/)
-instead.
+Recurring work that starts new chats, such as a nightly schedule, a reaction to GitHub issues, or
+a webhook from another service, is covered in [Triggers](/docs/guides/triggers/). This page covers
+one-time runs, watches that react to events, and what agents set up for themselves.
 
 ## Where to find it
 
 ### Everything in the project
 
-The **project Events page** — **Events** in the project navigation — is the full view. It has four
-sections: **Subscriptions**, **Schedules**, **Standing watches**, and **Channels**. Each carries an
-icon, and a section you have loaded keeps a count beside its name as you move between them (a
-section holding nothing shows no count). Schedules refresh every 30 seconds
-while the tab is in front (and stop while it is in the background, so a page left open does not
-poll forever). Every section has its own empty state naming what would appear there, so "nothing
-here" never looks like a failed load.
+**Automation** in the project navigation opens the overview. From top to bottom (in two columns
+on a wide screen):
 
-![The project Events page: Subscriptions, Schedules, Standing watches and Channels section buttons with icons, the open Subscriptions section carrying a count of 2, and two subscription cards showing their reason, owner, filter, requested and resolved delivery, target session link, and green "active" state badges.](/images/docs/project-events-page.png)
+- **Needs your attention** lists anything that stopped, failed or could not be confirmed, with
+  the usual fix as one button: **Resume**, **See what went wrong**, **Give it more runs**, or
+  **Check the result**. A one-time run that failed stays here for three days, then only on its
+  own page and in History.
+- **Coming up** shows the next things that start on their own, and when.
+- **Your automations** lists every automation in words: what starts it and what it does.
+  **Scheduled**, **Reactions**, **One time** and **Paused or off** narrow the list. Finished
+  one-time runs fold away under **Show finished automations**.
+- **Recently** shows the latest runs. **History** opens all of them, with a **Problems** filter;
+  each run links to its chat.
+- **Behind the scenes** sums up what agents are waiting for and the channels they post on.
+
+Schedules and watches refresh every 30 seconds while the tab is in front, and stop while it is in
+the background, so a page left open does not poll forever.
+
+![The project Automation page: "Your automations" with All, Scheduled, Reactions, One time and Paused or off filters, and rows grouped under On a schedule, When something happens and One time, each saying what starts it and what it does; beside them, "Coming up" with the next two runs and their times, "Recently" with a run that started a chat, and "Behind the scenes" with what agents are waiting on and the agent channels.](/images/docs/automation-page.png)
+
+Select an automation to open its page: what starts it, what it does, its recent runs, and the
+actions it offers. The exact values behind the words, such as the cron expression, the event
+filter, raw states and IDs, are under **Advanced** on every page.
 
 ### What is attached to this one chat?
 
-The **session Events drawer** is the same data, narrowed to one conversation. Open a chat session,
-click **Events** in the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail), and
-the drawer opens over the chat with **Subscriptions**, **Schedules**, and **Watches** tabs for that
-session. It answers "what automation is attached to _this_ chat" without leaving the chat.
-**View full page** at the bottom hands you to the project page with the same session filter applied;
-it always lands on Subscriptions, whichever tab you had open.
+Open a chat and select **Automation** in the
+[session tool rail](/docs/guides/chat-features/#the-session-tool-rail). **Automation for this
+chat** opens over the conversation:
 
-![The Events drawer open over a chat session, headed "Events", with Subscriptions, Schedules and Watches tabs; the Subscriptions tab shows two session-scoped subscriptions with their state, delivery routing, target session link, and Inspect delivery and Cancel subscription buttons; a "View full page" link sits at the bottom.](/images/docs/session-events-drawer.png)
+- **Waiting for** lists what an agent in this chat asked to hear about ("This chat is waiting
+  for…"), since when, and when it gives up, with **Stop waiting**.
+- **Coming up for this chat** lists one-time runs for this chat and watches that message it.
 
-On the project page, a session filter shows a banner with the first eight characters of the
-session ID (a link back to the chat) and a **Show whole project** button to clear it. Channels are
-always project-wide — that banner says so — because a channel is shared between agents rather than
-owned by one conversation.
+**Remind this chat later** sets up a one-time message to the chat. **All automation** goes to the
+project overview, and **Open as a page** shows the same view full size.
 
-## Reading a state badge
+![The "Automation for this chat" panel: a Remind this chat later button; under Waiting for, "This chat is waiting for a review request" and "This chat is waiting for a task to finish", each with Details and Stop waiting; under Coming up for this chat, a one-time message due today at 4:10 PM and a watch that starts a chat when code is pushed; All automation and Open as a page at the bottom.](/images/docs/session-automation-panel.png)
 
-Badges are coloured the same way here as in the admin event inspector, and every badge spells its
-state out in text as well, so you never have to rely on the colour.
+### Behind the scenes
 
-| Colour | States                                                                                      |
-| ------ | ------------------------------------------------------------------------------------------- |
-| Green  | `active`, `delivered`, `acked`, `accepted`, `matched`, `batch_created`, `record_only`       |
-| Blue   | `pending`, `queued_for_prompt_delivery`, `runtime_steer`, `runtime_interrupt`, `spawn_task` |
-| Amber  | `retry`, `ambiguous`                                                                        |
-| Red    | `failed`, `unauthorized`, `unsupported`, `critical`, `error`                                |
-| Grey   | `cancelled`, `expired`, `recorded_not_injected`, and anything else                          |
+**Behind the scenes** has two tabs:
 
-## Schedule once
+- **Waiting for** lists every event an agent asked to hear about, such as CI finishing on a
+  commit or a review on a pull request, and which chat is waiting. **Details** on each shows the
+  exact filter, how delivery was asked for and how it was resolved, and its recent deliveries.
+  **Show waits that ended** adds stopped and expired ones. Waits that SAM manages itself, such as
+  the relays that carry messages between agents, are hidden until you turn on **Show SAM's own
+  message relays** and can't be stopped here; a watch's own wait is managed from the watch.
+- **Channels** lists the channels agents post on, newest activity first; **Read** shows the
+  posts. Channels belong to the whole project, not to one chat. The private threads SAM keeps for
+  [messages between agents](/docs/guides/agents/#messages-between-agents) (`agent-dm.…`) are
+  hidden until you turn on **Show private threads between agents**.
 
-In the **Schedules** section, choose **Schedule once**, enter a due time, and pick an action:
+## Reading a state
 
-- **Message an existing session** sends your prompt to the selected conversation.
-  A busy agent receives it through the durable queue. A sleeping session resumes
-  its existing conversation when recovery is available, including a task whose
-  agent went to sleep while waiting, so an agent can schedule a message to itself
-  and be woken by it. You can message a conversation you own, or one
-  [shared with you](/docs/guides/collaboration/#share-a-chat) while your access lasts.
-  A message you schedule into a shared conversation shows as yours, is sent only while
-  the access you scheduled it under lasts, and is cancelled when that access ends. An
-  agent can schedule only into its own user's conversations.
-- **Start a new session** creates a task-backed conversation using the selected
-  profile and skill, with current project access, credentials and placement rules.
-  It can run after you leave or archive the conversation that created the schedule.
+An automation's page always names its state; lists show it only when it is worth noticing. Each
+state is spelled out in words, not just colour:
 
-The stored due time is UTC; the display timezone helps you interpret it. A due time
-is the earliest admission time, not a promise of exact-second model execution.
-Capacity, busy agents and recovery can delay delivery. Schedules do not keep an
-agent or workspace awake while waiting.
+| Shown as             | Means                                                                    |
+| -------------------- | ------------------------------------------------------------------------ |
+| **On**               | Runs when its schedule comes round or its event arrives                  |
+| **Scheduled**        | A one-time run waiting for its time                                      |
+| **Waiting to start** | Past its time and still trying to start, until the give-up time it shows |
+| **Starting**         | Being handed to an agent right now                                       |
+| **Paused**           | Not running until someone resumes it; when SAM paused it, it says why    |
+| **Off**              | A trigger that is turned off; **Turn on** starts it again                |
+| **Done**             | A one-time run that ran                                                  |
+| **Check**            | It finished, but failed or SAM could not confirm what happened           |
+| **Cancelled**        | Cancelled before it ran                                                  |
+| **Ended**            | A watch that was stopped for good, or a one-time run that expired        |
 
-Pending schedules can be rescheduled or cancelled. If someone else changed a
-schedule, refresh before trying again. Once an action is **admitted**, its durable
-message or task intent has been accepted. Cancelling the schedule at that point
-does not retract that work. Use the resulting session or task controls instead.
+A run's outcome reads the same way: it worked, it failed (with the reason), it was skipped, or
+SAM could not confirm what happened.
 
-An archived or cancelled target fails visibly; SAM does not silently redirect its
-message to a new conversation. Expired schedules do not start new work. An
-**ambiguous** result means SAM cannot establish the outcome of an attempted
-submission. Inspect the linked task or delivery before taking another action;
-agent side effects are not guaranteed to happen exactly once.
+## Run something once
 
-The execution receipt shows the canonical task or delivery state separately from
-schedule admission. **Refresh receipt** can reconcile exhausted retries without
-waking compute or replaying a message. Known running tasks resume monitoring;
-only a terminal task or delivery receipt frees a standing watch's concurrency slot.
-Missing or ambiguous receipts remain unresolved.
+Select **New automation**, then **Once, at a time you pick**:
 
-For an eligible queued task checkpoint, **Retry task submission** starts another
-finite retry budget using the original task/session identities, prompt, and deadline.
-Current creator authority is checked again. This option is unavailable after the
-original deadline or when task identity cannot be confirmed. It never resends a
-scheduled message. Agents use `reconcile_project_schedule` with `expectedVersion`
-and optional `retrySubmission: true` for the same operation.
+1. Pick the date and time, and the time zone, which starts as your browser's. **If it cannot
+   start on time, keep trying for** sets how long SAM may keep trying when a busy chat or a full
+   machine delays it, up to 24 hours; after that SAM gives up and tells you.
+2. Choose what should happen:
+   - **Message a chat** sends your message to the conversation you pick. A busy agent receives it
+     through the durable queue. A sleeping chat resumes its existing conversation when recovery
+     is available, including a task whose agent went to sleep while waiting, so an agent can
+     schedule a message to itself and be woken by it. You can message a conversation you own, or
+     one [shared with you](/docs/guides/collaboration/#share-a-chat) while your access lasts. A
+     message you schedule into a shared conversation shows as yours, is sent only while the access
+     you scheduled it under lasts, and is cancelled when that access ends. An agent can schedule
+     only into its own user's conversations.
+   - **Start a new chat** creates a task-backed conversation using the agent profile and skill you
+     pick, with current project access, credentials and placement rules. It can run after you
+     leave or archive the conversation that created it.
+3. Check the summary and save.
 
-## Standing watches
+The time must be in the future and within the next 30 days. SAM stores it in UTC; the time zone
+is how it is shown back to you. It is the earliest time the work is admitted, not a promise of
+exact-second model execution: capacity, busy agents and recovery can delay it. A waiting
+one-time run does not keep an agent or workspace awake.
 
-A standing watch is a human-managed project policy that acts on matching events.
-Choose a filter, an action, a cooldown, a concurrency limit and a finite execution
-limit. The execution limit bounds the number of actions, not a monetary budget.
-The resulting tasks still use ordinary profile and credential controls.
+Until it runs, its page offers **Run now**, **Change time** and **Cancel** (with an optional
+reason, shown later on its page). If someone else changed it first, SAM says so and loads the
+latest version, so you can try again. Once an action is **admitted**, its durable message or task
+intent has been accepted. Cancelling at that point does not retract that work; use the resulting
+chat or task controls instead.
 
-A watch can message only a conversation its creator owns, and only its creator
-can change what it does; other project writers can still pause, revoke or adjust its
-filter and limits. A watch that would message a conversation its creator does not
-own is paused, with the reason shown.
+An archived or cancelled target fails visibly; SAM does not silently redirect its message to a
+new conversation. A run that expires does not start new work. "May have run, but SAM could not
+confirm it" means SAM cannot establish the outcome of an attempted submission. Look at the linked
+chat or task before trying again; agent side effects are not guaranteed to happen exactly once.
 
-Pause a watch to stop new actions; resume it to match future events. Revoking a
-watch ends it. Changes, pause and revoke cancel actions that have not yet been
-admitted. Already admitted messages and tasks remain visible and can continue.
-Agents can manage their own finite subscriptions and one-off schedules; they
-cannot grant themselves a standing policy through an agent tool.
+After it runs, **What happened** shows whether the chat received the message, or whether the chat
+it should start was created, separately from the run's own state. **Check the result again**
+reconciles exhausted retries without waking compute or replaying a message. Known running tasks
+resume monitoring; only a finished task or delivery frees a watch's concurrency slot. Missing or
+unconfirmed results stay unresolved.
+
+For an eligible queued task, **Try submitting again** starts another finite retry budget using the
+original task and chat identities, prompt, and deadline. Current creator authority is checked
+again. It is unavailable after the original deadline or when the task's identity cannot be
+confirmed, and it never resends a scheduled message. Agents use `reconcile_project_schedule` with
+`expectedVersion` and optional `retrySubmission: true` for the same operation.
+
+## React when SAM sees an event
+
+A watch is a human-managed project policy that acts on matching events. Select **New
+automation**, then **When SAM sees an event**, and pick what it waits for: an issue or pull
+request opening, a pull request review, a task, chat or release failing, a release going live, a
+post on a named agent channel, or **Something else** to match event fields yourself (source,
+event type, subject and severity). Then choose what it does, the same way as a one-time run.
+
+Under **Limits**, **Wait between runs (minutes)** is the cooldown, **Most at once** caps
+concurrent runs, and **Runs in total** is a finite execution limit, at most 100. The limit bounds
+the number of actions, not a monetary budget; the resulting work still uses ordinary profile and
+credential controls. When it runs out, the watch says so; **Give it more runs** raises the limit.
+
+A watch can message only a conversation its creator owns, and only its creator can change what it
+does, because it acts as them; other project writers can still pause it, stop it, or change what
+it waits for, its limits and its name. A watch that would message a conversation its creator does
+not own is paused by SAM, with the reason shown.
+
+**Pause** stops new actions; **Resume** matches future events. **Stop for good** ends the watch.
+Changes, pausing and stopping cancel actions that have not yet been admitted. Already admitted
+messages and tasks remain visible and can continue. Each run the watch started appears under
+**Recent runs** on its page and in History. Agents can manage their own finite subscriptions and
+one-off schedules; they cannot grant themselves a standing policy through an agent tool.
 
 ## Understand delivery
 
-Subscriptions show both requested and resolved delivery. Recording a match does
-not prove that it was injected into an agent's context. Channels provide bounded
-history and an atomic catch-up-to-follow handoff for collaborating agents.
-Treat channel and external event contents as untrusted evidence.
+A wait's **Details** show both the delivery that was asked for and the delivery SAM resolved.
+Recording a match does not prove that it was injected into an agent's context. Channels provide
+bounded history and an atomic catch-up-to-follow handoff for collaborating agents. Treat channel
+and external event contents as untrusted evidence.
 
-For a webhook that did not trigger, open its trigger's **Delivery history**. The
-audit records the filter decision and reason, including deliveries that were
-intentionally ignored. Repeatedly changing a subscription will not make an ignored
-webhook pass a different trigger's filters.
+For a webhook that did not start anything, open the automation and look at **Calls received**.
+The audit records the filter decision and reason, including calls that were intentionally
+ignored. Repeatedly changing a subscription will not make an ignored webhook pass a different
+automation's filters.
 
 Project members can inspect automation. Project writers can change it. Access is
 checked again when an action fires, and a message's right to reach its conversation is

@@ -31,7 +31,12 @@ import {
   scheduleFromCron,
 } from '../../../src/pages/automation/editor/state';
 import { templateById } from '../../../src/pages/automation/editor/templates';
-import { instantToZonedInput, zonedInputToInstant } from '../../../src/pages/automation/time';
+import { GIVE_UP_OPTIONS } from '../../../src/pages/automation/schedule-time';
+import {
+  durationLabel,
+  instantToZonedInput,
+  zonedInputToInstant,
+} from '../../../src/pages/automation/time';
 
 const NOW = Date.parse('2026-10-20T12:00:00Z');
 const CAN = { canChangeAction: true, now: NOW };
@@ -271,6 +276,21 @@ describe('one-time automations', () => {
         CAN
       ).once
     ).toBe('Choose a time within the next 30 days.');
+  });
+});
+
+describe('duration wording', () => {
+  it('words lengths of time from the shared limits instead of fixed text', () => {
+    expect(durationLabel(15 * 60_000)).toBe('15 minutes');
+    expect(durationLabel(60 * 60_000)).toBe('1 hour');
+    expect(durationLabel(24 * 60 * 60_000)).toBe('24 hours');
+    expect(durationLabel(30 * 24 * 60 * 60_000)).toBe('30 days');
+    expect(GIVE_UP_OPTIONS.map((option) => option.label)).toEqual([
+      '15 minutes',
+      '1 hour',
+      '6 hours',
+      '24 hours',
+    ]);
   });
 });
 
@@ -530,5 +550,14 @@ describe('templates and save errors', () => {
     expect(
       friendlySaveError(new Error('Trigger "A" already exists in this project'))
     ).toMatchObject({ field: 'name' });
+  });
+
+  it('explains a save refused because someone else changed the watch first', () => {
+    expect(friendlySaveError(new Error('Standing watch version conflict')).message).toMatch(
+      /Someone changed this automation while you were editing/
+    );
+    expect(friendlySaveError(new Error('Schedule version or state conflict')).message).toMatch(
+      /Someone changed this automation/
+    );
   });
 });

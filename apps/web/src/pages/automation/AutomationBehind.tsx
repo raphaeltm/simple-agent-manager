@@ -3,6 +3,7 @@
  * (event subscriptions) and the channels they post on. With `?sessionId=` it shows everything
  * that concerns one chat instead (the old chat-scoped Events links land here).
  */
+import { DEFAULT_PROJECT_EVENT_LIST_MAX } from '@simple-agent-manager/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router';
@@ -15,7 +16,8 @@ import { Channels } from './channels';
 import { ChatAutomation } from './chat-automation';
 import { useAutomationAccess, useAutomationLookups } from './data';
 import { CheckRow } from './fields';
-import { ButtonLink, Chips, LoadError, Loading, Notice, Page, PageHeader } from './ui';
+import { LoadError, Loading, Notice, Page, PageHeader } from './page';
+import { ButtonLink, Chips } from './ui';
 import { WaitList } from './waiting';
 
 function Waiting() {
@@ -60,7 +62,8 @@ function Waiting() {
           />
           {active.data.hasMore && (
             <Notice>
-              Showing the most recent 200. Open a chat’s automation panel to see all of its waits.
+              Showing the most recent {DEFAULT_PROJECT_EVENT_LIST_MAX}. Open a chat’s automation
+              panel to see all of its waits.
             </Notice>
           )}
         </>

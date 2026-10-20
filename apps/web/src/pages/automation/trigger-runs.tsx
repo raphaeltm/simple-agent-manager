@@ -17,8 +17,9 @@ import { runPagesQueryOptions } from '../../lib/query-options';
 import { useProjectContext } from '../ProjectContext';
 import { executionOutcome, executionText } from './describe';
 import { useAutomationAction } from './detail-parts';
+import { LoadError, Loading } from './page';
 import { fullDate, relative } from './time';
-import { LoadError, Loading, OutcomeIcon, Panel, SectionTitle } from './ui';
+import { OutcomeIcon, Panel, SectionTitle } from './ui';
 
 /** Runs the API lets you delete: anything not running right now. */
 const DELETABLE = new Set(['queued', 'failed', 'skipped', 'completed']);

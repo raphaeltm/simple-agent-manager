@@ -401,15 +401,18 @@ export function StepReview({
           hint="Overlapping runs, chat type and machine"
           defaultOpen={Boolean(errors.maxConcurrent || errors.resources)}
         >
-          {state.start === 'schedule' && (
-            <CheckRow
-              label="Skip a run if the last one is still going"
-              hint="Recommended. Otherwise runs can pile up."
-              checked={state.trigger.skipIfRunning}
-              onChange={(skipIfRunning) => set({ skipIfRunning })}
-            />
-          )}
-          <Field label="Most runs at once" error={errors.maxConcurrent}>
+          {/* Every trigger kind honours it at admission (schedule, GitHub, webhook, incident). */}
+          <CheckRow
+            label="Skip a run if the last one is still going"
+            hint="Recommended. Otherwise runs can pile up."
+            checked={state.trigger.skipIfRunning}
+            onChange={(skipIfRunning) => set({ skipIfRunning })}
+          />
+          <Field
+            label="Most runs at once"
+            error={errors.maxConcurrent}
+            hint={state.trigger.skipIfRunning ? 'Used only when runs may overlap.' : undefined}
+          >
             {({ id, describedBy, invalid }) => (
               <input
                 id={id}

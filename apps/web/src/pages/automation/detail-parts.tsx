@@ -14,18 +14,11 @@ import { useToast } from '../../hooks/useToast';
 import { automationPaths } from '../../lib/automation-routes';
 import { useProjectContext } from '../ProjectContext';
 import { type AutomationLookups, useInvalidateAutomation } from './data';
+import { errorText, isVersionConflict } from './errors';
 import type { Attention, AutomationItem } from './model';
+import { Page, PageHeader } from './page';
 import { relative, whenLabel } from './time';
-import {
-  errorText,
-  KindIcon,
-  Page,
-  PageHeader,
-  Panel,
-  PromptText,
-  START_META,
-  StatePill,
-} from './ui';
+import { KindIcon, Panel, PromptText, START_META, StatePill } from './ui';
 
 /**
  * A mutation that reports its outcome in a toast and refreshes every automation read.
@@ -47,7 +40,12 @@ export function useAutomationAction<TArgs = void, TResult = unknown>(
       beforeRefresh?.(result);
       await invalidate();
     },
-    onError: (error) => toast.error(errorText(error, messages.failure)),
+    onError: async (error) => {
+      toast.error(errorText(error, messages.failure));
+      // A version conflict means the page is showing an old copy: load the latest so a retry
+      // sends the current version.
+      if (isVersionConflict(error)) await invalidate();
+    },
   });
 }
 

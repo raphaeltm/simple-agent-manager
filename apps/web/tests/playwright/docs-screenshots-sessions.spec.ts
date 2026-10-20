@@ -169,9 +169,11 @@ const AUTOMATION_TRIGGERS = [
     taskMode: 'task',
     vmSizeOverride: null,
     maxConcurrent: 1,
-    lastTriggeredAt: new Date(NOW - 3 * 3_600_000).toISOString(),
+    // Consistent with the cron and NOW (Tuesday 14:40 UTC): it ran at 9:00 today, next at 9:00
+    // tomorrow, so the capture never shows a "next run" that contradicts its own schedule.
+    lastTriggeredAt: '2026-09-22T09:00:00.000Z',
     triggerCount: 18,
-    nextFireAt: new Date(NOW + 20 * 3_600_000).toISOString(),
+    nextFireAt: '2026-09-23T09:00:00.000Z',
     createdAt: new Date(NOW - 30 * 86_400_000).toISOString(),
     updatedAt: new Date(NOW - 86_400_000).toISOString(),
   },
@@ -570,6 +572,8 @@ test('docs: session automation panel', async ({ page }) => {
   test.skip(isMobile(page), 'desktop capture');
   // The fixtures are pinned to NOW; pin the page clock too so "since 1 h ago" stays true.
   await page.clock.setFixedTime(NOW);
+  // Tall enough that the panel shows "Coming up for this chat" whole instead of under its footer.
+  await page.setViewportSize({ width: 1280, height: 1060 });
   await openChat(page);
   await page.getByTestId('session-tool-automation').click();
 

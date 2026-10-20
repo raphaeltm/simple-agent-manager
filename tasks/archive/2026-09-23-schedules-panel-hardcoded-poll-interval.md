@@ -71,3 +71,16 @@ so archiving it was right. This one item is the remainder.
 - `.claude/rules/09-task-tracking.md` — research findings must become verified checklist items
 - `apps/web/src/lib/poll-intervals.ts` — the existing pattern to copy
 - Parent: `tasks/archive/2026-09-18-polish-project-events-page-ui.md` (PR #2098)
+
+## Resolution (2026-10-20)
+
+Resolved by the Automation page (branch `sam/automation-page`, task
+`tasks/archive/2026-10-20-automation-page.md`), which replaced the project Events page:
+
+- `SchedulesPanel.tsx` and the rest of `apps/web/src/components/project-events/` were deleted.
+- Schedules and watches now refresh at `AUTOMATION_POLL_MS` in `apps/web/src/lib/poll-intervals.ts`
+  (`DEFAULT_AUTOMATION_POLL_MS = 30_000`, `VITE_AUTOMATION_POLL_MS` override, resolved through the
+  existing `resolveIntervalMs`), with `refetchIntervalInBackground` left at its `false` default.
+- `apps/web/tests/unit/pages/automation-polling.test.tsx` drives the real overview: it proves the
+  cadence, that a hidden tab stops polling, and that the env override is honoured. Each assertion
+  was confirmed red by removing the interval or forcing background polling.

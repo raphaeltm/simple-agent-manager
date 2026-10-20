@@ -13,7 +13,7 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
   needs your attention, start a chat in a project, reply to one, or answer an agent that's waiting
   for you, without opening SAM. → [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/)
 - **Agents can set up automation for you.** Ask an agent to create a schedule, GitHub, or webhook
-  trigger, and it appears on the project's **Triggers** page like one you made yourself.
+  trigger, and it appears on the project's **Automation** page like one you made yourself.
   → [Triggers](/docs/guides/triggers/#ask-an-agent-to-set-one-up)
 - **A chat wakes up as it went to sleep.** A chat started since 7 October wakes with the agent,
   model, and permission mode it started with, and can still ask you for approval if it could before.
@@ -56,7 +56,7 @@ Also changed this week:
   limits. → [Usage Limits](/docs/guides/agents/#usage-limits)
 - **Messages between agents arrive as a notice from SAM.** The recipient's chat shows a SAM notice
   written for its agent, which you don't need to answer, and the conversation between the two
-  agents is on the project's **Events** page. → [Messages between agents](/docs/guides/agents/#messages-between-agents)
+  agents is under the project's **Automation** → **Behind the scenes** → **Channels**. → [Messages between agents](/docs/guides/agents/#messages-between-agents)
 - **A new Chat you start on a VM no longer waits** for another workspace on the same machine to
   finish building.
 - **Messages with `@` and a word failed from 9 to 14 October.** A message with an email address

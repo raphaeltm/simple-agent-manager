@@ -14,6 +14,7 @@ import { Pause, Pencil, Play } from 'lucide-react';
 import { useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
+import { AUTOMATION_RECENT_RUNS_PER_TRIGGER } from '../../lib/automation-config';
 import { automationPaths } from '../../lib/automation-routes';
 import {
   pauseStandingWatch,
@@ -42,17 +43,17 @@ import {
 } from './detail-parts';
 import { Field, INPUT_CLASS } from './fields';
 import { fromWatch } from './model';
+import { Loading, Notice } from './page';
 import { relative } from './time';
 import {
   ButtonLink,
   Disclosure,
   KeyValues,
-  Loading,
-  Notice,
   OutcomeIcon,
   Panel,
   RowLink,
   SectionTitle,
+  TextLink,
 } from './ui';
 
 function RaiseLimitDialog({
@@ -126,18 +127,29 @@ function RaiseLimitDialog({
   );
 }
 
-function WatchRuns({ runs }: { runs: ProjectSchedule[] }) {
+function WatchRuns({ watchId, runs }: { watchId: string; runs: ProjectSchedule[] }) {
   const { projectId } = useProjectContext();
+  const shown = runs.slice(0, AUTOMATION_RECENT_RUNS_PER_TRIGGER);
   return (
     <div className="flex flex-col gap-2">
-      <SectionTitle title="Recent runs" count={runs.length || undefined} />
+      <SectionTitle
+        title="Recent runs"
+        count={runs.length || undefined}
+        action={
+          runs.length > shown.length ? (
+            <TextLink to={automationPaths.history(projectId, { kind: 'watch', id: watchId })}>
+              See all
+            </TextLink>
+          ) : undefined
+        }
+      />
       <Panel className="overflow-hidden" label="Runs">
-        {runs.length === 0 ? (
+        {shown.length === 0 ? (
           <p className="m-0 p-4 text-sm text-fg-muted">
             Nothing yet. Each time a matching event arrives, the run shows up here.
           </p>
         ) : (
-          runs.map((run) => {
+          shown.map((run) => {
             const entry = scheduleEntry(run);
             return (
               <RowLink
@@ -279,7 +291,7 @@ export function WatchDetail({ watchId }: { watchId: string }) {
           acts as them. You can change what it waits for, its limits and its name.
         </Notice>
       )}
-      <WatchRuns runs={runs.slice(0, 10)} />
+      <WatchRuns watchId={watch.id} runs={runs} />
     </>
   );
 

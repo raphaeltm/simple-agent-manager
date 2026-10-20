@@ -14,8 +14,9 @@ import { channelHistoryQueryOptions, channelsQueryOptions } from '../../lib/quer
 import { useProjectContext } from '../ProjectContext';
 import type { AutomationLookups } from './data';
 import { CheckRow } from './fields';
+import { LoadError, Loading, Notice } from './page';
 import { fullDate, relative } from './time';
-import { LoadError, Loading, Notice, Panel } from './ui';
+import { Panel } from './ui';
 
 function ChannelHistory({ channel, lookups }: { channel: string; lookups: AutomationLookups }) {
   const { projectId } = useProjectContext();

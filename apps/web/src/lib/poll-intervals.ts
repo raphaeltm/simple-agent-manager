@@ -41,6 +41,16 @@ function resolveRatio(raw: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : fallback;
 }
 
+/**
+ * Automation page refresh for one-time schedules and watches (the states that change on their
+ * own: a schedule comes due, a watch fires). Triggers and runs refresh on focus and after edits.
+ */
+export const DEFAULT_AUTOMATION_POLL_MS = 30_000;
+export const AUTOMATION_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_AUTOMATION_POLL_MS,
+  DEFAULT_AUTOMATION_POLL_MS
+);
+
 /** Node detail refresh (node record + its workspace list). */
 const DEFAULT_NODE_DETAIL_POLL_MS = 10_000;
 export const NODE_DETAIL_POLL_MS = resolveIntervalMs(

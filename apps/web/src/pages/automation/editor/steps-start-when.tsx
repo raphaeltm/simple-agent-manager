@@ -5,8 +5,9 @@ import { GitHubTriggerFields } from '../../../components/triggers/GitHubTriggerF
 import { WebhookTriggerFields } from '../../../components/triggers/WebhookTriggerFields';
 import type { AutomationStart } from '../../../lib/automation-routes';
 import { ChoiceCards } from '../fields';
+import { Notice } from '../page';
 import { OnceTimeFields } from '../schedule-time';
-import { KindIcon, Notice, Pill } from '../ui';
+import { KindIcon, Pill } from '../ui';
 import type { Errors } from './requests';
 import type { EditorState } from './state';
 import { ScheduleWhen } from './when-schedule';

@@ -3,10 +3,11 @@
  * URL is always shown; the token only once, when created or rotated), a sample check that
  * starts nothing, and the delivery history.
  */
-import type {
-  TriggerPreviewResponse,
-  TriggerResponse,
-  WebhookCredential,
+import {
+  DEFAULT_WEBHOOK_DELIVERY_RETENTION_DAYS,
+  type TriggerPreviewResponse,
+  type TriggerResponse,
+  type WebhookCredential,
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { useInfiniteQuery } from '@tanstack/react-query';
@@ -23,8 +24,10 @@ import { webhookDeliveriesQueryOptions } from '../../lib/query-options';
 import { useProjectContext } from '../ProjectContext';
 import { deliveryText } from './describe';
 import { useAutomationAction } from './detail-parts';
+import { errorText } from './errors';
+import { LoadError, Loading } from './page';
 import { fullDate, relative } from './time';
-import { errorText, LoadError, Loading, OutcomeIcon, Panel, SectionTitle } from './ui';
+import { OutcomeIcon, Panel, SectionTitle } from './ui';
 
 /** The ingest endpoint is the same for every webhook: the API origin plus a fixed path. */
 export const WEBHOOK_INGEST_URL = `${API_URL.replace(/\/$/, '')}/api/webhooks/ingest`;
@@ -242,7 +245,7 @@ export function WebhookDeliveries({ trigger }: { trigger: TriggerResponse }) {
     <div className="flex flex-col gap-2">
       <SectionTitle
         title="Calls received"
-        hint="Kept for 7 days. A call can be accepted and still be ignored by the filters."
+        hint={`Kept ${DEFAULT_WEBHOOK_DELIVERY_RETENTION_DAYS} days by default. A call can be accepted and still be ignored by the filters.`}
         action={
           <Button
             variant="ghost"
