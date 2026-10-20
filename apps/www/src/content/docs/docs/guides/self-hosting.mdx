@@ -85,6 +85,22 @@ The GitHub App needs **Pull requests: Read-only** for pull request and review we
 "Request user authorization (OAuth) during installation" must be **unchecked** on the GitHub form. When checked, it disables the Setup URL and breaks post-installation redirects.
 :::
 
+### Let agents open pull requests
+
+The App that the wizard creates can read pull requests and issues but not write them. Agents can
+clone and push branches, but `gh pr create` fails, and a trigger's run can't comment on or label an
+issue. SAM doesn't open pull requests itself (from v2026.10.17 the agent does, when asked), so to
+let agents open them:
+
+1. In the App's settings on GitHub, under **Permissions & events**, set **Pull requests** to
+   **Read and write**. Set **Issues** to **Read and write** too if runs should comment on or label
+   issues.
+2. Save. GitHub asks the owner of each installation to accept the new permissions, and the old ones
+   apply until they do.
+
+Workspaces then get the new permissions on their next GitHub token. A profile can narrow them again
+under **Platform Policy → GitHub CLI access**.
+
 ## Platform integrations after deploy
 
 Fresh deployments can keep most platform integration credentials out of GitHub Actions secrets. After the first deploy, open `/setup` with the one-time setup token and configure the integrations users need:
@@ -292,7 +308,7 @@ compute credential configured by an administrator.
 | `GH_WEBHOOK_SECRET`                        | Optional GitHub App webhook secret; can be configured in `/setup` instead                                                                                                                                                                                                                                                    |
 | `GOOGLE_LOGIN_CLIENT_ID`                   | Optional Google **login** OAuth client ID (Sign in with Google); can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/google`                                                                                                                                          |
 | `GOOGLE_LOGIN_CLIENT_SECRET`               | Optional Google **login** OAuth client secret; can be configured in `/setup` instead                                                                                                                                                                                                                                         |
-| `GITLAB_HOST`                              | Optional GitLab OAuth host, such as `https://gitlab.com`; can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/gitlab` and grant the `read_user` and `api` scopes (`api` is required for repository clone/push and merge-request creation in GitLab-backed workspaces) |
+| `GITLAB_HOST`                              | Optional GitLab OAuth host, such as `https://gitlab.com`; can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/gitlab` and select the `read_user`, `api`, `read_repository`, and `write_repository` scopes, which SAM requests at sign-in (`api` and the repository scopes let GitLab-backed workspaces clone and push, and let agents open merge requests) |
 | `GITLAB_CLIENT_ID`                         | Optional GitLab OAuth application ID; can be configured in `/setup` instead                                                                                                                                                                                                                                                  |
 | `GITLAB_CLIENT_SECRET`                     | Optional GitLab OAuth secret; can be configured in `/setup` instead                                                                                                                                                                                                                                                          |
 | `GOOGLE_CLIENT_ID`                         | Optional environment fallback for the Google **infra/GCP** OAuth client ID. A superadmin can configure the independent runtime pair at `/admin/integrations`; not used for login.                                                                                                                                            |
@@ -302,7 +318,7 @@ compute credential configured by an administrator.
 | `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials                                                                                                                                                                                                                                           |
 
 :::note
-GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`. When present, the deployment workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets and SAM uses them as environment fallbacks. Values saved in `/setup` or the superadmin platform config UI take precedence.
+GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`. When present, the deployment workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets and SAM uses them as environment fallbacks. Values saved in `/setup`, **Admin → Integrations**, or [**Admin → Settings**](/docs/guides/admin-settings/) take precedence.
 :::
 
 :::note
@@ -406,7 +422,7 @@ curl https://api.yourdomain.com/health
 # Should return: {"status":"healthy","timestamp":"..."}
 ```
 
-Open the Cloudflare dashboard link printed by the workflow, copy the plaintext `SETUP_TOKEN` Worker variable, then open `https://app.yourdomain.com/setup`. The setup page accepts the token only while first-run setup is incomplete. After you save a valid login provider and complete setup, `/setup` returns Gone and future changes move to the superadmin platform config UI.
+Open the Cloudflare dashboard link printed by the workflow, copy the plaintext `SETUP_TOKEN` Worker variable, then open `https://app.yourdomain.com/setup`. The setup page accepts the token only while first-run setup is incomplete. After you save a valid login provider and complete setup, `/setup` returns Gone and future changes are made by a superadmin in **Admin → Integrations** and [**Admin → Settings**](/docs/guides/admin-settings/).
 
 Open `https://app.yourdomain.com` — you should see the login page with whichever providers you configured.
 
@@ -429,6 +445,15 @@ The **Update Self-Hosted Instance** workflow (`update-self-hosted.yml`) automate
 
 If your fork has local commits that are not in the upstream release, the workflow will fail with a fast-forward error. In that case, merge manually and use Option B.
 
+:::caution[Update forward, not back]
+Releases up to v2026.10.16 can no longer deploy: Cloudflare now rejects their R2 CORS request, so
+Deploy Production stops at **Configure R2 CORS** (see
+[Troubleshooting](#deploy-fails-at-configure-r2-cors-http-400-code-10029)). Update to v2026.10.17 or
+later. And once you've deployed v2026.10.18 or later, deploying an older release fails the Durable
+Object migration check, so if a release misbehaves, move forward to a fixed one instead of rolling
+back.
+:::
+
 ### Option B: Manual deploy
 
 1. Sync your fork's `main` branch with upstream (e.g. via GitHub's "Sync fork" button or `git fetch upstream && git merge upstream/main`).
@@ -442,7 +467,7 @@ Use the manual workflow when you rotate deployment secrets, change GitHub Enviro
 
 The first genuine human to sign in to a fresh deployment becomes the **superadmin** — the account that can approve other users, manage platform credentials, and reach the admin dashboard.
 
-Fresh deployments are seeded with an internal sentinel user (`system_anonymous_trials`, `status='system'`, created by a database migration) used for anonymous trials. Trials are off unless you turn on the `trials:enabled` kill switch, and they should stay off: every trial visitor runs under this one account and can land on the same machine as another visitor, so the per-user isolation that protects everyone else doesn't separate them (see the [workspace isolation model](/docs/architecture/security/#one-node-belongs-to-one-user)). This sentinel is **not** a real user and never counts toward "is this the first human" checks. Two mechanisms guarantee the first real human is promoted regardless of the sentinel:
+Fresh deployments are seeded with an internal sentinel user (`system_anonymous_trials`, `status='system'`, created by a database migration) used for anonymous trials. Trials are off unless a superadmin turns them on in **Admin → Trials** or [**Admin → Settings**](/docs/guides/admin-settings/) (the older `trials:enabled` KV switch only counts while no trials value has been saved in the app), and they should stay off: every trial visitor runs under this one account and can land on the same machine as another visitor, so the per-user isolation that protects everyone else doesn't separate them (see the [workspace isolation model](/docs/architecture/security/#one-node-belongs-to-one-user)). This sentinel is **not** a real user and never counts toward "is this the first human" checks. Two mechanisms guarantee the first real human is promoted regardless of the sentinel:
 
 - **Deploy-time backfill** (migration): when a deployment has exactly one non-system human and no superadmin yet, that human is promoted to `superadmin`/`active` when migrations run. This also covers accounts created via token-login or device-flow.
 - **Login-time self-heal** (all sign-in paths): on every session creation — GitHub OAuth, token-login, and device-flow — if the signing-in user is the only non-system human and no superadmin exists, they are promoted in a single atomic, idempotent write. A failure here never blocks login.
@@ -648,6 +673,15 @@ Upgrade to the **Workers Paid plan** ($5/month). Go to **Workers & Pages** → u
 
 Your API token is missing the **Account → Containers → Edit** permission. SAM enables Cloudflare Container instant sessions by default, so edit the token and add the permission. To deploy without the container runtime, set the GitHub environment variable `CF_CONTAINER_ENABLED=false` and re-run the workflow.
 
+### Deploy fails at Configure R2 CORS (HTTP 400, code 10029)
+
+Deploy Production stops at the **Configure R2 CORS** step because Cloudflare rejected the request:
+since October 2026 its API refuses the field names that releases up to v2026.10.16 send. The deploy
+stops before database migrations run or anything new is published, so your running instance keeps
+working. Update to v2026.10.17 or later with the
+[Update Self-Hosted Instance workflow](#option-a-update-self-hosted-instance-workflow-recommended),
+which sends the fields Cloudflare expects, then re-run the deploy if it doesn't start on its own.
+
 ### SSL Handshake Failure
 
 If using a subdomain as `BASE_DOMAIN` (e.g., `sam.example.com`), the free Universal SSL certificate does not cover nested wildcards (`*.sam.example.com`). Use a top-level domain as `BASE_DOMAIN` instead.
@@ -678,6 +712,6 @@ Compact SQLite/R2 archive writes are opt-in (`PROJECT_DATA_ARCHIVE_COMPACT_ENABL
 
 ## AI app Connector
 
-The user-level SAM Connector is enabled by default, including after you update to v2026.10.10 or later. People connect Claude, ChatGPT, or a command-line client from their account's **Settings → Access**; superadmins manage installation policy in **Admin → Integrations → Connector**. To turn it off, switch off **Enable Connector** there, or set the `CONNECTOR_ENABLED` GitHub Environment variable to `false` before you deploy. See [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/) and the [Connector settings](/docs/reference/configuration/#sam-connector).
+The user-level SAM Connector is enabled by default, including after you update to v2026.10.10 or later. People connect Claude, ChatGPT, or a command-line client from their account's **Settings → Access**; superadmins manage installation policy in **Admin → Integrations → Connector**. To turn it off, switch off **Enable Connector** there or in **Admin → Settings**. Setting the `CONNECTOR_ENABLED` GitHub Environment variable to `false` before you deploy also works, but only while no value has been saved in the app: a saved value wins over the variable. See [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/) and the [Connector settings](/docs/reference/configuration/#sam-connector).
 
 Each installation has its own OAuth issuer and audience. Pulumi provisions the `OAUTH_KV` namespace and Worker binding. Vendor servers must reach the API host's discovery endpoints, `/oauth/*`, and `/connect/mcp`; Cloudflare Access login walls or WAF challenges on these paths can block connection and refresh. Keep SAM's OAuth authentication enforced when adjusting those network policies. Users also need the web host for sign-in and consent.

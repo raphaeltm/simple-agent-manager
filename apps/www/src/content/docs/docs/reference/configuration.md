@@ -11,7 +11,7 @@ This reference covers the most important configuration variables. For the comple
 
 ## Dynamic admin controls
 
-Use [Admin → Settings](/docs/guides/admin-settings/) for Phase 1 OAuth, Connector, trials and operational controls. D1 overrides take precedence over temporary legacy environment/KV inputs and code defaults. Reset removes the override and can reveal a legacy value. Encryption/signing roots, domains and Cloudflare resource bindings remain bootstrap configuration. New runtime tunables belong in the typed settings registry; the environment tables below retain migration compatibility.
+Superadmins change OAuth sign-in, the SAM Connector, anonymous trials, operational switches, and collaboration limits in [Admin → Settings](/docs/guides/admin-settings/), from v2026.10.17. A value saved there wins over the matching variable on this page, which in turn wins over older KV values and the code default; **Reset override** removes the saved value, so the variable (if set) applies again. Encryption/signing roots, domains and Cloudflare resource bindings remain bootstrap configuration. New runtime tunables belong in the typed settings registry; the environment tables below retain migration compatibility.
 
 ## Platform Secrets
 
@@ -748,6 +748,25 @@ aggregate operator-visible counters.
 | `MAX_TRIGGERS_PER_PROJECT`                   | `20`               | Platform default trigger cap per project; `wrangler.toml` ships `10`. A project owner can change it under Settings → Infrastructure → Scaling & Scheduling → Max Triggers |
 | `GITHUB_TRIGGERS_ENABLED`                    | unset              | `false` turns GitHub event triggers off and `true` forces them on; unset means on once a GitHub webhook secret is configured. Set it in `wrangler.toml` `[vars]`          |
 
+### GitHub trigger delivery recovery
+
+SAM saves each GitHub delivery a trigger could use before acknowledging it, and the five-minute cron
+retries runs that failed to start (see [When a trigger runs](/docs/guides/triggers/#when-a-trigger-runs)).
+Set these through GitHub Environment variables named `GH_TRIGGER_RECOVERY_*` (for example
+`GH_TRIGGER_RECOVERY_MAX_ATTEMPTS`), which the deploy passes to the Worker as `GITHUB_TRIGGER_RECOVERY_*`.
+
+| Variable                                       | Default                | Description                                                                              |
+| ---------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------- |
+| `GITHUB_TRIGGER_RECOVERY_MAX_ATTEMPTS`         | `12`                   | Attempts to start a delivery's run before giving up and notifying superadmins            |
+| `GITHUB_TRIGGER_RECOVERY_RETRY_BASE_MS`        | `30000` (30 s)         | First retry delay; it doubles after each failure                                         |
+| `GITHUB_TRIGGER_RECOVERY_RETRY_MAX_MS`         | `900000` (15 min)      | Longest retry delay                                                                      |
+| `GITHUB_TRIGGER_RECOVERY_BATCH_SIZE`           | `25`                   | Deliveries one cron pass picks up                                                        |
+| `GITHUB_TRIGGER_RECOVERY_MAX_WALL_TIME_MS`     | `20000` (20 s)         | Time after which a cron pass stops picking up more deliveries                            |
+| `GITHUB_TRIGGER_RECOVERY_LEASE_MS`             | `60000` (60 s)         | How long one pass holds a delivery before another may retry it                           |
+| `GITHUB_TRIGGER_RECOVERY_PAYLOAD_MAX_BYTES`    | `262144` (256 KiB)     | Largest delivery SAM saves; bigger ones are refused and start no run                     |
+| `GITHUB_TRIGGER_RECOVERY_PAYLOAD_RETENTION_MS` | `86400000` (24 h)      | How long a saved delivery is kept for retries                                            |
+| `GITHUB_TRIGGER_RECOVERY_DEDUP_RETENTION_MS`   | `7776000000` (90 days) | How long a delivery ID is remembered, so a redelivery never starts a second run          |
+
 ## Generic Webhook Triggers
 
 | Variable                                      | Default | Description                                                  |
@@ -831,6 +850,7 @@ tune how SAM stores and delivers requests internally and rarely need changing; t
 | --------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ACP_SESSION_DETECTION_WINDOW_MS` | `300000` (5 min) | Stale ProjectData ACP heartbeat detection window. VM sessions are not interrupted solely from stale/missing ProjectData heartbeat rows; the timeout must be paired with conclusive runtime/workspace evidence. |
 | `ACP_SESSION_MAX_FORK_DEPTH`      | `10`             | Maximum session fork chain depth                                                                                                                                                                               |
+| `ARCHIVED_FORK_HISTORY_MAX_CHARS` | `24000`          | Most characters of conversation history SAM hands the agent when you [fork an archived or expired chat](/docs/guides/chat-features/#fork-an-archived-or-expired-chat) (at most 200 messages either way). Set it in `wrangler.toml` `[vars]` |
 
 ## ACP Protocol (VM Agent)
 
@@ -870,8 +890,9 @@ Task-managed ACP prompts use control-plane inactivity classification and the tas
 ## SAM Connector
 
 The [SAM Connector](/docs/guides/sam-connector/) is on by default. Its policy settings are edited by
-superadmins in **Admin → Integrations → Connector**; a value saved there wins over the environment
-variable, and **Reset to default** removes it. The variables below set the starting values, and the
+superadmins in **Admin → Integrations → Connector**, and from v2026.10.17 also in
+[**Admin → Settings**](/docs/guides/admin-settings/); a value saved in either wins over the
+environment variable, and **Reset to default** (or **Reset override**) removes it. The variables below set the starting values, and the
 deploy passes each one through from a GitHub Environment variable of the same name. The deploy also
 creates the `OAUTH_KV` namespace the Connector stores OAuth state in; no setup is needed.
 
@@ -950,7 +971,7 @@ need the person, so a page can list fewer; the app follows `nextCursor` for more
 | `WORKSPACE_IDLE_BACKOFF_MAX_MS`                    | `21600000` (6 hr)                      | Maximum retry delay for repeated workspace-idle checks that cannot retire an idle workspace; the delay doubles from the base and resets on new activity or when the session wakes                                                                                                                                                                         |
 | `TASK_RUN_ABSOLUTE_CEILING_MS`                     | `86400000` (24 hr)                     | Absolute runaway-cost ceiling; fails even a task with a demonstrably live runtime. Measured from the age of the **currently allocated runtime generation** (`workspaces.created_at`), not from `tasks.started_at`, and applied only while a runtime generation exists — a conversation whose workspace has been released holds no compute for it to bound |
 | `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS`         | `3600000` (1 hr)                       | Longest the absolute ceiling waits for a sleep that is still only in flight (scheduled, capturing, stopping or retrying) once the ceiling has passed. Measured on runtime-generation age, so sleep retries cannot renew it; a restorable sleep record always defers the ceiling. Keep it above `SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS`                       |
-| `STALLED_TASK_CLASSIFIER_ENABLED`                  | `true`                                 | Once a task is past `TASK_RUN_MAX_EXECUTION_MS` and kept alive only by an open agent turn, ask a Workers AI classifier whether the turn is stalled; a confident `stalled` verdict fails the task with "SAM detected a stalled agent turn after N minutes". Set `false` to keep such turns running until the absolute ceiling                              |
+| `STALLED_TASK_CLASSIFIER_ENABLED`                  | `true`                                 | Once a task is past `TASK_RUN_MAX_EXECUTION_MS` and kept alive only by an open agent turn, ask a Workers AI classifier whether the turn is stalled; a confident `stalled` verdict fails the task with "SAM detected a stalled agent turn after N minutes". Set `false` to keep such turns running until the absolute ceiling. A value saved in Admin → Settings (`operations.stalledTaskClassifierEnabled`) wins over this variable |
 | `STALLED_TASK_CLASSIFIER_MIN_ACTIVITY_AGE_MS`      | `3600000` (1 hr)                       | How long the agent's current turn (or its running work) must have gone on, and the transcript stayed quiet, before the classifier is asked                                                                                                                                                                                                                |
 | `STALLED_TASK_CLASSIFIER_CONFIDENCE_THRESHOLD`     | `0.8`                                  | Stalled probability required to fail the task; uncertain or failed classifications keep the task running                                                                                                                                                                                                                                                  |
 | `STALLED_TASK_CLASSIFIER_MODEL`                    | `@cf/cloudflare/clef`                  | Workers AI model used for the stall classification                                                                                                                                                                                                                                                                                                        |
@@ -1584,6 +1605,25 @@ Applied via cloud-init on each node:
 
 ## File Upload & Download
 
+### Chat attachments
+
+Files attached to a project chat message are staged in R2 and delivered with the message
+([Attach Files to a Message](/docs/guides/chat-features/#attach-files-to-a-message)). The browser
+enforces the built-in limits as well, so lowering these takes effect but raising them doesn't. Set
+them in `wrangler.toml` `[vars]`.
+
+| Variable                            | Default               | Description                       |
+| ----------------------------------- | --------------------- | --------------------------------- |
+| `ATTACHMENT_UPLOAD_MAX_BYTES`       | `52428800` (50 MB)    | Max size per attached file        |
+| `ATTACHMENT_UPLOAD_BATCH_MAX_BYTES` | `209715200` (200 MB)  | Max total size per message        |
+| `ATTACHMENT_MAX_FILES`              | `20`                  | Max files per message             |
+| `ATTACHMENT_PRESIGN_EXPIRY_SECONDS` | `900` (15 min)        | Lifetime of each upload link      |
+
+### Workspace uploads and downloads
+
+These apply to files uploaded straight into a workspace from its own page, and to files downloaded
+from a workspace.
+
 | Variable                      | Default              | Description                     |
 | ----------------------------- | -------------------- | ------------------------------- |
 | `FILE_UPLOAD_MAX_BYTES`       | `52428800` (50 MB)   | Max size per uploaded file      |
@@ -1652,6 +1692,7 @@ Project event MCP tools use the ProjectData event limits above: `PROJECT_EVENT_L
 | -------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------- |
 | `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`         | `10485760` (10 MB) | Images below this size render inline automatically                                                   |
 | `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`           | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link                                 |
+| `VITE_PASTED_TEXT_ATTACHMENT_THRESHOLD`      | `4000`             | Pasted text at least this long becomes a text-file attachment. The deploy doesn't pass it through, so set it when you build the web app yourself |
 | `VITE_ANALYTICS_MAX_QUEUE_SIZE`              | `100`              | Max client-side analytics events retained before oldest events drop                                  |
 | `VITE_ANALYTICS_FLUSH_THRESHOLD`             | `10`               | Client event count that triggers an immediate analytics flush                                        |
 | `VITE_ANALYTICS_FLUSH_INTERVAL_MS`           | `5000`             | Client analytics background flush interval in milliseconds                                           |

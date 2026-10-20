@@ -667,22 +667,52 @@ Rate-limited to 20 submissions per clock hour per user (`RATE_LIMIT_REPORT_ISSUE
 
 Superadmin only. Runs a platform-error triage sweep immediately instead of waiting for the hourly cron. The feedback project itself is configured from **Admin → Integrations** or the environment fallback; this endpoint remains the manual way to verify automated triage without waiting up to an hour.
 
+## Admin Settings
+
+These endpoints back [Admin → Settings](/docs/guides/admin-settings/) and require an approved,
+active **superadmin**; anyone else gets `403`.
+
+### `GET /api/admin/settings`
+
+Returns `{ revision, settings, history }`. Each setting has `name`, `type`, `category`,
+`description`, `defaultValue`, `value` (the value in effect; secrets are never returned), `secret`,
+`risky`, `range` or `choices` where they apply, `configured`, `source` (`database`, `environment`,
+`kv`, or `default`), `updatedAt`, and `updatedBy`. `history` holds the last 100 changes (`name`,
+`action`, `actorUserId`, `createdAt`, `revision`), never their values. If the settings can't be read
+safely, the response is `503` with `SETTINGS_UNAVAILABLE`.
+
+### `PATCH /api/admin/settings`
+
+Applies 1–23 changes together and returns the same view as `GET`. A `value` of `null` removes the
+saved value (**Reset override**).
+
+```json
+{
+  "expectedRevision": 4,
+  "changes": [{ "name": "connector.writeEnabled", "value": false }]
+}
+```
+
+`409` means `expectedRevision` is out of date: read the settings again, then retry. An invalid value
+returns `400`; an OAuth client ID and secret are checked together.
+
 ## Admin Runtime Controls
 
-These endpoints require an approved, authenticated **superadmin**. The switches
-are availability brakes: an absent KV key or KV read error means enabled
-(fail-open), so a transient KV outage does not silently halt recovery work.
+The older endpoints for the cron-sweep and Durable Object alarm switches. They read and write the
+same `operations.cronSweepsEnabled` and `operations.doAlarmsEnabled` settings as
+`/api/admin/settings`, without its revision check, and need the same superadmin access.
 
 ### `GET /api/admin/runtime-controls`
 
-Read the cron-sweep and Durable Object alarm switches. The response includes
-`cronSweepsEnabled`, `doAlarmsEnabled`, the resolved KV keys, the in-memory
-cache TTL, the disabled-alarm retry interval, and `semantics: "fail-open"`.
+Read the cron-sweep and Durable Object alarm switches: `cronSweepsEnabled` and `doAlarmsEnabled`
+(the values in effect), the KV keys of their emergency switches, the cache TTL, and the
+disabled-alarm retry interval.
 
 ### `PATCH /api/admin/runtime-controls`
 
-Update either or both switches. At least one field is required and every
-provided value must be boolean.
+Update either or both switches. At least one field is required and every provided value must be
+boolean. Saving `true` also clears that switch's emergency KV key. An emergency KV key set to `false`
+or `disabled` stops the work whatever the setting says.
 
 ```json
 {

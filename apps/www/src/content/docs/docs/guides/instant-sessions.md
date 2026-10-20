@@ -62,18 +62,18 @@ Note that the **Full** workspace profile does not override this: workspace profi
 
 ## What happens to your work
 
-**SAM does not commit or push an Instant chat's work for you.** Nothing is auto-committed when the agent finishes, and no pull request is opened. A chat you send from the message box with no attachments or explicit resource overrides, and not with an idea's **Execute** button, gets no branch either: its workspace sits on your project's default branch, and anything the agent changed stays in that container.
+**SAM doesn't commit, push, or open a pull request for you**, on Instant or anywhere else: ask the
+agent when you want the work published (see
+[Where the work lands](/docs/guides/idea-execution/#where-the-work-lands)). What differs is whether
+the work gets a branch of its own:
 
-How work starts determines its initial branch; publication is always agent-directed:
+| How you started it                                                                                                                      | Branch                                         |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| A message-box chat on an **Instant** profile, with no attachments or resource overrides, not from an idea's **Execute** button          | None: the workspace stays on your default branch |
+| Anything else — an Instant chat with attachments or resource overrides or from **Execute**, a submitted task, or `dispatch_task`, in either task mode | Its own `sam/…` output branch                  |
 
-| How you started it                                                                                       | Branch                        | Auto-commit and push |
-| -------------------------------------------------------------------------------------------------------- | ----------------------------- | -------------------- |
-| A message-box chat on an **Instant** profile, no attachments or resource overrides, not from **Execute** | None — your default branch    | No                   |
-| A submitted task or `dispatch_task`, in **task** mode                                                    | Its own `sam/…` output branch | No                   |
-| The same, in **conversation** mode                                                                       | Its own `sam/…` output branch | No                   |
-
-- **The branch depends on how the work was started.** Only a composer chat on an Instant profile skips branch creation, and only when it has no attachments or explicit resource overrides and was not started with an idea's **Execute** button. Otherwise it is submitted as a task and gets one. Anything submitted as a task — or dispatched with `dispatch_task`, on either runtime — gets an output branch, whichever mode it runs in.
-- **Commits, pushes and pull requests are agent-directed in every task mode.** Ending a turn or completing a task does not publish repository changes.
+A chat with no branch keeps whatever the agent changed in its container, until the agent pushes it
+somewhere.
 
 Instant clones the requested base branch before checking out a task's output branch. A new output branch starts at that base; an existing output branch keeps its remote commits.
 

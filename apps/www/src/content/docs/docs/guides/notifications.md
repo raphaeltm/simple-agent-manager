@@ -36,7 +36,7 @@ chats, is under **Updates**.
 
 Selecting a **Mention** or **Comment** notification opens the chat at that comment thread. A
 **Shared Session** notification says how long you can use the chat; nothing tells you when that time
-runs out (see [Share a chat](/docs/guides/collaboration/#share-a-chat)).
+runs out (see [What your teammate sees](/docs/guides/collaboration/#what-your-teammate-sees)).
 
 To stop a kind of notification, switch it off in **Settings → Notifications**; the newer ones are
 **Mentions**, **Comments on your sessions**, and **Shared sessions**.

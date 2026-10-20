@@ -50,15 +50,18 @@ state, strategy, and how many offerings are available.
 
 ### The other settings on the same page
 
-A project's **Infrastructure** tab holds three things, and it is worth knowing which is which:
+A project's **Infrastructure** tab holds four sections, in this order, and it is worth knowing which
+is which:
 
-| Section                  | What it controls                                                                                           |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| **Default Resources**    | How much machine work asks for, when nothing more specific says otherwise                                  |
-| **Scaling & Scheduling** | The default provider and region, plus how densely nodes are packed and how long they stay warm             |
-| **Project compute pool** | Which concrete machines SAM may rent, and how it chooses between them — for workspaces and for deployments |
+| Section                    | What it controls                                                                                           |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Default Resources**      | How much machine work asks for, when nothing more specific says otherwise                                  |
+| **Workspace Idle Timeout** | How long a quiet workspace is kept (see [Warm reuse](#warm-reuse) for how it differs from warm machines)   |
+| **Project compute pool**   | Which concrete machines SAM may rent, and how it chooses between them — for workspaces and for deployments |
+| **Scaling & Scheduling**   | The default provider and region, plus how densely nodes are packed and how long they stay warm             |
 
-The first two feed the pool decisions described below, so they are covered here too.
+**Default Resources** and **Scaling & Scheduling** feed the pool decisions described below, so they
+are covered here too.
 
 ### Default provider and region
 
@@ -157,8 +160,9 @@ Each chip is one of:
 | ⚠ Allowed, with a reason | Allowed, but your provider does not offer it right now. You can turn it off                                                        |
 
 Only allowed machines are eligible for placement. Machine types the pool already allows are listed
-first; the rest of the provider's catalog is folded behind **Show more** and is searchable by name
-or region, so you can browse everything your provider sells without leaving the page.
+first; the rest of the provider's catalog is folded behind **Show N more machine types** and is
+searchable by name or region (**Search by name or region**), so you can browse everything your
+provider sells without leaving the page.
 
 #### How refresh treats your choices
 
@@ -220,7 +224,7 @@ all four settings together (the app's label, then the concept it sets):
 | **Placing agents** (workspace strategy)                    | Machine ordering for agent sessions and tasks                  | Balanced       |
 | **App deployments** (deployment strategy)                  | Machine ordering for app deployment nodes                      | Smallest fit   |
 | **If the provider is out of capacity** (exhaustion policy) | What happens when no permitted machine can be obtained         | Wait and retry |
-| **Machine limit** (maximum nodes per user)                 | How many managed workspace machines one person may run from it | 3              |
+| **Machine limit** (maximum nodes per user)                 | How many managed workspace machines one person may run from it (labelled **Machine limit per person** on project and shared pools) | 3              |
 
 The credentials, the allowed offerings, and the providers and regions are shared between the two
 workloads. You curate one list of machines; only the _ordering_ differs by workload. The
@@ -475,7 +479,7 @@ problem as a warning in plain words:
 | State                                     | Settings panel says                                                | What to do                                                           |
 | ----------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------- |
 | **Available**                             | _(no warning)_                                                     | Nothing to do.                                                       |
-| **Not configured**                        | "No machines yet" (or "You're using shared machines")              | Connect a cloud credential. The pool is created for you.             |
+| **Not configured**                        | "No machines yet" or "You're using shared machines" (on a project: "No machines for this project yet" or "This project uses shared machines"; on the installation pool: "No platform cloud account yet") | Connect a cloud credential. The pool is created for you.             |
 | **Empty — no eligible offerings**         | "No machines are allowed, so SAM can't start any from this pool."  | **Edit** it and allow a machine, or attach a credential.             |
 | **Unavailable — compute source disabled** | "The cloud account behind this pool is turned off or was removed." | Reconnect or re-enable the credential. The pool updates when you do. |
 | **Unavailable — catalog refresh needed**  | "SAM couldn't read the provider's machine list. Try Refresh."      | **Refresh**, then allow a machine that is still sold.                |
@@ -495,7 +499,7 @@ remove it so a lower scope applies.
 | A new machine is provisioned for every task                            | Requirements ask for an exclusive node, each request fills a machine, or **Spread** has not reached the pool's **Machine limit**.                                                                                                                                             |
 | Workspace machines are bigger or pricier than expected                 | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor. Then open **Resources** on a finished session to see what it actually used ([Session Resource History](/docs/guides/session-resources/)). |
 | A deployment machine is bigger than expected                           | Check the service CPU and memory limits in its deployment manifest, the pool's deployment strategy, and which smaller offerings the pool allows.                                                                                                                              |
-| Editing is disabled                                                    | Project pools need owner or admin (`secret:write`); maintainers can view and refresh but not edit.                                                                                                                                                                            |
+| There's no **Edit** button                                             | Project pools need owner or admin (`secret:write`); maintainers can view and refresh but not edit, so the button isn't shown to them.                                                                                                                                         |
 | The project ignores your personal pool                                 | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                                                                                                               |
 | Everything lands on one cloud although the pool allows several         | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                                                                                                 |
 | Too many, or too few, workspaces share a machine                       | Adjust explicit CPU, memory, and disk requirements, use **Exclusive node** for isolation, or change the pool strategy and **Machine limit**. [Session Resource History](/docs/guides/session-resources/) is the evidence for what the requirements should be.                 |

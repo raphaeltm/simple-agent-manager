@@ -59,6 +59,7 @@ export default defineConfig({
             { slug: 'docs/guides/cli' },
             { slug: 'docs/guides/app-deployments' },
             { slug: 'docs/guides/self-hosting' },
+            { slug: 'docs/guides/admin-settings' },
             { slug: 'docs/guides/local-development' },
           ],
         },
