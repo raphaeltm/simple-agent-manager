@@ -117,11 +117,11 @@ For repository work, SAM lets a member's workspace use the project's GitHub App 
 Everyone in a project can read every chat in it. Use the session list's filter to switch between
 **All sessions** and **My sessions**, the chats you started.
 
-| You want to…                                    | Do this                                                                                                                   |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Point a teammate at something in a chat         | [Comment](#comment-on-a-chat) on the message and [@mention](#mention-a-teammate) them                                     |
-| Tell the agent what a teammate said             | [Send their comment to the agent](#send-a-comment-to-the-agent)                                                           |
-| Let a teammate drive your chat while you're out | [Share the chat](#share-a-chat) for 5 minutes to an hour                                                                  |
+| You want to…                                    | Do this                                                                                                                            |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Point a teammate at something in a chat         | [Comment](#comment-on-a-chat) on the message and [@mention](#mention-a-teammate) them                                              |
+| Tell the agent what a teammate said             | [Send their comment to the agent](#send-a-comment-to-the-agent)                                                                    |
+| Let a teammate drive your chat while you're out | [Share the chat](#share-a-chat) for 5 minutes to an hour                                                                           |
 | Pick up where a teammate's chat left off        | Select **Fork** in its tool rail: the new chat is yours ([Conversation Forking](/docs/guides/chat-features/#conversation-forking)) |
 
 ### Comment on a chat
@@ -153,7 +153,7 @@ comment by default.
   <source media="(max-width: 40em)" srcset="/images/docs/collaboration-mention-mobile.png 2x" />
   <img
     src="/images/docs/collaboration-mention.png"
-    alt="A comment being written on an agent's reply in a project chat. The comment box reads &quot;Can you double-check this @&quot;, and a &quot;Mention a teammate&quot; list below it offers project members to pick from. Under the box are the choices &quot;Add note&quot; and &quot;Send to agent&quot;, and a Comment button."
+    alt="A comment being written on the agent's reply in a project chat, in the Comments panel beside the chat on a desktop or under the message on a phone. The comment box reads &quot;Can you double-check the empty-cart case, @&quot;, and a list below it offers the project's members to mention: Ana Ruiz, Ben Okafor, Dana Scully, and Erin Hannon."
   />
 </picture>
 
@@ -194,7 +194,7 @@ controls the owner has in that chat.
   <source media="(max-width: 40em)" srcset="/images/docs/collaboration-share-confirm-mobile.png 2x" />
   <img
     src="/images/docs/collaboration-share-confirm.png"
-    alt="The &quot;Share chat access&quot; dialog at its confirmation step, titled &quot;Share with Dana Scully?&quot;. Bullet points explain that the chat runs on the owner's accounts and that ending access doesn't undo anything. Under &quot;How long?&quot; the choices are 5 min, 10 min, 30 min, and 1 hour, with 30 min selected and &quot;Ends at&quot; a time below. The &quot;I understand this runs on my accounts&quot; box is ticked, and Back and Share buttons follow."
+    alt="The &quot;Share chat access&quot; dialog at its confirmation step, &quot;Share with Dana Scully?&quot;. Four points say that Dana can send messages, stop or archive the chat, and answer the agent; that everything runs on your accounts and is billed to you; that the agent can read your keys, so Dana may be able to see them; and that ending access doesn't undo what Dana did. Under &quot;How long?&quot;, 30 min is chosen from 5 min, 10 min, 30 min, and 1 hour, with &quot;Ends at 2:50 PM.&quot; below. &quot;I understand this runs on my accounts&quot; is ticked, and the Share button is enabled next to Back."
   />
 </picture>
 
@@ -227,7 +227,7 @@ access ends in 23 min (3:42 PM)._ Each of their messages is labelled, for exampl
   <source media="(max-width: 40em)" srcset="/images/docs/collaboration-shared-view-mobile.png 2x" />
   <img
     src="/images/docs/collaboration-shared-view.png"
-    alt="A chat as the teammate it was shared with sees it. In the transcript, one of the user messages is labelled with the teammate's name and &quot;shared access&quot;. Above the message box a notice reads &quot;You're chatting in Prakash Rao's session. It runs on Prakash Rao's accounts. Your access ends in 23 min&quot; followed by the time."
+    alt="A chat as Ana Ruiz, the teammate it was shared with, sees it. Her message in the conversation is labelled &quot;Ana Ruiz · shared access&quot;. Above the message box a notice reads &quot;You're chatting in Prakash Rao's session. It runs on Prakash Rao's accounts. Your access ends in 23 min (2:43 PM).&quot;"
   />
 </picture>
 

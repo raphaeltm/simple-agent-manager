@@ -7,17 +7,17 @@ SAM combines an in-app notification center with optional Web Push delivery for a
 
 ## Notification Types
 
-| Type               | Urgency | When It Fires                                                                                                                              |
-| ------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Type               | Urgency | When It Fires                                                                                                                                                                                          |
+| ------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **task_complete**  | Medium  | A task is marked complete. It reads **PR ready for review** with the pull request the agent reported, or else **Output on branch** with the task's branch name, which doesn't mean anything was pushed |
-| **needs_input**    | High    | An agent calls `request_human_input` because it needs your decision                                                                        |
-| **error**          | High    | Execution fails with an error                                                                                                              |
-| **progress**       | Low     | An agent reports incremental progress via `update_task_status`                                                                             |
-| **session_ended**  | Medium  | A conversation-mode session turn completes                                                                                                 |
-| **cron_failure**   | High    | A five-minute operational recovery sweep fails, a sweep opens a project's ProjectData archive circuit breaker, or SAM gives up retrying a GitHub trigger delivery (active superadmins only) |
-| **mention**        | Medium  | A teammate @mentions you in a chat comment or reply                                                                                        |
-| **comment**        | Low     | A teammate comments on a chat you own, or replies in a comment thread you are part of                                                      |
-| **session_access** | Medium  | A teammate shares a chat with you (saying for how long), extends or removes your access, or shares a chat you own with someone else        |
+| **needs_input**    | High    | An agent calls `request_human_input` because it needs your decision                                                                                                                                    |
+| **error**          | High    | Execution fails with an error                                                                                                                                                                          |
+| **progress**       | Low     | An agent reports incremental progress via `update_task_status`                                                                                                                                         |
+| **session_ended**  | Medium  | A conversation-mode session turn completes                                                                                                                                                             |
+| **cron_failure**   | High    | A five-minute operational recovery sweep fails, a sweep opens a project's ProjectData archive circuit breaker, or SAM gives up retrying a GitHub trigger delivery (active superadmins only)            |
+| **mention**        | Medium  | A teammate @mentions you in a chat comment or reply                                                                                                                                                    |
+| **comment**        | Low     | A teammate comments on a chat you own, or replies in a comment thread you are part of                                                                                                                  |
+| **session_access** | Medium  | A teammate shares a chat with you (saying for how long), extends or removes your access, or shares a chat you own with someone else                                                                    |
 
 A permission request, question, or link card that an agent puts in the chat while it waits does
 **not** send a notification. Those show up as **Needs input** beside the chat in the project's

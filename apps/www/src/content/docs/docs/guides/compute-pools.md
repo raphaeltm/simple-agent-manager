@@ -44,6 +44,15 @@ largest machine), lists its settings in plain words, and shows the machine types
 regions each one is allowed in. **Edit** opens the same panel for changes, with a Save bar that stays
 on screen.
 
+<picture>
+  <source type="image/webp" srcset="/images/features/sam-compute-pool-editor.webp" />
+  <img
+    src="/images/features/sam-compute-pool-editor.png"
+    alt="A project compute pool open for editing. Under &quot;How SAM uses machines&quot;: Placing agents is Pack, If the provider is out of capacity is Try other allowed machines, Machine limit per person is 3, and App deployments is Smallest fit. Under &quot;Allowed machines&quot;, a search box sits above one row per machine type with its vCPU, RAM, disk, and monthly price: cx23 is allowed in Falkenstein, and under &quot;Other machine types&quot;, cx33 and cpx31 can be allowed in Nuremberg and Helsinki while cx43 shows &quot;Falkenstein · region sold out&quot;. A bar at the bottom reads &quot;No changes yet&quot;, with Cancel and Save changes."
+    loading="lazy"
+  />
+</picture>
+
 You can also see the pool in effect without leaving your work: the **workspace sidebar** and a
 chat session's **infrastructure** section both show a "Current compute pool" line with the scope,
 state, strategy, and how many offerings are available.
@@ -219,11 +228,11 @@ workspace is bursty and short-lived, a deployment is steady and long-lived — s
 separate strategy for each. **Edit** on the compute pool panel of whichever scope you own shows
 all four settings together (the app's label, then the concept it sets):
 
-| Field                                                      | What it decides                                                | Default        |
-| ---------------------------------------------------------- | -------------------------------------------------------------- | -------------- |
-| **Placing agents** (workspace strategy)                    | Machine ordering for agent sessions and tasks                  | Balanced       |
-| **App deployments** (deployment strategy)                  | Machine ordering for app deployment nodes                      | Smallest fit   |
-| **If the provider is out of capacity** (exhaustion policy) | What happens when no permitted machine can be obtained         | Wait and retry |
+| Field                                                      | What it decides                                                                                                                    | Default        |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| **Placing agents** (workspace strategy)                    | Machine ordering for agent sessions and tasks                                                                                      | Balanced       |
+| **App deployments** (deployment strategy)                  | Machine ordering for app deployment nodes                                                                                          | Smallest fit   |
+| **If the provider is out of capacity** (exhaustion policy) | What happens when no permitted machine can be obtained                                                                             | Wait and retry |
 | **Machine limit** (maximum nodes per user)                 | How many managed workspace machines one person may run from it (labelled **Machine limit per person** on project and shared pools) | 3              |
 
 The credentials, the allowed offerings, and the providers and regions are shared between the two
@@ -476,14 +485,14 @@ The "Current compute pool" line in the workspace sidebar and chat infrastructure
 state of the pool in effect. When a pool cannot start machines, the settings panel shows the same
 problem as a warning in plain words:
 
-| State                                     | Settings panel says                                                | What to do                                                           |
-| ----------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| **Available**                             | _(no warning)_                                                     | Nothing to do.                                                       |
+| State                                     | Settings panel says                                                                                                                                                                                      | What to do                                                           |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| **Available**                             | _(no warning)_                                                                                                                                                                                           | Nothing to do.                                                       |
 | **Not configured**                        | "No machines yet" or "You're using shared machines" (on a project: "No machines for this project yet" or "This project uses shared machines"; on the installation pool: "No platform cloud account yet") | Connect a cloud credential. The pool is created for you.             |
-| **Empty — no eligible offerings**         | "No machines are allowed, so SAM can't start any from this pool."  | **Edit** it and allow a machine, or attach a credential.             |
-| **Unavailable — compute source disabled** | "The cloud account behind this pool is turned off or was removed." | Reconnect or re-enable the credential. The pool updates when you do. |
-| **Unavailable — catalog refresh needed**  | "SAM couldn't read the provider's machine list. Try Refresh."      | **Refresh**, then allow a machine that is still sold.                |
-| **Migration in progress**                 | "This pool is being updated. Try again in a minute."               | Wait, then reload.                                                   |
+| **Empty — no eligible offerings**         | "No machines are allowed, so SAM can't start any from this pool."                                                                                                                                        | **Edit** it and allow a machine, or attach a credential.             |
+| **Unavailable — compute source disabled** | "The cloud account behind this pool is turned off or was removed."                                                                                                                                       | Reconnect or re-enable the credential. The pool updates when you do. |
+| **Unavailable — catalog refresh needed**  | "SAM couldn't read the provider's machine list. Try Refresh."                                                                                                                                            | **Refresh**, then allow a machine that is still sold.                |
+| **Migration in progress**                 | "This pool is being updated. Try again in a minute."                                                                                                                                                     | Wait, then reload.                                                   |
 
 Remember that a project pool in any of the unhealthy states stays authoritative — fix it, or
 remove it so a lower scope applies.

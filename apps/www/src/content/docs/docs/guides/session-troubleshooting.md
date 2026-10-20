@@ -554,8 +554,7 @@ SAM gives each workspace access to the project's repository: through SAM's GitHu
 project, or your GitLab sign-in on a GitLab project. On a GitHub project it checks, every time Git
 asks, that the person whose workspace it is can still reach the repository. When access is refused,
 `git push`, `git fetch`, or `gh` in the workspace fails with an ordinary authentication error, and a
-new workspace fails to start with **failed to fetch git token: git-token authorization_denied (HTTP
-403)**.
+new workspace fails to start with **failed to fetch git token: git-token authorization_denied (HTTP 403)**.
 
 - **Access was removed.** If you lost access to the repository on GitHub, or the GitHub App was
   removed from it, restore that access and ask the agent to try again. There's nothing to wait for:

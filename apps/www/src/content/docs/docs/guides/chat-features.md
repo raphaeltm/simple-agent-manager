@@ -227,7 +227,7 @@ the conversation you are in rather than opening something beside it.)
 | **Complete**  | Mark the task complete                                                                                                                                             | When the session has a task that is not already finished          |
 | **Details**   | Session identifiers and the infrastructure it ran on                                                                                                               | Always                                                            |
 
-![The session tool rail in icons-and-labels mode, listing Files, Git, Timeline, Resources, Events and Comments, then Retry and Fork after a divider, with Report, Complete and Details pinned at the bottom.](/images/docs/session-tool-rail.png)
+![The session tool rail in icons-and-labels mode, listing Files, Git, Timeline, Resources, Events and Comments, then Share, Retry and Fork after a divider, with Report, Complete and Details pinned at the bottom.](/images/docs/session-tool-rail.png)
 
 **Files** and **Git** need a linked workspace and a live session, so they disappear once the
 session sleeps or stops. They are also only for the chat's owner: someone the chat is shared with
