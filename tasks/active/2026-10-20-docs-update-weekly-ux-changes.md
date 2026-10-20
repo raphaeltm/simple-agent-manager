@@ -148,3 +148,23 @@ reply mislabel.
 - **Rebase onto main** (#2382, #2384, #2385): conflicts in concepts, overview and troubleshooting
   resolved in favour of main's sleep-failure notices; #2382 (idle runtime terminated after repeated
   snapshot failures, unpushed files may be lost) added to idea-execution and the changelog.
+- Added a **Send to agent** screenshot (`collaboration-send-to-agent*.png`) and made the phone
+  comment-box capture settle before measuring (it was flaky about one run in three).
+
+### Round 2 (journey + fact-check)
+
+- **Journey reviewer** (1 HIGH, 5 MEDIUM, 5 LOW). Pushed back on the HIGH fix ("reply in the Blocked
+  chat and the agent carries on"): `holdTaskForProviderLimit()` runs before every TaskRunner step and
+  returns for a blocked wait (`task-runner/index.ts:398`), and the agent-key pin throws 409 for it
+  (`provider-limit-credential-pin.ts`), so the docs say a reply doesn't restart a Blocked task;
+  adopted its Archive-deletes-unpushed-work point. Fixed: stale "workspace keeps running"
+  (chat-features, api.md), lockout recovery (new `SETUP_TOKEN`, remove `SETUP_FORCE`), refused
+  admin values, hosted vs self-hosted PR permission (FAQ, concepts; hosted App verified with
+  `gh api /apps/simple-agent-manager`), teammate-asks-agent row and owner @mention, Repository Access
+  token scope, secret re-save, Task-profile reason. Product bugs appended to ideas
+  `01M5BREXSE42RBT0BQMK3Z72FG` (Blocked tasks can't resume) and `01M59MYE4GY91BWTE8TZF1ZB5D`.
+- **Fact-check reviewer** (7 LOW open at HEAD). Fixed: rail **Complete** sends no notification;
+  Complete refused for queued/delegated Blocked tasks; request_human_input vs in-chat cards; phone
+  Comments list; KV switch display timing; collaboration-limits release; snapshot-failure summary
+  and compute-pools leftovers from #2382. New idea `01M5BW6JYFKWRD92H96FR9S1XQ` (archiving a sleeping
+  VM task leaves it `sleeping`); `pr_created` dead path already in `01M5BRDZF2314EAE7S8HBD37NX`.
