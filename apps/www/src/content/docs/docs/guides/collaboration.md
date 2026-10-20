@@ -190,7 +190,7 @@ once, and a resolved thread can't be sent.
 
 The agent gets the comment quoted with the message it's about and who wrote it, after its current
 turn ends, like any message you send. In the chat it's labelled with who sent it, for example
-**Grace sent Rae's comment to the agent**. Everyone else can comment, but not send: ask the chat's
+**Grace Lee sent Rae Patel's comment to the agent**. Everyone else can comment, but not send: ask the chat's
 owner, or someone it's shared with, to send it, and @mention them so they get a **Mention**
 notification (a plain comment notification doesn't add to the bell's count).
 

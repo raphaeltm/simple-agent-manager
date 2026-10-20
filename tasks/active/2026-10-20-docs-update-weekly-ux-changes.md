@@ -218,5 +218,15 @@ reply mislabel.
   both the header chip and the list label (strict-mode failure; I had misread a truncated run as a
   pass): now scoped to the `Chat sessions` nav, all 8 scenes pass, and removing the creator fails
   exactly that assertion. Fixed: dependency-wait BLOCKED badge, full names and time in collaboration
-  examples, 16 October for the Fork box (first prod deploy 23:26 UTC), list "and", A–Z/a–z. New idea
+  examples, 16 October for the Fork box (deployed at 12:04 UTC that day; 23:26 UTC was #2363's deploy), list "and", A–Z/a–z. New idea
   `01M5C0GS9KXT1HFB801Z7XF2KV` (dead Tasks page, `stop_subtask` statuses).
+
+### Round 6 (journey + fact-check)
+
+- **Journey reviewer** (4 LOW, no product bugs). Fixed: troubleshooting and chat-features no longer say
+  no own-credential limit fails a task; Secret-placeholder symptom in the troubleshooting index;
+  Admin Settings' Collaboration group arrived after v2026.10.19; full owner name in the expiry notice.
+- **Fact-check reviewer** (3 LOW, two overlapping the journey round). Fixed: changelog limit scope
+  (own subscription or key, or project credential; rests, usually asleep); full names in the
+  sent-comment label; the Fork-box deploy time in this log. Collaboration spec ran 8/8 at both sizes.
+  Dependency-badge bugs appended to `01M5BREXSE42RBT0BQMK3Z72FG`.
