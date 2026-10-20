@@ -523,7 +523,8 @@ test('loading older messages keeps the reader on the turn they were reading', as
 test('your messages and SAM replies are visually distinct', async ({ page }) => {
   await mockSam(page, { turns: [turn('bubble', { message: 'Is the deploy healthy?' })] });
   await page.goto('/sam');
-  const bubble = page.locator('.glass-msg-user').filter({ hasText: 'Is the deploy healthy?' });
+  // Located by content, not class name, so the surface assertion is what discriminates.
+  const bubble = page.locator('article').getByText('Is the deploy healthy?').locator('..');
   await expect(bubble).toBeVisible();
   // The bubble's surface is a gradient (background-image) or a solid colour.
   const surface = await bubble.evaluate((element) => {
