@@ -46,7 +46,8 @@ export function handleExpiredGrants(
     sql,
     sessionId,
     [...new Set(grants.map((grant) => grant.granteeUserId))],
-    SENDER_ACCESS_EXPIRED_REASON
+    SENDER_ACCESS_EXPIRED_REASON,
+    now
   );
   markExpiryHandled(sql, grants, now);
   return cancelled;

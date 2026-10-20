@@ -261,6 +261,8 @@ The MCP `create_trigger` tool creates cron, GitHub, and webhook triggers in the 
 - `GET /workspaces/:id/files/list?path=.&worktree=...` — Directory listing
 - `GET /workspaces/:id/files/find?worktree=...` — Recursive flat file index
 
+With `confine=workdir`, the VM agent's list, raw, download, git file and git diff endpoints accept only relative paths, resolve symlinks inside the workspace, refuse anything outside the working tree or in any `.git` directory (`404`, `..` included, although the control plane already rejects `.`/`..` segments with `400`), and answer `X-SAM-Path-Confinement: workdir` (`packages/vm-agent/internal/server/file_confinement.go`). The control plane sends it for a grantee's reads through `/api/projects/:projectId/sessions/:sessionId/files/*` and `/git/*`, and returns `409` when an older agent does not confirm it. Session file upload stays owner-only.
+
 ## Voice Transcription
 
 - `POST /api/transcribe` — Transcribe audio via Workers AI (Whisper). Rate-limited per user (`RATE_LIMIT_TRANSCRIBE`, default 30 per `RATE_LIMIT_TRANSCRIBE_WINDOW_SECONDS` = 60)
@@ -340,7 +342,11 @@ Task-scoped MCP exposes `create_project_schedule`, `list_project_schedules`,
 `get_project_schedule`, `reschedule_project_schedule`, `cancel_project_schedule`, and
 `reconcile_project_schedule`.
 Creator/project identity comes from the verified caller. Human-owned standing-watch
-mutations are deliberately absent from agent tools. Schedule actions are
+mutations are deliberately absent from agent tools. A `message_session` target must be
+the creator's own chat, or (REST only, not MCP) a chat shared with them while the grant
+lasts; the grant is recorded and re-checked at fire time and before delivery, and revoke or
+expiry cancels it. Standing watches may target only chats their creator owns, and only the
+creator may change a watch's action. Schedule actions are
 `message_session` (sessionId, prompt) or `start_session` (prompt, optional
 agentProfileId/skillId). `dueAt` and optional `expiresAt` are UTC epoch milliseconds;
 `displayTimezone` is IANA. Creation requires a reusable `idempotencyKey`.

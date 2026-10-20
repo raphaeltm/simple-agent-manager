@@ -17,7 +17,10 @@ import {
   finalizeAcceptedPromptDelivery,
   processPromptDeliveryAlarm,
 } from '../../src/durable-objects/project-data/durability-foundation';
-import { requireScheduleAction } from '../../src/durable-objects/project-data/project-event-schedules-authority';
+import {
+  OWNER_ONLY_SCHEDULE,
+  requireScheduleAction,
+} from '../../src/durable-objects/project-data/project-event-schedules-authority';
 import { runScheduleAlarm } from '../../src/durable-objects/project-data/project-event-schedules-runner';
 import {
   createSchedule,
@@ -121,7 +124,7 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
 
   describe('scheduled message_session self-wake', () => {
     async function scheduleWhileAwake() {
-      await requireScheduleAction(sql, env as never, PROJECT, USER, selfWake);
+      await requireScheduleAction(sql, env as never, PROJECT, USER, selfWake, OWNER_ONLY_SCHEDULE);
       return hooks.transactionSync(() =>
         createSchedule(
           sql,
@@ -177,9 +180,12 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
     it('accepts a new self-wake schedule created after the task already slept', async () => {
       await sleepTheTask();
 
-      await expect(requireScheduleAction(sql, env as never, PROJECT, USER, selfWake)).resolves.toBe(
-        TASK
-      );
+      await expect(
+        requireScheduleAction(sql, env as never, PROJECT, USER, selfWake, OWNER_ONLY_SCHEDULE)
+      ).resolves.toMatchObject({
+        targetTaskId: TASK,
+        writer: { role: 'owner', ownerUserId: USER },
+      });
     });
 
     it.each([

@@ -3,7 +3,7 @@ import { PlanModal } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { isExpiredTask } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, type RefObject, useEffect, useMemo, useState } from 'react';
 
 import { ArchivedForkComposer } from './ArchivedForkComposer';
 import { CompletionDock } from './CompletionDock';
@@ -36,6 +36,8 @@ interface SessionFooterProps {
   slashCommands: SlashCommand[];
   onNewChat?: () => void;
   onFork?: () => void;
+  /** The read-only notice, focused when a teammate's open file panel closes on access loss. */
+  accessNoticeRef?: RefObject<HTMLDivElement | null>;
 }
 
 /**
@@ -58,6 +60,7 @@ export function SessionFooter({
   slashCommands,
   onNewChat,
   onFork,
+  accessNoticeRef,
 }: Readonly<SessionFooterProps>) {
   const [showPlanModal, setShowPlanModal] = useState(false);
 
@@ -164,15 +167,11 @@ export function SessionFooter({
           onSend={() => {
             void lc.handleSendFollowUp();
           }}
-          // Attachments are stored under the uploader and only delivered into the
-          // uploader's own workspace, so a shared session cannot take them yet.
-          onUploadFiles={
-            viewer.isGrantee
-              ? undefined
-              : (files) => {
-                  void lc.handleUploadFiles(files);
-                }
-          }
+          // A teammate's files are their own uploads; the server copies them only into this
+          // chat's workspace while their access lasts.
+          onUploadFiles={(files) => {
+            void lc.handleUploadFiles(files);
+          }}
           sending={lc.sendingFollowUp}
           uploading={lc.uploading}
           attachments={lc.attachments}
@@ -202,6 +201,7 @@ export function SessionFooter({
           ownerLabel={sessionOwnerLabel}
           onNewChat={onNewChat}
           accessEnded={accessEnded}
+          noticeRef={accessNoticeRef}
         />
       )}
       {lc.sessionState === 'terminated' && lc.session?.status === 'stopped' && viewer.canFork && (

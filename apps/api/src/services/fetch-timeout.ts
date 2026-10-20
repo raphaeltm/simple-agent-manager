@@ -18,6 +18,17 @@ export function getTimeoutMs(envValue: string | undefined, defaultMs: number = D
 }
 
 /**
+ * The URL as it may appear in an error message. The query string and fragment are dropped
+ * because they can carry tokens (VM agent `?token=`, presigned signatures), and callers log
+ * these messages.
+ */
+function urlWithoutQuery(url: string | URL): string {
+  const text = url.toString();
+  const end = text.search(/[?#]/);
+  return end === -1 ? text : text.slice(0, end);
+}
+
+/**
  * Fetch with an automatic timeout.
  * Aborts the request if it doesn't complete within `timeoutMs`.
  *
@@ -48,7 +59,7 @@ export async function fetchWithTimeout(
   } catch (err) {
     if (callerSignal?.aborted) throw callerSignal.reason;
     if (err instanceof Error && err.name === 'AbortError') {
-      throw new Error(`Request timed out after ${timeoutMs}ms: ${url}`);
+      throw new Error(`Request timed out after ${timeoutMs}ms: ${urlWithoutQuery(url)}`);
     }
     throw err;
   } finally {

@@ -40,6 +40,11 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
 		return
 	}
+	confined, err := requestedConfinement(w, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Sanitize path
 	dirPath := r.URL.Query().Get("path")
@@ -48,6 +53,10 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 	}
 	if dirPath != "." {
 		if err := sanitizeFilePath(dirPath); err != nil {
+			if confined {
+				writePathError(w, err, confined)
+				return
+			}
 			http.Error(w, fmt.Sprintf(`{"error":"invalid path: %s"}`, err.Error()), http.StatusBadRequest)
 			return
 		}
@@ -75,8 +84,17 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
+	listPath := dirPath
+	if confined {
+		listPath, err = s.resolveConfinedPath(ctx, containerID, user, workDir, dirPath)
+		if err != nil {
+			writeConfinementError(w, err)
+			return
+		}
+	}
+
 	output, _, err := s.execInContainer(ctx, containerID, user, workDir,
-		"find", dirPath, "-maxdepth", "1", "-not", "-name", ".",
+		"find", listPath, "-maxdepth", "1", "-not", "-name", ".",
 		"-printf", `%y\t%s\t%T@\t%f\n`,
 	)
 	if err != nil {
@@ -127,6 +145,12 @@ func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
+		return
+	}
+	// Already confined: find lists relative paths from the working tree, skips .git, and
+	// never follows a symlink (-P).
+	if _, err := requestedConfinement(w, r); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -215,6 +239,11 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
 	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
 		return
 	}
+	confined, err := requestedConfinement(w, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
@@ -222,7 +251,7 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := sanitizeFilePath(filePath); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writePathError(w, err, confined)
 		return
 	}
 
@@ -240,10 +269,19 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.config.FileRawTimeout)
 	defer cancel()
 
+	readPath := filePath
+	if confined {
+		readPath, err = s.resolveConfinedPath(ctx, containerID, user, workDir, filePath)
+		if err != nil {
+			writeConfinementError(w, err)
+			return
+		}
+	}
+
 	// Stat the file to get type, size, and mtime. Uses direct args (no shell)
 	// to avoid injection. Format: file_type\tsize_bytes\tmtime_epoch
 	statOut, statStderr, statErr := s.execInContainer(ctx, containerID, user, workDir,
-		"stat", "-c", "%F\t%s\t%Y", filePath)
+		"stat", "-c", "%F\t%s\t%Y", "--", readPath)
 	if statErr != nil {
 		slog.Warn("stat failed for raw file",
 			"path", filePath, "workspace", workspaceID,
@@ -317,7 +355,7 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
 	// Stream the file content directly from workspace exec to the response writer.
 	// This avoids buffering the entire file in memory.
 	// Uses direct args (no shell) — cat receives filePath as a single argument.
-	cmd, cmdErr := s.workspaceExecCommand(ctx, containerID, user, workDir, "cat", "--", filePath)
+	cmd, cmdErr := s.workspaceExecCommand(ctx, containerID, user, workDir, "cat", "--", readPath)
 	if cmdErr != nil {
 		slog.Error("Error creating raw file command", "path", filePath, "workspace", workspaceID, "error", cmdErr)
 		return

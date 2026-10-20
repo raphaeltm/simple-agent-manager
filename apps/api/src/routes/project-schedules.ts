@@ -111,6 +111,8 @@ projectScheduleRoutes.post('/', async (c) =>
     await projectData.createProjectSchedule(c.env, requireRouteParam(c, 'projectId'), {
       userId: getUserId(c),
       creatorChatSessionId: null,
+      // A person signed in to the app: their active shared access to a chat counts.
+      creator: 'person',
       request: await scheduleRequestBody(c.req.raw, c.env),
     }),
     201

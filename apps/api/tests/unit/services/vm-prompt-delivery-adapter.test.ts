@@ -1185,4 +1185,31 @@ describe('attachment delivery ordering', () => {
     expect(mocks.transferWorkspaceAttachments).not.toHaveBeenCalled();
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
+  it('copies a teammate’s own uploads into the owner’s workspace for a prompt sent on their behalf', async () => {
+    vi.clearAllMocks();
+    const env = envWithTarget();
+    env.R2 = { head: vi.fn().mockResolvedValue({ size: 4 }) } as unknown as R2Bucket;
+    const request = input(false);
+    request.claim.message.senderId = 'teammate-1';
+    request.claim.message.metadata = { attachments: [attachment], onBehalfOfUserId: 'user-1' };
+    mocks.nodeAgentRequest.mockResolvedValue(promptProtocolCapabilities);
+    mocks.transferWorkspaceAttachments.mockResolvedValue(undefined);
+    mocks.sendPromptToAgentOnNode.mockResolvedValue(protocolFixture.newPrompt);
+    await new DefaultVmPromptDeliveryAdapter(env).submit(request);
+    expect(env.R2.head).toHaveBeenCalledWith('temp-uploads/teammate-1/upload-1/photo.png');
+    expect(mocks.transferWorkspaceAttachments).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1', uploaderUserId: 'teammate-1' })
+    );
+  });
+  it('rejects a teammate’s attachments for a prompt sent on behalf of someone else', async () => {
+    vi.clearAllMocks();
+    const request = input(false);
+    request.claim.message.senderId = 'teammate-1';
+    request.claim.message.metadata = { attachments: [attachment], onBehalfOfUserId: 'other-owner' };
+    mocks.nodeAgentRequest.mockResolvedValue(promptProtocolCapabilities);
+    const result = await new DefaultVmPromptDeliveryAdapter(envWithTarget()).submit(request);
+    expect(result.kind).toBe('retry');
+    expect(mocks.transferWorkspaceAttachments).not.toHaveBeenCalled();
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
 });

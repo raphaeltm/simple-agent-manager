@@ -23,6 +23,11 @@ export interface SessionViewerCapabilities {
   canManageAccess: boolean;
   /** Fork an archived chat: it restores the owner's saved files, so owner only. */
   canFork: boolean;
+  /**
+   * The Files and Git panels. Owner and grantees; a grantee's reads are limited to the
+   * repository folder by the server and the workspace agent.
+   */
+  canBrowseWorkspace: boolean;
   isGrantee: boolean;
 }
 
@@ -50,6 +55,7 @@ export function resolveSessionViewerCapabilities(
     canSendToAgent: canDriveSession,
     canManageAccess: canDriveSession,
     canFork: viewerAccess === 'owner',
+    canBrowseWorkspace: canDriveSession,
     isGrantee: viewerAccess === 'grantee',
   };
 }

@@ -61,7 +61,11 @@ In the **Schedules** section, choose **Schedule once**, enter a due time, and pi
   A busy agent receives it through the durable queue. A sleeping session resumes
   its existing conversation when recovery is available, including a task whose
   agent went to sleep while waiting, so an agent can schedule a message to itself
-  and be woken by it.
+  and be woken by it. You can message a conversation you own, or one
+  [shared with you](/docs/guides/collaboration/#share-a-chat) while your access lasts.
+  A message you schedule into a shared conversation shows as yours, is sent only while
+  the access you scheduled it under lasts, and is cancelled when that access ends. An
+  agent can schedule only into its own user's conversations.
 - **Start a new session** creates a task-backed conversation using the selected
   profile and skill, with current project access, credentials and placement rules.
   It can run after you leave or archive the conversation that created the schedule.
@@ -102,6 +106,11 @@ Choose a filter, an action, a cooldown, a concurrency limit and a finite executi
 limit. The execution limit bounds the number of actions, not a monetary budget.
 The resulting tasks still use ordinary profile and credential controls.
 
+A watch can message only a conversation its creator owns, and only its creator
+can change what it does; other project writers can still pause, revoke or adjust its
+filter and limits. A watch that would message a conversation its creator does not
+own is paused, with the reason shown.
+
 Pause a watch to stop new actions; resume it to match future events. Revoking a
 watch ends it. Changes, pause and revoke cancel actions that have not yet been
 admitted. Already admitted messages and tasks remain visible and can continue.
@@ -121,7 +130,8 @@ intentionally ignored. Repeatedly changing a subscription will not make an ignor
 webhook pass a different trigger's filters.
 
 Project members can inspect automation. Project writers can change it. Access is
-checked again when an action fires; schedules store creator identity, never an
+checked again when an action fires, and a message's right to reach its conversation is
+checked again just before it is sent; schedules store creator identity, never an
 agent's bearer token.
 
 ## Storage and input limits

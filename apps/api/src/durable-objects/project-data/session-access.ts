@@ -283,7 +283,8 @@ function revokeGrantTree(
     sql,
     sessionId,
     [...new Set(grants.map((grant) => grant.granteeUserId))],
-    SENDER_ACCESS_REVOKED_REASON
+    SENDER_ACCESS_REVOKED_REASON,
+    now
   );
   return { revokedGrants: grants, cancelledDeliveryIds };
 }

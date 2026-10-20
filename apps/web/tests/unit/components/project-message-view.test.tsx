@@ -52,6 +52,9 @@ const mocks = vi.hoisted(() => ({
   listNotifications: vi.fn(),
   listAcpInteractions: vi.fn(),
   getProjectMembers: vi.fn(),
+  getSessionAccess: vi.fn(),
+  getSessionFileList: vi.fn(),
+  getSessionFileContent: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -67,6 +70,9 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   updateProjectTaskStatus: mocks.updateProjectTaskStatus,
   deleteWorkspace: mocks.deleteWorkspace,
   getProjectMembers: mocks.getProjectMembers,
+  getSessionAccess: mocks.getSessionAccess,
+  getSessionFileList: mocks.getSessionFileList,
+  getSessionFileContent: mocks.getSessionFileContent,
 }));
 
 vi.mock('../../../src/lib/api/comments', async (importOriginal) => ({
@@ -85,6 +91,7 @@ let capturedWsOnMessage: ((msg: ReturnType<typeof makeMessage>) => void) | null 
 let capturedWsOnCatchUp:
   | ((msgs: ReturnType<typeof makeMessage>[], session: ReturnType<typeof makeSession>) => void)
   | null = null;
+let capturedWsOnSessionAccessChanged: (() => void) | null = null;
 let capturedWsOnCommentEvent:
   ((event: import('../../../src/lib/api/comments').MessageCommentRealtimeEvent) => void) | null =
   null;
@@ -96,7 +103,9 @@ vi.mock('../../../src/hooks/useChatWebSocket', () => ({
     onMessage?: (msg: unknown) => void;
     onCatchUp?: (msgs: unknown[], session: unknown) => void;
     onCommentEvent?: (event: unknown) => void;
+    onSessionAccessChanged?: () => void;
   }) => {
+    capturedWsOnSessionAccessChanged = opts.onSessionAccessChanged ?? null;
     capturedWsOnMessage = (opts.onMessage ?? null) as typeof capturedWsOnMessage;
     capturedWsOnCatchUp = (opts.onCatchUp ?? null) as typeof capturedWsOnCatchUp;
     capturedWsOnCommentEvent = (opts.onCommentEvent ?? null) as typeof capturedWsOnCommentEvent;
@@ -120,8 +129,24 @@ vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
   return {
     ...actual,
     VoiceButton: () => <button data-testid="voice-button">Voice</button>,
-    MessageBubble: ({ text, role }: { text: string; role: string }) => (
-      <div data-testid={`acp-message-${role}`}>{text}</div>
+    // A file the agent mentions is a link only when the chat passes a file-click handler.
+    MessageBubble: ({
+      text,
+      role,
+      onFileClick,
+    }: {
+      text: string;
+      role: string;
+      onFileClick?: (path: string) => void;
+    }) => (
+      <div data-testid={`acp-message-${role}`}>
+        {text}
+        {onFileClick && text.includes('docs/guide.md') ? (
+          <button type="button" onClick={() => onFileClick('docs/guide.md')}>
+            Open docs/guide.md in file browser
+          </button>
+        ) : null}
+      </div>
     ),
     ToolCallCard: ({ toolCall }: { toolCall: { title: string } }) => (
       <div data-testid="acp-tool-call">{toolCall.title}</div>
@@ -1218,6 +1243,110 @@ describe('ProjectMessageView — Share follows the chat state', () => {
     expect(
       within(dialog).getByRole('button', { name: "Revoke Bea Arthur's access now" })
     ).toBeTruthy();
+  });
+});
+
+describe('ProjectMessageView — Files and Git follow shared access', () => {
+  const owner = { id: 'user-owner', name: 'Olivia Owner', email: null, avatarUrl: null };
+  const access = (viewerAccess: 'grantee' | 'reader') => ({
+    sessionId: 'session-1',
+    viewerAccess,
+    owner,
+    grants: [],
+    undelivered: [],
+    serverTime: Date.now(),
+  });
+  const session = (viewerAccess: 'grantee' | 'reader') => ({
+    ...makeSession('session-1', 'active'),
+    isMine: false,
+    viewerAccess,
+    access: access(viewerAccess),
+  });
+
+  beforeEach(() => {
+    mocks.getProjectMembers.mockResolvedValue({ members: [], inviteLinks: [], accessRequests: [] });
+    mocks.getSessionFileList.mockResolvedValue({
+      path: '.',
+      entries: [{ name: 'README.md', type: 'file', size: 12, modifiedAt: '2026-10-20T00:00:00Z' }],
+    });
+  });
+
+  it('gives a teammate Files and Git, and closes the panel when their access ends', async () => {
+    mocks.getChatSession.mockResolvedValue({
+      session: session('grantee'),
+      messages: [makeMessage('msg-1', 'session-1', 'Agent answer')],
+      hasMore: false,
+    });
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    expect(await screen.findByRole('button', { name: 'Review uncommitted changes' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Browse workspace files' }));
+    expect(await screen.findByText('README.md')).toBeTruthy();
+    expect(mocks.getSessionFileList).toHaveBeenCalledWith('proj-1', 'session-1', '.');
+
+    // The server says their access ended: the access read now answers as a reader.
+    mocks.getSessionAccess.mockResolvedValue(access('reader'));
+    act(() => capturedWsOnSessionAccessChanged?.());
+
+    await waitFor(() => expect(screen.queryByText('README.md')).toBeNull());
+    expect(mocks.getSessionAccess).toHaveBeenCalledWith('proj-1', 'session-1');
+    expect(screen.queryByRole('button', { name: 'Browse workspace files' })).toBeNull();
+    // Focus lands on the notice that says why, and a status line announces the close.
+    const notice = screen.getByText('Your shared access has ended').closest('[tabindex="-1"]');
+    expect(notice).not.toBeNull();
+    expect(document.activeElement).toBe(notice);
+    expect(
+      screen.getByText('Your shared access ended, so the file panel closed.').getAttribute('role')
+    ).toBe('status');
+    // Liveness: the chat itself is still on screen.
+    expect(screen.getByText('Agent answer')).toBeTruthy();
+  });
+
+  it('opens a file the agent mentions for a teammate, but not for a member it is not shared with', async () => {
+    mocks.getSessionFileContent.mockResolvedValue({
+      content: 'Guide text',
+      filePath: 'docs/guide.md',
+    });
+    mocks.getChatSession.mockResolvedValue({
+      session: session('grantee'),
+      messages: [makeMessage('msg-1', 'session-1', 'See docs/guide.md')],
+      hasMore: false,
+    });
+    const { unmount } = render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Open docs/guide.md in file browser' })
+    );
+    expect(await screen.findByText('Guide text')).toBeTruthy();
+    expect(mocks.getSessionFileContent).toHaveBeenCalledWith(
+      'proj-1',
+      'session-1',
+      'docs/guide.md'
+    );
+    unmount();
+
+    mocks.getChatSession.mockResolvedValue({
+      session: session('reader'),
+      messages: [makeMessage('msg-1', 'session-1', 'See docs/guide.md')],
+      hasMore: false,
+    });
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    // Liveness: the message renders, without a link into a panel the reader cannot use.
+    expect(await screen.findByText('See docs/guide.md')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Open docs/guide.md in file browser' })).toBeNull();
+  });
+
+  it('does not offer Files or Git to a member the chat is not shared with', async () => {
+    mocks.getChatSession.mockResolvedValue({
+      session: session('reader'),
+      messages: [makeMessage('msg-1', 'session-1', 'Agent answer')],
+      hasMore: false,
+    });
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    expect(await screen.findByText('Agent answer')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Jump through session history' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Browse workspace files' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Review uncommitted changes' })).toBeNull();
   });
 });
 

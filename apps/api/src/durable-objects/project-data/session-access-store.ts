@@ -12,6 +12,7 @@
 import * as v from 'valibot';
 
 import { createModuleLogger } from '../../lib/logger';
+import { cancelCreatorSchedulesForSession } from './project-event-schedules-storage';
 import { parseRow } from './row-schemas';
 
 const log = createModuleLogger('project_data.session_access');
@@ -194,6 +195,33 @@ export function readUnrevokedGrant(
   return readGrant(sql, READ_UNREVOKED_GRANT_SQL, sessionId, granteeUserId);
 }
 
+/**
+ * Null while the grant `grantId` still gives `granteeUserId` control of `sessionId` at `now`;
+ * otherwise how it ended. Something a teammate set up under one grant (a scheduled message)
+ * needs that grant, so a later grant to the same person does not revive it.
+ */
+export function grantEndedReason(
+  sql: SqlStorage,
+  sessionId: string,
+  granteeUserId: string,
+  grantId: string,
+  now: number
+): SenderAccessEndedReason | null {
+  if (readActiveGrant(sql, sessionId, granteeUserId, now)?.id === grantId) return null;
+  const row = sql
+    .exec(
+      `SELECT revoked_at FROM chat_session_access_grants
+        WHERE id = ? AND session_id = ? AND grantee_user_id = ? LIMIT 1`,
+      grantId,
+      sessionId,
+      granteeUserId
+    )
+    .toArray()[0];
+  return row && row.revoked_at === null
+    ? SENDER_ACCESS_EXPIRED_REASON
+    : SENDER_ACCESS_REVOKED_REASON;
+}
+
 export function isExpired(grant: SessionAccessGrantRecord, now: number): boolean {
   return grant.expiresAt === null || grant.expiresAt <= now;
 }
@@ -255,20 +283,38 @@ export function listActiveSessionAccessGrants(
 }
 
 /**
- * Fail every queued or not-yet-submitted prompt delivery that `senderUserIds` originated for
- * `sessionId`. A delivery already submitting (it may have reached the agent) is left alone:
- * a sent prompt cannot be taken back. The transcript row is labelled so it no longer reads as
- * delivered.
+ * Access to `sessionId` ended for `senderUserIds`: fail every queued or not-yet-submitted
+ * prompt delivery they originated there, and cancel the scheduled messages they made into it
+ * that have not come due. A delivery already submitting (it may have reached the agent) is left
+ * alone: a sent prompt cannot be taken back. The transcript row is labelled so it no longer
+ * reads as delivered. Every way access ends calls this, so nothing a person queued outlives it.
  */
 export function cancelUndeliveredSenderPrompts(
   sql: SqlStorage,
   sessionId: string,
   senderUserIds: string[],
-  reason: SenderAccessEndedReason
+  reason: SenderAccessEndedReason,
+  now: number
 ): string[] {
   if (senderUserIds.length === 0) return [];
+  const cancelledSchedules = cancelCreatorSchedulesForSession(
+    sql,
+    sessionId,
+    senderUserIds,
+    SENDER_ACCESS_ENDED_ERRORS[reason],
+    now
+  );
+  if (cancelledSchedules.length > 0) {
+    log.info('session_access.schedules_cancelled', {
+      sessionId,
+      scheduleIds: cancelledSchedules,
+      reason,
+    });
+  }
   // Both lists are bound as JSON arrays (`json_each`), so the statement text is fixed and its
-  // bind count does not grow with the number of revoked people.
+  // bind count does not grow with the number of revoked people. A scheduled message carries its
+  // creator as the sender with sender type `system`; these senders do not own the session, so
+  // any of theirs here was made under a grant.
   const rows = sql
     .exec(
       `UPDATE session_inbox
@@ -278,9 +324,11 @@ export function cancelUndeliveredSenderPrompts(
               next_attempt_at = NULL,
               attempt_started_at = NULL
         WHERE target_session_id = ?
-          AND sender_type = 'human'
           AND sender_id IN (SELECT value FROM json_each(?))
-          AND source_kind IN (SELECT value FROM json_each(?))
+          AND (
+            (sender_type = 'human' AND source_kind IN (SELECT value FROM json_each(?)))
+            OR source_kind = 'scheduled_action'
+          )
           AND (
             delivery_state IN ('queued', 'retry_wait')
             OR (delivery_state = 'delivering' AND prompt_delivery_phase = 'preparing')

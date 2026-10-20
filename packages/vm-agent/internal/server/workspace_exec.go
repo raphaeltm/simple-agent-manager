@@ -8,7 +8,8 @@ import (
 	"strings"
 )
 
-const dockerBinaryPath = "/usr/bin/docker"
+// dockerBinaryPath is the docker CLI the workspace exec path runs. Tests replace it.
+var dockerBinaryPath = "/usr/bin/docker"
 
 func (s *Server) isStandaloneWorkspaceExec() bool {
 	return s != nil && s.config != nil && s.config.IsStandaloneMode()
@@ -34,6 +35,8 @@ func standaloneWorkspaceCommandPath(command string) (string, error) {
 		return "/usr/bin/printenv", nil
 	case "pwd":
 		return "/usr/bin/pwd", nil
+	case "realpath":
+		return "/usr/bin/realpath", nil
 	case "stat":
 		return "/usr/bin/stat", nil
 	case "rm":

@@ -82,6 +82,8 @@ export const ProjectScheduleRowSchema = v.object({
   reserved_message_id: nullableText,
   reserved_status_id: nullableText,
   execution_finished_at: nullableInteger,
+  // Migration 066: the grant a teammate's schedule was made under; NULL for the owner's.
+  shared_access_grant_id: nullableText,
 });
 export type ProjectScheduleRow = v.InferOutput<typeof ProjectScheduleRowSchema>;
 
@@ -141,6 +143,53 @@ export function getSchedule(
   return row ? mapSchedule(row) : null;
 }
 
+/**
+ * The shared-access grant a teammate's schedule was made under (migration 066), or null for a
+ * schedule its target chat's owner made. Internal: authority checks read it; the API does not
+ * return it.
+ */
+export function scheduleSharedAccessGrantId(
+  sql: SqlStorage,
+  projectId: string,
+  id: string
+): string | null {
+  return readScheduleRow(sql, projectId, id)?.shared_access_grant_id ?? null;
+}
+
+/**
+ * Access to `sessionId` ended for `creatorUserIds`: cancel the scheduled messages they made into
+ * it that have not been admitted yet. One already admitted has queued its prompt, which the
+ * caller cancels with their other queued prompts. Returns the cancelled schedule ids.
+ */
+export function cancelCreatorSchedulesForSession(
+  sql: SqlStorage,
+  sessionId: string,
+  creatorUserIds: readonly string[],
+  lastError: string,
+  now: number
+): string[] {
+  if (creatorUserIds.length === 0) return [];
+  // The same transition and guard as `cancelSchedule`; the creator list is bound as one JSON
+  // array, so the statement text is fixed.
+  return sql
+    .exec(
+      `UPDATE project_schedules SET state = 'cancelled', version = version + 1, updated_at = ?,
+     next_attempt_at = NULL, claim_token = NULL, claim_until = NULL, execution_finished_at = ?,
+     last_error = ?
+     WHERE target_session_id = ? AND creator_user_id IN (SELECT value FROM json_each(?))
+       AND state IN ('pending','processing') AND event_id IS NULL AND delivery_id IS NULL
+       AND result_task_id IS NULL
+     RETURNING id`,
+      now,
+      now,
+      lastError,
+      sessionId,
+      JSON.stringify(creatorUserIds)
+    )
+    .toArray()
+    .flatMap((row) => (typeof row.id === 'string' ? [row.id] : []));
+}
+
 function requiredSchedule(sql: SqlStorage, projectId: string, id: string): ProjectSchedule {
   const schedule = getSchedule(sql, projectId, id);
   if (!schedule) throw new ProjectScheduleNotFoundError();
@@ -169,7 +218,12 @@ export function createSchedule(
   sql: SqlStorage,
   env: ScheduleEnv,
   projectId: string,
-  creator: { userId: string; chatSessionId: string | null },
+  creator: {
+    userId: string;
+    chatSessionId: string | null;
+    /** Set only when a teammate makes the schedule under a shared-access grant. */
+    sharedAccessGrantId?: string | null;
+  },
   value: unknown,
   now: number
 ): ProjectScheduleMutationResult {
@@ -235,8 +289,9 @@ export function createSchedule(
   sql.exec(
     `INSERT INTO project_schedules
     (id,project_id,creator_user_id,creator_chat_session_id,target_session_id,reason,action_json,fingerprint,
-     state,due_at,display_timezone,expires_at,version,idempotency_key,created_at,updated_at,next_attempt_at)
-    VALUES (?,?,?,?,?,?,?,?,'pending',?,?,?,1,?,?,?,?)`,
+     state,due_at,display_timezone,expires_at,version,idempotency_key,created_at,updated_at,next_attempt_at,
+     shared_access_grant_id)
+    VALUES (?,?,?,?,?,?,?,?,'pending',?,?,?,1,?,?,?,?,?)`,
     id,
     projectId,
     creator.userId,
@@ -251,7 +306,8 @@ export function createSchedule(
     idempotencyKey,
     now,
     now,
-    normalized.dueAt
+    normalized.dueAt,
+    normalized.action.kind === 'message_session' ? (creator.sharedAccessGrantId ?? null) : null
   );
   return result(requiredSchedule(sql, projectId, id), true);
 }
@@ -294,8 +350,11 @@ export function listSchedules(
     const conditions = ['project_id = ?'];
     const bindings: Array<string | number> = [projectId];
     if (column && sessionId) {
-      conditions.push(column === 'creator_chat_session_id'
-        ? 'creator_chat_session_id = ?' : 'target_session_id = ?');
+      conditions.push(
+        column === 'creator_chat_session_id'
+          ? 'creator_chat_session_id = ?'
+          : 'target_session_id = ?'
+      );
       bindings.push(sessionId);
     }
     if (cursor) {

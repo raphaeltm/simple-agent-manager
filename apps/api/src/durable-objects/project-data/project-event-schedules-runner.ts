@@ -4,20 +4,17 @@ import * as v from 'valibot';
 import { ulid } from '../../lib/ulid';
 import type { ReservedTaskSubmissionInput } from '../../services/reserved-task-submission';
 import { submitReservedTask } from '../../services/reserved-task-submission';
+import { loadSharedSessionNames } from '../../services/shared-session-names';
 import {
   type DurabilityFoundationHooks,
   finalizeAcceptedPromptDelivery,
 } from './durability-foundation';
-import { requireScheduleAction, requireScheduleTarget } from './project-event-schedules-authority';
+import { admitScheduleClaim } from './project-event-schedules-admission';
+import { requireScheduleAction, scheduleSharedAccess } from './project-event-schedules-authority';
 import { boundedScheduleTaskLabel, scheduleLimits } from './project-event-schedules-config';
-import { getSchedule } from './project-event-schedules-storage';
-import { admitProjectEvent } from './project-events';
+import { getSchedule, scheduleSharedAccessGrantId } from './project-event-schedules-storage';
 import { ProjectEventValidationError } from './project-events-contracts';
 import { stableStringify } from './project-events-values';
-import {
-  type AcceptPromptDeliveryInput,
-  acceptPromptDeliveryInTransaction,
-} from './prompt-delivery';
 import type { Env } from './types';
 
 const reservationSchema = v.object({
@@ -121,112 +118,6 @@ function claimSchedule(sql: SqlStorage, env: Env, projectId: string, id: string,
     now
   ).rowsWritten;
   return changed ? { schedule, token } : null;
-}
-
-function admitClaim(
-  sql: SqlStorage,
-  env: Env,
-  schedule: ProjectSchedule,
-  token: string,
-  payloadFingerprint: string,
-  targetTaskId: string | null,
-  now: number
-) {
-  const current = sql
-    .exec(
-      `SELECT id FROM project_schedules
-    WHERE project_id = ? AND id = ? AND version = ? AND state = 'processing'
-      AND claim_token = ? AND claim_until > ? AND expires_at > ?`,
-      schedule.projectId,
-      schedule.id,
-      schedule.version,
-      token,
-      now,
-      now
-    )
-    .toArray()[0];
-  if (!current) return null;
-  if (
-    schedule.action.kind === 'message_session' &&
-    requireScheduleTarget(sql, schedule.action.sessionId) !== targetTaskId
-  ) {
-    throw new ProjectEventValidationError('Scheduled target changed before admission');
-  }
-  const event = admitProjectEvent(sql, env, schedule.projectId, {
-    projectId: schedule.projectId,
-    source: 'sam.schedule',
-    eventType: 'schedule.due',
-    subject: { type: 'schedule', id: schedule.id },
-    severity: 'info',
-    deliveryKey: `${schedule.id}:${schedule.version}`,
-    payloadFingerprint,
-    metadata: {
-      scheduleId: schedule.id,
-      creatorUserId: schedule.creatorUserId,
-      dueAt: schedule.dueAt,
-      admittedAt: now,
-      dueToAdmissionMs: Math.max(0, now - schedule.dueAt),
-    },
-    display: {
-      title: 'Scheduled action admitted',
-      summary: schedule.reason ?? 'One-off scheduled action',
-    },
-    occurredAt: schedule.dueAt,
-    receivedAt: now,
-  });
-  if (event.outcome === 'conflict')
-    throw new ProjectEventValidationError('Schedule event identity conflict');
-  if (schedule.action.kind === 'message_session') {
-    const input: AcceptPromptDeliveryInput = {
-      deliveryId: ulid(),
-      targetSessionId: schedule.action.sessionId,
-      displayContent: schedule.action.prompt,
-      sourceKind: 'scheduled_action',
-      senderType: 'system',
-      senderId: schedule.creatorUserId,
-      sourceTaskId: targetTaskId,
-      ttlMs: Math.min(schedule.expiresAt - now, scheduleLimits(env).deliveryTtlMs),
-      metadata: {
-        scheduleId: schedule.id,
-        creatorUserId: schedule.creatorUserId,
-        eventId: event.event.id,
-      },
-    };
-    const accepted = acceptPromptDeliveryInTransaction(sql, env, input, now);
-    sql.exec(
-      `UPDATE project_schedules SET state = 'admitted', event_id = ?, delivery_id = ?,
-      result_session_id = ?, next_attempt_at = ?, claim_token = NULL, claim_until = NULL,
-      updated_at = ?, last_error = NULL WHERE project_id = ? AND id = ? AND claim_token = ?`,
-      event.event.id,
-      accepted.message.id,
-      schedule.action.sessionId,
-      now + scheduleLimits(env).retryBaseMs,
-      now,
-      schedule.projectId,
-      schedule.id,
-      token
-    );
-    return { input, accepted };
-  }
-  // Committing this intent is the cancellation boundary. All four identities
-  // survive a crash before/after D1 submission and are reused on every retry.
-  sql.exec(
-    `UPDATE project_schedules SET state = 'admitted', event_id = ?,
-    reserved_task_id = ?, reserved_session_id = ?, reserved_message_id = ?, reserved_status_id = ?,
-    next_attempt_at = ?, attempt_count = 0, claim_token = NULL, claim_until = NULL,
-    updated_at = ?, last_error = NULL WHERE project_id = ? AND id = ? AND claim_token = ?`,
-    event.event.id,
-    ulid(),
-    ulid(),
-    ulid(),
-    ulid(),
-    now,
-    now,
-    schedule.projectId,
-    schedule.id,
-    token
-  );
-  return null;
 }
 
 async function submitAdmittedSchedule(sql: SqlStorage, env: Env, projectId: string, id: string) {
@@ -461,15 +352,37 @@ export async function runScheduleAlarm(
     if (claim) {
       try {
         const digest = await fingerprint(claim.schedule);
-        const targetTaskId = await requireScheduleAction(
+        // A teammate's schedule fires only under the grant it was made with.
+        const authority = await requireScheduleAction(
           sql,
           env,
           projectId,
           claim.schedule.creatorUserId,
-          claim.schedule.action
+          claim.schedule.action,
+          scheduleSharedAccess(scheduleSharedAccessGrantId(sql, projectId, claim.schedule.id))
         );
+        const shared =
+          authority?.writer.role === 'grantee'
+            ? {
+                writer: authority.writer,
+                names: await loadSharedSessionNames(
+                  env.DATABASE,
+                  claim.schedule.creatorUserId,
+                  authority.writer.ownerUserId
+                ),
+              }
+            : null;
         const delivery = hooks.transactionSync(() =>
-          admitClaim(sql, env, claim.schedule, claim.token, digest, targetTaskId, Date.now())
+          admitScheduleClaim(
+            sql,
+            env,
+            claim.schedule,
+            claim.token,
+            digest,
+            authority,
+            shared,
+            Date.now()
+          )
         );
         if (delivery)
           await finalizeAcceptedPromptDelivery(sql, env, hooks, delivery.input, delivery.accepted);

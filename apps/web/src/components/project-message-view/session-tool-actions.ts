@@ -126,8 +126,8 @@ export interface BuildSessionToolActionsInput {
    */
   canManageShare?: boolean;
   /**
-   * Files/Git read the workspace through owner-only routes (they can reach any file in the
-   * container), so only the session owner gets them.
+   * Files/Git: the owner, and teammates the session is shared with (their reads are limited to
+   * the repository folder). Other members do not get them.
    */
   canBrowseWorkspace?: boolean;
   /** True while a mark-complete request is in flight. */

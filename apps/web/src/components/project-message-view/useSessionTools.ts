@@ -66,7 +66,7 @@ export interface UseSessionToolsInput {
   sharedWithCount?: number;
   /** Owner and grantees can add or remove people; everyone else only sees who has access. */
   canManageShare?: boolean;
-  /** Only the owner can browse workspace files (owner-only routes). */
+  /** Owner and grantees browse workspace files; a grantee's reads stay in the repository. */
   canBrowseWorkspace?: boolean;
 }
 

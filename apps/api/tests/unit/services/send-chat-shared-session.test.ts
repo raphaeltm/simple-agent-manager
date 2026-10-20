@@ -4,8 +4,9 @@ import type { Env } from '../../../src/env';
 
 /**
  * The grantee branches of `sendChat` (apps/api/src/services/send-chat.ts): who the prompt is
- * from, what the agent is told, and the two refusals a shared session has that an owned one
- * does not. Each refusal is paired with the owner control that must still go through.
+ * from, what the agent is told, whose uploads its attachments must be, and the refusal a shared
+ * session has that an owned one does not. Each refusal is paired with the owner control that
+ * must still go through.
  */
 
 const mocks = vi.hoisted(() => ({
@@ -17,11 +18,7 @@ const mocks = vi.hoisted(() => ({
   users: [] as Array<{ id: string; name: string | null; email: string | null }>,
 }));
 
-vi.mock('drizzle-orm/d1', () => ({
-  drizzle: vi.fn(() => ({
-    select: () => ({ from: () => ({ where: async () => mocks.users }) }),
-  })),
-}));
+vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn(() => ({})) }));
 vi.mock('../../../src/middleware/project-auth', () => ({
   requireProjectCapability: vi.fn(async () => ({ id: 'project-1' })),
 }));
@@ -61,9 +58,24 @@ function writerFor(actorUserId: string) {
   };
 }
 
+/** D1 answers only the display-name read a teammate's prompt makes. */
+function namesDatabase() {
+  return {
+    prepare: (query: string) => ({
+      bind: (...ids: string[]) => ({
+        all: async () => {
+          expect(query).toBe('SELECT id, name, email FROM users WHERE id IN (?, ?)');
+          return { results: mocks.users.filter((user) => ids.includes(user.id)) };
+        },
+      }),
+    }),
+  };
+}
+
 function envWith(overrides: Record<string, unknown> = {}) {
   return {
     R2: { head: vi.fn().mockResolvedValue({ size: 5 }) },
+    DATABASE: namesDatabase(),
     ...overrides,
   } as unknown as Env & {
     R2: { head: ReturnType<typeof vi.fn> };
@@ -150,19 +162,32 @@ describe('sendChat in a shared session', () => {
     );
   });
 
-  it('refuses a grantee’s attachments before touching uploads or the session', async () => {
+  it('accepts a grantee’s attachments, checked against their own uploads', async () => {
     const env = envWith();
+
+    await sendChat(env, 'grantee-1', 'project-1', 'session-1', {
+      content: 'Read this',
+      attachments: [attachment],
+    });
+
+    expect(env.R2.head).toHaveBeenCalledWith('temp-uploads/grantee-1/upload-1/context.txt');
+    expect(mocks.accept.mock.calls[0]![2].metadata).toMatchObject({
+      userId: 'grantee-1',
+      onBehalfOfUserId: 'owner-1',
+      attachments: [attachment],
+    });
+  });
+
+  it('refuses a grantee’s attachments that are not among their uploads, before any side effect', async () => {
+    const env = envWith({ R2: { head: vi.fn().mockResolvedValue(null) } });
 
     await expect(
       sendChat(env, 'grantee-1', 'project-1', 'session-1', {
         content: 'Read this',
         attachments: [attachment],
       })
-    ).rejects.toMatchObject({
-      statusCode: 400,
-      message: 'Attachments are not supported in a shared session yet',
-    });
-    expect(env.R2.head).not.toHaveBeenCalled();
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(env.R2.head).toHaveBeenCalledWith('temp-uploads/grantee-1/upload-1/context.txt');
     expect(mocks.cancelSleep).not.toHaveBeenCalled();
     expect(mocks.accept).not.toHaveBeenCalled();
   });
