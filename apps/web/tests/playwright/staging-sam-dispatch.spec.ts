@@ -11,7 +11,7 @@
  * Never rerun after an ambiguous result. The exclusive ledger below survives
  * Playwright output cleanup. Recover using its SAME turn key/action/task/session.
  * Maximum 12 minutes work + 3 minutes cleanup; one VM lifecycle.
- * Request cap: 2 vCPU/3.5 GB workload; catalog cost envelope: 8 vCPU/16 GB host.
+ * Small workload request; host placement follows the existing configured pool.
  * one dispatch, one same-session follow-up, one optional approved stop.
  * Prior comparable small Codex profile: 01KV6N86TMHWNWPXNDAWZB13FJ.
  *
@@ -455,7 +455,7 @@ test('one scoped Astra High dispatch, durable replay, follow-up and owned cleanu
         };
         ledger.messageIds = messages.map((item) => item.id);
         ledger.checks.liveAgentHeartbeat = true;
-        ledger.checks.observedHardwareWithinCostEnvelope = true;
+        ledger.checks.observedHardwareVerified = true;
         await save();
         return;
       }
