@@ -569,7 +569,7 @@ Submit an idea for autonomous execution. This is the chat-first path used by the
 
 These endpoints proxy file operations to the workspace's VM agent, accessed through a project chat session.
 
-The workspace's owner can use all of them. A member the chat is [shared with](/docs/guides/collaboration/#share-a-chat) can use the read endpoints (list, find, view, download, raw, git status and diff) while their access lasts; upload stays owner-only. For them every path must be relative to the repository working tree: absolute and `~` paths return `404`, and the VM agent refuses anything outside the working tree (`..` included), inside a `.git` folder, or reached through a link that points outside it (`404`). If the workspace's agent cannot confirm that limit, the request returns `409` and nothing from the agent. Other members get `403`.
+The workspace's owner can use all of them. A member the chat is [shared with](/docs/guides/collaboration/#share-a-chat) can use the read endpoints (list, find, view, download, raw, git status and diff) while their access lasts; upload stays owner-only. For them every path must be relative to the repository working tree: absolute and `~` paths return `404` (a `.` or `..` segment returns `400` for everyone), and the VM agent refuses anything outside the working tree, inside a `.git` folder, or reached through a link that points outside it (`404`). If the workspace's agent cannot confirm that limit, the request returns `409` and nothing from the agent. Other members get `403`.
 
 ### `GET /api/projects/:id/sessions/:sessionId/files/list`
 
