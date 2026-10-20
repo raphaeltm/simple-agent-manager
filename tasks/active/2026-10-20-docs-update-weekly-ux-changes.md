@@ -168,3 +168,24 @@ reply mislabel.
   Comments list; KV switch display timing; collaboration-limits release; snapshot-failure summary
   and compute-pools leftovers from #2382. New idea `01M5BW6JYFKWRD92H96FR9S1XQ` (archiving a sleeping
   VM task leaves it `sleeping`); `pr_created` dead path already in `01M5BRDZF2314EAE7S8HBD37NX`.
+
+### Round 3 (journey + fact-check)
+
+- **Journey reviewer** (1 HIGH, 2 MEDIUM, 8 LOW). Fixed: Blocked step 3 (Archive exists only for
+  sleeping Chats, `/close` refuses Task mode and `queued`, so a re-queued Blocked task can't be ended
+  from the app: the docs now say not to reply and to leave it), webhook-triggers no longer says GitHub
+  deliveries are unrecoverable (#2335), failed-task Archive claim, Instant "Fork conversation",
+  concepts `task_complete`, quickstart Waiting/Blocked, changelog Blocked and shared-access wording,
+  branch lookup after a self-Complete, lockout log location, teammate-view screenshot (Chat task and
+  creator mocked, Fork/Retry asserted; all collaboration images regenerated).
+- **Fact-check reviewer** (1 MEDIUM, 10 LOW). Fixed: reserved shell names in managed variables break
+  every `exec_with_secrets` call; secret-execution legacy mode, harness conflict, job end states,
+  re-save effect, optional idempotency key; archived fork history wording; workspace upload limits,
+  file-name rule and local-only note; PR takeover refusal rules and URL-only lookup; GitHub token
+  reuse (50 min); `gh` after access removal; ended-chat footers; compute-pool drain and fallback-pool
+  Edit; attachment presign note. The Dashboard **Waiting** label for "Blocked before provider prompt"
+  is now described exactly.
+- Product bugs: appended to `01M5BREXSE42RBT0BQMK3Z72FG` (re-queued Blocked tasks can't be ended; label
+  correction), `01M5BRDZF2314EAE7S8HBD37NX` (GitLab/SAM Git Chats told to push),
+  `01M5BW6JYFKWRD92H96FR9S1XQ` (failed Chats can't be archived); new `01M5BXZSF0H785W95J9ZHA3FVW`
+  (reserved variable names).
