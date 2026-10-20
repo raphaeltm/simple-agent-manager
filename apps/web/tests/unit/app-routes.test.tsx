@@ -201,6 +201,45 @@ vi.mock('../../src/pages/ChatSessionView', () => ({
   ChatSessionView: () => <div data-testid="chat-session-page" />,
 }));
 
+vi.mock('../../src/pages/ProjectContext', () => ({
+  useProjectContext: () => ({
+    projectId: 'proj-1',
+    project: null,
+    installations: [],
+    reload: async () => undefined,
+  }),
+}));
+
+/** Automation page stand-ins that print where they landed and the params they received. */
+async function automationStandIn(testId: string) {
+  const { useLocation, useParams } = await import('react-router');
+  return function StandIn() {
+    const location = useLocation();
+    const params = useParams();
+    return (
+      <div data-testid={testId}>
+        {location.pathname + location.search} {JSON.stringify(params)}
+      </div>
+    );
+  };
+}
+
+vi.mock('../../src/pages/automation/AutomationOverview', async () => ({
+  AutomationOverview: await automationStandIn('automation-overview-page'),
+}));
+vi.mock('../../src/pages/automation/AutomationEditor', async () => ({
+  AutomationEditor: await automationStandIn('automation-editor-page'),
+}));
+vi.mock('../../src/pages/automation/AutomationDetail', async () => ({
+  AutomationDetail: await automationStandIn('automation-detail-page'),
+}));
+vi.mock('../../src/pages/automation/AutomationHistory', async () => ({
+  AutomationHistory: await automationStandIn('automation-history-page'),
+}));
+vi.mock('../../src/pages/automation/AutomationBehind', async () => ({
+  AutomationBehind: await automationStandIn('automation-behind-page'),
+}));
+
 import App, { DEV_ONLY_ROUTE_PATHS, devOnlyRoutesEnabled } from '../../src/App';
 
 function renderAt(path: string) {
@@ -222,6 +261,56 @@ describe('App routes', () => {
 
     expect(await screen.findByTestId('projects-page')).toBeInTheDocument();
     expect(screen.queryByTestId('dashboard-page')).not.toBeInTheDocument();
+  });
+
+  describe('Automation', () => {
+    it('routes every Automation view, with the automation id apart from the project id', async () => {
+      renderAt('/projects/proj-1/automation/new');
+      const editor = await screen.findByTestId('automation-editor-page');
+      expect(editor).toHaveTextContent('/projects/proj-1/automation/new');
+      expect(editor).not.toHaveTextContent('automationId');
+
+      cleanup();
+      renderAt('/projects/proj-1/automation/trigger/t1');
+      expect(await screen.findByTestId('automation-detail-page')).toHaveTextContent(
+        '"kind":"trigger","automationId":"t1"'
+      );
+
+      cleanup();
+      renderAt('/projects/proj-1/automation/watch/w1/edit');
+      expect(await screen.findByTestId('automation-editor-page')).toHaveTextContent(
+        '"kind":"watch","automationId":"w1"'
+      );
+
+      cleanup();
+      renderAt('/projects/proj-1/automation/history');
+      expect(await screen.findByTestId('automation-history-page')).toBeInTheDocument();
+    });
+
+    it.each([
+      ['/projects/proj-1/events', 'automation-overview-page', '/projects/proj-1/automation'],
+      [
+        '/projects/proj-1/events?section=channels',
+        'automation-behind-page',
+        '/automation/behind?tab=channels',
+      ],
+      [
+        '/projects/proj-1/events?sessionId=s1',
+        'automation-behind-page',
+        '/automation/behind?sessionId=s1',
+      ],
+      ['/projects/proj-1/triggers', 'automation-overview-page', '/projects/proj-1/automation'],
+      ['/projects/proj-1/triggers?edit=new', 'automation-editor-page', '/automation/new'],
+      [
+        '/projects/proj-1/triggers?edit=t1',
+        'automation-editor-page',
+        '/automation/trigger/t1/edit',
+      ],
+      ['/projects/proj-1/triggers/t1', 'automation-detail-page', '/automation/trigger/t1'],
+    ])('sends the old URL %s to the view that replaced it', async (from, testId, to) => {
+      renderAt(from);
+      expect(await screen.findByTestId(testId)).toHaveTextContent(to);
+    });
   });
 
   it('routes /tools to the Tools page', async () => {

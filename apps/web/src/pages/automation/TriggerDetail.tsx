@@ -59,7 +59,7 @@ export function TriggerDetail({
   const runsReady = Boolean(runs.data);
   useEffect(() => {
     if (scrollToRuns && runsReady)
-      document.getElementById('runs')?.scrollIntoView({ block: 'start' });
+      document.getElementById('runs')?.scrollIntoView?.({ block: 'start' });
   }, [runsReady, scrollToRuns]);
 
   const setStatus = useAutomationAction(
@@ -156,7 +156,7 @@ export function TriggerDetail({
             <Button
               variant="ghost"
               onClick={() =>
-                document.getElementById('runs')?.scrollIntoView({ behavior: 'smooth' })
+                document.getElementById('runs')?.scrollIntoView?.({ behavior: 'smooth' })
               }
             >
               See the runs

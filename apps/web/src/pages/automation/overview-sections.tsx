@@ -25,12 +25,12 @@ import {
 import { clock, dayLabel, relative, whenLabel } from './time';
 import {
   Chips,
+  hasStatePill,
   KindIcon,
   OutcomeIcon,
   Panel,
   RowLink,
   SectionTitle,
-  hasStatePill,
   StatePill,
   TextLink,
 } from './ui';

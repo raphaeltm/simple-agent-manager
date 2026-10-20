@@ -131,7 +131,7 @@ export function EditorFlow({
       requestAnimationFrame(() =>
         document
           .querySelector('[role="alert"]')
-          ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+          ?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
       );
       return;
     }
