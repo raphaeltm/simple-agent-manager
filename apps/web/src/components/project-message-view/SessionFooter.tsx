@@ -164,15 +164,11 @@ export function SessionFooter({
           onSend={() => {
             void lc.handleSendFollowUp();
           }}
-          // Attachments are stored under the uploader and only delivered into the
-          // uploader's own workspace, so a shared session cannot take them yet.
-          onUploadFiles={
-            viewer.isGrantee
-              ? undefined
-              : (files) => {
-                  void lc.handleUploadFiles(files);
-                }
-          }
+          // A teammate's files are their own uploads; the server copies them only into this
+          // chat's workspace while their access lasts.
+          onUploadFiles={(files) => {
+            void lc.handleUploadFiles(files);
+          }}
           sending={lc.sendingFollowUp}
           uploading={lc.uploading}
           attachments={lc.attachments}

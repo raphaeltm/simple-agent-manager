@@ -107,10 +107,10 @@ describe('SessionFooter by viewer access', () => {
     expect(screen.queryByText(/can message this agent/)).toBeNull();
   });
 
-  it('gives a grantee the composer without uploads, under a notice naming the owner', () => {
+  it('gives a grantee the composer, with uploads, under a notice naming the owner', () => {
     renderFooter(session({ viewerAccess: 'grantee' }));
 
-    expect(screen.getByTestId('composer')).toHaveAttribute('data-can-upload', 'false');
+    expect(screen.getByTestId('composer')).toHaveAttribute('data-can-upload', 'true');
     expect(screen.getByTestId('shared-session-notice')).toHaveTextContent(
       "You're chatting in Prakash Raman's session. It runs on Prakash Raman's accounts."
     );

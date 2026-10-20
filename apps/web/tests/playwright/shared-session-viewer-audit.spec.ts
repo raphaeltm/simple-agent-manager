@@ -352,6 +352,8 @@ test.describe('Shared session — what each viewer sees', () => {
       /^Your access ends in 23 min \(.+\)\.$/
     );
     await expect(page.getByPlaceholder(/Send a message/)).toBeVisible();
+    // A teammate can attach their own files, like the owner.
+    await expect(page.getByRole('button', { name: 'Attach files' })).toBeVisible();
     // The notice wraps inside the viewport rather than pushing the composer off-screen.
     const viewport = page.viewportSize()!;
     const noticeBox = (await notice.boundingBox())!;
