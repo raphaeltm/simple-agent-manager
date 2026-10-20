@@ -6,7 +6,7 @@ import {
   makeMockUser,
   screenshot,
 } from './audit-helpers';
-import { expectDispatchSourceLink } from './staging-sam-dispatch-link';
+import { expectDispatchSourceLink, reloadSamHistory } from './staging-sam-dispatch-link';
 
 const user = makeMockUser({
   userId: 'sam-user',
@@ -842,4 +842,45 @@ test('users can persistently opt out while the installation is unavailable', asy
   await expect(toggle).toHaveAttribute('aria-checked', 'false');
   await expect(toggle).toBeDisabled();
   await expect(page.getByRole('link', { name: 'Open SAM', exact: true })).toHaveCount(0);
+});
+
+test('dispatch verification awaits slow history after reload without sending work', async ({
+  page,
+}) => {
+  const mock = await mockSam(page, {
+    turns: [
+      turn('done', {
+        actions: [
+          {
+            id: 'started',
+            operation: 'sam_chat_start',
+            state: 'completed',
+            input_json: '{"projectId":"project-1"}',
+            result_json: '{"link":"/projects/project-1/chat/session-9"}',
+          },
+        ],
+      }),
+    ],
+  });
+  await page.goto('/sam');
+  const source = new URL('/projects/project-1/chat/session-9', page.url()).href;
+  await expectDispatchSourceLink(page, source);
+  await page.route('**/api/sam/turns', async (route) => {
+    // Longer than Playwright's default 5s assertion timeout, within the live read deadline.
+    await new Promise((resolve) => setTimeout(resolve, 6_000));
+    await route.fallback();
+  });
+  await reloadSamHistory(page, new URL('/api/sam', page.url()).href, 15_000);
+  await expectDispatchSourceLink(page, source);
+  expect(mock.submissions).toEqual([]);
+});
+
+test('dispatch reload verification rejects failed history reads', async ({ page }) => {
+  await mockSam(page);
+  await page.goto('/sam');
+  await expect(page.getByLabel('Message SAM', { exact: true })).toBeVisible();
+  await page.route('**/api/sam/turns', (route) => route.fulfill({ status: 503, json: {} }));
+  await expect(
+    reloadSamHistory(page, new URL('/api/sam', page.url()).href, 15_000)
+  ).rejects.toThrow('Reloaded private history read succeeds');
 });

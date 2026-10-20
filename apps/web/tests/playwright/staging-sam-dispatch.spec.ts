@@ -36,7 +36,7 @@ import {
   followupDelivery,
   verifyCompletedFollowupReplay,
 } from './staging-sam-dispatch-followup';
-import { expectDispatchSourceLink } from './staging-sam-dispatch-link';
+import { expectDispatchSourceLink, reloadSamHistory } from './staging-sam-dispatch-link';
 import { dispatchReader, observeDispatchSession } from './staging-sam-dispatch-observation';
 import {
   captureOwnedProvisioning,
@@ -551,7 +551,7 @@ test(
       phase = 'runtime-evidence';
       await verifyRuntimeContract();
       phase = 'source-link';
-      await page.reload();
+      await reloadSamHistory(page, SAM_API, REQUEST_MS);
       await expectDispatchSourceLink(page, ledger.sourceLink);
       check(
         (await get(`${SAM_API}/turns`)).work.some(
@@ -626,8 +626,8 @@ test(
             stopTurn.actions.findIndex((action) => action.id === approval[0]!.id),
         'Current source read precedes controlled stop approval'
       );
-      await page.reload();
       phase = 'stop-confirm';
+      await reloadSamHistory(page, SAM_API, REQUEST_MS);
       await confirmAwakeDispatchStop({
         page,
         actionId: approval[0]!.id,
