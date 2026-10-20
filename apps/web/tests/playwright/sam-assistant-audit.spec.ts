@@ -68,6 +68,7 @@ async function mockSam(
     work?: Record<string, unknown>[];
     rejectSend?: boolean;
     legacy?: boolean;
+    transcript?: string;
   } = {}
 ) {
   let enabled = options.enabled ?? true;
@@ -157,6 +158,7 @@ async function mockSam(
     if (path === '/api/notifications') return respond({ notifications: [], unreadCount: 0 });
     if (path === '/api/notifications/preferences') return respond({ preferences: [] });
     if (path === '/api/agents') return respond({ agents: [] });
+    if (path === '/api/transcribe') return respond({ text: options.transcript ?? '' });
     return respond({});
   });
   return {
@@ -495,7 +497,8 @@ test('long conversations open at the newest turn above a pinned composer', async
 
 test('loading older messages keeps the reader on the turn they were reading', async ({ page }) => {
   await mockSam(page, {
-    turns: Array.from({ length: 6 }, (_, index) =>
+    // Enough recent turns to overflow even the tallest audited viewport (tablet).
+    turns: Array.from({ length: 12 }, (_, index) =>
       turn(`recent-${index}`, { message: `Recent question ${index}` })
     ),
     older: Array.from({ length: 10 }, (_, index) =>
@@ -504,14 +507,16 @@ test('loading older messages keeps the reader on the turn they were reading', as
   });
   await page.goto('/sam');
   const scroller = page.getByTestId('sam-conversation-scroller');
-  await expect(page.locator('article')).toHaveCount(6);
+  await expect(page.locator('article')).toHaveCount(12);
+  await expect(page.locator('article').last()).toBeInViewport();
   await scroller.evaluate((element) => {
     element.scrollTop = 0;
   });
   const reading = page.locator('article').filter({ hasText: 'Recent question 0' });
   await expect(reading).toBeInViewport();
+  await expect(page.locator('article').last()).not.toBeInViewport();
   await page.getByRole('button', { name: 'Load older messages' }).click();
-  await expect(page.locator('article')).toHaveCount(16);
+  await expect(page.locator('article')).toHaveCount(22);
   // Neither jumped to the oldest turn nor yanked to the bottom.
   await expect(reading).toBeInViewport();
   await expect(
@@ -632,8 +637,79 @@ test('uncertain dispatch checks its existing outcome without resubmitting work',
   });
   await page.goto('/sam');
   await expect(page.getByText('Outcome unknown')).toBeVisible();
+  await checkLayout(page, 'sam-uncertain');
   await page.getByRole('button', { name: 'Check outcome' }).click();
   await expect(page.getByRole('button', { name: 'Check outcome' })).toHaveCount(0);
+  expect(mock.submissions).toHaveLength(0);
+});
+
+test('completed and declined receipts read plainly with a link to the work', async ({ page }) => {
+  await mockSam(page, {
+    turns: [
+      turn('done', {
+        message: 'Start the login fix in Website redesign',
+        response: 'Started. The agent is working in the project chat.',
+        actions: [
+          readAction('read-profiles', 'sam_profiles_list'),
+          {
+            id: 'started',
+            operation: 'sam_chat_start',
+            input_json: '{"projectId":"project-1","message":"Fix the login redirect"}',
+            state: 'completed',
+            result_json: JSON.stringify({ link: '/projects/project-1/chat/session-9' }),
+          },
+          {
+            id: 'declined',
+            operation: 'sam_work_stop',
+            input_json: '{"projectId":"project-1","sessionId":"session-2"}',
+            state: 'rejected',
+            result_json: JSON.stringify({ message: 'Declined by user' }),
+          },
+        ],
+      }),
+    ],
+  });
+  await page.goto('/sam');
+  await expect(page.getByText('Checked agent profiles')).toBeVisible();
+  const started = page.getByRole('group', { name: 'Start project work' });
+  await expect(started.getByText('Done')).toBeVisible();
+  await expect(started.getByRole('link', { name: 'Open chat' })).toHaveAttribute(
+    'href',
+    '/projects/project-1/chat/session-9'
+  );
+  await expect(page.getByText('Declined', { exact: true })).toBeVisible();
+  // A declined effect offers nothing to act on.
+  await expect(page.getByRole('button', { name: 'Confirm stop' })).toHaveCount(0);
+  await checkLayout(page, 'sam-receipts');
+});
+
+test('voice recording shows a stop control, blocks sending, then appends the transcript', async ({
+  page,
+}) => {
+  // A synthetic microphone: the real VoiceButton records it with MediaRecorder.
+  await page.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = async () => {
+      const context = new AudioContext();
+      const oscillator = context.createOscillator();
+      const destination = context.createMediaStreamDestination();
+      oscillator.connect(destination);
+      oscillator.start();
+      return destination.stream;
+    };
+  });
+  const mock = await mockSam(page, { transcript: 'and summarize the open reviews' });
+  await page.goto('/sam');
+  const composer = page.getByLabel('Message SAM');
+  await composer.fill('Check the deploy');
+  await page.getByRole('button', { name: 'Start voice input', exact: true }).click();
+  const stop = page.getByRole('button', { name: 'Stop recording', exact: true });
+  await expect(stop).toBeVisible();
+  await checkTouchTarget(stop);
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+  await checkLayout(page, 'sam-voice-recording');
+  await stop.click();
+  await expect(composer).toHaveValue('Check the deploy and summarize the open reviews');
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
   expect(mock.submissions).toHaveLength(0);
 });
 

@@ -101,14 +101,17 @@ export function ActionCard({
       setBusy(false);
     }
   };
+  const title = effectTitle(action.operation);
   return (
     <div
+      role="group"
+      aria-label={title}
       className={`mt-3 min-w-0 rounded-lg border p-3 text-sm [overflow-wrap:anywhere] ${
         needsConfirmation ? 'border-warning/40 bg-warning-tint' : 'border-border-default bg-surface'
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <p className="font-semibold text-fg-primary">{effectTitle(action.operation)}</p>
+        <p className="font-semibold text-fg-primary">{title}</p>
         <ActionStatus action={action} message={message} />
       </div>
       {target && <p className="mt-1 text-fg-muted">In {projectName ?? 'one of your projects'}</p>}
