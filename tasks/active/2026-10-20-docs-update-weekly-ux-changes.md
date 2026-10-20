@@ -189,3 +189,20 @@ reply mislabel.
   correction), `01M5BRDZF2314EAE7S8HBD37NX` (GitLab/SAM Git Chats told to push),
   `01M5BW6JYFKWRD92H96FR9S1XQ` (failed Chats can't be archived); new `01M5BXZSF0H785W95J9ZHA3FVW`
   (reserved variable names).
+
+### Round 4 (journey + fact-check)
+
+- **Fact-check reviewer** (7 LOW, no CRITICAL/HIGH/MEDIUM). Fixed: Blocked step 3 (Archive only for
+  sleeping Chats and, unlike Complete, deletes the saved workspace; a VM reply re-queues the task, still
+  Blocked), Instant wakes get placeholders too, legacy-mode wording, ASCII-only upload names,
+  collaboration example time, the VM agent's new Git/secret settings aren't passed to machines, and a
+  stronger session-list assertion in the collaboration spec (proven to fail without the creator).
+  New idea `01M5BZ82P9KC9R3VY3C8A56003` (`gh` keeps the old token after access is revoked); Complete
+  offered for queued/delegated tasks appended to `01M5BREXSE42RBT0BQMK3Z72FG`.
+- **Journey reviewer** (1 MEDIUM, 6 LOW). Fixed: a Blocked task whose machine was prepared holds it
+  for up to 24 h, and the Connector's stop is the only way out (troubleshooting); session-list BLOCKED
+  badge in the symptom index; Connector can act on chats shared with you; non-owners see Complete on a
+  teammate's chat (collaboration); mention list wording; only Claude Code/Codex plan limits and
+  reset-bearing rate limits are parked (agents); previous-cycle Fork wording. Product notes appended
+  to `01M5BREXSE42RBT0BQMK3Z72FG` (24 h hold, badge outlives the task) and `01M59MYE4GY91BWTE8TZF1ZB5D`
+  (Complete for any member, hard-coded ⌘⏎).

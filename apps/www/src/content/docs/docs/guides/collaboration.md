@@ -154,7 +154,7 @@ the agent._
 
 ### Mention a teammate
 
-Type `@` in a comment or reply and pick a person from the **Mention a teammate** list. They get a
+Type `@` in a comment or reply and pick a person from the list that opens. They get a
 **Mention** notification that opens the thread. Only people you pick from the list are notified:
 typing `@name` by hand does not notify anyone. You can mention active project members, up to 10 per
 comment by default.
@@ -273,7 +273,8 @@ Without shared access, a teammate's chat shows _Only Prakash can message this ag
 comments on any message, or ask Prakash to share this chat._ and a **Start your own chat** button.
 You can still [comment](#comment-on-a-chat), [@mention](#mention-a-teammate) people, and fork the
 chat from its tool rail. Only the chat's owner, and people it's shared with, can answer the agent's
-questions and permission requests.
+questions and permission requests. The tool rail also shows **Complete**, which ends the owner's
+task: leave that to them.
 
 ### What SAM enforces
 

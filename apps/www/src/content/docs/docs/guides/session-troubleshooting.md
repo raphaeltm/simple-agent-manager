@@ -10,8 +10,8 @@ your work is safe and what to do next. Everything here applies to both
 
 - **Needs input** in the session list. The agent, or SAM, is waiting for an answer from the person
   who started the chat. → [Find what it's waiting for](#the-agent-is-waiting-for-you)
-- **"Waiting for provider limit reset at…"**, or **Waiting** or **Blocked** on the task's Dashboard
-  card. The agent's subscription or key hit a usage limit; SAM carries on after the reset, unless
+- **"Waiting for provider limit reset at…"**, **Waiting** or **Blocked** on the task's Dashboard
+  card, or a red **BLOCKED** badge on the chat in the session list. The agent's subscription or key hit a usage limit; SAM carries on after the reset, unless
   it says **Blocked**. → [Usually nothing to do](#waiting-for-a-provider-limit-reset)
 - **"SAM paused automatic check-ins…"** The agent kept stopping without finishing, or its model was
   rejected, so SAM stopped nudging it. → [Look, then reply](#sam-paused-automatic-check-ins)
@@ -161,8 +161,10 @@ To move on:
    asleep, **Archive** it, which, unlike **Complete**, deletes its saved workspace. Don't reply in the
    blocked chat, before or after **Complete**: on a VM, a reply puts the task back in the queue, where
    it stays **Blocked**, and SAM then refuses **Complete**. If SAM refuses it (the agent never
-   started, or someone replied), you can't end the task from the app yet. It won't run by itself, so
-   leave it and carry on in the new chat.
+   started, or someone replied), you can't end the task from SAM's own pages yet. If you use
+   [SAM from Claude or ChatGPT](/docs/guides/sam-connector/), ask it to stop that chat: that cancels
+   the task and frees its machine. Otherwise the task won't run by itself, but a machine already
+   prepared for it keeps running until SAM's 24-hour limit stops it.
 
 ## SAM paused automatic check-ins
 

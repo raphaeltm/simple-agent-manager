@@ -29,7 +29,8 @@ sees only what you can see in SAM, and its answers link back to the pages in SAM
 - **Keep ideas.** Create an idea, or update one.
 
 It can't read repository files directly, create projects, change settings, or delete ideas. It can
-only reply to, answer, or stop chats that you started.
+only reply to, answer, or stop chats that you started, or that a teammate has
+[shared with you](/docs/guides/collaboration/#share-a-chat) while your access lasts.
 
 ## Connect Claude or ChatGPT
 

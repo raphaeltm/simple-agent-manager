@@ -157,7 +157,8 @@ offers it. See [Choosing a model](/docs/guides/agents/#choosing-a-model).
   pre-filled with the old session's IDs, and its agent reads the original conversation itself.
   Retry pre-fills the original request. → [Conversation Forking](/docs/guides/chat-features/#conversation-forking)
 - **An expired chat says so.** A chat that slept longer than its saved workspace is kept shows
-  **Expired** and offers **Fork conversation**, instead of failing when you try to wake it.
+  **Expired** and offers **Fork conversation** (since 17 October, a **Fork** box where the message
+  box was), instead of failing when you try to wake it.
   → [Expired saved workspace](/docs/guides/session-troubleshooting/#expired-saved-workspace)
 - **A failed wake keeps the chat asleep.** If a VM chat can't wake, it goes back to sleep on the
   same task and you can try again, instead of the task failing. → [Wake failed](/docs/guides/session-troubleshooting/#wake-failed)

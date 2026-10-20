@@ -131,11 +131,13 @@ numbers are SAM's shared limits.
 When a limit is nearly used up, wait for the reset time shown in the dialog, or start new work with a
 profile for a different agent — Codex instead of Claude Code, say.
 
-If a limit runs out in the middle of work on your own subscription or key (or a project credential),
-**SAM waits for the reset and then carries on by itself.** The chat shows a message such as
+If Claude Code or Codex hits its plan's limit in the middle of work, or a provider's rate limit says
+when it resets, on your own subscription or key (or a project credential), **SAM waits for the reset
+and then carries on by itself.** The chat shows a message such as
 **Waiting for provider limit reset at 14:00 UTC (2026-10-21).** and rests, usually asleep; just after
 the reset SAM wakes it and tells the agent to continue where it left off. It never switches to
-another model, profile, or credential to get around the limit. See
+another model, profile, or credential to get around the limit. A limit that doesn't fit, such as
+one another agent reports without a reset time, still ends the work with the provider's error. See
 [Waiting for a provider limit reset](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset),
 including what **Blocked** means.
 
