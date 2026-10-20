@@ -75,10 +75,13 @@ export function StepWhen({
   state,
   onChange,
   errors,
+  creating,
 }: {
   state: EditorState;
   onChange: (state: EditorState) => void;
   errors: Errors;
+  /** False when editing: the webhook's URL and token already exist. */
+  creating: boolean;
 }) {
   switch (state.start) {
     case 'schedule':
@@ -145,8 +148,9 @@ export function StepWhen({
       return (
         <div className="flex flex-col gap-3">
           <Notice>
-            After you create it, SAM shows the URL and a secret token once. Paste both into the
-            service that will call it.
+            {creating
+              ? 'After you create it, SAM shows the URL and a secret token once. Paste both into the service that will call it.'
+              : 'Saving keeps its URL and token. To replace the token, use Get a new token on its page.'}
           </Notice>
           <WebhookTriggerFields
             sourceLabel={webhook.sourceLabel}

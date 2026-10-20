@@ -155,6 +155,16 @@ export function WaitCard({
             ...filterRows(subscription.filter),
             ['Asked for', subscription.deliveryPreference.requested.replaceAll('_', ' ')],
             ['Delivered as', subscription.deliveryPreference.resolved.replaceAll('_', ' ')],
+            ...(target
+              ? ([['Target chat', `${lookups.chatTitle(target)} (${target})`]] as Array<
+                  [string, string]
+                >)
+              : []),
+            ...(subscription.deliveryPreference.target?.taskId
+              ? ([['Target task', subscription.deliveryPreference.target.taskId]] as Array<
+                  [string, string]
+                >)
+              : []),
             [
               'Owner',
               `${subscription.owner.name || subscription.owner.id} (${subscription.owner.type.replaceAll('_', ' ')})`,

@@ -189,7 +189,10 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
     );
   } else if (triggers.length === 0) {
     popoverContent = (
-      <div className="px-3 py-4 text-center text-xs text-fg-muted">No triggers configured.</div>
+      <div className="px-3 py-4 text-center text-xs text-fg-muted">
+        No recurring or reacting automations yet. One-time runs and watches are on the Automation
+        page.
+      </div>
     );
   } else {
     popoverContent = (
@@ -239,7 +242,7 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
             {/* Header */}
             <div className="px-3 py-2 border-b border-border-default">
               <h4 className="text-xs font-semibold text-fg-primary m-0 uppercase tracking-wider">
-                Automation
+                Recurring and reacting
               </h4>
             </div>
 

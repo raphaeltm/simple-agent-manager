@@ -170,7 +170,12 @@ export function EditorFlow({
         onChange={(start) => setState((current) => ({ ...current, start }))}
       />
     ) : step === 'when' ? (
-      <StepWhen state={state} onChange={setState} errors={shownErrors} />
+      <StepWhen
+        state={state}
+        onChange={setState}
+        errors={shownErrors}
+        creating={steps.includes('start')}
+      />
     ) : step === 'what' ? (
       <StepWhat
         state={state}

@@ -355,6 +355,16 @@ const RUNNER_PAUSES: Record<string, string> = {
     'The person who created it no longer has access to this project, so it cannot run. Create a new watch to keep it going, or stop this one.',
 };
 
+/** Which of SAM's own pauses holds this watch, if any (a person's pause reason is not one). */
+export function watchRunnerPause(
+  watch: ProjectStandingWatch
+): 'target-not-owned' | 'creator-access-revoked' | null {
+  if (watch.state !== 'paused') return null;
+  if (watch.lastError === WATCH_TARGET_NOT_OWNED) return 'target-not-owned';
+  if (watch.lastError === WATCH_CREATOR_ACCESS_REVOKED) return 'creator-access-revoked';
+  return null;
+}
+
 export function watchAttention(watch: ProjectStandingWatch): Attention | null {
   if (watch.state === 'revoked') return null;
   // Resuming a watch SAM paused would only pause it again, so the fix is to look at it.

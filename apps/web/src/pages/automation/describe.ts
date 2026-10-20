@@ -119,6 +119,13 @@ const EVENT_PHRASES: Record<string, EventPhrase> = {
   },
 };
 
+/** GitHub's CI completion events: one "CI finished" to a person. */
+const CI_EVENT_TYPES = new Set([
+  'check_run.completed',
+  'check_suite.completed',
+  'workflow_run.completed',
+]);
+
 /** Where an event filter is pinned to one thing: "on commit abc1234", "on PR #12". */
 function subjectSuffix(filter: ProjectEventFilterV1): string {
   const type = one(filter.subjectType);
@@ -158,6 +165,15 @@ export function describeEventFilter(filter: ProjectEventFilterV1): EventPhrase {
   const eventTypes = list(filter.eventType);
   const known = eventTypes.length === 1 ? EVENT_PHRASES[eventTypes[0] ?? ''] : undefined;
   if (known) return { noun: `${known.noun}${suffix}`, clause: `${known.clause}${suffix}` };
+  // Agents usually wait for CI with every CI event type at once (check runs, check suites and
+  // workflow runs): that is still just "CI to finish".
+  if (eventTypes.length > 1 && eventTypes.every((type) => CI_EVENT_TYPES.has(type)))
+    return { noun: `CI to finish${suffix}`, clause: `CI finishes${suffix}` };
+  // Several types that read the same ("a new comment" twice) say it once.
+  const phrases = eventTypes.map((type) => EVENT_PHRASES[type]);
+  const first = phrases[0];
+  if (eventTypes.length > 1 && first && phrases.every((phrase) => phrase?.noun === first.noun))
+    return { noun: `${first.noun}${suffix}`, clause: `${first.clause}${suffix}` };
   const source = one(filter.source);
   const family =
     source === 'github'

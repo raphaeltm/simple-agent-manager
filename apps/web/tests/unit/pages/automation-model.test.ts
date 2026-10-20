@@ -430,6 +430,24 @@ describe('event wording fallbacks', () => {
     expect(describeEventFilter({ version: 1, source: 'github' }).noun).toBe(
       'matching GitHub activity'
     );
+    // How agents usually wait for CI: every CI completion type at once, pinned to a commit.
+    expect(
+      describeEventFilter({
+        version: 1,
+        source: 'github',
+        eventType: ['check_run.completed', 'check_suite.completed', 'workflow_run.completed'],
+        subjectType: 'commit',
+        subjectId: 'abcdef1234567',
+      }).noun
+    ).toBe('CI to finish on commit abcdef1');
+    // Mixed types that do not share a meaning still fall back to the family.
+    expect(
+      describeEventFilter({
+        version: 1,
+        source: 'github',
+        eventType: ['issues.opened', 'pull_request.opened'],
+      }).noun
+    ).toBe('matching GitHub activity');
     expect(
       describeEventFilter({
         version: 1,

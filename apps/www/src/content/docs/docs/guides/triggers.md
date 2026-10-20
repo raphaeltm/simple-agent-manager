@@ -28,10 +28,10 @@ You can create triggers yourself, or ask an agent in the project to create them 
    of the examples on an empty Automation page, this step is already filled in.
 3. **When should it run?**
    - **On a schedule**: under **How often?**, pick **Every day**, **Weekdays**, **Weekends**,
-     **Weekly** (then the days), **Monthly** (then the day), or **Every few hours** (every 1 to
-     12 hours, at a minute you choose), then the time and **Time zone**, which starts as your
-     browser's. **Custom** takes a cron expression such as `0 9 * * 1-5`. The next few runs are
-     shown as you choose. A schedule runs at most every 15 minutes.
+     **Weekly** (then the days), **Monthly** (then the day), or **Every few hours** (every hour, or
+     every 2, 3, 4, 6, 8 or 12 hours, at a minute you choose), then the time and **Time zone**,
+     which starts as your browser's. **Custom** takes a cron expression such as `0 9 * * 1-5`. The
+     next few runs are shown as you choose. A schedule runs at most every 15 minutes.
    - **When something happens on GitHub**: pick the **GitHub event** (**Issue**, **Issue
      comment**, **Pull request**, or **Push**), then narrow it down. **Actions** starts at the
      event's usual action (`opened` for issues and pull requests, `created` for issue comments;

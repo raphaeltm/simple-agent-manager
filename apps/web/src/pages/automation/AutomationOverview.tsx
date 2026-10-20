@@ -153,7 +153,10 @@ export function AutomationOverview() {
     </>
   );
 
-  if (data.isPending) {
+  // Nothing to show yet: either no list has answered, or the ones that did are empty while the
+  // others are still loading (an empty state then would flash for projects that only have
+  // one-time runs or watches).
+  if (data.isPending || (data.items.length === 0 && !data.isSettled)) {
     return (
       <Page wide>
         {header}

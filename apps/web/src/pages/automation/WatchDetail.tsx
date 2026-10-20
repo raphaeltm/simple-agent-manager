@@ -13,6 +13,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pause, Pencil, Play } from 'lucide-react';
 import { useState } from 'react';
 
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { AUTOMATION_RECENT_RUNS_PER_TRIGGER } from '../../lib/automation-config';
 import { automationPaths } from '../../lib/automation-routes';
@@ -43,7 +44,7 @@ import {
   WhenAndThen,
 } from './detail-parts';
 import { Field, INPUT_CLASS } from './fields';
-import { fromWatch } from './model';
+import { fromWatch, watchRunnerPause } from './model';
 import { Loading, Notice } from './page';
 import {
   ButtonLink,
@@ -178,6 +179,7 @@ export function WatchDetail({ watchId }: { watchId: string }) {
   const lookups = useAutomationLookups(projectId);
   const [raising, setRaising] = useState(false);
   const [reason, setReason] = useState('');
+  const [confirmResume, setConfirmResume] = useState(false);
   const query = useQuery({
     ...watchDetailQueryOptions(queryScope, projectId, watchId),
     enabled: Boolean(queryScope),
@@ -229,16 +231,35 @@ export function WatchDetail({ watchId }: { watchId: string }) {
   const revoked = watch.state === 'revoked';
   const exhausted = watch.executionCount >= watch.maxExecutions;
   const isCreator = watch.creatorUserId === access.userId;
+  // Resuming does not re-check what made SAM pause it, so the runner would pause it again at the
+  // next event. Only the creator can fix a chat they no longer own (by pointing it elsewhere);
+  // nobody can fix a creator who lost access.
+  const runnerPause = watchRunnerPause(watch);
+  const resumeBlocked =
+    exhausted ||
+    runnerPause === 'creator-access-revoked' ||
+    (runnerPause === 'target-not-owned' && !isCreator);
+  const resumeHint = exhausted
+    ? 'Give it more runs first'
+    : runnerPause === 'creator-access-revoked'
+      ? 'Its creator no longer has access to this project, so it would pause again'
+      : runnerPause === 'target-not-owned' && !isCreator
+        ? `Only ${access.personName(watch.creatorUserId)} can point it at a chat they own`
+        : undefined;
 
   const actions =
     access.canWrite && !revoked ? (
       <ActionBar count={2}>
         {watch.state === 'paused' ? (
           <Button
-            onClick={() => setPaused.mutate({ watch, paused: false })}
+            onClick={() =>
+              runnerPause === 'target-not-owned'
+                ? setConfirmResume(true)
+                : setPaused.mutate({ watch, paused: false })
+            }
             loading={setPaused.isPending}
-            disabled={exhausted}
-            title={exhausted ? 'Give it more runs first' : undefined}
+            disabled={resumeBlocked}
+            title={resumeHint}
           >
             <Play size={16} aria-hidden /> Resume
           </Button>
@@ -338,6 +359,19 @@ export function WatchDetail({ watchId }: { watchId: string }) {
       {raising && (
         <RaiseLimitDialog watch={watch} open={raising} onClose={() => setRaising(false)} />
       )}
+      <ConfirmDialog
+        isOpen={confirmResume}
+        onClose={() => setConfirmResume(false)}
+        onConfirm={() => {
+          setConfirmResume(false);
+          setPaused.mutate({ watch, paused: false });
+        }}
+        title="Resume this watch?"
+        message="SAM paused it because it messages a chat you no longer own. Unless you have pointed it at one of your chats (Edit, then What should happen), SAM pauses it again at the next event."
+        confirmLabel="Resume anyway"
+        variant="warning"
+        loading={setPaused.isPending}
+      />
     </>
   );
 }

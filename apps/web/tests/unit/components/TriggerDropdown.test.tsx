@@ -113,7 +113,7 @@ describe('TriggerDropdown', () => {
 
   it('shows empty state when no triggers exist', async () => {
     renderDropdown({ open: true });
-    expect(await screen.findByText('No triggers configured.')).toBeInTheDocument();
+    expect(await screen.findByText(/No recurring or reacting automations yet/)).toBeInTheDocument();
   });
 
   it('renders active trigger by name', async () => {
@@ -241,7 +241,7 @@ describe('TriggerDropdown', () => {
     await waitFor(() => {
       expect(mocks.listTriggers).toHaveBeenCalledTimes(2);
     });
-    expect(await screen.findByText('No triggers configured.')).toBeInTheDocument();
+    expect(await screen.findByText(/No recurring or reacting automations yet/)).toBeInTheDocument();
   });
 
   it('clamps the popover to the right viewport edge', async () => {

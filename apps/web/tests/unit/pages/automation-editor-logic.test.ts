@@ -6,6 +6,7 @@ import {
   parseCronToMode,
   parseDayList,
 } from '../../../src/components/triggers/schedule-cron';
+import { formatSpanWords, formatTimeFromNow } from '../../../src/lib/time-utils';
 import {
   canonicalCron,
   cronError,
@@ -31,7 +32,6 @@ import {
   scheduleFromCron,
 } from '../../../src/pages/automation/editor/state';
 import { templateById } from '../../../src/pages/automation/editor/templates';
-import { formatSpanWords, formatTimeFromNow } from '../../../src/lib/time-utils';
 import { GIVE_UP_OPTIONS } from '../../../src/pages/automation/schedule-time';
 import { instantToZonedInput, zonedInputToInstant } from '../../../src/pages/automation/time';
 

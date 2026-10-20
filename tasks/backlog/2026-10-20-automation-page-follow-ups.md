@@ -33,3 +33,12 @@ repo-wide changes, which that UI-only PR deliberately avoided. Each degrades saf
       `automation-config.ts`.
 - [ ] One exported positive-integer env parser in `apps/web/src/lib/`, used by every config
       module above, with a unit test.
+
+## Also deferred (Fable second review, LOW)
+
+4. **Browser Back on the editor's first step skips the discard check.**
+   `apps/web/src/pages/automation/editor/EditorFlow.tsx` confirms before closing and on reload
+   (`beforeunload`), but the app's `BrowserRouter` has no navigation blocker, so Back from the first
+   step leaves without asking. Fix once the app moves to a data router (`useBlocker`).
+
+- [ ] Browser Back from a dirty Automation editor asks before discarding.

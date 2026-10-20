@@ -138,6 +138,8 @@ export function useAutomationData(
     activity,
     /** True only before the first response of every list: the one moment a spinner may show. */
     isPending: sources.every((query) => query.isPending),
+    /** Every list has answered (or failed): only then can "nothing here" be true. */
+    isSettled: sources.every((query) => !query.isPending),
     /** Lists that failed; the page names them instead of hiding what did load. */
     failed: [
       triggers.isError ? 'recurring and reacting automations' : null,

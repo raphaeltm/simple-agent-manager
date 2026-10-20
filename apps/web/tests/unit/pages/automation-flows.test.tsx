@@ -8,7 +8,7 @@ import type {
   ProjectStandingWatch,
   TriggerResponse,
 } from '@simple-agent-manager/shared';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type ReactNode, useState } from 'react';
 import { MemoryRouter, Outlet, Route, Routes, useLocation } from 'react-router';
@@ -76,6 +76,10 @@ import { AutomationDetail } from '../../../src/pages/automation/AutomationDetail
 import { AutomationEditor } from '../../../src/pages/automation/AutomationEditor';
 import { AutomationOverview } from '../../../src/pages/automation/AutomationOverview';
 import { VERSION_CONFLICT_TEXT } from '../../../src/pages/automation/errors';
+import {
+  WATCH_CREATOR_ACCESS_REVOKED,
+  WATCH_TARGET_NOT_OWNED,
+} from '../../../src/pages/automation/model';
 import { ProjectContext } from '../../../src/pages/ProjectContext';
 import { createTestQueryClient } from '../../test-utils/query-test-utils';
 
@@ -327,6 +331,26 @@ describe('overview', () => {
     expect(screen.getAllByRole('link', { name: /New/ }).length).toBeGreaterThan(0);
   });
 
+  it('never flashes the empty state while other lists are still loading', async () => {
+    let releaseSchedules: (value: unknown) => void = () => undefined;
+    events.listSchedules.mockReturnValue(
+      new Promise((resolve) => {
+        releaseSchedules = resolve;
+      })
+    );
+    renderAt('/projects/p1/automation');
+    // Triggers and watches answer empty; schedules have not answered yet.
+    await waitFor(() => expect(api.listTriggers).toHaveBeenCalled());
+    await waitFor(() => expect(events.listStandingWatches).toHaveBeenCalled());
+    expect(await screen.findByText('Loading automation…')).toBeInTheDocument();
+    expect(screen.queryByText('Nothing runs on its own yet')).toBeNull();
+    await act(async () => {
+      releaseSchedules({ schedules: [schedule()], nextCursor: null });
+    });
+    expect((await screen.findAllByText('Check the release')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Nothing runs on its own yet')).toBeNull();
+  });
+
   it('shows a viewer everything but no controls', async () => {
     scope.userId = 'viewer';
     api.listTriggers.mockResolvedValue({ triggers: [trigger()] });
@@ -567,6 +591,46 @@ describe('watches', () => {
         prompt: 'Investigate and post a summary',
       }),
     });
+  });
+
+  it('lets only the creator resume a watch SAM paused over a chat it cannot message', async () => {
+    const user = userEvent.setup();
+    const paused = (creatorUserId: string, lastError: string) =>
+      watch({ state: 'paused', executionCount: 2, creatorUserId, lastError });
+    events.pauseStandingWatch.mockResolvedValue({
+      watch: watch({ executionCount: 2 }),
+      changed: true,
+      idempotent: false,
+    });
+
+    events.getStandingWatch.mockResolvedValue({
+      watch: paused('someone-else', WATCH_TARGET_NOT_OWNED),
+    });
+    const first = renderAt('/projects/p1/automation/watch/w1');
+    expect(await screen.findByRole('button', { name: /Resume/ })).toBeDisabled();
+    first.unmount();
+
+    events.getStandingWatch.mockResolvedValue({
+      watch: paused('owner', WATCH_CREATOR_ACCESS_REVOKED),
+    });
+    const second = renderAt('/projects/p1/automation/watch/w1');
+    expect(await screen.findByRole('button', { name: /Resume/ })).toBeDisabled();
+    second.unmount();
+
+    events.getStandingWatch.mockResolvedValue({ watch: paused('owner', WATCH_TARGET_NOT_OWNED) });
+    renderAt('/projects/p1/automation/watch/w1');
+    await user.click(await screen.findByRole('button', { name: /Resume/ }));
+    expect(events.pauseStandingWatch).not.toHaveBeenCalled();
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Resume anyway' })
+    );
+    await waitFor(() =>
+      expect(events.pauseStandingWatch).toHaveBeenCalledWith(
+        'p1',
+        'w1',
+        expect.objectContaining({ paused: false })
+      )
+    );
   });
 
   it('raises the run limit with only the limit', async () => {
@@ -830,6 +894,20 @@ describe('someone else changed it first', () => {
 });
 
 describe('behind the scenes', () => {
+  it('names the chat and task a wait delivers to in its details', async () => {
+    const user = userEvent.setup();
+    events.listEventSubscriptions.mockResolvedValue({
+      subscriptions: [subscription({})],
+      hasMore: false,
+    });
+    events.listEventSubscriptionDeliveries.mockResolvedValue({ deliveries: [], hasMore: false });
+    renderAt('/projects/p1/automation/behind');
+    await user.click(await screen.findByText('Details'));
+    expect(await screen.findByText('Target chat')).toBeInTheDocument();
+    expect(screen.getByText('Release shepherd (chat-1)')).toBeInTheDocument();
+    expect(screen.getByText('Target task')).toBeInTheDocument();
+  });
+
   it('hides SAM relays until asked, and lets people stop only waits they may stop', async () => {
     const user = userEvent.setup();
     events.listEventSubscriptions.mockResolvedValue({
