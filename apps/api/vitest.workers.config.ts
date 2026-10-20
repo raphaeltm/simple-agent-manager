@@ -152,7 +152,10 @@ export default defineConfig({
     globals: true,
     include: ['tests/workers/**/*.test.ts'],
     // Executed by vitest.sam-runtime.config.ts in the same test:workers command.
-    exclude: ['tests/workers/sam-session-do.test.ts'],
+    exclude: [
+      'tests/workers/sam-session-do.test.ts',
+      'tests/workers/sam-grounding-runtime.test.ts',
+    ],
     setupFiles: ['./tests/workers/setup-d1-migrations.ts'],
     provide: {
       D1_MIGRATIONS_JSON: JSON.stringify(d1Migrations),

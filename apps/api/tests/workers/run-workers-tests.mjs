@@ -21,5 +21,5 @@ function run(config, options = []) {
 
 // Preserve the established Workers pool, shard, file filters and timing reporter.
 run('vitest.workers.config.ts', args);
-// The one native module suite runs once in CI; it does not overwrite shard timing output.
+// Native module suites run once in CI; they do not overwrite shard timing output.
 if (!shard || shard.startsWith('1/')) run('vitest.sam-runtime.config.ts');
