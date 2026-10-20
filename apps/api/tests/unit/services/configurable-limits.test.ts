@@ -246,7 +246,7 @@ describe('DEFAULT_RATE_LIMITS', () => {
 // =============================================================================
 
 describe('task submit — configurable MAX_TASK_MESSAGE_LENGTH', () => {
-  const submitSource = readFileSync(resolve(process.cwd(), 'src/services/submit-task.ts'), 'utf8');
+  const submitSource = readFileSync(resolve(process.cwd(), 'src/services/submit-task-implementation.ts'), 'utf8');
 
   it('reads max message length from MAX_TASK_MESSAGE_LENGTH env var', () => {
     expect(submitSource).toContain('env.MAX_TASK_MESSAGE_LENGTH');

@@ -1,6 +1,6 @@
 # SAM modernization verification
 
-This is an implementation checkpoint, not a release certificate. No staging or production deployment has been performed.
+This is an implementation checkpoint, not a release certificate. Staging deployment run 39403971268 succeeded on b3d99023d2b4b323deaa28eb15d660f09eca1ce3; production has not been deployed.
 
 ## Local evidence
 
@@ -14,9 +14,9 @@ This is an implementation checkpoint, not a release certificate. No staging or p
 
 ## Release blockers and pending evidence
 
-Existing `SAM_PLAYWRIGHT_PRIMARY_USER` was rejected by staging `POST /api/auth/token-login` with HTTP401 `Invalid token format`. A valid existing dedicated credential must be supplied through the workspace environment. No replacement token, new grant or secret was created. No account was enabled.
+The earlier authentication blocker was a diagnosis error: ordinary workspace environment values are managed-secret placeholders. Using the required native `exec_with_secrets` path, the existing primary dedicated credential returned HTTP200. No credential replacement, new grant or secret was needed. Live feature checks remain pending.
 
-After resolving authentication:
+Remaining release work:
 
 1. Coordinate shared staging ownership, deploy exact reviewed branch commit and record workflow/deployment identifiers.
 2. Run `staging-sam-operator.spec.ts`: default-off, settings enable/refresh, isolation, replay/reconnect, cancellation and stale-tab disable; dedicated accounts only; cleanup opts both out.
@@ -34,3 +34,9 @@ Runtime controls now live only in the existing typed admin-settings registry; th
 The latest correction passed36 settings/work/security tests (including15 security cases),50 admin-settings tests,19 native Worker tests,61 deployment-generator baseline tests, API typecheck/lint, runtime-tunable/AST gates and14 scheduler cases. Stored invalid operation receipts now return409 before effects; both confirmation and reconciliation are regression-tested. The task submission entry-point wrapper was separated from its implementation to meet the file-size gate;95 relevant submission/dispatch tests passed, with one existing skip excluded.
 
 Secret scanning reported shifted existing synthetic Worker fixtures. Their original positions were restored without changing fixture values or the reviewed baseline. The current-tree scan passes with49 reviewed findings and zero new findings. PR preflight evidence validation also passes locally. Full CI and all live release gates remain pending.
+
+## Live verification checkpoint
+
+Staging run [39403971268](https://github.com/raphaeltm/simple-agent-manager/actions/runs/39403971268) succeeded on `b3d99023d2b4b323deaa28eb15d660f09eca1ce3`. Cloudflare API deployment `3d844005-fd50-4948-beda-dcf0fc172f5b`, Worker version `7ac00d91-ea0f-4e08-885a-d40680da86b0`, serves that commit at100%. Subsequent changes are test/evidence only. Dedicated-account live browser verification has started; no completed live journey is claimed yet.
+
+CI found source-inspection tests still targeting the extracted submission wrapper and signup tests expecting pre-opt-in behavior. Corrected source paths preserve every assertion;389 tests across11 suites passed. Updated real-Worker signup tests cover default-OFF behavior and approval enforcement on all new endpoints;46 tests passed. API typecheck and scoped lint passed. Final-head CI still must pass.

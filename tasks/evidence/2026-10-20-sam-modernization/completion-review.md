@@ -32,11 +32,11 @@ The launch scope is the latest canonical direction: default-OFF private account 
 
 **Actual:** the new `apps/web/tests/playwright/staging-sam-operator.spec.ts` covers default-off API/navigation/direct entry, UI enable and refresh, durable same-key replay, reconnect, two-user isolation, cancellation, and stale-tab disable. Its syntax/discovery/typecheck/lint were validated; it has not completed a live run. Parent is separately preparing the bounded project dispatch/VM lifecycle check.
 
-**Precise current external blocker:** parent reports the existing primary staging token-login returns **401, `Invalid token format`**; the user has been asked to refresh that existing token. This review did not repeat login or read/output credentials. This is not missing cloud-provider credentials, a need for a new grant, or an infrastructure-provisioning blocker.
+**Authentication correction after review:** the parent’s earlier HTTP401 diagnosis used a managed-secret placeholder. Existing primary token-login succeeds (HTTP200) through native `exec_with_secrets`. No replacement credential or grant is needed. Live/release gates below remain pending; this correction does not turn the completion review into a pass.
 
 **Gap/risk:** local tests cannot establish that deployed auth, the model gateway, UI, event delivery, and actual project runtime work together.
 
-**Recommendation:** after the existing dedicated token is refreshed and the reviewed change deployed, run the prepared serialized spec and one bounded project lifecycle exercise with exact task/session/profile/brief evidence, outcome reconciliation and cleanup. Preserve screenshots and identify the deployed commit. Do not count a prepared spec or mocked screenshot as live evidence.
+**Recommendation:** after the reviewed change is deployed, using existing dedicated credentials through `exec_with_secrets`, run the prepared serialized spec and one bounded project lifecycle exercise with exact task/session/profile/brief evidence, outcome reconciliation and cleanup. Preserve screenshots and identify the deployed commit. Do not count a prepared spec or mocked screenshot as live evidence.
 
 ### HIGH A/C: Runtime proof is not model-behavior release evaluation
 

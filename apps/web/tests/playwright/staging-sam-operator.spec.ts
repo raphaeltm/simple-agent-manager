@@ -95,6 +95,16 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
   const secondaryContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const secondary = await secondaryContext.newPage();
   const authenticated: Page[] = [];
+  let pageErrors = 0;
+  let consoleErrors = 0;
+  for (const observed of [page, secondary]) {
+    observed.on('pageerror', () => {
+      pageErrors += 1;
+    });
+    observed.on('console', (message) => {
+      if (message.type() === 'error') consoleErrors += 1;
+    });
+  }
   const runId = crypto.randomUUID();
   const answer = `SAM_STAGING_${runId.replaceAll('-', '')}`;
   const message = `Reply with exactly ${answer}. This is a read-only staging check. Do not call tools, start project work, send messages, change data, or access project resources.`;
@@ -264,7 +274,30 @@ test('SAM opt-in, private durable chat, cancellation, and stale-tab revocation',
         await settingsTab.close();
       }
     });
+    await test.step('Existing dashboard, projects and settings remain usable', async () => {
+      for (const [path, title] of [
+        ['/dashboard', 'Simple Agent Manager'],
+        ['/projects', 'Projects'],
+      ]) {
+        await page.goto(`${STAGING_APP}${path}`);
+        await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
+      }
+      await page.goto(`${STAGING_APP}/settings`);
+      await expect(page.getByRole('switch', { name: 'Enable SAM assistant' })).toHaveAttribute(
+        'aria-checked',
+        'false'
+      );
+      expect(pageErrors, 'No uncaught browser JavaScript errors').toBe(0);
+    });
   } finally {
+    await testInfo.attach('browser-error-counts', {
+      body: JSON.stringify({
+        pageErrors,
+        consoleErrors,
+        note: 'Counts only; no credential-bearing browser log text retained',
+      }),
+      contentType: 'application/json',
+    });
     // Attempt both cleanups even if either fails; never leave an account enabled
     // because the other account's cleanup request was rejected.
     const cleanups = await Promise.allSettled(

@@ -389,7 +389,7 @@ describe('Project agent defaults — mapper', () => {
 });
 
 describe('Project agent defaults — task submit resolution', () => {
-  const submit = apiSrc('services/submit-task.ts');
+  const submit = apiSrc('services/submit-task-implementation.ts');
 
   it('imports resolveProjectAgentDefault', () => {
     expect(submit).toContain('resolveProjectAgentDefault');

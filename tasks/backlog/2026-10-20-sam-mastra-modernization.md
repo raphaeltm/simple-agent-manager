@@ -35,7 +35,7 @@ All checklist items verified with concrete evidence. Disabled users cannot activ
 
 ## Current evidence and remaining gates
 
-- Implementation is present; release remains incomplete. All new accounts and existing accounts default OFF. No real users enabled, secrets created, grants added, deployment or merge performed.
+- Implementation is present; release remains incomplete. All new accounts and existing accounts default OFF. No real users enabled, secrets created, grants added, production deployment or merge performed.
 - Broad local baseline: `pnpm test`21 successful workspace tasks; API907 files/12869 tests passed,1file/2tests skipped (excluded from pass counts). `pnpm typecheck`19/19, `pnpm build`9/9 and `pnpm check:fast` passed.
 - Actual bundled Mastra/native workerd19/19 passed, including both provider adapters, accounting and real tool roundtrips with outbound HTTP model fixtures. The Workers-incompatible AJV code generation was replaced with a StandardSchema/Valibot bridge, without unsafe eval.
 - Local mocked mobile/desktop browser audit26 cases passed, plus6 final security/UI regressions. These are not live model or staging evidence.
@@ -43,12 +43,18 @@ All checklist items verified with concrete evidence. Disabled users cannot activ
 - [ ] Bounded initial-model behavioral evaluation: ambiguous project scope, code-question dispatch, selected profile and exact constraints, malicious report/history handling, private-context canaries, retrieval of older constraints, evidence-backed completion claims. Record actual operation inputs/results and sample sizes; no unearned quality percentage.
 - Final-head quality checks, draft PR/CI/review, dedicated-identity staging including bounded VM lifecycle, and production exact-commit verification remain pending.
 
-## Live verification blocker
+## Live verification authentication correction
 
-Existing `SAM_PLAYWRIGHT_PRIMARY_USER` is present but staging `POST https://api.sammy.party/api/auth/token-login` rejects it with HTTP401 `Invalid token format`. User asked to refresh existing smoke credentials through the environment. No new secrets/grants created; no accounts enabled; no deployments. Live model behavior, dispatch/VM lifecycle, staging checks and production release remain unverified.
+The earlier HTTP401 came from sending a managed-secret placeholder through an ordinary shell. The existing primary credential succeeds with HTTP200 through native `exec_with_secrets`; no user credential refresh or new secret/grant is required. Staging deployment run39403971268 succeeded on b3d99023d2b4b323deaa28eb15d660f09eca1ce3. Live model behavior, dispatch/VM lifecycle and production release remain unverified.
 
 ## Delivery checkpoint
 
-Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2386. Implementation commit: `4727aeb5e367d70909a146ec87ec62cc3ee01c2a`. Screenshot evidence comment: https://github.com/raphaeltm/simple-agent-manager/pull/2386#issuecomment-6288048540. CI running; staging blocked as above. Task and release remain incomplete.
+Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2386. Implementation commit: `4727aeb5e367d70909a146ec87ec62cc3ee01c2a`. Screenshot evidence comment: https://github.com/raphaeltm/simple-agent-manager/pull/2386#issuecomment-6288048540. CI corrections under validation; staging deployment succeeded. Task and release remain incomplete.
 
-CI corrections: admin registry only (no new Env controls or deployment diff), explicit invalid-receipt409, SQL predicates without interpolation, submission wrapper split with narrow writer inventory location updated. Local quality/security/native checks pass; see verification evidence. Existing synthetic fixture positions restored; current-tree secret scan passes with zero new findings. PR remains draft and live staging credential blocker persists.
+CI corrections: admin registry only (no new Env controls or deployment diff), explicit invalid-receipt409, SQL predicates without interpolation, submission wrapper split with narrow writer inventory location updated. Local quality/security/native checks pass; see verification evidence. Existing synthetic fixture positions restored; current-tree secret scan passes with zero new findings. PR remains draft; authentication is verified and live staging checks are pending.
+
+## Live verification checkpoint
+
+Staging run [39403971268](https://github.com/raphaeltm/simple-agent-manager/actions/runs/39403971268) succeeded on `b3d99023d2b4b323deaa28eb15d660f09eca1ce3`. Cloudflare API deployment `3d844005-fd50-4948-beda-dcf0fc172f5b`, Worker version `7ac00d91-ea0f-4e08-885a-d40680da86b0`, serves that commit at100%. Subsequent changes are test/evidence only. Dedicated-account live browser verification has started; no completed live journey is claimed yet.
+
+CI found source-inspection tests still targeting the extracted submission wrapper and signup tests expecting pre-opt-in behavior. Corrected source paths preserve every assertion;389 tests across11 suites passed. Updated real-Worker signup tests cover default-OFF behavior and approval enforcement on all new endpoints;46 tests passed. API typecheck and scoped lint passed. Final-head CI still must pass.

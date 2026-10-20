@@ -11,7 +11,7 @@
  * reject it is the approval gate. `GET /api/auth/me` returning 200 for the same cookie is the
  * liveness check that the 403s below are the gate, not a broken session.
  */
-import { createExecutionContext, env, SELF } from 'cloudflare:test';
+import { createExecutionContext, env, runInDurableObject, SELF } from 'cloudflare:test';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -42,7 +42,7 @@ const APPROVED_USER_ID = `${RUN}-approved`;
 const PROJECT_ID = `${RUN}-project`;
 
 interface Probe {
-  method: 'GET' | 'POST' | 'DELETE';
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   path: string;
   body?: Record<string, unknown>;
 }
@@ -75,6 +75,19 @@ const SAM_ROUTES: Probe[] = [
   { method: 'GET', path: '/api/sam/conversations' },
   { method: 'GET', path: '/api/sam/conversations/conversation-1/messages' },
   { method: 'GET', path: '/api/sam/search?query=budget' },
+  { method: 'GET', path: '/api/sam/settings' },
+  { method: 'PATCH', path: '/api/sam/settings', body: { enabled: true } },
+  { method: 'GET', path: '/api/sam/turns' },
+  {
+    method: 'POST',
+    path: '/api/sam/turns',
+    body: { requestKey: 'pending', message: 'Spend budget' },
+  },
+  { method: 'POST', path: '/api/sam/fork', body: {} },
+  { method: 'POST', path: '/api/sam/turns/turn-1/cancel', body: {} },
+  { method: 'POST', path: '/api/sam/actions/action-1/confirm', body: { approved: true } },
+  { method: 'POST', path: '/api/sam/actions/action-1/reconcile', body: {} },
+  { method: 'POST', path: '/api/sam/updates/action-1/seen', body: {} },
 ];
 
 const PROJECT_AGENT_ROUTES: Probe[] = [
@@ -153,11 +166,25 @@ describe('pending accounts are refused before any handler runs', () => {
     await expectApprovalRequired(await send(probe, pendingCookie));
   });
 
-  it('starts no SAM conversation for the pending account', async () => {
+  it('records no SAM messages, turns or actions for the pending account', async () => {
     await send(SAM_ROUTES[0]!, pendingCookie);
     const samSession = testEnv.SAM_SESSION.get(testEnv.SAM_SESSION.idFromName(PENDING_USER_ID));
-    const listed = await samSession.fetch('https://sam-session/conversations');
-    await expect(listed.json()).resolves.toEqual({ conversations: [] });
+    const count = await runInDurableObject(
+      samSession,
+      async (_instance, state) =>
+        state.storage.sql
+          .exec<{ count: number }>(
+            'SELECT (SELECT COUNT(*) FROM messages) + (SELECT COUNT(*) FROM operator_turns) + (SELECT COUNT(*) FROM operator_actions) AS count'
+          )
+          .one().count
+    );
+    expect(count).toBe(0);
+    const disabled = await samSession.fetch('https://sam-session/conversations');
+    expect(disabled.status).toBe(403);
+    await expect(disabled.json()).resolves.toMatchObject({
+      error: 'sam_disabled',
+      rejectedBeforeEffects: true,
+    });
   });
 
   it('does not mint an API token for the pending account', async () => {
@@ -190,7 +217,7 @@ describe('what a pending account may still reach', () => {
     });
   });
 
-  it.each([SAM_ROUTES[1]!, PROJECT_AGENT_ROUTES[1]!, API_TOKEN_ROUTES[0]!])(
+  it.each([SAM_ROUTES[4]!, PROJECT_AGENT_ROUTES[1]!, API_TOKEN_ROUTES[0]!])(
     'passes $method $path once signup approval is turned off (control)',
     async (probe) => {
       await setApprovalRequired(false);
@@ -204,10 +231,18 @@ describe('what a pending account may still reach', () => {
 });
 
 describe('approved accounts still reach the handlers', () => {
-  it('SAM agent: lists conversations and validates chat input', async () => {
+  it('SAM agent: requires opt-in, then lists conversations and validates chat input', async () => {
+    const disabled = await send(SAM_ROUTES[1]!, approvedCookie);
+    expect(disabled.status).toBe(403);
+    await expect(disabled.json()).resolves.toMatchObject({ error: 'sam_disabled' });
+    const enabled = await send(SAM_ROUTES[5]!, approvedCookie);
+    expect(enabled.status).toBe(200);
+    await expect(enabled.json()).resolves.toMatchObject({ enabled: true });
     const listed = await send(SAM_ROUTES[1]!, approvedCookie);
     expect(listed.status).toBe(200);
-    await expect(listed.json()).resolves.toMatchObject({ conversations: [] });
+    await expect(listed.json()).resolves.toMatchObject({
+      conversations: [{ title: 'SAM', type: 'human' }],
+    });
 
     // A blank message is rejected by the handler itself, so no model call is made.
     const chat = await send(
