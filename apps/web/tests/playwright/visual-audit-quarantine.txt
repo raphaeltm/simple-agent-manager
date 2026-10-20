@@ -86,7 +86,6 @@ provisioning-downgrade-audit.spec.ts
 recent-chats-dropdown-audit.spec.ts
 report-issue-audit.spec.ts
 repository-access-audit.spec.ts
-sam-prototype-audit.spec.ts
 scaling-settings-audit.spec.ts
 session-header-agent-info-audit.spec.ts
 settings-credentials-audit.spec.ts
