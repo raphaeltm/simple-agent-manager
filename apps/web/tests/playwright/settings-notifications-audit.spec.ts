@@ -152,7 +152,7 @@ test.describe('Notification Settings — Mobile', () => {
     await screenshot(page, 'notification-settings-mobile-default');
     await assertNoOverflow(page);
 
-    const switches = page.getByRole('switch');
+    const switches = page.locator('[role="switch"]:not([aria-label="Enable SAM assistant"])');
     await expect(switches).toHaveCount(TYPE_SWITCH_COUNT + 1);
     for (let i = 0; i < TYPE_SWITCH_COUNT; i++) {
       await expect(switches.nth(i)).toHaveAttribute('aria-checked', 'true');
@@ -189,7 +189,7 @@ test.describe('Notification Settings — Mobile', () => {
     await screenshot(page, 'notification-settings-mobile-wildcard-disabled');
     await assertNoOverflow(page);
 
-    const switches = page.getByRole('switch');
+    const switches = page.locator('[role="switch"]:not([aria-label="Enable SAM assistant"])');
     const count = await switches.count();
     for (let i = 0; i < count; i++) {
       await expect(switches.nth(i)).toHaveAttribute('aria-checked', 'false');
@@ -304,7 +304,7 @@ test.describe('Notification Settings — Desktop', () => {
     await screenshot(page, 'notification-settings-desktop-default');
     await assertNoOverflow(page);
 
-    const switches = page.getByRole('switch');
+    const switches = page.locator('[role="switch"]:not([aria-label="Enable SAM assistant"])');
     await expect(switches).toHaveCount(TYPE_SWITCH_COUNT + 1);
     await expect(page.getByRole('heading', { name: 'Push Notifications' })).toBeVisible();
     await expect(page.getByRole('switch', { name: 'Enable Web Push notifications' })).toBeVisible();

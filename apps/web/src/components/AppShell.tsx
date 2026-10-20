@@ -13,6 +13,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import { useGlobalCommandPalette } from '../hooks/useGlobalCommandPalette';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useProjectList } from '../hooks/useProjectData';
+import { useSamSettings } from '../hooks/useSamSettings';
 import { signOut } from '../lib/auth';
 import {
   FOCUS_MODE_STORAGE_KEY,
@@ -29,7 +30,7 @@ import { FocusModeToggle } from './FocusModeToggle';
 import { GlobalAudioPlayer } from './GlobalAudioPlayer';
 import { GlobalCommandPalette } from './GlobalCommandPalette';
 import { MobileNavDrawer, type MobileNavItem } from './MobileNavDrawer';
-import { extractProjectId, GLOBAL_NAV_ITEMS, NavSidebar, PROJECT_NAV_ITEMS } from './NavSidebar';
+import { extractProjectId, getGlobalNavItems, NavSidebar, PROJECT_NAV_ITEMS } from './NavSidebar';
 import { NotificationCenter } from './NotificationCenter';
 import { OnboardingProvider } from './onboarding';
 import { ChoosePathWizard } from './onboarding/choose-path/ChoosePathWizard';
@@ -66,6 +67,7 @@ interface AppShellProps {
 export function AppShell({ children }: AppShellProps) {
   const { user, isSuperadmin } = useAuth();
   const isMobile = useIsMobile();
+  const sam = useSamSettings();
   const location = useLocation();
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -152,7 +154,7 @@ export function AppShell({ children }: AppShellProps) {
         icon: item.icon,
       }));
     }
-    const items: MobileNavItem[] = GLOBAL_NAV_ITEMS.map((item) => ({
+    const items: MobileNavItem[] = getGlobalNavItems(sam.enabled).map((item) => ({
       label: item.label,
       path: item.path,
       icon: item.icon,
@@ -161,10 +163,10 @@ export function AppShell({ children }: AppShellProps) {
       items.push({ label: 'Admin', path: '/admin', icon: <Shield size={18} /> });
     }
     return items;
-  }, [isSuperadmin, projectId]);
+  }, [isSuperadmin, projectId, sam.enabled]);
 
   const mobileGlobalNavItems = useMemo((): MobileNavItem[] => {
-    const items: MobileNavItem[] = GLOBAL_NAV_ITEMS.map((item) => ({
+    const items: MobileNavItem[] = getGlobalNavItems(sam.enabled).map((item) => ({
       label: item.label,
       path: item.path,
       icon: item.icon,
@@ -173,7 +175,7 @@ export function AppShell({ children }: AppShellProps) {
       items.push({ label: 'Admin', path: '/admin', icon: <Shield size={18} /> });
     }
     return items;
-  }, [isSuperadmin]);
+  }, [isSuperadmin, sam.enabled]);
 
   const mobileInfraSection = useMemo(() => {
     return {

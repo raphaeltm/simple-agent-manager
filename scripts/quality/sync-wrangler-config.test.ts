@@ -1109,6 +1109,26 @@ describe('Connector deployment overrides', () => {
   });
 });
 
+it('forwards private SAM operator overrides without adding default bindings', () => {
+  vi.stubEnv('RESOURCE_PREFIX', 'operator-test');
+  const values = {
+    SAM_OPERATOR_DISABLED: 'true',
+    SAM_OPERATOR_WATCH_LIFETIME_MS: '120000',
+    SAM_OPERATOR_EVENT_PAGE_SIZE: '25',
+    SAM_OPERATOR_WORK_REFRESH_MS: '5000',
+    SAM_OPERATOR_WATCH_RETRY_LIMIT: '4',
+  };
+  for (const name of Object.keys(values)) vi.stubEnv(name, '');
+  const baseline = generateApiWorkerEnv({}, outputs, 'staging', false, false, null);
+  for (const name of Object.keys(values)) expect(baseline.vars).not.toHaveProperty(name);
+  for (const [name, value] of Object.entries(values)) vi.stubEnv(name, value);
+  for (const environment of ['staging', 'production']) {
+    expect(generateApiWorkerEnv({}, outputs, environment, false, false, null).vars).toMatchObject(
+      values
+    );
+  }
+});
+
 describe('Worker vars omitted because they equal the code default', () => {
   // The real per-environment inputs: the GitHub Environment variables the deploy workflow passes
   // through `${{ vars.NAME }}` into both Sync Wrangler Config steps, plus the agent release it

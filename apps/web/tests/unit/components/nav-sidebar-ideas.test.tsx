@@ -2,6 +2,10 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('../../../src/hooks/useSamSettings', () => ({
+  useSamSettings: () => ({ enabled: false }),
+}));
+
 vi.mock('../../../src/components/AuthProvider', () => ({
   useAuth: () => ({ isSuperadmin: false }),
 }));
@@ -25,7 +29,7 @@ describe('NavSidebar — Ideas nav item', () => {
     render(
       <MemoryRouter initialEntries={['/projects/proj-1/chat']}>
         <NavSidebar projectName="Test Project" />
-      </MemoryRouter>,
+      </MemoryRouter>
     );
     expect(screen.getByText('Ideas')).toBeInTheDocument();
     expect(screen.queryByText('Tasks')).not.toBeInTheDocument();

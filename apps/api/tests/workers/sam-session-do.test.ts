@@ -1,521 +1,772 @@
-/**
- * Workers integration tests for SamSession Durable Object.
- *
- * Tests run inside the workerd runtime via @cloudflare/vitest-pool-workers
- * with a real SQLite-backed DO instance.
- *
- * Covers:
- * - Message persistence and sequence ordering
- * - Conversation creation and listing
- * - Rate limiting enforcement
- * - Chat route relay (POST /chat, GET /conversations, GET /conversations/:id/messages)
- */
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+/** Real SamSession SQLite and Mastra Agent; only model HTTP is stubbed. */
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-function getSamSession(userId: string) {
-  const id = env.SAM_SESSION.idFromName(userId);
-  return env.SAM_SESSION.get(id);
+import { type SamRuntimeStub, startSamRuntime } from './support/sam-native-runtime';
+
+type Turn = {
+  id: string;
+  state: string;
+  message: string;
+  response: string | null;
+  generation: number;
+};
+type History = {
+  conversationId: string;
+  backingTaskId: string;
+  turns: Turn[];
+  nextCursor: string | null;
+};
+
+const MODEL = '@cf/google/gemma-4-26b-a4b-it';
+const modelRequests: Array<{ url: string; body: Record<string, unknown>; headers: Headers }> = [];
+const http = vi.fn<typeof fetch>();
+let modelDelay: Promise<void> | null = null;
+let requestedTool: { name: string; arguments: Record<string, unknown> } | null = null;
+let env: Awaited<ReturnType<typeof startSamRuntime>>;
+beforeAll(async () => {
+  env = await startSamRuntime((request) => http(request));
+});
+afterAll(async () => {
+  await env?.close();
+});
+
+function modelReply(text = 'Hello from the actual Mastra runtime', stream = false): Response {
+  const base = { id: 'completion-test', model: MODEL, created: 1 };
+  if (stream) {
+    return new Response(
+      [
+        {
+          ...base,
+          object: 'chat.completion.chunk',
+          choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }],
+        },
+        {
+          ...base,
+          object: 'chat.completion.chunk',
+          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 10, completion_tokens: 7, total_tokens: 17 },
+        },
+      ]
+        .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+        .join('') + 'data: [DONE]\n\n',
+      {
+        headers: { 'content-type': 'text/event-stream' },
+      }
+    );
+  }
+  return Response.json({
+    ...base,
+    object: 'chat.completion',
+    choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 10, completion_tokens: 7, total_tokens: 17 },
+  });
 }
 
-describe('SamSession DO — Message Persistence', () => {
-  it('creates a conversation and persists messages with correct sequence', async () => {
-    const stub = getSamSession('test-user-persistence');
-
-    // Create a conversation via POST /chat (will fail at agent loop due to no API key,
-    // but conversation + user message should be persisted)
-    const chatResp = await stub.fetch('https://sam-session/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        message: 'Hello SAM',
-        userId: 'test-user-persistence',
-      }),
+async function setup(enabled = true) {
+  const userId = `sam-worker-${crypto.randomUUID()}`;
+  await env.DATABASE.prepare("INSERT INTO users(id,email,name,status) VALUES(?,?,?,'active')")
+    .bind(userId, `${userId}@example.test`, 'SAM Worker Test')
+    .run();
+  const stub = env.SAM_SESSION.get(env.SAM_SESSION.idFromName(userId)) as SamRuntimeStub;
+  await stub.testEnvironment({
+    SAM_OPERATOR_DISABLED: 'false',
+    SAM_RATE_LIMIT_RPM: '30',
+    SAM_MODEL: MODEL,
+  });
+  const request = (path: string, method = 'GET', body?: unknown, asUser = userId) =>
+    stub.fetch(`https://sam-session${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', 'x-sam-user-id': asUser },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
+  if (enabled) expect((await request('/settings', 'PATCH', { enabled: true })).status).toBe(200);
+  return { userId, stub, request };
+}
 
-    // Should return SSE stream (200) even though agent loop will error
-    expect(chatResp.status).toBe(200);
-    expect(chatResp.headers.get('content-type')).toBe('text/event-stream');
+async function completed(request: Awaited<ReturnType<typeof setup>>['request'], turnId: string) {
+  let turn: Turn | undefined;
+  await vi.waitFor(
+    async () => {
+      const page = (await (await request('/turns')).json()) as History;
+      turn = page.turns.find((item) => item.id === turnId);
+      expect(turn?.state).toBe('completed');
+    },
+    { timeout: 5000, interval: 20 }
+  );
+  return turn!;
+}
 
-    // Read the stream to get conversationId and let it complete
-    const reader = chatResp.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let conversationId = '';
-
-    // Read until done or we have conversationId
-    let done = false;
-    while (!done) {
-      const result = await reader.read();
-      if (result.done) break;
-      buffer += decoder.decode(result.value, { stream: true });
-
-      // Parse SSE events
-      const lines = buffer.split('\n');
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const event = JSON.parse(line.slice(6)) as { type: string; conversationId?: string };
-          if (event.type === 'conversation_started' && event.conversationId) {
-            conversationId = event.conversationId;
-          }
-          if (event.type === 'done' || event.type === 'error') {
-            done = true;
-          }
-        } catch {
-          /* ignore parse errors */
-        }
+describe('SamSession durable operator in workerd', () => {
+  beforeEach(() => {
+    modelRequests.length = 0;
+    modelDelay = null;
+    requestedTool = null;
+    http.mockReset();
+    http.mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (
+        !url.startsWith('https://gateway.ai.cloudflare.com/v1/sam-test-account/sam-test-gateway/')
+      ) {
+        throw new Error(`Unexpected external HTTP boundary: ${url}`);
       }
-      buffer = lines[lines.length - 1] || '';
-    }
-    reader.releaseLock();
-
-    expect(conversationId).toBeTruthy();
-
-    // Verify conversation appears in list
-    const listResp = await stub.fetch('https://sam-session/conversations');
-    expect(listResp.status).toBe(200);
-    const listData = (await listResp.json()) as {
-      conversations: Array<{ id: string; title: string }>;
-    };
-    expect(listData.conversations.length).toBeGreaterThanOrEqual(1);
-    const conv = listData.conversations.find((c) => c.id === conversationId);
-    expect(conv).toBeTruthy();
-    expect(conv!.title).toBe('Hello SAM');
-
-    // Verify messages are persisted with correct sequence
-    const msgResp = await stub.fetch(
-      `https://sam-session/conversations/${conversationId}/messages`
-    );
-    expect(msgResp.status).toBe(200);
-    const msgData = (await msgResp.json()) as {
-      messages: Array<{ role: string; content: string; sequence: number }>;
-    };
-    expect(msgData.messages.length).toBeGreaterThanOrEqual(1);
-
-    // First message should be user message with sequence 1
-    const userMsg = msgData.messages.find((m) => m.role === 'user');
-    expect(userMsg).toBeTruthy();
-    expect(userMsg!.content).toBe('Hello SAM');
-    expect(userMsg!.sequence).toBe(1);
-  });
-
-  it('persists multiple messages with incrementing sequence', async () => {
-    const stub = getSamSession('test-user-sequence');
-
-    // First message
-    const resp1 = await stub.fetch('https://sam-session/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message: 'Message one', userId: 'test-user-sequence' }),
-    });
-    expect(resp1.status).toBe(200);
-
-    // Drain the stream
-    let convId = '';
-    const text1 = await resp1.text();
-    const match = text1.match(/"conversationId":"([^"]+)"/);
-    if (match) convId = match[1]!;
-
-    expect(convId).toBeTruthy();
-
-    // Second message to same conversation
-    const resp2 = await stub.fetch('https://sam-session/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        conversationId: convId,
-        message: 'Message two',
-        userId: 'test-user-sequence',
-      }),
-    });
-    expect(resp2.status).toBe(200);
-    await resp2.text(); // drain
-
-    // Check messages have incrementing sequences
-    const msgResp = await stub.fetch(`https://sam-session/conversations/${convId}/messages`);
-    const msgData = (await msgResp.json()) as {
-      messages: Array<{ role: string; content: string; sequence: number }>;
-    };
-
-    const userMessages = msgData.messages.filter((m) => m.role === 'user');
-    expect(userMessages.length).toBe(2);
-    expect(userMessages[0]!.sequence).toBeLessThan(userMessages[1]!.sequence);
-    expect(userMessages[0]!.content).toBe('Message one');
-    expect(userMessages[1]!.content).toBe('Message two');
-  });
-});
-
-describe('SamSession DO — Rate Limiting', () => {
-  it('returns 429 when rate limit exceeded', async () => {
-    // Use a unique user to avoid interference from other tests
-    const stub = getSamSession('test-user-ratelimit');
-
-    // Send many messages quickly — default is 30 RPM but we just need to exceed it
-    // We'll rely on the DO's rate limit table. Send messages in a loop.
-    const responses: number[] = [];
-    for (let i = 0; i < 35; i++) {
-      const resp = await stub.fetch('https://sam-session/chat', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message: `msg ${i}`, userId: 'test-user-ratelimit' }),
+      const body = JSON.parse(
+        init?.body
+          ? String(init.body)
+          : typeof input === 'object' && 'text' in input
+            ? await input.text()
+            : '{}'
+      ) as Record<string, unknown>;
+      modelRequests.push({
+        url,
+        body,
+        headers: new Headers(
+          init?.headers ??
+            (typeof input === 'object' && 'headers' in input ? input.headers : undefined)
+        ),
       });
-      responses.push(resp.status);
-      if (resp.status !== 200) {
-        // Drain body
-        await resp.text();
-      } else {
-        await resp.text(); // drain SSE
-      }
-    }
-
-    // Some should be 200, later ones should be 429
-    expect(responses.filter((s) => s === 200).length).toBeGreaterThan(0);
-    expect(responses.filter((s) => s === 429).length).toBeGreaterThan(0);
-  });
-
-  it('returns retry-after header on 429', async () => {
-    const stub = getSamSession('test-user-ratelimit-header');
-
-    // Exhaust rate limit
-    for (let i = 0; i < 31; i++) {
-      const resp = await stub.fetch('https://sam-session/chat', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message: `msg ${i}`, userId: 'test-user-ratelimit-header' }),
-      });
-      const status = resp.status;
-      if (status === 200) await resp.text();
-      else {
-        if (status === 429) {
-          const body = (await resp.json()) as { error: string; retryAfter: number };
-          expect(body.error).toBe('Rate limit exceeded');
-          expect(body.retryAfter).toBeGreaterThan(0);
-          expect(resp.headers.get('retry-after')).toBeTruthy();
-          return; // test passed
-        }
-        await resp.text();
-      }
-    }
-    // Should have hit 429 by now
-    expect.fail('Expected 429 response but never received one');
-  });
-});
-
-describe('SamSession DO — Search', () => {
-  it('returns 400 for empty search query', async () => {
-    const stub = getSamSession('test-user-search-empty');
-    const resp = await stub.fetch('https://sam-session/search?query=');
-    expect(resp.status).toBe(400);
-    const body = (await resp.json()) as { error: string };
-    expect(body.error).toBe('Query is required');
-  });
-
-  it('searches persisted messages and returns results', async () => {
-    const stub = getSamSession('test-user-search-basic');
-
-    // Create a conversation with a message containing unique text
-    const chatResp = await stub.fetch('https://sam-session/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        message: 'Tell me about XYZZY_UNIQUE_SEARCH_TOKEN',
-        userId: 'test-user-search-basic',
-      }),
+      await modelDelay;
+      if (url.includes('/anthropic/')) return anthropicReply(body.stream === true);
+      if (requestedTool && modelRequests.length === 1) return modelToolReply(body.stream === true);
+      return modelReply(undefined, body.stream === true);
     });
-    expect(chatResp.status).toBe(200);
-    await chatResp.text(); // drain SSE
-
-    // Search for the unique token
-    const searchResp = await stub.fetch(
-      'https://sam-session/search?query=XYZZY_UNIQUE_SEARCH_TOKEN'
-    );
-    expect(searchResp.status).toBe(200);
-    const body = (await searchResp.json()) as { results: Array<{ snippet: string; role: string }> };
-    expect(body.results.length).toBeGreaterThanOrEqual(1);
-    expect(body.results[0]!.snippet).toContain('XYZZY_UNIQUE_SEARCH_TOKEN');
-    expect(body.results[0]!.role).toBe('user');
   });
 
-  it('keeps LIKE escape expansion within SQLite pattern limits', async () => {
-    const stub = getSamSession('test-user-search-like-escape-budget');
+  it('is OFF by default and fences inference, history, and legacy paths without model calls', async () => {
+    const { request, stub } = await setup(false);
+    expect(await (await request('/settings')).json()).toEqual({ enabled: false, available: true });
+    for (const path of ['/turns', '/conversations', '/search?query=private']) {
+      expect((await request(path)).status).toBe(403);
+    }
+    expect(
+      (await request('/turns', 'POST', { requestKey: 'off', message: 'Do work' })).status
+    ).toBe(403);
+    expect((await request('/chat', 'POST', { message: 'Legacy bypass' })).status).toBe(403);
+    expect((await stub.testSql('SELECT COUNT(*) AS count FROM operator_turns'))[0]?.count).toBe(0);
+    expect(http).not.toHaveBeenCalled();
+  });
+
+  it('persists opt-in and one private conversation across new stub handles', async () => {
+    const { userId, request } = await setup();
+    const first = (await (await request('/turns')).json()) as History;
+    const newStub = env.SAM_SESSION.get(env.SAM_SESSION.idFromName(userId));
+    expect(await (await newStub.fetch('https://sam-session/settings')).json()).toMatchObject({
+      enabled: true,
+    });
+    const second = (await (await newStub.fetch('https://sam-session/turns')).json()) as History;
+    expect(second.conversationId).toBe(first.conversationId);
+    expect(second.backingTaskId).toBe(first.backingTaskId);
+    expect((await request('/chat', 'POST', { message: 'Legacy bypass' })).status).toBe(409);
+    expect(http).not.toHaveBeenCalled();
+  });
+
+  it('runs actual Mastra generation through the gateway and durably reconnects to the result', async () => {
+    const { request, userId } = await setup();
+    const response = await request('/turns', 'POST', {
+      requestKey: 'greeting',
+      message: 'Say hello',
+    });
+    expect(response.status).toBe(202);
+    const accepted = (await response.json()) as { accepted: boolean; turn: Turn };
+    expect(accepted.accepted).toBe(true);
+    const turn = await completed(request, accepted.turn.id);
+    expect(turn.response).toBe('Hello from the actual Mastra runtime');
+    expect(modelRequests).toHaveLength(1);
+    expect(modelRequests[0]?.url).toContain('/workers-ai/v1/chat/completions');
+    expect(modelRequests[0]?.body.model).toBe(MODEL);
+    expect(modelRequests[0]?.headers.get('cf-aig-metadata')).toContain(accepted.turn.id);
+    const date = new Date().toISOString().slice(0, 10);
+    expect(await env.KV.get(`ai-budget:${userId}:${date}`, 'json')).toEqual({
+      inputTokens: 10,
+      outputTokens: 7,
+    });
+    const providerUsage = await env.KV.get<Record<string, unknown>>(
+      `ai-provider-usage:${userId}:${date}`,
+      'json'
+    );
+    expect(Object.values(providerUsage ?? {})).toContainEqual(
+      expect.objectContaining({
+        providerId: 'workers-ai',
+        requests: 1,
+        inputTokens: 10,
+        outputTokens: 7,
+      })
+    );
+    const replay = await request('/turns', 'POST', {
+      requestKey: 'greeting',
+      message: 'Say hello',
+    });
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({
+      replayed: true,
+      turn: { id: turn.id, state: 'completed' },
+    });
+    expect(modelRequests).toHaveLength(1);
+    expect(
+      (await request('/turns', 'POST', { requestKey: 'greeting', message: 'Different intent' }))
+        .status
+    ).toBe(409);
+  });
+
+  it('runs the actual Anthropic gateway adapter with unified billing and records its usage', async () => {
+    const { request, stub, userId } = await setup();
+    await stub.testEnvironment({ SAM_MODEL: 'claude-sonnet-5', AI_PROXY_BILLING_MODE: 'unified' });
+    const response = await request('/turns', 'POST', {
+      requestKey: 'anthropic',
+      message: 'Reply through the configured Anthropic gateway',
+    });
+    expect(response.status).toBe(202);
+    const { turn } = (await response.json()) as { turn: Turn };
+    expect(await completed(request, turn.id)).toMatchObject({
+      response: 'Anthropic native adapter replied',
+    });
+    expect(modelRequests).toHaveLength(1);
+    expect(modelRequests[0]?.url).toContain('/anthropic/v1/messages');
+    expect(modelRequests[0]?.body.model).toBe('claude-sonnet-5');
+    expect(modelRequests[0]?.headers.get('cf-aig-authorization')).toBe(
+      'Bearer test-only-fake-token'
+    );
+    expect(modelRequests[0]?.headers.get('cf-aig-metadata')).toContain(turn.id);
+    const date = new Date().toISOString().slice(0, 10);
+    expect(await env.KV.get(`ai-budget:${userId}:${date}`, 'json')).toEqual({
+      inputTokens: 10,
+      outputTokens: 7,
+    });
+    const usage = await env.KV.get<Record<string, unknown>>(
+      `ai-provider-usage:${userId}:${date}`,
+      'json'
+    );
+    expect(Object.values(usage ?? {})).toContainEqual(
+      expect.objectContaining({
+        providerId: 'anthropic',
+        requests: 1,
+        inputTokens: 10,
+        outputTokens: 7,
+      })
+    );
+  });
+
+  it('executes an actual Mastra tool call against private SQLite and feeds the result into the next model step', async () => {
+    const { request, stub } = await setup();
+    const history = (await (await request('/turns')).json()) as History;
+    await seedMessage(
+      stub,
+      history.conversationId,
+      'PRIVATE_LOOKUP_TOKEN refers to the archived constraint',
+      1
+    );
+    requestedTool = {
+      name: 'sam_private_history_search',
+      arguments: { query: 'PRIVATE_LOOKUP_TOKEN' },
+    };
+    const { turn } = (await (
+      await request('/turns', 'POST', {
+        requestKey: 'tool-roundtrip',
+        message: 'Find my prior constraint',
+      })
+    ).json()) as { turn: Turn };
+    expect(await completed(request, turn.id)).toMatchObject({
+      response: 'Hello from the actual Mastra runtime',
+    });
+    expect(modelRequests).toHaveLength(2);
+    expect(modelRequests[0]?.body.tools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          function: expect.objectContaining({
+            name: 'sam_private_history_search',
+            parameters: expect.objectContaining({ required: ['query'] }),
+          }),
+        }),
+      ])
+    );
+    const messages = modelRequests[1]?.body.messages as Array<{
+      role: string;
+      content: unknown;
+      tool_call_id?: string;
+    }>;
+    const result = messages.find(
+      (message) => message.role === 'tool' && message.tool_call_id === 'private-history-call'
+    );
+    expect(JSON.stringify(result?.content)).toContain('PRIVATE_LOOKUP_TOKEN');
+    expect(JSON.stringify(result?.content)).toContain('archived constraint');
+  });
+
+  it('executes shared project reads through the same native schema bridge with current user scope', async () => {
+    const { request, stub, userId } = await setup();
+    const other = await setup();
+    const projectId = crypto.randomUUID();
+    for (const [id, owner, name] of [
+      [projectId, userId, 'Visible project'],
+      [crypto.randomUUID(), other.userId, 'Private other project'],
+    ]) {
+      await env.DATABASE.prepare(
+        "INSERT INTO projects(id,user_id,name,normalized_name,installation_id,repository,created_by) VALUES(?,?,?,?,'system_anonymous_trials_installation',?,?)"
+      )
+        .bind(id, owner, name, name!.toLowerCase(), `test/${id}`, owner)
+        .run();
+      await env.DATABASE.prepare(
+        "INSERT INTO project_members(project_id,user_id,role,status) VALUES(?,?,'owner','active')"
+      )
+        .bind(id, owner)
+        .run();
+    }
+    requestedTool = { name: 'sam_projects_list', arguments: { limit: 10 } };
+    const { turn } = (await (
+      await request('/turns', 'POST', { requestKey: 'project-list', message: 'List my projects' })
+    ).json()) as { turn: Turn };
+    await completed(request, turn.id);
+    expect(modelRequests).toHaveLength(2);
+    const messages = modelRequests[1]?.body.messages as Array<{ role: string; content: unknown }>;
+    const result = messages.find((message) => message.role === 'tool');
+    expect(JSON.stringify(result?.content)).toContain('Visible project');
+    expect(JSON.stringify(result?.content)).not.toContain('Private other project');
+    const actions = await stub.testSql(
+      'SELECT operation,state,result_json FROM operator_actions WHERE turn_id=?',
+      [turn.id]
+    );
+    expect(actions).toEqual([
+      expect.objectContaining({ operation: 'sam_projects_list', state: 'completed' }),
+    ]);
+    expect(String(actions[0]?.result_json)).toContain(projectId);
+    const tools = modelRequests[0]?.body.tools as Array<{
+      function: { name: string; parameters: { properties: Record<string, unknown> } };
+    }>;
+    expect(
+      tools.find((tool) => tool.function.name === 'sam_agent_answer')?.function.parameters
+        .properties
+    ).not.toHaveProperty('formContent');
+  });
+
+  it('keeps server validation active when a native model supplies invalid tool arguments', async () => {
+    const { request, stub } = await setup();
+    requestedTool = { name: 'sam_projects_list', arguments: { limit: 0 } };
+    const { turn } = (await (
+      await request('/turns', 'POST', { requestKey: 'invalid-tool', message: 'List my projects' })
+    ).json()) as { turn: Turn };
+    await completed(request, turn.id);
+    expect(modelRequests).toHaveLength(2);
+    const messages = modelRequests[1]?.body.messages as Array<{ role: string; content: unknown }>;
+    expect(JSON.stringify(messages.find((message) => message.role === 'tool')?.content)).toContain(
+      'validation failed'
+    );
+    expect(
+      await stub.testSql('SELECT id FROM operator_actions WHERE turn_id=?', [turn.id])
+    ).toEqual([]);
+  });
+
+  it('does not replay interrupted runtime work when an alarm recovers its durable receipt', async () => {
+    const { stub, request } = await setup();
+    const id = crypto.randomUUID();
+    const settings = (
+      await stub.testSql('SELECT generation,conversation_id FROM operator_settings')
+    )[0]!;
+    await stub.testSql(
+      "INSERT INTO operator_turns(id,request_key,conversation_id,message,generation,state,created_at,updated_at) VALUES(?,?,?,?,?,'running',?,?)",
+      [
+        id,
+        'crashed',
+        settings.conversation_id!,
+        'Accepted before isolate exit',
+        settings.generation!,
+        Date.now(),
+        Date.now(),
+      ]
+    );
+    await stub.testSql(
+      "INSERT INTO operator_actions(id,turn_id,operation,input_json,state,created_at) VALUES(?,?,?,'{}','uncertain',?)",
+      ['uncertain-action', id, 'sam_chat_start', Date.now()]
+    );
+    await stub.testAlarm();
+    const page = (await (await request('/turns')).json()) as History & {
+      turns: Array<Turn & { actions: Array<{ state: string }> }>;
+    };
+    expect(page.turns[0]?.state).toBe('interrupted');
+    expect(page.turns[0]?.actions[0]?.state).toBe('uncertain');
+    expect(http).not.toHaveBeenCalled();
+  });
+
+  it('isolates private conversations and transcript search by user', async () => {
+    const first = await setup();
+    const second = await setup();
+    const a = (await (await first.request('/turns')).json()) as History;
+    const b = (await (await second.request('/turns')).json()) as History;
+    expect(a.conversationId).not.toBe(b.conversationId);
+    expect(a.backingTaskId).not.toBe(b.backingTaskId);
+    await seedMessage(first.stub, a.conversationId, 'only-first-user', 1);
+    expect(await (await second.request('/search?query=only-first-user')).json()).toMatchObject({
+      results: [],
+    });
+    expect(
+      await (await second.request(`/conversations/${a.conversationId}/messages`)).json()
+    ).toMatchObject({ messages: [] });
+    expect(http).not.toHaveBeenCalled();
+  });
+
+  it('cancels an accepted turn while model HTTP is pending, without a late assistant result', async () => {
+    const { request, stub } = await setup();
+    let release!: () => void;
+    modelDelay = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const accepted = (await (
+      await request('/turns', 'POST', { requestKey: 'cancel', message: 'Wait for cancellation' })
+    ).json()) as { turn: Turn };
+    await vi.waitFor(() => expect(modelRequests).toHaveLength(1));
+    try {
+      expect(
+        await (await request(`/turns/${accepted.turn.id}/cancel`, 'POST')).json()
+      ).toMatchObject({ turn: { state: 'cancelled' } });
+    } finally {
+      release();
+    }
+    await vi.waitFor(async () => {
+      const row = (
+        await stub.testSql('SELECT state,response FROM operator_turns WHERE id=?', [
+          accepted.turn.id,
+        ])
+      )[0];
+      expect(row).toMatchObject({ state: 'cancelled', response: null });
+    });
+  });
+
+  it('disabling fences an in-flight response and re-enabling cannot replay its old generation', async () => {
+    const { request, stub } = await setup();
+    let release!: () => void;
+    modelDelay = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const accepted = (await (
+      await request('/turns', 'POST', { requestKey: 'disabled', message: 'Private pending turn' })
+    ).json()) as { turn: Turn };
+    await vi.waitFor(() => expect(modelRequests).toHaveLength(1));
+    try {
+      expect((await request('/settings', 'PATCH', { enabled: false })).status).toBe(200);
+      expect((await request('/turns')).status).toBe(403);
+      expect(
+        (await request('/turns', 'POST', { requestKey: 'new', message: 'Bypass' })).status
+      ).toBe(403);
+    } finally {
+      release();
+    }
+    await request('/settings', 'PATCH', { enabled: true });
+    await stub.testAlarm();
+    const page = (await (await request('/turns')).json()) as History;
+    expect(page.turns.find((turn) => turn.id === accepted.turn.id)).toMatchObject({
+      state: 'cancelled',
+      response: null,
+    });
+    expect(modelRequests).toHaveLength(1);
+  });
+
+  it('rejects concurrent distinct requests and coalesces concurrent retries to one accepted turn', async () => {
+    const { request, stub } = await setup();
+    let release!: () => void;
+    modelDelay = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      const responses = await Promise.all([
+        request('/turns', 'POST', { requestKey: 'same', message: 'One intent' }),
+        request('/turns', 'POST', { requestKey: 'same', message: 'One intent' }),
+      ]);
+      expect(responses.map((r) => r.status).sort()).toEqual([200, 202]);
+      expect(
+        (await request('/turns', 'POST', { requestKey: 'other', message: 'Other intent' })).status
+      ).toBe(409);
+      expect((await stub.testSql('SELECT COUNT(*) AS count FROM operator_turns'))[0]?.count).toBe(
+        1
+      );
+      await vi.waitFor(() => expect(modelRequests).toHaveLength(1));
+    } finally {
+      release();
+    }
+    const turns = ((await (await request('/turns')).json()) as History).turns;
+    await completed(request, turns[0]!.id);
+  });
+
+  it('enforces a durable rate limit and repairs a malformed legacy rate window', async () => {
+    const { request, stub } = await setup();
+    await stub.testEnvironment({ SAM_RATE_LIMIT_RPM: '1' });
+    await stub.testSql(
+      "INSERT OR REPLACE INTO operator_rate_limit VALUES(1,'not-a-timestamp',999)"
+    );
+    const accepted = (await (
+      await request('/turns', 'POST', { requestKey: 'rate-first', message: 'First turn' })
+    ).json()) as { turn: Turn };
+    await completed(request, accepted.turn.id);
+    const row = (await stub.testSql('SELECT window_start,used FROM operator_rate_limit'))[0]!;
+    expect(typeof row.window_start).toBe('number');
+    expect(row.used).toBe(1);
+    const limited = await request('/turns', 'POST', {
+      requestKey: 'rate-second',
+      message: 'Second turn',
+    });
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect(modelRequests).toHaveLength(1);
+  });
+
+  it('preserves legacy history, typed conversation listing, bounded pagination, and malformed-row isolation after opt-in', async () => {
+    const { request, stub } = await setup();
+    const page = (await (await request('/turns')).json()) as History;
+    for (let i = 1; i <= 4; i++)
+      await seedMessage(stub, page.conversationId, `Good legacy message ${i}`, i);
+    await stub.testSql(
+      "INSERT INTO conversations(id,title,type) VALUES('agent-history','Agent report','agent')"
+    );
+    await stub.testSql(
+      "INSERT INTO messages(id,conversation_id,role,content,sequence) VALUES('malformed',?,'user','bad sequence','not-a-number')",
+      [page.conversationId]
+    );
+    const human = (await (await request('/conversations?type=human')).json()) as {
+      conversations: Array<{ id: string; type: string }>;
+    };
+    expect(human.conversations).toContainEqual(
+      expect.objectContaining({ id: page.conversationId, type: 'human' })
+    );
+    const agent = (await (await request('/conversations?type=agent')).json()) as {
+      conversations: Array<{ id: string; type: string }>;
+    };
+    expect(agent.conversations).toEqual([
+      expect.objectContaining({ id: 'agent-history', type: 'agent' }),
+    ]);
+    const latest = (await (
+      await request(`/conversations/${page.conversationId}/messages?limit=2`)
+    ).json()) as { messages: Array<{ content: string; sequence: number }>; nextCursor: number };
+    expect(latest.messages.map((message) => message.sequence)).toEqual([3, 4]);
+    const older = (await (
+      await request(
+        `/conversations/${page.conversationId}/messages?limit=2&before=${latest.nextCursor}`
+      )
+    ).json()) as { messages: Array<{ content: string; sequence: number }> };
+    expect(older.messages.map((message) => message.sequence)).toEqual([1, 2]);
+    expect(await (await request('/turns')).json()).toMatchObject({ legacyHistoryAvailable: true });
+    await request('/settings', 'PATCH', { enabled: false });
+    expect((await request(`/conversations/${page.conversationId}/messages`)).status).toBe(403);
+    expect(http).not.toHaveBeenCalled();
+  });
+
+  it('preserves FTS search, search result limits, and SQLite LIKE escape bounds', async () => {
+    const { request, stub } = await setup();
+    const { conversationId } = (await (await request('/turns')).json()) as History;
+    for (let i = 1; i <= 5; i++)
+      await seedMessage(stub, conversationId, `XYZZY_UNIQUE_SEARCH_TOKEN iteration ${i}`, i);
+    const search = (await (
+      await request('/search?query=XYZZY_UNIQUE_SEARCH_TOKEN&limit=2')
+    ).json()) as { results: Array<{ snippet: string }> };
+    expect(search.results).toHaveLength(2);
+    expect(search.results[0]?.snippet).toContain('XYZZY_UNIQUE_SEARCH_TOKEN');
     const literalPrefix = '%'.repeat(24);
-    const chatResp = await stub.fetch('https://sam-session/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        message: `${literalPrefix} literal percent signs`,
-        userId: 'test-user-search-like-escape-budget',
-      }),
+    await seedMessage(stub, conversationId, `${literalPrefix} literal percent signs`, 6);
+    expect(
+      await (await request(`/search?query=${encodeURIComponent('%'.repeat(100))}`)).json()
+    ).toMatchObject({
+      query: literalPrefix,
+      queryTruncated: true,
+      results: [expect.objectContaining({ snippet: expect.stringContaining(literalPrefix) })],
     });
-    expect(chatResp.status).toBe(200);
-    await chatResp.text();
+    expect((await request('/search?query=')).status).toBe(400);
+    expect(http).not.toHaveBeenCalled();
+  });
 
-    const searchResp = await stub.fetch(
-      `https://sam-session/search?query=${encodeURIComponent('%'.repeat(100))}`
+  it('resumes an accepted turn after an isolate interruption without changing its identity', async () => {
+    const { request, stub } = await setup();
+    const settings = (
+      await stub.testSql('SELECT generation,conversation_id FROM operator_settings')
+    )[0]!;
+    const id = crypto.randomUUID();
+    await stub.testSql(
+      "INSERT INTO operator_turns(id,request_key,conversation_id,message,generation,state,created_at,updated_at) VALUES(?,?,?,?,?,'accepted',?,?)",
+      [
+        id,
+        'resume-accepted',
+        settings.conversation_id!,
+        'Persisted before acknowledgement',
+        settings.generation!,
+        Date.now(),
+        Date.now(),
+      ]
     );
-    expect(searchResp.status).toBe(200);
-    const body = (await searchResp.json()) as {
-      results: Array<{ snippet: string }>;
-      query: string;
-      queryTruncated: boolean;
-    };
-    expect(body.query).toBe(literalPrefix);
-    expect(body.queryTruncated).toBe(true);
-    expect(body.results[0]?.snippet).toContain(literalPrefix);
-  });
-
-  it('respects search limit parameter', async () => {
-    const stub = getSamSession('test-user-search-limit');
-
-    // Create multiple conversations with same keyword
-    for (let i = 0; i < 5; i++) {
-      const resp = await stub.fetch('https://sam-session/chat', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          message: `REPEATABLE_KEYWORD iteration ${i}`,
-          userId: 'test-user-search-limit',
-        }),
-      });
-      await resp.text();
-    }
-
-    const searchResp = await stub.fetch(
-      'https://sam-session/search?query=REPEATABLE_KEYWORD&limit=2'
+    await seedMessage(
+      stub,
+      String(settings.conversation_id),
+      'Persisted before acknowledgement',
+      1
     );
-    expect(searchResp.status).toBe(200);
-    const body = (await searchResp.json()) as { results: Array<{ snippet: string }> };
-    expect(body.results.length).toBeLessThanOrEqual(2);
-  });
-});
-
-describe('SamSession DO — Type Filter and Message Limit', () => {
-  it('filters conversations by type', async () => {
-    const stub = getSamSession('test-user-type-filter');
-
-    // Create a conversation (default type is "human")
-    const chatResp = await stub.fetch('https://sam-session/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        message: 'Hello for type filter test',
-        userId: 'test-user-type-filter',
-      }),
+    await stub.testAlarm();
+    expect(await completed(request, id)).toMatchObject({
+      id,
+      response: 'Hello from the actual Mastra runtime',
     });
-    await chatResp.text();
-
-    // List with type=human should return it
-    const humanResp = await stub.fetch('https://sam-session/conversations?type=human');
-    const humanData = (await humanResp.json()) as { conversations: Array<{ type: string }> };
-    expect(humanData.conversations.length).toBeGreaterThanOrEqual(1);
-    for (const c of humanData.conversations) {
-      expect(c.type).toBe('human');
-    }
-
-    // List with type=agent should return none (no agent conversations created)
-    const agentResp = await stub.fetch('https://sam-session/conversations?type=agent');
-    const agentData = (await agentResp.json()) as { conversations: Array<{ type: string }> };
-    expect(agentData.conversations.length).toBe(0);
+    expect(
+      await (
+        await request('/turns', 'POST', {
+          requestKey: 'resume-accepted',
+          message: 'Persisted before acknowledgement',
+        })
+      ).json()
+    ).toMatchObject({ replayed: true, turn: { id } });
+    expect(modelRequests).toHaveLength(1);
   });
 
-  it('returns type column in conversation list', async () => {
-    const stub = getSamSession('test-user-type-column');
-
-    const chatResp = await stub.fetch('https://sam-session/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        message: 'Type column test',
-        userId: 'test-user-type-column',
-      }),
+  it('branches retained private messages into a distinct backing task with idempotent branch identity', async () => {
+    const { request, stub } = await setup();
+    const first = (await (await request('/turns')).json()) as History;
+    await seedMessage(stub, first.conversationId, 'Private context to retain', 1);
+    const branch = (await (
+      await request('/fork', 'POST', { requestKey: 'branch-once' })
+    ).json()) as History;
+    expect(branch.conversationId).not.toBe(first.conversationId);
+    expect(branch.backingTaskId).not.toBe(first.backingTaskId);
+    expect(
+      await (await request('/fork', 'POST', { requestKey: 'branch-once' })).json()
+    ).toMatchObject({
+      conversationId: branch.conversationId,
+      backingTaskId: branch.backingTaskId,
+      replayed: true,
     });
-    await chatResp.text();
-
-    const listResp = await stub.fetch('https://sam-session/conversations');
-    const data = (await listResp.json()) as { conversations: Array<{ id: string; type: string }> };
-    expect(data.conversations.length).toBeGreaterThanOrEqual(1);
-    expect(data.conversations[0]!.type).toBe('human');
+    expect(
+      await (await request(`/conversations/${branch.conversationId}/messages`)).json()
+    ).toMatchObject({
+      messages: [expect.objectContaining({ content: 'Private context to retain' })],
+    });
+    expect(
+      (
+        await stub.testSql('SELECT parent_task_id FROM operator_conversation_tasks WHERE id=?', [
+          branch.backingTaskId,
+        ])
+      )[0]?.parent_task_id
+    ).toBe(first.backingTaskId);
+    expect(http).not.toHaveBeenCalled();
   });
 
-  it('respects limit param on GET /conversations/:id/messages', async () => {
-    const stub = getSamSession('test-user-msg-limit');
-
-    // Create a conversation and send multiple messages
-    const resp1 = await stub.fetch('https://sam-session/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message: 'Msg A', userId: 'test-user-msg-limit' }),
+  it('enforces the installation kill switch even for an opted-in user', async () => {
+    const { request, stub } = await setup();
+    await stub.testEnvironment({ SAM_OPERATOR_DISABLED: 'true' });
+    expect(await (await request('/settings')).json()).toMatchObject({
+      enabled: true,
+      available: false,
     });
-    const text1 = await resp1.text();
-    const match = text1.match(/"conversationId":"([^"]+)"/);
-    const convId = match?.[1];
-    expect(convId).toBeTruthy();
+    expect(
+      (await request('/turns', 'POST', { requestKey: 'kill-switch', message: 'Should not run' }))
+        .status
+    ).toBe(403);
+    await stub.testAlarm();
+    expect(http).not.toHaveBeenCalled();
+  });
 
-    // Send more messages
-    for (const msg of ['Msg B', 'Msg C', 'Msg D']) {
-      const r = await stub.fetch('https://sam-session/chat', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          conversationId: convId,
-          message: msg,
-          userId: 'test-user-msg-limit',
-        }),
-      });
-      await r.text();
-    }
-
-    // Request with limit=2
-    const limitResp = await stub.fetch(
-      `https://sam-session/conversations/${convId}/messages?limit=2`
+  it('validates empty messages, malformed cursors, settings types and unknown routes', async () => {
+    const { request } = await setup();
+    expect((await request('/turns', 'POST', { requestKey: 'invalid', message: '  ' })).status).toBe(
+      400
     );
-    const limitData = (await limitResp.json()) as { messages: Array<{ content: string }> };
-    expect(limitData.messages.length).toBe(2);
-
-    // Request without limit should return more
-    const allResp = await stub.fetch(`https://sam-session/conversations/${convId}/messages`);
-    const allData = (await allResp.json()) as { messages: Array<{ content: string }> };
-    expect(allData.messages.length).toBeGreaterThan(2);
+    expect((await request('/turns?before=invalid')).status).toBe(400);
+    expect((await request('/settings', 'PATCH', { enabled: 'yes' })).status).toBe(400);
+    expect((await request('/unknown')).status).toBe(404);
+    expect(http).not.toHaveBeenCalled();
   });
 });
 
-describe('SamSession DO — Row Fault Isolation', () => {
-  // REGRESSION (rule 50): `messages` rows were narrowed with a blind
-  // `as unknown as MessageRow[]` cast. `sequence` has INTEGER affinity but no
-  // STRICT typing, so real SQLite accepts and stores a non-numeric TEXT value
-  // as-is — the application itself never writes this; it's injected directly
-  // to simulate a legacy/corrupted row. A single malformed message must not
-  // 500 the whole conversation — it is skipped while the good messages either
-  // side of it still return.
-  it('skips a malformed message row (non-numeric sequence) and still returns the good messages', async () => {
-    const stub = getSamSession('test-user-row-fault-messages');
+async function seedMessage(
+  stub: SamRuntimeStub,
+  conversationId: string,
+  content: string,
+  sequence: number
+) {
+  const id = crypto.randomUUID();
+  await stub.testSql(
+    "INSERT INTO messages(id,conversation_id,role,content,sequence) VALUES(?,?,'user',?,?)",
+    [id, conversationId, content, sequence]
+  );
+  await stub.testSql(
+    'INSERT INTO messages_fts(rowid,content) SELECT rowid,content FROM messages WHERE id=?',
+    [id]
+  );
+}
 
-    const first = await stub.fetch('https://sam-session/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message: 'Good message one', userId: 'test-user-row-fault-messages' }),
+function anthropicReply(stream: boolean): Response {
+  const message = {
+    id: 'anthropic-message',
+    type: 'message',
+    role: 'assistant',
+    model: 'claude-sonnet-5',
+    content: [{ type: 'text', text: 'Anthropic native adapter replied' }],
+    stop_reason: 'end_turn',
+    stop_sequence: null,
+    usage: { input_tokens: 10, output_tokens: 7 },
+  };
+  if (!stream) return Response.json(message);
+  const events = [
+    {
+      type: 'message_start',
+      message: {
+        ...message,
+        content: [],
+        stop_reason: null,
+        usage: { input_tokens: 10, output_tokens: 0 },
+      },
+    },
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+    {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'text_delta', text: 'Anthropic native adapter replied' },
+    },
+    { type: 'content_block_stop', index: 0 },
+    {
+      type: 'message_delta',
+      delta: { stop_reason: 'end_turn', stop_sequence: null },
+      usage: { output_tokens: 7 },
+    },
+    { type: 'message_stop' },
+  ];
+  return new Response(
+    events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''),
+    { headers: { 'content-type': 'text/event-stream' } }
+  );
+}
+
+function modelToolReply(stream: boolean): Response {
+  const call = {
+    id: 'private-history-call',
+    type: 'function',
+    function: { name: requestedTool!.name, arguments: JSON.stringify(requestedTool!.arguments) },
+  };
+  const base = { id: 'tool-completion', model: MODEL, created: 1 };
+  const usage = { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 };
+  if (!stream)
+    return Response.json({
+      ...base,
+      object: 'chat.completion',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: null, tool_calls: [call] },
+          finish_reason: 'tool_calls',
+        },
+      ],
+      usage,
     });
-    const text1 = await first.text();
-    const convId = text1.match(/"conversationId":"([^"]+)"/)?.[1];
-    expect(convId).toBeTruthy();
-
-    const second = await stub.fetch('https://sam-session/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        conversationId: convId,
-        message: 'Good message two',
-        userId: 'test-user-row-fault-messages',
-      }),
-    });
-    await second.text();
-
-    // Inject a malformed message directly — real embedded SQLite, bypassing
-    // the app layer entirely.
-    await runInDurableObject(stub, async (_instance, state) => {
-      state.storage.sql.exec(
-        `INSERT INTO messages (id, conversation_id, role, content, sequence, created_at)
-         VALUES (?, ?, 'user', 'corrupted sequence', 'not-a-number', datetime('now'))`,
-        'msg-malformed-row-fault-001',
-        convId
-      );
-    });
-
-    const msgResp = await stub.fetch(`https://sam-session/conversations/${convId}/messages`);
-    expect(msgResp.status).toBe(200);
-    const msgData = (await msgResp.json()) as { messages: Array<{ id: string; content: string }> };
-
-    const contents = msgData.messages.map((m) => m.content);
-    expect(contents).toContain('Good message one');
-    expect(contents).toContain('Good message two');
-    expect(msgData.messages.find((m) => m.id === 'msg-malformed-row-fault-001')).toBeUndefined();
-  });
-
-  // REGRESSION (rule 50 — single-row degrade): `rate_limits` was narrowed with
-  // a blind `as {...} | undefined` cast. `window_start` has INTEGER affinity;
-  // a corrupted value must degrade the rate limiter to "row missing" (which
-  // self-heals via `INSERT OR REPLACE`) rather than silently computing NaN
-  // comparisons forever. This is the discriminating assertion: the pre-fix
-  // blind cast feeds the corrupted string straight into `Number(row.window_start)`
-  // (=NaN); `NaN > windowMs` is always false, so the reset branch never fires
-  // and the corrupted value is never repaired. The fix treats the unparsable
-  // row as absent and re-seeds it with a valid numeric window_start.
-  it('self-heals a corrupted rate_limits row instead of leaving it permanently NaN', async () => {
-    const stub = getSamSession('test-user-row-fault-ratelimit');
-
-    // Seed the singleton row via a real request, then corrupt it directly.
-    const seed = await stub.fetch('https://sam-session/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        message: 'seed rate limit row',
-        userId: 'test-user-row-fault-ratelimit',
-      }),
-    });
-    await seed.text();
-
-    await runInDurableObject(stub, async (_instance, state) => {
-      state.storage.sql.exec(
-        `UPDATE rate_limits SET window_start = 'not-a-timestamp' WHERE id = 1`
-      );
-    });
-
-    const resp = await stub.fetch('https://sam-session/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        message: 'after corruption',
-        userId: 'test-user-row-fault-ratelimit',
-      }),
-    });
-    expect(resp.status).toBe(200);
-    await resp.text();
-
-    const windowStart = await runInDurableObject(stub, async (_instance, state) => {
-      const row = state.storage.sql
-        .exec('SELECT window_start FROM rate_limits WHERE id = 1')
-        .toArray()[0] as { window_start: unknown } | undefined;
-      return row?.window_start;
-    });
-    expect(typeof windowStart).toBe('number');
-  });
-});
-
-describe('SamSession DO — Validation', () => {
-  it('returns 400 for empty message', async () => {
-    const stub = getSamSession('test-user-validation');
-
-    const resp = await stub.fetch('https://sam-session/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message: '', userId: 'test-user-validation' }),
-    });
-    expect(resp.status).toBe(400);
-    const body = (await resp.json()) as { error: string };
-    expect(body.error).toBe('Message is required');
-  });
-
-  it('returns 404 for nonexistent conversation', async () => {
-    const stub = getSamSession('test-user-404');
-
-    const resp = await stub.fetch('https://sam-session/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        conversationId: 'nonexistent-id',
-        message: 'hello',
-        userId: 'test-user-404',
-      }),
-    });
-    expect(resp.status).toBe(404);
-    const body = (await resp.json()) as { error: string };
-    expect(body.error).toBe('Conversation not found');
-  });
-
-  it('returns 404 for unknown routes', async () => {
-    const stub = getSamSession('test-user-unknown');
-    const resp = await stub.fetch('https://sam-session/unknown');
-    expect(resp.status).toBe(404);
-  });
-});
+  const events = [
+    {
+      ...base,
+      object: 'chat.completion.chunk',
+      choices: [
+        {
+          index: 0,
+          delta: { role: 'assistant', tool_calls: [{ index: 0, ...call }] },
+          finish_reason: null,
+        },
+      ],
+    },
+    {
+      ...base,
+      object: 'chat.completion.chunk',
+      choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+      usage,
+    },
+  ];
+  return new Response(
+    events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n',
+    { headers: { 'content-type': 'text/event-stream' } }
+  );
+}

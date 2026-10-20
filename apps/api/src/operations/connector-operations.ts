@@ -89,6 +89,9 @@ export const samChatStart = defineOperation({
     requestKey,
   }),
   async run(ctx, input) {
+    if (ctx.actor.via === 'sam' && !ctx.samDispatchReservation) {
+      throw new OperationError('invalid_input', 'SAM dispatch requires a durable reservation');
+    }
     await authorizeProjectOperation(ctx, input.projectId, 'task:write');
     const db = drizzle(ctx.env.DATABASE, { schema });
     const [user] = await db
@@ -106,7 +109,10 @@ export const samChatStart = defineOperation({
         input,
         (promise) => execCtx.waitUntil(promise),
         ctx.actor.via,
-        ctx.actor.clientName
+        ctx.actor.clientName,
+        undefined,
+        ctx.samDispatchReservation,
+        ctx.assertEffectAllowed
       );
       return { ...result, link: operationLink(ctx, input.projectId, result.sessionId) };
     });
@@ -138,7 +144,8 @@ export const samChatSend = defineOperation({
           input.projectId,
           input.sessionId,
           { content: input.content },
-          authorized
+          authorized,
+          ...(ctx.assertEffectAllowed ? ([ctx.assertEffectAllowed] as const) : ([] as const))
         )),
         link: operationLink(ctx, input.projectId, input.sessionId),
       }),
@@ -274,7 +281,13 @@ export const samWorkStop = defineOperation({
     });
     const target = sessionId;
     return executeConnectorWrite(ctx, 'sam_work_stop', input, () =>
-      stopChat(ctx.env, ctx.actor.userId, input.projectId, target)
+      stopChat(
+        ctx.env,
+        ctx.actor.userId,
+        input.projectId,
+        target,
+        ...(ctx.assertEffectAllowed ? ([ctx.assertEffectAllowed] as const) : ([] as const))
+      )
     );
   },
 });

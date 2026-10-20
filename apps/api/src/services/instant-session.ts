@@ -39,6 +39,10 @@ export interface LaunchInstantSessionInput {
   taskId: string;
   /** Session identity the task row already carries; omitted, the session gets a new one. */
   chatSessionId?: string | null;
+  /** Server-reserved message identity for an accepted SAM dispatch. */
+  initialMessageId?: string;
+  /** Server-only admission fence, rechecked before allocation and physical launch. */
+  assertLaunchAllowed?: () => Promise<void>;
   project: schema.Project;
   userId: string;
   initialPrompt: string;
@@ -229,6 +233,7 @@ async function ensureInstantCheckoutBranch(
     userId: input.userId,
     branch,
     baseBranch: defaultBranch,
+    ...(input.assertLaunchAllowed ? { beforeRemoteWrite: input.assertLaunchAllowed } : {}),
   });
 
   logWorkspaceBranchResult('instant_session.ensure_branch', result, {
@@ -274,6 +279,7 @@ export async function acceptInstantSession(
     providerInstanceType: 'cf-container',
   });
 
+  await input.assertLaunchAllowed?.();
   const node = await createNodeRecord(env, {
     userId: input.userId,
     credentialAttributionUserId: input.userId,
@@ -343,7 +349,8 @@ export async function acceptInstantSession(
     chatSessionId,
     'user',
     input.displayMessage ?? input.initialPrompt,
-    null
+    null,
+    ...(input.initialMessageId ? ([input.initialMessageId] as const) : ([] as const))
   );
   await db
     .update(schema.workspaces)
@@ -379,6 +386,7 @@ export async function continueInstantSessionLaunch(
   input: LaunchInstantSessionInput,
   accepted: AcceptedInstantSession
 ): Promise<LaunchInstantSessionResult> {
+  await input.assertLaunchAllowed?.();
   requireVmAgentContainer(env);
 
   const config = getVmAgentContainerConfig(env);

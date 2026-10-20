@@ -67,6 +67,34 @@ Use `GH_WEBHOOK_SECRET` in GitHub Actions because secret names cannot start with
 
 See `apps/api/.env.example` for the full list. Key variables are listed below.
 
+### Private SAM assistant runtime controls
+
+Use the typed **Operations** admin settings below for live configuration. All five are non-secret and retain optional API Worker/GitHub Environment variables for compatibility. User opt-in is a separate per-user setting and defaults to off; clearing the installation switch never enables SAM for a user.
+
+| Compatibility variable           | Default    | Meaning                                                                                                                                                          |
+| -------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SAM_OPERATOR_DISABLED`          | unset      | Exact string `true` disables assistant turns/actions installation-wide while preserving the saved user preference.                                               |
+| `SAM_OPERATOR_WATCH_LIFETIME_MS` | `86400000` | Lifetime in milliseconds of an own-work project-event watch created by a dispatch (24 hours). Expiry stops active watching; it does not cancel the project task. |
+| `SAM_OPERATOR_EVENT_PAGE_SIZE`   | `25`       | Maximum watches per scan, events per watch, and visible work cards (1–25).                                                                                       |
+| `SAM_OPERATOR_WORK_REFRESH_MS`   | `30000`    | Durable own-work refresh cadence in milliseconds. This is separate from the browser's active-turn refresh interval.                                              |
+| `SAM_OPERATOR_WATCH_RETRY_LIMIT` | `3`        | Consecutive failed watch refreshes before automatic updates stop (1–25). Successful pulls or requested follow-ups reset the count.                               |
+
+| Admin setting key                       | Type and permitted range    |
+| --------------------------------------- | --------------------------- |
+| `operations.samOperatorDisabled`        | Boolean; default `false`    |
+| `operations.samOperatorWatchLifetimeMs` | Integer `1`–`2147483647`    |
+| `operations.samOperatorEventPageSize`   | Integer `1`–`25`            |
+| `operations.samOperatorWorkRefreshMs`   | Integer `1000`–`2147483647` |
+| `operations.samOperatorWatchRetryLimit` | Integer `1`–`25`            |
+
+Each refresh selects at most 25 watches and reads at most 25 events per watch: at most 325 caller D1 reads, 75 cold ProjectData RPCs, and 625 local event-reference inserts, plus fixed alarm setup. A work-card read performs at most 75 D1 reads. Each watch persists its next check and charges an attempt before I/O; the alarm uses the earliest watch deadline. Failed watches defer until that deadline and stop after the retry limit, with a visible update warning. The watch lifetime also stops observation independently; neither condition cancels project work.
+
+Stored numeric admin settings take precedence over compatible environment values and code defaults. `SAM_OPERATOR_DISABLED=true` is an emergency veto that a stored `false` cannot override. The disabled setting is read without the normal settings cache before effects and fails closed when settings storage is unavailable. The deployment workflow forwards the five same-named GitHub Environment variables to the Worker; omitted values use the registry defaults without adding text bindings.
+
+Sources: `apps/api/src/services/operator-settings.ts`, `admin-settings-registry.ts`, `apps/api/src/durable-objects/sam-session/operator/work.ts`, and deployment configuration/defaults.
+
+The assistant reuses existing `SAM_MODEL`, context/window, tool-result and model-step limits from `resolveSamConfig`, plus `SAM_LLM_TIMEOUT_MS` (operator fallback `120000`). Operator turn admission uses `SAM_MESSAGE_MAX_LENGTH` with a `16000`-character fallback; legacy subtask-message readers can have a different fallback. No new provider API key is required specifically for enabling the assistant: it uses the installation's supported platform AI configuration and usage gate.
+
 ### How Worker variables are set
 
 `scripts/deploy/sync-wrangler-config.ts` (`getApiWorkerVars`) builds each deployed API Worker's

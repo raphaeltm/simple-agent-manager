@@ -7,6 +7,8 @@ SAM's project pages are chat-first interfaces where you interact with AI coding 
 
 Recent chat updates make the workspace feel more like a persistent work surface: task-backed chats can be forked consistently, SAM-injected setup context is collapsed out of the main conversation, and desktop sidebars can be collapsed when you need more room.
 
+For private coordination across projects, enable the optional [SAM account assistant](/docs/guides/sam-assistant/). Its account conversation is separate from these project-visible coding sessions.
+
 ## Attach Files to a Message
 
 Use the paperclip, paste an image or file, or drag files onto the message input. Long pasted text becomes a text-file attachment; short text stays in the input.

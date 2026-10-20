@@ -28,6 +28,7 @@ import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router';
 
+import { useSamSettings } from '../hooks/useSamSettings';
 import { useAuth } from './AuthProvider';
 import { useOnboarding } from './onboarding';
 
@@ -40,13 +41,22 @@ export interface NavItem {
 /** Global nav items shown when NOT inside a project */
 export const GLOBAL_NAV_ITEMS: NavItem[] = [
   { label: 'Home', path: '/dashboard', icon: <Home size={18} /> },
-  // { label: 'SAM', path: '/sam', icon: <Bot size={18} /> }, // Hidden — experimental, not ready for users yet
   { label: 'Chats', path: '/chats', icon: <MessageSquare size={18} /> },
   { label: 'Projects', path: '/projects', icon: <FolderKanban size={18} /> },
   { label: 'Map', path: '/account-map', icon: <Map size={18} /> },
   { label: 'Tools', path: '/tools', icon: <Wrench size={18} /> },
   { label: 'Settings', path: '/settings', icon: <Settings size={18} /> },
 ];
+
+export function getGlobalNavItems(samEnabled: boolean): NavItem[] {
+  return samEnabled
+    ? [
+        ...GLOBAL_NAV_ITEMS.slice(0, 1),
+        { label: 'SAM', path: '/sam', icon: <MessageSquare size={18} /> },
+        ...GLOBAL_NAV_ITEMS.slice(1),
+      ]
+    : GLOBAL_NAV_ITEMS;
+}
 
 /** Project sub-nav items — paths are relative to /projects/:id/ */
 export const PROJECT_NAV_ITEMS: NavItem[] = [
@@ -121,6 +131,8 @@ export function NavSidebar({
   projectHealthElement,
   iconOnly,
 }: NavSidebarProps) {
+  const sam = useSamSettings();
+  const visibleGlobalItems = getGlobalNavItems(sam.enabled);
   const location = useLocation();
   const { isSuperadmin } = useAuth();
   const { needsOnboarding, openOnboarding } = useOnboarding();
@@ -210,8 +222,8 @@ export function NavSidebar({
   // When inside a project, we can toggle between project nav and global nav
   if (insideProject && projectId) {
     const globalItems = isSuperadmin
-      ? [...GLOBAL_NAV_ITEMS, { label: 'Admin', path: '/admin', icon: <Shield size={18} /> }]
-      : GLOBAL_NAV_ITEMS;
+      ? [...visibleGlobalItems, { label: 'Admin', path: '/admin', icon: <Shield size={18} /> }]
+      : visibleGlobalItems;
 
     return (
       /* `data-intentional-clip`: this is a two-panel carousel — both panels sit
@@ -332,8 +344,8 @@ export function NavSidebar({
 
   // ── Global sidebar (when not inside a project) ──
   const globalItems = isSuperadmin
-    ? [...GLOBAL_NAV_ITEMS, { label: 'Admin', path: '/admin', icon: <Shield size={18} /> }]
-    : GLOBAL_NAV_ITEMS;
+    ? [...visibleGlobalItems, { label: 'Admin', path: '/admin', icon: <Shield size={18} /> }]
+    : visibleGlobalItems;
 
   return (
     // `flex-1 min-h-0 overflow-y-auto`: same reason as the project carousel above

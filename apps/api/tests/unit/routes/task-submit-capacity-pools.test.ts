@@ -21,7 +21,9 @@ import { agentProfileRoutes } from '../../../src/routes/agent-profiles';
 import { cliProjectMetadataRoutes } from '../../../src/routes/cli-project-metadata';
 import { skillRoutes } from '../../../src/routes/skills';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
+import type { SamDispatchReservation } from '../../../src/services/sam-dispatch-reservation';
 import { resolveSkillProfile } from '../../../src/services/skills';
+import { submitTask } from '../../../src/services/submit-task';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import {
   seedCloudCredential,
@@ -46,6 +48,7 @@ const mocks = vi.hoisted(() => ({
   stopSession: vi.fn(),
   updateSessionTopic: vi.fn(),
   startTaskRunnerDO: vi.fn(),
+  getTaskRunnerStatus: vi.fn(),
   generateTaskTitle: vi.fn(),
   getTaskTitleConfig: vi.fn(),
   truncateTitle: vi.fn(),
@@ -91,6 +94,7 @@ vi.mock('../../../src/services/project-data', () => ({
 
 vi.mock('../../../src/services/task-runner-do', () => ({
   startTaskRunnerDO: mocks.startTaskRunnerDO,
+  getTaskRunnerStatus: mocks.getTaskRunnerStatus,
 }));
 
 vi.mock('../../../src/services/task-title', () => ({
@@ -234,12 +238,282 @@ describe('task submit capacity-pool placement', () => {
     mocks.stopSession.mockResolvedValue(undefined);
     mocks.updateSessionTopic.mockResolvedValue(true);
     mocks.startTaskRunnerDO.mockResolvedValue(undefined);
+    mocks.getTaskRunnerStatus.mockResolvedValue(null);
     mocks.getTaskTitleConfig.mockReturnValue({});
     mocks.truncateTitle.mockReturnValue('Run in project pool');
     mocks.generateTaskTitle.mockResolvedValue('Generated task title');
     mocks.enrichMessageWithMentions.mockResolvedValue({
       enrichedMessage: 'Run in project pool',
     });
+  });
+
+  const samReservation: SamDispatchReservation = {
+    taskId: 'sam-reserved-task',
+    sessionId: 'sam-reserved-session',
+    initialMessageId: 'sam-reserved-message',
+    statusEventId: 'sam-reserved-status',
+  };
+  const samUser = { id: 'user-1', name: 'User One', email: 'user-1@example.com' };
+  const samBody = { message: 'Run in project pool', taskMode: 'task' as const };
+  const samWaitUntil = (promise: Promise<unknown>) => executionCtx.waitUntil(promise);
+
+  it('uses committed SAM identities and observes a lost VM start acknowledgement without restarting', async () => {
+    const { sqlite, env } = createEnv();
+    seedTaskSubmitRows(sqlite);
+    await seedProjectDefaultPool(env);
+    mocks.createSession.mockImplementation(async (...args) => args[6]);
+    mocks.getSession.mockResolvedValue({
+      id: samReservation.sessionId,
+      taskId: samReservation.taskId,
+      createdByUserId: samUser.id,
+    });
+    mocks.startTaskRunnerDO.mockImplementation(async (_env, input) => {
+      mocks.getTaskRunnerStatus.mockResolvedValue({
+        taskId: input.taskId,
+        projectId: input.projectId,
+        userId: input.userId,
+        config: { chatSessionId: input.chatSessionId },
+      });
+      throw new Error('Lost start acknowledgement');
+    });
+    try {
+      await expect(
+        submitTask(
+          env,
+          samUser,
+          'project-1',
+          samBody,
+          samWaitUntil,
+          'sam',
+          undefined,
+          undefined,
+          samReservation
+        )
+      ).rejects.toThrow('Lost start acknowledgement');
+      expect(sqlite.prepare('SELECT id, chat_session_id, status FROM tasks').get()).toEqual({
+        id: samReservation.taskId,
+        chat_session_id: samReservation.sessionId,
+        status: 'queued',
+      });
+      expect(mocks.persistMessage).toHaveBeenCalledWith(
+        env,
+        'project-1',
+        samReservation.sessionId,
+        'user',
+        samBody.message,
+        null,
+        samReservation.initialMessageId
+      );
+      const recovered = await submitTask(
+        env,
+        samUser,
+        'project-1',
+        samBody,
+        samWaitUntil,
+        'sam',
+        undefined,
+        undefined,
+        { ...samReservation, reconcileOnly: true }
+      );
+      expect(recovered).toMatchObject({
+        taskId: samReservation.taskId,
+        sessionId: samReservation.sessionId,
+        recovered: true,
+        status: 'queued',
+        dispatchState: 'confirmed',
+      });
+      expect(mocks.startTaskRunnerDO).toHaveBeenCalledTimes(1);
+      expect(mocks.createSession).toHaveBeenCalledTimes(1);
+      expect(mocks.stopSession).not.toHaveBeenCalled();
+      expect(mocks.requireRepositoryUserAccess).toHaveBeenCalledTimes(2);
+      await Promise.all(vi.mocked(executionCtx.waitUntil).mock.calls.map(([promise]) => promise));
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('overlapping SAM submissions compete for one task identity and start at most one runtime', async () => {
+    const { sqlite, env } = createEnv();
+    seedTaskSubmitRows(sqlite);
+    await seedProjectDefaultPool(env);
+    mocks.createSession.mockImplementation(async (...args) => args[6]);
+    mocks.getSession.mockResolvedValue({
+      id: samReservation.sessionId,
+      taskId: samReservation.taskId,
+      createdByUserId: samUser.id,
+    });
+    try {
+      const results = await Promise.allSettled(
+        [1, 2].map(() =>
+          submitTask(
+            env,
+            samUser,
+            'project-1',
+            samBody,
+            samWaitUntil,
+            'sam',
+            undefined,
+            undefined,
+            samReservation
+          )
+        )
+      );
+      expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
+      expect(taskCount(sqlite)).toBe(1);
+      expect(mocks.startTaskRunnerDO).toHaveBeenCalledTimes(1);
+      expect(mocks.createSession).toHaveBeenCalledTimes(1);
+      expect(mocks.persistMessage).toHaveBeenCalledTimes(1);
+      await Promise.all(vi.mocked(executionCtx.waitUntil).mock.calls.map(([promise]) => promise));
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('does not dispatch after the SAM effect fence rejects following async authorization', async () => {
+    const { sqlite, env } = createEnv();
+    seedTaskSubmitRows(sqlite);
+    await seedProjectDefaultPool(env);
+    const fence = vi.fn().mockRejectedValue(new Error('SAM disabled'));
+    try {
+      await expect(
+        submitTask(
+          env,
+          samUser,
+          'project-1',
+          samBody,
+          samWaitUntil,
+          'sam',
+          undefined,
+          undefined,
+          samReservation,
+          fence
+        )
+      ).rejects.toThrow('SAM disabled');
+      expect(mocks.requireRepositoryUserAccess).toHaveBeenCalledTimes(1);
+      expect(fence).toHaveBeenCalledTimes(1);
+      expect(taskCount(sqlite)).toBe(0);
+      expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('rechecks the SAM effect fence before VM startup after persisting its session', async () => {
+    const { sqlite, env } = createEnv();
+    seedTaskSubmitRows(sqlite);
+    await seedProjectDefaultPool(env);
+    mocks.createSession.mockImplementation(async (...args) => args[6]);
+    const fence = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('SAM disabled'));
+    try {
+      await expect(
+        submitTask(
+          env,
+          samUser,
+          'project-1',
+          samBody,
+          samWaitUntil,
+          'sam',
+          undefined,
+          undefined,
+          samReservation,
+          fence
+        )
+      ).rejects.toThrow('SAM disabled');
+      expect(taskCount(sqlite)).toBe(1);
+      expect(fence).toHaveBeenCalledTimes(2);
+      expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+      expect(mocks.stopSession).not.toHaveBeenCalled();
+      await Promise.all(vi.mocked(executionCtx.waitUntil).mock.calls.map(([promise]) => promise));
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it.each([true, false])(
+    'preserves Instant selection and committed identities for SAM (explicit profile=%s)',
+    async (explicitProfile) => {
+      const { sqlite, env } = createEnv();
+      seedUser(sqlite, samUser.id);
+      seedProjectWithMember(sqlite, { projectId: 'project-1', userId: samUser.id, role: 'owner' });
+      sqlite.exec(`INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, runtime)
+      VALUES ('instant', 'project-1', 'user-1', 'Instant', 'openai-codex', 'cf-container')`);
+      env.CF_CONTAINER_ENABLED = 'true';
+      mocks.acceptInstantSession.mockImplementation(async (_db, _env, input) => ({
+        chatSessionId: input.chatSessionId,
+      }));
+      mocks.continueInstantSessionLaunch.mockResolvedValue({});
+      const fence = vi.fn().mockResolvedValue(undefined);
+      try {
+        const result = await submitTask(
+          env,
+          samUser,
+          'project-1',
+          { ...samBody, ...(explicitProfile ? { agentProfileId: 'instant' } : {}) },
+          samWaitUntil,
+          'sam',
+          undefined,
+          undefined,
+          samReservation,
+          fence
+        );
+        expect(result).toMatchObject({
+          taskId: samReservation.taskId,
+          sessionId: samReservation.sessionId,
+        });
+        expect(mocks.acceptInstantSession).toHaveBeenCalledWith(
+          expect.anything(),
+          env,
+          expect.objectContaining({
+            taskId: samReservation.taskId,
+            chatSessionId: samReservation.sessionId,
+            initialMessageId: samReservation.initialMessageId,
+            assertLaunchAllowed: fence,
+          })
+        );
+        expect(sqlite.prepare('SELECT chat_session_id FROM tasks').get()).toEqual({
+          chat_session_id: samReservation.sessionId,
+        });
+        expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+        expect(fence).toHaveBeenCalledTimes(1);
+        await Promise.all(vi.mocked(executionCtx.waitUntil).mock.calls.map(([promise]) => promise));
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it('reauthorizes membership and repository access before observing a SAM receipt', async () => {
+    const { sqlite, env } = createEnv();
+    seedTaskSubmitRows(sqlite);
+    sqlite
+      .prepare(
+        'INSERT INTO tasks (id, project_id, user_id, chat_session_id, status) VALUES (?,?,?,?,?)'
+      )
+      .run(samReservation.taskId, 'project-1', samUser.id, samReservation.sessionId, 'queued');
+    const recover = () =>
+      submitTask(env, samUser, 'project-1', samBody, samWaitUntil, 'sam', undefined, undefined, {
+        ...samReservation,
+        reconcileOnly: true,
+      });
+    try {
+      mocks.requireRepositoryUserAccess.mockRejectedValueOnce(
+        new AppError(403, 'FORBIDDEN', 'Repository revoked')
+      );
+      await expect(recover()).rejects.toThrow('Repository revoked');
+      expect(mocks.getSession).not.toHaveBeenCalled();
+      sqlite.prepare('UPDATE project_members SET status=?').run('removed');
+      await expect(recover()).rejects.toMatchObject({ statusCode: 404 });
+      expect(mocks.requireRepositoryUserAccess).toHaveBeenCalledTimes(1);
+      expect(mocks.getSession).not.toHaveBeenCalled();
+      expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+      expect(mocks.acceptInstantSession).not.toHaveBeenCalled();
+      expect(taskCount(sqlite)).toBe(1);
+    } finally {
+      sqlite.close();
+    }
   });
 
   async function forkFixture() {

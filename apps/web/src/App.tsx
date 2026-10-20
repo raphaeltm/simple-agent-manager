@@ -172,7 +172,7 @@ const LegacyTriggerDetailRedirect = lazyNamed(
   () => import('./pages/automation/redirects'),
   'LegacyTriggerDetailRedirect'
 );
-const SamPrototype = lazyNamed(() => import('./pages/SamPrototype'), 'SamPrototype');
+const Sam = lazyNamed(() => import('./pages/Sam'), 'Sam');
 const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
 const ConnectorConsent = lazyNamed(() => import('./pages/ConnectorConsent'), 'ConnectorConsent');
@@ -256,7 +256,6 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
 }
 
 export const DEV_ONLY_ROUTE_PATHS = [
-  '/sam',
   '/__test/trial-chat-gate',
   '/__test/error-boundary',
   '/ui-standards',
@@ -296,8 +295,6 @@ export default function App() {
                     <Route path="/setup" element={page(<Setup />)} />
                     {showDevOnlyRoutes && (
                       <>
-                        {/* SAM prototype — local/test only, no auth */}
-                        <Route path="/sam" element={page(<SamPrototype />)} />
                         {/* Harness for Playwright audits — mounts trial components with mock data */}
                         <Route
                           path="/__test/trial-chat-gate"
@@ -312,6 +309,7 @@ export default function App() {
                     {/* Protected routes with AppShell (persistent navigation) */}
                     <Route element={<ProtectedLayout />}>
                       <Route path="/dashboard" element={<Dashboard />} />
+                      <Route path="/sam" element={page(<Sam />)} />
                       <Route path="/chats" element={page(<Chats />)} />
                       <Route path="/projects" element={page(<Projects />)} />
                       <Route path="/projects/new" element={page(<ProjectCreate />)} />

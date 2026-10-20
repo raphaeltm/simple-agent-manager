@@ -70,6 +70,7 @@ export async function executeConnectorWrite<T>(
 ): Promise<T> {
   if (ctx.actor.via !== 'connector' && ctx.actor.via !== 'pat') {
     await preflight?.();
+    await ctx.assertEffectAllowed?.();
     return run();
   }
   const settings = ctx.connectorSettings ?? (await getConnectorSettings(ctx.env));

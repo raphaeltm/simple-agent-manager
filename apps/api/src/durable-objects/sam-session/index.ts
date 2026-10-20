@@ -28,90 +28,13 @@ import {
   RowidRowSchema,
 } from '../row-validation';
 import { runAgentLoop, SAM_SYSTEM_PROMPT } from './agent-loop';
+import { OperatorController } from './operator/controller';
 import { executeTool, SAM_TOOLS } from './tools';
 import type { MessageRow, SamSseEvent } from './types';
 
 const log = createModuleLogger('sam_session');
 
 /** SQLite migration for the SamSession DO. */
-function migrate(sql: SqlStorage): void {
-  // Create migrations tracking table
-  sql.exec(`
-    CREATE TABLE IF NOT EXISTS sam_migrations (
-      name TEXT PRIMARY KEY,
-      applied_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-    )
-  `);
-
-  const applied = new Set(
-    sql
-      .exec('SELECT name FROM sam_migrations')
-      .toArray()
-      .map((r) => String(r.name))
-  );
-
-  if (!applied.has('001-initial')) {
-    sql.exec(`
-      CREATE TABLE conversations (
-        id TEXT PRIMARY KEY,
-        title TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )
-    `);
-    sql.exec(`CREATE INDEX idx_conversations_updated ON conversations(updated_at DESC)`);
-
-    sql.exec(`
-      CREATE TABLE messages (
-        id TEXT PRIMARY KEY,
-        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-        role TEXT NOT NULL,
-        content TEXT NOT NULL DEFAULT '',
-        tool_calls_json TEXT,
-        tool_call_id TEXT,
-        sequence INTEGER NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )
-    `);
-    sql.exec(`CREATE INDEX idx_messages_conv_seq ON messages(conversation_id, sequence ASC)`);
-
-    sql.exec(`INSERT INTO sam_migrations (name) VALUES ('001-initial')`);
-  }
-
-  if (!applied.has('002-rate-limits')) {
-    sql.exec(`
-      CREATE TABLE rate_limits (
-        id INTEGER PRIMARY KEY,
-        window_start INTEGER NOT NULL,
-        request_count INTEGER NOT NULL DEFAULT 0
-      )
-    `);
-    sql.exec(`INSERT INTO rate_limits (id, window_start, request_count) VALUES (1, 0, 0)`);
-    sql.exec(`INSERT INTO sam_migrations (name) VALUES ('002-rate-limits')`);
-  }
-
-  if (!applied.has('003-fts-and-type')) {
-    // Forward-compatible columns for Phase 3 (project agent threads)
-    sql.exec(`ALTER TABLE conversations ADD COLUMN type TEXT NOT NULL DEFAULT 'human'`);
-    sql.exec(`ALTER TABLE conversations ADD COLUMN linked_session_id TEXT`);
-    sql.exec(`ALTER TABLE conversations ADD COLUMN linked_project_id TEXT`);
-
-    // FTS5 virtual table for full-text search on message content
-    sql.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
-      USING fts5(content, content='messages', content_rowid='rowid', tokenize='unicode61')
-    `);
-
-    // Backfill existing messages into FTS5
-    sql.exec(`
-      INSERT INTO messages_fts(rowid, content)
-      SELECT rowid, content FROM messages WHERE content != ''
-    `);
-
-    sql.exec(`INSERT INTO sam_migrations (name) VALUES ('003-fts-and-type')`);
-  }
-}
-
 /** Build an FTS5 query from user input after stripping operators/reserved words. */
 export function buildFtsQuery(query: string): string | null {
   return buildSafeFtsQuery(query);
@@ -138,11 +61,13 @@ export function appendMessageLikeSearchResults(
   results: MessageSearchResult[]
 ): void {
   const likePatterns = getSearchQueryLikePatterns(query);
-  const likeConditions = likePatterns.map(() => String.raw`content LIKE ? ESCAPE '\'`).join(' AND ');
+  const likeConditions = likePatterns
+    .map(() => String.raw`content LIKE ? ESCAPE '\'`)
+    .join(' AND ');
   const querySql = [
     'SELECT role, content, sequence, created_at',
     'FROM messages',
-    `WHERE ${likeConditions}`,
+    `WHERE role IN ('user','assistant') AND (${likeConditions})`,
     'ORDER BY created_at DESC',
     'LIMIT ?',
   ].join('\n');
@@ -169,13 +94,16 @@ function encodeSseEvent(event: SamSseEvent): Uint8Array {
 
 export class SamSession extends DurableObject<AppEnv> {
   private sql: SqlStorage;
+  private operator: OperatorController;
 
   constructor(ctx: DurableObjectState, env: AppEnv) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
-    ctx.blockConcurrencyWhile(async () => {
-      migrate(this.sql);
-    });
+    this.operator = new OperatorController(ctx, env, this.sql);
+  }
+
+  async alarm(): Promise<void> {
+    await this.operator.alarm();
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -184,6 +112,8 @@ export class SamSession extends DurableObject<AppEnv> {
     const method = request.method;
 
     try {
+      const operatorResponse = await this.operator.handle(request);
+      if (operatorResponse) return operatorResponse;
       // POST /chat — start or continue a conversation
       if (method === 'POST' && path === '/chat') {
         return await this.handleChat(request);
@@ -207,7 +137,14 @@ export class SamSession extends DurableObject<AppEnv> {
       const messagesConversationId = messagesMatch?.[1];
       if (method === 'GET' && messagesConversationId) {
         const limit = parseInt(url.searchParams.get('limit') || '', 10) || undefined;
-        return this.handleGetMessages(messagesConversationId, limit);
+        const before = url.searchParams.get('before');
+        if (before && !/^\d+$/.test(before))
+          return Response.json({ error: 'invalid_cursor' }, { status: 400 });
+        return this.handleGetMessages(
+          messagesConversationId,
+          limit,
+          before ? Number(before) : undefined
+        );
       }
 
       return new Response(JSON.stringify({ error: 'Not found' }), {
@@ -376,7 +313,11 @@ export class SamSession extends DurableObject<AppEnv> {
   }
 
   /** Handle GET /conversations/:id/messages — get messages for a conversation. */
-  private handleGetMessages(conversationId: string, requestedLimit?: number): Response {
+  private handleGetMessages(
+    conversationId: string,
+    requestedLimit?: number,
+    before?: number
+  ): Response {
     const historyLimit = Number(this.env.SAM_HISTORY_LOAD_LIMIT) || DEFAULT_SAM_HISTORY_LOAD_LIMIT;
     const maxMessages = requestedLimit
       ? Math.min(
@@ -387,17 +328,26 @@ export class SamSession extends DurableObject<AppEnv> {
       : historyLimit;
     const rawRows = this.sql
       .exec(
-        `SELECT id, conversation_id, role, content, tool_calls_json, tool_call_id, sequence, created_at
-       FROM messages WHERE conversation_id = ? ORDER BY sequence ASC LIMIT ?`,
+        `SELECT id, conversation_id, role, content, NULL AS tool_calls_json, NULL AS tool_call_id, sequence, created_at
+       FROM messages WHERE conversation_id = ? AND role IN ('user','assistant') AND sequence < ? ORDER BY sequence DESC LIMIT ?`,
         conversationId,
-        maxMessages
+        before ?? Number.MAX_SAFE_INTEGER,
+        maxMessages + 1
       )
       .toArray();
-    const rows: MessageRow[] = mapRows(rawRows, MessageRowSchema, 'sam_session.messages_list');
+    const hasMore = rawRows.length > maxMessages;
+    const rows: MessageRow[] = mapRows(
+      rawRows.slice(0, maxMessages).reverse(),
+      MessageRowSchema,
+      'sam_session.messages_list'
+    );
 
-    return new Response(JSON.stringify({ messages: rows }), {
-      headers: { 'content-type': 'application/json' },
-    });
+    return new Response(
+      JSON.stringify({ messages: rows, nextCursor: hasMore ? rows[0]?.sequence : null }),
+      {
+        headers: { 'content-type': 'application/json' },
+      }
+    );
   }
 
   /** Create a new conversation. */
@@ -592,7 +542,7 @@ export class SamSession extends DurableObject<AppEnv> {
               `SELECT m.role, m.content, m.sequence, m.created_at
              FROM messages_fts f
              JOIN messages m ON m.rowid = f.rowid
-             WHERE f.messages_fts MATCH ?
+             WHERE f.messages_fts MATCH ? AND m.role IN ('user','assistant')
              ORDER BY rank
              LIMIT ?`,
               ftsQuery,

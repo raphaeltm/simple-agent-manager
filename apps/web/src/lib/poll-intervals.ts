@@ -51,6 +51,20 @@ export const AUTOMATION_POLL_MS = resolveIntervalMs(
   DEFAULT_AUTOMATION_POLL_MS
 );
 
+/** Private SAM preference/availability refresh, including changes from another tab. */
+export const DEFAULT_SAM_SETTINGS_POLL_MS = 10_000;
+export const SAM_SETTINGS_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_SAM_SETTINGS_POLL_MS,
+  DEFAULT_SAM_SETTINGS_POLL_MS
+);
+
+/** Private SAM refresh while a turn, action, or tracked project task remains active. */
+export const DEFAULT_SAM_ACTIVE_POLL_MS = 2_000;
+export const SAM_ACTIVE_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_SAM_ACTIVE_POLL_MS,
+  DEFAULT_SAM_ACTIVE_POLL_MS
+);
+
 /** Node detail refresh (node record + its workspace list). */
 const DEFAULT_NODE_DETAIL_POLL_MS = 10_000;
 export const NODE_DETAIL_POLL_MS = resolveIntervalMs(

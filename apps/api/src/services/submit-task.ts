@@ -60,6 +60,12 @@ import { startTaskRunnerDO } from '../services/task-runner-do';
 import { getTaskTitleConfig } from '../services/task-title';
 import { resolveWorkspaceRuntime } from '../services/workspace-runtime';
 import { buildArchivedForkContext } from './archived-chat-fork';
+import {
+  type ReconciledSamDispatch,
+  reconcileSamDispatch,
+  type SamDispatchReservation,
+  validateSamDispatchReservation,
+} from './sam-dispatch-reservation';
 import { getInitialTaskTitle, schedulePostSubmitWork } from './task-submit-title';
 
 /** Default max task message length. Override via MAX_TASK_MESSAGE_LENGTH env var. */
@@ -76,8 +82,10 @@ export async function submitTask(
   waitUntil: (promise: Promise<unknown>) => void,
   via: string = 'web',
   clientName?: string,
-  repositoryAccess?: (project: schema.Project) => Promise<unknown>
-): Promise<SubmitTaskResponse> {
+  repositoryAccess?: (project: schema.Project) => Promise<unknown>,
+  samReservation?: SamDispatchReservation,
+  assertEffectAllowed?: () => Promise<void>
+): Promise<SubmitTaskResponse | ReconciledSamDispatch> {
   let taskEffectsStarted = false;
   let operation: TaskSubmitOperation = 'project_authorization';
   try {
@@ -90,6 +98,8 @@ export async function submitTask(
       via,
       clientName,
       repositoryAccess,
+      samReservation,
+      assertEffectAllowed,
       () => {
         taskEffectsStarted = true;
       },
@@ -121,16 +131,22 @@ async function submitTaskImplementation(
   via: string,
   clientName: string | undefined,
   repositoryAccess: ((project: schema.Project) => Promise<unknown>) | undefined,
+  samReservation: SamDispatchReservation | undefined,
+  assertEffectAllowed: (() => Promise<void>) | undefined,
   beforeTaskEffects: () => void,
   setOperation: (operation: TaskSubmitOperation) => void,
   getOperation: () => TaskSubmitOperation
-): Promise<SubmitTaskResponse> {
+): Promise<SubmitTaskResponse | ReconciledSamDispatch> {
   const userId = user.id;
   const db = drizzle(env.DATABASE, { schema });
 
   if (!projectId) {
     throw errors.badRequest('projectId is required');
   }
+  if (via === 'sam' && !samReservation) {
+    throw errors.badRequest('SAM dispatch requires a durable reservation');
+  }
+  if (samReservation) validateSamDispatchReservation(samReservation, via);
 
   // Validate ownership
   const project = await requireProjectCapability(db, projectId, userId, 'task:write');
@@ -142,6 +158,10 @@ async function submitTaskImplementation(
   setOperation('repository_authorization');
   if (repositoryAccess) await repositoryAccess(project);
   else await requireRepositoryAccess(env, db, project, userId);
+  if (samReservation) {
+    const previous = await reconcileSamDispatch(env, userId, projectId, samReservation);
+    if (previous) return previous;
+  }
 
   // Validated by Valibot middleware
 
@@ -298,7 +318,7 @@ async function submitTaskImplementation(
   }
 
   const message = fork ? body.message : body.message.trim();
-  const taskId = ulid();
+  const taskId = samReservation?.taskId ?? ulid();
   const now = new Date().toISOString();
 
   // Generate branch name from message (R6 algorithm)
@@ -317,9 +337,9 @@ async function submitTaskImplementation(
       ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, env)
       : null;
   const preferredProvider = resolvedProfile?.provider ?? project.defaultProvider;
-  // REST preserves its explicit-Instant-only contract; automatic Connector starts
+  // REST preserves its explicit-Instant-only contract; automatic Connector/SAM starts
   // may use runtime selection, but VM-only fields always request VM placement.
-  const connectorStart = via === 'connector' || via === 'pat';
+  const connectorStart = via === 'connector' || via === 'pat' || via === 'sam';
   const hasVmOverrides = !!(
     body.nodeId ||
     body.vmSize ||
@@ -356,6 +376,8 @@ async function submitTaskImplementation(
     );
     const result = await submitInstantTask({
       beforeTaskEffects,
+      samReservation,
+      assertEffectAllowed,
       db,
       env: env,
       waitUntil: (promise) => waitUntil(promise),
@@ -539,10 +561,12 @@ async function submitTaskImplementation(
   const { enrichedMessage } = await enrichMessageWithMentions(message, db, projectId, userId, env);
 
   // Mark before issuing SQL: an insert error may have an uncertain commit outcome.
+  await assertEffectAllowed?.();
   beforeTaskEffects();
   setOperation('task_insert');
   await db.insert(schema.tasks).values({
     id: taskId,
+    chatSessionId: samReservation?.sessionId,
     projectId,
     userId,
     parentTaskId: body.parentTaskId ?? null,
@@ -576,7 +600,7 @@ async function submitTaskImplementation(
   // Record status event: null -> queued
   setOperation('task_status_event_insert');
   await db.insert(schema.taskStatusEvents).values({
-    id: ulid(),
+    id: samReservation?.statusEventId ?? ulid(),
     taskId,
     fromStatus: null,
     toStatus: 'queued',
@@ -600,7 +624,8 @@ async function submitTaskImplementation(
       null, // workspaceId — linked later by TaskRunner DO when workspace is created
       taskTitle,
       taskId,
-      userId
+      userId,
+      ...(samReservation ? ([samReservation.sessionId] as const) : ([] as const))
     );
 
     setOperation('task_session_link');
@@ -628,9 +653,18 @@ async function submitTaskImplementation(
     setOperation('initial_message_persist');
     // Persist initial user message — REQUIRED.
     // The user's message must be in the session before we return.
-    await projectDataService.persistMessage(env, projectId, sessionId, 'user', message, null);
+    await projectDataService.persistMessage(
+      env,
+      projectId,
+      sessionId,
+      'user',
+      message,
+      null,
+      ...(samReservation ? ([samReservation.initialMessageId] as const) : ([] as const))
+    );
   } catch (err) {
     markTaskSubmitOperation(err, getOperation());
+    if (samReservation) throw err;
     // Session creation or message persistence failed — mark task as failed
     // to prevent orphaned 'queued' records that the task runner can't process.
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -684,6 +718,7 @@ async function submitTaskImplementation(
   // TDF-6: Pass sessionId so the DO links it to the workspace instead of creating a new one.
   try {
     setOperation('runner_start');
+    await assertEffectAllowed?.();
     await startTaskRunnerDO(env, {
       taskId,
       projectId,
@@ -737,6 +772,9 @@ async function submitTaskImplementation(
       vmSizeSource,
     });
   } catch (err) {
+    // The reserved identities remain authoritative after a lost acknowledgement.
+    // Recovery observes them; it never starts another task or fails a live runner.
+    if (samReservation) throw err;
     // TaskRunner DO startup failed — mark task as failed.
     markTaskSubmitOperation(err, getOperation());
     const errorMsg = err instanceof Error ? err.message : String(err);

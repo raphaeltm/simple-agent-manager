@@ -42,6 +42,8 @@ function assertGeneration(db: D1Database, generation: number): void {
 }
 /** Honor shorter legacy convergence windows, including zero, within the safety ceiling. */
 export function adminSettingCacheMs(env: Env, name: AdminSettingName): number {
+  // A long-lived SamSession must observe an installation stop before its next effect.
+  if (name === 'operations.samOperatorDisabled') return 0;
   const ceiling =
     name === 'trials.enabled' ||
     name === 'operations.cronSweepsEnabled' ||
@@ -296,6 +298,11 @@ async function resolved(
   credentials?: CredentialRow[],
   fresh = false
 ) {
+  // Keep the effective value shown to admins consistent with the installation brake.
+  if (def.name === 'operations.samOperatorDisabled' && env.SAM_OPERATOR_DISABLED === 'true') {
+    const emergency = environmentDetails(env, def, secretValue);
+    if (emergency) return emergency;
+  }
   const stored = def.credential
     ? await credentialDetails(env, def, secretValue, credentials)
     : await overrideDetails(env, def, rows, fresh);
@@ -375,6 +382,8 @@ function outageValue(
   def: AdminSettingDefinition,
   name: AdminSettingName
 ): AdminSettingValue {
+  // This switch has inverse polarity: true is the safe state on a settings outage.
+  if (name === 'operations.samOperatorDisabled') return true;
   if (
     def.legacyEnvironment &&
     typeof env[def.legacyEnvironment] === 'string' &&
