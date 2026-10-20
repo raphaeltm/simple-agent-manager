@@ -64,7 +64,7 @@ function fixture() {
   const controller = new OperatorController(ctx, env, createSqlStorage(privateDatabase));
   controller.store.bindUser('alice');
   controller.store.setEnabled(true);
-  return { database, env, controller };
+  return { database, privateDatabase, env, controller };
 }
 
 function request(path: string, body: unknown, method = 'POST') {
@@ -135,6 +135,74 @@ function pauseMembershipRead(env: Env, table = 'project_members') {
 }
 
 describe('SAM operator authorization and effect fencing', () => {
+  it.each([
+    {
+      operation: 'sam_work_stop',
+      endpoint: 'confirm',
+      input: { projectId: 'project-alice', taskId: 42 },
+      approval: true,
+    },
+    {
+      operation: 'sam_chat_start',
+      endpoint: 'reconcile',
+      input: { projectId: 'project-alice', message: 42 },
+      approval: false,
+    },
+  ])(
+    'rejects schema-invalid stored $operation input on $endpoint without changing receipts or executing effects',
+    async ({ operation, endpoint, input, approval }) => {
+      const f = fixture();
+      const { turn } = toolsFor(f);
+      const actionId = `invalid-${endpoint}`;
+      f.controller.store.reserveAction(
+        actionId,
+        turn.id,
+        operation,
+        JSON.stringify(input),
+        approval
+      );
+      if (!approval) {
+        f.controller.store.finishAction(actionId, 'uncertain', {
+          message: 'Previous admission outcome remains unknown',
+        });
+      }
+      const receiptBefore = f.controller.store.action(actionId);
+      const turnBefore = f.controller.store.turn(turn.id);
+      const tasksBefore = f.database.prepare('SELECT * FROM tasks ORDER BY id').all();
+      const eventsBefore = f.database.prepare('SELECT * FROM task_status_events ORDER BY id').all();
+      const projectBoundary = vi.fn(() => {
+        throw new Error('Invalid stored input must not reach the project boundary');
+      });
+      f.env.PROJECT_DATA = {
+        idFromName: (projectId: string) => projectId,
+        get: projectBoundary,
+      } as unknown as Env['PROJECT_DATA'];
+
+      // Repeating a malformed historical receipt must remain a pre-effect rejection,
+      // not turn approval into uncertainty or reserve replacement dispatch identities.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const response = await f.controller.handle(
+          request(`/actions/${actionId}/${endpoint}`, { approved: true })
+        );
+        expect(response?.status).toBe(409);
+        expect(await response?.json()).toMatchObject({
+          error: 'invalid_receipt',
+          rejectedBeforeEffects: true,
+        });
+        expect(f.controller.store.action(actionId)).toEqual(receiptBefore);
+        expect(f.controller.store.turn(turn.id)).toEqual(turnBefore);
+        expect(
+          f.privateDatabase.prepare('SELECT * FROM operator_dispatch_reservations').all()
+        ).toEqual([]);
+        expect(f.database.prepare('SELECT * FROM tasks ORDER BY id').all()).toEqual(tasksBefore);
+        expect(f.database.prepare('SELECT * FROM task_status_events ORDER BY id').all()).toEqual(
+          eventsBefore
+        );
+      }
+      expect(projectBoundary).not.toHaveBeenCalled();
+    }
+  );
+
   it('executes an authorized idea once and returns the durable receipt on a repeated tool call', async () => {
     const f = fixture();
     const { execute, turn } = toolsFor(f);

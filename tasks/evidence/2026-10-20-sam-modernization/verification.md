@@ -26,3 +26,11 @@ After resolving authentication:
 6. Complete final-head CI/security/specialist review and CodeRabbit gate, then merge and verify exact production commit/deployment and minimal default-off smoke. Never enable real users.
 
 The canonical source was recovered in full (63,451 characters). Full settings/connections/compute/automation/deployment parity and general standing autonomy remain later roadmap stages, explicitly documented in the architecture decision and user guide.
+
+## CI correction follow-up
+
+Runtime controls now live only in the existing typed admin-settings registry; the five proposed environment overrides and all deployment forwarding were removed. The uncached fail-closed kill switch is retained. There is no infrastructure/deployment-path diff from main.
+
+The latest correction passed36 settings/work/security tests (including15 security cases),50 admin-settings tests,19 native Worker tests,61 deployment-generator baseline tests, API typecheck/lint, runtime-tunable/AST gates and14 scheduler cases. Stored invalid operation receipts now return409 before effects; both confirmation and reconciliation are regression-tested. The task submission entry-point wrapper was separated from its implementation to meet the file-size gate;95 relevant submission/dispatch tests passed, with one existing skip excluded.
+
+Secret scanning reported shifted existing synthetic Worker fixtures. Their original positions were restored without changing fixture values or the reviewed baseline. The current-tree scan passes with49 reviewed findings and zero new findings. PR preflight evidence validation also passes locally. Full CI and all live release gates remain pending.

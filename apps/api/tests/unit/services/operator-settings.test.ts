@@ -37,14 +37,12 @@ describe('typed SAM operator runtime settings', () => {
     expect(sqlite.prepare('SELECT * FROM platform_settings').all()).toEqual([]);
   });
 
-  it('supports validated environment fallbacks for existing deployments', async () => {
-    Object.assign(env, {
-      SAM_OPERATOR_DISABLED: 'true',
-      SAM_OPERATOR_WATCH_LIFETIME_MS: '120000',
-      SAM_OPERATOR_EVENT_PAGE_SIZE: '10',
-      SAM_OPERATOR_WORK_REFRESH_MS: '5000',
-      SAM_OPERATOR_WATCH_RETRY_LIMIT: '4',
-    });
+  it('resolves validated stored controls and exposes the same effective admin values', async () => {
+    set('operations.samOperatorDisabled', true);
+    set('operations.samOperatorWatchLifetimeMs', 120_000);
+    set('operations.samOperatorEventPageSize', 10);
+    set('operations.samOperatorWorkRefreshMs', 5_000);
+    set('operations.samOperatorWatchRetryLimit', 4);
     expect(await getOperatorSettings(env)).toEqual({
       disabled: true,
       watchLifetimeMs: 120_000,
@@ -52,18 +50,22 @@ describe('typed SAM operator runtime settings', () => {
       workRefreshMs: 5_000,
       watchRetryLimit: 4,
     });
-  });
-
-  it('prefers stored numeric settings but preserves the emergency environment brake', async () => {
-    env.SAM_OPERATOR_DISABLED = 'true';
-    env.SAM_OPERATOR_EVENT_PAGE_SIZE = '10';
-    set('operations.samOperatorDisabled', false);
-    set('operations.samOperatorEventPageSize', 25);
-    expect(await getOperatorSettings(env)).toMatchObject({ disabled: true, eventPageSize: 25 });
     const view = await readAdminSettings(env);
     expect(
       view.settings.find((setting) => setting.name === 'operations.samOperatorDisabled')
-    ).toMatchObject({ value: true, source: 'environment' });
+    ).toMatchObject({ value: true, source: 'database' });
+  });
+
+  it('keeps the new operator controls exclusively in the typed registry', () => {
+    for (const name of [
+      'operations.samOperatorDisabled',
+      'operations.samOperatorWatchLifetimeMs',
+      'operations.samOperatorEventPageSize',
+      'operations.samOperatorWorkRefreshMs',
+      'operations.samOperatorWatchRetryLimit',
+    ]) {
+      expect(findAdminSetting(name)?.legacyEnvironment).toBeUndefined();
+    }
   });
 
   it('observes kill-switch edits immediately on a long-lived binding without cache invalidation', async () => {
@@ -81,8 +83,8 @@ describe('typed SAM operator runtime settings', () => {
     expect((await getOperatorSettings(env)).workRefreshMs).toBe(12_000);
   });
 
-  it('fails disabled when the settings store is unavailable, even with an explicit false environment value', async () => {
-    env.SAM_OPERATOR_DISABLED = 'false';
+  it('fails disabled when the settings store is unavailable, even after a stored false was read', async () => {
+    set('operations.samOperatorDisabled', false);
     await getOperatorSettings(env);
     vi.spyOn(env.DATABASE, 'prepare').mockImplementation(() => {
       throw new Error('D1 outage');
@@ -109,7 +111,7 @@ describe('typed SAM operator runtime settings', () => {
     }
     expect(findAdminSetting('operations.samOperatorEventPageSize')!.validate(26)).toBe(false);
     expect(findAdminSetting('operations.samOperatorWatchRetryLimit')!.validate(26)).toBe(false);
-    env.SAM_OPERATOR_EVENT_PAGE_SIZE = 'not-a-number';
+    set('operations.samOperatorEventPageSize', 'not-a-number');
     set('operations.samOperatorWorkRefreshMs', -1);
     expect(await getOperatorSettings(env)).toMatchObject({
       eventPageSize: 25,

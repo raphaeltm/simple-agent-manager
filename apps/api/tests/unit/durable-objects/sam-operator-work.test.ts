@@ -70,6 +70,8 @@ function fixture(events: ProjectEventSubscriptionEventSummary[] = [event('event-
     schema.platformSettings,
   ]);
   database.exec(`
+    INSERT INTO platform_settings(key,value,updated_at,updated_by)
+      VALUES('operations.samOperatorEventPageSize','1','2026-10-20T00:00:00.000Z',NULL);
     INSERT INTO users(id,name,email,status,role) VALUES
       ('alice','Alice','alice@example.com','active','user'),
       ('bob','Bob','bob@example.com','active','user');
@@ -121,7 +123,6 @@ function fixture(events: ProjectEventSubscriptionEventSummary[] = [event('event-
   const env = {
     DATABASE: createSqliteD1(database),
     BASE_DOMAIN: 'example.com',
-    SAM_OPERATOR_EVENT_PAGE_SIZE: '1',
     PROJECT_DATA: {
       idFromName: (projectId: string) => projectId,
       get: () => ({
@@ -325,7 +326,11 @@ describe('SAM background work canonical event boundary', () => {
 
   it('bounds cold-watch I/O and visible work even when history requests a larger page', async () => {
     const f = fixture([]);
-    f.env.SAM_OPERATOR_EVENT_PAGE_SIZE = String(MAX_SAM_OPERATOR_EVENT_PAGE_SIZE);
+    f.database
+      .prepare(
+        "UPDATE platform_settings SET value=? WHERE key='operations.samOperatorEventPageSize'"
+      )
+      .run(String(MAX_SAM_OPERATOR_EVENT_PAGE_SIZE));
     f.env.SAM_HISTORY_LOAD_LIMIT = '10000';
     for (let i = 0; i < MAX_SAM_OPERATOR_EVENT_PAGE_SIZE + 5; i++) {
       f.controller.work.track(
@@ -369,7 +374,11 @@ describe('SAM background work canonical event boundary', () => {
 
   it('reaches valid work behind a saturated permanently failing page and stops retries at the budget', async () => {
     const f = fixture();
-    f.env.SAM_OPERATOR_EVENT_PAGE_SIZE = String(MAX_SAM_OPERATOR_EVENT_PAGE_SIZE);
+    f.database
+      .prepare(
+        "UPDATE platform_settings SET value=? WHERE key='operations.samOperatorEventPageSize'"
+      )
+      .run(String(MAX_SAM_OPERATOR_EVENT_PAGE_SIZE));
     f.database.prepare("UPDATE tasks SET status='completed'").run();
     for (let i = 0; i < MAX_SAM_OPERATOR_EVENT_PAGE_SIZE; i++) {
       f.controller.work.track(

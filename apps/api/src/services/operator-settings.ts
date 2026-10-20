@@ -21,8 +21,8 @@ export async function getOperatorSettings(env: Env): Promise<OperatorSettings> {
       resolveAdminSetting(env, 'operations.samOperatorWatchRetryLimit'),
     ]);
   return {
-    // An installation environment brake cannot be undone by a database edit.
-    disabled: env.SAM_OPERATOR_DISABLED === 'true' || disabled !== false,
+    // The registry resolves the uncached installation switch fail-closed.
+    disabled: disabled !== false,
     watchLifetimeMs:
       typeof watchLifetimeMs === 'number' ? watchLifetimeMs : OPERATOR_DEFAULTS.watchLifetimeMs,
     eventPageSize:

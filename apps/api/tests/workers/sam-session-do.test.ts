@@ -63,13 +63,15 @@ function modelReply(text = 'Hello from the actual Mastra runtime', stream = fals
 }
 
 async function setup(enabled = true) {
+  await env.DATABASE.prepare(
+    "DELETE FROM platform_settings WHERE key='operations.samOperatorDisabled'"
+  ).run();
   const userId = `sam-worker-${crypto.randomUUID()}`;
   await env.DATABASE.prepare("INSERT INTO users(id,email,name,status) VALUES(?,?,?,'active')")
     .bind(userId, `${userId}@example.test`, 'SAM Worker Test')
     .run();
   const stub = env.SAM_SESSION.get(env.SAM_SESSION.idFromName(userId)) as SamRuntimeStub;
   await stub.testEnvironment({
-    SAM_OPERATOR_DISABLED: 'false',
     SAM_RATE_LIMIT_RPM: '30',
     SAM_MODEL: MODEL,
   });
@@ -641,7 +643,11 @@ describe('SamSession durable operator in workerd', () => {
 
   it('enforces the installation kill switch even for an opted-in user', async () => {
     const { request, stub } = await setup();
-    await stub.testEnvironment({ SAM_OPERATOR_DISABLED: 'true' });
+    await env.DATABASE.prepare(
+      "INSERT INTO platform_settings(key,value,updated_at,updated_by) VALUES('operations.samOperatorDisabled','true',?,NULL)"
+    )
+      .bind(new Date().toISOString())
+      .run();
     expect(await (await request('/settings')).json()).toMatchObject({
       enabled: true,
       available: false,

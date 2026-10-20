@@ -23,8 +23,6 @@ interface Watch {
   next_check_at: number;
 }
 
-const ACTIVE_WATCH = "status NOT IN ('completed','failed','cancelled','watch_failed')";
-
 /** A bounded, record-only consumer of the existing canonical project event backbone. */
 export class OperatorWork {
   private settings: OperatorSettings = { ...OPERATOR_DEFAULTS };
@@ -103,7 +101,7 @@ export class OperatorWork {
     const row = this.sql
       .exec(
         `SELECT MIN(MIN(expires_at,MAX(next_check_at,?))) AS deadline
-       FROM operator_work WHERE generation=? AND expires_at>? AND ${ACTIVE_WATCH}`,
+       FROM operator_work WHERE generation=? AND expires_at>? AND status NOT IN ('completed','failed','cancelled','watch_failed')`,
         now,
         generation,
         now
@@ -141,7 +139,7 @@ export class OperatorWork {
     const page = (after: string) =>
       this.sql
         .exec<Watch & Record<string, SqlStorageValue>>(
-          `SELECT * FROM operator_work WHERE generation=? AND expires_at>? AND ${ACTIVE_WATCH} AND next_check_at<=? AND action_id>? ORDER BY action_id LIMIT ?`,
+          `SELECT * FROM operator_work WHERE generation=? AND expires_at>? AND status NOT IN ('completed','failed','cancelled','watch_failed') AND next_check_at<=? AND action_id>? ORDER BY action_id LIMIT ?`,
           generation,
           Date.now(),
           Date.now(),
@@ -167,7 +165,7 @@ export class OperatorWork {
       const nextCheck = Date.now() + this.settings.workRefreshMs;
       const claimed = this.sql.exec(
         `UPDATE operator_work SET failure_count=failure_count+1,next_check_at=?
-         WHERE action_id=? AND generation=? AND expires_at=? AND next_check_at<=? AND expires_at>? AND ${ACTIVE_WATCH}`,
+         WHERE action_id=? AND generation=? AND expires_at=? AND next_check_at<=? AND expires_at>? AND status NOT IN ('completed','failed','cancelled','watch_failed')`,
         nextCheck,
         row.action_id,
         row.generation,

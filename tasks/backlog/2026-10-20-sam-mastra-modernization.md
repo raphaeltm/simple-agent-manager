@@ -50,3 +50,5 @@ Existing `SAM_PLAYWRIGHT_PRIMARY_USER` is present but staging `POST https://api.
 ## Delivery checkpoint
 
 Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2386. Implementation commit: `4727aeb5e367d70909a146ec87ec62cc3ee01c2a`. Screenshot evidence comment: https://github.com/raphaeltm/simple-agent-manager/pull/2386#issuecomment-6288048540. CI running; staging blocked as above. Task and release remain incomplete.
+
+CI corrections: admin registry only (no new Env controls or deployment diff), explicit invalid-receipt409, SQL predicates without interpolation, submission wrapper split with narrow writer inventory location updated. Local quality/security/native checks pass; see verification evidence. Existing synthetic fixture positions restored; current-tree secret scan passes with zero new findings. PR remains draft and live staging credential blocker persists.

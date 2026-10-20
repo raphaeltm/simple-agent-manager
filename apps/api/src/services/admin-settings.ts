@@ -298,11 +298,6 @@ async function resolved(
   credentials?: CredentialRow[],
   fresh = false
 ) {
-  // Keep the effective value shown to admins consistent with the installation brake.
-  if (def.name === 'operations.samOperatorDisabled' && env.SAM_OPERATOR_DISABLED === 'true') {
-    const emergency = environmentDetails(env, def, secretValue);
-    if (emergency) return emergency;
-  }
   const stored = def.credential
     ? await credentialDetails(env, def, secretValue, credentials)
     : await overrideDetails(env, def, rows, fresh);

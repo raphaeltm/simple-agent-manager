@@ -1507,11 +1507,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   /** Max changed files returned by an Artifacts compare before truncating (default: 300). */
   REPO_BROWSE_MAX_COMPARE_FILES?: string;
   // SAM Agent (Top-Level Agent) configuration
-  SAM_OPERATOR_WATCH_LIFETIME_MS?: string; // Bounded own-work event watch lifetime (default: 86400000)
-  SAM_OPERATOR_EVENT_PAGE_SIZE?: string; // Watches, events per watch, and visible cards (default/max: 25)
-  SAM_OPERATOR_WORK_REFRESH_MS?: string; // Own-work refresh cadence (default: 30000)
-  SAM_OPERATOR_WATCH_RETRY_LIMIT?: string; // Consecutive failed watch refreshes before stopping updates (default: 3)
-  SAM_OPERATOR_DISABLED?: string; // Emergency kill switch; user opt-in is separately required
   SAM_MODEL?: string; // LLM model (default: claude-sonnet-5)
   SAM_MAX_TOKENS?: string; // Max output tokens per turn (default: 4096)
   SAM_MAX_TURNS?: string; // Max tool-use loop iterations (default: 20)

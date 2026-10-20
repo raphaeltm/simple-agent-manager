@@ -227,7 +227,14 @@ export class OperatorController {
         return json({ action: await actionProjection(this.env, userId)(action) });
       const operation = operations.find((item) => item.name === 'sam_chat_start');
       if (!operation) return reject('unavailable', 'Dispatch is unavailable', 503);
-      const input = v.parse(operation.input, JSON.parse(action.input_json));
+      const checkedInput = v.safeParse(operation.input, JSON.parse(action.input_json));
+      if (!checkedInput.success)
+        return reject(
+          'invalid_receipt',
+          'Recorded action no longer matches its operation schema.',
+          409
+        );
+      const input = checkedInput.output;
       try {
         const result = await operation.run(
           {
@@ -295,7 +302,14 @@ export class OperatorController {
       const operation = operations.find((item) => item.name === action.operation);
       if (!operation || operation.kind !== 'destructive')
         return json({ error: 'conflict', message: 'Action is no longer supported' }, 409);
-      const input = v.parse(operation.input, JSON.parse(action.input_json));
+      const checkedInput = v.safeParse(operation.input, JSON.parse(action.input_json));
+      if (!checkedInput.success)
+        return reject(
+          'invalid_receipt',
+          'Recorded action no longer matches its operation schema.',
+          409
+        );
+      const input = checkedInput.output;
       this.store.finishAction(action.id, 'uncertain', {
         message: 'User confirmed; outcome not yet confirmed',
       });

@@ -36,9 +36,7 @@ export default defineConfig({
         __dirname,
         './tests/workers/support/cloudflare-sandbox-stub.ts'
       ),
-      // src/index.ts eagerly registers Mastra consumers. The native SAM runtime
-      // suite exercises the real library; this pool keeps its dynamic loader
-      // away from that graph and throws if an unrelated test crosses the seam.
+      // Native SAM tests exercise real Mastra; this pool's stub rejects accidental use.
       '@mastra/core/llm': resolve(__dirname, './tests/workers/support/mastra-agent-stub.ts'),
       '@mastra/core/tools': resolve(__dirname, './tests/workers/support/mastra-agent-stub.ts'),
       '@mastra/core/agent': resolve(__dirname, './tests/workers/support/mastra-agent-stub.ts'),
