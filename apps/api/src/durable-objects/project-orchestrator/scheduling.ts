@@ -5,8 +5,6 @@
  * handoff packets, recompute scheduler states, detect stalls, and
  * log decisions.
  */
-import type { HandoffFact } from '@simple-agent-manager/shared';
-import type { HandoffPacket } from '@simple-agent-manager/shared';
 import type { OrchestratorConfig } from '@simple-agent-manager/shared';
 import type { VMSize } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
@@ -30,6 +28,7 @@ import { reconcileWorkflowRun } from '../../services/workflow-reconcile';
 import type { WorkflowRunRow } from '../../services/workflow-runs';
 import { mapRows } from '../row-validation';
 import { logDecision } from './decision-log';
+import { buildHandoffContent, parseRoutableHandoff } from './handoff-content';
 import { detectStalls, resolveActiveSessionIdsForTaskIds } from './stall-detection';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -41,25 +40,6 @@ interface TaskRow {
   mission_id: string | null;
   updated_at: string;
 }
-
-type RoutableHandoff = Pick<
-  HandoffPacket,
-  'id' | 'summary' | 'facts' | 'openQuestions' | 'suggestedActions'
->;
-
-const handoffFactObjectSchema = v.object({
-  key: v.optional(v.string()),
-  value: v.optional(v.string()),
-  fact: v.optional(v.string()),
-});
-
-const routableHandoffSchema = v.object({
-  id: v.string(),
-  summary: v.string(),
-  facts: v.optional(v.array(v.union([v.string(), handoffFactObjectSchema]))),
-  openQuestions: v.optional(v.array(v.string())),
-  suggestedActions: v.optional(v.array(v.string())),
-});
 
 /**
  * `SELECT mission_id, status, registered_at FROM orchestrator_missions ...`
@@ -767,52 +747,4 @@ async function routeHandoffsForTask(
     `Routed ${handoffs.length} handoff(s) to ${dependentTaskIds.length} dependent task(s)`,
     now
   );
-}
-
-/** Build a readable content string from a handoff packet for durable message delivery. */
-function buildHandoffContent(fromTaskId: string, handoff: RoutableHandoff): string {
-  const parts: string[] = [
-    `Handoff from task ${fromTaskId}:`,
-    '',
-    `**Summary:** ${handoff.summary}`,
-  ];
-  if (handoff.facts.length > 0) {
-    const facts = handoff.facts.map((fact) => `- ${fact.key}: ${fact.value}`).join('\n');
-    parts.push('', `**Key Facts:**\n${facts}`);
-  }
-  if (handoff.openQuestions.length > 0) {
-    const qs = handoff.openQuestions.map((q) => `- ${q}`).join('\n');
-    parts.push('', `**Open Questions:**\n${qs}`);
-  }
-  if (handoff.suggestedActions.length > 0) {
-    const acts = handoff.suggestedActions.map((a) => `- ${a}`).join('\n');
-    parts.push('', `**Suggested Actions:**\n${acts}`);
-  }
-  return parts.join('\n');
-}
-
-function parseRoutableHandoff(value: unknown): RoutableHandoff | null {
-  const parsed = v.safeParse(routableHandoffSchema, value);
-  if (!parsed.success) return null;
-
-  return {
-    id: parsed.output.id,
-    summary: parsed.output.summary,
-    facts: readHandoffFacts(parsed.output.facts),
-    openQuestions: parsed.output.openQuestions ?? [],
-    suggestedActions: parsed.output.suggestedActions ?? [],
-  };
-}
-
-function readHandoffFacts(
-  value: NonNullable<v.InferOutput<typeof routableHandoffSchema>['facts']> | undefined
-): HandoffFact[] {
-  return (value ?? []).flatMap((item): HandoffFact[] => {
-    if (typeof item === 'string') {
-      return [{ key: 'fact', value: item }];
-    }
-    const key = item.key ? item.key : item.fact ? 'fact' : null;
-    const factValue = item.value ? item.value : (item.fact ?? null);
-    return key && factValue ? [{ key, value: factValue }] : [];
-  });
 }

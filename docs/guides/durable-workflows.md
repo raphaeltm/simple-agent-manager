@@ -13,9 +13,26 @@ Call `start_workflow_run` with a stable `requestKey` and a `plan`:
     "title": "Write and review a document",
     "goal": "Produce a reviewed project Library document",
     "steps": [
-      { "key": "draft", "title": "Draft", "instructions": "Write a draft in the project Library and report its file ID.", "agentProfileId": "YOUR_PROFILE_ID" },
-      { "key": "review", "title": "Review", "instructions": "Read the draft from the predecessor result and publish review feedback in the Library.", "agentProfileId": "YOUR_PROFILE_ID", "after": ["draft"] },
-      { "key": "revise", "title": "Revise", "instructions": "Apply the review feedback and report the final Library file ID.", "agentProfileId": "YOUR_PROFILE_ID", "after": ["draft", "review"] }
+      {
+        "key": "draft",
+        "title": "Draft",
+        "instructions": "Write a draft in the project Library and report its file ID.",
+        "agentProfileId": "YOUR_PROFILE_ID"
+      },
+      {
+        "key": "review",
+        "title": "Review",
+        "instructions": "Read the draft from the predecessor result and publish review feedback in the Library.",
+        "agentProfileId": "YOUR_PROFILE_ID",
+        "after": ["draft"]
+      },
+      {
+        "key": "revise",
+        "title": "Revise",
+        "instructions": "Apply the review feedback and report the final Library file ID.",
+        "agentProfileId": "YOUR_PROFILE_ID",
+        "after": ["draft", "review"]
+      }
     ]
   }
 }

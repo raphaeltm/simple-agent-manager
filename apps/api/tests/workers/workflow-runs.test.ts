@@ -408,6 +408,7 @@ describe('durable workflow execution', () => {
       (await getWorkflowRun(testEnv, f.input.projectId, f.input.userId, f.run.runId)).status
     ).toBe('needs_attention');
     expect(f.start).toHaveBeenCalledTimes(1);
+    expect((await startWorkflowRun(testEnv, f.input)).status).toBe('needs_attention');
   });
 
   it('preserves active-run history after delivery outbox retention', async () => {

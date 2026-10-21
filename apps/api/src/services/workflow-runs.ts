@@ -90,7 +90,11 @@ export async function startWorkflowRun(
     if (existing.workflow_plan_fingerprint !== fingerprint)
       throw new Error('requestKey already belongs to a different workflow plan');
     if (existing.status === 'active') await startOrchestration(env, input.projectId, existing.id);
-    return { runId: existing.id, status: existing.status, reused: true };
+    return {
+      runId: existing.id,
+      status: existing.status === 'failed' ? 'needs_attention' : existing.status,
+      reused: true,
+    };
   }
   const parent = await env.DATABASE.prepare(
     `SELECT t.dispatch_depth, t.status,
@@ -210,7 +214,11 @@ export async function startWorkflowRun(
       .bind(input.projectId, input.userId, input.requestKey)
       .first<WorkflowRunRow>();
     if (winner?.workflow_plan_fingerprint === fingerprint)
-      return { runId: winner.id, status: winner.status, reused: true };
+      return {
+        runId: winner.id,
+        status: winner.status === 'failed' ? 'needs_attention' : winner.status,
+        reused: true,
+      };
     if (winner) throw new Error('requestKey already belongs to a different workflow plan');
     throw new Error('Could not reserve workflow; check the active-run limit', { cause: error });
   }

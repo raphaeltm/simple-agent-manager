@@ -29,9 +29,11 @@ CREATE TABLE mission_steps (
 );
 CREATE INDEX idx_mission_steps_task ON mission_steps(task_id);
 
--- Checkpoints are a leaf table: no table references it. Rebuild solely to widen
--- source_kind; copy every column and recreate every existing index. tasks and
--- task_status_events (FK parents) are never dropped or changed.
+-- Preserve the old checkpoint table as a migration archive while widening its
+-- source_kind CHECK. No table references this leaf. Copy every column and
+-- recreate every current index; no persisted table or row is dropped.
+-- The archive is historical, not a rollback source: new writes use only the
+-- canonical table, and parent deletions still cascade into archived rows.
 CREATE TABLE task_submission_checkpoints_workflow (
   task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -67,7 +69,12 @@ CREATE TABLE task_submission_checkpoints_workflow (
 
 
 INSERT INTO task_submission_checkpoints_workflow SELECT * FROM task_submission_checkpoints;
-DROP TABLE task_submission_checkpoints;
+ALTER TABLE task_submission_checkpoints RENAME TO task_submission_checkpoints_pre_workflow;
+DROP INDEX idx_task_submission_checkpoints_chat_session;
+DROP INDEX idx_task_submission_checkpoints_initial_message;
+DROP INDEX idx_task_submission_checkpoints_initial_status_event;
+DROP INDEX idx_task_submission_checkpoints_source;
+DROP INDEX idx_task_submission_checkpoints_state;
 ALTER TABLE task_submission_checkpoints_workflow RENAME TO task_submission_checkpoints;
 CREATE UNIQUE INDEX idx_task_submission_checkpoints_chat_session
   ON task_submission_checkpoints(chat_session_id);
