@@ -44,6 +44,8 @@ export function render(opts?: {
     type: 'div',
     props: {
       style: {
+        // Preserve the pre-0.62 layout: padding is included in the canvas size.
+        boxSizing: 'border-box',
         width: '100%',
         height: '100%',
         display: 'flex',
