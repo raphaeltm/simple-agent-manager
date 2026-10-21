@@ -1,7 +1,7 @@
 import { Button, PageLayout } from '@simple-agent-manager/ui';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Loader2, Settings } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
 import { EarlierSamHistory } from '../components/sam/EarlierSamHistory';
@@ -153,7 +153,11 @@ function SamConversation() {
       .flatMap((page) => page.turns) ?? [];
   const work = history.data?.pages[0]?.work ?? [];
   const scroll = useStickToBottom(turns[0]?.id);
-  const refresh = () => client.invalidateQueries({ queryKey: ['auth', scope, 'sam'] });
+  // Stable, so memoized turns that did not change skip re-rendering during live updates.
+  const refresh = useCallback(
+    () => client.invalidateQueries({ queryKey: ['auth', scope, 'sam'] }),
+    [client, scope]
+  );
   const active = turns.find(isActiveTurn);
   const live = useSamLiveTurn(active?.id, () => void refresh());
   useEffect(() => {

@@ -62,6 +62,11 @@ export function LiveProgress({
 }) {
   const phase = view?.phase ?? 'starting';
   const since = view?.startedAt ?? startedAt;
+  // Steps waiting for the user or with an unconfirmed outcome get their own action card
+  // with controls below; repeating them here without controls would say it twice.
+  const steps = (view?.activity ?? []).filter(
+    (step) => step.state !== 'needs_approval' && step.state !== 'uncertain'
+  );
   return (
     <div className="mt-1 min-w-0 space-y-2">
       <p className="flex min-w-0 items-center gap-2 text-sm text-fg-muted">
@@ -75,9 +80,9 @@ export function LiveProgress({
           </span>
         )}
       </p>
-      {view && view.activity.length > 0 && (
+      {steps.length > 0 && (
         <ul aria-label="What SAM is doing" className="space-y-1">
-          {view.activity.map((step) => (
+          {steps.map((step) => (
             <li key={step.id} className="flex min-w-0 items-start gap-1.5 text-xs text-fg-muted">
               <StepIcon state={step.state} />
               <span className="min-w-0 break-words">{describeLiveStep(step, projectNames)}</span>
@@ -91,7 +96,7 @@ export function LiveProgress({
       {view?.text ? (
         <RenderedMarkdown content={view.text} inline />
       ) : (
-        !view?.activity.length && (
+        !steps.length && (
           <p className="text-xs text-fg-muted">You can leave this page and come back.</p>
         )
       )}

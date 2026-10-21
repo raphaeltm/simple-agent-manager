@@ -1,5 +1,6 @@
 import { Alert } from '@simple-agent-manager/ui';
 import { Check } from 'lucide-react';
+import { memo } from 'react';
 
 import { RenderedMarkdown } from '../MarkdownRenderer';
 import { type Action, ActionCard } from './ActionCard';
@@ -29,7 +30,11 @@ function stateLabel(state: string): string | null {
   return state.replaceAll('_', ' ');
 }
 
-export function SamTurn({
+/**
+ * Memoized: while a turn streams, live updates re-render the conversation many times a
+ * second, and only the running turn's props change.
+ */
+export const SamTurn = memo(function SamTurn({
   turn,
   projectNames,
   refresh,
@@ -85,4 +90,4 @@ export function SamTurn({
       </div>
     </article>
   );
-}
+});

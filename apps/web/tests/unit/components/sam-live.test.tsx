@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -8,6 +8,7 @@ import {
   takeSseEvents,
   viewFromSnapshot,
 } from '../../../src/components/sam/sam-live';
+import { LiveProgress } from '../../../src/components/sam/LiveProgress';
 import { describeLiveStep } from '../../../src/components/sam/sam-receipts';
 import { useSamLiveTurn } from '../../../src/components/sam/useSamLiveTurn';
 
@@ -97,6 +98,30 @@ describe('live step labels', () => {
     expect(describeLiveStep({ id: 'x', operation: 'sam_new_tool', state: 'running' }, names)).toBe(
       'New tool…'
     );
+  });
+});
+
+describe('LiveProgress', () => {
+  it('leaves steps that wait for the user to their action card instead of repeating them', () => {
+    const view = viewFromSnapshot(
+      {
+        ...snapshot,
+        phase: 'working',
+        activity: [
+          { id: 'a', operation: 'sam_projects_list', state: 'completed', count: 2 },
+          { id: 'b', operation: 'sam_work_stop', state: 'needs_approval' },
+          { id: 'c', operation: 'sam_chat_start', state: 'uncertain' },
+        ],
+      },
+      Date.now()
+    );
+    render(<LiveProgress view={view} projectNames={new Map()} />);
+    expect(screen.getByRole('list', { name: 'What SAM is doing' })).toHaveTextContent(
+      'Listed 2 projects'
+    );
+    expect(screen.queryByText(/Waiting for your OK/)).toBeNull();
+    expect(screen.queryByText(/outcome not confirmed/)).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('Working');
   });
 });
 
