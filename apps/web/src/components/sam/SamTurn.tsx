@@ -1,8 +1,11 @@
 import { Alert } from '@simple-agent-manager/ui';
-import { Check, Loader2 } from 'lucide-react';
+import { Check } from 'lucide-react';
+import { memo } from 'react';
 
 import { RenderedMarkdown } from '../MarkdownRenderer';
 import { type Action, ActionCard } from './ActionCard';
+import { LiveProgress } from './LiveProgress';
+import type { LiveSnapshot, LiveView } from './sam-live';
 import { actionTarget, describeReads, isReadReceipt } from './sam-receipts';
 
 export interface Turn {
@@ -13,27 +16,39 @@ export interface Turn {
   response: string | null;
   error: string | null;
   actions: Action[];
+  /** Server epoch milliseconds. */
+  created_at?: number;
+  /** Progress of the running turn, carried by polled history (the stream supersedes it). */
+  live?: LiveSnapshot;
 }
 
 export const isActiveTurn = (turn: Turn) => turn.state === 'running' || turn.state === 'accepted';
 
 /** Completed turns need no label; every other state is worth a word. */
 function stateLabel(state: string): string | null {
-  if (state === 'completed') return null;
-  if (state === 'running' || state === 'accepted') return 'working';
+  if (state === 'completed' || state === 'running' || state === 'accepted') return null;
   return state.replaceAll('_', ' ');
 }
 
-export function SamTurn({
+/**
+ * Memoized: while a turn streams, live updates re-render the conversation many times a
+ * second, and only the running turn's props change.
+ */
+export const SamTurn = memo(function SamTurn({
   turn,
   projectNames,
   refresh,
+  live = null,
 }: {
   turn: Turn;
   projectNames: ReadonlyMap<string, string>;
   refresh: () => Promise<unknown>;
+  /** Live view of this turn while it runs. */
+  live?: LiveView | null;
 }) {
-  const reads = turn.actions.filter(isReadReceipt);
+  const active = isActiveTurn(turn);
+  // While running, the live step list says the same thing as the read summary, sooner.
+  const reads = active ? [] : turn.actions.filter(isReadReceipt);
   const effects = turn.actions.filter((action) => !isReadReceipt(action));
   const label = stateLabel(turn.state);
   return (
@@ -46,17 +61,14 @@ export function SamTurn({
       </div>
       <div className="min-w-0">
         <p className="text-xs font-medium text-fg-muted">SAM{label ? ` · ${label}` : ''}</p>
+        {active && (
+          <LiveProgress view={live} startedAt={turn.created_at} projectNames={projectNames} />
+        )}
         {turn.response && <RenderedMarkdown content={turn.response} inline />}
         {turn.error && (
           <Alert variant="warning" className="mt-2">
             {turn.error}
           </Alert>
-        )}
-        {isActiveTurn(turn) && (
-          <p className="mt-2 inline-flex items-center gap-2 text-sm text-fg-muted" role="status">
-            <Loader2 size={14} aria-hidden="true" className="motion-safe:animate-spin" />
-            Working… You can leave this page and return.
-          </p>
         )}
         {reads.length > 0 && (
           <p className="mt-2 flex items-start gap-1.5 text-xs text-fg-muted">
@@ -78,4 +90,4 @@ export function SamTurn({
       </div>
     </article>
   );
-}
+});

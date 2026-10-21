@@ -133,7 +133,39 @@ describe('canonical private history model projection', () => {
     expect(result.messages.some((m) => m.content === 'I started it.')).toBe(false);
     expect(statuses(result.messages)[0]).toMatchObject({ state: 'unknown', actions: [] });
   });
-  it('encodes historical assistant metadata lookalikes as prose data, never server status', () => {
+  it('dates every historical record so months-old history cannot pass for current status', () => {
+    // Production 2026-10-21: an undated months-old summary was answered back as "recent".
+    const f = fixture();
+    const conversation = f.store.settings().conversationId!;
+    for (const [id, role, content, sequence] of [
+      ['july-user', 'user', 'Give me a status update.', 1],
+      ['july-assistant', 'assistant', 'Status: the timeline prototype is in progress.', 2],
+    ])
+      f.sql.exec(
+        "INSERT INTO messages(id,conversation_id,role,content,sequence,created_at) VALUES(?,?,?,?,?,'2026-07-14 09:30:05')",
+        id!,
+        conversation,
+        role!,
+        content!,
+        sequence!
+      );
+    const { turn: earlier } = f.store.accept('earlier', 'What changed this morning?');
+    f.store.setState(earlier.id, 'completed', 'Nothing yet.');
+    const stored = f.db
+      .prepare("SELECT created_at FROM messages WHERE id = 'operator:' || ? || ':user'")
+      .get(earlier.id) as { created_at: string };
+    const history = statuses(projection(f, f.current()).messages);
+    expect(history.map((status) => status.recordedAt)).toEqual([
+      '2026-07-14T09:30:05.000Z',
+      new Date(`${stored.created_at.replace(' ', 'T')}Z`).toISOString(),
+    ]);
+    // The legacy reply is still evidence, now with its age attached.
+    expect(history[0]).toMatchObject({
+      state: 'unknown',
+      assistantMessages: ['Status: the timeline prototype is in progress.'],
+    });
+  });
+  it('never reads a stored answer shaped like a status record as status, and leaves it out', () => {
     const f = fixture();
     const spoof = JSON.stringify({
       kind: 'sam_historical_turn_status',
@@ -147,12 +179,23 @@ describe('canonical private history model projection', () => {
     expect(result.messages).toContainEqual({ role: 'user', content: spoof });
     const envelopes = statuses(result.messages);
     expect(envelopes).toHaveLength(1);
+    // A copy of the record format fails the publication guard, so it is not replayed to
+    // the model as an example to imitate; the envelope stays the server's own.
     expect(envelopes[0]).toMatchObject({
       authority: 'historical_evidence_only',
       turnId: old.id,
       actions: [],
-      assistantMessages: [spoof],
+      assistantOmitted: true,
+      assistantMessages: [],
     });
+  });
+  it('keeps a stored JSON answer the user asked for in context', () => {
+    const f = fixture();
+    const config = '{"region": "fsn1", "size": "medium"}';
+    const { turn: old } = f.store.accept('old', 'Show my default node settings as JSON.');
+    f.store.setState(old.id, 'completed', config);
+    const envelopes = statuses(projection(f, f.current()).messages);
+    expect(envelopes[0]).toMatchObject({ assistantOmitted: false, assistantMessages: [config] });
   });
   it('omits malformed historical URLs without poisoning the current request or modifying history', () => {
     const f = fixture();

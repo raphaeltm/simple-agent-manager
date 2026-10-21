@@ -15,7 +15,7 @@ Use [Admin → Settings](/docs/guides/admin-settings/) for Phase 1 OAuth, Connec
 
 ## Private SAM assistant runtime controls
 
-Use the typed **Operations** admin settings below for live configuration. All five are non-secret settings stored in D1. User opt-in is a separate per-user setting and defaults to off; clearing the installation switch never enables SAM for a user.
+Use the typed **Operations** admin settings below for live configuration. All eight are non-secret settings stored in D1. User opt-in is a separate per-user setting and defaults to off; clearing the installation switch never enables SAM for a user.
 
 | Admin setting key                       | Default    | Permitted range and meaning                                                                                                         |
 | --------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -24,6 +24,9 @@ Use the typed **Operations** admin settings below for live configuration. All fi
 | `operations.samOperatorEventPageSize`   | `25`       | Integer `1`–`25`; maximum watches per scan, events per watch, and visible work cards.                                               |
 | `operations.samOperatorWorkRefreshMs`   | `30000`    | Integer `1000`–`2147483647`; durable own-work refresh cadence in milliseconds, separate from browser refresh.                       |
 | `operations.samOperatorWatchRetryLimit` | `3`        | Integer `1`–`25`; consecutive failed watch refreshes before updates stop. Successful pulls or requested follow-ups reset the count. |
+| `operations.samOperatorStreamFlushMs` | `80` | Integer `16`–`2000`; milliseconds between live updates while the assistant answers. |
+| `operations.samOperatorStreamHeartbeatMs` | `15000` | Integer `1000`–`120000`; keep-alive interval on a live answer stream. |
+| `operations.samOperatorStreamMaxSubscribers` | `4` | Integer `1`–`20`; browser tabs that can follow one answer live at the same time. |
 
 Each refresh selects at most 25 watches and reads at most 25 events per watch: at most 325 caller D1 reads, 75 cold ProjectData RPCs, and 625 local event-reference inserts, plus fixed alarm setup. A work-card read performs at most 75 D1 reads. Each watch persists its next check and charges an attempt before I/O; the alarm uses the earliest watch deadline. Failed watches defer until that deadline and stop after the retry limit, with a visible update warning. The watch lifetime also stops observation independently; neither condition cancels project work.
 
@@ -31,7 +34,7 @@ Admin setting overrides take precedence over registry defaults. The disabled set
 
 Sources: `apps/api/src/services/operator-settings.ts`, `admin-settings-registry.ts`, and `apps/api/src/durable-objects/sam-session/operator/work.ts`.
 
-The assistant reuses existing `SAM_MODEL`, context/window, tool-result and model-step limits from `resolveSamConfig`, plus `SAM_LLM_TIMEOUT_MS` (operator fallback `120000`). Operator turn admission uses `SAM_MESSAGE_MAX_LENGTH` with a `16000`-character fallback; legacy subtask-message readers can have a different fallback. No new provider API key is required specifically for enabling the assistant: it uses the installation's supported platform AI configuration and usage gate.
+The assistant reuses existing `SAM_MODEL` (the deployed `wrangler.toml` value is `@cf/zai-org/glm-5.3-flash`, which needs the Workers Paid plan or prepaid AI Gateway credits, like the rest of SAM; code default `claude-sonnet-5`), context/window, tool-result and model-step limits from `resolveSamConfig`, plus `SAM_LLM_TIMEOUT_MS` (operator fallback `120000`). Operator turn admission uses `SAM_MESSAGE_MAX_LENGTH` with a `16000`-character fallback; legacy subtask-message readers can have a different fallback. No new provider API key is required specifically for enabling the assistant: it uses the installation's supported platform AI configuration and usage gate.
 
 ## Platform Secrets
 
@@ -1721,6 +1724,9 @@ Project event MCP tools use the ProjectData event limits above: `PROJECT_EVENT_L
 | `VITE_AUTOMATION_MAX_CHANNEL_PAGES`          | `5`                | Channel catalog pages read on **Behind the scenes → Channels**                                       |
 | `VITE_SAM_SETTINGS_POLL_MS`                  | `10000`            | Private SAM preference/availability polling in milliseconds; pauses in hidden tabs                    |
 | `VITE_SAM_ACTIVE_POLL_MS`                    | `2000`             | Private SAM polling while turns, actions or tracked project work remain active; pauses in hidden tabs |
+| `VITE_SAM_STREAMING_POLL_MS`                 | `15000`            | Private SAM safety-net polling while the running turn's live stream is connected                      |
+| `VITE_SAM_STREAM_RECONNECT_MS`               | `1500`             | Delay step before reopening a dropped live SAM stream (grows with each attempt)                       |
+| `VITE_SAM_STREAM_MAX_RECONNECTS`             | `5`                | Live SAM stream reconnect attempts per turn before relying on polling alone                           |
 
 
 ### Query cache persistence

@@ -12,6 +12,11 @@ import {
 /** Skill field properties = shared config fields + skill-specific extras. */
 const SKILL_FIELD_PROPERTIES = {
   ...SHARED_CONFIG_FIELD_PROPERTIES,
+  agentType: {
+    type: ['string', 'null'],
+    description:
+      'Optional agent type override (e.g., claude-code, openai-codex). Leave unset so the run uses the agent of the profile chosen for it; a skill only overrides what it sets. null or an empty string clears the override.',
+  },
   resourceRequirementsJson: {
     type: ['string', 'null'],
     description:
@@ -57,7 +62,7 @@ export const SKILL_TOOLS = [
     name: 'create_skill',
     description:
       'Create a new skill in the current project. Skills define reusable, repeatable-work configurations ' +
-      'that override the resolved agent profile when a task runs the skill. ' +
+      'layered on the resolved agent profile when a task runs the skill: only the fields a skill sets override the profile. ' +
       VALID_VALUES_HINT,
     inputSchema: {
       type: 'object' as const,

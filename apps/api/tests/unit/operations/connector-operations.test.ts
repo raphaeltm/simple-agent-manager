@@ -167,7 +167,12 @@ describe('connector operations current membership and creator authority', () => 
     });
     mocks.notifications.mockResolvedValue({
       notifications: [
-        { id: 'visible', projectId: 'project', title: 'Visible' },
+        {
+          id: 'visible',
+          projectId: 'project',
+          title: 'Visible',
+          createdAt: '2026-07-14T09:30:00.000Z',
+        },
         { id: 'secret', projectId: 'secret', title: 'Secret' },
       ],
     });
@@ -221,6 +226,9 @@ describe('connector operations current membership and creator authority', () => 
     expect(inbox.pending).toHaveLength(1);
     expect(inbox.notifications.map((n) => n.id)).toEqual(['visible']);
     expect(inbox.pending[0]?.link).toContain('/projects/project/chat/chat');
+    // Undated inbox items let a months-old notification pass for news (2026-10-21).
+    expect(inbox.pending[0]?.updatedAt).toBe(new Date(20).toISOString());
+    expect(inbox.notifications[0]?.createdAt).toBe('2026-07-14T09:30:00.000Z');
     mocks.snapshot.mockClear();
     expect((await samInboxGet.run(ctx('colleague'), {})).pending).toEqual([]);
     expect(mocks.snapshot).not.toHaveBeenCalled();

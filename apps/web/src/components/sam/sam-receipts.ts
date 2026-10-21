@@ -1,5 +1,6 @@
 import { ApiClientError } from '../../lib/api/client';
 import type { Action } from './ActionCard';
+import type { LiveActivity } from './sam-live';
 
 /**
  * Plain-language names for the operations SAM may record. The server projection
@@ -91,6 +92,13 @@ export function describeReads(actions: Action[]): string {
   ];
   if (labels.length <= 1) return labels.join('');
   return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
+/** Tool names the model mentions while thinking, in the words the step lines use. */
+export function humanizeThinking(text: string): string {
+  return text.replace(/\bsam_[a-z_]+\b/g, (name) =>
+    ACTION_TITLES[name] ? `“${ACTION_TITLES[name]}”` : name
+  );
 }
 
 export function effectTitle(operation: string): string {
@@ -210,4 +218,128 @@ export function requestErrorText(cause: unknown, fallback: string): string {
   if (cause instanceof ApiClientError) return cause.message;
   if (cause instanceof TypeError) return 'Couldn’t reach SAM. Check your connection and try again.';
   return cause instanceof Error ? cause.message : fallback;
+}
+
+interface StepContext {
+  project?: string;
+  query?: string;
+  limit?: number;
+  status?: string;
+  count?: number;
+}
+
+const count = (value: number | undefined, word: string, plural = `${word}s`) =>
+  value === undefined ? `${plural}` : `${value} ${value === 1 ? word : plural}`;
+const where = (context: StepContext) => (context.project ? ` in ${context.project}` : '');
+const quoted = (value: string | undefined) => (value ? ` for “${value}”` : '');
+
+/** What a live step is doing, then what it did. Plain words; inputs only describe the step. */
+const STEP_WORDS: Record<
+  string,
+  { running: (context: StepContext) => string; done: (context: StepContext) => string }
+> = {
+  sam_projects_list: {
+    running: () => 'Listing your projects',
+    done: (c) => `Listed ${count(c.count, 'project')}`,
+  },
+  sam_inbox_get: { running: () => 'Checking your inbox', done: () => 'Checked your inbox' },
+  sam_project_get: {
+    running: (c) => `Opening ${c.project ?? 'a project'}`,
+    done: (c) => `Opened ${c.project ?? 'a project'}`,
+  },
+  sam_chats_list: {
+    running: (c) => `Listing ${c.status ? `${c.status} ` : ''}chats${where(c)}`,
+    done: (c) => `Found ${count(c.count, 'chat')}${where(c)}`,
+  },
+  sam_chats_search: {
+    running: (c) => `Searching chats${quoted(c.query)}`,
+    done: (c) => `Found ${count(c.count, 'matching chat')}`,
+  },
+  sam_chat_read: {
+    running: (c) => `Reading a chat${where(c)}`,
+    done: (c) => `Read a chat${where(c)}`,
+  },
+  sam_tasks_list: {
+    running: (c) => {
+      if (c.query) return `Searching tasks${quoted(c.query)}${where(c)}`;
+      const limit = c.limit ? `${c.limit} ` : '';
+      const status = c.status ? `${c.status} ` : '';
+      return `Looking through your ${limit}most recent ${status}tasks${where(c)}`;
+    },
+    done: (c) =>
+      c.query
+        ? `Found ${count(c.count, 'matching task')}`
+        : `Read ${count(c.count, 'recent task')}${where(c)}`,
+  },
+  sam_task_get: {
+    running: (c) => `Opening a task${where(c)}`,
+    done: (c) => `Opened a task${where(c)}`,
+  },
+  sam_ideas_search: {
+    running: (c) => (c.query ? `Searching ideas${quoted(c.query)}` : 'Looking through your ideas'),
+    done: (c) => `Found ${count(c.count, 'idea')}`,
+  },
+  sam_idea_get: { running: () => 'Opening an idea', done: () => 'Opened an idea' },
+  sam_profiles_list: {
+    running: () => 'Listing agent profiles',
+    done: (c) => `Listed ${count(c.count, 'agent profile')}`,
+  },
+  sam_private_history_search: {
+    running: (c) => `Searching your earlier SAM conversations${quoted(c.query)}`,
+    done: () => 'Searched your earlier SAM conversations',
+  },
+  sam_chat_start: {
+    running: (c) => `Starting work${where(c)}`,
+    done: (c) => `Started work${where(c)}`,
+  },
+  sam_chat_send: {
+    running: (c) => `Sending a reply${where(c)}`,
+    done: (c) => `Sent a reply${where(c)}`,
+  },
+  sam_work_stop: {
+    running: (c) => `Preparing to stop work${where(c)}`,
+    done: (c) => `Stopped work${where(c)}`,
+  },
+  sam_agent_answer: {
+    running: () => 'Preparing an answer for an agent',
+    done: () => 'Answered an agent',
+  },
+  sam_idea_create: { running: () => 'Creating an idea', done: () => 'Created an idea' },
+  sam_idea_update: { running: () => 'Updating an idea', done: () => 'Updated an idea' },
+};
+
+/** One line for a live step, from its operation, descriptive inputs and result count. */
+export function describeLiveStep(
+  step: LiveActivity,
+  projectNames: ReadonlyMap<string, string>
+): string {
+  const target = step.target ?? {};
+  const projectId = typeof target.projectId === 'string' ? target.projectId : undefined;
+  const context: StepContext = {
+    project: projectId ? (projectNames.get(projectId) ?? 'a project') : undefined,
+    query: typeof target.query === 'string' ? target.query : undefined,
+    limit: typeof target.limit === 'number' ? target.limit : undefined,
+    status: typeof target.status === 'string' ? target.status.replaceAll('_', ' ') : undefined,
+    count: step.count,
+  };
+  const words = STEP_WORDS[step.operation] ?? {
+    running: () => humanize(step.operation),
+    done: () => humanize(step.operation),
+  };
+  switch (step.state) {
+    case 'running':
+      return `${words.running(context)}…`;
+    case 'completed':
+      return `${words.done(context)}${step.more ? ' (more available)' : ''}`;
+    case 'needs_approval':
+      return `Waiting for your OK: ${lowerFirst(words.running(context))}`;
+    case 'uncertain':
+      return `${words.running(context)}: outcome not confirmed yet`;
+    case 'failed':
+      return `Couldn’t finish: ${lowerFirst(words.running(context))}`;
+  }
+}
+
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1);
 }

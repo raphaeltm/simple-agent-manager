@@ -4,16 +4,13 @@ import * as v from 'valibot';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { parsePositiveInt } from '../../../lib/route-helpers';
-import { operations } from '../../../operations/registry';
 import { OPERATOR_DEFAULTS } from '../../../services/admin-settings-registry';
 import { getOperatorSettings, type OperatorSettings } from '../../../services/operator-settings';
+import { handleActionRoute } from './action-routes';
 import { runOperatorAgent } from './agent';
-import {
-  assertOperatorAccount,
-  assertOperatorExecution,
-  assertOperatorResource,
-} from './operations';
-import { actionProjection } from './projection';
+import { OperatorLive } from './live';
+import { assertOperatorAccount, assertOperatorExecution } from './operations';
+import { actionProjection, projectAccessCache } from './projection';
 import { OperatorStore } from './store';
 import { OperatorWork } from './work';
 
@@ -35,6 +32,11 @@ export class OperatorController {
   readonly store: OperatorStore;
   readonly work: OperatorWork;
   private runtimeSettings: OperatorSettings = { ...OPERATOR_DEFAULTS };
+  readonly live = new OperatorLive(() => ({
+    flushMs: this.runtimeSettings.streamFlushMs,
+    heartbeatMs: this.runtimeSettings.streamHeartbeatMs,
+    maxSubscribers: this.runtimeSettings.streamMaxSubscribers,
+  }));
   private runner: Promise<void> | null = null;
   private abort: AbortController | null = null;
 
@@ -119,14 +121,23 @@ export class OperatorController {
       const oldest = turns[0];
       const userId = this.store.settings().userId;
       if (!userId) return reject('forbidden', 'User identity required', 403);
-      const projectAction = actionProjection(this.env, userId);
-      const projectedTurns = await Promise.all(
-        turns.map(async (turn) => ({
-          ...turn,
-          actions: await Promise.all(this.store.actions(turn.id).map(projectAction)),
-        }))
-      );
-      const work = await this.work.view(userId);
+      // Receipts and work cards share one membership check per project, and run together.
+      const projectAccess = projectAccessCache(this.env, userId);
+      const projectAction = actionProjection(this.env, userId, projectAccess);
+      const [projectedTurns, work] = await Promise.all([
+        Promise.all(
+          turns.map(async (turn) => {
+            // Polling clients (no stream) still see the running turn's progress.
+            const live = this.live.snapshot(turn.id);
+            return {
+              ...turn,
+              actions: await Promise.all(this.store.actions(turn.id).map(projectAction)),
+              ...(live ? { live } : {}),
+            };
+          })
+        ),
+        this.work.view(userId, projectAccess),
+      ]);
       await assertOperatorExecution(this.env, userId);
       if (!this.enabled()) return reject('sam_disabled', 'SAM is disabled', 403);
       return json({
@@ -186,6 +197,15 @@ export class OperatorController {
       this.start();
       return json({ ...accepted, accepted: true }, accepted.replayed ? 200 : 202);
     }
+    const stream = path.match(/^\/turns\/([^/]+)\/stream$/);
+    if (stream?.[1] && request.method === 'GET') {
+      const userId = request.headers.get('x-sam-user-id');
+      if (!userId || userId !== this.store.settings().userId)
+        return reject('forbidden', 'User identity mismatch', 403);
+      await assertOperatorExecution(this.env, userId);
+      if (!this.enabled()) return reject('sam_disabled', 'SAM is disabled', 403);
+      return this.live.subscribe(stream[1]);
+    }
     const seen = path.match(/^\/updates\/([^/]+)\/seen$/);
     if (seen?.[1] && request.method === 'POST') {
       const userId = request.headers.get('x-sam-user-id');
@@ -214,133 +234,17 @@ export class OperatorController {
       }
       return json({ turn: this.store.turn(turn.id) });
     }
-    const reconcile = path.match(/^\/actions\/([^/]+)\/reconcile$/);
-    if (reconcile?.[1] && request.method === 'POST') {
-      const userId = request.headers.get('x-sam-user-id');
-      if (!userId || userId !== this.store.settings().userId)
-        return reject('forbidden', 'User identity mismatch', 403);
-      await assertOperatorExecution(this.env, userId);
-      const action = this.store.action(reconcile[1]);
-      if (!action || action.operation !== 'sam_chat_start')
-        return reject('not_found', 'Dispatch action not found', 404);
-      if (action.state !== 'uncertain')
-        return json({ action: await actionProjection(this.env, userId)(action) });
-      const operation = operations.find((item) => item.name === 'sam_chat_start');
-      if (!operation) return reject('unavailable', 'Dispatch is unavailable', 503);
-      const checkedInput = v.safeParse(operation.input, JSON.parse(action.input_json));
-      if (!checkedInput.success)
-        return reject(
-          'invalid_receipt',
-          'Recorded action no longer matches its operation schema.',
-          409
-        );
-      const input = checkedInput.output;
-      try {
-        const result = await operation.run(
-          {
-            env: this.env,
-            actor: { userId, via: 'sam', scopes: new Set(['sam.read', 'sam.write']) },
-            requestId: action.id,
-            idempotencyKey: action.id,
-            samDispatchReservation: {
-              ...this.store.dispatchReservation(action.id),
-              reconcileOnly: true,
-            },
-            assertEffectAllowed: async () => {
-              await assertOperatorExecution(this.env, userId);
-              await assertOperatorResource(this.env, userId, input);
-              if (!this.enabled()) throw new Error('SAM disabled');
-            },
-            execCtx: { waitUntil: this.ctx.waitUntil.bind(this.ctx) } as ExecutionContext,
-          },
-          input as never
-        );
-        if (!this.enabled()) return reject('sam_disabled', 'SAM is disabled', 403);
-        const uncertain =
-          !!result &&
-          typeof result === 'object' &&
-          'dispatchState' in result &&
-          result.dispatchState === 'uncertain';
-        this.store.finishAction(action.id, uncertain ? 'uncertain' : 'completed', result);
-      } catch {
-        // An absent or inaccessible receipt cannot prove that no effect happened.
-      }
-      const updated = this.store.action(action.id);
-      return json({ action: updated ? await actionProjection(this.env, userId)(updated) : null });
-    }
-    const confirmation = path.match(/^\/actions\/([^/]+)\/confirm$/);
-    if (confirmation?.[1] && request.method === 'POST') {
-      const parsed = v.safeParse(
-        v.object({ approved: v.boolean() }),
-        await request.json().catch(() => null)
-      );
-      if (!parsed.success)
-        return json(
-          { error: 'invalid_input', message: 'An explicit approval choice is required' },
-          400
-        );
-      const userId = request.headers.get('x-sam-user-id');
-      if (!userId || userId !== this.store.settings().userId)
-        return json({ error: 'forbidden', message: 'User identity mismatch' }, 403);
-      await assertOperatorExecution(this.env, userId);
-      const action = this.store.action(confirmation[1]);
-      const turn = action ? this.store.turn(action.turn_id) : null;
-      if (!action || !turn) return json({ error: 'not_found', message: 'Action not found' }, 404);
-      if (
-        !this.enabled() ||
-        turn.generation !== this.store.settings().generation ||
-        turn.state === 'cancelled'
-      )
-        return json({ error: 'sam_disabled', message: 'This action is no longer authorized' }, 403);
-      if (action.state !== 'approval_required')
-        return json({ action: await actionProjection(this.env, userId)(action) });
-      if (!parsed.output.approved) {
-        this.store.finishAction(action.id, 'rejected', { message: 'Declined by user' });
-        const updated = this.store.action(action.id);
-        return json({ action: updated ? await actionProjection(this.env, userId)(updated) : null });
-      }
-      const operation = operations.find((item) => item.name === action.operation);
-      if (!operation || operation.kind !== 'destructive')
-        return json({ error: 'conflict', message: 'Action is no longer supported' }, 409);
-      const checkedInput = v.safeParse(operation.input, JSON.parse(action.input_json));
-      if (!checkedInput.success)
-        return reject(
-          'invalid_receipt',
-          'Recorded action no longer matches its operation schema.',
-          409
-        );
-      const input = checkedInput.output;
-      this.store.finishAction(action.id, 'uncertain', {
-        message: 'User confirmed; outcome not yet confirmed',
-      });
-      try {
-        const result = await operation.run(
-          {
-            env: this.env,
-            actor: { userId, via: 'sam', scopes: new Set(['sam.read', 'sam.write']) },
-            requestId: action.id,
-            idempotencyKey: action.id,
-            assertEffectAllowed: async () => {
-              await assertOperatorExecution(this.env, userId);
-              await assertOperatorResource(this.env, userId, input);
-              if (
-                !this.enabled() ||
-                turn.generation !== this.store.settings().generation ||
-                this.store.turn(turn.id)?.state === 'cancelled'
-              )
-                throw new Error('Action fenced');
-            },
-            execCtx: { waitUntil: this.ctx.waitUntil.bind(this.ctx) } as ExecutionContext,
-          },
-          input as never
-        );
-        this.store.finishAction(action.id, 'completed', result);
-      } catch {
-        // Keep uncertain outcomes reserved. A repeated confirmation never repeats the effect.
-      }
-      const updated = this.store.action(action.id);
-      return json({ action: updated ? await actionProjection(this.env, userId)(updated) : null });
-    }
+    const actionResponse = await handleActionRoute(
+      {
+        env: this.env,
+        store: this.store,
+        enabled: () => this.enabled(),
+        waitUntil: this.ctx.waitUntil.bind(this.ctx),
+      },
+      request,
+      path
+    );
+    if (actionResponse) return actionResponse;
     // Legacy inference is intentionally closed; old tabs cannot bypass the new action ledger.
     if (path === '/chat')
       return json(
@@ -377,6 +281,8 @@ export class OperatorController {
     const userId = this.store.settings().userId;
     if (!userId) return;
     this.store.setState(turn.id, 'running');
+    // Before the first await, so a stream opened right after acceptance finds the turn live.
+    this.live.begin(turn.id);
     log.info('sam.operator.turn_started', { userId, turnId: turn.id, generation: turn.generation });
     this.abort = new AbortController();
     const timer = setTimeout(() => this.abort?.abort(), this.timeout());
@@ -399,6 +305,7 @@ export class OperatorController {
         onDispatch: (id, projectId, result) =>
           this.work.track(id, projectId, result, turn.generation),
         executionContext: { waitUntil: this.ctx.waitUntil.bind(this.ctx) },
+        live: this.live,
       });
       assertCurrent();
       this.store.setState(turn.id, 'completed', response);
@@ -417,10 +324,13 @@ export class OperatorController {
         );
     } finally {
       clearTimeout(timer);
+      const state = this.store.turn(turn.id)?.state ?? 'interrupted';
+      // The terminal state is stored, so the browser's refetch after `done` shows it.
+      this.live.end(turn.id, state);
       log.info('sam.operator.turn_finished', {
         userId,
         turnId: turn.id,
-        state: this.store.turn(turn.id)?.state,
+        state,
         durationMs: Date.now() - turn.created_at,
       });
       if (!this.store.active() || this.store.active()?.id === turn.id) {

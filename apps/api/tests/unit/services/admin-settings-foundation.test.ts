@@ -61,6 +61,13 @@ describe('Phase 1 settings registry', () => {
     expect(findAdminSetting('collaboration.commentNotificationWindowSeconds')?.defaultValue).toBe(
       600
     );
+    const usageWindow = findAdminSetting('chat.profileUsageWindowDays')!;
+    expect(usageWindow).toMatchObject({
+      defaultValue: 30,
+      category: 'Chat',
+      range: { min: 1, max: 365 },
+    });
+    for (const value of [0, 366, 1.5, '30']) expect(usageWindow.validate(value)).toBe(false);
     expect(findAdminSetting('feedback.projectId')).toBeUndefined();
     expect(findAdminSetting('integration.github.appPrivateKey')).toBeUndefined();
     expect(findAdminSetting('__proto__')).toBeUndefined();

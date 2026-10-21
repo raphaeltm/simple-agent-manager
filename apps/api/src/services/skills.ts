@@ -142,6 +142,16 @@ export async function getSkill(
   return toSkill(row);
 }
 
+/**
+ * A skill's agent override as stored: null leaves the agent to the chosen profile. An
+ * empty string means the same thing; clients whose tool schema types the field as a
+ * plain string send it to clear the override.
+ */
+function normalizeSkillAgentType(value: string | null | undefined): string | null | undefined {
+  if (value === undefined || value === null) return value;
+  return value.trim() || null;
+}
+
 export async function createSkill(
   db: Db,
   projectId: string,
@@ -151,11 +161,13 @@ export async function createSkill(
 ): Promise<AgentSkill> {
   const name = body.name?.trim();
   if (!name) throw errors.badRequest('name is required');
-  if (body.agentType && !isValidAgentType(body.agentType)) {
-    throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
+  // A skill only overrides what it sets: without an agent type the run uses the
+  // chosen profile's agent, so effort support is checked when the skill is resolved.
+  const createAgentType = normalizeSkillAgentType(body.agentType) ?? null;
+  if (createAgentType && !isValidAgentType(createAgentType)) {
+    throw errors.badRequest(`Invalid agent type: ${createAgentType}`);
   }
-  const createAgentType = body.agentType ?? env.DEFAULT_TASK_AGENT_TYPE ?? 'opencode';
-  if (body.effort && !isAgentEffortSupported(createAgentType, body.effort)) {
+  if (body.effort && createAgentType && !isAgentEffortSupported(createAgentType, body.effort)) {
     throw errors.badRequest(
       `Effort '${body.effort}' is not supported for agent type '${createAgentType}'`
     );
@@ -175,6 +187,8 @@ export async function createSkill(
     userId,
     name,
     ...baseProfileInsertValues(body, env),
+    // Never stamp the platform default agent on a skill (it would override the profile).
+    agentType: createAgentType,
     effort: body.effort ?? null,
     taskMode: body.taskMode ?? 'task',
     resourceRequirementsJson: serializeSkillResourceRequirements(body),
@@ -196,11 +210,12 @@ export async function updateSkill(
   if (skill.projectId !== projectId)
     throw errors.badRequest('Global skills must be edited through their own scope');
   if (skill.isBuiltin) throw errors.forbidden('Builtin skills cannot be modified');
-  if (body.agentType && !isValidAgentType(body.agentType)) {
-    throw errors.badRequest(`Invalid agent type: ${body.agentType}`);
+  const requestedAgentType = normalizeSkillAgentType(body.agentType);
+  if (requestedAgentType && !isValidAgentType(requestedAgentType)) {
+    throw errors.badRequest(`Invalid agent type: ${requestedAgentType}`);
   }
-  const updateAgentType = body.agentType ?? skill.agentType;
-  if (body.effort && !isAgentEffortSupported(updateAgentType, body.effort)) {
+  const updateAgentType = requestedAgentType !== undefined ? requestedAgentType : skill.agentType;
+  if (body.effort && updateAgentType && !isAgentEffortSupported(updateAgentType, body.effort)) {
     throw errors.badRequest(
       `Effort '${body.effort}' is not supported for agent type '${updateAgentType}'`
     );
@@ -220,7 +235,7 @@ export async function updateSkill(
   }
 
   const updates: Partial<schema.NewSkillRow> = { updatedAt: new Date().toISOString() };
-  applyBaseProfileUpdates(updates, body);
+  applyBaseProfileUpdates(updates, { ...body, agentType: requestedAgentType });
   if (body.effort !== undefined) {
     updates.effort = body.effort as AgentEffort | null;
   }
@@ -308,7 +323,15 @@ export async function resolveSkillProfile(
     [profile.systemPromptAppend, skill?.systemPromptAppend]
       .filter((value): value is string => Boolean(value?.trim()))
       .join('\n\n') || null;
-  const skillEffort = skill?.effort ?? null;
+  // `||`, not `??`: a blank override stored before blanks were normalized is still unset.
+  const agentType = skill?.agentType || profile.agentType;
+  // A skill that sets effort but not an agent can meet a profile whose agent lacks
+  // that effort level; keep the profile's effort rather than send an unsupported one.
+  const requestedSkillEffort = skill?.effort ?? null;
+  const skillEffort =
+    isAgentEffort(requestedSkillEffort) && isAgentEffortSupported(agentType, requestedSkillEffort)
+      ? requestedSkillEffort
+      : null;
   const skillRuntime = skill?.runtime ?? null;
 
   return {
@@ -316,9 +339,9 @@ export async function resolveSkillProfile(
     skillId: skill?.id ?? null,
     skillName: skill?.name ?? null,
     skillHint: skillNameOrId ?? null,
-    agentType: skill?.agentType ?? profile.agentType,
+    agentType,
     model: skill?.model ?? profile.model,
-    effort: isAgentEffort(skillEffort) ? skillEffort : profile.effort,
+    effort: skillEffort ?? profile.effort,
     permissionMode: skill?.permissionMode ?? profile.permissionMode,
     systemPromptAppend: promptAppend,
     maxTurns: skill?.maxTurns ?? profile.maxTurns,

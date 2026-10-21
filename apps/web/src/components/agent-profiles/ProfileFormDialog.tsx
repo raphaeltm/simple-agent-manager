@@ -494,7 +494,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               id="profile-description"
               value={description}
               onChange={(e) => setDescription(e.currentTarget.value)}
-              placeholder="What this profile is for..."
+              placeholder="What this profile is for. Shown on new-chat cards."
               disabled={saving}
               rows={3}
             />

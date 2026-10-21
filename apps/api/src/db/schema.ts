@@ -2139,6 +2139,29 @@ export const agentProfiles = sqliteTable(
 export type AgentProfileRow = typeof agentProfiles.$inferSelect;
 export type NewAgentProfileRow = typeof agentProfiles.$inferInsert;
 
+/** Per-person "hide from new chat" picker choices (migration 0201). A row exists only while hidden. */
+export const agentProfilePickerHidden = sqliteTable(
+  'agent_profile_picker_hidden',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => agentProfiles.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.projectId, table.profileId] }),
+    profileIdx: index('idx_agent_profile_picker_hidden_profile').on(table.profileId),
+  })
+);
+
 // =============================================================================
 // Skills (per-project repeatable-work definitions)
 // =============================================================================
@@ -2152,7 +2175,8 @@ export const skills = sqliteTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     description: text('description'),
-    agentType: text('agent_type').notNull().default('claude-code'),
+    /** null = use the agent of the profile chosen for the run (migration 0200). */
+    agentType: text('agent_type'),
     model: text('model'),
     effort: text('effort'),
     permissionMode: text('permission_mode'),

@@ -12,8 +12,8 @@
  *   DOCS_SHOTS=1 npx playwright test docs-screenshots-chat-states \
  *     --project="Desktop (1280x800)" --project="iPhone SE (375x667)"
  *
- * The committed PNGs were then palette-compressed (about 5x smaller, no visible change), from
- * apps/www: sharp(file).png({ palette: true, quality: 90, effort: 10, dither: 0.6 }).
+ * The committed PNGs were then palette-compressed (about 5x smaller, no visible change) with
+ * `pnpm --filter @simple-agent-manager/www compress:screenshots public/images/docs`.
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
 
@@ -294,6 +294,12 @@ async function setupMocks(page: Page, fixtures: SessionFixture[], overrides: Rou
     if (pathname === `/api/projects/${PROJECT_ID}/agent-profiles`) {
       return route.fulfill({ status: 200, json: AGENT_PROFILES });
     }
+    if (pathname === `/api/projects/${PROJECT_ID}/agent-profiles/picker`) {
+      return route.fulfill({
+        status: 200,
+        json: { usage: [], hiddenProfileIds: [], usageWindowDays: 30 },
+      });
+    }
     if (pathname in overrides) return route.fulfill({ status: 200, json: overrides[pathname] });
 
     return fulfillDocsChatRoute(route, {
@@ -464,7 +470,10 @@ function listPayload(fixtures: SessionFixture[]) {
 }
 
 async function forkExpiredChat(page: Page) {
-  await openExpiredChat(page, {
+  // Fork from the session tool rail, the guide's first path. The expired footer's own fork
+  // control now depends on the session's stored status (`SessionFooter.tsx`), which this
+  // fixture no longer matches: tasks/backlog/2026-10-21-docs-expired-chat-spec-drift.md.
+  await openChat(page, EXPIRED.id, EXPIRED_LIST, {
     [`/api/projects/${PROJECT_ID}/sessions`]: {
       sessions: listPayload(EXPIRED_LIST),
       total: EXPIRED_LIST.length,
@@ -474,7 +483,8 @@ async function forkExpiredChat(page: Page) {
       agents: [{ id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true }],
     },
   });
-  await page.getByRole('button', { name: 'Fork conversation' }).click();
+  await expect(page.getByText(/The saved workspace has expired/)).toBeVisible();
+  await page.getByRole('button', { name: /^Fork — start a new task/ }).click();
   await expect(page.getByText(`Forking from: ${EXPIRED.topic}`)).toBeVisible();
   const composer = page
     .getByRole('combobox')

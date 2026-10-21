@@ -19,11 +19,13 @@
     "check:links": "python3 scripts/check-doc-links.py",
     "optimize:features": "tsx scripts/optimize-feature-images.ts",
     "build:hero-layers": "tsx scripts/build-hero-layers.ts",
-    "build:feature-scenes": "tsx scripts/build-feature-scenes.ts"
+    "build:feature-scenes": "tsx scripts/build-feature-scenes.ts",
+    "compress:screenshots": "tsx scripts/compress-screenshots.ts"
   },
   "dependencies": {
     "@astrojs/sitemap": "3.7.4",
     "@astrojs/starlight": "0.40.0",
+    "@expressive-code/plugin-line-numbers": "0.43.1",
     "@simple-agent-manager/ui": "workspace:*",
     "astro": "6.4.8",
     "mermaid": "11.14.0"

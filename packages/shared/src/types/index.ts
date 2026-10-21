@@ -553,10 +553,13 @@ export type {
   GitHubCliPolicyPermissions,
   OpenCodeProvider,
   OpenCodeProviderMeta,
+  ProfilePickerState,
+  ProfilePickerUsage,
   ResolvedAgentProfile,
   ResolvedSkillProfile,
   SaveAgentSettingsRequest,
   UpdateAgentProfileRequest,
+  UpdateProfilePickerRequest,
   UpdateSkillRequest,
 } from './agent-settings';
 export {

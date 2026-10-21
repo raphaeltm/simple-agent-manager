@@ -109,8 +109,13 @@
   color-scheme: light;
 }
 
-/* --- Reset --- */
-*, *::before, *::after {
+/* --- Reset ---
+   Skips the inside of code blocks. Expressive Code (blog code) keeps its layout in a CSS
+   layer, which any unlayered rule beats, so this reset would zero all of its padding.
+   `:where()` keeps the selector's specificity at zero, as it was before. */
+*:where(:not(.expressive-code *)),
+*:where(:not(.expressive-code *))::before,
+*:where(:not(.expressive-code *))::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;

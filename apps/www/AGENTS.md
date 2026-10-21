@@ -10,7 +10,7 @@ Public marketing website, blog, and documentation at `simple-agent-manager.org`.
 |------|---------|
 | `astro.config.ts` | Astro/Starlight configuration, sidebar, integrations |
 | `src/content/docs/` | Starlight documentation pages (MDX/MD) |
-| `src/content/blog/` | Blog posts (MDX with frontmatter) |
+| `src/content/blog/` | Blog posts (Markdown with frontmatter) |
 | `src/pages/index.astro` | Landing page |
 | `src/components/Hero.astro` | Homepage hero: copy, glass node floor (`@simple-agent-manager/ui/glass/node-field`), real-UI stage, pause control |
 | `src/components/hero/` | Hero parts: `HeroStack` (desktop 3D stack), `HeroPhone` (mobile), `StreamingWindow` (transcript strip), `hero-motion.ts` (timeline, tilt, pause), `layers.ts` (themed layer styles) |
@@ -34,11 +34,13 @@ pnpm --filter @simple-agent-manager/www build     # Production build
 pnpm --filter @simple-agent-manager/www preview   # Preview production build
 pnpm --filter @simple-agent-manager/www build:hero-layers  # Rebuild hero layers after re-capturing hero screenshots
 pnpm --filter @simple-agent-manager/www build:feature-scenes  # Rebuild feature scene layers after editing a scene or re-capturing its sources
+pnpm --filter @simple-agent-manager/www compress:screenshots public/images/blog/<slug>  # Palette-compress committed docs/blog screenshots
 ```
 
 ## Conventions
 
-- Blog posts use MDX with YAML frontmatter (`title`, `date`, `author`, `category`, `tags`, `excerpt`; optional `draft`)
+- Blog posts are Markdown (`.md`; the collection does not load `.mdx`) with YAML frontmatter (`title`, `date`, `author`, `category`, `tags`, `excerpt`; optional `draft`). Posts about UI embed renders of the real app from `public/images/blog/<slug>/`; see "UI Renders" in `src/content/CLAUDE.md`
+- Code blocks in docs and blog are rendered by Expressive Code: plugins (line numbers, language tab) in `src/lib/expressive-code.ts`, registered in `astro.config.ts`. Blog pages give it Starlight's theme variables in `src/styles/blog-code.css`
 - Documentation lives in `src/content/docs/` following Starlight conventions
 - Assets are pre-built via `build:assets` (tracker script + blog Mermaid bundle)
 - Diagrams in content use Mermaid code fences (rendered client-side via `blog-mermaid.js`)
@@ -54,6 +56,7 @@ pnpm --filter @simple-agent-manager/www build:feature-scenes  # Rebuild feature 
 - Write or change homepage copy with the SAM skills `homepage-copy` (lead with the visitor's need, verify every claim in code or docs) and `humanizer` (remove AI-writing tells).
 - Scene boxes are source pixels. After re-capturing a source screenshot, re-run `build:feature-scenes` and check the boxes still outline the same UI (look at each scene; `homepage-scenes.spec.ts` writes every resting frame to `.codex/tmp/playwright-screenshots/`). Chips float in front of the window and perspective enlarges them, so they stay within 96% of the stage width (the window within 99%); `homepage-scenes.spec.ts` measures every layer at 11 widths in the intro and at rest.
 
+- Astro caches rendered Markdown, including each code block's `<link>` to the hashed `ec.*.css`, in `node_modules/.astro/data-store.json`. After changing Expressive Code settings, delete that file before building or previewing, or code blocks link a stylesheet that no longer exists and render unstyled. CI builds start clean.
 - `pnpm build:assets` runs before both `dev` and `build` — if you add new scripts, wire them there
 - The analytics tracker (`scripts/build-tracker.ts`) is bundled at build time, not at runtime
 - Do NOT confuse this with `apps/web/` — different stack (Astro vs React+Vite), different domain

@@ -326,7 +326,7 @@ Requirements resolve in this order, highest priority first:
 task  →  trigger  →  skill  →  agent profile  →  project  →  platform default
 ```
 
-- **Task** — the **Resources** control next to the chat composer, or the task submit form.
+- **Task** — the sliders button (**Chat options**) above the chat composer, or the task submit form.
   Use it for a one-off heavy job.
 - **Trigger** — the trigger form. Use it when scheduled or webhook work needs a different
   machine from interactive chat.

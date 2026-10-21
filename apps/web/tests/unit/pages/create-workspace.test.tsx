@@ -194,7 +194,8 @@ describe('CreateWorkspace', () => {
     expect(await screen.findByText('Checking prerequisites...')).toBeInTheDocument();
     expect(screen.getByText('Cloud Provider')).toBeInTheDocument();
     expect(screen.getByText('GitHub App Installation')).toBeInTheDocument();
-    expect(screen.getByText('Nodes')).toBeInTheDocument();
+    // The breadcrumb also says "Nodes"; this asserts the prerequisite row.
+    expect(screen.getByText('Nodes', { ignore: 'nav *' })).toBeInTheDocument();
   });
 
   it('shows individual prereq status as each resolves', async () => {

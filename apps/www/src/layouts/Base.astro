@@ -48,8 +48,9 @@ const apiUrl = `https://api.${baseDomain}`;
     <meta name="theme-color" content="#0b1110" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#f8fbf8" media="(prefers-color-scheme: light)" />
 
-    <!-- Content Security Policy -->
-    <meta http-equiv="Content-Security-Policy" content={`default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' https:; connect-src 'self' ${apiUrl}; frame-src 'none'; object-src 'none'; base-uri 'self'`} />
+    <!-- Content Security Policy. img-src allows data: because code blocks draw their copy
+         and terminal icons as inline SVG masks. -->
+    <meta http-equiv="Content-Security-Policy" content={`default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https:; connect-src 'self' ${apiUrl}; frame-src 'none'; object-src 'none'; base-uri 'self'`} />
 
     <!-- Canonical URL -->
     <link rel="canonical" href={`${siteUrl}${Astro.url.pathname}`} />
