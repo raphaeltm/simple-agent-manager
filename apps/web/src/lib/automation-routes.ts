@@ -26,6 +26,26 @@ export function isAutomationStart(value: string | null | undefined): value is Au
 
 export type BehindTab = 'waiting' | 'channels';
 
+/** Workflows list filters; `all` is the default and stays out of the URL. */
+export const WORKFLOW_FILTERS = ['all', 'active', 'needs_attention', 'completed'] as const;
+export type WorkflowFilter = (typeof WORKFLOW_FILTERS)[number];
+
+export function isWorkflowFilter(value: string | null | undefined): value is WorkflowFilter {
+  return WORKFLOW_FILTERS.includes(value as WorkflowFilter);
+}
+
+/** The run page's views. The default (no `view`) depends on the screen size. */
+export const WORKFLOW_RUN_VIEWS = ['steps', 'graph', 'activity'] as const;
+export type WorkflowRunView = (typeof WORKFLOW_RUN_VIEWS)[number];
+
+export function isWorkflowRunView(value: string | null | undefined): value is WorkflowRunView {
+  return WORKFLOW_RUN_VIEWS.includes(value as WorkflowRunView);
+}
+
+/** A chat in the project: the chats that automations start, message or run as workflow steps. */
+export const projectChatPath = (projectId: string, sessionId: string) =>
+  `/projects/${encodeURIComponent(projectId)}/chat/${encodeURIComponent(sessionId)}`;
+
 /** Overview list filters; also the target of old `?section=` links. */
 export const OVERVIEW_FILTERS = ['all', 'scheduled', 'reacting', 'once', 'stopped'] as const;
 export type OverviewFilter = (typeof OVERVIEW_FILTERS)[number];
@@ -69,6 +89,21 @@ export const automationPaths = {
     withQuery(`${root(projectId)}/behind`, {
       tab: options.tab === 'channels' ? 'channels' : undefined,
       sessionId: options.sessionId,
+    }),
+  /** Every workflow run in the project, optionally one status. */
+  workflows: (projectId: string, filter?: WorkflowFilter) =>
+    withQuery(`${root(projectId)}/workflows`, {
+      status: filter === 'all' ? undefined : filter,
+    }),
+  /** One run; `step` selects a step, `view` picks Steps, Graph or Activity. */
+  workflow: (
+    projectId: string,
+    runId: string,
+    options: { step?: string; view?: WorkflowRunView } = {}
+  ) =>
+    withQuery(`${root(projectId)}/workflows/${encodeURIComponent(runId)}`, {
+      view: options.view,
+      step: options.step,
     }),
 };
 

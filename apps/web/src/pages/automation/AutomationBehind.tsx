@@ -9,7 +9,7 @@ import { useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
-import { automationPaths, type BehindTab } from '../../lib/automation-routes';
+import { automationPaths, type BehindTab, projectChatPath } from '../../lib/automation-routes';
 import { subscriptionsQueryOptions } from '../../lib/query-options';
 import { useProjectContext } from '../ProjectContext';
 import { Channels } from './channels';
@@ -103,11 +103,7 @@ export function AutomationBehind() {
           subtitle="What this chat is waiting for, and what is set to message it."
         />
         <div className="flex flex-wrap gap-3">
-          <ButtonLink
-            to={`/projects/${encodeURIComponent(projectId)}/chat/${encodeURIComponent(sessionId)}`}
-          >
-            Open the chat
-          </ButtonLink>
+          <ButtonLink to={projectChatPath(projectId, sessionId)}>Open the chat</ButtonLink>
           <ButtonLink to={automationPaths.behind(projectId)}>Show the whole project</ButtonLink>
         </div>
         <ChatAutomation sessionId={sessionId} />

@@ -160,6 +160,14 @@ const AutomationBehind = lazyNamed(
   () => import('./pages/automation/AutomationBehind'),
   'AutomationBehind'
 );
+const WorkflowRuns = lazyNamed(
+  () => import('./pages/automation/workflows/WorkflowRuns'),
+  'WorkflowRuns'
+);
+const WorkflowRunPage = lazyNamed(
+  () => import('./pages/automation/workflows/WorkflowRunPage'),
+  'WorkflowRunPage'
+);
 const LegacyEventsRedirect = lazyNamed(
   () => import('./pages/automation/redirects'),
   'LegacyEventsRedirect'
@@ -359,7 +367,15 @@ export default function App() {
                         <Route path="automation/new" element={page(<AutomationEditor />)} />
                         <Route path="automation/history" element={page(<AutomationHistory />)} />
                         <Route path="automation/behind" element={page(<AutomationBehind />)} />
-                        <Route path="automation/:kind/:automationId" element={page(<AutomationDetail />)} />
+                        <Route path="automation/workflows" element={page(<WorkflowRuns />)} />
+                        <Route
+                          path="automation/workflows/:runId"
+                          element={page(<WorkflowRunPage />)}
+                        />
+                        <Route
+                          path="automation/:kind/:automationId"
+                          element={page(<AutomationDetail />)}
+                        />
                         <Route
                           path="automation/:kind/:automationId/edit"
                           element={page(<AutomationEditor />)}

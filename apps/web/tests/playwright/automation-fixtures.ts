@@ -669,6 +669,8 @@ export async function setupAutomationMocks(page: Page, options: AutomationMockOp
       });
     if (sub.startsWith('/event-channels'))
       return respond(200, { channels: options.empty ? [] : CHANNELS, nextCursor: null });
+    // Workflow audits register their own routes (workflow-fixtures.ts); the rest see none.
+    if (sub.startsWith('/workflows')) return respond(200, { runs: [], nextCursor: null });
     return respond(200, {});
   });
 }

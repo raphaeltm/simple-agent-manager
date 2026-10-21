@@ -30,6 +30,12 @@ import {
 } from './overview-sections';
 import { LoadError, Loading, Notice, Page, PageHeader } from './page';
 import { ButtonLink, KindIcon, Panel, SectionTitle } from './ui';
+import {
+  MoreWorkflowAttention,
+  useOverviewWorkflows,
+  WorkflowAttentionPanel,
+  WorkflowsPanel,
+} from './workflows/overview-workflows';
 
 function EmptyAutomation({ canWrite }: { canWrite: boolean }) {
   const { projectId } = useProjectContext();
@@ -93,6 +99,7 @@ export function AutomationOverview() {
   const access = useAutomationAccess();
   const lookups = useAutomationLookups(projectId);
   const data = useAutomationData(projectId);
+  const workflows = useOverviewWorkflows(projectId);
   const [params, setParams] = useSearchParams();
   const filterParam = params.get('filter');
   const filter: OverviewFilter = isOverviewFilter(filterParam) ? filterParam : 'all';
@@ -117,7 +124,7 @@ export function AutomationOverview() {
   const header = (
     <PageHeader
       title="Automation"
-      subtitle="Work that starts on its own: on a schedule, or when something happens."
+      subtitle="Work that starts on its own: on a schedule, when something happens, or as the next step of a workflow."
       action={
         access.canWrite ? (
           <ButtonLink to={automationPaths.create(projectId)} variant="primary" className="shrink-0">
@@ -165,12 +172,34 @@ export function AutomationOverview() {
     );
   }
 
+  // Workflow runs that need attention share the section with automations that do.
+  const attention = (
+    <NeedsAttention
+      items={data.items}
+      canWrite={access.canWrite}
+      extra={workflows.attention.map((run) => (
+        <WorkflowAttentionPanel key={`workflow:${run.id}`} run={run} />
+      ))}
+      action={workflows.moreAttention ? <MoreWorkflowAttention /> : undefined}
+    />
+  );
+  const workflowsPanel = (
+    <WorkflowsPanel
+      runs={workflows.runs}
+      isPending={workflows.recent.isPending}
+      isError={workflows.recent.isError}
+      personName={access.personName}
+    />
+  );
+
   if (data.items.length === 0 && data.failed.length === 0) {
     return (
       <Page>
         {header}
         {notices}
+        {attention}
         <EmptyAutomation canWrite={access.canWrite} />
+        {workflowsPanel}
         <BehindTheScenesSummary waiting={waitingCount} hasMore={Boolean(waiting.data?.hasMore)} />
       </Page>
     );
@@ -194,10 +223,10 @@ export function AutomationOverview() {
       }
     />
   );
-  const attention = <NeedsAttention items={data.items} canWrite={access.canWrite} />;
   const side = (
     <>
       <ComingUp items={data.items} lookups={lookups} />
+      {workflowsPanel}
       <Recently activity={data.activity} nameOf={nameOf} />
       <BehindTheScenesSummary waiting={waitingCount} hasMore={Boolean(waiting.data?.hasMore)} />
     </>
@@ -213,6 +242,7 @@ export function AutomationOverview() {
             {attention}
             <ComingUp items={data.items} lookups={lookups} />
             {list}
+            {workflowsPanel}
             <Recently activity={data.activity} nameOf={nameOf} />
             <BehindTheScenesSummary
               waiting={waitingCount}

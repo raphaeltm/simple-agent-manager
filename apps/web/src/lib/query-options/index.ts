@@ -133,3 +133,9 @@ export {
 } from './tasks';
 export { trialQueryKeys, trialStatusQueryOptions } from './trial';
 export { triggerQueryKeys, triggersQueryOptions } from './triggers';
+export {
+  recentWorkflowRunsQueryOptions,
+  workflowQueryKeys,
+  workflowRunPagesQueryOptions,
+  workflowRunQueryOptions,
+} from './workflows';

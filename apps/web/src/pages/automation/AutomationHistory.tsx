@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 
 import { AUTOMATION_MAX_RUN_READS } from '../../lib/automation-config';
-import { automationPaths, parseHistoryItem } from '../../lib/automation-routes';
+import { automationPaths, parseHistoryItem, projectChatPath } from '../../lib/automation-routes';
 import { formatTimeFromNow } from '../../lib/time-utils';
 import { useProjectContext } from '../ProjectContext';
 import { type ActivityEntry, isProblem } from './activity';
@@ -19,7 +19,7 @@ import { Chips, OutcomeIcon, Panel, TextLink } from './ui';
 function HistoryRow({ entry, name }: { entry: ActivityEntry; name: string }) {
   const { projectId } = useProjectContext();
   const chatTo = entry.chat?.sessionId
-    ? `/projects/${encodeURIComponent(projectId)}/chat/${encodeURIComponent(entry.chat.sessionId)}`
+    ? projectChatPath(projectId, entry.chat.sessionId)
     : entry.chat?.taskId
       ? `/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(entry.chat.taskId)}`
       : null;

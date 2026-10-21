@@ -562,6 +562,7 @@ export {
   resetUserAiBudget,
   updateUserAiBudget,
 } from './usage';
+export { getWorkflowRun, listWorkflowRuns } from './workflows';
 export {
   createAgentSession,
   createWorkspace,

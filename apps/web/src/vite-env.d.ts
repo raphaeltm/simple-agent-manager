@@ -50,6 +50,8 @@ interface ImportMetaEnv {
   readonly VITE_AUTOMATION_RUNS_PAGE_SIZE?: string;
   readonly VITE_AUTOMATION_CHAT_PICKER_LIMIT?: string;
   readonly VITE_AUTOMATION_MAX_CHANNEL_PAGES?: string;
+  readonly VITE_WORKFLOW_RUNS_PAGE_SIZE?: string;
+  readonly VITE_WORKFLOW_RUN_POLL_MS?: string;
   readonly DEV: boolean;
   readonly PROD: boolean;
   readonly MODE: string;

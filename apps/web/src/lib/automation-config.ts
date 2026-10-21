@@ -6,6 +6,11 @@
  * cadence lives with the app's other polls: `AUTOMATION_POLL_MS` in `lib/poll-intervals.ts`.
  */
 
+import {
+  DEFAULT_WORKFLOW_RUN_LIST_LIMIT,
+  MAX_WORKFLOW_RUN_LIST_LIMIT,
+} from '@simple-agent-manager/shared';
+
 function positiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -81,6 +86,16 @@ export const AUTOMATION_CHAT_PICKER_LIMIT = Math.min(
     import.meta.env.VITE_AUTOMATION_CHAT_PICKER_LIMIT,
     DEFAULT_AUTOMATION_CHAT_PICKER_LIMIT
   )
+);
+
+/**
+ * Workflow runs per page on the Workflows list, at most the API's page cap. The overview's
+ * Workflows panel shows {@link AUTOMATION_PREVIEW_ROWS} of them.
+ */
+export const DEFAULT_WORKFLOW_RUNS_PAGE_SIZE = DEFAULT_WORKFLOW_RUN_LIST_LIMIT;
+export const WORKFLOW_RUNS_PAGE_SIZE = Math.min(
+  MAX_WORKFLOW_RUN_LIST_LIMIT,
+  positiveInt(import.meta.env.VITE_WORKFLOW_RUNS_PAGE_SIZE, DEFAULT_WORKFLOW_RUNS_PAGE_SIZE)
 );
 
 /** Channel catalog pages (at the API's largest page size) read to sort channels by activity. */

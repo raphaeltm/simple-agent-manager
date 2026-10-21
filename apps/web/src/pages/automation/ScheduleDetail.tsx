@@ -12,7 +12,7 @@ import { Link } from 'react-router';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { AUTOMATION_ATTENTION_WINDOW_MS } from '../../lib/automation-config';
-import { automationPaths } from '../../lib/automation-routes';
+import { automationPaths, projectChatPath } from '../../lib/automation-routes';
 import {
   cancelSchedule,
   reconcileSchedule,
@@ -41,9 +41,6 @@ import { Loading, Notice } from './page';
 import { type OnceTime, OnceTimeFields, onceTimeFrom, resolveOnceTime } from './schedule-time';
 import { fullDate } from './time';
 import { Disclosure, KeyValues, Panel, SectionTitle, TextLink } from './ui';
-
-const chatPath = (projectId: string, sessionId: string) =>
-  `/projects/${encodeURIComponent(projectId)}/chat/${encodeURIComponent(sessionId)}`;
 
 function ChangeTimeDialog({
   schedule,
@@ -153,7 +150,7 @@ function ScheduleResult({ schedule, canWrite }: { schedule: ProjectSchedule; can
             again, so it does not run twice.
           </p>
         )}
-        {sessionId && <TextLink to={chatPath(projectId, sessionId)}>Open the chat</TextLink>}
+        {sessionId && <TextLink to={projectChatPath(projectId, sessionId)}>Open the chat</TextLink>}
         {canWrite && (
           <div className="flex flex-col gap-2">
             <div className="flex flex-wrap gap-3">

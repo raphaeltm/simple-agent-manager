@@ -51,6 +51,16 @@ export const AUTOMATION_POLL_MS = resolveIntervalMs(
   DEFAULT_AUTOMATION_POLL_MS
 );
 
+/**
+ * Refresh for an open workflow run while it is active, so a step finishing or starting shows
+ * without a reload. Finished runs do not change and are not polled.
+ */
+export const DEFAULT_WORKFLOW_RUN_POLL_MS = 10_000;
+export const WORKFLOW_RUN_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_WORKFLOW_RUN_POLL_MS,
+  DEFAULT_WORKFLOW_RUN_POLL_MS
+);
+
 /** Private SAM preference/availability refresh, including changes from another tab. */
 export const DEFAULT_SAM_SETTINGS_POLL_MS = 10_000;
 export const SAM_SETTINGS_POLL_MS = resolveIntervalMs(

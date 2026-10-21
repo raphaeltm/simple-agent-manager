@@ -1,7 +1,7 @@
 /** The sections of the Automation overview. Each reads the shared view model from `data.ts`. */
 import { Button } from '@simple-agent-manager/ui';
 import { ChevronRight, CircleAlert, Hash, Hourglass, TriangleAlert } from 'lucide-react';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
@@ -160,15 +160,24 @@ function AttentionPanel({
 export function NeedsAttention({
   items,
   canWrite,
+  extra = [],
+  action,
 }: {
   items: AutomationItem[];
   canWrite: boolean;
+  /** More panels for the same section, such as workflow runs that need attention. */
+  extra?: ReactNode[];
+  action?: ReactNode;
 }) {
   const list = attentionItems(items);
-  if (!list.length) return null;
+  if (!list.length && !extra.length) return null;
   return (
     <div className="flex flex-col gap-2" data-testid="automation-attention">
-      <SectionTitle title="Needs your attention" count={list.length} />
+      <SectionTitle
+        title="Needs your attention"
+        count={list.length + extra.length}
+        action={action}
+      />
       <div className="flex flex-col gap-3">
         {list.map((item) => (
           <AttentionPanel
@@ -178,6 +187,7 @@ export function NeedsAttention({
             canWrite={canWrite}
           />
         ))}
+        {extra}
       </div>
     </div>
   );
