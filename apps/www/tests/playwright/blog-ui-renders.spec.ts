@@ -58,7 +58,12 @@ function renderProblems(slug: string, markdown: string): string[] {
       const pixels = pngSize(file);
       const width = Number(image.get('width'));
       const height = Number(image.get('height'));
-      if (Math.abs(pixels.width - 2 * width) > 2 || Math.abs(pixels.height - 2 * height) > 2) {
+      if (!(Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0)) {
+        problems.push(`${label} must declare a numeric width and height`);
+      } else if (
+        Math.abs(pixels.width - 2 * width) > 2 ||
+        Math.abs(pixels.height - 2 * height) > 2
+      ) {
         problems.push(
           `${label} is ${pixels.width}x${pixels.height}px but declares ${width}x${height}; ` +
             'use the CSS size blogShot() printed'
