@@ -22,6 +22,7 @@ const NON_CODE_LANGUAGES = ['', 'mermaid', 'plain', 'plaintext', 'text', 'txt'];
  */
 const LANGUAGES_WITHOUT_LINE_NUMBERS = [...NON_CODE_LANGUAGES, ...LanguageGroups.terminal];
 
+/** Tab labels. A language missing here shows its fence id as typed; add it when a post needs it. */
 const LANGUAGE_NAMES: Readonly<Record<string, string>> = {
   astro: 'Astro',
   cjs: 'JavaScript',

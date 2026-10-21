@@ -104,7 +104,7 @@ When a post covers something people see or touch in the app (a new control, pane
 
 The app's Playwright suite already renders real pages against mocked APIs. Reuse it:
 
-1. Find the spec that shipped with the UI change: every UI PR adds an `apps/web/tests/playwright/*-audit.spec.ts` with realistic mock data (`gh pr view <number> --json files`). The `docs-screenshots-*.spec.ts` specs are good examples too.
+1. Find the spec that shipped with the UI change: every UI PR adds an `apps/web/tests/playwright/*-audit.spec.ts` with realistic mock data (`gh pr view <number> --json files`). The `docs-screenshots-*.spec.ts` specs are good examples too. If neither covers the surface, write the mocks from the response types in `packages/shared/src/` and the API calls the page makes (its hooks under `apps/web/src/`).
 2. Copy its mocks into `apps/web/tests/playwright/<slug>.local.spec.ts`. That name is gitignored on purpose: the capture spec is scratch work, so the blog PR stays inside `apps/www/` and on the marketing site's narrow CI.
 3. For each theme, seed it, drive the UI to the state you want, assert it rendered, and capture the element with `blogShot()` from `docs-shot.ts`:
 

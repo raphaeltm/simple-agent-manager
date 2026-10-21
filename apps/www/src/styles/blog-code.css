@@ -5,7 +5,11 @@
    only docs pages define, so on a blog page the border, background and fonts all resolved to
    nothing and code blocks looked like plain text. These declarations give those variables
    the marketing palette. Dark-theme frame colours are resolved on `:root`, so they must be
-   declared there rather than on `.post-body`. */
+   declared there rather than on `.post-body`.
+
+   The names come from @astrojs/starlight's integrations/expressive-code: `preprocessor.ts`
+   (the private `--__sl-font*` font variables) and `theming.ts` (the colour variables). After
+   a Starlight upgrade, check them there; code-blocks.spec.ts fails if they stop resolving. */
 :root {
   --sl-color-gray-5: var(--color-border); /* frame and tab-bar borders */
   --sl-color-gray-6: var(--color-bg-surface); /* dark: code background */
