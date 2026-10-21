@@ -11,6 +11,9 @@ import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
+import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
+import { handleCreateSkill, handleUpdateSkill } from '../../../src/routes/mcp/skill-tools';
 import { createSkill, resolveSkillProfile, updateSkill } from '../../../src/services/skills';
 import {
   applySqliteMigration,
@@ -205,6 +208,60 @@ describe('skills only override the agent when they set one', () => {
     expect(storedAgentType(skill.id)).toEqual({ agent_type: null });
     const resolved = await resolveSkillProfile(db, PROJECT, 'p-claude', skill.id, USER, ENV);
     expect(resolved.agentType).toBe('claude-code');
+  });
+
+  it('trims spaces around a valid agent type', async () => {
+    const skill = await createSkill(
+      db,
+      PROJECT,
+      USER,
+      { name: 'padded', agentType: '  openai-codex  ' },
+      ENV
+    );
+
+    expect(storedAgentType(skill.id)).toEqual({ agent_type: 'openai-codex' });
+  });
+
+  it('clears the agent and sets an effort the old agent lacked in one update', async () => {
+    const skill = await createSkill(
+      db,
+      PROJECT,
+      USER,
+      { name: 'codex-first', agentType: 'openai-codex' },
+      ENV
+    );
+
+    const updated = await updateSkill(db, PROJECT, skill.id, USER, {
+      agentType: '  ',
+      effort: 'max',
+    });
+
+    expect(updated.agentType).toBeNull();
+    expect(updated.effort).toBe('max');
+    const resolved = await resolveSkillProfile(db, PROJECT, 'p-claude', skill.id, USER, ENV);
+    expect(resolved).toMatchObject({ agentType: 'claude-code', effort: 'max' });
+  });
+
+  it('clears through the MCP skill tools with an empty string, as a stale client sends it', async () => {
+    const env = { DATABASE: createSqliteD1(sqlite) } as Env;
+    const token = { projectId: PROJECT, userId: USER } as McpTokenData;
+
+    const created = await handleCreateSkill(1, { name: 'mcp-blank', agentType: '' }, token, env);
+    expect('error' in created).toBe(false);
+    expect(sqlite.prepare("SELECT agent_type FROM skills WHERE name = 'mcp-blank'").get()).toEqual({
+      agent_type: null,
+    });
+
+    const stamped = await createSkill(
+      db,
+      PROJECT,
+      USER,
+      { name: 'mcp-stamped', agentType: 'opencode' },
+      ENV
+    );
+    const updated = await handleUpdateSkill(2, { skillId: stamped.id, agentType: '' }, token, env);
+    expect('error' in updated).toBe(false);
+    expect(storedAgentType(stamped.id)).toEqual({ agent_type: null });
   });
 
   it('leaves an existing agent type untouched when an unrelated field is updated', async () => {
