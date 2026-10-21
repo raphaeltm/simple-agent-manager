@@ -2,6 +2,7 @@ import type { Env } from '../env';
 import { getMcpLimits } from '../routes/mcp/_helpers';
 
 export class WorkflowCapacityDeferredError extends Error {}
+export class WorkflowSubmissionGuardRejectedError extends Error {}
 /** Live policy, not part of the immutable execution snapshot. */
 export async function workflowCapacityBlocked(
   env: Env,

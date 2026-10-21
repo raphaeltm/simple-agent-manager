@@ -67,7 +67,9 @@ function assertCreatorAuthority(sourceKind: string, row: CreatorAuthorityRow | n
     throw new TaskRunnerCreatorAuthorityRevokedError(
       sourceKind === 'trigger'
         ? 'Trigger execution principal is not a current project member with task execution access; reattach or disable the trigger'
-        : 'Scheduled task creator no longer has active project task:write authority'
+        : sourceKind === 'workflow'
+          ? 'Workflow owner no longer has active project task:write authority; restore project access and submit a new workflow run'
+          : 'Scheduled task creator no longer has active project task:write authority'
     );
   }
 }
@@ -253,7 +255,7 @@ async function readReservedSubmissionAuthority(
   )
     .bind(guard.taskId, guard.projectId, guard.userId)
     .first<ReservedSubmissionAuthorityRow>();
-  if (row?.source_kind === 'workflow') {
+  if (row?.source_kind === 'workflow' && row.status !== 'in_progress') {
     const step = await env.DATABASE.prepare(
       `SELECT s.state, m.status, m.workflow_deadline_at
       FROM mission_steps s JOIN missions m ON m.id = s.mission_id

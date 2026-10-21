@@ -28,6 +28,7 @@ export interface WorkflowRunRow {
   created_at: string;
   updated_at: string;
 }
+export class WorkflowInputError extends Error {}
 export interface WorkflowStepRow {
   mission_id: string;
   step_key: string;
@@ -77,7 +78,7 @@ export async function startWorkflowRun(
   const config = await getWorkflowConfig(env);
   const plan = parseWorkflowPlan(input.plan, env, config.maxSteps);
   if (!/^[a-zA-Z0-9_.:-]{1,160}$/.test(input.requestKey))
-    throw new Error(
+    throw new WorkflowInputError(
       'requestKey must be 1–160 letters, digits, dots, colons, underscores or hyphens'
     );
   const fingerprint = await workflowFingerprint({ parentTaskId: input.parentTaskId, plan });
@@ -88,7 +89,7 @@ export async function startWorkflowRun(
     .first<WorkflowRunRow>();
   if (existing) {
     if (existing.workflow_plan_fingerprint !== fingerprint)
-      throw new Error('requestKey already belongs to a different workflow plan');
+      throw new WorkflowInputError('requestKey already belongs to a different workflow plan');
     if (existing.status === 'active') await startOrchestration(env, input.projectId, existing.id);
     return {
       runId: existing.id,
@@ -115,10 +116,10 @@ export async function startWorkflowRun(
     !parent ||
     !['queued', 'in_progress', 'delegated', 'awaiting_followup'].includes(parent.status)
   )
-    throw new Error('An active task owned by the workflow owner is required');
+    throw new WorkflowInputError('An active task owned by the workflow owner is required');
   const depth = parent.dispatch_depth + 1;
   if (depth > (parent.max_dispatch_depth ?? getMcpLimits(env).dispatchMaxDepth))
-    throw new Error('Workflow exceeds project dispatch depth limit');
+    throw new WorkflowInputError('Workflow exceeds project dispatch depth limit');
   const source = parent.credential_attribution_source ?? 'user';
   const db = drizzle(env.DATABASE, { schema });
   const [project] = await db
@@ -219,8 +220,16 @@ export async function startWorkflowRun(
         status: winner.status === 'failed' ? 'needs_attention' : winner.status,
         reused: true,
       };
-    if (winner) throw new Error('requestKey already belongs to a different workflow plan');
-    throw new Error('Could not reserve workflow; check the active-run limit', { cause: error });
+    if (winner)
+      throw new WorkflowInputError('requestKey already belongs to a different workflow plan');
+    const count = await env.DATABASE.prepare(
+      `SELECT COUNT(*) AS active FROM missions WHERE project_id = ? AND workflow_plan_json IS NOT NULL AND status IN ('active','paused')`
+    )
+      .bind(input.projectId)
+      .first<{ active: number }>();
+    if ((count?.active ?? 0) >= config.maxActiveRuns)
+      throw new WorkflowInputError('Project active workflow run limit reached');
+    throw new Error('Could not reserve workflow; retry with the same requestKey', { cause: error });
   }
   return { runId: id, status: 'active', reused: false };
 }
