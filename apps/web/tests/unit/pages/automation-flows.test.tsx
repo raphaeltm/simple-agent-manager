@@ -15,6 +15,7 @@ import { MemoryRouter, Outlet, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
+  listWorkflowRuns: vi.fn(),
   listTriggers: vi.fn(),
   getTrigger: vi.fn(),
   listTriggerExecutions: vi.fn(),
@@ -273,6 +274,7 @@ function renderAt(path: string) {
 
 beforeEach(() => {
   scope.userId = 'owner';
+  api.listWorkflowRuns.mockResolvedValue({ runs: [], nextCursor: null });
   api.listTriggers.mockResolvedValue({ triggers: [] });
   api.listTriggerExecutions.mockResolvedValue({ executions: [], nextCursor: null });
   api.listWebhookDeliveries.mockResolvedValue({ deliveries: [], nextCursor: null });

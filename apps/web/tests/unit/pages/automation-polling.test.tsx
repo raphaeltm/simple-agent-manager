@@ -9,6 +9,7 @@ import { MemoryRouter, Outlet, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
+  listWorkflowRuns: vi.fn(),
   listTriggers: vi.fn(),
   listTriggerExecutions: vi.fn(),
   getProjectMembers: vi.fn(),
@@ -70,6 +71,7 @@ function renderOverview() {
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
+  api.listWorkflowRuns.mockResolvedValue({ runs: [], nextCursor: null });
   api.listTriggers.mockResolvedValue({ triggers: [] });
   api.listTriggerExecutions.mockResolvedValue({ executions: [], nextCursor: null });
   api.getProjectMembers.mockResolvedValue({ members: [] });

@@ -124,7 +124,7 @@ export function runHeadline(run: Pick<WorkflowRunSummary, 'status' | 'steps'>): 
     return `${verb} on ${quoted(first.title)}${more} · ${progress.done} of ${progress.total} done`;
   }
   const held = run.steps.find((step) => step.status === 'waiting' && step.reason);
-  if (held?.reason) return `Waiting: ${held.reason}`;
+  if (held?.reason) return `Held: ${held.reason}`;
   return `Starting the next step · ${progress.done} of ${progress.total} done`;
 }
 
