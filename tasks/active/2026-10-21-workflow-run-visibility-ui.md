@@ -67,12 +67,12 @@ engine does not support (no retry/skip/pause/cancel/create); creation stays MCP-
 ## Implementation checklist
 
 ### Contract and API
-- [ ] Shared types `packages/shared/src/types/workflow.ts` (statuses as const lists, list/detail response types, event-wait step view) exported from the shared index.
-- [ ] Shared read model `apps/api/src/services/workflow-run-read.ts`: load run + steps + activity + linked tasks + owner in bounded queries; per-row isolation; projections for REST detail/list.
-- [ ] MCP `getWorkflowRun` reuses the shared loader with unchanged output shape.
-- [ ] REST `GET /api/projects/:projectId/workflows` (status filter, cursor, limit clamp) and `GET /api/projects/:projectId/workflows/:runId`; per-route auth; `task:read`; non-disclosing 404.
-- [ ] Worker tests (real D1): list/detail happy path through the real engine, status filter + cursor paging, viewer access, non-member 404, foreign-project run 404 (attack + owner control), malformed step row tolerated, MCP output unchanged.
-- [ ] Publish UI/read contract + event-wait step view on `feature.workflows`.
+- [x] Shared types `packages/shared/src/types/workflow.ts` (statuses as const lists, list/detail response types, event-wait step view) exported from the shared index.
+- [x] Shared read model `apps/api/src/services/workflow-run-read.ts`: load run + steps + activity + linked tasks + owner in bounded queries; per-row isolation; projections for REST detail/list.
+- [x] MCP `getWorkflowRun` reuses the shared loader with unchanged output shape.
+- [x] REST `GET /api/projects/:projectId/workflows` (status filter, cursor, limit clamp) and `GET /api/projects/:projectId/workflows/:runId`; per-route auth; `task:read`; non-disclosing 404.
+- [x] Worker tests (real D1): list/detail happy path through the real engine, status filter + cursor paging, viewer access, non-member 404, foreign-project run 404 (attack + owner control), malformed step row tolerated, MCP output unchanged.
+- [x] Publish UI/read contract + event-wait step view on `feature.workflows`.
 
 ### Web UI
 - [ ] API client + query options (`lib/api/workflows.ts`, `lib/query-options/workflows.ts`), identity-scoped keys, active-run polling (`VITE_WORKFLOW_RUN_POLL_MS`).
@@ -109,3 +109,9 @@ engine does not support (no retry/skip/pause/cancel/create); creation stays MCP-
 - `docs/guides/durable-workflows.md`, `apps/api/src/services/workflow-runs.ts`, `workflow-reconcile.ts`
 - Idea `01M59MBMZJVYHPHH1GJ7X8TZT1`; knowledge UIUX, WorkflowFeatureDelivery
 - Rules 02, 11, 28, 48, 50, 56, 60, 62, 64, 65, 79
+
+## Implementation notes
+
+- 2026-10-21 21:3xZ: read API committed `519e549d4`. Worker tests (`tests/workers/workflow-run-read-routes.test.ts`, 9) + foundation suite (19) green. Discrimination proven: removing `project_id = ?` from `loadWorkflowRun` reddens the cross-project attack test; removing `requireProjectTaskRead` from the detail route reddens the access test. `quality:runtime-boundary-semantics` required valibot row schemas instead of `as Row[]` casts.
+- Branch merged foundation head `ddf4b8f88` (includes main `d4b87b304`) instead of rebasing, to avoid force-pushing the output branch.
+- turbo injects a block into AGENTS.md when it detects an agent; revert it before every commit.
