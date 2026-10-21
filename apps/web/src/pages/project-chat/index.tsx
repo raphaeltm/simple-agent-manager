@@ -18,6 +18,8 @@ import { DerivedSessionBanner } from './DerivedSessionBanner';
 import { FocusStrip } from './FocusStrip';
 import { getSessionSourceContext } from './lineageUtils';
 import { MobileSessionDrawer } from './MobileSessionDrawer';
+// PROTOTYPE (do not merge): direction C renders profile cards in the empty canvas
+import { getPickerVariant, ProfileCanvas } from './profile-picker-prototype';
 import { ProvisioningIndicator } from './ProvisioningIndicator';
 import { SessionList } from './SessionList';
 import { isTerminal } from './types';
@@ -40,6 +42,7 @@ export function ProjectChat() {
   } | null>(null);
   const processedAttentionAction = useRef<string | null>(null);
   const { loadSessions, projectId, sessionId } = state;
+  const pickerVariant = getPickerVariant(location.search);
 
   const submitAttentionAnswer = useCallback(
     async (markerId: string, answer: string) => {
@@ -413,6 +416,14 @@ export function ProjectChat() {
                   state={state.provisioning}
                   bootLogCount={state.bootLogs.length}
                   onViewLogs={() => state.setBootLogPanelOpen(true)}
+                />
+              ) : pickerVariant === 'c' && state.agentProfiles.length > 0 ? (
+                <ProfileCanvas
+                  projectId={state.projectId}
+                  profiles={state.agentProfiles}
+                  selectedProfileId={state.selectedProfileId}
+                  onSelect={state.setSelectedProfileId}
+                  onNewProfile={state.openProfileWizard}
                 />
               ) : (
                 <>

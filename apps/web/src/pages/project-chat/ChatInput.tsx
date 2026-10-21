@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import type { MutableRefObject, ReactNode } from 'react';
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
 import { ProjectChatComposer } from '../../components/project-chat/ProjectChatComposer';
@@ -34,6 +34,8 @@ import {
   validateResourceState,
 } from '../../components/resource-requirements';
 import { useIsMobile } from '../../hooks/useIsMobile';
+// PROTOTYPE (do not merge): new-chat profile picker directions behind ?pp=a|b|c
+import { getPickerVariant, PrototypeProfilePicker } from './profile-picker-prototype';
 import type { ProfileWizardState, ProfileWizardStep } from './useProjectChatState';
 
 interface ChatAttachmentDisplay {
@@ -240,6 +242,8 @@ export function ChatInput({
   uploading,
 }: ChatInputProps) {
   const isMobile = useIsMobile();
+  const location = useLocation();
+  const pickerVariant = getPickerVariant(location.search);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [resourceOverrideOpen, setResourceOverrideOpen] = useState(false);
   const hasTaskResources = hasAnyResourceValue(taskResourceReqs);
@@ -307,7 +311,31 @@ export function ChatInput({
 
       {noAgents && <NoAgentsNotice projectId={projectId} />}
 
-      {agentProfiles.length > 0 && !profileWizard.open && (
+      {agentProfiles.length > 0 && !profileWizard.open && pickerVariant && (
+        <PrototypeProfilePicker
+          variant={pickerVariant}
+          projectId={projectId}
+          profiles={agentProfiles}
+          selectedProfileId={selectedProfileId}
+          onProfileChange={onProfileChange}
+          onNewProfile={onOpenProfileWizard}
+          onEditProfile={() => setEditProfileOpen(true)}
+          onAttach={() => fileInputRef?.current?.click()}
+          attachDisabled={submitting || Boolean(uploading)}
+          options={{
+            skills,
+            selectedSkillId,
+            onSkillChange,
+            taskResourceReqs,
+            onTaskResourceReqsChange,
+            taskResourceErrors,
+            onTaskResourceErrorsClear,
+            disabled: submitting,
+          }}
+        />
+      )}
+
+      {agentProfiles.length > 0 && !profileWizard.open && !pickerVariant && (
         <div
           className="mb-2 flex flex-wrap items-center gap-1.5"
           aria-label="Agent profiles and skills"
@@ -533,7 +561,7 @@ export function ChatInput({
         </div>
       )}
 
-      {!noAgents && !profileWizard.open && !needsProfileBeforeSubmit && (
+      {!noAgents && !profileWizard.open && !needsProfileBeforeSubmit && !pickerVariant && (
         <div className="mb-1.5 flex items-center">
           <button
             type="button"
@@ -553,7 +581,7 @@ export function ChatInput({
         </div>
       )}
 
-      {(resourceOverrideOpen || hasResourceErrors) && !profileWizard.open && (
+      {(resourceOverrideOpen || hasResourceErrors) && !profileWizard.open && !pickerVariant && (
         <div className="mb-2 rounded-md border border-border-default bg-surface px-3 py-2">
           <ResourceRequirementsInput
             value={taskResourceReqs}
@@ -582,7 +610,7 @@ export function ChatInput({
         transcribeApiUrl={transcribeApiUrl}
         slashCommands={slashCommands}
         agentProfiles={agentProfiles}
-        skills={skills}
+        skills={pickerVariant ? [] : skills}
         selectedSkillId={selectedSkillId}
         onSkillChange={onSkillChange}
         attachments={attachments}
@@ -591,6 +619,7 @@ export function ChatInput({
         fileInputRef={fileInputRef}
         uploading={uploading}
         showShortcutHint={!isMobile}
+        hideAttachButton={pickerVariant === 'a' || pickerVariant === 'c'}
         attachTitle="Attach files to this task"
       />
       {selectedProfile && (
