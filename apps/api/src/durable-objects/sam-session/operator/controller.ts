@@ -10,7 +10,7 @@ import { handleActionRoute } from './action-routes';
 import { runOperatorAgent } from './agent';
 import { OperatorLive } from './live';
 import { assertOperatorAccount, assertOperatorExecution } from './operations';
-import { actionProjection } from './projection';
+import { actionProjection, projectAccessCache } from './projection';
 import { OperatorStore } from './store';
 import { OperatorWork } from './work';
 
@@ -121,19 +121,23 @@ export class OperatorController {
       const oldest = turns[0];
       const userId = this.store.settings().userId;
       if (!userId) return reject('forbidden', 'User identity required', 403);
-      const projectAction = actionProjection(this.env, userId);
-      const projectedTurns = await Promise.all(
-        turns.map(async (turn) => {
-          // Polling clients (no stream) still see the running turn's progress.
-          const live = this.live.snapshot(turn.id);
-          return {
-            ...turn,
-            actions: await Promise.all(this.store.actions(turn.id).map(projectAction)),
-            ...(live ? { live } : {}),
-          };
-        })
-      );
-      const work = await this.work.view(userId);
+      // Receipts and work cards share one membership check per project, and run together.
+      const projectAccess = projectAccessCache(this.env, userId);
+      const projectAction = actionProjection(this.env, userId, projectAccess);
+      const [projectedTurns, work] = await Promise.all([
+        Promise.all(
+          turns.map(async (turn) => {
+            // Polling clients (no stream) still see the running turn's progress.
+            const live = this.live.snapshot(turn.id);
+            return {
+              ...turn,
+              actions: await Promise.all(this.store.actions(turn.id).map(projectAction)),
+              ...(live ? { live } : {}),
+            };
+          })
+        ),
+        this.work.view(userId, projectAccess),
+      ]);
       await assertOperatorExecution(this.env, userId);
       if (!this.enabled()) return reject('sam_disabled', 'SAM is disabled', 403);
       return json({

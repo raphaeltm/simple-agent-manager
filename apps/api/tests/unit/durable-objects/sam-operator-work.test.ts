@@ -427,6 +427,36 @@ describe('SAM background work canonical event boundary', () => {
     expect(queries.filter((sql) => sql.includes('"project_members"'))).toHaveLength(2);
   });
 
+  it('checks a project once for both its receipts and its work cards in one history read', async () => {
+    const f = fixture([]);
+    const { turn } = f.controller.store.accept('dispatch-turn', 'Start the redesign');
+    f.controller.store.reserveAction(
+      'dispatch-receipt',
+      turn.id,
+      'sam_chat_start',
+      JSON.stringify({ projectId: 'project-alice' }),
+      false
+    );
+    f.controller.store.setState(turn.id, 'completed', 'Started the work.');
+    const prepare = vi.spyOn(f.env.DATABASE, 'prepare');
+    const response = await f.controller.handle(
+      new Request('https://sam-session/turns', { headers: { 'x-sam-user-id': 'alice' } })
+    );
+    expect(response?.status).toBe(200);
+    const page = (await response!.json()) as {
+      work: Array<{ actionId: string }>;
+      turns: Array<{ actions: Array<{ id: string; available?: boolean }> }>;
+    };
+    // Both projections saw the project: the card is listed and the receipt stays available.
+    expect(page.work.map((card) => card.actionId)).toEqual(['dispatch-action']);
+    expect(page.turns.at(-1)?.actions).toEqual([
+      expect.objectContaining({ id: 'dispatch-receipt' }),
+    ]);
+    expect(page.turns.at(-1)?.actions[0]?.available).toBeUndefined();
+    const memberships = prepare.mock.calls.filter(([sql]) => sql.includes('"project_members"'));
+    expect(memberships).toHaveLength(1);
+  });
+
   it('hides only the revoked project’s cards', async () => {
     const f = twoProjectWork();
     f.database

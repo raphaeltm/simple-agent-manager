@@ -6,8 +6,31 @@ import { operations } from '../../../operations/registry';
 import { requireSessionWriter } from '../../../services/session-access';
 import type { OperatorAction } from './store';
 
+/**
+ * Request-local project membership checks. One read that projects receipts and work cards
+ * passes the same cache to both, so each project is checked once.
+ */
+export function projectAccessCache(env: Env, userId: string) {
+  const checks = new Map<string, Promise<boolean>>();
+  return (projectId: string): Promise<boolean> => {
+    let check = checks.get(projectId);
+    if (!check) {
+      check = requireProjectAccess(drizzle(env.DATABASE), projectId, userId).then(
+        () => true,
+        () => false
+      );
+      checks.set(projectId, check);
+    }
+    return check;
+  };
+}
+
 /** Request-local authorization cache. Stored resource payloads never become a visibility grant. */
-export function actionProjection(env: Env, userId: string) {
+export function actionProjection(
+  env: Env,
+  userId: string,
+  projectAccess = projectAccessCache(env, userId)
+) {
   const access = new Map<string, Promise<boolean>>();
   const allowed = (projectId: string, sessionId?: string) => {
     const key = JSON.stringify([projectId, sessionId]);
@@ -15,7 +38,7 @@ export function actionProjection(env: Env, userId: string) {
     if (!result) {
       result = (async () => {
         try {
-          await requireProjectAccess(drizzle(env.DATABASE), projectId, userId);
+          if (!(await projectAccess(projectId))) return false;
           if (sessionId)
             await requireSessionWriter(env, projectId, sessionId, userId, {
               action: 'inspect this SAM action',

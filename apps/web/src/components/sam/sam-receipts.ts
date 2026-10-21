@@ -94,6 +94,13 @@ export function describeReads(actions: Action[]): string {
   return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
 }
 
+/** Tool names the model mentions while thinking, in the words the step lines use. */
+export function humanizeThinking(text: string): string {
+  return text.replace(/\bsam_[a-z_]+\b/g, (name) =>
+    ACTION_TITLES[name] ? `“${ACTION_TITLES[name]}”` : name
+  );
+}
+
 export function effectTitle(operation: string): string {
   return ACTION_TITLES[operation] ?? humanize(operation);
 }

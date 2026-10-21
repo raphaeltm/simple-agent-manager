@@ -808,6 +808,12 @@ test('scrolling past the newest turn never moves the page or the composer', asyn
   await expect(page.getByRole('heading', { name: 'SAM', exact: true })).toBeInViewport();
   await checkComposerPinned(page);
   await checkLayout(page, 'sam-overscroll');
+  // The reporting phone's width (412×891), which no project in the matrix covers.
+  await page.setViewportSize({ width: 412, height: 891 });
+  await page.mouse.move(206, 445);
+  for (let gesture = 0; gesture < 3; gesture++) await page.mouse.wheel(0, 2500);
+  await expect(page.getByRole('heading', { name: 'SAM', exact: true })).toBeInViewport();
+  await checkComposerPinned(page);
 });
 
 test('loading older messages keeps the reader on the turn they were reading', async ({ page }) => {

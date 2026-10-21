@@ -7,6 +7,7 @@ import { requireProjectAccess } from '../../../middleware/project-auth';
 import { OPERATOR_DEFAULTS } from '../../../services/admin-settings-registry';
 import type { OperatorSettings } from '../../../services/operator-settings';
 import * as projectData from '../../../services/project-data';
+import { projectAccessCache } from './projection';
 
 interface Watch {
   action_id: string;
@@ -281,17 +282,15 @@ export class OperatorWork {
    * Runs on every history read, so its D1 reads run in parallel and each project's
    * membership is checked once; one awaited round trip per card made history slow.
    */
-  async view(userId: string): Promise<Array<Record<string, unknown>>> {
-    const access = new Map<string, Promise<unknown>>();
+  async view(
+    userId: string,
+    projectAccess = projectAccessCache(this.env, userId)
+  ): Promise<Array<Record<string, unknown>>> {
     const cards = await Promise.all(
       this.rows().map(async (row) => {
         try {
-          let member = access.get(row.project_id);
-          if (!member) {
-            member = requireProjectAccess(drizzle(this.env.DATABASE), row.project_id, userId);
-            access.set(row.project_id, member);
-          }
-          await member;
+          // Revoked project details are not exposed from stale projections.
+          if (!(await projectAccess(row.project_id))) return null;
           const task = await this.env.DATABASE.prepare(
             'SELECT t.status,t.title AS taskTitle,p.name AS projectName,t.execution_step AS executionStep FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=? AND t.project_id=? AND t.user_id=? AND t.chat_session_id=?'
           )
@@ -346,7 +345,7 @@ export class OperatorWork {
             link: `https://app.${this.env.BASE_DOMAIN}/projects/${row.project_id}/chat/${row.session_id}`,
           };
         } catch {
-          /* Revoked project details are not exposed from stale projections. */
+          /* A failed read hides that card; it never fails the whole history read. */
           return null;
         }
       })

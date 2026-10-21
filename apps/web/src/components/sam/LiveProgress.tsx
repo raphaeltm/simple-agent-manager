@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 
 import { RenderedMarkdown } from '../MarkdownRenderer';
 import type { LiveActivity, LivePhase, LiveView } from './sam-live';
-import { describeLiveStep } from './sam-receipts';
+import { describeLiveStep, humanizeThinking } from './sam-receipts';
 
 /** The elapsed counter shows whole seconds. */
 const ELAPSED_TICK_MS = 1_000;
@@ -91,7 +91,9 @@ export function LiveProgress({
         </ul>
       )}
       {view?.thinking && phase === 'thinking' && (
-        <p className="line-clamp-2 break-words text-sm italic text-fg-muted">{view.thinking}</p>
+        <p className="line-clamp-2 break-words text-sm italic text-fg-muted">
+          {humanizeThinking(view.thinking)}
+        </p>
       )}
       {view?.text ? (
         <RenderedMarkdown content={view.text} inline />

@@ -1,6 +1,7 @@
 import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { LiveProgress } from '../../../src/components/sam/LiveProgress';
 import {
   applyLiveEvent,
   type LiveEvent,
@@ -8,7 +9,6 @@ import {
   takeSseEvents,
   viewFromSnapshot,
 } from '../../../src/components/sam/sam-live';
-import { LiveProgress } from '../../../src/components/sam/LiveProgress';
 import { describeLiveStep } from '../../../src/components/sam/sam-receipts';
 import { useSamLiveTurn } from '../../../src/components/sam/useSamLiveTurn';
 
@@ -122,6 +122,21 @@ describe('LiveProgress', () => {
     expect(screen.queryByText(/Waiting for your OK/)).toBeNull();
     expect(screen.queryByText(/outcome not confirmed/)).toBeNull();
     expect(screen.getByRole('status')).toHaveTextContent('Working');
+  });
+
+  it('names the tools SAM mentions while thinking the way its steps do', () => {
+    const view = viewFromSnapshot(
+      {
+        ...snapshot,
+        phase: 'thinking',
+        thinking: 'I will call sam_tasks_list after sam_inbox_get, not sam_unknown_tool.',
+      },
+      Date.now()
+    );
+    render(<LiveProgress view={view} projectNames={new Map()} />);
+    expect(
+      screen.getByText('I will call “List tasks” after “Check your inbox”, not sam_unknown_tool.')
+    ).toBeInTheDocument();
   });
 });
 
