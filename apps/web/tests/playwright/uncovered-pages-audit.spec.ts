@@ -10,7 +10,6 @@ import {
 /**
  * Visual audit for pages with no prior Playwright coverage:
  *
- * - /workspaces          (workspaces list — states + empty)
  * - /workspaces/new      (create-workspace form)
  * - /projects/:id/activity       (activity feed)
  * - /projects/:id/notifications  (project notifications, all types)
