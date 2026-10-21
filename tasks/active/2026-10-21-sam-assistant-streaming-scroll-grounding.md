@@ -61,6 +61,14 @@ Raphaël's feedback on the new private SAM assistant (`/sam`, PR #2386), 2026-10
   usage arrives in streams. Budget accounting (`incrementTokenUsage`) depends on it → add a
   fail-safe estimate if a step reports no usage, and verify KV counters on staging.
 
+### Send latency (staging measurement, 2026-10-21)
+
+- After Send, "Sending…" stayed up ~4–5 s after the POST returned. `Sam.tsx` `send()` awaited a
+  history refresh before the new turn could show.
+- `GET /api/sam/turns` took 4.0–7.6 s for the smoke user (91 turns, 10 project-work cards); other
+  SAM requests took 0.4–0.8 s. `OperatorWork.view` ran three D1 reads per card one after another
+  (two membership reads plus the task read) on every history read.
+
 ### Model evaluation (Cloudflare docs, 2026-10-21)
 
 | Model | Input $/M | Cached input $/M | Output $/M | Context | Notes |
@@ -114,6 +122,12 @@ Raphaël's feedback on the new private SAM assistant (`/sam`, PR #2386), 2026-10
 - [x] Tests: native workerd runtime (real Mastra) for streamed text, guard gating, tool activity,
       `stream:true` upstream, usage accounting; unit tests for the hub and the SSE parser; Playwright
       audit with a progressive mocked stream at mobile + desktop.
+- [x] Web: show the accepted turn from the send receipt at once and refresh history behind it; a
+      failed send still waits for history. Playwright holds the history read and asserts the turn
+      and its stream show (fails on the old handler).
+- [x] API: `OperatorWork.view` reads cards in parallel and checks each project once (3N → N + 2P
+      D1 reads). Unit tests: all reads in flight together, one membership check per project, and a
+      revoked-project control (the first two fail on the sequential loop).
 
 ### D. Model (shared + api config)
 - [x] Add `@cf/zai-org/glm-5.3-flash` to `PLATFORM_AI_MODELS` with published pricing, optional

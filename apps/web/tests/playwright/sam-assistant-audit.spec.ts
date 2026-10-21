@@ -70,6 +70,10 @@ async function mockSam(
     rejectSend?: boolean;
     legacy?: boolean;
     transcript?: string;
+    /** Hold history reads after a send until `releaseHistory()`, like a slow history read. */
+    holdHistoryAfterSend?: boolean;
+    /** Fields of the send receipt's turn; the default receipt is already completed. */
+    receipt?: Record<string, unknown>;
   } = {}
 ) {
   let enabled = options.enabled ?? true;
@@ -80,6 +84,8 @@ async function mockSam(
   const confirmations: boolean[] = [];
   const cursors: string[] = [];
   let historyReads = 0;
+  let heldHistory: Promise<void> | null = null;
+  let releaseHistory = () => {};
   await page.addInitScript(() =>
     localStorage.setItem('sam-onboarding-wizard-dismissed-sam-user', 'true')
   );
@@ -115,11 +121,20 @@ async function mockSam(
           failSend = false;
           return route.abort('failed');
         }
-        const receipt = turn('accepted', { message: body.message, request_key: body.requestKey });
+        const receipt = turn('accepted', {
+          message: body.message,
+          request_key: body.requestKey,
+          ...options.receipt,
+        });
         turns = [...turns, receipt];
+        if (options.holdHistoryAfterSend)
+          heldHistory = new Promise((resolve) => {
+            releaseHistory = resolve;
+          });
         return respond({ turn: receipt, accepted: true, replayed: false });
       }
       historyReads++;
+      if (heldHistory) await heldHistory;
       if (failHistory)
         return respond({ error: 'UNAVAILABLE', message: 'History could not load' }, 503);
       const before = url.searchParams.get('before');
@@ -169,6 +184,10 @@ async function mockSam(
     confirmations,
     cursors,
     historyReads: () => historyReads,
+    releaseHistory: () => releaseHistory(),
+    setTurns: (update: (current: typeof turns) => typeof turns) => {
+      turns = update(turns);
+    },
     disable: () => {
       enabled = false;
     },
@@ -624,6 +643,50 @@ test('a running turn shows each step, its thinking and the answer as it is writt
   // A connected stream relaxes history polling (2s → 15s); the settled step refreshed once.
   await page.waitForTimeout(4_500);
   expect(mock.historyReads() - readsBefore).toBeLessThanOrEqual(1);
+});
+
+test('a sent message shows at once and streams while history is still loading', async ({
+  page,
+}) => {
+  const mock = await mockSam(page, {
+    turns: [turn('earlier', { message: 'Earlier question', response: 'Earlier answer.' })],
+    holdHistoryAfterSend: true,
+    // As the server answers: the turn is admitted and running, with no answer yet.
+    receipt: { state: 'accepted', response: null, created_at: Date.now() },
+  });
+  const push = await liveStream(page);
+  await page.goto('/sam');
+  await page.getByLabel('Message SAM').fill('What shipped recently?');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  // The history read after the send is held; the accepted turn shows from the send receipt.
+  const newest = page.locator('article').last();
+  await expect(newest.getByText('What shipped recently?')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop SAM turn' })).toBeVisible();
+  await expect(page.getByText('Sending…')).toHaveCount(0);
+  await push({
+    ...liveSnapshot,
+    turnId: 'accepted',
+    phase: 'writing',
+    thinking: null,
+    text: 'Two changes shipped today.',
+  });
+  await expect(newest.getByText('Two changes shipped today.')).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Writing' })).toBeVisible();
+  await checkComposerPinned(page);
+  await checkLayout(page, 'sam-sent-streaming');
+  // The held read returns the finished turn: it replaces the shown one rather than adding one.
+  mock.setTurns((all) =>
+    all.map((item) =>
+      item.id === 'accepted'
+        ? { ...item, state: 'completed', response: 'Two changes shipped today.' }
+        : item
+    )
+  );
+  mock.releaseHistory();
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop SAM turn' })).toHaveCount(0);
+  await expect(page.locator('article')).toHaveCount(2);
+  await expect(page.getByText('Two changes shipped today.')).toHaveCount(1);
 });
 
 test('without a stream, polled history still shows the running turn’s progress', async ({

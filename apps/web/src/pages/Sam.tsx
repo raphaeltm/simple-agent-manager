@@ -1,5 +1,5 @@
 import { Button, PageLayout } from '@simple-agent-manager/ui';
-import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { type InfiniteData, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Loader2, Settings } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
@@ -55,6 +55,38 @@ function readPending(storageKey: string): PendingMessage | null {
     /* A new message reports unavailable storage before sending. */
   }
   return null;
+}
+
+/** The running turn in the admission receipt, or null for a replay or an unexpected shape. */
+function acceptedTurn(receipt: unknown): Turn | null {
+  if (!receipt || typeof receipt !== 'object' || !('turn' in receipt)) return null;
+  const turn = receipt.turn;
+  if (
+    !turn ||
+    typeof turn !== 'object' ||
+    !('id' in turn) ||
+    typeof turn.id !== 'string' ||
+    !('request_key' in turn) ||
+    typeof turn.request_key !== 'string' ||
+    !('message' in turn) ||
+    typeof turn.message !== 'string' ||
+    !('state' in turn) ||
+    typeof turn.state !== 'string'
+  )
+    return null;
+  const accepted: Turn = {
+    id: turn.id,
+    request_key: turn.request_key,
+    message: turn.message,
+    state: turn.state,
+    response: null,
+    error: null,
+    actions: [],
+    ...('created_at' in turn && typeof turn.created_at === 'number'
+      ? { created_at: turn.created_at }
+      : {}),
+  };
+  return isActiveTurn(accepted) ? accepted : null;
 }
 
 export function Sam() {
@@ -186,15 +218,33 @@ function SamConversation() {
     setError(null);
     scroll.scrollToBottom();
     const submission = pending ?? { requestKey: crypto.randomUUID(), message };
+    let shown = false;
     try {
       // Persist before the network request: a lost response followed by a reload
       // must replay the same request, never dispatch the work a second time.
       sessionStorage.setItem(storageKey, JSON.stringify(submission));
       setPending(submission);
-      await request('/api/sam/turns', { method: 'POST', body: JSON.stringify(submission) });
+      const receipt = acceptedTurn(
+        await request<unknown>('/api/sam/turns', {
+          method: 'POST',
+          body: JSON.stringify(submission),
+        })
+      );
       sessionStorage.removeItem(storageKey);
       setPending(null);
       setMessage('');
+      if (receipt) {
+        // A history read can take seconds. Show the accepted turn now so its live
+        // progress streams in while history refreshes behind it.
+        await client.cancelQueries({ queryKey: key });
+        client.setQueryData<InfiniteData<History, string | null>>(key, (data) => {
+          const [newest, ...older] = data?.pages ?? [];
+          const known = data?.pages.some((page) => page.turns.some(({ id }) => id === receipt.id));
+          if (!data || !newest || known) return data;
+          return { ...data, pages: [{ ...newest, turns: [...newest.turns, receipt] }, ...older] };
+        });
+        shown = true;
+      }
     } catch (cause) {
       if (cause instanceof ApiClientError && cause.rejectedBeforeEffects) {
         sessionStorage.removeItem(storageKey);
@@ -202,7 +252,9 @@ function SamConversation() {
       }
       setError(requestErrorText(cause, 'Could not send. Retry uses the same request.'));
     } finally {
-      await refresh();
+      // Without the turn on screen, Send stays locked until history shows what was recorded.
+      if (shown) void refresh();
+      else await refresh();
       setSending(false);
     }
   };
