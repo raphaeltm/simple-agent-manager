@@ -786,6 +786,33 @@ export {
   SCHEDULER_STATES,
 } from './mission';
 
+// Durable workflow runs (read contract for the Automation → Workflows pages)
+export type {
+  WorkflowActivityEntry,
+  WorkflowArtifactRef,
+  WorkflowRunDetail,
+  WorkflowRunDetailResponse,
+  WorkflowRunListResponse,
+  WorkflowRunStatus,
+  WorkflowRunSummary,
+  WorkflowStepAgent,
+  WorkflowStepDetail,
+  WorkflowStepKind,
+  WorkflowStepOutput,
+  WorkflowStepStatus,
+  WorkflowStepSummary,
+  WorkflowStepWait,
+} from './workflow';
+export {
+  DEFAULT_WORKFLOW_RUN_LIST_LIMIT,
+  isWorkflowRunStatus,
+  isWorkflowStepStatus,
+  MAX_WORKFLOW_RUN_LIST_LIMIT,
+  WORKFLOW_RUN_STATUSES,
+  WORKFLOW_STEP_KINDS,
+  WORKFLOW_STEP_STATUSES,
+} from './workflow';
+
 // Orchestrator (Phase 3: Project Orchestrator)
 export type {
   DecisionAction,

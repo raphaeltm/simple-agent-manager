@@ -167,6 +167,7 @@ import { triggersRoutes } from './routes/triggers';
 import { ttsRoutes } from './routes/tts';
 import { uiGovernanceRoutes } from './routes/ui-governance';
 import { usageRoutes } from './routes/usage';
+import { workflowRoutes } from './routes/workflows';
 import { workspacesRoutes } from './routes/workspaces';
 import {
   isExpectedWorkspacePortsUpstreamUnavailable,
@@ -849,6 +850,7 @@ app.route('/api/projects/:projectId/triggers', triggersRoutes);
 app.route('/api/projects/:projectId/knowledge', knowledgeRoutes);
 app.route('/api/projects/:projectId/mailbox', mailboxRoutes);
 app.route('/api/projects/:projectId/missions', missionRoutes);
+app.route('/api/projects/:projectId/workflows', workflowRoutes);
 app.route('/api/projects/:projectId/orchestrator', orchestratorRoutes);
 app.route('/api/projects/:projectId/policies', policyRoutes);
 app.route('/api/projects/:projectId/agent', projectAgentRoutes);

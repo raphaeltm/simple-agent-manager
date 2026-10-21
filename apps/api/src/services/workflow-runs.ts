@@ -12,6 +12,7 @@ import { resolveSkillProfile } from './skills';
 import { assertReservedTaskCreatorAuthority } from './task-runner-start-guard';
 import { getWorkflowConfig } from './workflow-config';
 import { parseWorkflowPlan, workflowFingerprint, type WorkflowPlan } from './workflow-plan';
+import { loadWorkflowRun, toMcpWorkflowRun } from './workflow-run-read';
 import { workflowProjectSnapshot } from './workflow-snapshot';
 
 export interface WorkflowRunRow {
@@ -225,43 +226,10 @@ export async function startWorkflowRun(
   return { runId: id, status: 'active', reused: false };
 }
 
+/** The owner's read (MCP). Project members read through `routes/workflows.ts`. */
 export async function getWorkflowRun(env: Env, projectId: string, userId: string, runId: string) {
   await assertReservedTaskCreatorAuthority(env, 'workflow', projectId, userId);
-  const run = await env.DATABASE.prepare(
-    'SELECT * FROM missions WHERE id = ? AND project_id = ? AND user_id = ? AND workflow_plan_json IS NOT NULL'
-  )
-    .bind(runId, projectId, userId)
-    .first<WorkflowRunRow>();
-  if (!run) throw new Error('Workflow run not found');
-  const steps = await loadWorkflowSteps(env, runId);
-  const activity = await env.DATABASE.prepare(
-    `SELECT event_type, event_payload_json, created_at FROM mission_workflow_events
-    WHERE mission_id = ? ORDER BY created_at, id LIMIT ?`
-  )
-    .bind(runId, steps.length * 4 + 2)
-    .all<{ event_type: string; event_payload_json: string; created_at: string }>();
-  return {
-    runId: run.id,
-    title: run.title,
-    goal: run.description,
-    status: run.status === 'failed' ? 'needs_attention' : run.status,
-    deadlineAt: run.workflow_deadline_at,
-    steps: steps.map((s) => ({
-      key: s.step_key,
-      title: s.title,
-      after: JSON.parse(s.after_json),
-      status: s.state,
-      attemptId: s.attempt_id,
-      taskId: s.submission_json ? s.task_id : null,
-      sessionId: s.submission_json ? s.session_id : null,
-      reason: s.reason,
-      launchRetries: s.launch_retries,
-      result: s.result_json ? JSON.parse(s.result_json) : null,
-    })),
-    activity: activity.results.map((e) => ({
-      eventType: e.event_type,
-      at: e.created_at,
-      event: JSON.parse(e.event_payload_json),
-    })),
-  };
+  const loaded = await loadWorkflowRun(env, { projectId, runId, ownerUserId: userId });
+  if (!loaded) throw new Error('Workflow run not found');
+  return toMcpWorkflowRun(loaded);
 }
