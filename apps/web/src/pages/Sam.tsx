@@ -6,16 +6,18 @@ import { Link } from 'react-router';
 
 import { EarlierSamHistory } from '../components/sam/EarlierSamHistory';
 import { RetryAlert } from '../components/sam/RetryAlert';
+import { viewFromSnapshot } from '../components/sam/sam-live';
 import { requestErrorText } from '../components/sam/sam-receipts';
 import { SamComposer } from '../components/sam/SamComposer';
 import { isActiveTurn, SamTurn, type Turn } from '../components/sam/SamTurn';
+import { useSamLiveTurn } from '../components/sam/useSamLiveTurn';
 import { useStickToBottom } from '../components/sam/useStickToBottom';
 import { type Work, WorkPanel } from '../components/sam/WorkCard';
 import { useProjectList } from '../hooks/useProjectData';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { useSamSettings } from '../hooks/useSamSettings';
 import { ApiClientError, request } from '../lib/api/client';
-import { SAM_ACTIVE_POLL_MS } from '../lib/poll-intervals';
+import { SAM_ACTIVE_POLL_MS, SAM_STREAMING_POLL_MS } from '../lib/poll-intervals';
 import { PROJECT_LIST_LIMIT } from '../lib/project-query-config';
 
 interface History {
@@ -104,6 +106,8 @@ function SamConversation() {
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Read by the poll cadence below; the live stream pushes the running turn's progress.
+  const streamingRef = useRef(false);
   const key = ['auth', scope, 'sam', 'turns'] as const;
   const history = useInfiniteQuery({
     queryKey: key,
@@ -116,22 +120,21 @@ function SamConversation() {
     getNextPageParam: (page) => page.nextCursor,
     retry: false,
     refetchIntervalInBackground: false,
-    refetchInterval: (query) =>
-      query.state.data?.pages.some(
+    refetchInterval: (query) => {
+      const pages = query.state.data?.pages ?? [];
+      const runningTurn = pages.some((page) => page.turns.some(isActiveTurn));
+      const otherActivity = pages.some(
         (page) =>
-          page.turns.some(
-            (turn) =>
-              isActiveTurn(turn) ||
-              turn.actions.some(
-                (action) => action.state === 'pending' || action.state === 'running'
-              )
+          page.turns.some((turn) =>
+            turn.actions.some((action) => action.state === 'pending' || action.state === 'running')
           ) ||
           page.work?.some(
             (work) => !['completed', 'failed', 'cancelled', 'archived'].includes(work.status)
           )
-      )
-        ? SAM_ACTIVE_POLL_MS
-        : false,
+      );
+      if (otherActivity || (runningTurn && !streamingRef.current)) return SAM_ACTIVE_POLL_MS;
+      return runningTurn ? SAM_STREAMING_POLL_MS : false;
+    },
   });
   // Shares the sidebar's cached project list, so naming an action's project costs no request.
   const { projects } = useProjectList({
@@ -152,6 +155,13 @@ function SamConversation() {
   const scroll = useStickToBottom(turns[0]?.id);
   const refresh = () => client.invalidateQueries({ queryKey: ['auth', scope, 'sam'] });
   const active = turns.find(isActiveTurn);
+  const live = useSamLiveTurn(active?.id, () => void refresh());
+  useEffect(() => {
+    streamingRef.current = live.streaming;
+  }, [live.streaming]);
+  // Without a stream (or before it connects), polled history carries the same snapshot.
+  const polledLive = active?.live ? viewFromSnapshot(active.live, history.dataUpdatedAt) : null;
+  const activeLive = live.view ?? polledLive;
   const pendingRecorded = pending && turns.some((turn) => turn.request_key === pending.requestKey);
   // Only a matching server receipt clears an uncertain submission. Polling must
   // never overwrite an ordinary draft or clear an unrelated request.
@@ -319,7 +329,13 @@ function SamConversation() {
             )}
             <section aria-label="Conversation" className="space-y-6">
               {turns.map((turn) => (
-                <SamTurn key={turn.id} turn={turn} projectNames={projectNames} refresh={refresh} />
+                <SamTurn
+                  key={turn.id}
+                  turn={turn}
+                  projectNames={projectNames}
+                  refresh={refresh}
+                  live={turn.id === active?.id ? activeLive : null}
+                />
               ))}
             </section>
           </div>
