@@ -13,8 +13,10 @@ sampled the running turn twice a second until it finished.
 | 3 | `a262f0ee9` (deploy 39588349771) | GLM 5.3 Flash | Pass. |
 | 4 | `280162f4e` (deploy 39593029335) | GLM 5.3 Flash | Pass, stored answer correct. The model first wrote a copy of a history record; 463 characters streamed for ~10 s before the guard's correction replaced them. Fixed afterwards: the guard now rejects record copies. |
 | 5 | `8a9f1306e` (deploy 39598495157) | GLM 5.3 Flash | Pass. The model copied a record again; nothing of it streamed, and the correction's live answer followed. The status read "Writing" for those 14 s, fixed afterwards to "Thinking". Done at ~44 s; 51,109 in / 1,437 out, $0.0064. |
+| 6 | `8c38a25ff` (deploy 39604101697) | GLM 5.3 Flash | Pass, final code head. Turn shown 2.8 s after Send, inbox step 6.4 s, answer streamed from 15.5 s (29 text events), done ~27 s; live dated answer; 2 requests, 35,187 in / 673 out, $0.0036 (AI Gateway). |
 
-Every run: no failed API requests, no console errors, `<main>` not scrollable
+Staging's daily input tokens reached 79% of the smoke user's 500K cap after run 6, so no more
+runs were made. Every run: no failed API requests, no console errors, `<main>` not scrollable
 (`scrollHeight - clientHeight = 0`, `scrollTop = 0`), composer bottom = shell bottom (891 px).
 
 ## Model comparison (runs 2 and 3: same build, question and data; one sample each)
