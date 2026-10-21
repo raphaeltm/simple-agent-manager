@@ -249,7 +249,11 @@ function SamConversation() {
           data-testid="sam-conversation-scroller"
           // useStickToBottom anchors prepends itself (Safari has no scroll anchoring);
           // Chromium's native anchoring is off so every browser behaves the same.
-          className="h-full overflow-y-auto overflow-x-hidden [overflow-anchor:none]"
+          // `relative` makes this scroller the containing block of absolute descendants
+          // (the turns' sr-only labels). Without it they escape the clip and stretch the
+          // shell's <main> scroll area, so scrolling past the newest turn dragged the
+          // pinned composer up the screen.
+          className="relative h-full overflow-y-auto overflow-x-hidden [overflow-anchor:none]"
         >
           <div
             ref={scroll.contentRef}

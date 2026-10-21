@@ -1,0 +1,148 @@
+# /sam assistant: mobile scroll leak, live streaming progress, recency grounding, GLM 5.3 Flash
+
+Task: `01M5ER021WQMW1QB3ETQKMFNJ9` · Branch: `sam/looks-theres-scrolling-bug-kmfnj9`
+
+## Problem
+
+Raphaël's feedback on the new private SAM assistant (`/sam`, PR #2386), 2026-10-21:
+
+1. **Scrolling bug (mobile, screenshot).** The composer floats mid-screen with blank page background
+   below it and the SAM header gone.
+2. **Progress is too generic and too infrequent.** One turn showed only "Working…" the whole time;
+   another showed "Checked projects and tasks" late.
+3. **No token streaming.** The old SAM UI streamed tokens and felt smooth; the new one shows the
+   whole answer at the end.
+4. **Wrong answer to a basic question.** "What shipped recently?" returned work from months ago.
+5. **Model.** Gemma 4 26B is the current `SAM_MODEL`; evaluate GLM 5.3 Flash (has a cached-input price).
+
+## Research Findings
+
+### Scroll bug (reproduced locally, Playwright 412x891 mobile)
+
+- `apps/web/src/pages/Sam.tsx`: conversation scroller is `h-full overflow-y-auto` but **not
+  positioned**; its wrapper is `relative`. Tailwind `sr-only` spans (`SamTurn.tsx` "You: ") are
+  `position:absolute`, so their containing block is the wrapper, outside the scroller. They are not
+  clipped by the scroller and sit at their unscrolled static positions (151 → 5621px).
+- Their overflow propagates through the overflow-visible wrapper/root into the AppShell `<main>`
+  (`overflow-y-auto`): measured `main.scrollHeight=5560` vs `clientHeight=829` with only an 829px child.
+- A wheel/touch scroll at the bottom of the conversation chains to `<main>` (measured
+  `main.scrollTop=3000` after one wheel), dragging the SAM header off-screen and the pinned composer
+  up — exactly the screenshot.
+- The existing audit `checkComposerPinned` asserted `composer.bottom <= viewport.height`, which a
+  composer dragged upward also satisfies; it never asserted `<main>` cannot scroll.
+
+### Wrong "what shipped recently" answer (production AI Gateway logs, gateway `sam`)
+
+- Turn `82921219-…` ("What shipped recently?"): ONE Gemma call, **zero tool calls**. The model
+  answered from a months-old legacy assistant message in private history (projected as
+  `sam_historical_turn_status`, `turnId:null`, `state:unknown`). Its reasoning: "the previous turn's
+  summary (which I'm treating as the source of truth…)".
+- The system prompt has **no current date/time**; historical records carry **no timestamps**.
+- Turn `44c7bb04-…` (follow-up): 3 calls (projects_list, tasks_list, answer) = 11s + 14s + 36s;
+  correct answer once live data was read. The model inferred "today" from task timestamps.
+- `inboxGet` (`apps/api/src/operations/connector-read-core.ts`) returns unread notifications and
+  pending items with **no timestamps**, so even live inbox data cannot be judged for recency.
+
+### No streaming / generic progress
+
+- `operator/agent.ts` calls Mastra `agent.generate()` → non-streaming upstream request (prod request
+  body has no `stream`). The browser polls `GET /api/sam/turns` every 2s (`SAM_ACTIVE_POLL_MS`).
+- `SamTurn.tsx` shows "SAM · working" + "Working… You can leave this page and return." for any active
+  turn; read receipts only appear after a tool completes ("Checked …").
+- Mastra 1.77 `agent.stream()` + `onChunk` gives `text-delta`, `reasoning-delta`, `tool-call`,
+  `tool-result`, `step-start`/`step-finish` chunks. `getFullOutput().text` is the **last step's text**
+  for tool-driven runs (pre-tool narration excluded) — the live draft must mirror that.
+- The server publication guard (`assertGroundedOperatorResponse`) runs on the final text and may
+  trigger an unpublished-draft correction. Streaming must not publish text the guard would reject:
+  release only whitespace-bounded prefixes that pass the guard (guard is prefix-monotonic for
+  whitespace-bounded prefixes: identifiers/URLs never contain whitespace).
+- Streaming usage: Mastra's openai-compatible client sends no `stream_options`; Workers AI
+  `/v1/chat/completions` reports `finish_reason` "only on the usage chunk" (changelog 2026-02-17), so
+  usage arrives in streams. Budget accounting (`incrementTokenUsage`) depends on it → add a
+  fail-safe estimate if a step reports no usage, and verify KV counters on staging.
+
+### Model evaluation (Cloudflare docs, 2026-10-21)
+
+| Model | Input $/M | Cached input $/M | Output $/M | Context | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `@cf/google/gemma-4-26b-a4b-it` | 0.10 | — | 0.30 | 256K | 4B active |
+| `@cf/zai-org/glm-5.3-flash` | 0.15 | 0.03 | 0.50 | 1M | 18B active of 320B; tools, streaming; `reasoning_effort` low/high/max, cannot disable |
+
+- Raphaël's two turns (27,585 in / 3,009 out tokens) cost $0.0037 on Gemma; GLM 5.3 Flash ≈ $0.0056
+  uncached, ≈ $0.0039 with in-turn prefix caching (later steps resend the earlier prefix).
+- Prefix caching is automatic; `x-session-affinity` raises hit rates; dynamic content belongs at the
+  end of the prompt.
+- `PLATFORM_AI_MODELS` has no cached-price field and lists Gemma's context as 32,768 (stale).
+
+## Implementation Checklist
+
+### A. Mobile scroll leak (web)
+- [ ] Make the SAM conversation scroller the containing block (`relative`) so absolute descendants
+      (sr-only labels) are clipped by it and cannot extend `<main>`'s scroll area.
+- [ ] Playwright regression: long conversation at 375/390/412px, wheel/touch past the bottom;
+      assert `<main>` has no scrollable overflow, `main.scrollTop` stays 0, SAM header visible,
+      composer bottom at the viewport bottom. Prove it fails without the fix.
+- [ ] Tighten `checkComposerPinned` to assert the composer sits at the bottom edge (not merely above it).
+- [ ] Record the lesson (absolute descendants escape a non-positioned scroller) in the web overflow rule.
+
+### B. Recency grounding (api)
+- [ ] Add the current UTC date/time to each turn's instructions (constant within a turn, at the end).
+- [ ] Add `recordedAt` to every `sam_historical_turn_status` record (operator turn `created_at`;
+      legacy message `created_at`).
+- [ ] Strengthen instructions: status/recency questions must use operations called this turn;
+      history is past context only; judge recency against the current time and include dates.
+- [ ] `inboxGet`: include `updatedAt` for pending items and `createdAt` for notifications.
+- [ ] Tests: request body contains the current time and `recordedAt`; inbox timestamps.
+
+### C. Live streaming + specific progress (api + web)
+- [ ] Refactor grounding into a reusable receipt index + text check (`assertGroundedOperatorResponse`
+      keeps its contract).
+- [ ] `operator/live.ts`: per-DO live state for the active turn (phase, released answer text,
+      reasoning preview, tool activity), SSE subscribers with snapshot-on-connect, throttled flushes,
+      heartbeat, subscriber cap, close on turn end. Release only guard-passing whitespace-bounded prefixes.
+- [ ] `agent.ts`: `agent.stream()` + `getFullOutput()` (same error semantics as `generate`),
+      `onChunk` → live hub; step narration resets the draft; correction resets the draft.
+- [ ] Usage fail-safe: estimate tokens when a streamed step reports none; log `sam.operator.usage_estimated`.
+- [ ] `controller.ts`: `GET /turns/:id/stream` (SSE) and a live snapshot on the active turn in
+      `GET /turns`; publish `done` after the turn's terminal state is written.
+- [ ] `routes/sam.ts`: proxy the stream path (authenticated, per-user DO).
+- [ ] Runtime-tunable knobs as admin settings (flush ms, heartbeat ms, max subscribers).
+- [ ] Web: `useSamLiveTurn` hook (fetch-stream SSE parser, reconnect with backoff, fallback to polling).
+- [ ] Web: active turn shows streamed answer, specific tool activity lines ("Reading your 20 most
+      recent tasks"), "Thinking" phase with a one-line reasoning preview, and elapsed time.
+- [ ] Web: slower history polling while the stream is healthy; refetch on tool completion and `done`.
+- [ ] Tests: native workerd runtime (real Mastra) for streamed text, guard gating, tool activity,
+      `stream:true` upstream, usage accounting; unit tests for the hub and the SSE parser; Playwright
+      audit with a progressive mocked stream at mobile + desktop.
+
+### D. Model (shared + api config)
+- [ ] Add `@cf/zai-org/glm-5.3-flash` to `PLATFORM_AI_MODELS` with published pricing, optional
+      cached-input price field; fix Gemma's context window.
+- [ ] Use cached-input pricing in SAM cost accounting when usage reports cached tokens.
+- [ ] Send `x-session-affinity` (per private conversation) on SAM Workers AI calls.
+- [ ] Per-model request controls (GLM 5.3 Flash: `reasoning_effort: low`).
+- [ ] Switch `SAM_MODEL` to GLM 5.3 Flash after staging comparison; check GitHub Environment overrides
+      for `SAM_MODEL` (rule 70) and verify the deployed value.
+
+### E. Docs
+- [ ] `apps/www/.../guides/sam-assistant.md`, `architecture/sam-account-assistant.md`,
+      `reference/configuration.md` (new admin settings, model), `reference/api.md` (stream route).
+
+## Acceptance Criteria
+
+- [ ] On a phone, scrolling the conversation never moves the page: header and composer stay put
+      (Playwright regression, proven discriminating).
+- [ ] The answer streams into the UI progressively while SAM works; persisted answer matches.
+- [ ] Active turns show what SAM is doing right now (specific tool lines, thinking, writing) with
+      elapsed time, updating at least every few seconds.
+- [ ] Streamed text never shows content the publication guard rejects.
+- [ ] Token budgets still record usage for streamed turns (test + staging KV check).
+- [ ] "What shipped recently?" on staging calls live tools and reports recent work with dates.
+- [ ] SAM runs on GLM 5.3 Flash in staging with streaming and tools working end to end.
+
+## References
+
+- PR #2386 (Mastra SAM assistant), `apps/api/src/durable-objects/sam-session/operator/*`
+- `apps/web/src/pages/Sam.tsx`, `apps/web/src/components/sam/*`
+- Rules: web 56 (clipped overflow), 62 (real trigger), 52 (model catalog), 70 (deployed value), 60 (I/O budgets)
+- Cloudflare docs: Workers AI GLM 5.3 Flash, Gemma 4, prompt caching, changelog 2026-02-17

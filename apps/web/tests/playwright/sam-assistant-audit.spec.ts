@@ -206,13 +206,25 @@ async function checkComposerTouchTargets(page: Page) {
     });
 }
 
-/** The composer is pinned: fully on screen, and the newest turn ends above it. */
+/**
+ * The composer is pinned: fully on screen at the bottom edge of the shell, the shell's
+ * <main> has nothing of its own to scroll, and the newest turn ends above the composer.
+ */
 async function checkComposerPinned(page: Page) {
   const composer = page.locator('form').filter({ has: page.getByLabel('Message SAM') });
   await expect(composer).toBeInViewport({ ratio: 1 });
   const viewport = page.viewportSize()!;
   const composerBox = (await composer.boundingBox())!;
   expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(viewport.height + 1);
+  const main = await page.locator('#main-content').evaluate((element) => ({
+    bottom: element.getBoundingClientRect().bottom,
+    scrollable: element.scrollHeight - element.clientHeight,
+    scrollTop: element.scrollTop,
+  }));
+  // A composer dragged up the screen also passes the "above the viewport bottom" check.
+  expect(Math.abs(composerBox.y + composerBox.height - main.bottom)).toBeLessThanOrEqual(1);
+  expect(main.scrollable, 'SAM content leaks into the shell scroll area').toBeLessThanOrEqual(1);
+  expect(main.scrollTop).toBe(0);
   const newest = page.locator('article').last();
   if ((await newest.count()) > 0) {
     await expect(newest).toBeInViewport();
@@ -555,6 +567,32 @@ test('long conversations open at the newest turn above a pinned composer', async
   await jump.click();
   await expect(page.locator('article').last()).toBeInViewport();
   await expect(jump).toHaveCount(0);
+});
+
+test('scrolling past the newest turn never moves the page or the composer', async ({ page }) => {
+  // Reported on Android (2026-10-21): the turns' sr-only labels escaped the scroller,
+  // so the overscroll chained to the shell and dragged the composer up the screen.
+  await mockSam(page, {
+    turns: Array.from({ length: 12 }, (_, index) =>
+      turn(`overscroll-${index}`, {
+        message: `Question ${index}`,
+        response: `Answer ${index}. ${'A grounded line about recent work. '.repeat(6)}`,
+      })
+    ),
+  });
+  await page.goto('/sam');
+  await expect(page.locator('article')).toHaveCount(12);
+  await expect(page.locator('article').last()).toBeInViewport();
+  const scroller = page.getByTestId('sam-conversation-scroller');
+  const box = (await scroller.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  for (let gesture = 0; gesture < 3; gesture++) await page.mouse.wheel(0, 2500);
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollHeight - element.scrollTop))
+    .toBeLessThanOrEqual(box.height + 2);
+  await expect(page.getByRole('heading', { name: 'SAM', exact: true })).toBeInViewport();
+  await checkComposerPinned(page);
+  await checkLayout(page, 'sam-overscroll');
 });
 
 test('loading older messages keeps the reader on the turn they were reading', async ({ page }) => {
