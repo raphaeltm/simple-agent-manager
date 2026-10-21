@@ -31,14 +31,14 @@ You MUST:
 
 ## What to Keep in Sync
 
-| Feature                | Desktop (`NavSidebar`)                                                     | Mobile (`MobileNavDrawer`)                                                           |
-| ---------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Nav items (global)     | `GLOBAL_NAV_ITEMS` (Infrastructure links to `/nodes`) + Admin (superadmin) | Same items with same icons                                                           |
-| Nav items (project)    | Chat, Tasks, Overview, Activity, Sessions, Settings                        | Same items with same icons                                                           |
-| Icons                  | Lucide icons on every item                                                 | Same Lucide icons                                                                    |
-| Back to Projects       | ArrowLeft icon + label                                                     | Same                                                                                 |
-| Project name header    | Shown when in project context (falls back to "Project" if name not passed) | Same (currently always "Project" — real name requires AppShell to fetch and pass it) |
-| Active state styling   | Highlighted with accent color                                              | Highlighted with accent color + left border                                          |
+| Feature              | Desktop (`NavSidebar`)                                                     | Mobile (`MobileNavDrawer`)                                                           |
+| -------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Nav items (global)   | `GLOBAL_NAV_ITEMS` (Infrastructure links to `/nodes`) + Admin (superadmin) | Same items with same icons                                                           |
+| Nav items (project)  | Chat, Tasks, Overview, Activity, Sessions, Settings                        | Same items with same icons                                                           |
+| Icons                | Lucide icons on every item                                                 | Same Lucide icons                                                                    |
+| Back to Projects     | ArrowLeft icon + label                                                     | Same                                                                                 |
+| Project name header  | Shown when in project context (falls back to "Project" if name not passed) | Same (currently always "Project" — real name requires AppShell to fetch and pass it) |
+| Active state styling | Highlighted with accent color                                              | Highlighted with accent color + left border                                          |
 
 ## Quick Check
 
