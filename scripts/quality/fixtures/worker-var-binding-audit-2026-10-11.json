@@ -251,7 +251,7 @@
     "AI_PROXY_DEFAULT_MODEL": "@cf/qwen/qwen3-30b-a3b-fp8",
     "AI_PROXY_REQUEST_BODY_MAX_BYTES": "1048576",
     "AI_GATEWAY_ID": "sam",
-    "SAM_MODEL": "@cf/google/gemma-4-26b-a4b-it",
+    "SAM_MODEL": "@cf/zai-org/glm-5.3-flash",
     "MAX_TRIGGERS_PER_PROJECT": "10",
     "CRON_MIN_INTERVAL_MINUTES": "15",
     "CRON_TEMPLATE_MAX_LENGTH": "8000",
