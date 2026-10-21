@@ -311,6 +311,28 @@ describe('private SAM live turn view', () => {
     expect(hub.snapshot('turn')).toMatchObject({ phase: 'thinking', thinking: null, text: '' });
   });
 
+  it('previews one-paragraph reasoning by its latest complete sentence', async () => {
+    const hub = live();
+    const view = reader(hub.subscribe('turn'));
+    hub.stepStarted();
+    const previews = () =>
+      view.events.flatMap((event) => (event.type === 'thinking' ? [event.text] : []));
+    // Low-effort reasoning often arrives as one paragraph with no newline at all.
+    hub.chunk(reasoning('The user asks what shipped recently. I should check the inbox and re'));
+    await vi.advanceTimersByTimeAsync(settings.flushMs);
+    expect(previews()).toEqual(['The user asks what shipped recently.']);
+    hub.chunk(reasoning('cent tasks. Then'));
+    await vi.advanceTimersByTimeAsync(settings.flushMs);
+    expect(previews()).toEqual([
+      'The user asks what shipped recently.',
+      'I should check the inbox and recent tasks.',
+    ]);
+    // A decimal or a dotted name is not a sentence end; only the finished sentence shows.
+    hub.chunk(reasoning(' compare v1.2 with the 3.5 release'));
+    await vi.advanceTimersByTimeAsync(settings.flushMs);
+    expect(previews().at(-1)).toBe('I should check the inbox and recent tasks.');
+  });
+
   it('gives a late subscriber a snapshot, then ends every stream when the turn ends', async () => {
     const hub = live();
     hub.stepStarted();

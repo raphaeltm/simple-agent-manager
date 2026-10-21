@@ -46,7 +46,7 @@ function StepIcon({ state }: { state: LiveActivity['state'] }) {
 
 /**
  * What SAM is doing in the running turn: phase and elapsed time, each step in plain
- * words as it starts and settles, the answer as it is written, and the latest line of
+ * words as it starts and settles, the answer as it is written, and the latest sentence of
  * its reasoning while it thinks. Everything here is replaced by the stored answer and
  * receipts when the turn ends.
  */

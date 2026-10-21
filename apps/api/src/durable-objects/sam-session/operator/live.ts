@@ -26,7 +26,7 @@ export interface LiveSnapshot {
   elapsedMs: number;
   /** Published answer text of the current model step. */
   text: string;
-  /** Latest complete line of the model's reasoning, shown as a one-line preview. */
+  /** Latest complete sentence or line of the model's reasoning, shown as a short preview. */
   thinking: string | null;
   activity: LiveActivity[];
 }
@@ -419,14 +419,15 @@ function resultOf(result: unknown, isError: boolean): Partial<LiveActivity> {
 }
 
 /**
- * The latest complete line of reasoning, plain text, bounded. Partial lines are not shown.
+ * The latest complete sentence or line of reasoning, plain text, bounded. Low-effort
+ * reasoning is often one paragraph, so waiting for a newline would show nothing.
  * Reasoning is under no instruction to label or link what it mentions, and the receipt
  * guard checks only labelled identifiers, so raw identifiers and links are removed here
  * rather than shown unchecked; the preview is a hint of what SAM is doing, not a source.
  */
 function thinkingPreview(reasoning: string): string | null {
-  const lines = reasoning.split('\n');
-  lines.pop(); // The last segment has no newline yet: still being written.
+  const lines = reasoning.split(/\n|(?<=[.!?])\s+/);
+  lines.pop(); // The last segment has no end yet: still being written.
   for (let index = lines.length - 1; index >= 0; index--) {
     const line = (lines[index] ?? '')
       .replace(PLATFORM_URL_PATTERN, '…')
