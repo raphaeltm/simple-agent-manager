@@ -4,7 +4,9 @@ const packetSchema = v.object({
   id: v.string(),
   missionId: v.string(),
   fromTaskId: v.string(),
-  artifactRefs: v.array(v.object({ type: v.string(), ref: v.string() })),
+  artifactRefs: v.array(
+    v.object({ type: v.string(), ref: v.optional(v.string()), path: v.optional(v.string()) })
+  ),
 });
 
 /** Incoming messages are not outputs. Validate only packets authored by this step. */
@@ -33,7 +35,18 @@ export function workflowOutputHandoffs(
     const parsed = v.safeParse(packetSchema, value);
     if (!parsed.success)
       return { error: 'Step published malformed artifact references', handoffs: [] };
-    const packet = { id: parsed.output.id, artifactRefs: parsed.output.artifactRefs };
+    const artifactRefs = parsed.output.artifactRefs.map(({ type, ref, path }) => ({
+      type,
+      ref: ref ?? path ?? '',
+    }));
+    if (
+      artifactRefs.some(({ ref }) => !ref) ||
+      parsed.output.artifactRefs.some(
+        ({ ref, path }) => ref !== undefined && path !== undefined && ref !== path
+      )
+    )
+      return { error: 'Step published malformed artifact references', handoffs: [] };
+    const packet = { id: parsed.output.id, artifactRefs };
     if (JSON.stringify([...handoffs, packet]).length > maxChars) {
       // Keep the packet ID; the complete packet remains available via get_handoff.
       packet.artifactRefs = [];

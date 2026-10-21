@@ -1,6 +1,9 @@
+import * as v from 'valibot';
+
 import type { Env } from '../../env';
-import { getWorkflowRun,startWorkflowRun } from '../../services/workflow-runs';
+import { getWorkflowRun, startWorkflowRun, WorkflowInputError } from '../../services/workflow-runs';
 import {
+  INTERNAL_ERROR,
   INVALID_PARAMS,
   jsonRpcError,
   type JsonRpcResponse,
@@ -24,10 +27,12 @@ export async function handleStartWorkflowRun(
     });
     return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result) }] });
   } catch (error) {
+    const isInput = error instanceof v.ValiError || error instanceof WorkflowInputError;
+    const message = error instanceof Error ? error.message : String(error);
     return jsonRpcError(
       requestId,
-      INVALID_PARAMS,
-      error instanceof Error ? error.message : String(error)
+      isInput ? INVALID_PARAMS : INTERNAL_ERROR,
+      isInput ? message : `${message}. Retry with the same requestKey.`
     );
   }
 }
@@ -38,13 +43,15 @@ export async function handleGetWorkflowRun(
   env: Env
 ): Promise<JsonRpcResponse> {
   try {
-    if (typeof params.runId !== 'string' || !params.runId) throw new Error('runId is required');
+    if (typeof params.runId !== 'string' || !params.runId)
+      throw new WorkflowInputError('runId is required');
     const result = await getWorkflowRun(env, token.projectId, token.userId, params.runId);
     return jsonRpcSuccess(requestId, { content: [{ type: 'text', text: JSON.stringify(result) }] });
   } catch (error) {
+    const isInput = error instanceof WorkflowInputError;
     return jsonRpcError(
       requestId,
-      INVALID_PARAMS,
+      isInput ? INVALID_PARAMS : INTERNAL_ERROR,
       error instanceof Error ? error.message : String(error)
     );
   }

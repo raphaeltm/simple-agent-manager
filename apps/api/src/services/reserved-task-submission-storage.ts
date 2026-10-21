@@ -9,7 +9,11 @@ import type {
   PreparedSubmission,
   ReservedTaskSubmissionInput,
 } from './reserved-task-submission-contracts';
-import { workflowCapacityBlocked,WorkflowCapacityDeferredError } from './workflow-admission';
+import {
+  workflowCapacityBlocked,
+  WorkflowCapacityDeferredError,
+  WorkflowSubmissionGuardRejectedError,
+} from './workflow-admission';
 
 export async function commitD1Submission(
   env: Env,
@@ -126,14 +130,15 @@ export async function commitD1Submission(
   const insertStatus = env.DATABASE.prepare(
     `INSERT INTO task_status_events
        (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
-     VALUES (?, ?, NULL, 'queued', ?, ?, ?, ?)`
+     SELECT ?, ?, NULL, 'queued', ?, ?, ?, ? ${workflow ? 'WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ?)' : ''}`
   ).bind(
     input.identities.initialStatusEventId,
     input.identities.taskId,
     input.source.initialStatusActorType,
     input.source.initialStatusActorId,
     input.source.initialStatusReason,
-    now
+    now,
+    ...(workflow ? [input.identities.taskId] : [])
   );
   const insertCheckpoint = env.DATABASE.prepare(
     `INSERT INTO task_submission_checkpoints
@@ -141,7 +146,7 @@ export async function commitD1Submission(
         initial_status_event_id, source_kind, source_id, source_execution_id, triggered_by,
         intent_fingerprint, accepted_snapshot_json, branch_name, task_title,
         checkpoint_state, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'd1_committed', ?, ?)`
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'd1_committed', ?, ? ${workflow ? 'WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ?)' : ''}`
   ).bind(
     input.identities.taskId,
     input.projectId,
@@ -158,7 +163,8 @@ export async function commitD1Submission(
     prepared.snapshot.task.outputBranch,
     prepared.snapshot.task.title,
     now,
-    now
+    now,
+    ...(workflow ? [input.identities.taskId] : [])
   );
 
   if (input.source.kind === 'trigger') {
@@ -188,7 +194,19 @@ export async function commitD1Submission(
       ]
     : [];
   try {
-    await env.DATABASE.batch([insertTask, insertStatus, insertCheckpoint, ...lineage]);
+    const results = await env.DATABASE.batch([
+      insertTask,
+      insertStatus,
+      insertCheckpoint,
+      ...lineage,
+    ]);
+    if (workflow && results[0]?.meta.changes === 0) {
+      if (await workflowCapacityBlocked(env, input.projectId, workflow.parentTaskId))
+        throw new WorkflowCapacityDeferredError('Waiting for project task capacity');
+      throw new WorkflowSubmissionGuardRejectedError(
+        'Workflow step submission guard rejected the task'
+      );
+    }
   } catch (error) {
     if (workflow && (await workflowCapacityBlocked(env, input.projectId, workflow.parentTaskId)))
       throw new WorkflowCapacityDeferredError('Waiting for project task capacity');

@@ -10,7 +10,11 @@ import {
   submitReservedTask,
 } from './reserved-task-submission';
 import { resolveSkillProfile } from './skills';
-import { workflowCapacityBlocked, WorkflowCapacityDeferredError } from './workflow-admission';
+import {
+  workflowCapacityBlocked,
+  WorkflowCapacityDeferredError,
+  WorkflowSubmissionGuardRejectedError,
+} from './workflow-admission';
 import { getWorkflowConfig } from './workflow-config';
 import { workflowEventStatements } from './workflow-events';
 import { workflowOutputHandoffs } from './workflow-handoffs';
@@ -113,18 +117,7 @@ async function launchStep(
       await transitionStep(env, run, step, 'failed', 'Project dispatch depth limit changed');
       return;
     }
-    const count = await env.DATABASE.prepare(
-      `SELECT
-      SUM(CASE WHEN parent_task_id = ? THEN 1 ELSE 0 END) AS children,
-      SUM(CASE WHEN dispatch_depth > 0 THEN 1 ELSE 0 END) AS active
-      FROM tasks WHERE project_id = ? AND status IN ('queued','in_progress','delegated','awaiting_followup')`
-    )
-      .bind(run.root_task_id, run.project_id)
-      .first<{ children: number; active: number }>();
-    if (
-      (count?.children ?? 0) >= limits.maxPerTask ||
-      (count?.active ?? 0) >= limits.maxActivePerProject
-    ) {
+    if (await workflowCapacityBlocked(env, run.project_id, run.root_task_id)) {
       await env.DATABASE.prepare(
         'UPDATE mission_steps SET reason = ? WHERE mission_id = ? AND step_key = ?'
       )
@@ -404,6 +397,20 @@ export async function reconcileWorkflowRun(
     try {
       await launchStep(env, run, step, steps, now, config, deps);
     } catch (error) {
+      if (error instanceof WorkflowSubmissionGuardRejectedError) {
+        await env.DATABASE.prepare(
+          'UPDATE mission_steps SET launch_retries = ?,next_attempt_at = ?,reason = ? WHERE mission_id = ? AND step_key = ?'
+        )
+          .bind(
+            step.launch_retries,
+            now + config.launchRetryBackoffMs,
+            error.message,
+            run.id,
+            step.step_key
+          )
+          .run();
+        continue;
+      }
       if (error instanceof WorkflowCapacityDeferredError) {
         await env.DATABASE.prepare(
           'UPDATE mission_steps SET launch_retries = ?,reason = ? WHERE mission_id = ? AND step_key = ?'
