@@ -36,3 +36,10 @@ An agent starts a three-step plan and ends its turn. SAM completes it without co
 - Cloudflare reliability review: registration lease, prepared-profile/current-limit checks, deadline ordering and durable history fixes accepted.
 - Security review: only same-run step-authored handoffs imported; malformed own outputs fail explicitly and references are bounded. Rereview passed.
 - Documentation/constitution/completion review: failed run replay normalized to needs_attention; no remaining implementation findings. Release gates still pending.
+
+## Live staging evidence (2026-10-21)
+- Deployment39644535871 attempt2 passed including smoke checks at9a95c2cff. An initial Cloudflare startup-limit rejection cleared on one retry; same bundle had previously reported575ms startup.
+- Workflow91a985a1-7eb9-4f0b-a696-f986bf6fa525 completed all three real Claude tasks: draft, review, revise. Identical MCP submissions returned the same run with reusedfalse/true.
+- Parent ended its turn and was explicitly put to sleep at18:09UTC. Review and revision advanced afterward without waking it. Draft and review workspaces were also slept after completion.
+- Library01M5FTKT4D1A5BH0ZZJKP6R7KQ was passed via predecessor summaries; authenticated download verified exact final content: `Workflow marker WFD20261021. The answer is forty-two.`
+- Existing user OAuth credentials and pool settings were used; no token-cap changes. At most two test VMs. Both VM DELETE requests returned200; final read-only cleanup check recorded in task state. Live failure injection remains untested; deterministic Workers tests cover failed prerequisites and recovery.
