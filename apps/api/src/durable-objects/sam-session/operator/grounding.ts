@@ -80,6 +80,14 @@ const claims: Array<{ verbs: string; operations: string[] }> = [
 ];
 const writes = new Set(claims.flatMap((claim) => claim.operations));
 
+/** Kind of the private history records the model reads; never a shape of an answer. */
+export const HISTORY_RECORD_KIND = 'sam_historical_turn_status';
+/**
+ * A reply that copies the history record format: it opens with a JSON object or carries
+ * the record kind. Such a copy can replay old links and IDs as if they were current.
+ */
+const HISTORY_RECORD_COPY = new RegExp(`^\\s*\\{|"kind"\\s*:\\s*"${HISTORY_RECORD_KIND}"`);
+
 /** A ULID or UUID, including any fabricated `_suffix`: the whole token is one identity. */
 export const PLATFORM_IDENTIFIER_PATTERN =
   /\b(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[_-][A-Za-z0-9_-]+)?\b/gi;
@@ -178,6 +186,9 @@ export function buildGroundingIndex(actions: OperatorAction[], appOrigin: string
 
 export function assertGroundedText(text: string, index: GroundingIndex): void {
   const { appOrigin, identities, links, completed } = index;
+  // Its opening brace or marker is in every prefix, so the live stream withholds it at once.
+  if (HISTORY_RECORD_COPY.test(text))
+    throw new OperatorGroundingError('SAM response reproduces a private history record');
   // Match the WHOLE token, including fabricated suffixes; a real profile ID
   // prefix must never ground a made-up session/task ID.
   for (const match of text.matchAll(PLATFORM_IDENTIFIER_PATTERN)) {

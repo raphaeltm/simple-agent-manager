@@ -1,4 +1,8 @@
-import { assertGroundedOperatorResponse, OperatorGroundingError } from './grounding';
+import {
+  assertGroundedOperatorResponse,
+  HISTORY_RECORD_KIND,
+  OperatorGroundingError,
+} from './grounding';
 import type { OperatorAction, OperatorStore, OperatorTurn } from './store';
 
 type Message = { role: 'user'; content: string } | { role: 'assistant'; content: string };
@@ -73,7 +77,7 @@ export function projectOperatorContext(input: {
     {
       role: 'assistant',
       content: JSON.stringify({
-        kind: 'sam_historical_turn_status',
+        kind: HISTORY_RECORD_KIND,
         authority: 'historical_evidence_only',
         recordedAt: group.recordedAt,
         turnId: group.turn?.id ?? null,

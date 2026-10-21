@@ -69,6 +69,13 @@ Raphaël's feedback on the new private SAM assistant (`/sam`, PR #2386), 2026-10
   SAM requests took 0.4–0.8 s. `OperatorWork.view` ran three D1 reads per card one after another
   (two membership reads plus the task read) on every history read.
 
+### History record copy (staging run 4, 2026-10-21)
+
+- GLM began one answer by writing a `sam_historical_turn_status` JSON record copied from its
+  history. The stream showed 463 characters of it for ~10 s; the final text then failed the
+  guard (its old links had no receipts this turn) and the correction forced a live read. Before
+  streaming the copy was invisible; a copy with no links or IDs would have been stored.
+
 ### Model evaluation (Cloudflare docs, 2026-10-21)
 
 | Model | Input $/M | Cached input $/M | Output $/M | Context | Notes |
@@ -128,6 +135,12 @@ Raphaël's feedback on the new private SAM assistant (`/sam`, PR #2386), 2026-10
 - [x] API: `OperatorWork.view` reads cards in parallel and checks each project once (3N → N + 2P
       D1 reads). Unit tests: all reads in flight together, one membership check per project, and a
       revoked-project control (the first two fail on the sequential loop).
+- [x] Review follow-ups: one access cache shared by receipts and work cards, run together; tool
+      names in the thinking line read as step titles; overscroll audit at 412×891.
+- [x] Guard: a reply that copies the history record format is rejected (never streamed or
+      stored; runs the correction; left out of later context); instructions say never to write
+      such records. Tests: guard unit, live hub, context, and a workerd run with the real agent
+      (copy → correction → tool → answer); all four fail without the rule.
 
 ### D. Model (shared + api config)
 - [x] Add `@cf/zai-org/glm-5.3-flash` to `PLATFORM_AI_MODELS` with published pricing, optional

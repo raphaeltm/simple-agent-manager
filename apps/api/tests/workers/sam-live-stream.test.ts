@@ -232,6 +232,57 @@ describe('SAM live answer stream in workerd', () => {
     expect(live.events.at(-1)).toEqual({ type: 'done', state: 'completed' });
   });
 
+  it('withholds a reply that copies a history record and streams the corrected answer', async () => {
+    const { request, start, turn } = await setup();
+    // Seen on staging: the model opened its answer with a record from its own history.
+    const copy = JSON.stringify({
+      kind: 'sam_historical_turn_status',
+      authority: 'historical_evidence_only',
+      assistantMessages: ['Here is the current picture. Nothing shipped.'],
+    });
+    const subscribed = deferred();
+    const projectsCall = {
+      ...base,
+      choices: [
+        {
+          index: 0,
+          delta: {
+            role: 'assistant',
+            tool_calls: [
+              {
+                index: 0,
+                id: 'call-projects',
+                type: 'function',
+                function: { name: 'sam_projects_list', arguments: '{"limit":5}' },
+              },
+            ],
+          },
+          finish_reason: null,
+        },
+      ],
+    };
+    reply = (_body, index) =>
+      index === 0
+        ? gated([subscribed.promise, content(copy.slice(0, 60)), content(copy.slice(60)), finish()])
+        : index === 1
+          ? gated([projectsCall, finish('tool_calls', usage)])
+          : gated([content('You have no projects yet.'), finish('stop', usage)]);
+    const id = await start('What shipped recently?');
+    const live = follow(await request(`/turns/${id}/stream`));
+    subscribed.release();
+    await live.done;
+    expect(JSON.stringify(live.events)).not.toContain('sam_historical_turn_status');
+    expect(live.text()).toBe('You have no projects yet.');
+    const finished = await turn(id);
+    expect(finished.turn).toMatchObject({
+      state: 'completed',
+      response: 'You have no projects yet.',
+    });
+    // The rejected copy ran the existing correction, whose first step must call a tool.
+    expect(modelRequests).toHaveLength(3);
+    expect(modelRequests[1]?.body.tool_choice).toBe('required');
+  });
+
   it('runs GLM 5.3 Flash at low reasoning effort, previews its reasoning, and bills cached input at the cached price', async () => {
     const glm = '@cf/zai-org/glm-5.3-flash';
     const { userId, stub, request, start } = await setup();

@@ -338,6 +338,24 @@ describe('private SAM live turn view', () => {
     expect(previews().at(-1)).toBe('Call sam_tasks_list for recent work.');
   });
 
+  it('never streams a draft that copies the history record format', async () => {
+    const hub = live();
+    const view = reader(hub.subscribe('turn'));
+    hub.stepStarted();
+    hub.chunk(text('{"kind":"sam_historical_turn_status","assistantMessages":["Here is '));
+    hub.chunk(text('the current picture, as before."]} and more '));
+    await vi.advanceTimersByTimeAsync(settings.flushMs);
+    hub.stepFinished(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(view.text()).toBe('');
+    expect(JSON.stringify(view.events)).not.toContain('sam_historical_turn_status');
+    // The corrected answer still streams in full.
+    hub.resetDraft();
+    hub.chunk(text('Two tasks finished today. '));
+    await vi.advanceTimersByTimeAsync(settings.flushMs);
+    expect(view.text()).toBe('Two tasks finished today. ');
+  });
+
   it('gives a late subscriber a snapshot, then ends every stream when the turn ends', async () => {
     const hub = live();
     hub.stepStarted();

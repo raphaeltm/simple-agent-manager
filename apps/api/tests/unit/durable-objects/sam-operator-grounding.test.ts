@@ -27,6 +27,20 @@ const check = (text: string, receipts: OperatorAction[] = []) =>
   assertGroundedOperatorResponse(text, receipts, origin);
 
 describe('operator publication grounding', () => {
+  it('rejects a reply that copies the private history record format', () => {
+    // Seen on staging: the model opened its answer with a record from its own history.
+    const record = JSON.stringify({
+      kind: 'sam_historical_turn_status',
+      authority: 'historical_evidence_only',
+      assistantMessages: ['Here is the current picture.'],
+    });
+    expect(() => check(record)).toThrow('reproduces a private history record');
+    expect(() => check(`  ${record}`)).toThrow('reproduces a private history record');
+    expect(() => check(`Earlier I said: ${record}`)).toThrow('reproduces a private history record');
+    // Prose that merely mentions braces or the record name is still an answer.
+    expect(() => check('Use {project} placeholders in the brief.')).not.toThrow();
+    expect(() => check('History is shown as sam_historical_turn_status records.')).not.toThrow();
+  });
   it('grounds a stopped workspace without claiming deletion', () => {
     expect(() =>
       check('I stopped the workspace.', [

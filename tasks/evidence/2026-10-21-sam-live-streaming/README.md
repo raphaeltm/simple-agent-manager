@@ -10,7 +10,8 @@ sampled the running turn twice a second until it finished.
 | --- | --- | --- | --- |
 | 1 | `dcd201546` (deploy 39578825121) | GLM 5.3 Flash | Pass. Live inbox and project reads, 17 visible answer increments, dated answer. "Sending…" showed for seconds (see below). |
 | 2 | `cb1528def` (deploy 39585545753, throwaway branch, deleted) | Gemma 4 26B | Same build as run 3 with only `SAM_MODEL` changed. |
-| 3 | `a262f0ee9` (deploy 39588349771) | GLM 5.3 Flash | Pass. Final head. |
+| 3 | `a262f0ee9` (deploy 39588349771) | GLM 5.3 Flash | Pass. |
+| 4 | `280162f4e` (deploy 39593029335) | GLM 5.3 Flash | Pass, stored answer correct. The model first wrote a copy of a history record; 463 characters streamed for ~10 s before the guard's correction replaced them. Fixed afterwards: the guard now rejects record copies. |
 
 Every run: no failed API requests, no console errors, `<main>` not scrollable
 (`scrollHeight - clientHeight = 0`, `scrollTop = 0`), composer bottom = shell bottom (891 px).
