@@ -292,6 +292,10 @@ export function RunGraph({
         ref={ref}
         data-testid="workflow-graph"
         data-direction={layout.direction}
+        // A graph that scrolls sideways is a tab stop, so arrow keys can scroll it.
+        tabIndex={wider ? 0 : undefined}
+        role={wider ? 'region' : undefined}
+        aria-label={wider ? 'Workflow graph' : undefined}
         className="relative w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-xl border border-solid border-border-default bg-[color-mix(in_srgb,var(--sam-color-bg-inset)_60%,transparent)]"
       >
         {width > 0 && (

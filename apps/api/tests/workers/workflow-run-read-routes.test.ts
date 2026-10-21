@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import * as projectData from '../../src/services/project-data';
+import { listWorkflowRuns } from '../../src/services/workflow-run-list';
 import { getWorkflowRun, loadWorkflowSteps } from '../../src/services/workflow-runs';
 import { seedInstallation, seedProject, seedSignedInUser, seedUser } from './helpers/seed-d1';
 import { finishStepTask, workflowRunFixture } from './helpers/workflow-run-fixture';
@@ -231,6 +232,13 @@ describe('workflow run detail for project members', () => {
     )
       .bind(runId)
       .run();
+    // Only the first step has started, so this corrupts exactly one event.
+    const starting = await env.DATABASE.prepare(
+      `SELECT COUNT(*) AS n FROM mission_workflow_events WHERE mission_id = ? AND event_type = 'workflow.step.starting'`
+    )
+      .bind(runId)
+      .first<{ n: number }>();
+    expect(starting?.n).toBe(1);
     await env.DATABASE.prepare(
       `UPDATE mission_workflow_events SET event_payload_json = 'nope' WHERE mission_id = ? AND event_type = 'workflow.step.starting'`
     )
@@ -253,7 +261,13 @@ describe('workflow run detail for project members', () => {
     // Neighbours are intact, and the corrupted event is the only one missing.
     expect(body.run.steps.find((step) => step.key === 'revise')!.after).toEqual(['review']);
     expect(body.run.activity.map((entry) => entry.state)).toEqual(['running']);
-    expect(JSON.stringify(warn.mock.calls)).toContain('workflow_read.field_skipped');
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain('workflow_read.field_skipped');
+    // The log names the field and what was wrong, never the content: these columns hold
+    // agent-written text, and JSON.parse and valibot messages quote their input.
+    expect(logged).toContain('invalid JSON');
+    expect(logged).not.toContain('not json');
+    expect(logged).not.toContain('nope');
 
     // The owner's MCP read survives the same rows.
     const mcp = await getWorkflowRun(testEnv, f.projectId, f.userId, runId);
@@ -308,6 +322,75 @@ describe('workflow run list for project members', () => {
     expect(attention.body.runs.map((run) => run.id)).toEqual([second]);
     const active = await read<WorkflowRunListResponse>(cookie, `${base}?status=active`);
     expect(active.body.runs.map((run) => run.id)).toEqual([third, first]);
+  });
+
+  it('leaves a malformed run out of its page and still pages past it', async () => {
+    const f = await workflowRunFixture([{ key: 'only', title: 'Only step' }]);
+    const first = await f.startRun('first', 'First run');
+    const broken = await f.startRun('broken', 'Broken run');
+    const third = await f.startRun('third', 'Third run');
+    // A deadline that is not a number fails the list row schema.
+    await env.DATABASE.prepare(
+      "UPDATE missions SET workflow_deadline_at = 'agent-written text' WHERE id = ?"
+    )
+      .bind(broken)
+      .run();
+    const warn = vi.spyOn(console, 'warn');
+
+    const cookie = await seedSignedInUser(f.userId);
+    const base = `/api/projects/${f.projectId}/workflows`;
+    // One run per page, so the broken run fills a page on its own: that page is empty, and
+    // its cursor (taken from the broken row itself) must still lead on to the first run.
+    const pages: string[][] = [];
+    let cursor: string | null = null;
+    do {
+      const page: { status: number; body: WorkflowRunListResponse } =
+        await read<WorkflowRunListResponse>(
+          cookie,
+          `${base}?limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+        );
+      expect(page.status).toBe(200);
+      pages.push(page.body.runs.map((run) => run.id));
+      cursor = page.body.nextCursor;
+    } while (cursor && pages.length < 5);
+    expect(pages).toEqual([[third], [], [first]]);
+
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain('workflow_deadline_at');
+    expect(logged).not.toContain('agent-written text');
+  });
+
+  it('reads the steps of more runs than one D1 statement can bind', async () => {
+    const f = await workflowRunFixture([{ key: 'only', title: 'Only step' }]);
+    // More run IDs than D1's 100 bound parameters, beside the one reserved for the reason cap.
+    // Called directly: the route caps a page at 50, so this is the guard for a larger cap.
+    const runs = 101;
+    const now = Date.now();
+    await env.DATABASE.batch(
+      Array.from({ length: runs }, (_, index) => {
+        const id = `bulk-${index}-${crypto.randomUUID()}`;
+        const at = new Date(now - index * 1000).toISOString();
+        return [
+          env.DATABASE.prepare(
+            `INSERT INTO missions (id, project_id, user_id, title, status, workflow_plan_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 'active', '{}', ?, ?)`
+          ).bind(id, f.projectId, f.userId, `Bulk run ${index}`, at, at),
+          env.DATABASE.prepare(
+            `INSERT INTO mission_steps (mission_id, step_key, ordinal, title, instructions, after_json,
+             profile_id, profile_snapshot_json, attempt_id, task_id, session_id, updated_at)
+             VALUES (?, 'only', 0, 'Only step', 'Do it', '[]', ?, '{}', ?, ?, ?, ?)`
+          ).bind(id, f.profileId, `att-${id}`, `task-${id}`, `chat-${id}`, at),
+        ];
+      }).flat()
+    );
+
+    const page = await listWorkflowRuns(testEnv, f.projectId, {
+      status: null,
+      cursor: null,
+      limit: runs,
+    });
+    expect(page.runs).toHaveLength(runs);
+    expect(page.runs.every((run) => run.steps.length === 1)).toBe(true);
   });
 
   it('rejects an unknown status or a forged cursor', async () => {

@@ -1,7 +1,8 @@
 /**
  * Keyboard behaviour for a radiogroup built from buttons (the WAI-ARIA radio pattern): the group
  * is one tab stop, arrow keys move both the choice and focus, and Home/End jump to the ends.
- * Disabled options are skipped. Used by the filter chips and the choice cards.
+ * Disabled options are skipped. Used by the filter chips, the choice cards, and the workflow run
+ * page's view tabs (tabs that activate on focus follow the same keys).
  */
 import { type KeyboardEvent, useRef } from 'react';
 

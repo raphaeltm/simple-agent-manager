@@ -8,7 +8,7 @@ import type {
   WorkflowRunSummary,
   WorkflowStepDetail,
 } from '@simple-agent-manager/shared';
-import { QueryClientProvider } from '@tanstack/react-query';
+import { focusManager, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
@@ -43,7 +43,7 @@ vi.mock('../../../src/hooks/useQueryScope', () => ({ useQueryScope: () => 'owner
 
 import { ToastProvider } from '../../../src/hooks/useToast';
 import { ApiClientError } from '../../../src/lib/api/client';
-import { WORKFLOW_RUN_POLL_MS } from '../../../src/lib/poll-intervals';
+import { AUTOMATION_POLL_MS, WORKFLOW_RUN_POLL_MS } from '../../../src/lib/poll-intervals';
 import { AutomationOverview } from '../../../src/pages/automation/AutomationOverview';
 import { WorkflowRunPage } from '../../../src/pages/automation/workflows/WorkflowRunPage';
 import { WorkflowRuns } from '../../../src/pages/automation/workflows/WorkflowRuns';
@@ -426,6 +426,24 @@ describe('Workflow run page on a phone', () => {
       'Could not load this workflow. D1 timed out'
     );
   });
+  it('moves between views with Home, End and the arrow keys, one tab stop at a time', async () => {
+    renderAt('/projects/p1/automation/workflows/run-active');
+    const steps = await screen.findByRole('tab', { name: 'Steps' });
+    expect(steps).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', steps.id);
+    steps.focus();
+    await userEvent.keyboard('{End}');
+    const activity = screen.getByRole('tab', { name: 'Activity' });
+    expect(activity).toHaveAttribute('aria-selected', 'true');
+    expect(activity).toHaveFocus();
+    expect(activity).toHaveAttribute('aria-controls', screen.getByRole('tabpanel').id);
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', activity.id);
+    expect(activity).toHaveAttribute('tabindex', '0');
+    expect(screen.getByRole('tab', { name: 'Steps' })).toHaveAttribute('tabindex', '-1');
+    await userEvent.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: 'Steps' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Steps' })).toHaveFocus();
+  });
 });
 
 describe('Workflow run page on a wide screen', () => {
@@ -465,6 +483,38 @@ describe('refreshing', () => {
       await vi.advanceTimersByTimeAsync(WORKFLOW_RUN_POLL_MS * 3);
     });
     expect(api.getWorkflowRun).toHaveBeenCalledTimes(1);
+  });
+
+  it('pauses while the tab is hidden, on the run page and the list', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderAt('/projects/p1/automation/workflows/run-active');
+    await screen.findByTestId('workflow-run');
+    focusManager.setFocused(false);
+    let listCalls = 0;
+    try {
+      const runCalls = api.getWorkflowRun.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(WORKFLOW_RUN_POLL_MS * 3);
+      });
+      expect(api.getWorkflowRun.mock.calls.length).toBe(runCalls);
+
+      cleanup();
+      renderAt('/projects/p1/automation/workflows');
+      await screen.findAllByTestId('workflow-run-row');
+      listCalls = api.listWorkflowRuns.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(AUTOMATION_POLL_MS * 3);
+      });
+      expect(api.listWorkflowRuns.mock.calls.length).toBe(listCalls);
+    } finally {
+      focusManager.setFocused(undefined);
+    }
+    // Back in front, the list with a running workflow refreshes again: the pause came from the
+    // hidden tab, not from a query that stopped for good.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTOMATION_POLL_MS + 50);
+    });
+    expect(api.listWorkflowRuns.mock.calls.length).toBeGreaterThan(listCalls);
   });
 });
 

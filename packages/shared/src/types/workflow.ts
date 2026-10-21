@@ -7,6 +7,7 @@
  * (`apps/api/src/services/workflow-reconcile.ts`). The API projects runs and steps in one
  * place, `apps/api/src/services/workflow-run-read.ts`, so a new step field lands there once.
  */
+import type { HandoffArtifactRef } from './mission';
 import type { CompletionEvidence } from './task';
 
 /**
@@ -90,11 +91,14 @@ export interface WorkflowRunListResponse {
   nextCursor: string | null;
 }
 
-/** A reference an agent published with its result, for example a Library file ID or a URL. */
-export interface WorkflowArtifactRef {
-  type: string;
-  ref: string;
-}
+/**
+ * A reference an agent published with its result, for example a Library file ID or a URL: a
+ * `HandoffArtifactRef` as the engine stores it. `type` stays open because `publish_handoff`
+ * accepts any type string and the engine keeps it as given; readers match the known kinds.
+ */
+export type WorkflowArtifactRef = Omit<HandoffArtifactRef, 'type' | 'description'> & {
+  type: HandoffArtifactRef['type'] | (string & {});
+};
 
 /** What a finished step reported. Everything here was written by the step's agent. */
 export interface WorkflowStepOutput {

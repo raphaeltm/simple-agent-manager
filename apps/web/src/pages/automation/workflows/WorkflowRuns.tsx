@@ -34,7 +34,7 @@ const FILTER_OPTIONS: Array<{ id: WorkflowFilter; label: string }> = [
 const GROUPS: Array<{ status: WorkflowRunSummary['status']; title: string }> = [
   { status: 'needs_attention', title: 'Needs your attention' },
   { status: 'active', title: 'Running' },
-  { status: 'completed', title: 'Finished' },
+  { status: 'completed', title: 'Done' },
 ];
 
 /** One run: what it is, what is happening now, who started it, and its progress. */

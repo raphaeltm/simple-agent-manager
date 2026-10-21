@@ -10,6 +10,7 @@ import { ArrowLeft, History, ListChecks, Network } from 'lucide-react';
 import { lazy, type ReactNode, Suspense, useCallback, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 
+import { useMediaQuery } from '../../../hooks/useMediaQuery';
 import { ApiClientError } from '../../../lib/api/client';
 import {
   automationPaths,
@@ -20,6 +21,7 @@ import { formatTimeFromNow } from '../../../lib/time-utils';
 import { useProjectContext } from '../../ProjectContext';
 import { useAutomationAccess } from '../data';
 import { LoadError, Loading, Page, PageHeader } from '../page';
+import { useRadioKeys } from '../radio-keys';
 import { Panel } from '../ui';
 import { useWorkflowRun } from './data';
 import { progressSentence, workflowProgress } from './model';
@@ -29,9 +31,11 @@ import { RunAttention } from './run-attention';
 import { RunSteps } from './run-steps';
 import { StepDetail } from './step-detail';
 import { RunBadge, StepProgressBar } from './ui';
-import { useWideLayout } from './use-wide-layout';
 
 const RunGraph = lazy(() => import('./run-graph').then((module) => ({ default: module.RunGraph })));
+
+/** The width at which step details sit beside the steps (Tailwind `lg`). */
+const WIDE_QUERY = '(min-width: 1024px)';
 
 /** History state marking a step opened from the list on a phone. */
 const FROM_LIST = 'workflowStepFromList';
@@ -42,6 +46,10 @@ const TABS: Array<{ id: WorkflowRunView; label: string; Icon: typeof ListChecks 
   { id: 'activity', label: 'Activity', Icon: History },
 ];
 
+const TAB_PANEL_ID = 'workflow-run-view';
+const tabId = (view: WorkflowRunView) => `workflow-run-tab-${view}`;
+
+/** One tab stop; arrow keys, Home and End move between views (the WAI-ARIA tabs pattern). */
 function Tabs({
   view,
   onChange,
@@ -49,20 +57,24 @@ function Tabs({
   view: WorkflowRunView;
   onChange: (view: WorkflowRunView) => void;
 }) {
+  const keys = useRadioKeys(TABS, view, onChange);
   return (
     <div
       role="tablist"
       aria-label="Show the run as"
       className="flex gap-1 border-0 border-b border-solid border-border-default"
     >
-      {TABS.map(({ id, label, Icon }) => {
+      {TABS.map(({ id, label, Icon }, index) => {
         const active = id === view;
         return (
           <button
             key={id}
+            {...keys(index)}
+            id={tabId(id)}
             type="button"
             role="tab"
             aria-selected={active}
+            aria-controls={TAB_PANEL_ID}
             onClick={() => onChange(id)}
             className={`-mb-px inline-flex min-h-11 cursor-pointer items-center gap-1.5 border-0 border-b-2 border-solid bg-transparent px-3 text-sm font-semibold ${active ? 'border-b-accent text-fg-primary' : 'border-b-transparent text-fg-muted hover:text-fg-primary'}`}
           >
@@ -91,7 +103,7 @@ export function WorkflowRunPage() {
   const { projectId } = useProjectContext();
   const { runId = '' } = useParams();
   const [params, setParams] = useSearchParams();
-  const wide = useWideLayout();
+  const wide = useMediaQuery(WIDE_QUERY);
   const { personName } = useAutomationAccess();
   const query = useWorkflowRun(projectId, runId);
   const run = query.data;
@@ -254,7 +266,12 @@ export function WorkflowRunPage() {
           >
             <div className="flex min-w-0 flex-col gap-4">
               <Tabs view={view} onChange={(next) => setParam('view', next, true)} />
-              <div role="tabpanel" className="min-w-0">
+              <div
+                role="tabpanel"
+                id={TAB_PANEL_ID}
+                aria-labelledby={tabId(view)}
+                className="min-w-0"
+              >
                 {tabContent}
               </div>
             </div>

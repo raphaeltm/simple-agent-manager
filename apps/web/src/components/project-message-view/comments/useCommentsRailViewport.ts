@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useMediaQuery } from '../../../hooks/useMediaQuery';
 
 /**
  * Matches Tailwind's `lg` breakpoint used by the message-row inline comment
@@ -8,19 +8,5 @@ import { useEffect, useState } from 'react';
 const COMMENTS_RAIL_MEDIA_QUERY = '(min-width: 1024px)';
 
 export function useCommentsRailViewport(): boolean {
-  const [matches, setMatches] = useState(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
-    return window.matchMedia(COMMENTS_RAIL_MEDIA_QUERY).matches;
-  });
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-    const mediaQuery = window.matchMedia(COMMENTS_RAIL_MEDIA_QUERY);
-    const handleChange = (event: MediaQueryListEvent) => setMatches(event.matches);
-    mediaQuery.addEventListener('change', handleChange);
-    setMatches(mediaQuery.matches);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, []);
-
-  return matches;
+  return useMediaQuery(COMMENTS_RAIL_MEDIA_QUERY);
 }

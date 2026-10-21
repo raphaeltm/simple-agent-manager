@@ -86,12 +86,34 @@ export function toWorkflowRunStatus(stored: string): WorkflowRunStatus {
   return stored === 'active' || stored === 'completed' ? stored : 'needs_attention';
 }
 
-export function fieldSkipped(runId: string, field: string, stepKey: string | null, error: unknown) {
+/** Where a value failed and what was expected, without the value itself. */
+const issueReason = (issues: readonly v.BaseIssue<unknown>[]) =>
+  issues
+    .map((issue) => `${v.getDotPath(issue) ?? 'value'}: expected ${issue.expected ?? issue.type}`)
+    .join('; ');
+
+/**
+ * Why a value was skipped. valibot and JSON.parse messages quote the input, and these columns
+ * hold agent-written text, so only the location and the expected shape are logged.
+ */
+function skipReason(error: unknown): string {
+  if (error instanceof v.ValiError) return issueReason(error.issues);
+  if (error instanceof SyntaxError) return 'invalid JSON';
+  return error instanceof Error ? error.name : 'unknown error';
+}
+
+/** Log a skipped row or field. `reason` is either a caught error or our own content-free text. */
+export function fieldSkipped(
+  runId: string,
+  field: string,
+  stepKey: string | null,
+  reason: unknown
+) {
   log.warn('workflow_read.field_skipped', {
     runId,
     field,
     stepKey,
-    error: error instanceof Error ? error.message : String(error),
+    reason: typeof reason === 'string' ? reason : skipReason(reason),
   });
 }
 
@@ -106,8 +128,7 @@ export function parseRows<TSchema extends v.GenericSchema>(
   for (const row of rows ?? []) {
     const result = v.safeParse(schema, row);
     if (result.success) parsed.push(result.output);
-    else
-      fieldSkipped(runId, table, null, new Error(result.issues.map((i) => i.message).join('; ')));
+    else fieldSkipped(runId, table, null, issueReason(result.issues));
   }
   return parsed;
 }
@@ -146,13 +167,13 @@ export async function loadWorkflowRun(
        launch_retries, result_json, reason, updated_at
        FROM mission_steps WHERE mission_id = ? ORDER BY ordinal`
     ).bind(run.id),
-    // Each step attempt records at most starting, running and one outcome; the run one outcome.
-    // The bound is therefore never reached, so the activity is complete (rule 65).
+    // Not capped, so the activity is always complete (rule 65). It is bounded by its writer:
+    // `workflow-events.ts` keys each row by step attempt and state (INSERT OR IGNORE), so a run
+    // holds at most one row per step state plus its outcome, a few dozen at the step cap.
     env.DATABASE.prepare(
       `SELECT id, event_type, event_payload_json, created_at FROM mission_workflow_events
-       WHERE mission_id = ? ORDER BY created_at, id
-       LIMIT (SELECT COUNT(*) * 4 + 2 FROM mission_steps WHERE mission_id = ?)`
-    ).bind(run.id, run.id),
+       WHERE mission_id = ? ORDER BY created_at, id`
+    ).bind(run.id),
     env.DATABASE.prepare(
       `SELECT id, status, title, chat_session_id FROM tasks
        WHERE project_id = ? AND (id = ? OR id IN (SELECT task_id FROM mission_steps WHERE mission_id = ?))`
@@ -242,14 +263,17 @@ interface ParsedEvent {
 function parseEvent(runId: string, row: EventRow): ParsedEvent | null {
   const match = EVENT_TYPE.exec(row.event_type);
   if (!match?.[1] || !match[2]) {
-    fieldSkipped(runId, `event:${row.id}`, null, new Error(`Unknown event type ${row.event_type}`));
+    fieldSkipped(runId, `event:${row.id}`, null, `unknown event type ${row.event_type}`);
     return null;
   }
   if (match[1] === 'run')
     return { at: row.created_at, stepKey: null, attemptId: null, state: match[2] };
   try {
     const { metadata } = v.parse(EVENT_PAYLOAD, JSON.parse(row.event_payload_json));
-    if (!metadata.stepId) throw new Error('Step event without stepId');
+    if (!metadata.stepId) {
+      fieldSkipped(runId, `event:${row.id}`, null, 'step event without stepId');
+      return null;
+    }
     return {
       at: row.created_at,
       stepKey: metadata.stepId,
@@ -275,7 +299,7 @@ function stepDetail(
 ): WorkflowStepDetail | null {
   const runId = loaded.run.id;
   if (!isWorkflowStepStatus(row.state)) {
-    fieldSkipped(runId, 'state', row.step_key, new Error(`Unknown step state ${row.state}`));
+    fieldSkipped(runId, 'state', row.step_key, `unknown step state ${row.state}`);
     return null;
   }
   const task = loaded.tasks.get(row.task_id) ?? null;
@@ -364,7 +388,8 @@ export function toMcpWorkflowRun(loaded: LoadedWorkflowRun) {
     runId: run.id,
     title: run.title,
     goal: run.description,
-    status: toWorkflowRunStatus(run.status),
+    // Exactly the MCP mapping that predates the REST contract (only `failed` is renamed).
+    status: run.status === 'failed' ? 'needs_attention' : run.status,
     deadlineAt: run.workflow_deadline_at,
     steps: loaded.steps.map((step) => ({
       key: step.step_key,

@@ -121,12 +121,7 @@ export async function listWorkflowRuns(
     'mission_steps'
   )) {
     if (!isWorkflowStepStatus(step.state)) {
-      fieldSkipped(
-        step.mission_id,
-        'state',
-        step.step_key,
-        new Error(`Unknown step state ${step.state}`)
-      );
+      fieldSkipped(step.mission_id, 'state', step.step_key, `unknown step state ${step.state}`);
       continue;
     }
     const status: WorkflowStepStatus = step.state;

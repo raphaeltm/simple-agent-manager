@@ -240,7 +240,7 @@ test.describe('Workflow run page', () => {
     await expect(detail.getByText('Listening', { exact: true })).toBeVisible();
     // The fixture's clock starts when the file loads, so the countdown may have moved a minute.
     await expect(page.getByTestId('workflow-step-explanation')).toHaveText(
-      /^Listening for CI to finish on pull request #2405\. Gives up in 4\d min\.$/
+      /^Listening for CI to finish on pull request #2405\. Gives up in [34]\d min\.$/
     );
     await expect(detail.getByText('What it waits for')).toBeVisible();
     await expect(detail.getByText('check_suite.completed')).toBeVisible();
