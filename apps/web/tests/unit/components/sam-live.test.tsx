@@ -205,11 +205,14 @@ describe('useSamLiveTurn', () => {
   it('leaves the page on polling when the turn is not running in the server object', async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
-    const { result } = renderHook(() => useSamLiveTurn('turn-1', vi.fn()));
+    const onSettled = vi.fn();
+    const { result } = renderHook(() => useSamLiveTurn('turn-1', onSettled));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result.current).toEqual({ view: null, streaming: false });
+    // The turn may have just ended: history is refreshed once instead of waiting for a poll.
+    expect(onSettled).toHaveBeenCalledTimes(1);
   });
 
   it('reconnects after a dropped stream and resynchronises from the new snapshot', async () => {
@@ -223,6 +226,13 @@ describe('useSamLiveTurn', () => {
       stream.close();
     });
     await waitFor(() => expect(stream.fetchMock).toHaveBeenCalledTimes(2), { timeout: 4_000 });
+    // The new connection starts from its own snapshot: a delta before it is not applied to
+    // the old view, which stays on screen until the snapshot arrives.
+    await act(async () => {
+      stream.send({ type: 'text', at: 5, text: 'stale ' });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(result.current.view?.text).toBe('Half ');
     act(() => stream.send({ type: 'snapshot', ...snapshot, text: 'Half of the answer ' }));
     await waitFor(() => expect(result.current.view?.text).toBe('Half of the answer '));
   });

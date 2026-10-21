@@ -230,7 +230,8 @@ AI_PROXY_REQUEST_BODY_MAX_BYTES = "1048576"
 AI_GATEWAY_ID = "sam"
 # SAM Agent — Workers AI for zero-config usage (no API key needed). GLM 5.3 Flash
 # (2026-10-21): larger than Gemma 4 26B at similar per-turn cost once the repeated
-# prompt prefix is billed at its cached-input price.
+# prompt prefix is billed at its cached-input price. It needs the Workers Paid plan
+# (or prepaid AI Gateway credits), which every SAM install already requires.
 SAM_MODEL = "@cf/zai-org/glm-5.3-flash"
 # Triggers (Event-Driven Agent Triggers)
 MAX_TRIGGERS_PER_PROJECT = "10"

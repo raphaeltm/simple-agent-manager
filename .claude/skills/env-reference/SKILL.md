@@ -88,7 +88,7 @@ Admin setting overrides take precedence over registry defaults. The disabled set
 
 Sources: `apps/api/src/services/operator-settings.ts`, `admin-settings-registry.ts`, and `apps/api/src/durable-objects/sam-session/operator/work.ts`.
 
-The assistant reuses existing `SAM_MODEL` (the deployed `wrangler.toml` value is `@cf/zai-org/glm-5.3-flash`; code default `claude-sonnet-5`), context/window, tool-result and model-step limits from `resolveSamConfig`, plus `SAM_LLM_TIMEOUT_MS` (operator fallback `120000`). Operator turn admission uses `SAM_MESSAGE_MAX_LENGTH` with a `16000`-character fallback; legacy subtask-message readers can have a different fallback. No new provider API key is required specifically for enabling the assistant: it uses the installation's supported platform AI configuration and usage gate.
+The assistant reuses existing `SAM_MODEL` (the deployed `wrangler.toml` value is `@cf/zai-org/glm-5.3-flash`, which needs the Workers Paid plan or prepaid AI Gateway credits, like the rest of SAM; code default `claude-sonnet-5`), context/window, tool-result and model-step limits from `resolveSamConfig`, plus `SAM_LLM_TIMEOUT_MS` (operator fallback `120000`). Operator turn admission uses `SAM_MESSAGE_MAX_LENGTH` with a `16000`-character fallback; legacy subtask-message readers can have a different fallback. No new provider API key is required specifically for enabling the assistant: it uses the installation's supported platform AI configuration and usage gate.
 
 ### How Worker variables are set
 

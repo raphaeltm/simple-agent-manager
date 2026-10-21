@@ -19,7 +19,7 @@ While SAM works, its reply shows what it is doing right now: **Starting**, **Thi
 
 The live view is a preview of the stored reply. Text that refers to a project, task or chat appears only once a completed step in the same turn returned that item, so a guessed identifier or link is never shown while SAM is still writing. When the turn ends, the stored answer and its receipts replace the live view.
 
-For questions about current work, such as what shipped or changed recently, SAM is told today's date and reads live project data in that turn. Earlier messages in your SAM history carry their dates and count as past context, not current status.
+For questions about current work, such as what shipped or changed recently, SAM is told today's date and instructed to read live project data in that turn. Each read shows as a step in the reply, such as _Checked your inbox_. If an answer about current work shows no step, ask SAM to check again. Earlier messages in your SAM history carry their dates and count as past context, not current status.
 
 ## Review actions and recover safely
 

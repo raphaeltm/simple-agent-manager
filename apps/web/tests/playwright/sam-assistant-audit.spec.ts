@@ -641,6 +641,12 @@ test('a running turn shows each step, its thinking and the answer as it is writt
   await checkComposerPinned(page);
   await checkLayout(page, 'sam-live-writing');
   // A connected stream relaxes history polling (2s → 15s); the settled step refreshed once.
+  // The window is the measurement, so it is a fixed wait; the stream must be the open one.
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __samLive: { opened: number } }).__samLive.opened
+    )
+  ).toBe(1);
   await page.waitForTimeout(4_500);
   expect(mock.historyReads() - readsBefore).toBeLessThanOrEqual(1);
 });

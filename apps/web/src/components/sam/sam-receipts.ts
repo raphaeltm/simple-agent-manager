@@ -260,10 +260,12 @@ const STEP_WORDS: Record<
     done: (c) => `Read a chat${where(c)}`,
   },
   sam_tasks_list: {
-    running: (c) =>
-      c.query
-        ? `Searching tasks${quoted(c.query)}${where(c)}`
-        : `Looking through your ${c.limit ? `${c.limit} ` : ''}most recent ${c.status ? `${c.status} ` : ''}tasks${where(c)}`,
+    running: (c) => {
+      if (c.query) return `Searching tasks${quoted(c.query)}${where(c)}`;
+      const limit = c.limit ? `${c.limit} ` : '';
+      const status = c.status ? `${c.status} ` : '';
+      return `Looking through your ${limit}most recent ${status}tasks${where(c)}`;
+    },
     done: (c) =>
       c.query
         ? `Found ${count(c.count, 'matching task')}`
