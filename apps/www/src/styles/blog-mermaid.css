@@ -1,0 +1,333 @@
+/* Interactive Mermaid diagrams in blog posts.
+   `src/scripts/blog-mermaid.ts` wraps each Mermaid code block in `.mermaid-shell`
+   (chrome, pan/zoom surface, full-screen mode). Imported by `layouts/BlogPost.astro`. */
+
+.post-body .mermaid-shell {
+  margin: 32px 0;
+  border: 1px solid rgba(110, 215, 154, 0.18);
+  border-radius: 20px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top left, rgba(110, 215, 154, 0.12), transparent 32%),
+    linear-gradient(180deg, rgba(19, 32, 29, 0.96), rgba(11, 17, 16, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(230, 242, 238, 0.04),
+    0 28px 60px rgba(0, 0, 0, 0.24);
+}
+
+.post-body .mermaid-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid rgba(110, 215, 154, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
+}
+
+.post-body .mermaid-eyebrow {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #6ed79a;
+}
+
+.post-body .mermaid-hint {
+  margin: 4px 0 0;
+  font-size: 0.82rem;
+  color: var(--color-fg-muted);
+}
+
+.post-body .mermaid-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.post-body .mermaid-reset,
+.post-body .mermaid-expand {
+  border: 1px solid rgba(110, 215, 154, 0.18);
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: rgba(11, 17, 16, 0.7);
+  color: var(--color-fg-primary);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    transform 0.2s ease,
+    background 0.2s ease;
+}
+
+.post-body .mermaid-reset:hover,
+.post-body .mermaid-reset:focus-visible,
+.post-body .mermaid-expand:hover,
+.post-body .mermaid-expand:focus-visible {
+  border-color: rgba(110, 215, 154, 0.45);
+  background: rgba(21, 128, 61, 0.12);
+  transform: translateY(-1px);
+}
+
+.post-body .mermaid-expand {
+  background: rgba(22, 163, 74, 0.12);
+}
+
+.post-body .mermaid-surface {
+  position: relative;
+  width: 100%;
+  min-height: 360px;
+  max-height: min(78vh, 720px);
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  aspect-ratio: var(--mermaid-diagram-ratio, auto);
+  background:
+    linear-gradient(rgba(110, 215, 154, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(110, 215, 154, 0.05) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.post-body .mermaid-surface.is-grabbing {
+  cursor: grabbing;
+}
+
+.post-body .mermaid-canvas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 360px;
+  height: 100%;
+  padding: 0;
+}
+
+.post-body .mermaid-canvas svg {
+  display: block;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: 100%;
+  margin: 0 auto;
+  shape-rendering: geometricPrecision;
+  text-rendering: geometricPrecision;
+  color-rendering: optimizeQuality;
+}
+
+.post-body .mermaid-shell .label,
+.post-body .mermaid-shell foreignObject div {
+  color: var(--color-fg-primary);
+}
+
+.post-body .mermaid-error {
+  padding: 24px;
+  color: #ffd1d1;
+}
+
+html[data-theme='light'] .post-body .mermaid-error {
+  color: #b91c1c;
+}
+
+.post-body .mermaid-error pre {
+  margin-top: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---- Light-mode mermaid surfaces (match marketing light palette) ---- */
+html[data-theme='light'] .post-body .mermaid-shell {
+  border-color: rgba(21, 128, 61, 0.22);
+  background:
+    radial-gradient(circle at top left, rgba(21, 128, 61, 0.08), transparent 32%),
+    linear-gradient(180deg, #f4f8f5, #eef3ef);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 18px 40px rgba(16, 40, 28, 0.12);
+}
+
+html[data-theme='light'] .post-body .mermaid-chrome {
+  border-bottom-color: rgba(21, 128, 61, 0.16);
+  background: linear-gradient(180deg, rgba(17, 39, 29, 0.03), transparent);
+}
+
+html[data-theme='light'] .post-body .mermaid-eyebrow {
+  color: #15803d;
+}
+
+html[data-theme='light'] .post-body .mermaid-reset,
+html[data-theme='light'] .post-body .mermaid-expand {
+  border-color: rgba(21, 128, 61, 0.28);
+  background: rgba(248, 251, 248, 0.9);
+}
+
+html[data-theme='light'] .post-body .mermaid-expand {
+  background: rgba(21, 128, 61, 0.1);
+}
+
+html[data-theme='light'] .post-body .mermaid-reset:hover,
+html[data-theme='light'] .post-body .mermaid-reset:focus-visible,
+html[data-theme='light'] .post-body .mermaid-expand:hover,
+html[data-theme='light'] .post-body .mermaid-expand:focus-visible {
+  border-color: rgba(21, 128, 61, 0.5);
+  background: rgba(21, 128, 61, 0.16);
+}
+
+html[data-theme='light'] .post-body .mermaid-surface {
+  background:
+    linear-gradient(rgba(21, 128, 61, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(21, 128, 61, 0.06) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+html[data-theme='light'] .post-body .mermaid-shell.is-fullscreen {
+  border-color: rgba(21, 128, 61, 0.3);
+  background:
+    radial-gradient(circle at top left, rgba(21, 128, 61, 0.1), transparent 28%),
+    linear-gradient(180deg, #f4f8f5, #e8efe9);
+}
+
+html[data-theme='light'] .post-body .mermaid-shell.is-fullscreen .mermaid-chrome > div:first-child {
+  border-color: rgba(21, 128, 61, 0.16);
+  background: rgba(248, 251, 248, 0.82);
+}
+
+body.mermaid-fullscreen-open {
+  overflow: hidden;
+}
+
+/* `main` is a root stacking context, so raise it above the fixed header while
+   a diagram is full screen. Otherwise the header can cover the close control. */
+body.mermaid-fullscreen-open .blog-post {
+  z-index: 301;
+}
+
+.post-body .mermaid-shell.is-fullscreen {
+  position: fixed;
+  inset: 16px;
+  z-index: 300;
+  margin: 0;
+  border-color: rgba(110, 215, 154, 0.28);
+  background:
+    radial-gradient(circle at top left, rgba(110, 215, 154, 0.16), transparent 28%),
+    linear-gradient(180deg, rgba(19, 32, 29, 0.985), rgba(7, 11, 10, 0.995));
+}
+
+.post-body .mermaid-shell.is-fullscreen .mermaid-chrome {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  left: 12px;
+  z-index: 2;
+  align-items: flex-start;
+  border: none;
+  padding: 0;
+  background: none;
+  pointer-events: none;
+}
+
+.post-body .mermaid-shell.is-fullscreen .mermaid-chrome > div:first-child {
+  max-width: min(55vw, 420px);
+  padding: 10px 12px;
+  border: 1px solid rgba(110, 215, 154, 0.12);
+  border-radius: 14px;
+  background: rgba(7, 11, 10, 0.68);
+}
+
+.post-body .mermaid-shell.is-fullscreen .mermaid-actions {
+  margin-left: auto;
+  pointer-events: auto;
+}
+
+.post-body .mermaid-shell.is-fullscreen .mermaid-surface {
+  min-height: calc(100vh - 32px);
+  max-height: calc(100vh - 32px);
+  aspect-ratio: auto;
+}
+
+.post-body .mermaid-shell.is-fullscreen .mermaid-canvas {
+  min-height: calc(100vh - 32px);
+  align-items: flex-start;
+  padding: 0;
+}
+
+.post-body .mermaid-shell.is-fullscreen .mermaid-canvas svg {
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-width: 640px) {
+  .post-body .mermaid-chrome {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .post-body .mermaid-actions {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .post-body .mermaid-reset,
+  .post-body .mermaid-expand {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .post-body .mermaid-surface {
+    min-height: 300px;
+  }
+
+  .post-body .mermaid-canvas {
+    min-height: 300px;
+    padding: 0;
+  }
+
+  .post-body .mermaid-shell.is-fullscreen {
+    inset: 0;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+
+  .post-body .mermaid-shell.is-fullscreen .mermaid-chrome {
+    top: 8px;
+    right: 8px;
+    left: 8px;
+    flex-direction: row;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .post-body .mermaid-shell.is-fullscreen .mermaid-chrome > div:first-child {
+    display: none;
+  }
+
+  .post-body .mermaid-shell.is-fullscreen .mermaid-actions {
+    width: auto;
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .post-body .mermaid-shell.is-fullscreen .mermaid-reset,
+  .post-body .mermaid-shell.is-fullscreen .mermaid-expand {
+    width: auto;
+    min-height: 40px;
+    padding: 8px 12px;
+    font-size: 0.78rem;
+    background: rgba(7, 11, 10, 0.78);
+  }
+
+  html[data-theme='light'] .post-body .mermaid-shell.is-fullscreen .mermaid-reset,
+  html[data-theme='light'] .post-body .mermaid-shell.is-fullscreen .mermaid-expand {
+    background: rgba(248, 251, 248, 0.92);
+  }
+
+  .post-body .mermaid-shell.is-fullscreen .mermaid-surface,
+  .post-body .mermaid-shell.is-fullscreen .mermaid-canvas {
+    min-height: 100vh;
+    max-height: 100vh;
+    padding: 0;
+  }
+}
