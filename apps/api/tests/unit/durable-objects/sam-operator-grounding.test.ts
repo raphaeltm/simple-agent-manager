@@ -37,7 +37,15 @@ describe('operator publication grounding', () => {
     expect(() => check(record)).toThrow('reproduces a private history record');
     expect(() => check(`  ${record}`)).toThrow('reproduces a private history record');
     expect(() => check(`Earlier I said: ${record}`)).toThrow('reproduces a private history record');
-    // Prose that merely mentions braces or the record name is still an answer.
+    // A copy that drops the kind still carries the record's other keys.
+    for (const partial of [
+      'Status: {"authority": "historical_evidence_only", "state": "completed"}',
+      'Here it is: {"assistantMessages": ["Nothing shipped."]}',
+      '{"turnId": "t", "assistantOmitted": false}',
+    ])
+      expect(() => check(partial)).toThrow('reproduces a private history record');
+    // JSON the user asked for, and prose that names the record, are still answers.
+    expect(() => check('{"name": "website", "branch": "main"}')).not.toThrow();
     expect(() => check('Use {project} placeholders in the brief.')).not.toThrow();
     expect(() => check('History is shown as sam_historical_turn_status records.')).not.toThrow();
   });

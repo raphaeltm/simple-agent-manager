@@ -1,5 +1,6 @@
 import {
   assertGroundedOperatorResponse,
+  HISTORY_RECORD_AUTHORITY,
   HISTORY_RECORD_KIND,
   OperatorGroundingError,
 } from './grounding';
@@ -78,7 +79,7 @@ export function projectOperatorContext(input: {
       role: 'assistant',
       content: JSON.stringify({
         kind: HISTORY_RECORD_KIND,
-        authority: 'historical_evidence_only',
+        authority: HISTORY_RECORD_AUTHORITY,
         recordedAt: group.recordedAt,
         turnId: group.turn?.id ?? null,
         state: group.turn?.state ?? 'unknown',

@@ -189,6 +189,14 @@ describe('canonical private history model projection', () => {
       assistantMessages: [],
     });
   });
+  it('keeps a stored JSON answer the user asked for in context', () => {
+    const f = fixture();
+    const config = '{"region": "fsn1", "size": "medium"}';
+    const { turn: old } = f.store.accept('old', 'Show my default node settings as JSON.');
+    f.store.setState(old.id, 'completed', config);
+    const envelopes = statuses(projection(f, f.current()).messages);
+    expect(envelopes[0]).toMatchObject({ assistantOmitted: false, assistantMessages: [config] });
+  });
   it('omits malformed historical URLs without poisoning the current request or modifying history', () => {
     const f = fixture();
     const { turn: old } = f.store.accept('old', 'Keep my original constraint.');

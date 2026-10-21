@@ -80,13 +80,22 @@ const claims: Array<{ verbs: string; operations: string[] }> = [
 ];
 const writes = new Set(claims.flatMap((claim) => claim.operations));
 
-/** Kind of the private history records the model reads; never a shape of an answer. */
+/** Kind and authority of the private history records the model reads; never part of an answer. */
 export const HISTORY_RECORD_KIND = 'sam_historical_turn_status';
+export const HISTORY_RECORD_AUTHORITY = 'historical_evidence_only';
 /**
- * A reply that copies the history record format: it opens with a JSON object or carries
- * the record kind. Such a copy can replay old links and IDs as if they were current.
+ * A reply that copies the history record format, wherever it starts. It carries one of the
+ * record's own keys, which no answer needs, and can replay old links and IDs as current.
+ * Ordinary JSON a user asks for has none of them and is unaffected.
  */
-const HISTORY_RECORD_COPY = new RegExp(`^\\s*\\{|"kind"\\s*:\\s*"${HISTORY_RECORD_KIND}"`);
+const HISTORY_RECORD_COPY = new RegExp(
+  [
+    `"kind"\\s*:\\s*"${HISTORY_RECORD_KIND}"`,
+    `"authority"\\s*:\\s*"${HISTORY_RECORD_AUTHORITY}"`,
+    '"assistantMessages"\\s*:',
+    '"assistantOmitted"\\s*:',
+  ].join('|')
+);
 
 /** A ULID or UUID, including any fabricated `_suffix`: the whole token is one identity. */
 export const PLATFORM_IDENTIFIER_PATTERN =
@@ -186,7 +195,8 @@ export function buildGroundingIndex(actions: OperatorAction[], appOrigin: string
 
 export function assertGroundedText(text: string, index: GroundingIndex): void {
   const { appOrigin, identities, links, completed } = index;
-  // Its opening brace or marker is in every prefix, so the live stream withholds it at once.
+  // A text that contains a record key keeps it in every longer text, so once the key
+  // appears the live stream withholds the rest of the step.
   if (HISTORY_RECORD_COPY.test(text))
     throw new OperatorGroundingError('SAM response reproduces a private history record');
   // Match the WHOLE token, including fabricated suffixes; a real profile ID

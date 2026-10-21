@@ -137,7 +137,7 @@ Raphaël's feedback on the new private SAM assistant (`/sam`, PR #2386), 2026-10
       revoked-project control (the first two fail on the sequential loop).
 - [x] Review follow-ups: one access cache shared by receipts and work cards, run together; tool
       names in the thinking line read as step titles; overscroll audit at 412×891.
-- [x] Guard: a reply that copies the history record format is rejected (never streamed or
+- [x] Guard: a reply that carries a history record key (kind, authority, assistantMessages, assistantOmitted) is rejected (never streamed or
       stored; runs the correction; left out of later context); instructions say never to write
       such records. Tests: guard unit, live hub, context, and a workerd run with the real agent
       (copy → correction → tool → answer); all four fail without the rule.
