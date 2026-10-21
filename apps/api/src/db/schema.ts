@@ -2102,7 +2102,8 @@ export const skills = sqliteTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     description: text('description'),
-    agentType: text('agent_type').notNull().default('claude-code'),
+    /** null = use the agent of the profile chosen for the run (migration 0200). */
+    agentType: text('agent_type'),
     model: text('model'),
     effort: text('effort'),
     permissionMode: text('permission_mode'),

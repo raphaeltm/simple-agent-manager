@@ -637,6 +637,13 @@ describe('MCP Skill Tools', () => {
       expect(extractSkillFields({ runtime: null })).toEqual({ runtime: null });
     });
 
+    it('passes agentType: null through so the override can be cleared', () => {
+      expect(extractSkillFields({ agentType: null })).toEqual({ agentType: null });
+      expect(extractSkillFields({ agentType: 'openai-codex' })).toEqual({
+        agentType: 'openai-codex',
+      });
+    });
+
     it('ignores unknown fields', () => {
       const fields = extractSkillFields({
         unknownField: 'value',

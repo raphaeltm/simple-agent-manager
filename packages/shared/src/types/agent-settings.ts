@@ -288,19 +288,25 @@ export interface ResolvedAgentProfile {
 // Skills (per-project repeatable-work definitions)
 // =============================================================================
 
-export interface AgentSkill extends Omit<AgentProfile, 'effort'> {
+export interface AgentSkill extends Omit<AgentProfile, 'effort' | 'agentType'> {
+  /** null = use the agent of the profile chosen for the run. A skill only overrides what it sets. */
+  agentType: string | null;
   /** null = inherit from the selected/default profile. */
   effort: AgentEffort | null;
   resourceRequirementsJson: string | null;
   defaultProfileId: string | null;
 }
 
-export interface CreateSkillRequest extends CreateAgentProfileRequest {
+export interface CreateSkillRequest extends Omit<CreateAgentProfileRequest, 'agentType'> {
+  /** Omit or null to use the chosen profile's agent. */
+  agentType?: string | null;
   resourceRequirementsJson?: string | null;
   defaultProfileId?: string | null;
 }
 
-export interface UpdateSkillRequest extends UpdateAgentProfileRequest {
+export interface UpdateSkillRequest extends Omit<UpdateAgentProfileRequest, 'agentType'> {
+  /** null clears the override so the chosen profile's agent is used. */
+  agentType?: string | null;
   resourceRequirementsJson?: string | null;
   defaultProfileId?: string | null;
 }

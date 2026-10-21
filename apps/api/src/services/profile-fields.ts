@@ -23,7 +23,8 @@ export interface BaseProfileRow {
   userId: string;
   name: string;
   description: string | null;
-  agentType: string;
+  /** Always set for profiles; null on a skill means "use the profile's agent". */
+  agentType: string | null;
   model: string | null;
   effort: unknown;
   permissionMode: string | null;
@@ -74,7 +75,9 @@ export interface BaseProfileFieldsResponse {
  * converting the integer `isBuiltin` flag to a boolean. Generic over the row type
  * so each caller preserves its exact field union types.
  */
-export function toBaseProfileFields<R extends BaseProfileRow>(row: R): BaseProfileFieldsResponse {
+export function toBaseProfileFields<R extends BaseProfileRow>(
+  row: R
+): Omit<BaseProfileFieldsResponse, 'agentType'> & { agentType: R['agentType'] } {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -105,7 +108,7 @@ export function toBaseProfileFields<R extends BaseProfileRow>(row: R): BaseProfi
 /** Shape accepted by the insert/update helpers — every base field is optional. */
 export interface BaseProfileWriteInput {
   description?: string | null;
-  agentType?: string;
+  agentType?: string | null;
   model?: string | null;
   effort?: AgentEffort | null;
   permissionMode?: string | null;
