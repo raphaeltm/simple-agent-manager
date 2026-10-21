@@ -15,7 +15,7 @@ Use the microphone button to transcribe a message into the composer. You still r
 
 ## Follow an answer as it is written
 
-While SAM works, its reply shows what it is doing right now: **Starting**, **Thinking**, **Working** or **Writing**, with the time elapsed. Each step appears as a plain line when it starts and is updated when it finishes, for example _Looking through your 20 most recent tasks…_ becoming _Read 20 recent tasks_. While it thinks, the latest sentence of its reasoning is shown in italics. The answer then appears word by word.
+While SAM works, its reply shows what it is doing right now: **Starting**, **Thinking**, **Working** or **Writing**, with the time elapsed. Each step appears as a plain line when it starts and is updated when it finishes, for example _Looking through your 20 most recent tasks…_ becoming _Read 20 recent tasks_. If the model shares its reasoning, the latest sentence is shown in italics while it thinks. The answer then appears word by word.
 
 The live view is a preview of the stored reply. Text that refers to a project, task or chat appears only once a completed step in the same turn returned that item, so a guessed identifier or link is never shown while SAM is still writing. When the turn ends, the stored answer and its receipts replace the live view.
 

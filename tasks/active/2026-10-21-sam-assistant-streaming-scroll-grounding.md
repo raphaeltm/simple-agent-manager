@@ -135,8 +135,12 @@ Raphaël's feedback on the new private SAM assistant (`/sam`, PR #2386), 2026-10
 - [x] Use cached-input pricing in SAM cost accounting when usage reports cached tokens.
 - [x] Send `x-session-affinity` (per private conversation) on SAM Workers AI calls.
 - [x] Per-model request controls (GLM 5.3 Flash: `reasoning_effort: low`).
-- [ ] Switch `SAM_MODEL` to GLM 5.3 Flash after staging comparison; check GitHub Environment overrides
-      for `SAM_MODEL` (rule 70) and verify the deployed value.
+- [x] Switch `SAM_MODEL` to GLM 5.3 Flash after staging comparison; check GitHub Environment overrides
+      for `SAM_MODEL` (rule 70) and verify the deployed value. Staging A/B on the same build,
+      question and data (throwaway branch with only `SAM_MODEL` changed, deleted after): both
+      models called live tools and answered with dates. GLM made 2 model calls, 32,990 in / 488 out,
+      $0.0034; Gemma made 3 calls, 57,302 in / 1,213 out, $0.0043, and finished in ~31 s against GLM's ~20 s. No
+      staging/production Environment override of `SAM_MODEL`.
 
 ### E. Docs
 - [x] `apps/www/.../guides/sam-assistant.md`, `architecture/sam-account-assistant.md`,
@@ -144,15 +148,22 @@ Raphaël's feedback on the new private SAM assistant (`/sam`, PR #2386), 2026-10
 
 ## Acceptance Criteria
 
-- [ ] On a phone, scrolling the conversation never moves the page: header and composer stay put
-      (Playwright regression, proven discriminating).
-- [ ] The answer streams into the UI progressively while SAM works; persisted answer matches.
-- [ ] Active turns show what SAM is doing right now (specific tool lines, thinking, writing) with
-      elapsed time, updating at least every few seconds.
-- [ ] Streamed text never shows content the publication guard rejects.
-- [ ] Token budgets still record usage for streamed turns (test + staging KV check).
-- [ ] "What shipped recently?" on staging calls live tools and reports recent work with dates.
-- [ ] SAM runs on GLM 5.3 Flash in staging with streaming and tools working end to end.
+- [x] On a phone, scrolling the conversation never moves the page: header and composer stay put
+      (Playwright regression, proven discriminating; staging runs 1-3: `<main>` scrollable 0,
+      composer bottom = shell bottom).
+- [x] The answer streams into the UI progressively while SAM works; persisted answer matches
+      (workerd test asserts live text = stored response; staging 14-17 visible increments).
+- [x] Active turns show what SAM is doing right now (specific tool lines, thinking, writing) with
+      elapsed time, updating at least every few seconds (staging run 3: turn shown 0.9 s, step
+      4.5 s, answer 9.8 s; GLM streams no reasoning, so no thinking line on GLM).
+- [x] Streamed text never shows content the publication guard rejects (live hub unit tests,
+      workerd midpoint test, preview redaction test).
+- [x] Token budgets still record usage for streamed turns (workerd test; staging budget deltas
+      equal the AI Gateway log for every run).
+- [x] "What shipped recently?" on staging calls live tools and reports recent work with dates.
+- [x] SAM runs on GLM 5.3 Flash in staging with streaming and tools working end to end.
+
+Evidence: `tasks/evidence/2026-10-21-sam-live-streaming/README.md`.
 
 ## References
 
