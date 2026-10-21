@@ -6,7 +6,7 @@ import { stripMarkdown } from '../../lib/text-utils';
 import { isRetryOrFork } from './lineageUtils';
 import type { TaskInfo } from './useTaskGroups';
 
-function matchesQuery(session: ChatSessionListItem, query: string): boolean {
+function matchesSessionQuery(session: ChatSessionListItem, query: string): boolean {
   return (
     Boolean(session.topic && stripMarkdown(session.topic).toLowerCase().includes(query)) ||
     session.id.includes(query) ||
@@ -16,8 +16,9 @@ function matchesQuery(session: ChatSessionListItem, query: string): boolean {
 }
 
 /**
- * The session list's Recent and Older buckets, filtered by the sidebar search. Searching
- * always shows Older, so a match there is never hidden behind its collapsed group.
+ * The session list's Recent and Older buckets, filtered by the search box. Shared by the
+ * desktop sidebar and the mobile drawer. Searching always shows Older, so a match there is
+ * never hidden behind its collapsed group.
  */
 export function useSessionFilters(
   sessions: ChatSessionListItem[],
@@ -48,13 +49,13 @@ export function useSessionFilters(
   const filteredRecent = useMemo(() => {
     if (!searchQuery.trim()) return recentSessions;
     const q = searchQuery.toLowerCase();
-    return recentSessions.filter((s) => matchesQuery(s, q));
+    return recentSessions.filter((s) => matchesSessionQuery(s, q));
   }, [recentSessions, searchQuery]);
 
   const filteredStale = useMemo(() => {
     if (!searchQuery.trim()) return staleSessions;
     const q = searchQuery.toLowerCase();
-    return staleSessions.filter((s) => matchesQuery(s, q));
+    return staleSessions.filter((s) => matchesSessionQuery(s, q));
   }, [staleSessions, searchQuery]);
 
   return {

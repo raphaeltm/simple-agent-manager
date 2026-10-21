@@ -8,7 +8,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { Paperclip } from 'lucide-react';
 import type { MutableRefObject } from 'react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
 import {
@@ -165,6 +165,7 @@ export function ChatInput({
     disabled: submitting,
   };
   const showOptions = optionsOpen || hasResourceErrors;
+  const optionsPanelId = useId();
 
   return (
     <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
@@ -191,7 +192,9 @@ export function ChatInput({
         />
       )}
 
-      {showToolbar && showOptions && <ComposerOptionsPanel options={options} compact={isMobile} />}
+      {showToolbar && showOptions && (
+        <ComposerOptionsPanel id={optionsPanelId} options={options} compact={isMobile} />
+      )}
 
       {showToolbar && (
         <div className="mb-2 flex items-center gap-2">
@@ -221,6 +224,7 @@ export function ChatInput({
           )}
           <ComposerOptionsButton
             open={showOptions}
+            panelId={optionsPanelId}
             count={composerOptionsCount(options)}
             disabled={submitting}
             onToggle={() => setOptionsOpen((open) => !open)}

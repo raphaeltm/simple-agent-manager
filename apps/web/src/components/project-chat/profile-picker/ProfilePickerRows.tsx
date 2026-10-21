@@ -5,11 +5,12 @@ import type { ReactNode } from 'react';
 import { profileSubtitle } from './model';
 import { ProfileAvatar } from './ProfileAvatar';
 
+/** A heading, so screen readers can jump between the sheet's sections. */
 export function SectionLabel({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <div className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+    <h3 className="m-0 px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
       {children}
-    </div>
+    </h3>
   );
 }
 
@@ -63,7 +64,7 @@ export function ProfilePickerRow({
           }
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-transparent text-fg-muted hover:text-fg-primary disabled:opacity-50"
         >
-          {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
+          {hidden ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
         </button>
       )}
     </div>

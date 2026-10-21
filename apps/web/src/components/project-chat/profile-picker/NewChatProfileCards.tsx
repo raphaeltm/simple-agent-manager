@@ -1,5 +1,6 @@
 import type { AgentProfile, ProfilePickerState } from '@simple-agent-manager/shared';
-import { ChevronRight } from 'lucide-react';
+import { Check, ChevronRight } from 'lucide-react';
+import { useId } from 'react';
 
 import { profileCardSet, profileSubtitle } from './model';
 import { ProfileAvatar } from './ProfileAvatar';
@@ -17,29 +18,40 @@ function ProfileCard({
   selected,
   onSelect,
 }: Readonly<{ profile: AgentProfile; selected: boolean; onSelect: () => void }>) {
+  const descriptionId = useId();
+  const subtitle = profileSubtitle(profile);
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`flex min-h-[76px] min-w-0 flex-col gap-1 rounded-xl border p-3 text-left transition-colors ${
+      // Name and what runs it; a long description is read after, as the description.
+      aria-label={`${profile.name}, ${subtitle}`}
+      aria-describedby={profile.description ? descriptionId : undefined}
+      className={`relative flex min-h-[76px] min-w-0 flex-col gap-1 rounded-xl border p-3 text-left transition-colors ${
         selected
           ? 'border-accent bg-accent/15 ring-1 ring-accent'
           : 'border-border-default bg-surface hover:border-accent/50'
       }`}
     >
-      <span className="flex min-w-0 items-center gap-2">
+      <span className="flex min-w-0 items-center gap-2 pr-4">
         <ProfileAvatar profile={profile} size="sm" />
         <span className="line-clamp-2 break-words text-sm font-semibold leading-tight text-fg-primary">
           {profile.name}
         </span>
       </span>
+      {selected && (
+        <Check size={15} className="absolute right-2.5 top-2.5 text-accent" aria-hidden="true" />
+      )}
       {profile.description && (
-        <span className="line-clamp-2 break-words text-xs leading-snug text-fg-secondary">
+        <span
+          id={descriptionId}
+          className="line-clamp-2 break-words text-xs leading-snug text-fg-secondary"
+        >
           {profile.description}
         </span>
       )}
-      <span className="truncate text-[11px] text-fg-muted">{profileSubtitle(profile)}</span>
+      <span className="truncate text-[11px] text-fg-muted">{subtitle}</span>
     </button>
   );
 }

@@ -31,14 +31,23 @@ export function ComposerOptionsButton({
   open,
   count,
   disabled,
+  panelId,
   onToggle,
-}: Readonly<{ open: boolean; count: number; disabled: boolean; onToggle: () => void }>) {
+}: Readonly<{
+  open: boolean;
+  count: number;
+  disabled: boolean;
+  /** Id of the panel this button shows and hides. */
+  panelId: string;
+  onToggle: () => void;
+}>) {
   return (
     <button
       type="button"
       onClick={onToggle}
       disabled={disabled}
       aria-expanded={open}
+      aria-controls={open ? panelId : undefined}
       aria-label={count > 0 ? `Chat options (${count} set)` : 'Chat options'}
       title="Skill and resources for this chat"
       className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full border bg-transparent transition-colors disabled:opacity-50 ${
@@ -62,11 +71,12 @@ export function ComposerOptionsButton({
 
 /** Per-chat skill and resource overrides, moved out of the always-visible composer. */
 export function ComposerOptionsPanel({
+  id,
   options,
   compact,
-}: Readonly<{ options: ComposerOptionsValue; compact: boolean }>) {
+}: Readonly<{ id: string; options: ComposerOptionsValue; compact: boolean }>) {
   return (
-    <div className="mb-2 grid gap-3 rounded-lg border border-border-default bg-surface p-3">
+    <div id={id} className="mb-2 grid gap-3 rounded-lg border border-border-default bg-surface p-3">
       {options.skills.length > 0 && (
         <div>
           <div className="mb-1 text-xs font-medium text-fg-secondary">Skill for this chat</div>

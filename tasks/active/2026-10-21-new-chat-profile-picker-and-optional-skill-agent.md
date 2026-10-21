@@ -44,30 +44,30 @@ Approved by Raphaël: "I agree with your rec. Let's get it built and shipped to 
 
 ### A. Skills: optional agent type
 
-- [ ] Migration `0200_skills_optional_agent_type.sql`: add nullable `agent_type_new`, copy `agent_type` where not null, drop old column, rename the new one. Preserves every existing value.
-- [ ] Drizzle `skills.agentType` nullable; `SkillRow` and `AgentSkill.agentType: string | null`; Create/UpdateSkillRequest accept `agentType?: string | null`.
-- [ ] `createSkill`: store `body.agentType ?? null` (no env default). Validate effort against the agent only when the skill sets one.
-- [ ] `updateSkill`: `agentType: null` clears; effort validation uses the effective agent (or skips when null).
-- [ ] `resolveSkillProfile`: a skill effort that the resolved agent doesn't support falls back to the profile effort.
-- [ ] Valibot skill schemas accept `agentType: null`; MCP `create_skill`/`update_skill` accept and document `agentType: null`.
-- [ ] Tests:
+- [x] Migration `0200_skills_optional_agent_type.sql`: add nullable `agent_type_new`, copy `agent_type` where not null, drop old column, rename the new one. Preserves every existing value.
+- [x] Drizzle `skills.agentType` nullable; `SkillRow` and `AgentSkill.agentType: string | null`; Create/UpdateSkillRequest accept `agentType?: string | null`.
+- [x] `createSkill`: store `body.agentType ?? null` (no env default). Validate effort against the agent only when the skill sets one.
+- [x] `updateSkill`: `agentType: null` clears; effort validation uses the effective agent (or skips when null).
+- [x] `resolveSkillProfile`: a skill effort that the resolved agent doesn't support falls back to the profile effort.
+- [x] Valibot skill schemas accept `agentType: null`; MCP `create_skill`/`update_skill` accept and document `agentType: null`.
+- [x] Tests:
   - create without agent → null
   - update clear → null
   - resolve: null skill agent → profile agent; set skill agent → skill agent
   - effort guard
   - MCP null passthrough
   - migration applies in the worker test env
-- [ ] Docs: agents.md and concepts.mdx describe "a skill only overrides what it sets".
+- [x] Docs: agents.md and concepts.mdx describe "a skill only overrides what it sets".
 
 ### B. Picker API
 
-- [ ] Migration `0201_agent_profile_picker_hidden.sql` + drizzle table `agent_profile_picker_hidden (user_id, project_id, profile_id, created_at; PK user+project+profile; FKs cascade)`.
-- [ ] Admin setting `chat.profileUsageWindowDays` (integer, default 30, 1–365) plus a reader.
-- [ ] Service `agent-profile-picker.ts`:
+- [x] Migration `0201_agent_profile_picker_hidden.sql` + drizzle table `agent_profile_picker_hidden (user_id, project_id, profile_id, created_at; PK user+project+profile; FKs cascade)`.
+- [x] Admin setting `chat.profileUsageWindowDays` (integer, default 30, 1–365) plus a reader.
+- [x] Service `agent-profile-picker.ts`:
   - `getProfilePickerState`: own manual chats only (triggered_by='user', dispatch_depth=0, not recovery, not draft, hint not null, within the window), grouped by profile → lastUsedAt and chatCount; plus hidden ids.
   - `updateHiddenProfiles({hide, unhide})`: validates ids against profiles accessible in the project.
-- [ ] Routes `GET /api/projects/:projectId/agent-profiles/picker` and `PATCH .../picker` (`requireProjectAccess`; registered before `/:profileId`); Valibot schema with bounded arrays.
-- [ ] Tests (real SQL engine):
+- [x] Routes `GET /api/projects/:projectId/agent-profiles/picker` and `PATCH .../picker` (`requireProjectAccess`; registered before `/:profileId`); Valibot schema with bounded arrays.
+- [x] Tests (real SQL engine):
   - usage filters (other user, dispatched, triggered, recovery, draft, outside window)
   - hide/unhide idempotent
   - cross-project/foreign profile rejected, with an owner control
@@ -75,34 +75,34 @@ Approved by Raphaël: "I agree with your rec. Let's get it built and shipped to 
 
 ### C. Picker UI
 
-- [ ] Shared helpers (`apps/web/src/components/project-chat/profile-picker/model.ts`): glyph, subtitle, recent, sections, idle, default selection.
-- [ ] API client + TanStack query options/hook for picker state; optimistic hide/unhide; invalidate after a chat is started.
-- [ ] Components:
+- [x] Shared helpers (`apps/web/src/components/project-chat/profile-picker/model.ts`): glyph, subtitle, recent, sections, idle, default selection.
+- [x] API client + TanStack query options/hook for picker state; optimistic hide/unhide; invalidate after a chat is started.
+- [x] Components:
   - `ProfileAvatar`
   - `ProfilePickerSheet`: bottom sheet on mobile, popover on desktop; Recent / Chat & explore / Build & open PRs / Hidden; search above 8; Edit-list mode with hide toggles and the "Hide N not used in 30 days" action; footer New / Edit / Manage.
   - `ProfileToControl`
   - `ComposerOptions`: skill + resources
   - `ProfileCards`: canvas; recent 4 (or all when no usage); desktop builders; "All N profiles".
-- [ ] `ChatInput`:
+- [x] `ChatInput`:
   - Replace chips, Resources row and inline Skill select with the toolbar: To control + attach + Options.
   - Extract the wizard into `ProfileWizardPanel.tsx`.
   - Remove dead code (RuntimeBadge, chip helpers).
-- [ ] `ProjectChatComposer`: `showAttachButton` prop (default true).
-- [ ] `index.tsx`: new-chat canvas shows `ProfileCards` when 2+ visible profiles, else the hero + starter prompts; extract the sidebar so the file is under 500 lines.
-- [ ] `useProjectChatState`: extract profile selection and the wizard into `useProfileChoice.ts`. Default = last-used visible profile once picker state loads; fall back to the first visible profile (also when picker state errors); never override a user choice.
-- [ ] Profile form: the description label notes it shows on new-chat cards.
-- [ ] Tests:
+- [x] `ProjectChatComposer`: `showAttachButton` prop (default true).
+- [x] `index.tsx`: new-chat canvas shows `ProfileCards` when 2+ visible profiles, else the hero + starter prompts; extract the sidebar so the file is under 500 lines.
+- [x] `useProjectChatState`: extract profile selection and the wizard into `useProfileChoice.ts`. Default = last-used visible profile once picker state loads; fall back to the first visible profile (also when picker state errors); never override a user choice.
+- [x] Profile form: the description label notes it shows on new-chat cards.
+- [x] Tests:
   - model helpers
   - cards / sheet / To control (behavioural)
   - default-selection through the real hook
   - UI→API capability: picking a card sends that `agentProfileId`
   - hide flow calls PATCH and removes the card
-- [ ] Update `project-chat-composer-audit.spec.ts` and other specs/unit tests that used the chips.
-- [ ] Playwright audit `new-chat-profile-picker-audit.spec.ts`:
+- [x] Update `project-chat-composer-audit.spec.ts` and other specs/unit tests that used the chips.
+- [x] Playwright audit `new-chat-profile-picker-audit.spec.ts`:
   - viewports 375×667, 1280×800, plus 375×400 keyboard
   - data: 15 realistic profiles, 1 profile, 0 usage, 30 profiles with 200-char names / unicode, hidden profiles, picker API 500
   - `assertNoOverflow`; screenshots reviewed
-- [ ] Docs: chat-features.md (picking a profile, cards, hide, Options) and agents.md (profile picker).
+- [x] Docs: chat-features.md (picking a profile, cards, hide, Options) and agents.md (profile picker).
 
 ### D. Release
 
@@ -113,14 +113,29 @@ Approved by Raphaël: "I agree with your rec. Let's get it built and shipped to 
 
 - [ ] New skills created without an agent type store NULL; a chat using profile X + that skill runs on X's agent.
 - [ ] Existing skills keep their stored agent type (migration preserves values); the 19 SAM skills show agentType null after the post-deploy fix.
-- [ ] Opening a new chat pre-selects the user's last-used (visible) profile in this project, not the alphabetical first.
-- [ ] With 2+ visible profiles, the empty new-chat screen shows recent profile cards; tapping one selects it, and the "To:" control shows it.
-- [ ] The composer shows one toolbar row (To / attach / Options) and the message box; skill and resources are reachable via Options and still reach the submit request.
+- [x] Opening a new chat pre-selects the user's last-used (visible) profile in this project, not the alphabetical first.
+- [x] With 2+ visible profiles, the empty new-chat screen shows recent profile cards; tapping one selects it, and the "To:" control shows it.
+- [x] The composer shows one toolbar row (To / attach / Options) and the message box; skill and resources are reachable via Options and still reach the submit request.
 - [ ] Hide/unhide per user works (bulk and single), persists across devices, never affects other users, and hidden profiles stay usable.
-- [ ] Phone 375×667: the composer takes ≤ 25% of the viewport with 15 profiles; at 375×400 with the keyboard the message box stays visible; no horizontal overflow at any tested viewport.
+- [x] Phone 375×667: the composer takes ≤ 25% of the viewport with 15 profiles; at 375×400 with the keyboard the message box stays visible; no horizontal overflow at any tested viewport.
 - [ ] Docs updated; all tests green; staging verified end-to-end.
 
 ## References
 
 - Prototype: branch `sam/id-take-screenshot-mobile-7xtbf0` commit `905b81684` (`?pp=c`). Do not merge that branch.
 - Rules: 18 (file size), 28 (SQL guards on real engine), 31 (migration safety), 48 (TanStack/SWR), 60 (I/O budgets), 62 (real trigger), 17/56 (visual audit).
+
+## Implementation notes
+
+- Commits on `sam/new-chat-profile-picker`: fd9c6ab9b (skills), 74c208fa9 (picker API), 5f332076e (format), 3992217c8 (picker UI), 91a8d6565 (layout fixes), f0822d0f3 (docs images).
+- Migrations 0200 and 0201 apply in the Workers test environment (`tests/workers/setup-d1-migrations.ts`); 0200 value preservation is tested on real SQLite.
+- Locally verified acceptance criteria:
+  - Last-used default without an alphabetical flash: `project-chat.test.tsx` uses a deferred picker response.
+  - Cards select the profile; the To control shows it.
+  - One toolbar row; skill and resources sent from Options.
+  - Composer ≤ 25% of a 375×667 phone; message box visible at 375×400; no overflow at 375, 390, 768 and 1280: `new-chat-profile-picker-audit.spec.ts`.
+- Tablet (768px) leaves the chat column about 250px beside two sidebars. Card columns and the To subtitle therefore use container queries, not screen breakpoints. The audit asserts readable card widths; the old grid fails it at 43px.
+- Pre-existing failures found on main, filed:
+  - `tasks/backlog/2026-10-21-composer-audit-provisioning-progress-test-fails-on-main.md`
+  - `tasks/backlog/2026-10-21-docs-expired-chat-spec-drift.md`
+- Marketing chat scene and feature screenshot still show the old layout. That needs a scene redesign, so it is tracked as idea `01M5F2QXNM6K385XNQJD105CRZ`.

@@ -189,10 +189,10 @@ Type `@` in a chat message to choose a profile from the mention list. Mentions a
 ### Choosing a profile for a new chat
 
 - **The profile you used last is pre-selected.** A new chat starts with the profile you most recently started a chat with in this project. Change it any time before you send.
-- **Your recent profiles appear as cards.** With two or more profiles, the empty chat asks **Who should take this?** and shows your most recent profiles as cards. On a computer it also shows profiles that build and open pull requests. Each card shows the profile's description (edit it on the **Profiles** page) and what runs it, such as **Claude · Opus 5.5 · max effort**. Tap a card to pick it. With only one profile, the starter prompts show instead.
+- **Your recent profiles appear as cards.** With two or more profiles you haven't hidden, the empty chat asks **Who should take this?** and shows your most recent profiles as cards. When the chat area is wide enough, it also shows profiles that build and open pull requests. Each card shows the profile's description (change it with **Edit** in the profile list or on the **Profiles** page) and what runs it, such as **Claude · Opus 5.5 · max effort**. Tap a card to pick it. Otherwise the starter prompts show instead.
 - **To** above the message box names the chosen profile. Select it to see every profile: **Recent** first, then **Chat & explore** and **Build & open PRs**, with a search box once you have more than eight. **New**, **Edit** and **Manage** are at the bottom.
 - **Hide profiles you don't pick by hand.** In that list, select **Edit list**, then the eye next to a profile. Or accept the suggestion to hide every profile you haven't picked in the last 30 days (admins can change the window with [`chat.profileUsageWindowDays`](/docs/guides/admin-settings/#chat)). Hiding only changes your own list in this project: triggers, agents that dispatch work, @mentions and other members still use the profile. Hidden profiles stay at the end of the list, and you can show them again there.
-- **Skill and resources are under the sliders button** next to **To**. A number on the button shows how many you've set for this chat.
+- **Skill and resources are under the sliders button** at the end of the **To** row, after the attach button. A number on the button shows how many you've set for this chat.
 
 ### Choosing a model
 

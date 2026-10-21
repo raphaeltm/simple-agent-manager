@@ -533,7 +533,7 @@ You may also see a banner telling you a message was saved but its delivery was i
 
 ## Starting a New Chat
 
-When you open a new chat with two or more agent profiles, SAM asks **Who should take this?** and shows your recent profiles as cards; the one you used last is already selected. See [Choosing a profile for a new chat](/docs/guides/agents/#choosing-a-profile-for-a-new-chat). With one profile, SAM offers a few repo-aware **starter prompts** instead (for example, "What's in this repo?" or "Run the tests and fix any failures") so you can get moving without a blank page. Pick one or type your own.
+When you open a new chat with two or more agent profiles you haven't hidden, SAM asks **Who should take this?** and shows your recent profiles as cards; the one you used last is already selected. See [Choosing a profile for a new chat](/docs/guides/agents/#choosing-a-profile-for-a-new-chat). Otherwise SAM offers a few repo-aware **starter prompts** instead (for example, "What's in this repo?" or "Run the tests and fix any failures") so you can get moving without a blank page. Pick one or type your own.
 
 To send on a desktop keyboard, press **Cmd+Enter** on Mac or **Ctrl+Enter** on Windows/Linux — plain **Enter** inserts a new line so you can write multi-line prompts. The composer shows the correct shortcut for your platform as a hint. On mobile, tap the send button; **Enter** always inserts a new line.
 

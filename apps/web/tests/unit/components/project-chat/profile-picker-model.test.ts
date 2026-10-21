@@ -110,6 +110,23 @@ describe('selectProfileId', () => {
     expect(selectProfileId(null, ALL, { status: 'unavailable' })).toBe('alpha');
   });
 
+  it('still pre-selects a profile when every one is hidden, since hidden profiles stay usable', () => {
+    const allHidden = state({ hiddenProfileIds: ALL.map((p) => p.id) });
+    expect(selectProfileId(null, ALL, { status: 'ready', state: allHidden })).toBe('alpha');
+    expect(profileCardSet(ALL, allHidden, 4).items).toEqual([]);
+  });
+
+  it('skips usage of a profile that has since been deleted', () => {
+    const picker = state({ usage: usage('deleted-profile', 'opus') });
+    expect(selectProfileId(null, ALL, { status: 'ready', state: picker })).toBe('opus');
+    expect(profileCardSet(ALL, picker, 4).items.map((p) => p.id)).toEqual(['opus']);
+    expect(pickerSections(ALL, picker, '', 3)[0]).toEqual({
+      id: 'recent',
+      label: 'Recent',
+      items: [OPUS],
+    });
+  });
+
   it('never replaces a profile the person already chose', () => {
     const ready = { status: 'ready' as const, state: state({ usage: usage('zed') }) };
     expect(selectProfileId('opus', ALL, ready)).toBe('opus');

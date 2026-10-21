@@ -3,7 +3,7 @@ import type {
   ProfilePickerState,
   UpdateProfilePickerRequest,
 } from '@simple-agent-manager/shared';
-import { useEscapeKey } from '@simple-agent-manager/ui';
+import { useModalInteraction } from '@simple-agent-manager/ui';
 import { ChevronDown, ChevronRight, Pencil, Plus, Search, Settings2, X } from 'lucide-react';
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -74,23 +74,18 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const { onClose } = props;
-  useEscapeKey(onClose, open);
+  // Focus trap, Escape, scroll lock, an inert page behind, and focus back on whatever
+  // opened the sheet (the To control or the cards link).
+  useModalInteraction({ enabled: open, modalRef: dialogRef, onEscape: onClose });
 
-  // Return focus to whatever opened the sheet (the To control or the cards link).
+  // Every opening starts from the plain list.
   useEffect(() => {
-    if (!open) return;
-    restoreFocusRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    dialogRef.current?.focus();
-    return () => {
-      restoreFocusRef.current?.focus();
-      setQuery('');
-      setEditing(false);
-      setShowHidden(false);
-    };
+    if (open) return;
+    setQuery('');
+    setEditing(false);
+    setShowHidden(false);
   }, [open]);
 
   const sections = useMemo(
@@ -111,9 +106,10 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
   };
 
   return createPortal(
-    <>
+    // One root for backdrop and sheet, so isolating the page leaves the backdrop clickable.
+    <div data-sam-modal-root="">
       <div
-        className="fixed inset-0 z-drawer-backdrop bg-black/50"
+        className="fixed inset-0 z-drawer-backdrop border-0 glass-backdrop-dim"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -124,7 +120,7 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
         aria-label="Choose a profile"
         tabIndex={-1}
         style={layout.style}
-        className={`${layout.className} z-drawer flex flex-col overflow-hidden border border-border-default bg-page shadow-2xl outline-none`}
+        className={`${layout.className} z-drawer flex flex-col overflow-hidden outline-none glass-modal glass-panel-container glass-composited`}
       >
         {isMobile && (
           <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-border-default" />
@@ -147,7 +143,7 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
             aria-label="Close"
             className="flex h-11 w-11 items-center justify-center rounded-md bg-transparent text-fg-muted hover:text-fg-primary"
           >
-            <X size={18} />
+            <X size={18} aria-hidden="true" />
           </button>
         </div>
         {profiles.length > SEARCH_THRESHOLD && (
@@ -190,15 +186,21 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
             return (
               <div key={section.id}>
                 {collapsible ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowHidden((value) => !value)}
-                    aria-expanded={showHidden}
-                    className="flex min-h-11 w-full items-center gap-1 bg-transparent px-4 pt-2 text-left text-[11px] font-semibold uppercase tracking-wide text-fg-muted hover:text-fg-secondary"
-                  >
-                    {showHidden ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                    {section.label} ({section.items.length})
-                  </button>
+                  <h3 className="m-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowHidden((value) => !value)}
+                      aria-expanded={showHidden}
+                      className="flex min-h-11 w-full items-center gap-1 bg-transparent px-4 pt-2 text-left text-[11px] font-semibold uppercase tracking-wide text-fg-muted hover:text-fg-secondary"
+                    >
+                      {showHidden ? (
+                        <ChevronDown size={13} aria-hidden="true" />
+                      ) : (
+                        <ChevronRight size={13} aria-hidden="true" />
+                      )}
+                      {section.label} ({section.items.length})
+                    </button>
+                  </h3>
                 ) : (
                   <SectionLabel>{section.label}</SectionLabel>
                 )}
@@ -264,7 +266,7 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
           </button>
         </div>
       </div>
-    </>,
+    </div>,
     document.body
   );
 }
