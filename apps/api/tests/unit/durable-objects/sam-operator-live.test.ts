@@ -331,6 +331,11 @@ describe('private SAM live turn view', () => {
     hub.chunk(reasoning(' compare v1.2 with the 3.5 release'));
     await vi.advanceTimersByTimeAsync(settings.flushMs);
     expect(previews().at(-1)).toBe('I should check the inbox and recent tasks.');
+    // Numbered plans split into bare numbers, which are skipped; tool names keep their
+    // underscores while emphasis markers are removed.
+    hub.chunk(reasoning('.\nPlan:\n1. Call _sam_tasks_list_ for **recent** work.\n2. '));
+    await vi.advanceTimersByTimeAsync(settings.flushMs);
+    expect(previews().at(-1)).toBe('Call sam_tasks_list for recent work.');
   });
 
   it('gives a late subscriber a snapshot, then ends every stream when the turn ends', async () => {

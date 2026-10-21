@@ -433,10 +433,12 @@ function thinkingPreview(reasoning: string): string | null {
       .replace(PLATFORM_URL_PATTERN, '…')
       .replace(PLATFORM_IDENTIFIER_PATTERN, '…')
       .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '')
-      .replace(/[*_`#]+/g, '')
+      // Emphasis markers go; an underscore inside a word (a tool name) stays.
+      .replace(/[*`#]+|(?<!\w)_+|_+(?!\w)/g, '')
       .replace(/\s+/g, ' ')
       .trim();
-    if (!line) continue;
+    // A bare list number ("1.") is left over from the sentence split, not a thought.
+    if (!/\p{L}{2}/u.test(line)) continue;
     if (line.length <= THINKING_PREVIEW_MAX_CHARS) return line;
     const clipped = line.slice(0, THINKING_PREVIEW_MAX_CHARS);
     return `${clipped.slice(0, Math.max(clipped.lastIndexOf(' '), 1))}…`;
