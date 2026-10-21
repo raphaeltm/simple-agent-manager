@@ -4,12 +4,12 @@
  * failed run with blocked dependents, an event-wait step that is listening, a run that hit its
  * deadline, a finished run, plus long-text, 25-step and markup variants.
  */
+import type { Page, Route } from '@playwright/test';
 import type {
   WorkflowRunDetail,
   WorkflowRunSummary,
   WorkflowStepDetail,
 } from '@simple-agent-manager/shared';
-import type { Page, Route } from '@playwright/test';
 
 import { LONG_NAME, NOW, OWNER_ID, PROJECT_ID, SPECIAL_TEXT } from './automation-fixtures';
 
