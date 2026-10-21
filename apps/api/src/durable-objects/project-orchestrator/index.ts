@@ -75,6 +75,7 @@ const MissionIdRowSchema = v.object({ mission_id: v.string() });
 
 export class ProjectOrchestrator extends DurableObject<Env> {
   private projectId: string | null = null;
+  private cycleLock: Promise<void> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -92,7 +93,11 @@ export class ProjectOrchestrator extends DurableObject<Env> {
    * Register a mission for orchestration and arm the scheduling alarm.
    * Called when a mission is created (create_mission MCP tool).
    */
-  async startOrchestration(projectId: string, missionId: string): Promise<void> {
+  async startOrchestration(
+    projectId: string,
+    missionId: string,
+    workflowRegistrationDeadline?: number
+  ): Promise<void> {
     this.projectId = projectId;
     await this.ctx.storage.put('projectId', projectId);
     const now = Date.now();
@@ -118,6 +123,13 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     logDecision(sql, missionId, null, 'dispatch', 'Mission registered for orchestration', now);
     log.info('orchestrator.mission_registered', { projectId, missionId });
 
+    if (workflowRegistrationDeadline !== undefined) {
+      sql.exec(
+        'UPDATE orchestrator_missions SET workflow_registration_deadline = ? WHERE mission_id = ?',
+        workflowRegistrationDeadline,
+        missionId
+      );
+    }
     // Arm the scheduling alarm
     await this.armAlarm();
   }
@@ -126,6 +138,16 @@ export class ProjectOrchestrator extends DurableObject<Env> {
    * Pause a mission — stops scheduling new tasks but running tasks continue.
    */
   async pauseMission(projectId: string, missionId: string): Promise<boolean> {
+    // Workflow steering is not exposed in Phase 0; do not let legacy mission
+    // controls bypass workflow ownership or alter durable step state.
+    if (
+      await this.env.DATABASE.prepare(
+        'SELECT 1 FROM missions WHERE id = ? AND workflow_plan_json IS NOT NULL'
+      )
+        .bind(missionId)
+        .first()
+    )
+      return false;
     this.projectId = projectId;
     const sql = this.ctx.storage.sql;
     const result = sql.exec(
@@ -149,6 +171,16 @@ export class ProjectOrchestrator extends DurableObject<Env> {
    * Resume a paused mission — re-enables scheduling.
    */
   async resumeMission(projectId: string, missionId: string): Promise<boolean> {
+    // Workflow steering is not exposed in Phase 0; do not let legacy mission
+    // controls bypass workflow ownership or alter durable step state.
+    if (
+      await this.env.DATABASE.prepare(
+        'SELECT 1 FROM missions WHERE id = ? AND workflow_plan_json IS NOT NULL'
+      )
+        .bind(missionId)
+        .first()
+    )
+      return false;
     this.projectId = projectId;
     const sql = this.ctx.storage.sql;
     const result = sql.exec(
@@ -173,6 +205,16 @@ export class ProjectOrchestrator extends DurableObject<Env> {
    * Cancel a mission — marks pending tasks as cancelled.
    */
   async cancelMission(projectId: string, missionId: string): Promise<boolean> {
+    // Workflow steering is not exposed in Phase 0; do not let legacy mission
+    // controls bypass workflow ownership or alter durable step state.
+    if (
+      await this.env.DATABASE.prepare(
+        'SELECT 1 FROM missions WHERE id = ? AND workflow_plan_json IS NOT NULL'
+      )
+        .bind(missionId)
+        .first()
+    )
+      return false;
     this.projectId = projectId;
     const sql = this.ctx.storage.sql;
 
@@ -418,7 +460,11 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     if (!projectId) return; // No active missions, nothing to do
 
     try {
-      await runSchedulingCycle(this.ctx.storage.sql, this.env, projectId, config);
+      const cycle = this.cycleLock.then(() =>
+        runSchedulingCycle(this.ctx.storage.sql, this.env, projectId, config)
+      );
+      this.cycleLock = cycle.catch(() => undefined);
+      await cycle;
     } catch (err) {
       log.error('orchestrator.alarm.cycle_failed', {
         projectId,

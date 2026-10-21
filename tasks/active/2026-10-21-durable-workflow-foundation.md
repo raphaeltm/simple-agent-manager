@@ -13,15 +13,15 @@ Mission grouping exists but no submission path creates deferred steps. Implement
 - Current repository at c0fb8edd8; existing SAM isolated task branch is clean and current. PR-only policy overrides skill's direct-main task commit.
 
 ## Checklist
-- [ ] Persist bounded validated DAG plan with idempotent start key, owner, steps, attempt identities, frozen launch intent and status/reasons.
-- [ ] Extend reserved task submission with workflow source, root attribution, mission/parent/depth, admission limits and current authority.
-- [ ] Extend existing orchestrator to reconcile workflow steps with bounded retries/deadline and no duplicate starts.
-- [ ] Persist predecessor summary/artifact references and supply bounded handoff prompts.
-- [ ] Emit lifecycle events with run/step/attempt/task identities through existing outbox; terminal events nudge reconciliation.
-- [ ] MCP start_workflow_run/get_workflow_run with same-owner and current membership checks.
-- [ ] Status includes steps, task/session links, attempts, reasons and activity history.
-- [ ] Tests: real D1 submission/terminal path, failed prerequisite, duplicate events, concurrent start replay, restart/lost ACK, authorization, plan validation, migrations.
-- [ ] Update relevant API documentation.
+- [x] Persist bounded validated DAG plan with idempotent start key, owner, steps, attempt identities, frozen launch intent and status/reasons.
+- [x] Extend reserved task submission with workflow source, root attribution, mission/parent/depth, admission limits and current authority.
+- [x] Extend existing orchestrator to reconcile workflow steps with bounded retries/deadline and no duplicate starts.
+- [x] Persist predecessor summary/artifact references and supply bounded handoff prompts.
+- [x] Emit lifecycle events with run/step/attempt/task identities through existing outbox; terminal events nudge reconciliation.
+- [x] MCP start_workflow_run/get_workflow_run with same-owner and current membership checks.
+- [x] Status includes steps, task/session links, attempts, reasons and activity history.
+- [x] Tests: real D1 submission/terminal path, failed prerequisite, duplicate events, concurrent start replay, restart/lost ACK, authorization, plan validation, migrations.
+- [x] Update relevant API documentation.
 - [ ] Full quality checks and independent local specialist reviews.
 - [ ] Staging real 3-step document handoff, failure and recovery evidence; bounded resource cleanup.
 - [ ] PR, CI, best-effort CodeRabbit, merge and production smoke.

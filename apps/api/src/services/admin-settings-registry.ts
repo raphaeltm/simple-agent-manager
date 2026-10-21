@@ -8,10 +8,12 @@ import {
   validateConnectorSetting,
 } from './connector-settings-definition';
 import { ENV_KEYS, SECRET_KINDS, SETTING_KEYS } from './platform-config-store';
+import { WORKFLOW_DEFAULTS, WORKFLOW_SETTING_DETAILS } from './workflow-defaults';
 
 export type AdminSettingValue = boolean | number | string | readonly string[] | null;
 export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
 export type AdminSettingName =
+  | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
   | `connector.${ConnectorSettingKey}`
   | 'collaboration.commentMentionsMax'
   | 'collaboration.commentNotificationWindowSeconds'
@@ -270,6 +272,15 @@ const definitions: AdminSettingDefinition[] = [
     'Trials',
     'Allow anonymous trials. Fresh installs remain disabled.',
     { legacyKv: 'trials' }
+  ),
+  ...(Object.keys(WORKFLOW_DEFAULTS) as Array<keyof typeof WORKFLOW_DEFAULTS>).map((key) =>
+    integerDefinition(
+      `workflow.${key}`,
+      WORKFLOW_DEFAULTS[key],
+      'Operations',
+      WORKFLOW_SETTING_DETAILS[key].description,
+      { min: 1, max: WORKFLOW_SETTING_DETAILS[key].max }
+    )
   ),
   integerDefinition(
     'collaboration.sessionAccessMaxGrants',

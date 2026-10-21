@@ -49,13 +49,14 @@ import {
   TaskRunnerStartGuardRevokedError,
 } from './task-runner-start-guard';
 import { getTaskTitleConfig } from './task-title';
+import { workflowProjectSnapshot } from './workflow-snapshot';
 
 const FINGERPRINT_VERSION = 1;
 const SNAPSHOT_VERSION = 1;
 const MAX_RESERVED_ID_LENGTH = 160;
 const DEFAULT_RESERVED_REPOSITORY_ACCESS_FLOW_MAX_LENGTH = 512;
 const DEFAULT_RESERVED_INITIAL_STATUS_REASON_MAX_LENGTH = 1_024;
-const SOURCE_KINDS = new Set<string>(['trigger', 'schedule', 'standing_watch']);
+const SOURCE_KINDS = new Set<string>(['trigger', 'schedule', 'standing_watch', 'workflow']);
 const TASK_ACTOR_TYPES = new Set<string>(['user', 'system', 'workspace_callback']);
 const TRIGGERED_BY = new Set<string>(TRIGGERED_BY_VALUES);
 
@@ -205,6 +206,7 @@ export async function submissionFingerprint(input: ReservedTaskSubmissionInput):
       vmSizeOverride: input.vmSizeOverride,
       resourceRequirementsJson: input.resourceRequirementsJson ?? null,
       source: input.source,
+      ...(input.workflow ? { workflow: input.workflow } : {}),
     })
   );
 }
@@ -323,6 +325,12 @@ async function resolvePlacementForInput(
       message: string;
     }
 > {
+  if (input.workflow && workflowProjectSnapshot(project) !== input.workflow.expectedProjectJson) {
+    return {
+      reason: 'placement_unavailable',
+      message: 'Project execution defaults changed after workflow submission',
+    };
+  }
   let profile: ResolvedProfile;
   try {
     profile =
@@ -340,6 +348,18 @@ async function resolvePlacementForInput(
     return {
       reason: 'profile_unavailable',
       message: error instanceof Error ? error.message : String(error),
+    };
+  }
+  if (input.workflow && JSON.stringify(profile) !== input.workflow.expectedProfileJson) {
+    return {
+      reason: 'profile_unavailable',
+      message: 'Workflow agent profile changed after plan submission',
+    };
+  }
+  if (input.workflow && profile?.runtime === 'cf-container') {
+    return {
+      reason: 'placement_unavailable',
+      message: 'Workflow steps currently require a VM profile',
     };
   }
   let placement: TaskStartPlacement;
@@ -367,7 +387,8 @@ async function resolvePlacementForInput(
         vmSizeSource: input.source.kind === 'trigger' ? 'trigger' : 'task',
         taskMode: input.taskMode ?? null,
       },
-      credentialProjectPolicy: 'current-project',
+      credentialProjectPolicy: input.workflow ? 'inherited-or-none' : 'current-project',
+      inheritedCredentialAttribution: input.workflow?.credentialAttribution,
       taskModeDefault: 'workspace-profile',
       resourceRequirements: resourceRequirementLayers,
     });
@@ -381,6 +402,12 @@ async function resolvePlacementForInput(
     throw err;
   }
 
+  if (input.workflow && placement.runtime.requestedRuntime === 'cf-container') {
+    return {
+      reason: 'placement_unavailable',
+      message: 'Workflow steps currently require VM execution',
+    };
+  }
   const placementResolution = await resolveTaskStartPlacementCredentialAttributionFromPlacement(
     db,
     placement,
@@ -500,7 +527,7 @@ export async function prepareNewSubmission(
     userId: input.userId,
     vmSize: placement.vmSize,
     vmLocation: placement.vmLocation,
-    branch: project.defaultBranch,
+    branch: input.workflow ? branchName : project.defaultBranch,
     defaultBranch: project.defaultBranch,
     userName: user.name,
     userEmail: user.email,

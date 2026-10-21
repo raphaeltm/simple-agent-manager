@@ -877,6 +877,10 @@ export const missions = sqliteTable(
     rootTaskId: text('root_task_id'),
     /** JSON-serialized MissionBudgetConfig. Enforcement comes in later phases. */
     budgetConfig: text('budget_config'),
+    workflowPlanJson: text('workflow_plan_json'),
+    workflowRequestKey: text('workflow_request_key'),
+    workflowPlanFingerprint: text('workflow_plan_fingerprint'),
+    workflowDeadlineAt: integer('workflow_deadline_at'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -888,6 +892,52 @@ export const missions = sqliteTable(
     projectIdIdx: index('idx_missions_project_id').on(table.projectId),
     projectStatusIdx: index('idx_missions_project_status').on(table.projectId, table.status),
     userIdIdx: index('idx_missions_user_id').on(table.userId),
+  })
+);
+
+/** Durable step identity; tasks are created only when prerequisites succeed. */
+export const missionSteps = sqliteTable(
+  'mission_steps',
+  {
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    stepKey: text('step_key').notNull(),
+    ordinal: integer('ordinal').notNull(),
+    title: text('title').notNull(),
+    instructions: text('instructions').notNull(),
+    afterJson: text('after_json').notNull(),
+    profileId: text('profile_id').notNull(),
+    profileSnapshotJson: text('profile_snapshot_json').notNull(),
+    state: text('state').notNull().default('waiting'),
+    attemptId: text('attempt_id').notNull().unique(),
+    taskId: text('task_id').notNull().unique(),
+    sessionId: text('session_id').notNull().unique(),
+    submissionJson: text('submission_json'),
+    launchRetries: integer('launch_retries').notNull().default(0),
+    nextAttemptAt: integer('next_attempt_at').notNull().default(0),
+    resultJson: text('result_json'),
+    reason: text('reason'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.missionId, table.stepKey] }),
+    taskIdx: index('idx_mission_steps_task').on(table.taskId),
+  })
+);
+export const missionWorkflowEvents = sqliteTable(
+  'mission_workflow_events',
+  {
+    id: text('id').primaryKey(),
+    missionId: text('mission_id')
+      .notNull()
+      .references(() => missions.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').notNull(),
+    eventPayloadJson: text('event_payload_json').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    runIdx: index('idx_mission_workflow_events_run').on(table.missionId, table.createdAt, table.id),
   })
 );
 

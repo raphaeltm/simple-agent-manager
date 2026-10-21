@@ -25,6 +25,9 @@ import { resolveTaskStartPlacementCredentialAttribution } from '../../services/p
 import * as projectDataService from '../../services/project-data';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
+import { getWorkflowConfig } from '../../services/workflow-config';
+import { reconcileWorkflowRun } from '../../services/workflow-reconcile';
+import type { WorkflowRunRow } from '../../services/workflow-runs';
 import { mapRows } from '../row-validation';
 import { logDecision } from './decision-log';
 import { detectStalls, resolveActiveSessionIdsForTaskIds } from './stall-detection';
@@ -68,6 +71,7 @@ const SchedulingMissionRowSchema = v.object({
   mission_id: v.string(),
   status: v.string(),
   registered_at: v.number(),
+  workflow_registration_deadline: v.optional(v.nullable(v.number())),
 });
 
 // ── Scheduling Cycle ──────────────────────────────────────────────────────────
@@ -89,9 +93,9 @@ export async function runSchedulingCycle(
   const missions = mapRows(
     sql
       .exec(
-        `SELECT mission_id, status, registered_at
+        `SELECT mission_id, status, registered_at, workflow_registration_deadline
            FROM orchestrator_missions
-           WHERE status IN ('active', 'completing')`
+           WHERE status IN ('active', 'completing') ORDER BY last_checked_at, mission_id`
       )
       .toArray(),
     SchedulingMissionRowSchema,
@@ -101,8 +105,38 @@ export async function runSchedulingCycle(
 
   if (missions.length === 0) return;
 
+  const workflowLaunchBudget = { remaining: 0 };
+  let workflowBudgetLoaded = false;
   for (const mission of missions) {
     try {
+      const workflow = await env.DATABASE.prepare(
+        'SELECT * FROM missions WHERE id = ? AND project_id = ? AND workflow_plan_json IS NOT NULL'
+      )
+        .bind(mission.mission_id, projectId)
+        .first<WorkflowRunRow>();
+      if (workflow) {
+        if (!workflowBudgetLoaded) {
+          workflowLaunchBudget.remaining = (await getWorkflowConfig(env)).maxLaunchesPerCycle;
+          workflowBudgetLoaded = true;
+        }
+        sql.exec(
+          'UPDATE orchestrator_missions SET last_checked_at = ? WHERE mission_id = ?',
+          now,
+          mission.mission_id
+        );
+        await reconcileWorkflowRun(env, workflow, { launchBudget: workflowLaunchBudget });
+        if (!['active', 'paused'].includes(workflow.status))
+          cleanupMissionTracking(sql, mission.mission_id);
+        if (workflowLaunchBudget.remaining <= 0) break;
+        continue;
+      }
+      if (mission.workflow_registration_deadline != null) {
+        // An uncommitted workflow may commit only BEFORE this same deadline
+        // (enforced inside its D1 INSERT). It cannot appear after cleanup.
+        if (now >= mission.workflow_registration_deadline)
+          cleanupMissionTracking(sql, mission.mission_id);
+        continue;
+      }
       const status = mission.status ?? 'active';
       if (status === 'completing') {
         cleanupMissionTracking(sql, mission.mission_id);

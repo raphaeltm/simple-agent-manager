@@ -42,6 +42,10 @@ export const ORCHESTRATOR_MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS idx_decisions_created ON decision_log(created_at);
     `,
   },
+  {
+    name: '002_workflow_registration',
+    sql: 'ALTER TABLE orchestrator_missions ADD COLUMN workflow_registration_deadline INTEGER;',
+  },
 ] as const;
 
 /**
@@ -60,7 +64,11 @@ export function runOrchestratorMigrations(sql: SqlStorage): void {
     const applied = sql.exec('SELECT 1 FROM _migrations WHERE name = ?', migration.name).toArray();
     if (applied.length === 0) {
       sql.exec(migration.sql);
-      sql.exec('INSERT INTO _migrations (name, applied_at) VALUES (?, ?)', migration.name, Date.now());
+      sql.exec(
+        'INSERT INTO _migrations (name, applied_at) VALUES (?, ?)',
+        migration.name,
+        Date.now()
+      );
     }
   }
 }

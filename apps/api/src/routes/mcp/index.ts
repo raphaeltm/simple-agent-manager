@@ -178,6 +178,7 @@ import {
   handleUpdateTrigger,
 } from './trigger-tools';
 import { webhookClaimRoutes } from './webhook-claims';
+import { handleGetWorkflowRun,handleStartWorkflowRun } from './workflow-tools';
 import {
   handleExposePort,
   handleGetCredentialStatus,
@@ -622,6 +623,10 @@ mcpRoutes.post('/', async (c) => {
           case 'flag_contradiction':
             return c.json(await handleFlagContradiction(requestId, toolArgs, tokenData, c.env));
           // ─── Mission orchestration tools ───────────────────────────────
+          case 'start_workflow_run':
+            return c.json(await handleStartWorkflowRun(requestId, toolArgs, tokenData, c.env));
+          case 'get_workflow_run':
+            return c.json(await handleGetWorkflowRun(requestId, toolArgs, tokenData, c.env));
           case 'create_mission':
             return c.json(await handleCreateMission(requestId, toolArgs, tokenData, c.env));
           case 'get_mission':

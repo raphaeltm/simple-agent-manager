@@ -1,4 +1,5 @@
 import type { Env } from '../env';
+import { getMcpLimits } from '../routes/mcp/_helpers';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
@@ -8,6 +9,7 @@ import type {
   PreparedSubmission,
   ReservedTaskSubmissionInput,
 } from './reserved-task-submission-contracts';
+import { workflowCapacityBlocked,WorkflowCapacityDeferredError } from './workflow-admission';
 
 export async function commitD1Submission(
   env: Env,
@@ -63,8 +65,43 @@ export async function commitD1Submission(
     now,
     now,
   ];
-  const insertTask =
-    input.source.kind === 'trigger'
+  const workflow = input.workflow;
+  const limits = getMcpLimits(env);
+  const workflowGuard = workflow
+    ? `WHERE EXISTS (
+    SELECT 1 FROM mission_steps s JOIN missions m ON m.id = s.mission_id
+    WHERE s.mission_id = ? AND s.step_key = ? AND s.task_id = ? AND s.attempt_id = ?
+      AND s.state = 'starting' AND m.status = 'active' AND m.project_id = ? AND m.user_id = ?
+      AND m.workflow_deadline_at > ?
+      AND ? <= COALESCE((SELECT max_dispatch_depth FROM projects WHERE id = m.project_id), ?)
+  ) AND (SELECT COUNT(*) FROM tasks WHERE parent_task_id = ? AND project_id = ?
+    AND status IN ('queued','in_progress','delegated','awaiting_followup')) < COALESCE((SELECT max_sub_tasks_per_task FROM projects WHERE id = ?), ?)
+    AND (SELECT COUNT(*) FROM tasks WHERE project_id = ? AND dispatch_depth > 0
+    AND status IN ('queued','in_progress','delegated','awaiting_followup')) < COALESCE((SELECT max_concurrent_tasks FROM projects WHERE id = ?), ?)`
+    : '';
+  const insertTask = workflow
+    ? env.DATABASE.prepare(
+        `INSERT INTO tasks ${insertTaskColumns} SELECT ${insertTaskValues} ${workflowGuard}`
+      ).bind(
+        ...insertTaskBindings,
+        workflow.missionId,
+        workflow.stepKey,
+        t.taskId,
+        input.source.sourceExecutionId,
+        input.projectId,
+        input.userId,
+        Date.now(),
+        workflow.dispatchDepth,
+        limits.dispatchMaxDepth,
+        workflow.parentTaskId,
+        input.projectId,
+        input.projectId,
+        limits.dispatchMaxPerTask,
+        input.projectId,
+        input.projectId,
+        limits.dispatchMaxActivePerProject
+      )
+    : input.source.kind === 'trigger'
       ? env.DATABASE.prepare(
           `INSERT INTO tasks ${insertTaskColumns}
            SELECT ${insertTaskValues}
@@ -143,5 +180,18 @@ export async function commitD1Submission(
     return;
   }
 
-  await env.DATABASE.batch([insertTask, insertStatus, insertCheckpoint]);
+  const lineage = workflow
+    ? [
+        env.DATABASE.prepare(
+          'UPDATE tasks SET mission_id = ?, parent_task_id = ?, dispatch_depth = ? WHERE id = ?'
+        ).bind(workflow.missionId, workflow.parentTaskId, workflow.dispatchDepth, t.taskId),
+      ]
+    : [];
+  try {
+    await env.DATABASE.batch([insertTask, insertStatus, insertCheckpoint, ...lineage]);
+  } catch (error) {
+    if (workflow && (await workflowCapacityBlocked(env, input.projectId, workflow.parentTaskId)))
+      throw new WorkflowCapacityDeferredError('Waiting for project task capacity');
+    throw error;
+  }
 }
