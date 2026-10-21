@@ -34,7 +34,9 @@ import { TriggerDropdown } from '../../../src/components/triggers/TriggerDropdow
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeTrigger(overrides: Partial<TriggerResponse> & { id: string; name: string }): TriggerResponse {
+function makeTrigger(
+  overrides: Partial<TriggerResponse> & { id: string; name: string }
+): TriggerResponse {
   return {
     projectId: 'proj-1',
     userId: 'user-1',
@@ -65,12 +67,8 @@ function renderDropdown(props: { open?: boolean; onToggle?: () => void } = {}) {
     onToggle,
     ...renderWithQuery(
       <MemoryRouter>
-        <TriggerDropdown
-          projectId="proj-1"
-          open={props.open ?? false}
-          onToggle={onToggle}
-        />
-      </MemoryRouter>,
+        <TriggerDropdown projectId="proj-1" open={props.open ?? false} onToggle={onToggle} />
+      </MemoryRouter>
     ),
   };
 }
@@ -85,7 +83,10 @@ describe('TriggerDropdown', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listTriggers.mockResolvedValue({ triggers: [], total: 0 });
-    Object.defineProperty(globalThis, 'innerWidth', { configurable: true, value: originalInnerWidth });
+    Object.defineProperty(globalThis, 'innerWidth', {
+      configurable: true,
+      value: originalInnerWidth,
+    });
   });
 
   it('renders clock button with correct aria-label', () => {
@@ -112,7 +113,7 @@ describe('TriggerDropdown', () => {
 
   it('shows empty state when no triggers exist', async () => {
     renderDropdown({ open: true });
-    expect(await screen.findByText('No triggers configured.')).toBeInTheDocument();
+    expect(await screen.findByText(/No recurring or reacting automations yet/)).toBeInTheDocument();
   });
 
   it('renders active trigger by name', async () => {
@@ -147,29 +148,29 @@ describe('TriggerDropdown', () => {
     const item = await screen.findByRole('button', { name: /Daily Review/i });
     await user.click(item);
 
-    expect(mocks.navigate).toHaveBeenCalledWith('/projects/proj-1/triggers/t-1');
+    expect(mocks.navigate).toHaveBeenCalledWith('/projects/proj-1/automation/trigger/t-1');
     expect(onToggle).toHaveBeenCalled();
   });
 
-  it('navigates to triggers list on New Trigger click', async () => {
+  it('opens the create flow on New automation click', async () => {
     const user = userEvent.setup();
     const { onToggle } = renderDropdown({ open: true });
 
-    const newBtn = await screen.findByRole('button', { name: /New Trigger/i });
+    const newBtn = await screen.findByRole('button', { name: /New automation/i });
     await user.click(newBtn);
 
-    expect(mocks.navigate).toHaveBeenCalledWith('/projects/proj-1/triggers');
+    expect(mocks.navigate).toHaveBeenCalledWith('/projects/proj-1/automation/new');
     expect(onToggle).toHaveBeenCalled();
   });
 
-  it('navigates to triggers list on Manage click', async () => {
+  it('opens the Automation page on All automation click', async () => {
     const user = userEvent.setup();
     const { onToggle } = renderDropdown({ open: true });
 
-    const manageBtn = await screen.findByRole('button', { name: /Manage/i });
+    const manageBtn = await screen.findByRole('button', { name: /All automation/i });
     await user.click(manageBtn);
 
-    expect(mocks.navigate).toHaveBeenCalledWith('/projects/proj-1/triggers');
+    expect(mocks.navigate).toHaveBeenCalledWith('/projects/proj-1/automation');
     expect(onToggle).toHaveBeenCalled();
   });
 
@@ -177,17 +178,26 @@ describe('TriggerDropdown', () => {
     const { rerender } = renderWithQuery(
       <MemoryRouter>
         <TriggerDropdown projectId="proj-1" open={false} onToggle={vi.fn()} />
-      </MemoryRouter>,
+      </MemoryRouter>
     );
-    expect(screen.getByRole('button', { name: 'Automation triggers' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Automation triggers' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
 
     rerender(
       <MemoryRouter>
         <TriggerDropdown projectId="proj-1" open={true} onToggle={vi.fn()} />
-      </MemoryRouter>,
+      </MemoryRouter>
     );
-    expect(screen.getByRole('button', { name: 'Automation triggers' })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('button', { name: 'Automation triggers' })).toHaveAttribute('aria-haspopup', 'true');
+    expect(screen.getByRole('button', { name: 'Automation triggers' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+    expect(screen.getByRole('button', { name: 'Automation triggers' })).toHaveAttribute(
+      'aria-haspopup',
+      'true'
+    );
   });
 
   it('closes on Escape and returns focus to the trigger button', async () => {
@@ -209,7 +219,7 @@ describe('TriggerDropdown', () => {
       <MemoryRouter>
         <button type="button">Outside</button>
         <TriggerDropdown projectId="proj-1" open={true} onToggle={onToggle} />
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     await user.click(screen.getByRole('button', { name: 'Outside' }));
@@ -231,7 +241,7 @@ describe('TriggerDropdown', () => {
     await waitFor(() => {
       expect(mocks.listTriggers).toHaveBeenCalledTimes(2);
     });
-    expect(await screen.findByText('No triggers configured.')).toBeInTheDocument();
+    expect(await screen.findByText(/No recurring or reacting automations yet/)).toBeInTheDocument();
   });
 
   it('clamps the popover to the right viewport edge', async () => {

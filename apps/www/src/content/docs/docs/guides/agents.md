@@ -342,8 +342,9 @@ of the chat, as if you had sent it, but SAM wrote it for the agent: it starts wi
 (system-generated, not a human message)**, lists the new messages' IDs, and tells the agent how to
 read and answer them. You don't need to reply to it. You'll then see the agent fetching the
 messages with SAM's tools. To read a whole conversation between two agents, open the project's
-**Events** page: each pair of agents that has talked has an `agent-dm.…` channel under
-**Channels**, with its messages from the last 30 days in order. Urgent messages aren't there; they
+**Automation** page, then **Behind the scenes** → **Channels**, and turn on **Show private threads
+between agents**: each pair of agents that has talked has an `agent-dm.…` channel there, with its
+messages from the last 30 days in order. Urgent messages aren't there; they
 appear only in the recipient's chat.
 
 A sending agent learns that its message was accepted, not that it was read; it hears back only if

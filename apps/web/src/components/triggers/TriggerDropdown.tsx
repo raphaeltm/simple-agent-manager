@@ -12,8 +12,9 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
+import { automationPaths } from '../../lib/automation-routes';
 import { triggersQueryOptions } from '../../lib/query-options';
-import { FOCUS_RING } from './trigger-presentation';
+import { FOCUS_RING } from './trigger-form-support';
 
 const POPOVER_WIDTH = 288;
 const POPOVER_MARGIN = 8;
@@ -45,8 +46,10 @@ const TriggerRow: FC<TriggerRowProps> = ({ trigger, projectId, onNavigate }) => 
   ) : (
     <Clock size={12} className="text-fg-muted shrink-0 mt-0.5" aria-hidden="true" />
   );
-  const labelClass = isPaused ? 'text-xs font-medium text-fg-muted truncate' : 'text-xs font-medium text-fg-primary truncate';
-  const rowClass = `flex items-start gap-2 w-full px-3 py-2 bg-transparent border-none cursor-pointer text-left hover:bg-surface-hover transition-colors ${isPaused ? 'opacity-60 ' : ''}${FOCUS_RING}`;
+  const labelClass = isPaused
+    ? 'text-xs font-medium text-fg-muted truncate'
+    : 'text-xs font-medium text-fg-primary truncate';
+  const rowClass = `flex min-h-11 items-start gap-2 w-full px-3 py-2 bg-transparent border-none cursor-pointer text-left hover:bg-surface-hover transition-colors ${isPaused ? 'opacity-60 ' : ''}${FOCUS_RING}`;
   let secondaryText: string | null = null;
   if (isPaused) {
     secondaryText = 'Paused';
@@ -57,7 +60,7 @@ const TriggerRow: FC<TriggerRowProps> = ({ trigger, projectId, onNavigate }) => 
   return (
     <button
       type="button"
-      onClick={() => onNavigate(`/projects/${projectId}/triggers/${trigger.id}`)}
+      onClick={() => onNavigate(automationPaths.detail(projectId, 'trigger', trigger.id))}
       className={rowClass}
     >
       {icon}
@@ -143,10 +146,13 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
     };
   }, [open, closePopover]);
 
-  const navigateAndClose = useCallback((path: string) => {
-    closePopover();
-    navigate(path);
-  }, [closePopover, navigate]);
+  const navigateAndClose = useCallback(
+    (path: string) => {
+      closePopover();
+      navigate(path);
+    },
+    [closePopover, navigate]
+  );
 
   const handleRetry = useCallback(() => {
     void triggersQuery.refetch();
@@ -165,11 +171,7 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
   const popoverId = `trigger-dropdown-${projectId}`;
   let popoverContent;
   if (loading) {
-    popoverContent = (
-      <div className="px-3 py-4 text-center text-xs text-fg-muted">
-        Loading...
-      </div>
-    );
+    popoverContent = <div className="px-3 py-4 text-center text-xs text-fg-muted">Loading...</div>;
   } else if (loadError) {
     popoverContent = (
       <div className="px-3 py-4 text-center">
@@ -188,7 +190,8 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
   } else if (triggers.length === 0) {
     popoverContent = (
       <div className="px-3 py-4 text-center text-xs text-fg-muted">
-        No triggers configured.
+        No recurring or reacting automations yet. One-time runs and watches are on the Automation
+        page.
       </div>
     );
   } else {
@@ -222,52 +225,51 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
         <Clock size={15} aria-hidden="true" />
       </button>
 
-      {open && createPortal(
-        <section
-          id={popoverId}
-          ref={contentRef}
-          className="w-72 max-w-[calc(100vw-16px)] rounded-lg glass-surface shadow-lg overflow-hidden"
-          style={{
-            position: 'fixed',
-            zIndex: 50,
-            top: position.top,
-            left: position.left,
-          }}
-          aria-label="Automation triggers"
-        >
-          {/* Header */}
-          <div className="px-3 py-2 border-b border-border-default">
-            <h4 className="text-xs font-semibold text-fg-primary m-0 uppercase tracking-wider">
-              Triggers
-            </h4>
-          </div>
+      {open &&
+        createPortal(
+          <section
+            id={popoverId}
+            ref={contentRef}
+            className="w-72 max-w-[calc(100vw-16px)] rounded-lg glass-surface shadow-lg overflow-hidden"
+            style={{
+              position: 'fixed',
+              zIndex: 50,
+              top: position.top,
+              left: position.left,
+            }}
+            aria-label="Automation triggers"
+          >
+            {/* Header */}
+            <div className="px-3 py-2 border-b border-border-default">
+              <h4 className="text-xs font-semibold text-fg-primary m-0 uppercase tracking-wider">
+                Recurring and reacting
+              </h4>
+            </div>
 
-          {/* Content */}
-          <div className="max-h-64 overflow-y-auto">
-            {popoverContent}
-          </div>
+            {/* Content */}
+            <div className="max-h-64 overflow-y-auto">{popoverContent}</div>
 
-          {/* Footer */}
-          <div className="border-t border-border-default px-3 py-2 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => navigateAndClose(`/projects/${projectId}/triggers`)}
-              className={`flex-1 flex items-center gap-1.5 text-xs text-accent-primary bg-transparent border-none cursor-pointer py-1 hover:underline ${FOCUS_RING}`}
-            >
-              <Plus size={12} aria-hidden="true" />
-              New Trigger
-            </button>
-            <button
-              type="button"
-              onClick={() => navigateAndClose(`/projects/${projectId}/triggers`)}
-              className={`text-xs text-fg-muted bg-transparent border-none cursor-pointer py-1 hover:text-fg-primary hover:underline ${FOCUS_RING}`}
-            >
-              Manage
-            </button>
-          </div>
-        </section>,
-        document.body,
-      )}
+            {/* Footer */}
+            <div className="border-t border-border-default px-3 py-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigateAndClose(automationPaths.create(projectId))}
+                className={`flex-1 flex min-h-11 items-center gap-1.5 text-xs text-accent-primary bg-transparent border-none cursor-pointer hover:underline ${FOCUS_RING}`}
+              >
+                <Plus size={12} aria-hidden="true" />
+                New automation
+              </button>
+              <button
+                type="button"
+                onClick={() => navigateAndClose(automationPaths.overview(projectId))}
+                className={`min-h-11 text-xs text-fg-muted bg-transparent border-none cursor-pointer hover:text-fg-primary hover:underline ${FOCUS_RING}`}
+              >
+                All automation
+              </button>
+            </div>
+          </section>,
+          document.body
+        )}
     </div>
   );
 };

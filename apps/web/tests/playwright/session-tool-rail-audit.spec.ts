@@ -395,7 +395,7 @@ test.describe('Session tool rail — discoverability', () => {
       'git',
       'timeline',
       'resources',
-      'events',
+      'automation',
       'comments',
       'retry',
       'fork',
@@ -422,7 +422,7 @@ test.describe('Session tool rail — discoverability', () => {
       ['git', 'Review uncommitted changes'],
       ['timeline', 'Jump through session history'],
       ['resources', 'Inspect session CPU, memory, I/O and tool-window correlation'],
-      ['events', 'Session events and schedules'],
+      ['automation', 'What this chat waits for, and reminders'],
       ['comments', 'Open comment threads on this session'],
       ['retry', 'Retry — re-run this task'],
       ['fork', 'Fork — start a new task from this session'],
@@ -627,7 +627,7 @@ test.describe('Session tool rail — layout', () => {
     if (metrics.scrollHeight <= metrics.clientHeight) {
       // Everything fits: nothing to scroll to, so assert the strong property instead —
       // every tool is already on screen.
-      for (const id of ['files', 'git', 'timeline', 'events']) {
+      for (const id of ['files', 'git', 'timeline', 'automation']) {
         await expect(page.getByTestId(`session-tool-${id}`)).toBeInViewport();
       }
       return;
@@ -635,7 +635,7 @@ test.describe('Session tool rail — layout', () => {
 
     // Report/Complete/Details are pinned outside this scroller — covered separately by
     // 'Report, Complete and Details stay pinned above the fold'.
-    for (const id of ['files', 'git', 'timeline', 'events']) {
+    for (const id of ['files', 'git', 'timeline', 'automation']) {
       const tool = page.getByTestId(`session-tool-${id}`);
       await tool.scrollIntoViewIfNeeded();
       await expect(tool).toBeInViewport();
@@ -801,6 +801,10 @@ function registerSharedMatrixCases(theme: MatrixTheme, viewport: MatrixViewport)
 
 for (const theme of ['dark', 'light'] as const) {
   test.describe(`Tab placement matrix — mobile / ${theme}`, () => {
+    // Pinned like the desktop matrix below, so the mobile cases stay mobile when the spec
+    // runs under a desktop project (labels mode only overlays on a phone).
+    test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
+
     registerSharedMatrixCases(theme, 'mobile');
 
     test(`hidden tab clears a TALL header`, async ({ page }) => {
@@ -953,6 +957,105 @@ test.describe('Session resource history drawer', () => {
       el.scrollTop = el.scrollHeight;
     });
     await capture(page, `resource-history-detail-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+});
+
+test.describe('Session automation panel', () => {
+  test('opens from the rail and shows what this chat waits for and what is coming', async ({
+    page,
+  }) => {
+    await openChat(page, { state: 'active' });
+    // Registered after openChat's catch-all, so these win for the panel's three reads.
+    await page.route('**/api/projects/*/event-subscriptions**', (route) =>
+      route.fulfill({
+        json: {
+          subscriptions: [
+            {
+              id: 'sub-rail-ci',
+              projectId: PROJECT_ID,
+              contractVersion: 1,
+              owner: { type: 'agent', id: `${PROJECT_ID}:${SESSION_ID}`, name: 'agent' },
+              idempotencyKey: 'k',
+              filter: {
+                version: 1,
+                source: 'github',
+                eventType: 'check_suite.completed',
+                subjectType: 'commit',
+                subjectId: 'abcdef1234567',
+              },
+              filterFingerprint: 'f',
+              matchKeyCount: 1,
+              deliveryPreference: {
+                requested: 'existing_session_prompt',
+                resolved: 'queued_for_prompt_delivery',
+                target: { sessionId: SESSION_ID, taskId: null, runtimeId: null, agentId: null },
+              },
+              state: 'active',
+              reason: null,
+              createdAt: NOW - 3_600_000,
+              updatedAt: NOW - 3_600_000,
+              expiresAt: NOW + 86_400_000,
+              cancelledAt: null,
+              cancelledBy: null,
+              cancelReason: null,
+              lastMatchedAt: null,
+            },
+          ],
+          hasMore: false,
+        },
+      })
+    );
+    await page.route('**/api/projects/*/schedules**', (route) =>
+      route.fulfill({
+        json: {
+          schedules: [
+            {
+              id: 'sch-rail-1',
+              projectId: PROJECT_ID,
+              creatorUserId: 'user-rail-1',
+              creatorChatSessionId: SESSION_ID,
+              reason: 'Check whether the canary held overnight',
+              action: {
+                kind: 'message_session',
+                sessionId: SESSION_ID,
+                prompt: 'Is the canary still healthy?',
+              },
+              state: 'pending',
+              dueAt: NOW + 2 * 3_600_000,
+              displayTimezone: 'UTC',
+              expiresAt: NOW + 26 * 3_600_000,
+              version: 1,
+              idempotencyKey: 'k',
+              createdAt: NOW - 600_000,
+              updatedAt: NOW - 600_000,
+              nextAttemptAt: null,
+              attemptCount: 0,
+              lastError: null,
+              eventId: null,
+              deliveryId: null,
+              resultTaskId: null,
+              resultSessionId: null,
+              watchId: null,
+              sourceEventId: null,
+            },
+          ],
+          nextCursor: null,
+        },
+      })
+    );
+    await page.route('**/api/projects/*/standing-watches**', (route) =>
+      route.fulfill({ json: { watches: [], nextCursor: null } })
+    );
+
+    await page.getByTestId('session-tool-automation').click();
+    const panel = page.getByRole('dialog', { name: 'Automation for this chat' });
+    await expect(panel).toBeVisible();
+    await expect(
+      panel.getByText('This chat is waiting for CI to finish', { exact: false })
+    ).toBeVisible();
+    await expect(panel.getByText('Check whether the canary held overnight')).toBeVisible();
+    await expect(panel.getByRole('link', { name: 'All automation' })).toBeVisible();
+    await capture(page, `automation-panel-${page.viewportSize()?.width ?? 'viewport'}`);
   });
 });
 

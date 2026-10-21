@@ -319,7 +319,10 @@ async function setupApiMocks(page: Page) {
     }
 
     // Provider catalog
-    if (pathName.startsWith('/api/provider-catalog') || pathName.startsWith('/api/providers/catalog')) {
+    if (
+      pathName.startsWith('/api/provider-catalog') ||
+      pathName.startsWith('/api/providers/catalog')
+    ) {
       return respond(200, { catalogs: [] });
     }
 
@@ -338,9 +341,31 @@ async function setupApiMocks(page: Page) {
         return respond(200, { messages: [] });
       }
 
-      // Triggers
-      if (subPath.startsWith('/triggers')) {
+      // Automation (triggers, one-time automations, watches, agent waits)
+      if (subPath === '/triggers') {
         return respond(200, { triggers: MOCK_TRIGGERS });
+      }
+      if (/^\/triggers\/[^/]+\/(executions|webhook)/.test(subPath)) {
+        return respond(200, { executions: [], deliveries: [], nextCursor: null });
+      }
+      if (subPath.startsWith('/triggers/')) {
+        const trigger = MOCK_TRIGGERS.find((candidate) => subPath === `/triggers/${candidate.id}`);
+        return trigger ? respond(200, trigger) : respond(404, { error: 'NOT_FOUND' });
+      }
+      if (subPath.startsWith('/schedules')) {
+        return respond(200, { schedules: [], nextCursor: null });
+      }
+      if (subPath.startsWith('/standing-watches')) {
+        return respond(200, { watches: [], nextCursor: null });
+      }
+      if (subPath.startsWith('/event-subscriptions')) {
+        return respond(200, { subscriptions: [], hasMore: false });
+      }
+      if (subPath === '/members') {
+        return respond(200, { members: [] });
+      }
+      if (subPath.startsWith('/skills')) {
+        return respond(200, { items: [] });
       }
 
       // Library directories
@@ -444,7 +469,9 @@ async function assertAlignedToTriggerEnd(trigger: Locator, overlay: Locator) {
   if (!triggerBox || !overlayBox) {
     throw new Error('Expected trigger and overlay boxes to be measurable');
   }
-  expect(Math.abs((overlayBox.x + overlayBox.width) - (triggerBox.x + triggerBox.width))).toBeLessThanOrEqual(24);
+  expect(
+    Math.abs(overlayBox.x + overlayBox.width - (triggerBox.x + triggerBox.width))
+  ).toBeLessThanOrEqual(24);
 }
 
 async function openNodeDropdown(page: Page, screenshotName: string) {
@@ -478,8 +505,12 @@ async function openSharedTooltip(page: Page, screenshotName: string) {
   await assertNoOverflow(page);
 }
 
-async function openCommandPalette(page: Page, screenshotName: string, target: 'window' | 'document') {
-  await page.goto('/projects/proj-test-1/triggers');
+async function openCommandPalette(
+  page: Page,
+  screenshotName: string,
+  target: 'window' | 'document'
+) {
+  await page.goto('/projects/proj-test-1/automation');
   await page.waitForTimeout(800);
 
   await page.evaluate((dispatchTarget) => {
@@ -525,6 +556,16 @@ async function openOptionalButtonOverlay(
 
 type OverlayViewport = 'mobile' | 'desktop';
 
+/** The ConfirmDialog an automation's Delete opens: a real portal, not an optional button. */
+async function openAutomationDeleteDialog(page: Page, viewport: OverlayViewport) {
+  await page.goto(`/projects/proj-test-1/automation/trigger/${MOCK_TRIGGERS[0]?.id ?? ''}`);
+  await page.getByRole('button', { name: 'Delete automation' }).click();
+  const dialog = page.getByRole('dialog', { name: /Delete this automation/ });
+  await expect(dialog).toBeVisible();
+  await screenshot(page, `portal-automation-delete-confirm-${viewport}`);
+  await assertNoOverflow(page);
+}
+
 type SharedOverlayScenario = {
   name: string;
   run: (page: Page, viewport: OverlayViewport) => Promise<void>;
@@ -536,12 +577,13 @@ function viewportScreenshot(baseName: string, viewport: OverlayViewport) {
 
 const sharedOverlayScenarios: SharedOverlayScenario[] = [
   {
+    // The trigger popover lives in the project chat's sidebar header.
     name: 'TriggerDropdown portal renders positioned correctly',
     run: (page, viewport) =>
       openOptionalButtonOverlay(page, {
         buttonSelector: 'button[aria-label="Automation triggers"]',
         overlayScreenshotName: viewportScreenshot('portal-trigger-dropdown', viewport),
-        url: '/projects/proj-test-1/triggers',
+        url: '/projects/proj-test-1/chat',
       }),
   },
   {
@@ -555,15 +597,8 @@ const sharedOverlayScenarios: SharedOverlayScenario[] = [
       }),
   },
   {
-    name: 'TriggerCard context menu portal renders positioned correctly',
-    run: (page, viewport) =>
-      openOptionalButtonOverlay(page, {
-        buttonSelector: 'button[aria-label="Trigger actions"]',
-        overlayScreenshotName: viewportScreenshot('portal-trigger-card-actions', viewport),
-        pageScreenshotName:
-          viewport === 'desktop' ? viewportScreenshot('portal-triggers-page', viewport) : undefined,
-        url: '/projects/proj-test-1/triggers',
-      }),
+    name: 'Automation delete ConfirmDialog renders above the page',
+    run: (page, viewport) => openAutomationDeleteDialog(page, viewport),
   },
   {
     name: 'Nodes shared DropdownMenu portal renders with blurred glass surface',
@@ -594,25 +629,6 @@ test.describe('Portal Overlays — Mobile', () => {
     await setupApiMocks(page);
   });
 
-  test('ConfirmDialog portal renders above page content', async ({ page }) => {
-    // Navigate to triggers page which has delete actions that open ConfirmDialog
-    await page.goto('/projects/proj-test-1/triggers');
-    await page.waitForTimeout(800);
-
-    // Screenshot the page with triggers loaded
-    await screenshot(page, 'portal-triggers-page-mobile');
-
-    // Click the more menu on a trigger card to get the context menu
-    const moreBtn = page.locator('button[aria-label="Trigger actions"]').first();
-    if (await moreBtn.isVisible()) {
-      await moreBtn.click();
-      await page.waitForTimeout(400);
-      await screenshot(page, 'portal-trigger-card-menu-mobile');
-    }
-
-    await assertNoOverflow(page);
-  });
-
   test('CommandPalette portal renders above page', async ({ page }) => {
     await openCommandPalette(page, 'portal-command-palette-mobile', 'window');
   });
@@ -624,7 +640,7 @@ test.describe('Portal Overlays — Mobile', () => {
   test('MobileNavDrawer portal renders with backdrop', async ({ page, isMobile }) => {
     test.skip(!isMobile, 'MobileNavDrawer is mobile-only');
 
-    await page.goto('/projects/proj-test-1/triggers');
+    await page.goto('/projects/proj-test-1/automation');
     await page.waitForTimeout(800);
 
     // Look for the mobile menu button (hamburger)
@@ -643,7 +659,7 @@ test.describe('Portal Overlays — Mobile', () => {
   test('MobileSessionDrawer portal renders with session list', async ({ page, isMobile }) => {
     test.skip(!isMobile, 'MobileSessionDrawer is mobile-only');
 
-    await page.goto('/projects/proj-test-1/triggers');
+    await page.goto('/projects/proj-test-1/automation');
     await page.waitForTimeout(800);
 
     // Look for the sessions/chats button

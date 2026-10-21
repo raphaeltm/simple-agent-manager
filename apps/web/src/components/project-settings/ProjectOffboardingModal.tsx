@@ -43,7 +43,7 @@ export function defaultOffboardingAction(
 function resourceKindLabel(kind: ProjectMemberOffboardingResourceKind): string {
   switch (kind) {
     case 'trigger':
-      return 'Triggers';
+      return 'Automation';
     case 'task_tree':
       return 'Running tasks';
     case 'node':

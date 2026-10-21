@@ -206,7 +206,8 @@ test.describe('Project sidebar scroll — short laptop (1280x600)', () => {
     // an unmounted nav would also satisfy "nothing is clipped".
     const nav = page.locator(PROJECT_NAV);
     await expect(nav.getByRole('link', { name: 'Chat', exact: true })).toBeVisible();
-    expect(await nav.getByRole('link').count()).toBe(13);
+    // 12 items since Events and Triggers merged into Automation (13 before).
+    expect(await nav.getByRole('link').count()).toBe(12);
 
     await assertNoVerticalClipping(page, PROJECT_NAV);
   });
@@ -336,7 +337,8 @@ test.describe('Project sidebar scroll — short laptop (1280x600)', () => {
 // ---------------------------------------------------------------------------
 // Desktop — 1280x800, the standard viewport.
 //
-// Measured: the 13-item project nav needs 604px, but the sidebar's fixed chrome
+// Measured: the 13-item project nav needed 604px (12 items since Events and Triggers merged into
+// Automation, still more than the room left), but the sidebar's fixed chrome
 // (logo header, command palette, Focus toggle, theme switcher, user footer)
 // leaves it only 540px. So the last item was unreachable at the STANDARD desktop
 // height too — the report understated the blast radius, it is just far worse on
@@ -357,7 +359,7 @@ test.describe('Project sidebar scroll — standard desktop (1280x800)', () => {
     const before = await measure(nav);
     expect(
       before.scrollHeight,
-      'the 13-item nav still overflows the sidebar at 800px — if this ever stops ' +
+      'the 12-item nav still overflows the sidebar at 800px — if this ever stops ' +
         'being true the assertions below go vacuous, so fail loudly instead'
     ).toBeGreaterThan(before.clientHeight + 1);
     expect(before.overflowY).toMatch(/auto|scroll/);

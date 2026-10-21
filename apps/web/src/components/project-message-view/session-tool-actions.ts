@@ -10,7 +10,6 @@ import { isExpiredTask } from '@simple-agent-manager/shared';
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
-  CalendarClock,
   CheckCircle2,
   Clock,
   Flag,
@@ -21,6 +20,7 @@ import {
   MessageSquareQuote,
   RotateCcw,
   Users,
+  Workflow,
 } from 'lucide-react';
 
 import type { ChatSessionResponse } from '../../lib/api';
@@ -63,7 +63,7 @@ export type SessionToolId =
   | 'git'
   | 'timeline'
   | 'resources'
-  | 'events'
+  | 'automation'
   | 'comments'
   | 'share'
   | 'retry'
@@ -113,7 +113,7 @@ export interface BuildSessionToolActionsInput {
   hasGitHandler: boolean;
   hasTimelineHandler: boolean;
   hasResourcesHandler: boolean;
-  hasEventsHandler: boolean;
+  hasAutomationHandler: boolean;
   hasCommentsHandler: boolean;
   hasRetryHandler: boolean;
   hasForkHandler: boolean;
@@ -174,7 +174,7 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSp
     hasGitHandler,
     hasTimelineHandler,
     hasResourcesHandler,
-    hasEventsHandler,
+    hasAutomationHandler,
     hasCommentsHandler,
     canBrowseWorkspace = true,
   } = input;
@@ -219,12 +219,12 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSp
     });
   }
 
-  if (hasEventsHandler) {
+  if (hasAutomationHandler) {
     actions.push({
-      id: 'events',
-      label: 'Events',
-      hint: 'Session events and schedules',
-      icon: CalendarClock,
+      id: 'automation',
+      label: 'Automation',
+      hint: 'What this chat waits for, and reminders',
+      icon: Workflow,
     });
   }
 

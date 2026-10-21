@@ -173,7 +173,7 @@ describe('useCommandPaletteContext', () => {
     expect(labels).toContain('My Project: Go to Deployments');
     expect(labels).toContain('My Project: Go to Agent Context');
     expect(labels).toContain('My Project: Go to Notifications');
-    expect(labels).toContain('My Project: Go to Triggers');
+    expect(labels).toContain('My Project: Go to Automation');
     expect(labels).toContain('My Project: Go to Profiles');
     expect(labels).toContain('My Project: Go to Skills');
   });
@@ -183,7 +183,7 @@ describe('useCommandPaletteContext', () => {
     ['ctx-project-deployments', '/projects/p1/deployments'],
     ['ctx-project-agent-context', '/projects/p1/agent-context'],
     ['ctx-project-notifications', '/projects/p1/notifications'],
-    ['ctx-project-triggers', '/projects/p1/triggers'],
+    ['ctx-project-automation', '/projects/p1/automation'],
     ['ctx-project-profiles', '/projects/p1/profiles'],
     ['ctx-project-skills', '/projects/p1/skills'],
   ])('%s navigates to %s', (id, expectedPath) => {
@@ -199,7 +199,7 @@ describe('useCommandPaletteContext', () => {
   // ── Create quick actions (?edit=new opens the create modal) ──
 
   it.each([
-    ['ctx-create-trigger', 'My Project: Create Trigger', '/projects/p1/triggers?edit=new'],
+    ['ctx-create-automation', 'My Project: Create Automation', '/projects/p1/automation/new'],
     ['ctx-create-profile', 'My Project: Create Profile', '/projects/p1/profiles?edit=new'],
     ['ctx-create-skill', 'My Project: Create Skill', '/projects/p1/skills?edit=new'],
   ])('%s navigates with the ?edit=new query string', (id, label, expectedPath) => {
@@ -325,7 +325,7 @@ describe('useCommandPaletteContext', () => {
     const { result } = renderContextHook({ chatSessions: sessions });
     // Default cap is 20. On a project+session URL we have:
     //   10 project nav (Chat/Ideas/Activity/Settings/Library/Agent Context/
-    //   Notifications/Triggers/Profiles/Skills) + 3 create + 2 session = 15 (all fit)
+    //   Notifications/Automation/Profiles/Skills) + 3 create + 2 session = 15 (all fit)
     // (outputPrUrl is only on detail endpoint, not list; "Open PR" action removed)
     expect(result.current.contextActions.length).toBeLessThanOrEqual(20);
     expect(result.current.contextActions.length).toBe(15);

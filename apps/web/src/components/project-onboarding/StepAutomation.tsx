@@ -153,7 +153,7 @@ export function StepAutomation({
       <StepHeader
         id="automation"
         title="Schedule automation (optional)"
-        lead="A scheduled trigger runs a task agent with a prompt you define — a morning triage, weekly cleanup, or recurring dependency check. Skip it now and add triggers later from the project page."
+        lead="A scheduled trigger runs a task agent with a prompt you define — a morning triage, weekly cleanup, or recurring dependency check. Skip it now and add automations later from the project’s Automation page."
       />
       <section className="grid gap-3 rounded-md border border-border-default bg-surface p-4">
         <label htmlFor="project-onboarding-trigger-name" className="grid gap-1.5">
@@ -255,7 +255,7 @@ export function StepAutomation({
           </div>
           <p className="m-0 text-xs text-fg-muted">
             {describeSimpleSchedule(schedule, triggerForm.cronTimezone)}. Need a custom cron
-            expression or more trigger controls? Open the trigger editor after onboarding.
+            expression or more controls? Edit it on the Automation page after onboarding.
           </p>
         </fieldset>
 
@@ -279,8 +279,8 @@ export function StepAutomation({
         <p>
           Onboarding only covers the common schedules. Each run dispatches a task agent with the
           prompt above through the same pipeline a manual task uses. After the project is created,
-          open the trigger editor to use custom cron expressions, change concurrency, or attach a
-          different profile.
+          edit it on the project’s Automation page to use custom cron expressions, change
+          concurrency, or attach a different profile.
         </p>
       </WhyDetails>
     </div>

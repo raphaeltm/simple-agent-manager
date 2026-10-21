@@ -9,8 +9,10 @@ import type {
   ProjectEventSubscriptionListResult,
   ProjectEventSubscriptionMutationResult,
   ProjectEventSubscriptionState,
+  ProjectSchedule,
   ProjectScheduleList,
   ProjectScheduleMutationResult,
+  ProjectStandingWatch,
   ProjectStandingWatchList,
   ProjectStandingWatchMutationResult,
   ReconcileProjectScheduleRequest,
@@ -24,8 +26,8 @@ import { request } from './api/client';
 /** One bounded page per request; cursors are opaque and always project-scoped. */
 export const EVENT_PAGE_SIZE = 25;
 const base = (projectId: string) => `/api/projects/${encodeURIComponent(projectId)}`;
-function query(cursor?: string | null, sessionId?: string) {
-  const params = new URLSearchParams({ limit: String(EVENT_PAGE_SIZE) });
+function query(cursor?: string | null, sessionId?: string, limit = EVENT_PAGE_SIZE) {
+  const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set('cursor', cursor);
   if (sessionId) params.set('sessionId', sessionId);
   return params.toString();
@@ -36,21 +38,29 @@ const post = <T>(path: string, body: unknown) =>
     body: JSON.stringify(body),
   });
 
+/** Subscriptions have no cursor: one page, newest first, `hasMore` when it was cut short. */
 export const listEventSubscriptions = (
   projectId: string,
   sessionId?: string,
-  state: ProjectEventSubscriptionState | 'any' = 'any'
+  state: ProjectEventSubscriptionState | 'any' = 'any',
+  limit = EVENT_PAGE_SIZE
 ) =>
   request<ProjectEventSubscriptionListResult>(
-    `${base(projectId)}/event-subscriptions?${query(null, sessionId)}&state=${state}`
+    `${base(projectId)}/event-subscriptions?${query(null, sessionId, limit)}&state=${state}`
   );
 export const cancelEventSubscription = (projectId: string, id: string, reason?: string) =>
   post<ProjectEventSubscriptionMutationResult>(
     `${base(projectId)}/event-subscriptions/${encodeURIComponent(id)}/cancel`,
     { reason }
   );
-export const listEventChannels = (projectId: string, cursor?: string | null) =>
-  request<ProjectEventChannelList>(`${base(projectId)}/event-channels?${query(cursor)}`);
+export const listEventChannels = (
+  projectId: string,
+  cursor?: string | null,
+  limit = EVENT_PAGE_SIZE
+) =>
+  request<ProjectEventChannelList>(
+    `${base(projectId)}/event-channels?${query(cursor, undefined, limit)}`
+  );
 export const getEventChannelHistory = (
   projectId: string,
   channel: string,
@@ -59,8 +69,15 @@ export const getEventChannelHistory = (
   request<ProjectEventChannelHistory>(
     `${base(projectId)}/event-channels/${encodeURIComponent(channel)}/history?${query(cursor)}`
   );
-export const listSchedules = (projectId: string, cursor?: string | null, sessionId?: string) =>
-  request<ProjectScheduleList>(`${base(projectId)}/schedules?${query(cursor, sessionId)}`);
+export const listSchedules = (
+  projectId: string,
+  cursor?: string | null,
+  sessionId?: string,
+  limit = EVENT_PAGE_SIZE
+) =>
+  request<ProjectScheduleList>(`${base(projectId)}/schedules?${query(cursor, sessionId, limit)}`);
+export const getSchedule = (projectId: string, id: string) =>
+  request<{ schedule: ProjectSchedule }>(`${base(projectId)}/schedules/${encodeURIComponent(id)}`);
 export const createSchedule = (projectId: string, body: CreateProjectScheduleRequest) =>
   post<ProjectScheduleMutationResult>(`${base(projectId)}/schedules`, body);
 export const rescheduleSchedule = (
@@ -89,10 +106,15 @@ export const reconcileSchedule = (
 export const listStandingWatches = (
   projectId: string,
   cursor?: string | null,
-  sessionId?: string
+  sessionId?: string,
+  limit = EVENT_PAGE_SIZE
 ) =>
   request<ProjectStandingWatchList>(
-    `${base(projectId)}/standing-watches?${query(cursor, sessionId)}`
+    `${base(projectId)}/standing-watches?${query(cursor, sessionId, limit)}`
+  );
+export const getStandingWatch = (projectId: string, id: string) =>
+  request<{ watch: ProjectStandingWatch }>(
+    `${base(projectId)}/standing-watches/${encodeURIComponent(id)}`
   );
 export const createStandingWatch = (projectId: string, body: CreateProjectStandingWatchRequest) =>
   post<ProjectStandingWatchMutationResult>(`${base(projectId)}/standing-watches`, body);

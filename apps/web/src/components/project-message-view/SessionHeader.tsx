@@ -19,7 +19,6 @@ import {
   User2,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router';
 
 import type { ChatSessionResponse } from '../../lib/api';
 import { getPortAccessUrl, getProjectTask, listChatMessages } from '../../lib/api';
@@ -41,6 +40,7 @@ import {
 } from './SessionHeaderFormatters';
 import { SessionHeaderInfrastructure } from './SessionHeaderInfrastructure';
 import { SessionSourceContextRow } from './SessionSourceContextRow';
+import { SessionTriggerOrigin } from './SessionTriggerOrigin';
 import type { SessionState } from './types';
 import { formatCountdown } from './types';
 import { usePublicPortsToggle } from './usePublicPortsToggle';
@@ -257,7 +257,9 @@ export function SessionHeader({
             }}
           >
             <span className="w-[6px] h-[6px] rounded-full bg-current" />
-            {isExpiredTask(taskEmbed) ? 'Expired' : (SESSION_STATE_LABELS[sessionState] ?? 'Stopped')}
+            {isExpiredTask(taskEmbed)
+              ? 'Expired'
+              : (SESSION_STATE_LABELS[sessionState] ?? 'Stopped')}
           </span>
 
           {workspace && <WorkspaceProfileBadge workspace={workspace} />}
@@ -540,47 +542,7 @@ export function SessionHeader({
 
           {/* Trigger info — shown when task was spawned by an automation trigger */}
           {triggerDetail?.trigger && (
-            <div
-              className="flex items-start gap-2 px-2 py-1.5 rounded text-xs"
-              style={{
-                background: 'color-mix(in srgb, var(--sam-color-info, #3b82f6) 8%, transparent)',
-              }}
-            >
-              <Clock
-                size={12}
-                className="shrink-0 mt-0.5"
-                style={{ color: 'var(--sam-color-info, #3b82f6)' }}
-              />
-              <div className="flex-1 min-w-0 space-y-0.5">
-                <div className="font-medium text-fg-primary">
-                  Triggered by: {triggerDetail.trigger.name}
-                </div>
-                {triggerDetail.trigger.cronHumanReadable && (
-                  <div className="text-fg-muted">
-                    Schedule: {triggerDetail.trigger.cronHumanReadable}
-                  </div>
-                )}
-                {triggerDetail.triggerExecution && (
-                  <div className="text-fg-muted">
-                    Run #{triggerDetail.triggerExecution.sequenceNumber}
-                  </div>
-                )}
-                <div className="flex items-center gap-2 mt-1">
-                  <Link
-                    to={`/projects/${projectId}/triggers/${triggerDetail.trigger.id}`}
-                    className="text-accent-primary no-underline hover:underline"
-                  >
-                    View Trigger
-                  </Link>
-                  <Link
-                    to={`/projects/${projectId}/triggers/${triggerDetail.trigger.id}`}
-                    className="text-fg-muted no-underline hover:underline"
-                  >
-                    All Runs
-                  </Link>
-                </div>
-              </div>
-            </div>
+            <SessionTriggerOrigin projectId={projectId} detail={triggerDetail} />
           )}
 
           {sourceContext && (

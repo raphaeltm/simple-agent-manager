@@ -196,8 +196,8 @@ What SAM enforces:
 - A teammate can schedule a one-off message into the chat (see
   [Scheduled actions](/docs/guides/scheduled-actions/)). It shows as theirs, marked **scheduled**,
   is sent only while their access lasts, and is cancelled when their access ends. A teammate's
-  agent can't schedule into the chat for them. Standing watches are lasting rules, so only the owner
-  can point one at their chat.
+  agent can't schedule into the chat for them. Watches are lasting rules, so only the owner can
+  point one at their chat.
 - The terminal, port previews and the workspace page stay with the owner: they reach the whole
   workspace, and SAM can't cut off a live terminal or port connection when access ends. **Fork**
   and **Retry** in the rail work for a teammate and run on the teammate's own accounts; forking an
@@ -230,7 +230,7 @@ By default, a resource runs on the **personal** keys of the member who set it up
 You have two levers, depending on your goal:
 
 - **Move the cost onto a shared key** — click **Fix** on a personal-key row to go to **Settings → Connections** and attach a project-scoped credential. Members' sessions then use the shared project credential instead of an individual's key. (If you attach your _own_ key as the project credential, you are still the one paying.)
-- **Stop the work entirely** — disable or delete the trigger or task from the **Triggers** page (or the resource itself). Attaching a credential changes _who_ pays; it does not stop the automation.
+- **Stop the work entirely** — pause or delete the trigger from the **Automation** page, or stop the task (or the resource itself). Attaching a credential changes _who_ pays; it does not stop the automation.
 
 ![The Credential Attribution panel, showing a nightly trigger running on a member's personal Claude Code key flagged for review with a Fix link, and a staging deployment covered by a shared project Hetzner credential.](/images/docs/collaboration-credentials.png)
 

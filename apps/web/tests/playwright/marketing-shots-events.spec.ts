@@ -1,9 +1,11 @@
 /**
- * Marketing screenshots — Triggers, Events (subscriptions/schedules/watches/
- * channels), and the project Activity stream. Renders the REAL production
- * components with mocked API data and captures the images embedded in the
- * public marketing site (apps/www/src/data/features.ts -> apps/www/public/
- * images/features).
+ * Marketing screenshots — the project Automation page: the overview, a webhook
+ * automation's page and its one-time credential, what agents are waiting for, a
+ * watch, and agent channels. Renders the REAL production components with mocked
+ * API data and captures the images embedded in the public marketing site
+ * (apps/www/src/data/features/events.json -> apps/www/public/images/features).
+ * The homepage scene (apps/www/src/data/scenes/events.json) crops
+ * sam-triggers-sources; re-check its boxes after re-capturing it.
  *
  * Run with the marketing output flag to write committed images:
  *   MARKETING_SHOTS=1 PLAYWRIGHT_BASE_URL=http://localhost:4173 \
@@ -35,6 +37,8 @@ test.describe.configure({ timeout: 90_000 });
 const PROJECT_ID = NORTHWIND.projectId;
 const BASE = `/api/projects/${PROJECT_ID}`;
 const ts = (iso: string) => Date.parse(iso);
+/** The fixtures' "now": relative times on the page are measured from here. */
+const NOW = '2026-09-14T09:45:00Z';
 
 const PROJECT = {
   id: PROJECT_ID,
@@ -65,7 +69,12 @@ const PROJECT = {
 };
 
 const MEMBERS = [
-  { userId: NORTHWIND.owner.id, role: 'owner', status: 'active', user: { ...NORTHWIND.owner, image: null } },
+  {
+    userId: NORTHWIND.owner.id,
+    role: 'owner',
+    status: 'active',
+    user: { ...NORTHWIND.owner, image: null },
+  },
   ...NORTHWIND.members.map((m) => ({
     userId: m.id,
     role: 'member',
@@ -128,7 +137,7 @@ const AGENT_PROFILES = [PROFILE_CODEX_HIGH, PROFILE_BRAINSTORMER, PROFILE_INVEST
 interface TriggerOverrides {
   id: string;
   name: string;
-  sourceType: 'cron' | 'github' | 'webhook' | 'incident';
+  sourceType: 'cron' | 'github' | 'webhook';
   [key: string]: unknown;
 }
 
@@ -172,7 +181,8 @@ const TRIGGERS = [
     lastTriggeredAt: '2026-09-13T04:00:00Z',
     triggerCount: 118,
     agentProfileId: PROFILE_CODEX_HIGH.id,
-    promptTemplate: 'Audit dependencies for {{project.name}} and open a PR for anything with a known CVE.',
+    promptTemplate:
+      'Audit dependencies for {{project.name}} and open a PR for anything with a known CVE.',
     credentialAttribution: {
       multiplayerActive: true,
       hasPersonalWarning: true,
@@ -182,7 +192,11 @@ const TRIGGERS = [
           consumerTarget: PROFILE_CODEX_HIGH.id,
           label: 'Codex 5.5 High',
           source: 'personal',
-          owner: { id: NORTHWIND.owner.id, name: NORTHWIND.owner.name, email: NORTHWIND.owner.email },
+          owner: {
+            id: NORTHWIND.owner.id,
+            name: NORTHWIND.owner.name,
+            email: NORTHWIND.owner.email,
+          },
           projectCredential: null,
           fixHref: `/projects/${PROJECT_ID}/settings/credentials`,
           warning: "This agent path runs on Priya's personal OpenAI key.",
@@ -207,7 +221,7 @@ const TRIGGERS = [
   }),
   trigger({
     id: 'trig-triage-issues',
-    name: 'Triage new issues',
+    name: 'Issue triage',
     description: 'Labels and routes new GitHub issues automatically.',
     sourceType: 'github',
     status: 'active',
@@ -238,7 +252,8 @@ const TRIGGERS = [
   trigger({
     id: WEBHOOK_DATADOG_ID,
     name: 'Datadog critical alert → investigate',
-    description: 'Starts an investigation session whenever Datadog reports a critical alert for the payments service.',
+    description:
+      'Starts an investigation session whenever Datadog reports a critical alert for the payments service.',
     sourceType: 'webhook',
     status: 'active',
     triggerCount: 19,
@@ -261,7 +276,8 @@ const TRIGGERS = [
   trigger({
     id: 'trig-webhook-stripe',
     name: 'Stripe deploy failed',
-    description: 'Notifies an agent session when a Stripe deploy check fails in the payments integration.',
+    description:
+      'Notifies an agent session when a Stripe deploy check fails in the payments integration.',
     sourceType: 'webhook',
     status: 'active',
     triggerCount: 5,
@@ -277,17 +293,6 @@ const TRIGGERS = [
       tokenCreatedAt: '2026-05-14T00:00:00Z',
       tokenRotatedAt: '2026-08-01T00:00:00Z',
     },
-  }),
-  trigger({
-    id: 'trig-incident-triage',
-    name: 'Platform incident triage',
-    description: 'Dispatches an operator agent for grouped private platform-feedback incidents.',
-    sourceType: 'incident',
-    status: 'active',
-    triggerCount: 8,
-    lastTriggeredAt: '2026-09-13T22:00:00Z',
-    agentProfileId: PROFILE_INVESTIGATOR.id,
-    promptTemplate: 'Investigate private incidents: {{incident.backlogSummary}}',
   }),
 ];
 
@@ -413,7 +418,8 @@ const DATADOG_EXECUTIONS = [
     skipReason: null,
     taskId: 'task-datadog-9',
     eventType: 'webhook',
-    renderedPrompt: 'Triage this untrusted alert: {"alert":{"severity":"critical","service":"payments-api"}}',
+    renderedPrompt:
+      'Triage this untrusted alert: {"alert":{"severity":"critical","service":"payments-api"}}',
     errorMessage: null,
     scheduledAt: '2026-09-14T08:12:00Z',
     startedAt: '2026-09-14T08:12:03Z',
@@ -429,7 +435,8 @@ const DATADOG_EXECUTIONS = [
     skipReason: null,
     taskId: 'task-datadog-8',
     eventType: 'webhook',
-    renderedPrompt: 'Triage this untrusted alert: {"alert":{"severity":"critical","service":"payments-api"}}',
+    renderedPrompt:
+      'Triage this untrusted alert: {"alert":{"severity":"critical","service":"payments-api"}}',
     errorMessage: null,
     scheduledAt: '2026-09-14T02:03:00Z',
     startedAt: '2026-09-14T02:03:04Z',
@@ -445,7 +452,8 @@ const DATADOG_EXECUTIONS = [
     skipReason: null,
     taskId: 'task-datadog-7',
     eventType: 'webhook',
-    renderedPrompt: 'Triage this untrusted alert: {"alert":{"severity":"critical","service":"payments-api"}}',
+    renderedPrompt:
+      'Triage this untrusted alert: {"alert":{"severity":"critical","service":"payments-api"}}',
     errorMessage: null,
     scheduledAt: '2026-09-13T22:41:00Z',
     startedAt: '2026-09-13T22:41:02Z',
@@ -461,7 +469,8 @@ const DATADOG_EXECUTIONS = [
     skipReason: null,
     taskId: 'task-datadog-6',
     eventType: 'webhook',
-    renderedPrompt: 'Triage this untrusted alert: {"alert":{"severity":"critical","service":"payments-api"}}',
+    renderedPrompt:
+      'Triage this untrusted alert: {"alert":{"severity":"critical","service":"payments-api"}}',
     errorMessage: null,
     scheduledAt: '2026-09-13T16:12:00Z',
     startedAt: '2026-09-13T16:12:05Z',
@@ -477,7 +486,8 @@ const DATADOG_EXECUTIONS = [
     skipReason: null,
     taskId: 'task-datadog-5',
     eventType: 'webhook',
-    renderedPrompt: 'Triage this untrusted alert: {"alert":{"severity":"critical","service":"payments-api"}}',
+    renderedPrompt:
+      'Triage this untrusted alert: {"alert":{"severity":"critical","service":"payments-api"}}',
     errorMessage: 'Workspace provisioning failed: ETIMEDOUT contacting the compute provider.',
     scheduledAt: '2026-09-12T20:31:00Z',
     startedAt: '2026-09-12T20:31:04Z',
@@ -543,9 +553,19 @@ const SUBSCRIPTIONS = [
   }),
   subscription({
     id: 'sub-stripe-webhook',
-    owner: { type: 'agent', id: SESSION_STRIPE_ROTATION, name: 'Stripe webhook signature rotation' },
+    owner: {
+      type: 'agent',
+      id: SESSION_STRIPE_ROTATION,
+      name: 'Stripe webhook signature rotation',
+    },
     idempotencyKey: 'idem-sub-stripe',
-    filter: { version: 1, source: 'webhook', eventType: 'webhook.accepted', subjectId: 'trig-webhook-stripe' },
+    filter: {
+      version: 1,
+      source: 'webhook',
+      eventType: 'webhook.accepted',
+      subjectType: 'webhook_trigger',
+      subjectId: 'trig-webhook-stripe',
+    },
     filterFingerprint: 'fp-stripe',
     deliveryPreference: {
       requested: 'runtime_steer',
@@ -563,7 +583,7 @@ const SUBSCRIPTIONS = [
     id: 'sub-flaky-tests',
     owner: { type: 'standing_watch', id: 'watch-flaky-tests', name: 'Flaky test triage' },
     idempotencyKey: 'idem-sub-flaky',
-    filter: { version: 1, source: 'ci', eventType: 'check_suite.completed' },
+    filter: { version: 1, source: 'github', eventType: 'check_suite.completed' },
     filterFingerprint: 'fp-flaky',
     deliveryPreference: { requested: 'spawn_task', resolved: 'spawn_task', target: {} },
     state: 'active',
@@ -591,7 +611,12 @@ const SUBSCRIPTIONS = [
     id: 'sub-pci-bundle',
     owner: { type: 'agent', id: SESSION_PCI_BUNDLE, name: 'Weekly PCI evidence bundle' },
     idempotencyKey: 'idem-sub-pci',
-    filter: { version: 1, source: 'cron', eventType: 'trigger.execution_completed', subjectId: 'trig-pci-bundle' },
+    filter: {
+      version: 1,
+      source: 'cron',
+      eventType: 'trigger.execution_completed',
+      subjectId: 'trig-pci-bundle',
+    },
     filterFingerprint: 'fp-pci',
     deliveryPreference: {
       requested: 'existing_session_prompt',
@@ -609,7 +634,12 @@ const SUBSCRIPTIONS = [
     id: 'sub-old-deploy-watch',
     owner: { type: 'human', id: NORTHWIND.owner.id, name: NORTHWIND.owner.name },
     idempotencyKey: 'idem-sub-old-deploy',
-    filter: { version: 1, source: 'webhook', eventType: 'webhook.accepted', subjectId: 'trig-old-deploy' },
+    filter: {
+      version: 1,
+      source: 'webhook',
+      eventType: 'webhook.accepted',
+      subjectId: 'trig-old-deploy',
+    },
     filterFingerprint: 'fp-old-deploy',
     deliveryPreference: { requested: 'record_only', resolved: 'record_only', target: {} },
     state: 'cancelled',
@@ -784,16 +814,58 @@ const SCHEDULES = [
   },
 ];
 
+/** Runs the flaky-test watch started: one-time actions carrying its watchId. */
+function watchRun(id: string, at: string, sequence: number) {
+  return {
+    id,
+    projectId: PROJECT_ID,
+    creatorUserId: 'user-aisha',
+    creatorChatSessionId: null,
+    reason: 'Flaky test triage',
+    action: {
+      kind: 'start_session',
+      prompt:
+        'If this check suite failed, decide whether the failure is flaky or a real regression.',
+      agentProfileId: PROFILE_INVESTIGATOR.id,
+      skillId: 'skill-flaky-test-triage',
+    },
+    state: 'admitted',
+    dueAt: ts(at),
+    displayTimezone: 'UTC',
+    expiresAt: ts(at) + 3_600_000,
+    version: 2,
+    idempotencyKey: `idem-${id}`,
+    createdAt: ts(at),
+    updatedAt: ts(at) + 60_000,
+    nextAttemptAt: null,
+    attemptCount: 1,
+    lastError: null,
+    eventId: `evt-ci-${sequence}`,
+    deliveryId: null,
+    resultTaskId: `task-flaky-${sequence}`,
+    resultSessionId: `session-flaky-${sequence}`,
+    watchId: 'watch-flaky-tests',
+    sourceEventId: `evt-ci-${sequence}`,
+  };
+}
+
+const WATCH_RUNS = [
+  watchRun('sched-flaky-7', '2026-09-13T22:00:00Z', 7),
+  watchRun('sched-flaky-6', '2026-09-12T15:30:00Z', 6),
+  watchRun('sched-flaky-5', '2026-09-11T09:10:00Z', 5),
+];
+
 const WATCHES = [
   {
     id: 'watch-flaky-tests',
     projectId: PROJECT_ID,
     creatorUserId: 'user-aisha',
     reason: 'Flaky test triage',
-    filter: { version: 1, source: 'ci', eventType: 'check_suite.failed' },
+    filter: { version: 1, source: 'github', eventType: 'check_suite.completed' },
     action: {
       kind: 'start_session',
-      prompt: 'Investigate the failing CI check suite and determine if it is flaky or a real regression.',
+      prompt:
+        'If this check suite failed, decide whether the failure is flaky or a real regression.',
       agentProfileId: PROFILE_INVESTIGATOR.id,
       skillId: 'skill-flaky-test-triage',
     },
@@ -838,8 +910,18 @@ const WATCHES = [
 ];
 
 const CHANNELS = [
-  { id: 'chan-release-train', name: 'release-train', lifetimeCount: 58, lastPublishedAt: ts('2026-09-14T09:05:00Z') },
-  { id: 'chan-incidents', name: 'incidents', lifetimeCount: 21, lastPublishedAt: ts('2026-09-13T22:00:00Z') },
+  {
+    id: 'chan-release-train',
+    name: 'release-train',
+    lifetimeCount: 58,
+    lastPublishedAt: ts('2026-09-14T09:05:00Z'),
+  },
+  {
+    id: 'chan-incidents',
+    name: 'incidents',
+    lifetimeCount: 21,
+    lastPublishedAt: ts('2026-09-13T22:00:00Z'),
+  },
   {
     id: 'chan-ledger-migration',
     name: 'ledger-migration',
@@ -894,7 +976,8 @@ const RELEASE_TRAIN_HISTORY = {
         receivedAt: ts('2026-09-13T20:50:00Z'),
         display: { title: 'v2026.36.2 deployed to production', untrusted: true },
         metadata: {
-          message: 'Migrate ledger to double-entry schema session published: production deploy complete, watching error budget.',
+          message:
+            'Migrate ledger to double-entry schema session published: production deploy complete, watching error budget.',
         },
       },
     },
@@ -906,9 +989,46 @@ const RELEASE_TRAIN_HISTORY = {
 };
 
 // ---------------------------------------------------------------------------
-// Activity stream
+// Lookups and per-trigger runs
 // ---------------------------------------------------------------------------
 
+/** Chats the automations message or started, so pages show titles instead of IDs. */
+const CHAT_SESSIONS = [
+  { id: SESSION_LEDGER, topic: 'Migrate ledger to double-entry schema', status: 'active' },
+  { id: SESSION_STRIPE_ROTATION, topic: 'Stripe webhook signature rotation', status: 'active' },
+  { id: SESSION_PCI_BUNDLE, topic: 'Weekly PCI evidence bundle', status: 'active' },
+  { id: '01K9PAYRETRYW8TWNQXCVD45E2F', topic: 'Payment retry suite', status: 'active' },
+];
+
+const SKILLS = [
+  {
+    id: 'skill-flaky-test-triage',
+    projectId: PROJECT_ID,
+    name: 'Flaky test triage',
+    description: 'Re-runs a failing suite and compares it with recent history.',
+  },
+];
+
+/** Recent runs per trigger; triggers not listed have not run in this window. */
+const NIGHTLY_EXECUTIONS = [
+  {
+    ...DATADOG_EXECUTIONS[0],
+    id: 'exec-nightly-118',
+    triggerId: 'trig-nightly-audit',
+    taskId: 'task-nightly-118',
+    eventType: 'cron',
+    renderedPrompt: null,
+    scheduledAt: '2026-09-14T04:00:00Z',
+    startedAt: '2026-09-14T04:00:02Z',
+    completedAt: '2026-09-14T04:26:40Z',
+    sequenceNumber: 118,
+    createdAt: '2026-09-14T04:00:00Z',
+  },
+];
+const EXECUTIONS_BY_TRIGGER: Record<string, unknown[]> = {
+  [WEBHOOK_DATADOG_ID]: DATADOG_EXECUTIONS,
+  'trig-nightly-audit': NIGHTLY_EXECUTIONS,
+};
 
 // ---------------------------------------------------------------------------
 // Route handlers
@@ -918,9 +1038,11 @@ function commonHandler(path: string, respond: AuditResponder): Promise<void> | u
   if (path.includes('/api/auth/')) return respond(200, MARKETING_USER);
   if (path === '/api/projects') return respond(200, { projects: [PROJECT], nextCursor: null });
   if (path === `/api/projects/${PROJECT_ID}`) return respond(200, PROJECT);
-  if (path === `${BASE}/members`) return respond(200, { members: MEMBERS, inviteLinks: [], accessRequests: [] });
+  if (path === `${BASE}/members`)
+    return respond(200, { members: MEMBERS, inviteLinks: [], accessRequests: [] });
   if (path === `${BASE}/agent-profiles`) return respond(200, { items: AGENT_PROFILES });
-  if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+  if (path.startsWith('/api/notifications'))
+    return respond(200, { notifications: [], unreadCount: 0 });
   if (path === '/api/github/installations') return respond(200, []);
   if (path === '/api/credentials') return respond(200, []);
   if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
@@ -930,20 +1052,35 @@ function commonHandler(path: string, respond: AuditResponder): Promise<void> | u
   if (path === '/api/chats' || path === '/api/chats/recent')
     return respond(200, { sessions: [], total: 0, totalActive: 0, groups: [] });
   if (path === '/api/account-map')
-    return respond(200, { projects: [], nodes: [], workspaces: [], sessions: [], tasks: [], relationships: [] });
+    return respond(200, {
+      projects: [],
+      nodes: [],
+      workspaces: [],
+      sessions: [],
+      tasks: [],
+      relationships: [],
+    });
   if (path === '/api/trial-status') return respond(200, { available: false });
   if (path === '/api/providers/catalog') return respond(200, { catalogs: [] });
   if (path === '/api/report-issue/config') return respond(200, { enabled: false });
   return undefined;
 }
 
-function triggerHandler(path: string, respond: AuditResponder, route: Route): Promise<void> | undefined {
+function triggerHandler(
+  path: string,
+  respond: AuditResponder,
+  route: Route
+): Promise<void> | undefined {
   const method = route.request().method();
 
   if (path === `${BASE}/triggers`) return respond(200, { triggers: TRIGGERS });
 
-  if (new RegExp(`^${BASE}/triggers/[^/]+/executions`).test(path)) {
-    return respond(200, { executions: DATADOG_EXECUTIONS, nextCursor: null });
+  const runsMatch = path.match(new RegExp(`^${BASE}/triggers/([^/]+)/executions`));
+  if (runsMatch) {
+    return respond(200, {
+      executions: EXECUTIONS_BY_TRIGGER[runsMatch[1] ?? ''] ?? [],
+      nextCursor: null,
+    });
   }
   if (new RegExp(`^${BASE}/triggers/[^/]+/webhook/deliveries$`).test(path)) {
     return respond(200, { deliveries: DATADOG_DELIVERIES, nextCursor: null });
@@ -959,24 +1096,52 @@ function triggerHandler(path: string, respond: AuditResponder, route: Route): Pr
   return undefined;
 }
 
-function eventsHandler(path: string, respond: AuditResponder): Promise<void> | undefined {
-  if (path === `${BASE}/event-subscriptions`) return respond(200, { subscriptions: SUBSCRIPTIONS, hasMore: false, limit: 25 });
+function eventsHandler(
+  path: string,
+  respond: AuditResponder,
+  route: Route
+): Promise<void> | undefined {
+  if (path === `${BASE}/event-subscriptions`) {
+    // The API filters by state; so must the mock, or ended waits count as waiting.
+    const state = new URL(route.request().url()).searchParams.get('state') ?? 'any';
+    const subscriptions =
+      state === 'any' ? SUBSCRIPTIONS : SUBSCRIPTIONS.filter((item) => item.state === state);
+    return respond(200, { subscriptions, hasMore: false, limit: 25 });
+  }
   if (/\/event-subscriptions\/[^/]+\/deliveries$/.test(path))
     return respond(200, { deliveries: LEDGER_DELIVERIES, hasMore: false });
-  if (path === `${BASE}/schedules`) return respond(200, { schedules: SCHEDULES, nextCursor: null });
-  if (path === `${BASE}/standing-watches`) return respond(200, { watches: WATCHES, nextCursor: null });
-  if (path === `${BASE}/event-channels`) return respond(200, { channels: CHANNELS, nextCursor: null });
+  if (path === `${BASE}/schedules`)
+    return respond(200, { schedules: [...SCHEDULES, ...WATCH_RUNS], nextCursor: null });
+  const scheduleMatch = path.match(new RegExp(`^${BASE}/schedules/([^/]+)$`));
+  if (scheduleMatch) {
+    const found = [...SCHEDULES, ...WATCH_RUNS].find((item) => item.id === scheduleMatch[1]);
+    return respond(found ? 200 : 404, found ? { schedule: found } : { error: 'not_found' });
+  }
+  if (path === `${BASE}/standing-watches`)
+    return respond(200, { watches: WATCHES, nextCursor: null });
+  const watchMatch = path.match(new RegExp(`^${BASE}/standing-watches/([^/]+)$`));
+  if (watchMatch) {
+    const found = WATCHES.find((item) => item.id === watchMatch[1]);
+    return respond(found ? 200 : 404, found ? { watch: found } : { error: 'not_found' });
+  }
+  if (path === `${BASE}/sessions`)
+    return respond(200, { sessions: CHAT_SESSIONS, total: CHAT_SESSIONS.length });
+  if (path === `${BASE}/skills`) return respond(200, { items: SKILLS });
+  if (path === `${BASE}/event-channels`)
+    return respond(200, { channels: CHANNELS, nextCursor: null });
   if (/\/event-channels\/[^/]+\/history$/.test(path)) return respond(200, RELEASE_TRAIN_HISTORY);
   return undefined;
 }
-
 
 async function setupMocks(
   page: Page,
   handler: (path: string, respond: AuditResponder, route: Route) => Promise<void> | undefined
 ) {
   await dismissOnboarding(page);
-  await setupAuditRoutes(page, (path, respond, route) => handler(path, respond, route) ?? commonHandler(path, respond));
+  await setupAuditRoutes(
+    page,
+    (path, respond, route) => handler(path, respond, route) ?? commonHandler(path, respond)
+  );
 }
 
 function logPageErrors(page: Page) {
@@ -993,22 +1158,30 @@ async function assertNoCrash(page: Page) {
 }
 
 // ---------------------------------------------------------------------------
-// A. Triggers list
+// A. The Automation overview
 // ---------------------------------------------------------------------------
 
-test('sam-triggers-sources', async ({ page }) => {
+/** Every Automation view reads triggers and the eventing lists together. */
+function automationHandler(path: string, respond: AuditResponder, route: Route) {
+  return triggerHandler(path, respond, route) ?? eventsHandler(path, respond, route);
+}
+
+async function openAutomation(page: Page, path: string) {
   logPageErrors(page);
-  await setupMocks(page, (path, respond, route) => triggerHandler(path, respond, route));
+  await page.clock.setFixedTime(NOW);
+  await setupMocks(page, automationHandler);
+  await page.goto(`/projects/${PROJECT_ID}/automation${path}`);
+}
 
-  // Taller than MARKETING_VIEWPORT so the header plus five trigger cards
-  // (cron with its credential banner, two GitHub, one webhook) fit in one
-  // frame without scrolling.
+test('sam-triggers-sources', async ({ page }) => {
+  // Taller than MARKETING_VIEWPORT so the overview's two columns fit in one frame.
   await page.setViewportSize({ width: 1440, height: 1180 });
-
-  await page.goto(`/projects/${PROJECT_ID}/triggers`);
-  await expect(page.getByRole('heading', { name: 'Triggers' })).toBeVisible();
-  await expect(page.getByText('Nightly dependency audit')).toBeVisible();
-  await expect(page.getByText('Datadog critical alert')).toBeVisible();
+  await openAutomation(page, '');
+  await expect(page.getByRole('heading', { name: 'Automation', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your automations' })).toBeVisible();
+  await expect(page.getByText('Nightly dependency audit').first()).toBeVisible();
+  await expect(page.getByText('Datadog critical alert → investigate').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Coming up' })).toBeVisible();
   await assertNoCrash(page);
   await assertNoOverflow(page);
 
@@ -1016,120 +1189,83 @@ test('sam-triggers-sources', async ({ page }) => {
 });
 
 // ---------------------------------------------------------------------------
-// B + C. Webhook trigger detail: deliveries, execution history, and the
-// one-time credential dialog shown on rotation.
+// B + C. A webhook automation's page: its calls, and the one-time credential
+// shown when the token is replaced.
 // ---------------------------------------------------------------------------
 
 test('sam-webhook-deliveries, sam-webhook-credential', async ({ page }) => {
-  logPageErrors(page);
-  await setupMocks(page, (path, respond, route) => triggerHandler(path, respond, route));
-
-  await page.goto(`/projects/${PROJECT_ID}/triggers/${WEBHOOK_DATADOG_ID}`);
-  await expect(page.getByRole('heading', { name: 'Datadog critical alert' })).toBeVisible();
-  await expect(page.getByText('Active token ends in ••••7k2q', { exact: false })).toBeVisible();
+  // Tall enough that the whole "Calls received" section renders inside the scroll area.
+  await page.setViewportSize({ width: 1440, height: 1500 });
+  await openAutomation(page, `/trigger/${WEBHOOK_DATADOG_ID}`);
+  await expect(
+    page.getByRole('heading', { name: /Datadog critical alert/, level: 1 })
+  ).toBeVisible();
+  await expect(page.getByLabel('Webhook connection').getByText('••••7k2q')).toBeVisible();
   await assertNoCrash(page);
   await assertNoOverflow(page);
 
-  // Shrink the Preview payload textarea so the capture below can fit the
-  // credential section, the (now short) preview box, and several delivery
-  // rows without the tall default textarea eating the frame.
-  await page.addStyleTag({
-    content: 'textarea[aria-label="Sample webhook JSON"]{height:120px !important;}',
-  });
+  // The audit trail itself: every call, what SAM did with it, and the run it started or skipped.
+  const calls = page.getByRole('region', { name: 'Calls received' });
+  await expect(calls.getByText('Ignored: did not match the filters').first()).toBeVisible();
+  await expect(calls.getByText('Skipped: the previous run was still going').first()).toBeVisible();
+  const section = calls.locator('xpath=..');
+  await section.evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  await marketingShot(page, 'sam-webhook-deliveries', section);
 
-  // Scroll "Webhook credential" to the top of the frame (~24px margin) so the
-  // capture starts there instead of mid-way through the Configuration table.
-  const credentialHeading = page.getByRole('heading', { name: 'Webhook credential' });
-  await credentialHeading.evaluate((el) => {
-    el.scrollIntoView({ block: 'start' });
-    (el.closest('.sam-main-content') ?? document.scrollingElement)?.scrollBy(0, -24);
-  });
-  await expect(page.getByRole('heading', { name: 'Delivery history' })).toBeVisible();
-  await marketingShot(page, 'sam-webhook-deliveries');
-
-  // Every mocked delivery row rendered (the marketing capture above shows the
-  // first seven; the rest are asserted here).
-  const deliveryHeading = page.getByRole('heading', { name: 'Delivery history' });
-  const deliverySection = deliveryHeading.locator('xpath=ancestor::section[1]');
-  await expect(deliverySection.getByText('rate limited', { exact: true })).toBeVisible();
-
-  // Rotate the token to reveal the one-time credential dialog with the full
-  // endpoint URL, bearer token, and curl example.
-  page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: /Rotate token/ }).click();
+  // Replace the token to reveal the one-time credential dialog.
+  await page.getByRole('button', { name: 'Get a new token' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Replace token' }).click();
   const dialog = page.getByRole('dialog', { name: /save your webhook credential/i });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText(ROTATED_CREDENTIAL.endpointUrl, { exact: true })).toBeVisible();
   await expect(dialog.getByText(ROTATED_CREDENTIAL.token, { exact: true })).toBeVisible();
 
   await page.addStyleTag({
-    content:
-      `.glass-backdrop-dim{background:${OPAQUE_BACKDROP_COLOR} !important;opacity:1 !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}`,
+    content: `.glass-backdrop-dim{background:${OPAQUE_BACKDROP_COLOR} !important;opacity:1 !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}`,
   });
   await marketingShot(page, 'sam-webhook-credential', dialog);
 });
 
 // ---------------------------------------------------------------------------
-// D, E, F. Project Events — subscriptions, schedules, standing watches,
-// channels (with one channel's history expanded).
+// D, E, F. What agents are waiting for, a watch, and agent channels.
 // ---------------------------------------------------------------------------
 
-test('sam-events-subscriptions, sam-events-watches, sam-events-channels', async ({ page }) => {
-  logPageErrors(page);
-  await setupMocks(page, (path, respond) => eventsHandler(path, respond));
-
-  await page.goto(`/projects/${PROJECT_ID}/events?section=subscriptions`);
-  await expect(page.getByRole('heading', { name: 'Events', exact: true })).toBeVisible();
+test('sam-events-subscriptions', async ({ page }) => {
+  await openAutomation(page, '/behind');
+  await expect(page.getByRole('heading', { name: 'Behind the scenes', level: 1 })).toBeVisible();
+  await expect(
+    page.getByText('Migrate ledger to double-entry schema is waiting for', { exact: false })
+  ).toBeVisible();
   await assertNoCrash(page);
 
-  // --- D: Subscriptions — capture the list first so the breadth of owners,
-  // sources, and states (active/expired/cancelled) is visible in one frame.
-  const subscriptionsRegion = page.getByRole('region', { name: 'Subscriptions', exact: true });
-  await expect(subscriptionsRegion.getByText('Migrate ledger to double-entry schema')).toBeVisible();
-  await expect(subscriptionsRegion.getByText('Stripe webhook signature rotation')).toBeVisible();
-  await expect(subscriptionsRegion.getByRole('heading', { name: 'Flaky test triage' })).toBeVisible();
+  // Open one wait's details: the exact filter, both delivery modes, and what was delivered.
+  const ledger = page.getByRole('region', { name: /^Migrate ledger to double-entry schema waits/ });
+  await ledger.getByText('Details', { exact: true }).click();
+  await expect(ledger.getByText('Read by the agent')).toBeVisible();
   await assertNoOverflow(page);
   await marketingShot(page, 'sam-events-subscriptions');
+});
 
-  // Verify the delivery-outcome inspection flow (matched -> delivered/acked
-  // outcomes with timestamps) still works, even though the primary shot above
-  // favors breadth over depth.
-  const ledgerCard = subscriptionsRegion.locator('article').filter({ hasText: 'Watch PR #482' });
-  await ledgerCard.getByRole('button', { name: 'Inspect delivery' }).click();
-  await expect(ledgerCard.getByRole('region', { name: 'Recent delivery outcomes' })).toBeVisible();
-  await expect(ledgerCard.getByText('acked', { exact: true })).toBeVisible();
-
-  // --- E (schedules) ---
-  await page.getByRole('button', { name: 'Schedules', exact: true }).click();
-  const schedulesRegion = page.getByRole('region', { name: 'Schedules', exact: true });
-  await expect(
-    schedulesRegion.getByText('Re-run the payment-retry suite once CI settles').first()
-  ).toBeVisible();
-  await expect(schedulesRegion.getByText('Nightly dependency audit follow-up')).toBeVisible();
-  await expect(schedulesRegion.getByText('Confirm the PCI evidence bundle reached compliance')).toBeVisible();
-  await assertNoOverflow(page);
-
-  // --- E (standing watches) ---
-  await page.getByRole('button', { name: 'Standing watches', exact: true }).click();
-  const watchesRegion = page.getByRole('region', { name: 'Standing watches', exact: true });
-  await expect(watchesRegion.getByText('Flaky test triage')).toBeVisible();
-  await expect(watchesRegion.getByText('Security-labelled issue watch')).toBeVisible();
-  await expect(watchesRegion.getByText('7 / 20 executions', { exact: false })).toBeVisible();
+test('sam-events-watches', async ({ page }) => {
+  await openAutomation(page, '/watch/watch-flaky-tests');
+  await expect(page.getByRole('heading', { name: 'Flaky test triage', level: 1 })).toBeVisible();
+  await expect(page.getByText('7 of 20 runs used', { exact: false }).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Recent runs' })).toBeVisible();
+  await assertNoCrash(page);
   await assertNoOverflow(page);
   await marketingShot(page, 'sam-events-watches');
+});
 
-  // --- F: Channels, with release-train history expanded ---
-  await page.getByRole('button', { name: 'Channels', exact: true }).click();
-  const channelsRegion = page.getByRole('region', { name: 'Channels', exact: true });
-  await expect(channelsRegion.getByText('release-train', { exact: false })).toBeVisible();
-  await expect(channelsRegion.getByText('incidents', { exact: false })).toBeVisible();
-  await expect(channelsRegion.getByText('ledger-migration', { exact: false })).toBeVisible();
-  const releaseCard = channelsRegion.locator('article').filter({ hasText: 'release-train' });
-  await releaseCard.getByRole('button', { name: 'Read history' }).click();
-  const history = page.getByRole('region', { name: 'History for release-train', exact: true });
-  await expect(history).toBeInViewport();
-  await expect(history.getByText('promoted to canary', { exact: false })).toBeVisible();
+test('sam-events-channels', async ({ page }) => {
+  await openAutomation(page, '/behind?tab=channels');
+  await expect(page.getByRole('radio', { name: 'Channels' })).toHaveAttribute(
+    'aria-checked',
+    'true'
+  );
+  await page.getByRole('button', { name: /release-train/ }).click();
+  await expect(page.getByText('v2026.37.0 promoted to canary', { exact: false })).toBeVisible();
+  await expect(page.getByText('incidents', { exact: false }).first()).toBeVisible();
+  await assertNoCrash(page);
   await assertNoOverflow(page);
   await marketingShot(page, 'sam-events-channels');
 });
-

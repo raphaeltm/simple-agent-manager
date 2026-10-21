@@ -57,7 +57,7 @@ export interface UseSessionToolsInput {
   onOpenGit?: () => void;
   onOpenTimeline?: () => void;
   onOpenResources?: () => void;
-  onOpenEvents?: () => void;
+  onOpenAutomation?: () => void;
   onOpenComments?: () => void;
   onRetry?: () => void;
   onFork?: () => void;
@@ -100,7 +100,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     onOpenGit,
     onOpenTimeline,
     onOpenResources,
-    onOpenEvents,
+    onOpenAutomation,
     onOpenComments,
     onRetry,
     onFork,
@@ -176,7 +176,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       hasGitHandler: !!onOpenGit,
       hasTimelineHandler: !!onOpenTimeline,
       hasResourcesHandler: !!onOpenResources,
-      hasEventsHandler: !!onOpenEvents,
+      hasAutomationHandler: !!onOpenAutomation,
       hasCommentsHandler: !!onOpenComments,
       hasRetryHandler: !!onRetry,
       hasForkHandler: !!onFork,
@@ -198,7 +198,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     onOpenGit,
     onOpenTimeline,
     onOpenResources,
-    onOpenEvents,
+    onOpenAutomation,
     onOpenComments,
     onRetry,
     onFork,
@@ -225,8 +225,8 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
         case 'resources':
           onOpenResources?.();
           break;
-        case 'events':
-          onOpenEvents?.();
+        case 'automation':
+          onOpenAutomation?.();
           break;
         case 'comments':
           onOpenComments?.();
@@ -261,7 +261,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       onOpenGit,
       onOpenTimeline,
       onOpenResources,
-      onOpenEvents,
+      onOpenAutomation,
       onOpenComments,
       onOpenShare,
       onRetry,

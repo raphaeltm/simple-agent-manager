@@ -1,7 +1,11 @@
 import type { WebhookTriggerFilter } from '@simple-agent-manager/shared';
 import { Plus, Trash2 } from 'lucide-react';
 
-import { FOCUS_RING } from './trigger-presentation';
+import { FOCUS_RING } from './trigger-form-support';
+
+/** Number inputs are not covered by the app's global form styles in `index.css`. */
+const NUMBER_INPUT =
+  'block min-h-11 rounded-[var(--sam-radius-sm)] border border-solid border-[var(--sam-form-border)] bg-[var(--sam-form-bg)]';
 
 type FilterValueType = 'string' | 'number' | 'boolean' | 'null';
 
@@ -47,7 +51,7 @@ export function WebhookTriggerFields({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <div>
         <label
           htmlFor="webhook-source-label"
@@ -57,6 +61,7 @@ export function WebhookTriggerFields({
         </label>
         <input
           id="webhook-source-label"
+          type="text"
           value={sourceLabel}
           onChange={(event) => onSourceLabelChange(event.target.value)}
           placeholder="PagerDuty, billing, internal service"
@@ -70,6 +75,7 @@ export function WebhookTriggerFields({
         </label>
         <input
           id="webhook-headers"
+          type="text"
           value={includedHeaders}
           onChange={(event) => onIncludedHeadersChange(event.target.value)}
           placeholder="x-request-id, x-event-type"
@@ -81,8 +87,8 @@ export function WebhookTriggerFields({
         </p>
       </div>
 
-      <div className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-medium text-fg-primary m-0">Payload filters</h3>
             <p className="text-xs text-fg-muted mt-1 mb-0">
@@ -93,7 +99,7 @@ export function WebhookTriggerFields({
             aria-label="Webhook filter mode"
             value={filterMode}
             onChange={(event) => onFilterModeChange(event.target.value as 'all' | 'any')}
-            className={`px-2 py-1.5 rounded-md text-sm text-fg-primary ${FOCUS_RING}`}
+            className={`!w-auto px-2 py-1.5 rounded-md text-sm text-fg-primary ${FOCUS_RING}`}
           >
             <option value="all">Match all</option>
             <option value="any">Match any</option>
@@ -103,12 +109,13 @@ export function WebhookTriggerFields({
         {filters.map((filter, index) => (
           <div
             key={index}
-            className="grid grid-cols-1 sm:grid-cols-[1fr_8rem_7rem_1fr_auto] gap-2 items-end"
+            className="grid grid-cols-1 gap-2 rounded-lg border border-border-default p-3 sm:grid-cols-[1fr_8rem_7rem_1fr_auto] sm:items-end sm:border-0 sm:p-0"
           >
             <label className="text-xs text-fg-muted">
               Path
               <input
                 aria-label={`Filter ${index + 1} path`}
+                type="text"
                 value={filter.path}
                 onChange={(event) => updateFilter(index, { path: event.target.value })}
                 placeholder="event.action"
@@ -186,7 +193,7 @@ export function WebhookTriggerFields({
                               : event.target.value,
                         })
                       }
-                      className={`mt-1 w-full px-2 py-1.5 rounded-md text-sm text-fg-primary ${FOCUS_RING}`}
+                      className={`mt-1 w-full px-2 py-1.5 rounded-md text-sm text-fg-primary ${getFilterValueType(filter.value) === 'number' ? NUMBER_INPUT : ''} ${FOCUS_RING}`}
                     />
                   )}
                 </label>
@@ -195,7 +202,7 @@ export function WebhookTriggerFields({
             <button
               type="button"
               onClick={() => onFiltersChange(filters.filter((_, current) => current !== index))}
-              className={`p-2 rounded-md text-fg-muted hover:text-danger bg-transparent border-none cursor-pointer ${FOCUS_RING}`}
+              className={`inline-flex h-11 w-11 items-center justify-center justify-self-end rounded-md text-fg-muted hover:text-danger bg-transparent border border-border-default cursor-pointer ${FOCUS_RING}`}
               aria-label={`Remove filter ${index + 1}`}
             >
               <Trash2 size={16} />
@@ -206,7 +213,7 @@ export function WebhookTriggerFields({
         <button
           type="button"
           onClick={() => onFiltersChange([...filters, { path: '', operator: 'exists' }])}
-          className={`inline-flex items-center gap-2 text-sm text-accent bg-transparent border-none p-0 cursor-pointer ${FOCUS_RING}`}
+          className={`inline-flex min-h-11 w-fit items-center gap-2 rounded-md px-2 text-sm font-semibold text-accent bg-transparent border-none cursor-pointer ${FOCUS_RING}`}
         >
           <Plus size={15} /> Add filter
         </button>

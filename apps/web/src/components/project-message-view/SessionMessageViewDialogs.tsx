@@ -2,17 +2,24 @@ import {
   isShareableChatSessionStatus,
   type SessionAccessSummary,
 } from '@simple-agent-manager/shared';
+import { lazy, Suspense } from 'react';
 
 import type { ChatSessionResponse } from '../../lib/api';
-import { SessionEventsDrawer } from '../chat/SessionEventsDrawer';
+import { importWithRetry } from '../../lib/lazy-with-retry';
 import { ReportIssueDialog } from '../ReportIssueDialog';
 import { sessionOwnerLabel } from './session-viewer-access';
 import { SessionHeaderCompletionDialog } from './SessionHeaderCompletionDialog';
 import { SessionShareDialog } from './SessionShareDialog';
 import type { UseSessionToolsResult } from './useSessionTools';
 
+// Loaded when first opened: the Automation panel's code stays out of the chat's own bundle.
+const SessionAutomationDrawer = lazy(async () => ({
+  default: (await importWithRetry(() => import('../chat/SessionAutomationDrawer')))
+    .SessionAutomationDrawer,
+}));
+
 /**
- * The overlays the session tool rail opens: events, report, complete and share. They live
+ * The overlays the session tool rail opens: automation, report, complete and share. They live
  * beside the view rather than in `SessionHeader` because the actions that open them do.
  * Split out of `SessionMessageView` (`.claude/rules/18-file-size-limits.md`).
  */
@@ -23,8 +30,8 @@ export function SessionMessageViewDialogs({
   nodeId,
   viewerId,
   sessionTools,
-  showEvents,
-  onCloseEvents,
+  showAutomation,
+  onCloseAutomation,
   showShare,
   onCloseShare,
   onAccessChanged,
@@ -35,16 +42,22 @@ export function SessionMessageViewDialogs({
   nodeId: string | null;
   viewerId: string | null;
   sessionTools: UseSessionToolsResult;
-  showEvents: boolean;
-  onCloseEvents: () => void;
+  showAutomation: boolean;
+  onCloseAutomation: () => void;
   showShare: boolean;
   onCloseShare: () => void;
   onAccessChanged: (access: SessionAccessSummary) => void;
 }>) {
   return (
     <>
-      {showEvents && (
-        <SessionEventsDrawer projectId={projectId} sessionId={sessionId} onClose={onCloseEvents} />
+      {showAutomation && (
+        <Suspense fallback={null}>
+          <SessionAutomationDrawer
+            projectId={projectId}
+            sessionId={sessionId}
+            onClose={onCloseAutomation}
+          />
+        </Suspense>
       )}
 
       {showShare && session.access && viewerId && (

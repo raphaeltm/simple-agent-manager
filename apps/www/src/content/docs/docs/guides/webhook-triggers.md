@@ -7,16 +7,17 @@ Generic webhook triggers let external systems submit task context to an agent wi
 
 ## Create a Trigger
 
-Open a project, select **Triggers**, and create a **Webhook** trigger. Configure:
+Open a project, select **Automation**, then **New automation**, and choose **When another service
+calls SAM**. Configure:
 
-- An explicit agent profile. Webhook triggers do not fall back to an implicit profile.
-- Optionally, a skill to apply as a profile-override layer for triggered runs.
-- A prompt template using the webhook context described below.
-- Optional `all` or `any` payload filters.
-- Optional safe request headers to expose to the prompt.
-- The normal trigger concurrency and skip-if-running controls.
+- Optionally, a **Source label**, safe **Included headers** to expose to the prompt, and **Payload
+  filters** that must all (**Match all**) or any (**Match any**) match.
+- An explicit agent profile (**Agent**). Webhook triggers do not fall back to an implicit profile.
+- Optionally, a **Skill** to apply as a profile-override layer for triggered runs.
+- **What should it do?**: the prompt template, using the webhook context described below.
+- Under **Advanced options**, the normal skip-if-running and concurrency controls.
 
-SAM shows the raw token only after creation or rotation. Copy it before closing the credential dialog. Later API responses expose only the final four characters. A trigger an agent created never shows its token in the UI: the agent receives a one-time link instead (see [Creating Webhooks through MCP](#creating-webhooks-through-mcp)), and you can always get a new token with **Rotate token** on the trigger's page.
+SAM shows the raw token only after creation or rotation. Copy it before closing the credential dialog. Later API responses expose only the final four characters. A trigger an agent created never shows its token in the UI: the agent receives a one-time link instead (see [Creating Webhooks through MCP](#creating-webhooks-through-mcp)), and you can always get a new token with **Get a new token** on the trigger's page.
 
 ## Send a Delivery
 
@@ -56,7 +57,7 @@ Webhook templates can interpolate:
 
 Templates are rendered as plain text. Strings keep their original quotes, ampersands, Markdown, and HTML-like characters; SAM does not HTML-entity encode agent prompts. Interpolating a complete object or array, such as `{{webhook.body}}` or `{{webhook.headers}}`, produces canonical compact JSON with deterministic object-key ordering. `null` renders as `null`, while a missing path renders blank. An optional source label that has not been configured therefore renders blank. If an interpolated value or the complete prompt exceeds its configured bound, the rendered text includes `[truncated by SAM]` at the truncation point.
 
-Use **Preview** on the trigger detail page to test a sample payload, header selection, filters, and rendered prompt without starting work. A manual run accepts the same optional sample context but creates a real execution.
+Use **Try it with a sample** on the trigger's page to test a sample payload, filters, and rendered prompt without starting work. A manual run through the API accepts the same optional sample context but creates a real execution.
 
 ## Filters and Headers
 
@@ -66,7 +67,7 @@ Filters use dot-separated object paths and one of three operators:
 - `equals` uses strict comparison against a string, number, boolean, or `null`.
 - `contains` checks a substring in a string or an exact element in an array.
 
-With `all` mode every filter must match; with `any` mode at least one must match. Filtered deliveries return `202` and remain visible in delivery history, but they do not create executions.
+With `all` mode every filter must match; with `any` mode at least one must match. Filtered deliveries return `202` and remain visible under **Calls received** on the trigger's page, but they do not create executions.
 
 Only explicitly configured headers are copied into template context. SAM rejects credential- and signature-like names such as `Authorization`, `Cookie`, `X-API-Key`, and headers containing `token`. This allowlist is for safe metadata such as an event type or tenant ID, not for authenticating another provider's signature scheme.
 
@@ -100,8 +101,9 @@ Redeem from the originating workspace/session with its existing `SAM_MCP_TOKEN`.
 SAM sets `SAM_MCP_TOKEN` only for **Codex** sessions. **Claude Code**, **OpenCode**, **Gemini CLI**,
 **Mistral Vibe**, and **Amp** receive their SAM credential another way, so the variable is empty in
 their shell and redemption fails with an authentication error. In that case, open the trigger's page
-in SAM, select **Rotate token**, and copy the endpoint and token from the **Save your webhook
-credential** dialog into the sending service yourself. Rotating cancels the pending claim.
+in SAM, select **Get a new token** and confirm, and copy the endpoint and token from the **Save your
+webhook credential** dialog into the sending service yourself. Replacing the token cancels the
+pending claim.
 :::
 
 Pipe the response into a secret command accepting stdin. This Bash example keeps authentication out of curl's process arguments and rejects empty input before updating a Cloudflare Worker secret:
@@ -134,7 +136,7 @@ Self-hosted deployments can tune the ingress body limit, filter limits, rate win
 
 ## GitHub event triggers
 
-Choose **GitHub event** when creating a repository automation. New issues and pull requests default to `opened`; issue comments default to `created`. Push events have no action filter. Empty actions match every action of the selected event. The form and REST/MCP configuration endpoints reject actions that do not belong to that event. See [GitHub webhook events and payloads](https://docs.github.com/en/webhooks/webhook-events-and-payloads) for available actions.
+Choose **When something happens on GitHub** when creating a repository automation. New issues and pull requests default to `opened`; issue comments default to `created`. Push events have no action filter. Empty actions match every action of the selected event. The form and REST/MCP configuration endpoints reject actions that do not belong to that event. See [GitHub webhook events and payloads](https://docs.github.com/en/webhooks/webhook-events-and-payloads) for available actions.
 
 You can edit an existing GitHub trigger's event and filters. Changing the event resets its action default, retains compatible labels/text/branches, and removes filters that do not apply. Required labels match all configured labels; text matching is case-insensitive; source branch matching is case-sensitive. Pull request branches refer to the source branch. Push branch filters also accept full tag refs such as `refs/tags/v1`. Clearing the draft checkbox includes draft pull requests.
 

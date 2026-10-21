@@ -1,7 +1,7 @@
 /**
  * Comprehensive browser proof for resource form surfaces.
  *
- * Covers ProfileFormDialog, SkillFormDialog, TriggerForm, ProjectSettings
+ * Covers ProfileFormDialog, SkillFormDialog, the Automation editor, ProjectSettings
  * infrastructure, ChatInput (submit/reset/VM-vs-Instant/wizard), at mobile
  * (375x667), desktop (1280x800), and narrow (320x568) viewports.
  *
@@ -357,8 +357,15 @@ async function setupMocks(
       if (sub.includes('/state')) return respond({ state: {} });
       if (sub === '/agent-profiles') return respond({ items: profs });
       if (sub === '/skills') return respond({ items: skills });
+      if (/^\/triggers\/[^/]+\/executions/.test(sub))
+        return respond({ executions: [], nextCursor: null });
       if (sub.startsWith('/triggers') && sub !== '/triggers') return respond(triggers[0] ?? {});
       if (sub === '/triggers') return respond({ triggers });
+      if (sub.startsWith('/schedules')) return respond({ schedules: [], nextCursor: null });
+      if (sub.startsWith('/standing-watches')) return respond({ watches: [], nextCursor: null });
+      if (sub.startsWith('/event-subscriptions'))
+        return respond({ subscriptions: [], hasMore: false });
+      if (sub === '/members') return respond({ members: [] });
       if (sub.startsWith('/tasks')) return respond({ tasks: [], nextCursor: null });
       if (sub === '/trial') return respond({ available: false });
       if (sub.startsWith('/chats')) return respond({ sessions: [], total: 0, totalActive: 0 });
@@ -792,106 +799,75 @@ test.describe('SkillFormDialog — Skills Page', () => {
 });
 
 // =====================================================================================
-// TriggerForm — Triggers page  (POST/PATCH payload assertions)
+// Automation editor — recurring automation machine settings (POST/PATCH payloads)
 // =====================================================================================
 
-test.describe('TriggerForm — Triggers Page', () => {
+/** Walks the create flow for a recurring automation up to the review step. */
+async function createRecurringToReview(page: Page, prompt: string) {
+  await page.goto('/projects/proj-test-1/automation/new?start=schedule');
+  await expect(page.getByText(/Step 2 of 4/)).toBeVisible();
+  await page.getByTestId('automation-editor-next').click();
+  await page.getByLabel('What should it do?').fill(prompt);
+  await page.getByTestId('automation-editor-next').click();
+  await expect(page.getByText(/Step 4 of 4/)).toBeVisible();
+}
+
+test.describe('Automation editor — machine settings', () => {
   test.describe('desktop 1280x800', () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test('create trigger with resources — POST payload includes resourceRequirementsJson', async ({
+    test('create with resources — POST payload includes resourceRequirementsJson', async ({
       page,
     }) => {
       const { pageErrors, capturedRequests } = await setupMocks(page);
-      await page.goto('/projects/proj-test-1/triggers');
-      await page.waitForTimeout(2000);
-
-      const createBtn = page.getByRole('button', { name: /new trigger|create trigger/i }).first();
-      await expect(createBtn).toBeVisible();
-      await createBtn.click();
-
-      const dialog = page.locator('[role="dialog"]');
-      await expect(dialog).toBeVisible();
-
-      // Fill required fields
-      await dialog.locator('#trigger-name').fill('Test Trigger');
-      // Fill prompt
-      const promptArea = dialog.locator('textarea').first();
-      await promptArea.fill('Run the tests');
-
-      // Scroll to and open advanced options
-      const advancedBtn = dialog.getByText('Advanced Options').first();
-      await advancedBtn.scrollIntoViewIfNeeded();
-      await expect(advancedBtn).toBeVisible();
-      await advancedBtn.click();
-      await page.waitForTimeout(300);
-
-      // Scroll the trigger form body to reach resource inputs
-      const scrollBody = dialog.getByTestId('trigger-form-scroll-body');
-      await scrollBody.evaluate((el) => {
-        el.scrollTop = el.scrollHeight;
-      });
-      await page.waitForTimeout(300);
-
-      // Set vCPU in the advanced resource section
-      const vcpuInput = dialog.getByLabel('vCPU');
+      await createRecurringToReview(page, 'Run the tests');
+      await page.getByLabel('Name').fill('Test Trigger');
+      await page.getByText('Advanced options').click();
+      const vcpuInput = page.getByLabel('vCPU');
       await vcpuInput.scrollIntoViewIfNeeded();
-      await expect(vcpuInput).toBeVisible();
       await vcpuInput.fill('4');
 
-      await screenshot(page, 'trigger-create-resources-desktop');
+      await screenshot(page, 'automation-create-resources-desktop');
 
-      // Submit
-      const submitBtn = dialog.getByRole('button', { name: /create trigger/i });
-      await submitBtn.scrollIntoViewIfNeeded();
-      await submitBtn.click();
-      await page.waitForTimeout(500);
-
+      await page.getByRole('button', { name: 'Create automation' }).click();
+      await expect
+        .poll(() =>
+          capturedRequests.find((r) => r.method === 'POST' && r.path.endsWith('/triggers'))
+        )
+        .toBeTruthy();
       const post = capturedRequests.find(
-        (r) => r.method === 'POST' && r.path.includes('/triggers')
+        (r) => r.method === 'POST' && r.path.endsWith('/triggers')
       );
-      expect(post).toBeTruthy();
       const body = post!.body as Record<string, unknown>;
       expect(body.name).toBe('Test Trigger');
-      const resJson = JSON.parse(body.resourceRequirementsJson as string);
-      expect(resJson.minVcpu).toBe(4);
+      expect(JSON.parse(body.resourceRequirementsJson as string).minVcpu).toBe(4);
 
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
 
-    test('edit trigger — no-op PATCH preserves resources', async ({ page }) => {
+    test('edit — no-op save preserves resources and the legacy size', async ({ page }) => {
       const { pageErrors, capturedRequests } = await setupMocks(page);
-      await page.goto('/projects/proj-test-1/triggers');
-      await expect(page.getByText(TRIGGER_WITH_RESOURCES.name)).toBeVisible();
+      await page.goto(`/projects/proj-test-1/automation/trigger/${TRIGGER_WITH_RESOURCES.id}/edit`);
+      await expect(page.getByText(/Step 1 of 3/)).toBeVisible();
+      await page.getByTestId('automation-editor-next').click();
+      await page.getByTestId('automation-editor-next').click();
+      await page.getByText('Advanced options').click();
 
-      // Open dropdown actions → Edit
-      const actionsBtn = page.getByRole('button', {
-        name: `Actions for "${TRIGGER_WITH_RESOURCES.name}"`,
-      });
-      await expect(actionsBtn).toBeVisible();
-      await actionsBtn.click();
-      await page.waitForTimeout(200);
-      await page.getByRole('menuitem', { name: 'Edit' }).click();
-      await page.waitForTimeout(300);
+      await screenshot(page, 'automation-edit-resources-desktop');
 
-      const dialog = page.locator('[role="dialog"]');
-      await expect(dialog).toBeVisible();
-
-      await screenshot(page, 'trigger-edit-resources-desktop');
-
-      // Save without changes
-      const saveBtn = dialog.getByRole('button', { name: /save|update/i }).first();
-      await saveBtn.scrollIntoViewIfNeeded();
-      await saveBtn.click();
-      await page.waitForTimeout(500);
-
+      await page.getByRole('button', { name: 'Save changes' }).click();
+      await expect
+        .poll(() =>
+          capturedRequests.find((r) => r.method === 'PATCH' && r.path.includes('/triggers/'))
+        )
+        .toBeTruthy();
       const patch = capturedRequests.find(
         (r) => r.method === 'PATCH' && r.path.includes('/triggers/')
       );
-      expect(patch).toBeTruthy();
       const body = patch!.body as Record<string, unknown>;
-      expect(body.vmSizeOverride).toBe('medium');
+      // The stored legacy size is not resent unless the person clears it.
+      expect(body).not.toHaveProperty('vmSizeOverride');
       const resJson = JSON.parse(body.resourceRequirementsJson as string);
       expect(resJson.minVcpu).toBe(2);
       expect(resJson.minMemoryGb).toBe(8);
@@ -903,37 +879,15 @@ test.describe('TriggerForm — Triggers Page', () => {
   test.describe('mobile 375x667', () => {
     test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
 
-    test('trigger form on mobile — resource controls reachable', async ({ page }) => {
+    test('resource controls reachable on a phone', async ({ page }) => {
       const { pageErrors } = await setupMocks(page);
-      await page.goto('/projects/proj-test-1/triggers');
-      await page.waitForTimeout(2000);
-
-      const createBtn = page.getByRole('button', { name: /new trigger|create trigger/i }).first();
-      await expect(createBtn).toBeVisible();
-      await createBtn.click();
-
-      const dialog = page.locator('[role="dialog"]');
-      await expect(dialog).toBeVisible();
-
-      // Open advanced
-      const advancedBtn = dialog.getByText('Advanced Options').first();
-      await advancedBtn.scrollIntoViewIfNeeded();
-      await expect(advancedBtn).toBeVisible();
-      await advancedBtn.click();
-      await page.waitForTimeout(300);
-
-      // Scroll trigger form body to resource controls
-      const scrollBody = dialog.getByTestId('trigger-form-scroll-body');
-      await scrollBody.evaluate((el) => {
-        el.scrollTop = el.scrollHeight;
-      });
-      await page.waitForTimeout(300);
-
-      const vcpu = dialog.getByLabel('vCPU');
+      await createRecurringToReview(page, 'Run the tests');
+      await page.getByText('Advanced options').click();
+      const vcpu = page.getByLabel('vCPU');
       await vcpu.scrollIntoViewIfNeeded();
       await expect(vcpu).toBeVisible();
 
-      await screenshot(page, 'trigger-create-resources-mobile');
+      await screenshot(page, 'automation-create-resources-mobile');
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
@@ -942,18 +896,12 @@ test.describe('TriggerForm — Triggers Page', () => {
   test.describe('narrow 320x568', () => {
     test.use({ viewport: { width: 320, height: 568 }, isMobile: true });
 
-    test('trigger form fits at 320px', async ({ page }) => {
+    test('create flow fits at 320px', async ({ page }) => {
       const { pageErrors } = await setupMocks(page);
-      await page.goto('/projects/proj-test-1/triggers');
-      await page.waitForTimeout(2000);
+      await page.goto('/projects/proj-test-1/automation/new');
+      await expect(page.getByText(/Step 1 of 4/)).toBeVisible();
 
-      const createBtn = page.getByRole('button', { name: /new trigger|create trigger/i }).first();
-      await createBtn.click();
-
-      const dialog = page.locator('[role="dialog"]');
-      await expect(dialog).toBeVisible();
-
-      await screenshot(page, 'trigger-create-form-narrow');
+      await screenshot(page, 'automation-create-form-narrow');
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
@@ -1224,12 +1172,17 @@ test.describe('ChatInput — Resource Submit and Reset', () => {
       await assertNoOverflow(page);
 
       await page.getByRole('button', { name: 'Send', exact: true }).click();
-      await expect.poll(() => capturedRequests.find(
-        (request) => request.method === 'POST' && request.path.includes('/tasks/submit')
-      )?.body).toMatchObject({
-        message: 'Build the feature with mobile resource overrides',
-        resourceRequirements: { minVcpu: 2.5, minMemoryGb: 6 },
-      });
+      await expect
+        .poll(
+          () =>
+            capturedRequests.find(
+              (request) => request.method === 'POST' && request.path.includes('/tasks/submit')
+            )?.body
+        )
+        .toMatchObject({
+          message: 'Build the feature with mobile resource overrides',
+          resourceRequirements: { minVcpu: 2.5, minMemoryGb: 6 },
+        });
       assertNoPageErrors(pageErrors);
     });
   });
@@ -1386,12 +1339,12 @@ test.describe('Edge cases — stress data', () => {
       assertNoPageErrors(pageErrors);
     });
 
-    test('triggers page empty state', async ({ page }) => {
+    test('automation page empty state', async ({ page }) => {
       const { pageErrors } = await setupMocks(page, { triggers: [] });
-      await page.goto('/projects/proj-test-1/triggers');
-      await page.waitForTimeout(2000);
+      await page.goto('/projects/proj-test-1/automation');
+      await expect(page.getByText('Nothing runs on its own yet')).toBeVisible();
 
-      await screenshot(page, 'triggers-empty-state-desktop');
+      await screenshot(page, 'automation-empty-state-desktop');
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });

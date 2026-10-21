@@ -36,6 +36,15 @@ interface ImportMetaEnv {
   readonly VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS?: string;
   readonly VITE_CREDENTIAL_LIMITS_STALE_TIME_MS?: string;
   readonly VITE_CREDENTIAL_LIMITS_REFETCH_INTERVAL_MS?: string;
+  readonly VITE_AUTOMATION_POLL_MS?: string;
+  readonly VITE_AUTOMATION_ATTENTION_WINDOW_MS?: string;
+  readonly VITE_AUTOMATION_RECENT_RUNS_PER_TRIGGER?: string;
+  readonly VITE_AUTOMATION_MAX_RUN_READS?: string;
+  readonly VITE_AUTOMATION_MAX_LIST_PAGES?: string;
+  readonly VITE_AUTOMATION_PREVIEW_ROWS?: string;
+  readonly VITE_AUTOMATION_RUNS_PAGE_SIZE?: string;
+  readonly VITE_AUTOMATION_CHAT_PICKER_LIMIT?: string;
+  readonly VITE_AUTOMATION_MAX_CHANNEL_PAGES?: string;
   readonly DEV: boolean;
   readonly PROD: boolean;
   readonly MODE: string;

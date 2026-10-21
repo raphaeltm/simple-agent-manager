@@ -69,7 +69,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   const [floatingHeaderRef, floatingHeaderHeight] = useFloatingHeaderHeight();
   const [showTimeline, setShowTimeline] = useState(false);
   const [showComments, setShowComments] = useState(false);
-  const [showEvents, setShowEvents] = useState(false);
+  const [showAutomation, setShowAutomation] = useState(false);
   const [showResources, setShowResources] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const openComments = useCallback(() => setShowComments(true), []);
@@ -79,8 +79,8 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   const openTimeline = useCallback(() => setShowTimeline(true), []);
   const closeTimeline = useCallback(() => setShowTimeline(false), []);
   const openResources = useCallback(() => setShowResources(true), []);
-  const openEvents = useCallback(() => setShowEvents(true), []);
-  const closeEvents = useCallback(() => setShowEvents(false), []);
+  const openAutomation = useCallback(() => setShowAutomation(true), []);
+  const closeAutomation = useCallback(() => setShowAutomation(false), []);
   const openShare = useCallback(() => setShowShare(true), []);
   const closeShare = useCallback(() => setShowShare(false), []);
 
@@ -243,7 +243,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     onOpenGit: lc.handleOpenGitChanges,
     onOpenTimeline: openTimeline,
     onOpenResources: openResources,
-    onOpenEvents: openEvents,
+    onOpenAutomation: openAutomation,
     onOpenComments: openComments,
     onRetry,
     onFork,
@@ -470,8 +470,8 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
         nodeId={lc.workspace?.nodeId ?? null}
         viewerId={viewerId}
         sessionTools={sessionTools}
-        showEvents={showEvents}
-        onCloseEvents={closeEvents}
+        showAutomation={showAutomation}
+        onCloseAutomation={closeAutomation}
         showShare={showShare}
         onCloseShare={closeShare}
         onAccessChanged={lc.applySessionAccess}

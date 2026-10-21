@@ -253,7 +253,8 @@ async function setupMocks(
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
     if (path === '/api/providers/catalog') return respond(200, { catalogs: [] });
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/github')) return respond(200, []);
     if (path === '/api/credentials/resolution-status') return respond(200, { consumers: [] });
     if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
@@ -269,12 +270,21 @@ async function setupMocks(
           ? respond(500, { error: 'INTERNAL_ERROR', message: 'Health unavailable' })
           : respond(200, health);
       }
-      if (subPath === '/triggers') return respond(200, { triggers: [mockTrigger, mockLongTrigger] });
+      if (subPath === '/triggers')
+        return respond(200, { triggers: [mockTrigger, mockLongTrigger] });
       if (subPath === `/triggers/${trigger.id}`) return respond(200, mockTrigger);
       if (subPath === `/triggers/${longTrigger.id}`) return respond(200, mockLongTrigger);
-      if (subPath.match(/^\/triggers\/[^/]+\/executions/)) {
-        return respond(200, { executions: [], nextCursor: null });
+      if (subPath.match(/^\/triggers\/[^/]+\/(executions|webhook)/)) {
+        return respond(200, { executions: [], deliveries: [], nextCursor: null });
       }
+      if (subPath.startsWith('/schedules'))
+        return respond(200, { schedules: [], nextCursor: null });
+      if (subPath.startsWith('/standing-watches'))
+        return respond(200, { watches: [], nextCursor: null });
+      if (subPath.startsWith('/event-subscriptions'))
+        return respond(200, { subscriptions: [], hasMore: false });
+      if (subPath.startsWith('/skills')) return respond(200, { items: [] });
+      if (subPath.startsWith('/sessions')) return respond(200, { sessions: [], total: 0 });
       if (subPath === '/members') return respond(200, members);
       if (subPath === '/runtime-config') return respond(200, { envVars: [], files: [] });
       if (subPath === '/repository-access') {
@@ -298,14 +308,17 @@ function requireProject(projectName: string, message: string) {
 }
 
 const mobileOnly = requireProject('iPhone SE (375x667)', 'mobile audit runs on iPhone SE only');
-const desktopOnly = requireProject('Desktop (1280x800)', 'desktop audit runs on desktop project only');
+const desktopOnly = requireProject(
+  'Desktop (1280x800)',
+  'desktop audit runs on desktop project only'
+);
 
 test.describe('Credential attribution health — desktop', () => {
   test.beforeEach(desktopOnly);
 
   test('nav badge and modal handle long shared-resource attribution', async ({ page }) => {
     await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/triggers`);
+    await page.goto(`/projects/${PROJECT_ID}/automation`);
     const badge = page.getByRole('button', { name: /credential attribution health/i });
     await expect(badge).toBeVisible();
     await badge.click();
@@ -317,7 +330,7 @@ test.describe('Credential attribution health — desktop', () => {
 
   test('trigger detail repeats inline personal-key warning', async ({ page }) => {
     await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/triggers/${trigger.id}`);
+    await page.goto(`/projects/${PROJECT_ID}/automation/trigger/${trigger.id}`);
     await expect(page.getByText('Personal credential attribution')).toBeVisible();
     await screenshot(page, 'credential-health-trigger-warning-desktop');
     await assertNoOverflow(page);
@@ -325,8 +338,10 @@ test.describe('Credential attribution health — desktop', () => {
 
   test('solo project hides credential nav and inline trigger warnings', async ({ page }) => {
     await setupMocks(page, { multiplayerActive: false });
-    await page.goto(`/projects/${PROJECT_ID}/triggers/${trigger.id}`);
-    await expect(page.getByRole('button', { name: /credential attribution health/i })).toHaveCount(0);
+    await page.goto(`/projects/${PROJECT_ID}/automation/trigger/${trigger.id}`);
+    await expect(page.getByRole('button', { name: /credential attribution health/i })).toHaveCount(
+      0
+    );
     await expect(page.getByText('Personal credential attribution')).toHaveCount(0);
     await expect(page.getByText("This runs on Coworker's personal key.")).toHaveCount(0);
     await screenshot(page, 'credential-health-solo-hidden-desktop');
@@ -348,7 +363,7 @@ test.describe('Credential attribution health — mobile', () => {
 
   test('drawer badge and modal remain usable on narrow screens', async ({ page }) => {
     await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/triggers`);
+    await page.goto(`/projects/${PROJECT_ID}/automation`);
     await page.getByRole('button', { name: /open navigation menu/i }).click();
     const badge = page.getByRole('button', { name: /credential attribution health/i });
     await expect(badge).toBeVisible();
@@ -360,7 +375,7 @@ test.describe('Credential attribution health — mobile', () => {
 
   test('inline warning and sharing checklist wrap on mobile', async ({ page }) => {
     await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/triggers/${longTrigger.id}`);
+    await page.goto(`/projects/${PROJECT_ID}/automation/trigger/${longTrigger.id}`);
     await expect(page.getByText('Personal credential attribution')).toBeVisible();
     await screenshot(page, 'credential-health-trigger-warning-mobile');
     await assertNoOverflow(page);
@@ -373,21 +388,27 @@ test.describe('Credential attribution health — mobile', () => {
 
   test('solo project keeps credential clutter hidden on mobile', async ({ page }) => {
     await setupMocks(page, { multiplayerActive: false });
-    await page.goto(`/projects/${PROJECT_ID}/triggers/${longTrigger.id}`);
+    await page.goto(`/projects/${PROJECT_ID}/automation/trigger/${longTrigger.id}`);
     await page.getByRole('button', { name: /open navigation menu/i }).click();
-    await expect(page.getByRole('button', { name: /credential attribution health/i })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /credential attribution health/i })).toHaveCount(
+      0
+    );
     await expect(page.getByText('Personal credential attribution')).toHaveCount(0);
     await expect(page.getByText("This runs on Coworker's personal key.")).toHaveCount(0);
     await screenshot(page, 'credential-health-solo-hidden-mobile');
     await assertNoOverflow(page);
   });
 
-  test('health fetch errors leave the compact nav absent without breaking navigation', async ({ page }) => {
+  test('health fetch errors leave the compact nav absent without breaking navigation', async ({
+    page,
+  }) => {
     await setupMocks(page, { health: emptyHealth, healthError: true });
-    await page.goto(`/projects/${PROJECT_ID}/triggers`);
+    await page.goto(`/projects/${PROJECT_ID}/automation`);
     await page.getByRole('button', { name: /open navigation menu/i }).click();
     await expect(page.getByRole('dialog', { name: /navigation menu/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /credential attribution health/i })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /credential attribution health/i })).toHaveCount(
+      0
+    );
     await screenshot(page, 'credential-health-error-hidden-mobile');
     await assertNoOverflow(page);
   });
