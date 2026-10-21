@@ -186,7 +186,10 @@ describe('durable workflow execution', () => {
       'Draft document',
       [],
       [],
-      [{ type: 'library_file', ref: 'library-doc-123' }],
+      [
+        { type: 'library_file', path: 'library-doc-123', description: 'Draft document' },
+        { type: 'url', ref: 'https://example.test/review' },
+      ],
       []
     );
     await finish(f.input.projectId, steps[0]!.task_id, 'completed');
@@ -207,6 +210,10 @@ describe('durable workflow execution', () => {
       { state: 'completed', reason: null },
       { state: 'running', reason: null },
       { state: 'waiting', reason: null },
+    ]);
+    expect(JSON.parse(steps[0]!.result_json!).handoffs[0].artifactRefs).toEqual([
+      { type: 'library_file', ref: 'library-doc-123' },
+      { type: 'url', ref: 'https://example.test/review' },
     ]);
     expect(f.start).toHaveBeenCalledTimes(2);
     const messages = await projectData.getMessages(
