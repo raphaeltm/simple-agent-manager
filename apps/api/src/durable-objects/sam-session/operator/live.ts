@@ -145,8 +145,8 @@ export class OperatorLive {
         return;
       case 'text-delta':
         if (typeof payload.text !== 'string') return;
+        // The phase turns to writing when text is released: withheld text is not writing.
         turn.pending += payload.text;
-        this.setPhase(turn, 'writing');
         this.scheduleFlush();
         return;
       case 'tool-call':
@@ -205,12 +205,14 @@ export class OperatorLive {
       turn.released = '';
       this.broadcast({ type: 'draft-reset' });
     }
-    if (text.length > turn.released.length)
+    if (text.length > turn.released.length) {
+      this.setPhase(turn, 'writing');
       this.broadcast({
         type: 'text',
         at: turn.released.length,
         text: text.slice(turn.released.length),
       });
+    }
     turn.released = text;
     turn.pending = '';
   }
@@ -335,6 +337,8 @@ export class OperatorLive {
       if (cut > turn.released.length) {
         const prefix = candidate.slice(0, cut);
         if (isGroundedText(prefix, turn.grounding)) {
+          if (!turn.activity.some((item) => item.state === 'running'))
+            this.setPhase(turn, 'writing');
           this.broadcast({
             type: 'text',
             at: turn.released.length,

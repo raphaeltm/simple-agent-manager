@@ -141,6 +141,11 @@ Raphaël's feedback on the new private SAM assistant (`/sam`, PR #2386), 2026-10
       stored; runs the correction; left out of later context); instructions say never to write
       such records. Tests: guard unit, live hub, context, and a workerd run with the real agent
       (copy → correction → tool → answer); all four fail without the rule.
+- [x] Live status says "Thinking", not "Writing", while a step's text is withheld (run 5 showed
+      14 s of "Writing" with nothing written); an end-of-prompt line asks for plain prose.
+- Deferred: why the model copies records (every past assistant turn is shown as JSON) →
+  `tasks/backlog/2026-10-21-sam-history-records-primes-json-replies.md`. It needs a history
+  projection redesign with its own security review.
 
 ### D. Model (shared + api config)
 - [x] Add `@cf/zai-org/glm-5.3-flash` to `PLATFORM_AI_MODELS` with published pricing, optional

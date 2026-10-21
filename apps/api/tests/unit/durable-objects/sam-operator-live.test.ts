@@ -349,11 +349,16 @@ describe('private SAM live turn view', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(view.text()).toBe('');
     expect(JSON.stringify(view.events)).not.toContain('sam_historical_turn_status');
-    // The corrected answer still streams in full.
+    // Withheld text is not writing: the status line stays on thinking.
+    const phases = () =>
+      view.events.flatMap((event) => (event.type === 'phase' ? [event.phase] : []));
+    expect(phases()).toEqual(['thinking']);
+    // The corrected answer still streams in full, and only then is SAM writing.
     hub.resetDraft();
     hub.chunk(text('Two tasks finished today. '));
     await vi.advanceTimersByTimeAsync(settings.flushMs);
     expect(view.text()).toBe('Two tasks finished today. ');
+    expect(phases()).toEqual(['thinking', 'writing']);
   });
 
   it('gives a late subscriber a snapshot, then ends every stream when the turn ends', async () => {
