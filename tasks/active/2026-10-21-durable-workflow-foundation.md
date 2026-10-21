@@ -22,9 +22,17 @@ Mission grouping exists but no submission path creates deferred steps. Implement
 - [x] Status includes steps, task/session links, attempts, reasons and activity history.
 - [x] Tests: real D1 submission/terminal path, failed prerequisite, duplicate events, concurrent start replay, restart/lost ACK, authorization, plan validation, migrations.
 - [x] Update relevant API documentation.
-- [ ] Full quality checks and independent local specialist reviews.
+- [x] Full quality checks and independent local specialist reviews.
 - [ ] Staging real 3-step document handoff, failure and recovery evidence; bounded resource cleanup.
 - [ ] PR, CI, best-effort CodeRabbit, merge and production smoke.
 
 ## Acceptance
 An agent starts a three-step plan and ends its turn. SAM completes it without coordinator intervention, passing the document/result references between steps. Failed prerequisites never launch dependents or yield a successful run. Duplicate delivery/restarts never create duplicate tasks/sessions. Current authorization and admission controls remain enforced. No new UI, automatic agent-failure retries, templates or arbitrary event subscriptions in this slice.
+
+## Local validation and review
+- 13,004 API tests passed (2 skipped); 53 Workers tests passed across workflow, reserved TaskRunner and ProjectData suites.
+- Migration upgrade tests preserve checkpoints, indexes, FKs and parent rows; canonical new source accepts workflow. Old leaf table retained as a historical archive to satisfy no-DROP policy.
+- API lint/typecheck, format ratchet, migration safety/ordering, DO migration safety, file sizes, type boundaries, runtime tunables and instruction context budget passed.
+- Cloudflare reliability review: registration lease, prepared-profile/current-limit checks, deadline ordering and durable history fixes accepted.
+- Security review: only same-run step-authored handoffs imported; malformed own outputs fail explicitly and references are bounded. Rereview passed.
+- Documentation/constitution/completion review: failed run replay normalized to needs_attention; no remaining implementation findings. Release gates still pending.
