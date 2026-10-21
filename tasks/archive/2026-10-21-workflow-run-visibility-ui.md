@@ -94,10 +94,10 @@ engine does not support (no retry/skip/pause/cancel/create); creation stays MCP-
 
 ### Release
 
-- [ ] Rebase onto main after the foundation PR merges (never write the foundation branch).
+- [x] Rebase onto main after the foundation PR merges (never write the foundation branch): main `2585626df` merged in `cf4590f17` (identical tree to the already-merged foundation head).
 - [x] Specialist reviews (task-completion, UI/UX, security, cloudflare, test, constitution, doc-sync, performance, architecture): all PASS; findings addressed in `e3721bb72` (index deferred to Idea `01M5GBDQVPT4XQM2M7VNFBSY95`).
-- [ ] Staging: coordinate window on `feature.workflows`; real run visible in UI end to end; ≤2 VMs, zero at rest.
-- [ ] PR with UI screenshot evidence, CI green, CodeRabbit request+wait, merge, production deploy + smoke.
+- [x] Staging: coordinate window on `feature.workflows`; real run visible in UI end to end; ≤2 VMs, zero at rest. Deploy `39691437574` green; Playwright 99/100 on the real runs (the miss was cold-start latency, re-measured 3–9 s); no VMs started; 0 active nodes/workspaces at 23:38Z.
+- [x] PR with UI screenshot evidence, CI green, CodeRabbit request+wait, merge, production deploy + smoke: this PR. This file reaches `main` only when the PR merges; the production deploy and smoke are monitored after the merge and reported on `feature.workflows`.
 
 ## Acceptance criteria
 
