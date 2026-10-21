@@ -80,6 +80,12 @@ const claims: Array<{ verbs: string; operations: string[] }> = [
 ];
 const writes = new Set(claims.flatMap((claim) => claim.operations));
 
+/** A ULID or UUID, including any fabricated `_suffix`: the whole token is one identity. */
+export const PLATFORM_IDENTIFIER_PATTERN =
+  /\b(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[_-][A-Za-z0-9_-]+)?\b/gi;
+/** An absolute URL or an app-relative project path. */
+export const PLATFORM_URL_PATTERN = /(?:https?:\/\/[^\s<>"`()[\]]+|\/projects\/[^\s<>"`()[\]]+)/g;
+
 /** What this turn's completed receipts prove; built once per receipt change, checked per text. */
 export interface GroundingIndex {
   readonly appOrigin: string;
@@ -174,9 +180,7 @@ export function assertGroundedText(text: string, index: GroundingIndex): void {
   const { appOrigin, identities, links, completed } = index;
   // Match the WHOLE token, including fabricated suffixes; a real profile ID
   // prefix must never ground a made-up session/task ID.
-  const identifiers =
-    /\b(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[_-][A-Za-z0-9_-]+)?\b/gi;
-  for (const match of text.matchAll(identifiers)) {
+  for (const match of text.matchAll(PLATFORM_IDENTIFIER_PATTERN)) {
     const prefix = text.slice(Math.max(0, match.index - 100), match.index).replace(/[*`]/g, '');
     const resourceLabel =
       /\b(project|task|session|chat|conversation|profile|idea)(?:\s+(?:id|identifier))?\s*(?::|=|\bis\b)?\s*['"]?$/i;
@@ -186,8 +190,7 @@ export function assertGroundedText(text: string, index: GroundingIndex): void {
     if (resource && !identities.get(resource)?.has(match[0]))
       throw new OperatorGroundingError('SAM response contains an ungrounded platform identity');
   }
-  const urls = /(?:https?:\/\/[^\s<>"`()[\]]+|\/projects\/[^\s<>"`()[\]]+)/g;
-  for (const [candidate] of text.matchAll(urls)) {
+  for (const [candidate] of text.matchAll(PLATFORM_URL_PATTERN)) {
     // Scan backwards once: a suffix regexp retries at every punctuation
     // position when a long punctuation run ends in a non-punctuation byte.
     let end = candidate.length;

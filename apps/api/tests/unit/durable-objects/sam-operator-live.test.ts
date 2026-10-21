@@ -207,6 +207,61 @@ describe('private SAM live turn view', () => {
     ).toEqual(['working', 'thinking', 'working', 'thinking']);
   });
 
+  it('marks failed and unconfirmed steps, and leaves the working phase when none still run', async () => {
+    const hub = live();
+    const view = reader(hub.subscribe('turn'));
+    const call = (id: string, toolName: string) =>
+      hub.chunk({ type: 'tool-call', payload: { toolCallId: id, toolName, args: {} } });
+    call('thrown', 'sam_tasks_list');
+    hub.chunk({
+      type: 'tool-error',
+      payload: { toolCallId: 'thrown', toolName: 'sam_tasks_list', error: 'Invalid input' },
+    });
+    call('error-result', 'sam_inbox_get');
+    hub.chunk({
+      type: 'tool-result',
+      payload: { toolCallId: 'error-result', toolName: 'sam_inbox_get', result: {}, isError: true },
+    });
+    call('uncertain', 'sam_chat_start');
+    hub.chunk({
+      type: 'tool-result',
+      payload: {
+        toolCallId: 'uncertain',
+        toolName: 'sam_chat_start',
+        result: { status: 'uncertain', actionId: 'a' },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hub.snapshot('turn')?.activity.map((step) => [step.id, step.state])).toEqual([
+      ['thrown', 'failed'],
+      ['error-result', 'failed'],
+      ['uncertain', 'uncertain'],
+    ]);
+    // Every settled step hands the status line back to thinking.
+    expect(
+      view.events.filter((event) => event.type === 'phase').map((event) => event.phase)
+    ).toEqual(['working', 'thinking', 'working', 'thinking', 'working', 'thinking']);
+  });
+
+  it('drops a reader that stops reading instead of queueing frames for it forever', async () => {
+    const hub = new OperatorLive(
+      () => ({ ...settings, maxSubscribers: 1 }),
+      () => now
+    );
+    hub.begin('turn');
+    hub.setGrounding(noReceipts);
+    const stalled = hub.subscribe('turn'); // never read
+    expect(stalled.status).toBe(200);
+    expect(hub.subscribe('turn').status).toBe(429);
+    for (let index = 0; index < 600; index++)
+      hub.chunk({
+        type: 'tool-call',
+        payload: { toolCallId: `c${index}`, toolName: 'sam_projects_list' },
+      });
+    // The stalled reader's slot is free again.
+    expect(hub.subscribe('turn').status).toBe(200);
+  });
+
   it('drops pre-tool narration, because the stored answer is the final step only', async () => {
     const hub = live();
     const view = reader(hub.subscribe('turn'));
@@ -236,12 +291,23 @@ describe('private SAM live turn view', () => {
     expect(previews()).toEqual(['List projects to see what exists.']);
     hub.chunk(reasoning(`sk ${task} to read it.\n`));
     await vi.advanceTimersByTimeAsync(settings.flushMs);
-    // An ungrounded identity in reasoning is withheld; the previous line stays.
-    expect(previews()).toEqual(['List projects to see what exists.']);
+    // Reasoning is not told to label identities, so none are shown, labelled or not.
+    hub.chunk(reasoning(`Hmm, ${project} could be it: ${origin}/projects/${project}\n`));
+    await vi.advanceTimersByTimeAsync(settings.flushMs);
+    expect(previews()).toEqual([
+      'List projects to see what exists.',
+      'Then open task … to read it.',
+      'Hmm, … could be it: …',
+    ]);
     expect(JSON.stringify(view.events)).not.toContain(task);
+    expect(JSON.stringify(view.events)).not.toContain(project);
+    // A reasoning line that claims an effect without a receipt is still withheld.
+    hub.chunk(reasoning('I started the task for you.\n'));
+    await vi.advanceTimersByTimeAsync(settings.flushMs);
+    expect(previews().at(-1)).toBe('Hmm, … could be it: …');
     hub.resetDraft();
     await vi.advanceTimersByTimeAsync(0);
-    expect(previews()).toEqual(['List projects to see what exists.', null]);
+    expect(previews().at(-1)).toBeNull();
     expect(hub.snapshot('turn')).toMatchObject({ phase: 'thinking', thinking: null, text: '' });
   });
 

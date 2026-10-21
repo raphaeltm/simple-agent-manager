@@ -1,4 +1,9 @@
-import { type GroundingIndex, isGroundedText } from './grounding';
+import {
+  type GroundingIndex,
+  isGroundedText,
+  PLATFORM_IDENTIFIER_PATTERN,
+  PLATFORM_URL_PATTERN,
+} from './grounding';
 
 /** What the running turn is doing right now, for the status line. */
 export type LivePhase = 'starting' | 'thinking' | 'working' | 'writing';
@@ -156,6 +161,8 @@ export class OperatorLive {
         return;
       case 'tool-error':
         this.updateTool(turn, payload, { state: 'failed' });
+        if (!turn.activity.some((item) => item.state === 'running'))
+          this.setPhase(turn, 'thinking');
         return;
       default:
         return;
@@ -411,12 +418,19 @@ function resultOf(result: unknown, isError: boolean): Partial<LiveActivity> {
   };
 }
 
-/** The latest complete line of reasoning, plain text, bounded. Partial lines are not shown. */
+/**
+ * The latest complete line of reasoning, plain text, bounded. Partial lines are not shown.
+ * Reasoning is under no instruction to label or link what it mentions, and the receipt
+ * guard checks only labelled identifiers, so raw identifiers and links are removed here
+ * rather than shown unchecked; the preview is a hint of what SAM is doing, not a source.
+ */
 function thinkingPreview(reasoning: string): string | null {
   const lines = reasoning.split('\n');
   lines.pop(); // The last segment has no newline yet: still being written.
   for (let index = lines.length - 1; index >= 0; index--) {
     const line = (lines[index] ?? '')
+      .replace(PLATFORM_URL_PATTERN, '…')
+      .replace(PLATFORM_IDENTIFIER_PATTERN, '…')
       .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '')
       .replace(/[*_`#]+/g, '')
       .replace(/\s+/g, ' ')

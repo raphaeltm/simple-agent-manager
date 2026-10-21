@@ -77,55 +77,55 @@ Raphaël's feedback on the new private SAM assistant (`/sam`, PR #2386), 2026-10
 ## Implementation Checklist
 
 ### A. Mobile scroll leak (web)
-- [ ] Make the SAM conversation scroller the containing block (`relative`) so absolute descendants
+- [x] Make the SAM conversation scroller the containing block (`relative`) so absolute descendants
       (sr-only labels) are clipped by it and cannot extend `<main>`'s scroll area.
-- [ ] Playwright regression: long conversation at 375/390/412px, wheel/touch past the bottom;
+- [x] Playwright regression: long conversation at 375/390/412px, wheel/touch past the bottom;
       assert `<main>` has no scrollable overflow, `main.scrollTop` stays 0, SAM header visible,
       composer bottom at the viewport bottom. Prove it fails without the fix.
-- [ ] Tighten `checkComposerPinned` to assert the composer sits at the bottom edge (not merely above it).
-- [ ] Record the lesson (absolute descendants escape a non-positioned scroller) in the web overflow rule.
+- [x] Tighten `checkComposerPinned` to assert the composer sits at the bottom edge (not merely above it).
+- [x] Record the lesson (absolute descendants escape a non-positioned scroller) in the web overflow rule.
 
 ### B. Recency grounding (api)
-- [ ] Add the current UTC date/time to each turn's instructions (constant within a turn, at the end).
-- [ ] Add `recordedAt` to every `sam_historical_turn_status` record (operator turn `created_at`;
+- [x] Add the current UTC date/time to each turn's instructions (constant within a turn, at the end).
+- [x] Add `recordedAt` to every `sam_historical_turn_status` record (operator turn `created_at`;
       legacy message `created_at`).
-- [ ] Strengthen instructions: status/recency questions must use operations called this turn;
+- [x] Strengthen instructions: status/recency questions must use operations called this turn;
       history is past context only; judge recency against the current time and include dates.
-- [ ] `inboxGet`: include `updatedAt` for pending items and `createdAt` for notifications.
-- [ ] Tests: request body contains the current time and `recordedAt`; inbox timestamps.
+- [x] `inboxGet`: include `updatedAt` for pending items and `createdAt` for notifications.
+- [x] Tests: request body contains the current time and `recordedAt`; inbox timestamps.
 
 ### C. Live streaming + specific progress (api + web)
-- [ ] Refactor grounding into a reusable receipt index + text check (`assertGroundedOperatorResponse`
+- [x] Refactor grounding into a reusable receipt index + text check (`assertGroundedOperatorResponse`
       keeps its contract).
-- [ ] `operator/live.ts`: per-DO live state for the active turn (phase, released answer text,
+- [x] `operator/live.ts`: per-DO live state for the active turn (phase, released answer text,
       reasoning preview, tool activity), SSE subscribers with snapshot-on-connect, throttled flushes,
       heartbeat, subscriber cap, close on turn end. Release only guard-passing whitespace-bounded prefixes.
-- [ ] `agent.ts`: `agent.stream()` + `getFullOutput()` (same error semantics as `generate`),
+- [x] `agent.ts`: `agent.stream()` + `getFullOutput()` (same error semantics as `generate`),
       `onChunk` → live hub; step narration resets the draft; correction resets the draft.
-- [ ] Usage fail-safe: estimate tokens when a streamed step reports none; log `sam.operator.usage_estimated`.
-- [ ] `controller.ts`: `GET /turns/:id/stream` (SSE) and a live snapshot on the active turn in
+- [x] Usage fail-safe: estimate tokens when a streamed step reports none; log `sam.operator.usage_estimated`.
+- [x] `controller.ts`: `GET /turns/:id/stream` (SSE) and a live snapshot on the active turn in
       `GET /turns`; publish `done` after the turn's terminal state is written.
-- [ ] `routes/sam.ts`: proxy the stream path (authenticated, per-user DO).
-- [ ] Runtime-tunable knobs as admin settings (flush ms, heartbeat ms, max subscribers).
-- [ ] Web: `useSamLiveTurn` hook (fetch-stream SSE parser, reconnect with backoff, fallback to polling).
-- [ ] Web: active turn shows streamed answer, specific tool activity lines ("Reading your 20 most
+- [x] `routes/sam.ts`: proxy the stream path (authenticated, per-user DO).
+- [x] Runtime-tunable knobs as admin settings (flush ms, heartbeat ms, max subscribers).
+- [x] Web: `useSamLiveTurn` hook (fetch-stream SSE parser, reconnect with backoff, fallback to polling).
+- [x] Web: active turn shows streamed answer, specific tool activity lines ("Reading your 20 most
       recent tasks"), "Thinking" phase with a one-line reasoning preview, and elapsed time.
-- [ ] Web: slower history polling while the stream is healthy; refetch on tool completion and `done`.
-- [ ] Tests: native workerd runtime (real Mastra) for streamed text, guard gating, tool activity,
+- [x] Web: slower history polling while the stream is healthy; refetch on tool completion and `done`.
+- [x] Tests: native workerd runtime (real Mastra) for streamed text, guard gating, tool activity,
       `stream:true` upstream, usage accounting; unit tests for the hub and the SSE parser; Playwright
       audit with a progressive mocked stream at mobile + desktop.
 
 ### D. Model (shared + api config)
-- [ ] Add `@cf/zai-org/glm-5.3-flash` to `PLATFORM_AI_MODELS` with published pricing, optional
+- [x] Add `@cf/zai-org/glm-5.3-flash` to `PLATFORM_AI_MODELS` with published pricing, optional
       cached-input price field; fix Gemma's context window.
-- [ ] Use cached-input pricing in SAM cost accounting when usage reports cached tokens.
-- [ ] Send `x-session-affinity` (per private conversation) on SAM Workers AI calls.
-- [ ] Per-model request controls (GLM 5.3 Flash: `reasoning_effort: low`).
+- [x] Use cached-input pricing in SAM cost accounting when usage reports cached tokens.
+- [x] Send `x-session-affinity` (per private conversation) on SAM Workers AI calls.
+- [x] Per-model request controls (GLM 5.3 Flash: `reasoning_effort: low`).
 - [ ] Switch `SAM_MODEL` to GLM 5.3 Flash after staging comparison; check GitHub Environment overrides
       for `SAM_MODEL` (rule 70) and verify the deployed value.
 
 ### E. Docs
-- [ ] `apps/www/.../guides/sam-assistant.md`, `architecture/sam-account-assistant.md`,
+- [x] `apps/www/.../guides/sam-assistant.md`, `architecture/sam-account-assistant.md`,
       `reference/configuration.md` (new admin settings, model), `reference/api.md` (stream route).
 
 ## Acceptance Criteria
