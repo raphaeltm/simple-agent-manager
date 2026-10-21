@@ -282,14 +282,13 @@ export class OperatorWork {
    * membership is checked once; one awaited round trip per card made history slow.
    */
   async view(userId: string): Promise<Array<Record<string, unknown>>> {
-    const db = drizzle(this.env.DATABASE);
     const access = new Map<string, Promise<unknown>>();
     const cards = await Promise.all(
       this.rows().map(async (row) => {
         try {
           let member = access.get(row.project_id);
           if (!member) {
-            member = requireProjectAccess(db, row.project_id, userId);
+            member = requireProjectAccess(drizzle(this.env.DATABASE), row.project_id, userId);
             access.set(row.project_id, member);
           }
           await member;
