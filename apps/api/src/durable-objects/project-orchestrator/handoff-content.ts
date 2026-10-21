@@ -1,7 +1,7 @@
 import type { HandoffFact, HandoffPacket } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
-type RoutableHandoff = Pick<
+export type RoutableHandoff = Pick<
   HandoffPacket,
   'id' | 'summary' | 'facts' | 'openQuestions' | 'suggestedActions'
 >;

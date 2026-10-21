@@ -28,7 +28,7 @@ import { reconcileWorkflowRun } from '../../services/workflow-reconcile';
 import type { WorkflowRunRow } from '../../services/workflow-runs';
 import { mapRows } from '../row-validation';
 import { logDecision } from './decision-log';
-import { buildHandoffContent, parseRoutableHandoff } from './handoff-content';
+import { buildHandoffContent, parseRoutableHandoff, type RoutableHandoff } from './handoff-content';
 import { detectStalls, resolveActiveSessionIdsForTaskIds } from './stall-detection';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
