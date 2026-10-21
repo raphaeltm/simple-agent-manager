@@ -20,11 +20,14 @@ on a wide screen):
 - **Needs your attention** lists anything that stopped, failed or could not be confirmed, with
   the usual fix as one button: **Resume**, **See what went wrong**, **Give it more runs**, or
   **Check the result**. A one-time run that failed stays here for three days, then only on its
-  own page and in History.
+  own page and in History. A [workflow](/docs/guides/workflows/) with a failed step appears here
+  the same way, with **See what went wrong**.
 - **Coming up** shows the next things that start on their own, and when.
 - **Your automations** lists every automation in words: what starts it and what it does.
   **Scheduled**, **Reactions**, **One time** and **Paused or off** narrow the list. Finished
   one-time runs fold away under **Show finished automations**.
+- **Workflows** shows the newest multi-step plans agents handed to SAM, with **All** to see every
+  run. See [Workflows](/docs/guides/workflows/).
 - **Recently** shows the latest runs. **History** opens all of them, with a **Problems** filter;
   each run links to its chat.
 - **Behind the scenes** sums up what agents are waiting for and the channels they post on.

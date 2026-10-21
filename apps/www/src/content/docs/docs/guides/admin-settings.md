@@ -3,7 +3,7 @@ title: Dynamic admin settings
 description: Change Phase 1 platform controls without redeploying the Worker.
 ---
 
-Active, approved superadmins can use **Admin → Settings** to search and edit platform settings from a phone or desktop. This page covers the Phase 1 controls: GitHub, Google login, Google infrastructure and GitLab OAuth configuration; the ten Connector settings; anonymous trials; cron sweeps; Durable Object alarms; stalled-task classification; the Collaboration limits for shared chats and comments; and the Chat setting for the new-chat profile picker. Other deployment and resource settings remain in their existing interfaces.
+Active, approved superadmins can use **Admin → Settings** to search and edit platform settings from a phone or desktop. This page covers the Phase 1 controls: GitHub, Google login, Google infrastructure and GitLab OAuth configuration; the ten Connector settings; anonymous trials; cron sweeps; Durable Object alarms; stalled-task classification; the Collaboration limits for shared chats and comments; the Chat setting for the new-chat profile picker; and the Operations limits for workflows. Other deployment and resource settings remain in their existing interfaces.
 
 The editor shows each setting's effective value, code default and source. Secret fields show only whether a value is configured. Enter a replacement to change a secret; leaving a password field empty does not reveal or erase the current secret. Related OAuth client IDs and secrets must satisfy the existing provider validation together. Risky saves and resets require confirmation.
 
@@ -28,6 +28,22 @@ Lowering the share limit does not remove anyone's access. It only blocks new sha
 | Setting                       | Default | Range | What it controls                                                                                                                                                                                       |
 | ----------------------------- | ------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `chat.profileUsageWindowDays` | 30      | 1–365 | Days of each person's own new chats used to show their recent profiles first and to suggest hiding profiles they haven't picked. See [Agents](/docs/guides/agents/#choosing-a-profile-for-a-new-chat). |
+
+## Workflows
+
+These limit [workflows](/docs/guides/workflows/), under the **Operations** category. Every value is a whole number from 1 to the maximum shown.
+
+| Setting                             | Default     | Maximum     | What it limits                                                           |
+| ----------------------------------- | ----------- | ----------- | ------------------------------------------------------------------------ |
+| `workflow.maxSteps`                 | 25          | 25          | Steps in one workflow plan                                               |
+| `workflow.maxParallelSteps`         | 2           | 10          | Steps of one workflow running at once                                    |
+| `workflow.maxActiveRuns`            | 10          | 25          | Workflows running at once in one project                                 |
+| `workflow.lifetimeMs`               | 259,200,000 | 604,800,000 | Milliseconds a workflow may run (72 hours) before it needs attention     |
+| `workflow.maxLaunchesPerCycle`      | 2           | 5           | Workflow steps SAM starts in one project scheduling cycle                |
+| `workflow.launchRetryLimit`         | 5           | 10          | Attempts to confirm that a step started before the step fails            |
+| `workflow.launchRetryBackoffMs`     | 30,000      | 300,000     | Milliseconds before the first retry of an unconfirmed step start         |
+| `workflow.repositoryCheckTimeoutMs` | 5,000       | 10,000      | Milliseconds for each repository access check before a step starts       |
+| `workflow.handoffMaxChars`          | 8,000       | 16,000      | Characters of a finished step's summary passed to the steps that need it |
 
 ## Storage and consistency
 

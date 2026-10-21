@@ -67,6 +67,7 @@ engine does not support (no retry/skip/pause/cancel/create); creation stays MCP-
 ## Implementation checklist
 
 ### Contract and API
+
 - [x] Shared types `packages/shared/src/types/workflow.ts` (statuses as const lists, list/detail response types, event-wait step view) exported from the shared index.
 - [x] Shared read model `apps/api/src/services/workflow-run-read.ts`: load run + steps + activity + linked tasks + owner in bounded queries; per-row isolation; projections for REST detail/list.
 - [x] MCP `getWorkflowRun` reuses the shared loader with unchanged output shape.
@@ -75,21 +76,24 @@ engine does not support (no retry/skip/pause/cancel/create); creation stays MCP-
 - [x] Publish UI/read contract + event-wait step view on `feature.workflows`.
 
 ### Web UI
-- [ ] API client + query options (`lib/api/workflows.ts`, `lib/query-options/workflows.ts`), identity-scoped keys, active-run polling (`VITE_WORKFLOW_RUN_POLL_MS`).
-- [ ] Routes `automation/workflows`, `automation/workflows/:runId` (lazy) + `automationPaths.workflows/workflow`.
-- [ ] Workflow view model (pure): stages, plain-language step status lines, recovery action from structure, progress counts, attention selection.
-- [ ] Workflows list page: groups (Needs attention / Running / Finished), filter chips, progress bar, empty state explaining MCP-only start, load-more, error/loading states.
-- [ ] Run detail page: header (status, starter, started-from chat, deadline), progress, attention callout with real actions (open chat / view step), tabs Steps · Graph · Activity, step detail (instructions, inputs from predecessors, outputs, evidence labelled agent-reported, chat link, Advanced IDs), About this run.
-- [ ] Graph: React Flow + dagre reuse, status-coloured edges, node select, lazy-loaded.
-- [ ] Event-wait rendering (kind `wait`): listening/heard/timed-out wording, timeout display.
-- [ ] Automation overview: workflows needing attention in "Needs your attention"; Workflows panel with running/recent runs and link to the list.
-- [ ] Unit tests (view model + rendered pages with realistic data, attention selection, wait steps, links).
-- [ ] Playwright visual audit (375 + 1280; normal, long text, empty, many/25 steps, wide fan-out, failure, wait step, error) with `assertNoOverflow`; screenshots reviewed.
+
+- [x] API client + query options (`lib/api/workflows.ts`, `lib/query-options/workflows.ts`), identity-scoped keys, active-run polling (`VITE_WORKFLOW_RUN_POLL_MS`).
+- [x] Routes `automation/workflows`, `automation/workflows/:runId` (lazy) + `automationPaths.workflows/workflow`.
+- [x] Workflow view model (pure): stages, plain-language step status lines, recovery action from structure, progress counts, attention selection.
+- [x] Workflows list page: groups (Needs attention / Running / Finished), filter chips, progress bar, empty state explaining MCP-only start, load-more, error/loading states.
+- [x] Run detail page: header (status, starter, started-from chat, deadline), progress, attention callout with real actions (open chat / view step), tabs Steps · Graph · Activity, step detail (instructions, inputs from predecessors, outputs, evidence labelled agent-reported, chat link, Advanced IDs), About this run.
+- [x] Graph: React Flow + dagre reuse, status-coloured edges, node select, lazy-loaded.
+- [x] Event-wait rendering (kind `wait`): listening/heard/timed-out wording, timeout display.
+- [x] Automation overview: workflows needing attention in "Needs your attention"; Workflows panel with running/recent runs and link to the list.
+- [x] Unit tests (view model + rendered pages with realistic data, attention selection, wait steps, links).
+- [x] Playwright visual audit (375 + 1280; normal, long text, empty, many/25 steps, wide fan-out, failure, wait step, error) with `assertNoOverflow`; screenshots reviewed.
 
 ### Docs
-- [ ] `docs/guides/durable-workflows.md`: REST reads + UI location; public docs page under `apps/www/src/content/docs/docs/` for following a workflow run; api-reference skill.
+
+- [x] `docs/guides/durable-workflows.md`: REST reads + UI location; public docs page under `apps/www/src/content/docs/docs/` for following a workflow run; api-reference skill.
 
 ### Release
+
 - [ ] Rebase onto main after the foundation PR merges (never write the foundation branch).
 - [ ] Specialist reviews (task-completion, UI/UX, security, cloudflare, test, constitution, doc-sync).
 - [ ] Staging: coordinate window on `feature.workflows`; real run visible in UI end to end; ≤2 VMs, zero at rest.
@@ -115,3 +119,6 @@ engine does not support (no retry/skip/pause/cancel/create); creation stays MCP-
 - 2026-10-21 21:3xZ: read API committed `519e549d4`. Worker tests (`tests/workers/workflow-run-read-routes.test.ts`, 9) + foundation suite (19) green. Discrimination proven: removing `project_id = ?` from `loadWorkflowRun` reddens the cross-project attack test; removing `requireProjectTaskRead` from the detail route reddens the access test. `quality:runtime-boundary-semantics` required valibot row schemas instead of `as Row[]` casts.
 - Branch merged foundation head `ddf4b8f88` (includes main `d4b87b304`) instead of rebasing, to avoid force-pushing the output branch.
 - turbo injects a block into AGENTS.md when it detects an agent; revert it before every commit.
+- 2026-10-21 22:2xZ: web UI committed `3f02b81dc` (list, run page with Steps/Graph/Activity, step details, overview sections, event-wait view). Playwright audit `workflow-runs-audit.spec.ts` 54/54 at 375/390/1280 plus the existing Automation audit 42/42. Real bug found by the 25-step fixture: React Flow fit-view shrank nodes to ~13px, fixed with a 0.75 minimum zoom, sideways scroll centred on the selected step, and a hint.
+- Unit tests `e9d6d469e` (28): view model + rendered pages. Discrimination: removing the 3-day attention window reddens the overview test; polling finished runs reddens the polling test.
+- Docs: public guide `guides/workflows.md` (3 compressed screenshots from `docs-screenshots-workflows.spec.ts`), Automation guide, admin-settings table for `workflow.*` (the foundation added the settings without public docs), contract doc "Reading runs", api-reference section. `www` build, link check (0 broken) and tests (94) pass.
