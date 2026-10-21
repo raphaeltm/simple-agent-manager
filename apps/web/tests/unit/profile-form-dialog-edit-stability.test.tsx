@@ -67,7 +67,9 @@ describe('ProfileFormDialog edit stability', () => {
     );
 
     // Liveness: the form is still mounted and rendering this profile's other fields.
-    expect(screen.getByPlaceholderText('What this profile is for...')).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('What this profile is for. Shown on new-chat cards.')
+    ).toBeInTheDocument();
     expect(name).toBeInTheDocument();
 
     expect(name.value).toBe('My Renamed Profile');

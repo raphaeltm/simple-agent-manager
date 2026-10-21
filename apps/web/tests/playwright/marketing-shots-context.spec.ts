@@ -19,7 +19,7 @@
  *   B. sam-context-memory    — Memory tab, 4 entities expanded to show observations
  *   C. sam-context-policies  — Policies tab, 12 durable instruction-only policies
  *   D. sam-context-actions   — Agent actions tab, timestamped activity feed
- *   E. sam-chat-new-session  — project chat "new chat" composer + profile selector
+ *   E. sam-chat-new-session  — project chat "new chat" screen: recent profile cards + To control
  *   F. sam-chat-tool-stream  — live session mid-task with a rich tool stream
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
@@ -1035,6 +1035,17 @@ async function setupMocks(page: Page) {
       if (subPath === '/sessions') return respond(route, 200, { sessions: SESSION_LIST, total: SESSION_LIST.length });
       if (subPath === '/tasks') return respond(route, 200, { tasks: [], total: 0 });
       if (subPath === '/agent-profiles') return respond(route, 200, { items: AGENT_PROFILES });
+      if (subPath === '/agent-profiles/picker') {
+        return respond(route, 200, {
+          usage: AGENT_PROFILES.slice(0, 3).map((profile, index) => ({
+            profileId: profile.id,
+            lastUsedAt: new Date(agoMs((index + 1) * 60)).toISOString(),
+            chatCount: 6 - index,
+          })),
+          hiddenProfileIds: [],
+          usageWindowDays: 30,
+        });
+      }
       if (subPath === '/cached-commands') return respond(route, 200, { commands: [] });
       if (subPath === '/commands') return respond(route, 200, { commands: [] });
       if (subPath === '/skills') return respond(route, 200, { items: [] });
@@ -1163,26 +1174,16 @@ test('sam-chat-new-session', async ({ page }) => {
   await setupMocks(page);
   await page.goto(`/projects/${PROJECT_ID}/chat`);
 
-  await expect(page.getByText('What do you want to build?')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Who should take this?')).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('body')).not.toContainText('Something went wrong');
   await expect(page.getByPlaceholder('Describe what you want the agent to do...')).toBeVisible();
 
-  // Quick-start prompt suggestions
-  await expect(page.getByRole('button', { name: 'Run the tests and summarize what fails.' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Fix the most recent open issue.' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Find one small improvement I can ship today.' })).toBeVisible();
-
-  // Agent profile selector — 5 profiles. Each toggle button carries a `title`
-  // attribute equal to the plain profile name; the adjacent "Edit <name>"
-  // icon button's aria-label contains the same text as a substring, so match
-  // on the `title` attribute rather than accessible name to avoid ambiguity.
-  const profileRow = page.locator('[aria-label="Agent profiles and skills"]');
-  await expect(profileRow).toBeVisible();
-  await expect(profileRow.locator('button[title="Claude Code — Opus 5"]')).toBeVisible();
-  await expect(profileRow.locator('button[title="Codex 5.5 High"]')).toBeVisible();
-  await expect(profileRow.locator('button[title="Gemini CLI Reviewer"]')).toBeVisible();
-  await expect(profileRow.locator('button[title="Brainstormer"]')).toBeVisible();
-  await expect(profileRow.locator('button[title="Picky CTO"]')).toBeVisible();
+  // Recent profiles as cards; the composer names the pre-selected (last-used) one.
+  const cards = page.getByRole('region', { name: 'Choose a profile' });
+  for (const profile of AGENT_PROFILES.slice(0, 3)) {
+    await expect(cards.getByRole('button', { name: new RegExp(profile.name) })).toBeVisible();
+  }
+  await expect(page.getByRole('button', { name: /^To / })).toContainText(AGENT_PROFILES[0]!.name);
 
   // Sidebar — existing sessions with Northwind topics
   await expect(page.getByText('Add idempotency keys to refund webhook')).toBeVisible();

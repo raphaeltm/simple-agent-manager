@@ -1,6 +1,12 @@
 import { queryOptions } from '@tanstack/react-query';
 
-import { listAgentCredentials, listAgentProfiles, listAgents, listSkills } from '../api';
+import {
+  getProfilePickerState,
+  listAgentCredentials,
+  listAgentProfiles,
+  listAgents,
+  listSkills,
+} from '../api';
 import { AGENT_CATALOG_STALE_TIME_MS } from '../query-stale-times';
 
 /**
@@ -30,6 +36,12 @@ export const agentQueryKeys = {
   profiles: (queryScope: string) => [...agentQueryKeys.all(queryScope), 'profiles'] as const,
   profileList: (queryScope: string, projectId: string) =>
     [...agentQueryKeys.profiles(queryScope), projectId] as const,
+  /**
+   * The caller's own new-chat picker state (usage + hidden). Nested under
+   * `profileList`, so invalidating a project's profiles also refreshes it.
+   */
+  profilePicker: (queryScope: string, projectId: string) =>
+    [...agentQueryKeys.profileList(queryScope, projectId), 'picker'] as const,
   skills: (queryScope: string) => [...agentQueryKeys.all(queryScope), 'skills'] as const,
   skillList: (queryScope: string, projectId: string) =>
     [...agentQueryKeys.skills(queryScope), projectId] as const,
@@ -54,6 +66,13 @@ export function agentProfilesQueryOptions(queryScope: string, projectId: string)
   return queryOptions({
     queryKey: agentQueryKeys.profileList(queryScope, projectId),
     queryFn: () => listAgentProfiles(projectId),
+  });
+}
+
+export function profilePickerQueryOptions(queryScope: string, projectId: string) {
+  return queryOptions({
+    queryKey: agentQueryKeys.profilePicker(queryScope, projectId),
+    queryFn: () => getProfilePickerState(projectId),
   });
 }
 

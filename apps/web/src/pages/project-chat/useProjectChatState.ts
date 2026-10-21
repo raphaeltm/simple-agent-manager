@@ -1,12 +1,8 @@
 // FILE SIZE EXCEPTION: Pre-existing project chat state hook exceeds the 800-line gate on main; split as follow-up outside shared runtime fix scope.
 import type {
-  AgentProfileRuntime,
-  CreateAgentProfileRequest,
   ProviderCatalog,
   Task,
   TaskMode,
-  UpdateAgentProfileRequest,
-  VMSize,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
 import { DEFAULT_WORKSPACE_PROFILE, hasByocComputeCredential } from '@simple-agent-manager/shared';
@@ -14,16 +10,15 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 
+import { selectProfileId } from '../../components/project-chat/profile-picker/model';
 import {
   EMPTY_RESOURCE_STATE as EMPTY_RESOURCE_STATE_IMPORT,
   hasAnyResourceValue,
   hasValidationErrors,
-  serializeResourceRequirements,
   toResourceRequirements,
   validateResourceState,
 } from '../../components/resource-requirements';
 import { useAgentCatalog } from '../../hooks/useAgentCatalog';
-import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
 import { useBootLogStream } from '../../hooks/useBootLogStream';
 import { useCredentials } from '../../hooks/useCredentials';
@@ -53,13 +48,7 @@ import {
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { isRetryOrFork } from './lineageUtils';
-import {
-  buildForkMessage,
-  resolveWizardRuntime,
-  resolveWizardTaskMode,
-  resolveWizardWorkspaceProfile,
-  selectProfileId,
-} from './profileWizardHelpers';
+import { buildForkMessage } from './profileWizardHelpers';
 import {
   buildBaseSubmitRequest,
   getCompletedAttachmentRefs,
@@ -74,6 +63,7 @@ import {
   SESSION_SYNC_INTERVAL_MS,
 } from './types';
 import { DEFAULT_ATTACHMENT_MESSAGE, useAttachments } from './useAttachments';
+import { useProfileChoice } from './useProfileChoice';
 import { useProjectSkills } from './useProjectSkills';
 import { useProvisioningTracker } from './useProvisioningTracker';
 import { useSessionReducer } from './useSessionReducer';
@@ -92,21 +82,7 @@ export interface PendingDerived {
   promptLoading: boolean;
 }
 
-export type ProfileWizardStep = 'agent' | 'work-type' | 'runtime' | 'resources' | 'name';
 export type SessionScope = 'my' | 'all';
-
-export interface ProfileWizardState {
-  open: boolean;
-  step: ProfileWizardStep;
-  selectedAgentType: string | null;
-  workType: TaskMode | null;
-  runtime: AgentProfileRuntime | null;
-  vmSize: VMSize | null;
-  resourceReqs: import('../../components/resource-requirements').ResourceRequirementsFormState;
-  profileName: string;
-  saving: boolean;
-  error: string | null;
-}
 
 const EMPTY_PROVIDER_CATALOGS: ProviderCatalog[] = [];
 
@@ -158,27 +134,28 @@ export function useProjectChatState() {
   );
   const [selectedAgentType, setSelectedAgentType] = useState<string | null>(null);
 
-  // Agent profile selection
-  const {
-    profiles: agentProfiles,
-    createProfile: createProfileMutation,
-    updateProfile,
-  } = useAgentProfiles(projectId, queryScope);
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-
-  // Auto-selection that previously lived inside the two removed mount effects. Both
-  // are strictly "fill in a default once something is available" — neither may
-  // override a choice the user has already made, so each is guarded on the current
-  // selection (`.claude/rules/06-technical-patterns.md`, interaction-effect analysis).
+  // Fill in a default agent type once one is available, never overriding a choice
+  // (`.claude/rules/06-technical-patterns.md`, interaction-effect analysis).
   useEffect(() => {
     const firstAgent = configuredAgents[0];
     if (!firstAgent) return;
     setSelectedAgentType((current) => current ?? firstAgent.id);
   }, [configuredAgents]);
 
-  useEffect(() => {
-    setSelectedProfileId((current) => selectProfileId(current, agentProfiles));
-  }, [agentProfiles]);
+  // Profiles, the person's picker state and pre-selection, the picker sheet and the
+  // inline create-profile wizard.
+  const profileChoice = useProfileChoice({
+    projectId,
+    queryScope,
+    configuredAgents,
+    selectedAgentType,
+  });
+  const {
+    agentProfiles,
+    selectedProfileId,
+    openProfileWizard,
+    profilePicker: { picker: profilePickerInput, refresh: refreshProfilePicker },
+  } = profileChoice;
   const { skills, selectedSkillId, setSelectedSkillId } = useProjectSkills(projectId);
   // The catalog is only meaningful once the user can actually provision, matching the
   // previous behaviour where it was fetched inside the `hasCloud` branch.
@@ -186,18 +163,6 @@ export function useProjectChatState() {
     hasCloudCredentials ? queryScope : ''
   );
   const providerCatalogs = hasCloudCredentials ? allProviderCatalogs : EMPTY_PROVIDER_CATALOGS;
-  const [profileWizard, setProfileWizard] = useState<ProfileWizardState>({
-    open: false,
-    step: 'agent',
-    selectedAgentType: null,
-    workType: null,
-    runtime: null,
-    vmSize: null,
-    resourceReqs: { ...EMPTY_RESOURCE_STATE_IMPORT },
-    profileName: '',
-    saving: false,
-    error: null,
-  });
 
   // Slash command cache for pre-session autocomplete
   // Pass sessionId as refreshKey so cached commands are re-fetched when switching sessions
@@ -347,13 +312,6 @@ export function useProjectChatState() {
     }
   }, [multiplayerActive]);
 
-  const handleUpdateProfile = useCallback(
-    async (profileId: string, data: UpdateAgentProfileRequest) => {
-      await updateProfile(profileId, data);
-    },
-    [updateProfile]
-  );
-
   useEffect(() => {
     if (executeIdeaId && !sessionId) {
       executeIdeaIdRef.current = executeIdeaId;
@@ -476,123 +434,28 @@ export function useProjectChatState() {
   // Handlers
   // ---------------------------------------------------------------------------
 
-  const suggestProfileName = useCallback(
-    (agentType: string | null, workType: TaskMode | null) => {
-      const agent = configuredAgents.find((candidate) => candidate.id === agentType);
-      const agentName = agent?.name ?? 'Agent';
-      return workType === 'task' ? `${agentName} Tasks` : `${agentName} Chat`;
-    },
-    [configuredAgents]
-  );
-
-  const openProfileWizard = useCallback(() => {
-    const soleAgent = configuredAgents.length === 1 ? configuredAgents[0] : null;
-    const initialAgentType = soleAgent?.id ?? selectedAgentType ?? configuredAgents[0]?.id ?? null;
-    setProfileWizard({
-      open: true,
-      step: soleAgent ? 'work-type' : 'agent',
-      selectedAgentType: initialAgentType,
-      workType: null,
-      runtime: null,
-      vmSize: null,
-      resourceReqs: { ...EMPTY_RESOURCE_STATE_IMPORT },
-      profileName: '',
-      saving: false,
-      error: null,
-    });
-  }, [configuredAgents, selectedAgentType]);
-
-  const closeProfileWizard = useCallback(() => {
-    setProfileWizard((current) => ({ ...current, open: false, saving: false, error: null }));
-  }, []);
-
-  const updateProfileWizard = useCallback((patch: Partial<ProfileWizardState>) => {
-    setProfileWizard((current) => ({ ...current, ...patch, error: null }));
-  }, []);
-
-  const createProfile = useCallback(
-    async (data: CreateAgentProfileRequest) => {
-      // The mutation invalidates the shared `agentProfiles` entry, so the new profile
-      // reaches every consumer (profiles page, task forms, trigger form) rather than
-      // only this hook's local copy, which is what the previous manual splice did.
-      const profile = await createProfileMutation(data);
-      setSelectedProfileId(profile.id);
-      return profile;
-    },
-    [createProfileMutation]
-  );
-
-  const createProfileFromWizard = useCallback(async () => {
-    const name = profileWizard.profileName.trim();
-    if (!name) {
-      setProfileWizard((current) => ({ ...current, error: 'Profile name is required' }));
-      return null;
-    }
-    if (agentProfiles.some((profile) => profile.name.toLowerCase() === name.toLowerCase())) {
-      setProfileWizard((current) => ({ ...current, error: `Profile "${name}" already exists` }));
-      return null;
-    }
-    const agentType = profileWizard.selectedAgentType ?? configuredAgents[0]?.id;
-    if (!agentType) {
-      setProfileWizard((current) => ({
-        ...current,
-        error: 'Choose an agent before creating a profile',
-      }));
-      return null;
-    }
-    const workType = profileWizard.workType ?? 'conversation';
-    const runtime = resolveWizardRuntime(workType, profileWizard.runtime);
-    setProfileWizard((current) => ({ ...current, saving: true, error: null }));
-    try {
-      const resourceJson =
-        runtime === 'cf-container'
-          ? null
-          : serializeResourceRequirements(profileWizard.resourceReqs);
-      const profile = await createProfile({
-        name,
-        description:
-          workType === 'task'
-            ? 'Write code and open pull requests'
-            : 'Chat and explore with a lightweight workspace',
-        agentType,
-        runtime,
-        resourceRequirementsJson: resourceJson,
-        workspaceProfile: resolveWizardWorkspaceProfile(runtime, workType),
-        taskMode: resolveWizardTaskMode(runtime, workType),
-      });
-      setProfileWizard((current) => ({ ...current, open: false, saving: false, error: null }));
-      return profile;
-    } catch (err) {
-      setProfileWizard((current) => ({
-        ...current,
-        saving: false,
-        error: err instanceof Error ? err.message : 'Failed to create profile',
-      }));
-      return null;
-    }
-  }, [
-    agentProfiles,
-    configuredAgents,
-    createProfile,
-    profileWizard.profileName,
-    profileWizard.runtime,
-    profileWizard.selectedAgentType,
-    profileWizard.resourceReqs,
-    profileWizard.workType,
-  ]);
-
   const resolveProfileIdForSubmit = useCallback(async () => {
     if (selectedProfileId) return selectedProfileId;
     if (configuredAgents.length === 0) {
       setSubmitError('Add an agent in Settings before starting a chat.');
       return null;
     }
-    if (agentProfiles.length > 0) return agentProfiles[0]?.id ?? null;
+    if (agentProfiles.length > 0) {
+      // Sent before the picker state arrived: same default rule, without waiting for it.
+      const fallback = profilePickerInput.status === 'ready' ? profilePickerInput : null;
+      return selectProfileId(null, agentProfiles, fallback ?? { status: 'unavailable' });
+    }
 
     openProfileWizard();
     setSubmitError('Create a profile before sending your first message.');
     return null;
-  }, [agentProfiles, configuredAgents.length, openProfileWizard, selectedProfileId]);
+  }, [
+    agentProfiles,
+    configuredAgents.length,
+    openProfileWizard,
+    profilePickerInput,
+    selectedProfileId,
+  ]);
 
   const handleSubmit = async () => {
     const trimmed =
@@ -648,6 +511,7 @@ export function useProjectChatState() {
         newChatIntentRef.current = false;
         navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
         loadSessions().catch(() => undefined);
+        void refreshProfilePicker();
         return;
       }
 
@@ -703,6 +567,7 @@ export function useProjectChatState() {
       newChatIntentRef.current = false;
       navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
       void loadSessions();
+      void refreshProfilePicker();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Failed to start task');
     } finally {
@@ -903,19 +768,23 @@ export function useProjectChatState() {
     setSelectedAgentType,
     agentProfiles,
     selectedProfileId,
-    setSelectedProfileId,
+    setSelectedProfileId: profileChoice.setSelectedProfileId,
+    profilePicker: profileChoice.profilePicker,
+    profileSheet: profileChoice.profileSheet,
+    openProfileSheet: profileChoice.openProfileSheet,
+    closeProfileSheet: profileChoice.closeProfileSheet,
     skills,
     selectedSkillId,
     setSelectedSkillId,
     providerCatalogs,
     hasUserCloudCredentials,
-    profileWizard,
+    profileWizard: profileChoice.profileWizard,
     openProfileWizard,
-    closeProfileWizard,
-    updateProfileWizard,
-    createProfileFromWizard,
-    suggestProfileName,
-    handleUpdateProfile,
+    closeProfileWizard: profileChoice.closeProfileWizard,
+    updateProfileWizard: profileChoice.updateProfileWizard,
+    createProfileFromWizard: profileChoice.createProfileFromWizard,
+    suggestProfileName: profileChoice.suggestProfileName,
+    handleUpdateProfile: profileChoice.handleUpdateProfile,
     slashCommands,
     selectedWorkspaceProfile,
     setSelectedWorkspaceProfile,

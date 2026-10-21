@@ -173,7 +173,7 @@ In **SAM** mode the proxy serves the models in the platform catalog, which an op
 
 ## Agent Profiles
 
-An **agent profile** bundles a connected agent, a model, and settings into a reusable configuration. Profiles are how you choose what runs: pick a profile from the chat input when you start a session, or attach one to a [trigger](/docs/guides/webhook-triggers/) for automated work. Create and manage profiles under a project's **Profiles** page.
+An **agent profile** bundles a connected agent, a model, and settings into a reusable configuration. Profiles are how you choose what runs: pick one when you start a chat ([see below](#choosing-a-profile-for-a-new-chat)), or attach one to a [trigger](/docs/guides/webhook-triggers/) for automated work. Create and manage profiles under a project's **Profiles** page.
 
 In a [shared project](/docs/guides/collaboration/), agent profiles (and skills, environment variables, secrets, and files) are project-scoped resources — any member can use profiles another member created. LLM cost still follows the running user's own key unless a shared project credential is attached.
 
@@ -184,6 +184,14 @@ When work starts, the agent is resolved in this order:
 3. The platform default (`DEFAULT_TASK_AGENT_TYPE`, `opencode` in the checked-in Worker config)
 
 Type `@` in a chat message to choose a profile from the mention list. Mentions are optional hints to the receiving agent: unknown names leave your message unchanged. Names such as `@gcp-deployer`, `@release.bot`, and `@部署` are supported; names with spaces use quotes, such as `@"Code Reviewer"`. The mention list handles quoting and escaping for you. Email addresses and npm scopes such as `@types/node` stay ordinary text. Selecting the profile that runs a chat remains strict: an invalid selection is rejected.
+
+### Choosing a profile for a new chat
+
+- **The profile you used last is pre-selected.** A new chat starts with the profile you most recently started a chat with in this project. Change it any time before you send.
+- **Your recent profiles appear as cards.** With two or more profiles, the empty chat asks **Who should take this?** and shows your most recent profiles as cards. On a computer it also shows profiles that build and open pull requests. Each card shows the profile's description (edit it on the **Profiles** page) and what runs it, such as **Claude · Opus 5.5 · max effort**. Tap a card to pick it. With only one profile, the starter prompts show instead.
+- **To** above the message box names the chosen profile. Select it to see every profile: **Recent** first, then **Chat & explore** and **Build & open PRs**, with a search box once you have more than eight. **New**, **Edit** and **Manage** are at the bottom.
+- **Hide profiles you don't pick by hand.** In that list, select **Edit list**, then the eye next to a profile. Or accept the suggestion to hide every profile you haven't picked in the last 30 days (admins can change the window with [`chat.profileUsageWindowDays`](/docs/guides/admin-settings/#chat)). Hiding only changes your own list in this project: triggers, agents that dispatch work, @mentions and other members still use the profile. Hidden profiles stay at the end of the list, and you can show them again there.
+- **Skill and resources are under the sliders button** next to **To**. A number on the button shows how many you've set for this chat.
 
 ### Choosing a model
 
@@ -214,7 +222,8 @@ agent more careful, choose another mode:
 Set a mode in a profile, in the project's **Agent Overrides** (project settings), or in
 **Settings → Agents**. When a chat starts, SAM uses the first of these that sets a mode, in that
 order; a change applies to chats started after you save it, not to one already running. (A skill
-created with SAM's `create_skill` tool can set a mode too, and it wins over the profile's.)
+created with SAM's `create_skill` tool can set a mode too, and it wins over the profile's. A skill only
+overrides what it sets: when it leaves the agent empty, the profile's agent runs.)
 
 When the agent asks, a card appears in the chat and the agent waits for your answer — see
 [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you). A request nobody

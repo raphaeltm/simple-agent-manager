@@ -2,39 +2,33 @@ import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import type {
   AgentInfo,
   AgentProfile,
-  AgentProfileRuntime,
   AgentSkill,
   TaskMode,
   UpdateAgentProfileRequest,
 } from '@simple-agent-manager/shared';
-import {
-  Check,
-  ChevronDown,
-  ChevronRight,
-  MessageSquare,
-  Plus,
-  Server,
-  Settings,
-  Wrench,
-  Zap,
-} from 'lucide-react';
-import type { MutableRefObject, ReactNode } from 'react';
+import { Paperclip } from 'lucide-react';
+import type { MutableRefObject } from 'react';
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
+import {
+  ComposerOptionsButton,
+  composerOptionsCount,
+  ComposerOptionsPanel,
+  type ComposerOptionsValue,
+  ProfilePickerSheet,
+  ProfileToControl,
+} from '../../components/project-chat/profile-picker';
 import { ProjectChatComposer } from '../../components/project-chat/ProjectChatComposer';
 import {
-  EMPTY_RESOURCE_STATE,
-  hasAnyResourceValue,
   hasValidationErrors,
   type ResourceRequirementsFormState,
-  ResourceRequirementsInput,
   type ResourceValidationErrors,
-  validateResourceState,
 } from '../../components/resource-requirements';
 import { useIsMobile } from '../../hooks/useIsMobile';
-import type { ProfileWizardState, ProfileWizardStep } from './useProjectChatState';
+import type { UseProfilePickerResult } from '../../hooks/useProfilePicker';
+import { NoAgentsNotice, NoProfilesGate, ProfileWizardPanel } from './ProfileWizardPanel';
+import type { ProfileSheetState, ProfileWizardState } from './useProfileChoice';
 
 interface ChatAttachmentDisplay {
   file: File;
@@ -42,71 +36,6 @@ interface ChatAttachmentDisplay {
   progress: number;
   status: 'pending' | 'uploading' | 'complete' | 'error';
   error?: string;
-}
-
-const WIZARD_STEPS: ProfileWizardStep[] = ['agent', 'work-type', 'runtime', 'resources', 'name'];
-
-function getWizardSteps(skipAgent: boolean, runtime: AgentProfileRuntime | null) {
-  return WIZARD_STEPS.filter((step) => {
-    if (skipAgent && step === 'agent') return false;
-    if (runtime === 'cf-container' && step === 'resources') return false;
-    return true;
-  });
-}
-
-function getWizardStepNumber(step: ProfileWizardStep, visibleSteps: ProfileWizardStep[]) {
-  return Math.max(1, visibleSteps.indexOf(step) + 1);
-}
-
-function getWizardNextStep(step: ProfileWizardStep, visibleSteps: ProfileWizardStep[]) {
-  const index = visibleSteps.indexOf(step);
-  if (index < 0 || index >= visibleSteps.length - 1) return null;
-  return visibleSteps[index + 1] ?? null;
-}
-
-function getWizardPreviousStep(step: ProfileWizardStep, visibleSteps: ProfileWizardStep[]) {
-  const index = visibleSteps.indexOf(step);
-  if (index <= 0) return null;
-  return visibleSteps[index - 1] ?? null;
-}
-
-function getAgentInitial(agent: AgentInfo) {
-  return (agent.name.trim()[0] ?? agent.id[0] ?? 'A').toUpperCase();
-}
-
-function getRuntimeLabel(runtime: AgentProfileRuntime | null) {
-  if (runtime === 'cf-container') return 'Instant';
-  if (runtime === 'vm') return 'VM';
-  return 'Auto';
-}
-
-function getRuntimeSummary(runtime: AgentProfileRuntime | null) {
-  if (runtime === 'cf-container') return 'Instant container';
-  if (runtime === 'vm') return 'Cloud VM';
-  return 'Auto runtime';
-}
-
-function getRuntimeBadgeTitle(runtime: AgentProfileRuntime): string {
-  return runtime === 'cf-container' ? 'Instant container profile' : 'Cloud VM profile';
-}
-
-function RuntimeBadge({ runtime }: Readonly<{ runtime: AgentProfileRuntime }>) {
-  const isInstant = runtime === 'cf-container';
-  const Icon = isInstant ? Zap : Server;
-  return (
-    <span
-      className={[
-        'inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none',
-        isInstant
-          ? 'border-accent/30 bg-accent/10 text-accent'
-          : 'border-info/30 bg-info-tint text-info-fg',
-      ].join(' ')}
-      title={getRuntimeBadgeTitle(runtime)}
-    >
-      <Icon size={11} aria-hidden="true" />
-      {getRuntimeLabel(runtime)}
-    </span>
-  );
 }
 
 type ChatInputProps = Readonly<{
@@ -122,6 +51,10 @@ type ChatInputProps = Readonly<{
   agentProfiles: AgentProfile[];
   selectedProfileId: string | null;
   onProfileChange: (profileId: string | null) => void;
+  profilePicker: UseProfilePickerResult;
+  profileSheet: ProfileSheetState;
+  onOpenProfileSheet: (anchor: DOMRect | null) => void;
+  onCloseProfileSheet: () => void;
   skills: AgentSkill[];
   selectedSkillId: string | null;
   onSkillChange: (skillId: string | null) => void;
@@ -160,51 +93,11 @@ function getComposerPlaceholder({
   return placeholder;
 }
 
-function canAdvanceWizard(profileWizard: ProfileWizardState) {
-  if (profileWizard.step === 'agent') return Boolean(profileWizard.selectedAgentType);
-  if (profileWizard.step === 'work-type') return Boolean(profileWizard.workType);
-  if (profileWizard.step === 'runtime') return Boolean(profileWizard.runtime);
-  if (profileWizard.step === 'resources') {
-    return !hasValidationErrors(validateResourceState(profileWizard.resourceReqs));
-  }
-  return Boolean(profileWizard.profileName.trim());
-}
-
-function getProfileButtonClass(selected: boolean) {
-  return [
-    'min-h-8 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors flex items-center gap-1.5 min-w-0 max-w-full',
-    selected
-      ? 'border-accent bg-accent/10 text-accent'
-      : 'border-border-default bg-transparent text-fg-secondary hover:border-accent/60 hover:text-fg-primary',
-  ].join(' ');
-}
-
-function getWizardBackLabel(step: ProfileWizardStep, visibleSteps: ProfileWizardStep[]) {
-  return getWizardPreviousStep(step, visibleSteps) ? 'Back' : 'Cancel';
-}
-
-function getWizardTitle(step: ProfileWizardStep) {
-  const titles: Record<ProfileWizardStep, string> = {
-    agent: 'Which agent?',
-    'work-type': 'What kind of work?',
-    runtime: 'Where should it run?',
-    resources: 'Resources',
-    name: 'Name the profile',
-  };
-  return titles[step];
-}
-
-function getWizardDescription(step: ProfileWizardStep) {
-  const descriptions: Record<ProfileWizardStep, string> = {
-    agent: 'Choose the agent this profile should use.',
-    'work-type': 'Pick whether this profile should work independently or stay conversational.',
-    runtime: 'Choose Instant for quick chat, or Cloud VM for heavier work.',
-    resources: 'Set minimum resource requirements, or leave blank for defaults.',
-    name: 'Use a short name that will be easy to pick later.',
-  };
-  return descriptions[step];
-}
-
+/**
+ * The new-chat composer: one toolbar row (who the chat goes to, attach, options) above
+ * the message box. Profiles are picked in a sheet or from the cards above, not from a
+ * wall of chips (idea 01M5EW9H86VD88S7E3WWA1D9X1).
+ */
 export function ChatInput({
   value,
   onChange,
@@ -218,6 +111,10 @@ export function ChatInput({
   agentProfiles,
   selectedProfileId,
   onProfileChange,
+  profilePicker,
+  profileSheet,
+  onOpenProfileSheet,
+  onCloseProfileSheet,
   skills,
   selectedSkillId,
   onSkillChange,
@@ -241,61 +138,33 @@ export function ChatInput({
 }: ChatInputProps) {
   const isMobile = useIsMobile();
   const [editProfileOpen, setEditProfileOpen] = useState(false);
-  const [resourceOverrideOpen, setResourceOverrideOpen] = useState(false);
-  const hasTaskResources = hasAnyResourceValue(taskResourceReqs);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const hasResourceErrors = hasValidationErrors(taskResourceErrors);
 
   const selectedProfile = selectedProfileId
     ? (agentProfiles.find((p) => p.id === selectedProfileId) ?? null)
     : null;
-  const skipAgentStep = agents.length === 1;
   const needsProfileBeforeSubmit = agentProfiles.length === 0 && agents.length >= 1;
   const noAgents = agents.length === 0;
   const inputDisabled = noAgents || needsProfileBeforeSubmit || profileWizard.open;
+  const showToolbar = !inputDisabled && agentProfiles.length > 0;
   const composerPlaceholder = getComposerPlaceholder({
     noAgents,
     needsProfileBeforeSubmit,
     wizardOpen: profileWizard.open,
     placeholder,
   });
-  const canProceed = canAdvanceWizard(profileWizard);
-
-  const selectedWizardAgent =
-    agents.find((agent) => agent.id === profileWizard.selectedAgentType) ?? agents[0] ?? null;
-  const visibleWizardSteps = getWizardSteps(skipAgentStep, profileWizard.runtime);
-  const stepNumber = getWizardStepNumber(profileWizard.step, visibleWizardSteps);
-  const totalSteps = visibleWizardSteps.length;
-
-  const updateWizardStep = (step: ProfileWizardStep) => onUpdateProfileWizard({ step });
-
-  const handleWizardNext = () => {
-    if (!canProceed || profileWizard.saving) return;
-    const nextStep = getWizardNextStep(profileWizard.step, visibleWizardSteps);
-    if (!nextStep) {
-      void onCreateProfileFromWizard();
-      return;
-    }
-    if (nextStep === 'name') {
-      onUpdateProfileWizard({
-        step: 'name',
-        profileName:
-          profileWizard.profileName.trim() ||
-          suggestProfileName(profileWizard.selectedAgentType, profileWizard.workType),
-      });
-      return;
-    }
-    updateWizardStep(nextStep);
+  const options: ComposerOptionsValue = {
+    skills,
+    selectedSkillId,
+    onSkillChange,
+    taskResourceReqs,
+    onTaskResourceReqsChange,
+    taskResourceErrors,
+    onTaskResourceErrorsClear,
+    disabled: submitting,
   };
-
-  const handleWizardBack = () => {
-    if (profileWizard.saving) return;
-    const previousStep = getWizardPreviousStep(profileWizard.step, visibleWizardSteps);
-    if (!previousStep) {
-      onCloseProfileWizard();
-      return;
-    }
-    updateWizardStep(previousStep);
-  };
+  const showOptions = optionsOpen || hasResourceErrors;
 
   return (
     <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
@@ -307,268 +176,55 @@ export function ChatInput({
 
       {noAgents && <NoAgentsNotice projectId={projectId} />}
 
-      {agentProfiles.length > 0 && !profileWizard.open && (
-        <div
-          className="mb-2 flex flex-wrap items-center gap-1.5"
-          aria-label="Agent profiles and skills"
-        >
-          {agentProfiles.map((profile) => (
-            <button
-              key={profile.id}
-              type="button"
-              onClick={() => onProfileChange(profile.id)}
-              disabled={submitting}
-              className={getProfileButtonClass(profile.id === selectedProfileId)}
-              aria-pressed={profile.id === selectedProfileId}
-              title={profile.name}
-            >
-              <span className="truncate">{profile.name}</span>
-              {profile.runtime && <RuntimeBadge runtime={profile.runtime} />}
-            </button>
-          ))}
-          {selectedProfile && (
-            <button
-              type="button"
-              onClick={() => setEditProfileOpen(true)}
-              disabled={submitting}
-              aria-label={`Edit ${selectedProfile.name}`}
-              className="min-h-8 min-w-8 rounded-full border border-border-default bg-page text-fg-muted hover:text-fg-primary flex items-center justify-center disabled:opacity-50"
-            >
-              <Settings size={16} />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onOpenProfileWizard}
-            disabled={submitting}
-            className="min-h-8 rounded-full border border-dashed border-border-default bg-transparent px-2.5 py-1 text-xs text-fg-muted hover:border-accent/60 hover:text-fg-primary flex items-center gap-1 disabled:opacity-50"
-          >
-            <Plus size={15} />
-            New
-          </button>
-        </div>
-      )}
-
       {needsProfileBeforeSubmit && !profileWizard.open && (
         <NoProfilesGate onStartWizard={onOpenProfileWizard} />
       )}
 
       {profileWizard.open && (
-        <div className="mb-3 overflow-hidden rounded-lg border border-border-default bg-surface">
-          <div className="h-1 bg-border-default">
-            <div
-              className="h-full bg-accent transition-[width]"
-              style={{ width: `${(stepNumber / totalSteps) * 100}%` }}
+        <ProfileWizardPanel
+          agents={agents}
+          profileWizard={profileWizard}
+          onCloseProfileWizard={onCloseProfileWizard}
+          onUpdateProfileWizard={onUpdateProfileWizard}
+          onCreateProfileFromWizard={onCreateProfileFromWizard}
+          suggestProfileName={suggestProfileName}
+        />
+      )}
+
+      {showToolbar && showOptions && <ComposerOptionsPanel options={options} compact={isMobile} />}
+
+      {showToolbar && (
+        <div className="mb-2 flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <ProfileToControl
+              profile={selectedProfile}
+              loading={profilePicker.picker.status === 'loading'}
+              disabled={submitting}
+              onOpen={onOpenProfileSheet}
             />
           </div>
-          <div className="p-3 sm:p-4">
-            <div className="mb-3">
-              <div className="text-[10px] uppercase text-fg-muted">
-                Step {stepNumber} of {totalSteps}
-              </div>
-              <h2 className="m-0 mt-1 text-sm font-semibold text-fg-primary">
-                {getWizardTitle(profileWizard.step)}
-              </h2>
-              <p className="m-0 mt-1 text-xs text-fg-muted">
-                {getWizardDescription(profileWizard.step)}
-              </p>
-            </div>
-
-            {profileWizard.error && (
-              <div
-                role="alert"
-                className="mb-3 rounded-sm bg-danger-tint px-3 py-2 text-xs text-danger"
-              >
-                {profileWizard.error}
-              </div>
-            )}
-
-            {profileWizard.step === 'agent' && (
-              <div className="grid gap-2">
-                {agents.map((agent) => (
-                  <SelectionCard
-                    key={agent.id}
-                    selected={profileWizard.selectedAgentType === agent.id}
-                    onClick={() => onUpdateProfileWizard({ selectedAgentType: agent.id })}
-                    disabled={profileWizard.saving}
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-page text-sm font-semibold text-fg-muted">
-                        {getAgentInitial(agent)}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold text-fg-primary">
-                          {agent.name}
-                        </div>
-                        <div className="line-clamp-2 text-xs text-fg-muted">
-                          {agent.description || agent.id}
-                        </div>
-                      </div>
-                    </div>
-                  </SelectionCard>
-                ))}
-              </div>
-            )}
-
-            {profileWizard.step === 'work-type' && (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <WorkTypeCard
-                  selected={profileWizard.workType === 'task'}
-                  icon={<Wrench size={20} />}
-                  title="Build and open PRs"
-                  description="Best when you want the agent to make changes, run checks, and carry the task to a pull request."
-                  onClick={() => onUpdateProfileWizard({ workType: 'task', runtime: null })}
-                  disabled={profileWizard.saving}
-                />
-                <WorkTypeCard
-                  selected={profileWizard.workType === 'conversation'}
-                  icon={<MessageSquare size={20} />}
-                  title="Chat and explore"
-                  description="Best for questions, planning, code reading, and lighter back-and-forth work."
-                  onClick={() => onUpdateProfileWizard({ workType: 'conversation', runtime: null })}
-                  disabled={profileWizard.saving}
-                />
-              </div>
-            )}
-
-            {profileWizard.step === 'runtime' && (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <WorkTypeCard
-                  selected={profileWizard.runtime === 'cf-container'}
-                  icon={<Zap size={20} />}
-                  title="Instant container"
-                  description="Starts a chat workspace in a Cloudflare Container without a VM provisioning step."
-                  onClick={() =>
-                    onUpdateProfileWizard({
-                      runtime: 'cf-container',
-                      resourceReqs: { ...EMPTY_RESOURCE_STATE },
-                      workType: 'conversation',
-                    })
-                  }
-                  disabled={profileWizard.saving}
-                />
-                <WorkTypeCard
-                  selected={profileWizard.runtime === 'vm'}
-                  icon={<Server size={20} />}
-                  title="Cloud VM"
-                  description="Uses the project's cloud provisioning path for larger or longer-running work."
-                  onClick={() => onUpdateProfileWizard({ runtime: 'vm' })}
-                  disabled={profileWizard.saving}
-                />
-              </div>
-            )}
-
-            {profileWizard.step === 'resources' && (
-              <div className="rounded-md border border-border-default bg-surface p-3">
-                <ResourceRequirementsInput
-                  value={profileWizard.resourceReqs}
-                  onChange={(next: ResourceRequirementsFormState) =>
-                    onUpdateProfileWizard({ resourceReqs: next })
-                  }
-                  disabled={profileWizard.saving}
-                  inheritLabel="platform default"
-                  hideDisk
-                  errors={validateResourceState(profileWizard.resourceReqs)}
-                />
-              </div>
-            )}
-
-            {profileWizard.step === 'name' && (
-              <div className="grid gap-2">
-                <label className="grid gap-1.5">
-                  <span className="text-xs text-fg-muted">Profile name</span>
-                  <input
-                    type="text"
-                    value={profileWizard.profileName}
-                    onChange={(event) => onUpdateProfileWizard({ profileName: event.target.value })}
-                    disabled={profileWizard.saving}
-                    className="min-h-[44px] w-full rounded-md border border-border-default bg-page px-3 py-2 text-sm text-fg-primary outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
-                    placeholder="e.g. Implementer, Quick Chat, Reviewer"
-                  />
-                </label>
-                <div className="text-xs text-fg-muted">
-                  Summary:{' '}
-                  <strong className="text-fg-secondary">
-                    {selectedWizardAgent?.name ?? 'Agent'}
-                  </strong>{' '}
-                  · {profileWizard.workType === 'task' ? 'Build and open PRs' : 'Chat and explore'}{' '}
-                  · {getRuntimeSummary(profileWizard.runtime)}
-                  {profileWizard.runtime !== 'cf-container' &&
-                    profileWizard.resourceReqs.minVcpu && (
-                      <> · {profileWizard.resourceReqs.minVcpu} vCPU</>
-                    )}
-                </div>
-              </div>
-            )}
-
-            <div className="mt-4 flex items-center justify-between border-t border-border-default pt-3">
-              <button
-                type="button"
-                onClick={handleWizardBack}
-                disabled={profileWizard.saving}
-                className="min-h-[44px] rounded-md border border-border-default bg-transparent px-3 py-2 text-sm text-fg-muted hover:text-fg-primary disabled:opacity-50"
-              >
-                {getWizardBackLabel(profileWizard.step, visibleWizardSteps)}
-              </button>
-              <button
-                type="button"
-                onClick={handleWizardNext}
-                disabled={!canProceed || profileWizard.saving}
-                className="min-h-[44px] rounded-md border-0 bg-accent px-4 py-2 text-sm font-semibold text-white disabled:bg-inset disabled:text-fg-muted disabled:opacity-70 flex items-center gap-1.5"
-              >
-                {profileWizard.step === 'name' ? (
-                  <>
-                    <Check size={15} />
-                    {profileWizard.saving ? 'Creating...' : 'Create profile'}
-                  </>
-                ) : (
-                  <>
-                    Next
-                    <ChevronRight size={15} />
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {!noAgents && !profileWizard.open && !needsProfileBeforeSubmit && (
-        <div className="mb-1.5 flex items-center">
-          <button
-            type="button"
-            onClick={() => setResourceOverrideOpen((v) => !v)}
+          {onFilesSelected && (
+            <button
+              type="button"
+              onClick={() => fileInputRef?.current?.click()}
+              disabled={submitting || Boolean(uploading)}
+              aria-label="Attach files to this task"
+              title="Attach files to this task"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border-default bg-transparent text-fg-muted transition-colors hover:text-fg-primary disabled:opacity-50"
+            >
+              <Paperclip
+                size={16}
+                className={uploading ? 'animate-pulse' : ''}
+                aria-hidden="true"
+              />
+            </button>
+          )}
+          <ComposerOptionsButton
+            open={showOptions}
+            count={composerOptionsCount(options)}
             disabled={submitting}
-            className={[
-              'text-[11px] flex items-center gap-1 bg-transparent border-none cursor-pointer p-0 disabled:opacity-50',
-              hasTaskResources
-                ? 'text-accent font-medium'
-                : 'text-fg-muted hover:text-fg-secondary',
-            ].join(' ')}
-          >
-            <Server size={12} aria-hidden="true" />
-            Resources{hasTaskResources ? ' (custom)' : ''}
-            {resourceOverrideOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-          </button>
-        </div>
-      )}
-
-      {(resourceOverrideOpen || hasResourceErrors) && !profileWizard.open && (
-        <div className="mb-2 rounded-md border border-border-default bg-surface px-3 py-2">
-          <ResourceRequirementsInput
-            value={taskResourceReqs}
-            onChange={(next) => {
-              onTaskResourceReqsChange(next);
-              onTaskResourceErrorsClear();
-            }}
-            disabled={submitting}
-            inheritLabel="profile/project default"
-            errors={taskResourceErrors}
-            compact={isMobile}
+            onToggle={() => setOptionsOpen((open) => !open)}
           />
-          <p className="m-0 mt-1 text-[10px] text-fg-muted">
-            Override resources for this task only. Leave blank to inherit.
-          </p>
         </div>
       )}
 
@@ -582,16 +238,29 @@ export function ChatInput({
         transcribeApiUrl={transcribeApiUrl}
         slashCommands={slashCommands}
         agentProfiles={agentProfiles}
-        skills={skills}
-        selectedSkillId={selectedSkillId}
-        onSkillChange={onSkillChange}
         attachments={attachments}
         onFilesSelected={onFilesSelected}
         onRemoveAttachment={onRemoveAttachment}
         fileInputRef={fileInputRef}
         uploading={uploading}
         showShortcutHint={!isMobile}
+        showAttachButton={!showToolbar}
         attachTitle="Attach files to this task"
+      />
+      <ProfilePickerSheet
+        open={profileSheet.open}
+        anchor={profileSheet.anchor}
+        projectId={projectId}
+        profiles={agentProfiles}
+        selectedProfileId={selectedProfileId}
+        pickerState={profilePicker.state}
+        hiddenUpdating={profilePicker.updating}
+        hiddenUpdateError={profilePicker.updateError}
+        onSelect={onProfileChange}
+        onSetHidden={profilePicker.setHidden}
+        onClose={onCloseProfileSheet}
+        onNewProfile={onOpenProfileWizard}
+        onEditProfile={selectedProfile ? () => setEditProfileOpen(true) : undefined}
       />
       {selectedProfile && (
         <ProfileFormDialog
@@ -605,110 +274,5 @@ export function ChatInput({
         />
       )}
     </div>
-  );
-}
-
-function NoAgentsNotice({ projectId }: Readonly<{ projectId: string }>) {
-  const navigate = useNavigate();
-  return (
-    <div className="mb-2 flex flex-col gap-3 rounded-md border border-border-default bg-surface px-3 py-3 sm:flex-row sm:items-center">
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-fg-primary">Add an agent to start chatting</div>
-        <div className="mt-1 text-xs text-fg-muted">
-          Connect or enable an ACP-capable agent in project settings.
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={() => navigate(`/projects/${projectId}/settings/agents`)}
-        className="min-h-[44px] rounded-md border border-border-default bg-page px-3 py-2 text-sm text-fg-primary hover:border-accent/60"
-      >
-        Settings &gt; Agents
-      </button>
-    </div>
-  );
-}
-
-function NoProfilesGate({ onStartWizard }: Readonly<{ onStartWizard: () => void }>) {
-  return (
-    <div className="mb-3 flex flex-col gap-3 rounded-lg border border-accent/20 bg-accent/5 p-3 sm:flex-row sm:items-center">
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-fg-primary">Create a profile to start</div>
-        <div className="mt-1 text-xs text-fg-muted">
-          Choose an agent and default runtime settings for this project chat.
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={onStartWizard}
-        className="min-h-[44px] rounded-md border-0 bg-accent px-4 py-2 text-sm font-semibold text-white flex items-center justify-center gap-1.5"
-      >
-        Create profile
-        <ChevronRight size={15} />
-      </button>
-    </div>
-  );
-}
-
-function SelectionCard({
-  selected,
-  disabled,
-  onClick,
-  children,
-}: Readonly<{
-  selected: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}>) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`min-h-[56px] w-full rounded-md border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
-        selected
-          ? 'border-accent bg-accent/10'
-          : 'border-border-default bg-page hover:border-accent/60'
-      }`}
-    >
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">{children}</div>
-        {selected && <Check size={16} className="shrink-0 text-accent" />}
-      </div>
-    </button>
-  );
-}
-
-function WorkTypeCard({
-  icon,
-  title,
-  description,
-  selected,
-  disabled,
-  onClick,
-}: Readonly<{
-  icon: ReactNode;
-  title: string;
-  description: string;
-  selected: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}>) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`min-h-[132px] rounded-md border p-3 text-left transition-colors disabled:opacity-50 ${
-        selected
-          ? 'border-accent bg-accent/10'
-          : 'border-border-default bg-page hover:border-accent/60'
-      }`}
-    >
-      <div className="mb-2 text-fg-muted">{icon}</div>
-      <div className="text-sm font-semibold text-fg-primary">{title}</div>
-      <div className="mt-1 text-xs leading-5 text-fg-muted">{description}</div>
-    </button>
   );
 }

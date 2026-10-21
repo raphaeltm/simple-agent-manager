@@ -305,6 +305,9 @@ async function setupApiMocks(page: Page, mode: AuditMode, profiles = AGENT_PROFI
             mode === 'wizard' || mode === 'single-wizard' || mode === 'no-agents' ? [] : profiles,
         });
       }
+      if (subPath === '/agent-profiles/picker') {
+        return respond(200, { usage: [], hiddenProfileIds: [], usageWindowDays: 30 });
+      }
       if (subPath === '/skills') return respond(200, { items: mode === 'wizard' ? [] : SKILLS });
       if (subPath.match(/^\/agent-profiles\/[^/]+\/runtime\/env-vars/)) {
         return respond(200, { envVars: [] });
@@ -399,42 +402,46 @@ test.describe('Project chat composer audit', () => {
 
     const textarea = page.locator('textarea[role="combobox"]');
     await expect(textarea).toBeVisible();
-    await expect(page.getByText('Run the tests and summarize what fails.')).toBeVisible();
+    // Three profiles: the empty screen offers them as cards instead of starter prompts.
+    const cards = page.getByRole('region', { name: 'Choose a profile' });
+    await expect(cards.getByRole('button', { name: /^Codex/ })).toBeVisible();
+    const toControl = page.getByRole('button', { name: /^To / });
+    await expect(toControl).toContainText('Codex');
 
-    // Skill selector is available in the new-task composer and surfaces resource hints.
+    // Skill selector moved behind Chat options and still surfaces resource hints.
+    await page.getByRole('button', { name: 'Chat options' }).click();
     const skillSelect = page.getByLabel('Skill', { exact: true });
     await expect(skillSelect).toBeVisible();
     await skillSelect.selectOption('skill-audit');
     await expect(page.getByText(/8 GB RAM/)).toBeVisible();
     await skillSelect.selectOption('');
+    await page.getByRole('button', { name: 'Chat options' }).click();
     await screenshot(
       page,
       `project-chat-composer-new-prompts-${testInfo.project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
     );
     await assertNoOverflow(page);
 
-    await page.getByText('Run the tests and summarize what fails.').click();
-    await expect(textarea).toHaveValue('Run the tests and summarize what fails.');
+    await cards.getByRole('button', { name: /^Open Code/ }).click();
+    await expect(toControl).toContainText('Open Code');
     await textarea.fill(
       `Implement shared composer behavior with unicode π, emoji, HTML-like <button>, and ${'very long wrapping text '.repeat(16)}`
     );
-
-    await expect(page.getByRole('button', { name: /Codex\s+Instant/i })).toBeVisible();
-    await expect(page.getByTitle('Instant container profile')).toBeVisible();
-    await expect(page.getByTitle('Cloud VM profile')).toBeVisible();
     await captureComposerAudit(
       page,
       `project-chat-composer-new-long-${getProjectSuffix(testInfo.project.name)}`
     );
 
-    await page.getByRole('button', { name: /Edit Codex/i }).click();
-    await expect(page.getByRole('dialog')).toBeVisible();
+    await toControl.click();
+    const sheet = page.getByRole('dialog', { name: 'Choose a profile' });
+    await expect(sheet).toBeVisible();
+    await sheet.getByRole('button', { name: /Edit Open Code/i }).click();
+    await expect(page.getByRole('dialog').last()).toBeVisible();
     await captureComposerAudit(
       page,
       `project-chat-profile-edit-modal-${getProjectSuffix(testInfo.project.name)}`
     );
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog')).toHaveCount(0);
 
     await textarea.fill('/');
     await expect(page.getByText('/review')).toBeVisible();
@@ -511,17 +518,16 @@ test.describe('Project chat composer audit', () => {
   }, testInfo) => {
     await openMockedChat(page, 'duplicate');
 
-    await expect(page.getByRole('button', { name: /Codex\s+Instant/i })).toBeVisible();
-    await expect(page.getByTitle('Instant container profile')).toBeVisible();
-    await expect(page.getByTitle('Cloud VM profile')).toBeVisible();
-    await expect(page.getByRole('button', { name: /Long reusable profile name/ })).toBeVisible();
+    const cards = page.getByRole('region', { name: 'Choose a profile' });
+    await expect(cards.getByRole('button', { name: /^Codex/ })).toBeVisible();
+    await expect(cards.getByRole('button', { name: /Long reusable profile name/ })).toBeVisible();
     await captureComposerAudit(
       page,
       `project-chat-profile-existing-long-names-${getProjectSuffix(testInfo.project.name)}`
     );
 
-    const newButtons = page.getByRole('button', { name: /New/i });
-    await newButtons.last().click();
+    await page.getByRole('button', { name: /^To / }).click();
+    await page.getByRole('dialog', { name: 'Choose a profile' }).getByRole('button', { name: /^New$/ }).click();
     await chooseWizardOption(page, /OpenAI Codex/i);
     await chooseWizardOption(page, /Chat and explore/i);
     await chooseWizardOption(page, /Instant container/i);
