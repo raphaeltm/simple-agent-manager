@@ -26,7 +26,7 @@ Implement canonical idea 01KQ720TE8Y8ZGVTZPBM8Y4NH0 with Mastra, default-OFF use
 - [x] Unit/integration/security/Worker regression tests for enable/refresh/disable, stale tabs/in-flight, isolation, duplicate dispatch, interrupted/repeated flows, cancellation and reconnect.
 - [x] Documentation/capability matrix and rollback; visual audit mobile/desktop.
 - [ ] Draft PR, independent Astra High specialist/security/completion review; final-head lint/typecheck/test/build/CI.
-- [ ] Coordinate staging ownership, dedicated test identities, full live staging E2E and cleanup.
+- [x] Coordinate staging ownership, dedicated test identities, full live staging E2E and cleanup (journey07; prior failures preserved).
 - [ ] Rebase latest main and retest; CodeRabbit request/wait; merge, exact-commit production deployment and minimal smoke.
 
 ## Acceptance
@@ -34,6 +34,10 @@ Implement canonical idea 01KQ720TE8Y8ZGVTZPBM8Y4NH0 with Mastra, default-OFF use
 All checklist items verified with concrete evidence. Disabled users cannot activate or read SAM via direct links/API/event/runtime. Disable fences further effects without silently cancelling project tasks or deleting history. No cross-user/project disclosure; no private global memory copied into project records. Repeated accepted intent does not duplicate work; uncertain external effects stay visible until reconciled. Events do not interrupt human conversation. No skipped checks represented as passing.
 
 ## Current evidence and remaining gates
+
+As of 2026-10-21 00:30 UTC, full journey07 **passed** on `cd6aeed8fb84c10e596022961657ffa99bcf19ce`: dispatch, Astra High worker contract, answer/source link, follow-up, same-key replay, fresh scoped VM stop acknowledgment and repeated confirmation. All six cleanup steps and independent original-inventory/SAM-OFF/budget readback passed. See [journey07 evidence](../evidence/2026-10-20-sam-modernization/journey-07-pass.md). CI39516530278, E2E39516530222 and staging39518314402 passed; exact Worker100% and frontend verified. No budget change was needed after UTC reset. Conservative aggregate additional cost is USD1.3634289, no active reservation or override. User superseded one-run permission with small increments within aggregate USD5/month. Remaining: latest-main rebase/retest, final completion/security review, CodeRabbit request/wait, merge, production deployment and smoke. Earlier failed records below remain failures.
+
+### Historical checkpoint (superseded by journey07 above)
 
 **Release blocker:** a complete dispatch → follow-up → confirmed-stop live journey remains unverified. Historical pre-fix candidate `c7392f17da31605dae27023b195f3f018545df74` CI39452779652 and E2E39452779764 passed, but did not satisfy that gate. Independent actual-provider review found all 18 tool definitions present and real calls/results mapped correctly; the pre-fix model context replayed unsupported historical assistant templates without turn/receipt provenance. See [provider diagnosis](../evidence/2026-10-20-sam-modernization/provider-reliability-diagnosis.md). Model-only history correction and stronger full-journey assertions passed local verification: native57/57, API90/90, staging helpers38/38, typecheck/lint/format and independent security review. Candidate `b841e71b74da2ba9f5d619dc305db12bb3d4b926` passed CI39457830504, E2E39457830552 and staging39460173888; Worker100% and frontend exact commit were verified. The top-level runtime is Gemma, separately from Astra High implementation/project workers. No model substitution or new grants are authorized.
 
