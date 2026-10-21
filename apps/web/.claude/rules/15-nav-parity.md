@@ -27,18 +27,17 @@ You MUST:
 
 1. **Check parity**: Does the other navigation surface (desktop or mobile) need the same change?
 2. **If yes**: Apply the equivalent change to both surfaces in the same PR.
-3. **If no**: Document why the change is intentionally desktop-only or mobile-only (e.g., "Infrastructure collapsible section is desktop-only because mobile uses a simpler layout").
+3. **If no**: Document why the change is intentionally desktop-only or mobile-only (e.g., "the Focus Mode icon rail is desktop-only because mobile has no persistent sidebar").
 
 ## What to Keep in Sync
 
 | Feature                | Desktop (`NavSidebar`)                                                     | Mobile (`MobileNavDrawer`)                                                           |
 | ---------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Nav items (global)     | Home, Projects, Settings + Admin (superadmin)                              | Same items with same icons                                                           |
+| Nav items (global)     | `GLOBAL_NAV_ITEMS` (Infrastructure links to `/nodes`) + Admin (superadmin) | Same items with same icons                                                           |
 | Nav items (project)    | Chat, Tasks, Overview, Activity, Sessions, Settings                        | Same items with same icons                                                           |
 | Icons                  | Lucide icons on every item                                                 | Same Lucide icons                                                                    |
 | Back to Projects       | ArrowLeft icon + label                                                     | Same                                                                                 |
 | Project name header    | Shown when in project context (falls back to "Project" if name not passed) | Same (currently always "Project" — real name requires AppShell to fetch and pass it) |
-| Infrastructure section | Collapsible, superadmin-only (Nodes, Workspaces)                           | Same                                                                                 |
 | Active state styling   | Highlighted with accent color                                              | Highlighted with accent color + left border                                          |
 
 ## Quick Check
