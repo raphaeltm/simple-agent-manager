@@ -155,6 +155,7 @@ export default defineConfig({
     exclude: [
       'tests/workers/sam-session-do.test.ts',
       'tests/workers/sam-grounding-runtime.test.ts',
+      'tests/workers/sam-live-stream.test.ts',
     ],
     setupFiles: ['./tests/workers/setup-d1-migrations.ts'],
     provide: {

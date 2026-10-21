@@ -350,7 +350,123 @@ describe('SAM background work canonical event boundary', () => {
     );
     prepare.mockClear();
     expect(await f.controller.work.view('alice')).toHaveLength(MAX_SAM_OPERATOR_EVENT_PAGE_SIZE);
-    expect(prepare).toHaveBeenCalledTimes(MAX_SAM_OPERATOR_EVENT_PAGE_SIZE * 3);
+    // One task read per card; the single project's two membership reads run once, not per card.
+    expect(prepare).toHaveBeenCalledTimes(MAX_SAM_OPERATOR_EVENT_PAGE_SIZE + 2);
+  });
+
+  /** Tracks cards across two projects, newest-expiring last so the listed order is known. */
+  function twoProjectWork() {
+    const f = fixture([]);
+    f.database.exec(`
+      INSERT INTO projects(id,name,status) VALUES ('project-team','Team project','active');
+      INSERT INTO project_members(project_id,user_id,role,status)
+        VALUES('project-team','alice','owner','active');
+      INSERT INTO tasks(id,project_id,user_id,title,status,chat_session_id,task_mode,created_at,updated_at)
+        VALUES('task-team','project-team','alice','Team task','in_progress','session-team',
+          'task','2026-10-20T00:00:00.000Z','2026-10-20T00:00:00.000Z');
+    `);
+    const cards = [
+      ['alice-1', 'project-alice', 'task-alice', 'session-alice'],
+      ['team-2', 'project-team', 'task-team', 'session-team'],
+      ['alice-3', 'project-alice', 'task-alice', 'session-alice'],
+      ['team-4', 'project-team', 'task-team', 'session-team'],
+    ] as const;
+    cards.forEach(([actionId, projectId, taskId, sessionId], index) => {
+      vi.mocked(Date.now).mockReturnValue(NOW + index + 1);
+      f.controller.work.track(actionId, projectId, { taskId, sessionId }, f.generation);
+    });
+    vi.mocked(Date.now).mockReturnValue(NOW);
+    return f;
+  }
+
+  it('reads every card concurrently and checks each project once, in listed order', async () => {
+    const f = twoProjectWork();
+    const database = f.env.DATABASE;
+    const queries: string[] = [];
+    let waiting = 0;
+    let release!: () => void;
+    const allInFlight = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Each task read waits until all five are in flight, so a one-at-a-time loop never finishes.
+    f.env.DATABASE = {
+      ...database,
+      prepare(sql: string) {
+        queries.push(sql);
+        const statement = database.prepare(sql);
+        if (!sql.startsWith('SELECT t.status,t.title')) return statement;
+        return {
+          ...statement,
+          bind(...values: unknown[]) {
+            const bound = statement.bind(...values);
+            return {
+              ...bound,
+              async first() {
+                if (++waiting === 5) release();
+                await allInFlight;
+                return bound.first();
+              },
+            };
+          },
+        } as D1PreparedStatement;
+      },
+    } as D1Database;
+    const cards = await Promise.race([
+      f.controller.work.view('alice'),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('task reads ran one at a time')), 1_000);
+      }),
+    ]);
+    expect(cards.map((card) => [card.actionId, card.projectName])).toEqual([
+      ['team-4', 'Team project'],
+      ['alice-3', 'Alice project'],
+      ['team-2', 'Team project'],
+      ['alice-1', 'Alice project'],
+      ['dispatch-action', 'Alice project'],
+    ]);
+    expect(queries.filter((sql) => sql.includes('"project_members"'))).toHaveLength(2);
+  });
+
+  it('checks a project once for both its receipts and its work cards in one history read', async () => {
+    const f = fixture([]);
+    const { turn } = f.controller.store.accept('dispatch-turn', 'Start the redesign');
+    f.controller.store.reserveAction(
+      'dispatch-receipt',
+      turn.id,
+      'sam_chat_start',
+      JSON.stringify({ projectId: 'project-alice' }),
+      false
+    );
+    f.controller.store.setState(turn.id, 'completed', 'Started the work.');
+    const prepare = vi.spyOn(f.env.DATABASE, 'prepare');
+    const response = await f.controller.handle(
+      new Request('https://sam-session/turns', { headers: { 'x-sam-user-id': 'alice' } })
+    );
+    expect(response?.status).toBe(200);
+    const page = (await response!.json()) as {
+      work: Array<{ actionId: string }>;
+      turns: Array<{ actions: Array<{ id: string; available?: boolean }> }>;
+    };
+    // Both projections saw the project: the card is listed and the receipt stays available.
+    expect(page.work.map((card) => card.actionId)).toEqual(['dispatch-action']);
+    expect(page.turns.at(-1)?.actions).toEqual([
+      expect.objectContaining({ id: 'dispatch-receipt' }),
+    ]);
+    expect(page.turns.at(-1)?.actions[0]?.available).toBeUndefined();
+    const memberships = prepare.mock.calls.filter(([sql]) => sql.includes('"project_members"'));
+    expect(memberships).toHaveLength(1);
+  });
+
+  it('hides only the revoked project’s cards', async () => {
+    const f = twoProjectWork();
+    f.database
+      .prepare("UPDATE project_members SET status='removed' WHERE project_id='project-team'")
+      .run();
+    expect((await f.controller.work.view('alice')).map((card) => card.actionId)).toEqual([
+      'alice-3',
+      'alice-1',
+      'dispatch-action',
+    ]);
   });
 
   it('advances progress and charges a retry before the first awaited authority check', async () => {

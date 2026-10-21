@@ -24,6 +24,9 @@ export function operationLink(ctx: OperationContext, projectId?: string, session
     ? `${base}/projects/${encodeURIComponent(projectId)}${sessionId ? `/chat/${encodeURIComponent(sessionId)}` : ''}`
     : base;
 }
+function isoFromEpochMs(value: number): string | null {
+  return Number.isFinite(value) ? new Date(value).toISOString() : null;
+}
 export function operationPageLimit(ctx: OperationContext, requested?: number) {
   const limits = getPlatformOperationLimits(ctx.env);
   return Math.min(limits.taskListMax, Math.max(1, Math.floor(requested ?? limits.taskListLimit)));
@@ -243,6 +246,9 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
         projectId: row.projectId,
         sessionId: row.id,
         topic: row.topic,
+        // Readers (including the SAM assistant) judge recency from this; an undated
+        // item is indistinguishable from one that is months old.
+        updatedAt: isoFromEpochMs(row.updatedAt),
         attention,
         interactions: await connectorPendingInteractions(ctx.env, row.projectId, row.id),
         link: operationLink(ctx, row.projectId, row.id),
@@ -321,6 +327,8 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
         title: row.title,
         body: row.body,
         type: row.type,
+        // Unread notifications can be months old; the date is what says so.
+        createdAt: row.createdAt,
         link: operationLink(ctx, row.projectId ?? undefined, row.sessionId ?? undefined),
       })),
   };

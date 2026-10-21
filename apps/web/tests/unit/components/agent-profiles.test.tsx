@@ -412,7 +412,7 @@ describe('ProfileFormDialog', () => {
       <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
     await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Test Profile');
-    await user.type(screen.getByPlaceholderText('What this profile is for...'), 'A test');
+    await user.type(screen.getByPlaceholderText('What this profile is for. Shown on new-chat cards.'), 'A test');
     await user.click(screen.getByText('Create Profile'));
     await waitFor(() => {
       expect(defaultOnSave).toHaveBeenCalledWith(

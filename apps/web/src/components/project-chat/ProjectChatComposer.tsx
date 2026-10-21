@@ -50,6 +50,8 @@ interface ProjectChatComposerProps {
   uploading?: boolean;
   showShortcutHint?: boolean;
   attachTitle?: string;
+  /** False when the caller renders its own attach control (the new-chat toolbar). */
+  showAttachButton?: boolean;
   submitLabel?: string;
   readOnly?: boolean;
   focusOnMount?: boolean;
@@ -83,6 +85,7 @@ export function ProjectChatComposer({
   uploading = false,
   showShortcutHint = true,
   attachTitle = 'Attach files',
+  showAttachButton = true,
   submitLabel = 'Send',
   readOnly = false,
   focusOnMount = true,
@@ -307,16 +310,18 @@ export function ProjectChatComposer({
               className="hidden"
               onChange={(event) => handleFilesSelected(event.target.files)}
             />
-            <button
-              type="button"
-              onClick={() => internalFileInputRef.current?.click()}
-              disabled={sending || disabled || uploading}
-              className="shrink-0 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center bg-transparent border border-[rgba(34,197,94,0.12)] rounded-md text-fg-muted hover:text-fg-primary hover:border-[rgba(34,197,94,0.25)] hover:shadow-[0_0_8px_rgba(22,163,74,0.1)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-              aria-label={attachTitle}
-              title={attachTitle}
-            >
-              <Paperclip size={18} className={uploading ? 'animate-pulse' : ''} />
-            </button>
+            {showAttachButton && (
+              <button
+                type="button"
+                onClick={() => internalFileInputRef.current?.click()}
+                disabled={sending || disabled || uploading}
+                className="shrink-0 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center bg-transparent border border-[rgba(34,197,94,0.12)] rounded-md text-fg-muted hover:text-fg-primary hover:border-[rgba(34,197,94,0.25)] hover:shadow-[0_0_8px_rgba(22,163,74,0.1)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                aria-label={attachTitle}
+                title={attachTitle}
+              >
+                <Paperclip size={18} className={uploading ? 'animate-pulse' : ''} />
+              </button>
+            )}
           </>
         )}
         <textarea

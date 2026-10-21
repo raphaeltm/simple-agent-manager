@@ -126,7 +126,7 @@ task  →  trigger  →  skill  →  agent profile  →  project  →  platform 
 
 The platform default is 2 vCPU, 4 GB RAM, and 40 GB disk. Set a project baseline in
 **Project → Settings → Infrastructure → Default Resources**, a per-profile or per-skill default in
-their editors, or a one-off override from the **Resources** control next to the chat composer.
+their editors, or a one-off override under the sliders button (**Chat options**) above the chat composer.
 
 SAM provisions the exact provider instance type the pool selected, and records what the machine
 actually reports about itself. A node's detail page shows both: **Observed hardware** (from the

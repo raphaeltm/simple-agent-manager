@@ -3,6 +3,8 @@ import Base from './Base.astro';
 import Header from '../components/Header.astro';
 import CtaFooter from '../components/CtaFooter.astro';
 import { categoryColors } from '../lib/blog-utils';
+import '../styles/blog-code.css';
+import '../styles/blog-mermaid.css';
 
 interface Props {
   title: string;
@@ -219,13 +221,27 @@ const formattedDate = date.toLocaleDateString('en-US', {
     color: var(--color-fg-primary);
   }
 
-  .post-body :global(pre) {
-    margin: 24px 0;
-    padding: 20px;
+  /* UI renders: <figure> blocks written in the post (src/content/CLAUDE.md, "UI renders").
+     Direct children only, so code-block frames (also <figure>) are untouched. */
+  .post-body > :global(figure) {
+    margin: 32px 0;
+  }
+
+  .post-body > :global(figure) :global(img) {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto;
+    border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
-    overflow-x: auto;
+  }
+
+  .post-body > :global(figure) > :global(figcaption) {
+    margin-top: 12px;
     font-size: 0.875rem;
-    line-height: 1.6;
+    line-height: 1.5;
+    color: var(--color-fg-muted);
+    text-align: center;
   }
 
   .post-body :global(code:not(pre code)) {
@@ -235,336 +251,6 @@ const formattedDate = date.toLocaleDateString('en-US', {
     padding: 2px 6px;
     font-family: var(--font-mono);
     font-size: 0.85em;
-  }
-
-  .post-body :global(.mermaid-shell) {
-    margin: 32px 0;
-    border: 1px solid rgba(110, 215, 154, 0.18);
-    border-radius: 20px;
-    overflow: hidden;
-    background:
-      radial-gradient(circle at top left, rgba(110, 215, 154, 0.12), transparent 32%),
-      linear-gradient(180deg, rgba(19, 32, 29, 0.96), rgba(11, 17, 16, 0.98));
-    box-shadow:
-      inset 0 1px 0 rgba(230, 242, 238, 0.04),
-      0 28px 60px rgba(0, 0, 0, 0.24);
-  }
-
-  .post-body :global(.mermaid-chrome) {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 18px 20px 14px;
-    border-bottom: 1px solid rgba(110, 215, 154, 0.12);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
-  }
-
-  .post-body :global(.mermaid-eyebrow) {
-    margin: 0;
-    font-family: var(--font-mono);
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: #6ed79a;
-  }
-
-  .post-body :global(.mermaid-hint) {
-    margin: 4px 0 0;
-    font-size: 0.82rem;
-    color: var(--color-fg-muted);
-  }
-
-  .post-body :global(.mermaid-actions) {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .post-body :global(.mermaid-reset),
-  .post-body :global(.mermaid-expand) {
-    border: 1px solid rgba(110, 215, 154, 0.18);
-    border-radius: 999px;
-    padding: 10px 14px;
-    background: rgba(11, 17, 16, 0.7);
-    color: var(--color-fg-primary);
-    font: inherit;
-    font-size: 0.82rem;
-    cursor: pointer;
-    transition:
-      border-color 0.2s ease,
-      transform 0.2s ease,
-      background 0.2s ease;
-  }
-
-  .post-body :global(.mermaid-reset:hover),
-  .post-body :global(.mermaid-reset:focus-visible),
-  .post-body :global(.mermaid-expand:hover),
-  .post-body :global(.mermaid-expand:focus-visible) {
-    border-color: rgba(110, 215, 154, 0.45);
-    background: rgba(21, 128, 61, 0.12);
-    transform: translateY(-1px);
-  }
-
-  .post-body :global(.mermaid-expand) {
-    background: rgba(22, 163, 74, 0.12);
-  }
-
-  .post-body :global(.mermaid-surface) {
-    position: relative;
-    width: 100%;
-    min-height: 360px;
-    max-height: min(78vh, 720px);
-    overflow: hidden;
-    cursor: grab;
-    touch-action: none;
-    aspect-ratio: var(--mermaid-diagram-ratio, auto);
-    background:
-      linear-gradient(rgba(110, 215, 154, 0.05) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(110, 215, 154, 0.05) 1px, transparent 1px);
-    background-size: 28px 28px;
-  }
-
-  .post-body :global(.mermaid-surface.is-grabbing) {
-    cursor: grabbing;
-  }
-
-  .post-body :global(.mermaid-canvas) {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    min-height: 360px;
-    height: 100%;
-    padding: 0;
-  }
-
-  .post-body :global(.mermaid-canvas svg) {
-    display: block;
-    width: 100%;
-    max-width: none;
-    height: 100%;
-    max-height: 100%;
-    margin: 0 auto;
-    shape-rendering: geometricPrecision;
-    text-rendering: geometricPrecision;
-    color-rendering: optimizeQuality;
-  }
-
-  .post-body :global(.mermaid-shell .label),
-  .post-body :global(.mermaid-shell foreignObject div) {
-    color: var(--color-fg-primary);
-  }
-
-  .post-body :global(.mermaid-error) {
-    padding: 24px;
-    color: #ffd1d1;
-  }
-
-  :global(html[data-theme='light']) .post-body :global(.mermaid-error) {
-    color: #b91c1c;
-  }
-
-  .post-body :global(.mermaid-error pre) {
-    margin-top: 12px;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  /* ---- Light-mode mermaid surfaces (match marketing light palette) ---- */
-  :global(html[data-theme='light']) .post-body :global(.mermaid-shell) {
-    border-color: rgba(21, 128, 61, 0.22);
-    background:
-      radial-gradient(circle at top left, rgba(21, 128, 61, 0.08), transparent 32%),
-      linear-gradient(180deg, #f4f8f5, #eef3ef);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.6),
-      0 18px 40px rgba(16, 40, 28, 0.12);
-  }
-
-  :global(html[data-theme='light']) .post-body :global(.mermaid-chrome) {
-    border-bottom-color: rgba(21, 128, 61, 0.16);
-    background: linear-gradient(180deg, rgba(17, 39, 29, 0.03), transparent);
-  }
-
-  :global(html[data-theme='light']) .post-body :global(.mermaid-eyebrow) {
-    color: #15803d;
-  }
-
-  :global(html[data-theme='light']) .post-body :global(.mermaid-reset),
-  :global(html[data-theme='light']) .post-body :global(.mermaid-expand) {
-    border-color: rgba(21, 128, 61, 0.28);
-    background: rgba(248, 251, 248, 0.9);
-  }
-
-  :global(html[data-theme='light']) .post-body :global(.mermaid-expand) {
-    background: rgba(21, 128, 61, 0.1);
-  }
-
-  :global(html[data-theme='light']) .post-body :global(.mermaid-reset:hover),
-  :global(html[data-theme='light']) .post-body :global(.mermaid-reset:focus-visible),
-  :global(html[data-theme='light']) .post-body :global(.mermaid-expand:hover),
-  :global(html[data-theme='light']) .post-body :global(.mermaid-expand:focus-visible) {
-    border-color: rgba(21, 128, 61, 0.5);
-    background: rgba(21, 128, 61, 0.16);
-  }
-
-  :global(html[data-theme='light']) .post-body :global(.mermaid-surface) {
-    background:
-      linear-gradient(rgba(21, 128, 61, 0.06) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(21, 128, 61, 0.06) 1px, transparent 1px);
-    background-size: 28px 28px;
-  }
-
-  :global(html[data-theme='light']) .post-body :global(.mermaid-shell.is-fullscreen) {
-    border-color: rgba(21, 128, 61, 0.3);
-    background:
-      radial-gradient(circle at top left, rgba(21, 128, 61, 0.1), transparent 28%),
-      linear-gradient(180deg, #f4f8f5, #e8efe9);
-  }
-
-  :global(html[data-theme='light']) .post-body :global(.mermaid-shell.is-fullscreen .mermaid-chrome > div:first-child) {
-    border-color: rgba(21, 128, 61, 0.16);
-    background: rgba(248, 251, 248, 0.82);
-  }
-
-  :global(body.mermaid-fullscreen-open) {
-    overflow: hidden;
-  }
-
-  /* `main` is a root stacking context, so raise it above the fixed header while
-     a diagram is full screen. Otherwise the header can cover the close control. */
-  :global(body.mermaid-fullscreen-open) .blog-post {
-    z-index: 301;
-  }
-
-  .post-body :global(.mermaid-shell.is-fullscreen) {
-    position: fixed;
-    inset: 16px;
-    z-index: 300;
-    margin: 0;
-    border-color: rgba(110, 215, 154, 0.28);
-    background:
-      radial-gradient(circle at top left, rgba(110, 215, 154, 0.16), transparent 28%),
-      linear-gradient(180deg, rgba(19, 32, 29, 0.985), rgba(7, 11, 10, 0.995));
-  }
-
-  .post-body :global(.mermaid-shell.is-fullscreen .mermaid-chrome) {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    left: 12px;
-    z-index: 2;
-    align-items: flex-start;
-    border: none;
-    padding: 0;
-    background: none;
-    pointer-events: none;
-  }
-
-  .post-body :global(.mermaid-shell.is-fullscreen .mermaid-chrome > div:first-child) {
-    max-width: min(55vw, 420px);
-    padding: 10px 12px;
-    border: 1px solid rgba(110, 215, 154, 0.12);
-    border-radius: 14px;
-    background: rgba(7, 11, 10, 0.68);
-  }
-
-  .post-body :global(.mermaid-shell.is-fullscreen .mermaid-actions) {
-    margin-left: auto;
-    pointer-events: auto;
-  }
-
-  .post-body :global(.mermaid-shell.is-fullscreen .mermaid-surface) {
-    min-height: calc(100vh - 32px);
-    max-height: calc(100vh - 32px);
-    aspect-ratio: auto;
-  }
-
-  .post-body :global(.mermaid-shell.is-fullscreen .mermaid-canvas) {
-    min-height: calc(100vh - 32px);
-    align-items: flex-start;
-    padding: 0;
-  }
-
-  .post-body :global(.mermaid-shell.is-fullscreen .mermaid-canvas svg) {
-    width: 100%;
-    height: 100%;
-  }
-
-  @media (max-width: 640px) {
-    .post-body :global(.mermaid-chrome) {
-      align-items: flex-start;
-      flex-direction: column;
-    }
-
-    .post-body :global(.mermaid-actions) {
-      width: 100%;
-      flex-direction: column;
-    }
-
-    .post-body :global(.mermaid-reset),
-    .post-body :global(.mermaid-expand) {
-      width: 100%;
-      min-height: 44px;
-    }
-
-    .post-body :global(.mermaid-surface) {
-      min-height: 300px;
-    }
-
-    .post-body :global(.mermaid-canvas) {
-      min-height: 300px;
-      padding: 0;
-    }
-
-    .post-body :global(.mermaid-shell.is-fullscreen) {
-      inset: 0;
-      border-radius: 0;
-      border-left: none;
-      border-right: none;
-    }
-
-    .post-body :global(.mermaid-shell.is-fullscreen .mermaid-chrome) {
-      top: 8px;
-      right: 8px;
-      left: 8px;
-      flex-direction: row;
-      justify-content: flex-end;
-      gap: 8px;
-    }
-
-    .post-body :global(.mermaid-shell.is-fullscreen .mermaid-chrome > div:first-child) {
-      display: none;
-    }
-
-    .post-body :global(.mermaid-shell.is-fullscreen .mermaid-actions) {
-      width: auto;
-      flex-direction: row;
-      gap: 8px;
-    }
-
-    .post-body :global(.mermaid-shell.is-fullscreen .mermaid-reset),
-    .post-body :global(.mermaid-shell.is-fullscreen .mermaid-expand) {
-      width: auto;
-      min-height: 40px;
-      padding: 8px 12px;
-      font-size: 0.78rem;
-      background: rgba(7, 11, 10, 0.78);
-    }
-
-    :global(html[data-theme='light']) .post-body :global(.mermaid-shell.is-fullscreen .mermaid-reset),
-    :global(html[data-theme='light']) .post-body :global(.mermaid-shell.is-fullscreen .mermaid-expand) {
-      background: rgba(248, 251, 248, 0.92);
-    }
-
-    .post-body :global(.mermaid-shell.is-fullscreen .mermaid-surface),
-    .post-body :global(.mermaid-shell.is-fullscreen .mermaid-canvas) {
-      min-height: 100vh;
-      max-height: 100vh;
-      padding: 0;
-    }
   }
 
   .post-tags {

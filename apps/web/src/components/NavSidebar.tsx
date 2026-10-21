@@ -4,8 +4,6 @@ import {
   Bell,
   Bot,
   Brain,
-  ChevronDown,
-  ChevronRight,
   FileCode,
   FolderKanban,
   FolderOpen,
@@ -14,7 +12,6 @@ import {
   Map,
   MessageSquare,
   MessageSquareQuote,
-  Monitor,
   PlayCircle,
   Rocket,
   Server,
@@ -26,7 +23,6 @@ import {
   Zap,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useState } from 'react';
 import { Link, useLocation } from 'react-router';
 
 import { useSamSettings } from '../hooks/useSamSettings';
@@ -46,6 +42,8 @@ export const GLOBAL_NAV_ITEMS: NavItem[] = [
   { label: 'Projects', path: '/projects', icon: <FolderKanban size={18} /> },
   { label: 'Map', path: '/account-map', icon: <Map size={18} /> },
   { label: 'Tools', path: '/tools', icon: <Wrench size={18} /> },
+  // Opens the Nodes page; labelled for the whole area.
+  { label: 'Infrastructure', path: '/nodes', icon: <Server size={18} /> },
   { label: 'Settings', path: '/settings', icon: <Settings size={18} /> },
 ];
 
@@ -116,7 +114,7 @@ interface NavSidebarProps {
   projectName?: string;
   showGlobalNav?: boolean;
   onToggleGlobalNav?: () => void;
-  /** Rendered below Infrastructure in global nav views */
+  /** Rendered below the global nav items */
   projectListSection?: ReactNode;
   projectHealthElement?: ReactNode;
   /** Collapse to a 56px icon rail (Focus Mode) — hides labels, centers icons */
@@ -137,7 +135,6 @@ export function NavSidebar({
   const location = useLocation();
   const { isSuperadmin } = useAuth();
   const { needsOnboarding, openOnboarding } = useOnboarding();
-  const [infraOpen, setInfraOpen] = useState(false);
 
   const projectId = extractProjectId(location.pathname);
   const insideProject = Boolean(projectId);
@@ -145,65 +142,6 @@ export function NavSidebar({
   // Shared item class: centered icon-only in Focus rail, full label otherwise.
   const itemClass = (active: boolean) =>
     `${iconOnly ? NAV_ITEM_BASE_ICON : NAV_ITEM_BASE} ${active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE}`;
-
-  // Collapsible Infrastructure section — identical in the project-context global
-  // panel and the standalone global sidebar. Extracted so the markup lives once.
-  const infraItems = [
-    { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
-    { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
-  ];
-
-  // In the Focus icon rail there is no room for a collapsible header — render
-  // the infra destinations directly as icon links so they remain reachable.
-  const infraSection = iconOnly ? (
-    <div className={SECTION_DIVIDER}>
-      {infraItems.map((item) => {
-        const active = isActive(item.path, location.pathname);
-        return (
-          <Link
-            key={item.path}
-            to={item.path}
-            aria-current={active ? 'page' : undefined}
-            aria-label={item.label}
-            title={item.label}
-            className={itemClass(active)}
-          >
-            {item.icon}
-          </Link>
-        );
-      })}
-    </div>
-  ) : (
-    <div className={SECTION_DIVIDER}>
-      <button
-        onClick={() => setInfraOpen(!infraOpen)}
-        className={`flex items-center gap-2 w-full px-3 py-2 rounded-sm bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] transition-all duration-150 ${FOCUS_RING}`}
-        aria-expanded={infraOpen}
-        aria-controls="infra-nav-panel"
-      >
-        {infraOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        Infrastructure
-      </button>
-      {infraOpen && (
-        <div id="infra-nav-panel" className="flex flex-col gap-1">
-          {infraItems.map((item) => {
-            const active = isActive(item.path, location.pathname);
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                aria-current={active ? 'page' : undefined}
-                className={`${NAV_ITEM_BASE} ml-2 ${active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE}`}
-              >
-                {item.icon}
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
 
   // Onboarding resume — shown in both nav layouts when setup is incomplete.
   const onboardingResume = needsOnboarding && (
@@ -331,8 +269,6 @@ export function NavSidebar({
               );
             })}
 
-            {infraSection}
-
             {onboardingResume}
 
             {/* Project list — hidden in the Focus rail (too wide for 56px) */}
@@ -372,8 +308,6 @@ export function NavSidebar({
           </Link>
         );
       })}
-
-      {infraSection}
 
       {onboardingResume}
 

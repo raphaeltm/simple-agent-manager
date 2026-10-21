@@ -439,7 +439,7 @@ idea, a task, or a quick question, and SAM records the new chat's parent.
   <source media="(max-width: 40em)" srcset="/images/docs/chat-fork-composer-mobile.png 2x" />
   <img
     src="/images/docs/chat-fork-composer.png"
-    alt="The new-chat screen after Fork. A banner reads &quot;Forking from: Add a CSV export to the orders page&quot;, with a close button. Below it is the selected profile, &quot;Build and test&quot; on a VM, and the message box, scrolled to its end: the previous chat's IDs, then an instruction the user has added, &quot;Now add the same CSV export to the invoices page.&quot;"
+    alt="The new-chat screen after Fork. A banner reads &quot;Forking from: Add a CSV export to the orders page&quot;, with a close button. Below it, To names the profile, &quot;Build and test&quot;, and then comes the message box, scrolled to its end: the previous chat's IDs, then an instruction the user has added, &quot;Now add the same CSV export to the invoices page.&quot;"
   />
 </picture>
 
@@ -454,7 +454,7 @@ can't load the original request, the message box says so and you can type it you
 
 ### Before you send
 
-- **Check the profile.** Fork and Retry use the profile selected in the message box, which isn't
+- **Check the profile.** Fork and Retry use the profile shown in **To** above the message box, which isn't
   necessarily the one the original chat used. Picking another profile is how you retry with a
   different agent or model.
 - **The ✕ on the banner** removes the link to the original chat. The text stays in the message box,
@@ -533,7 +533,7 @@ You may also see a banner telling you a message was saved but its delivery was i
 
 ## Starting a New Chat
 
-When you open a new chat, SAM offers a few repo-aware **starter prompts** (for example, "What's in this repo?" or "Run the tests and fix any failures") so you can get moving without a blank page. Pick one or type your own.
+When you open a new chat with two or more agent profiles you haven't hidden, SAM asks **Who should take this?** and shows your recent profiles as cards; the one you used last is already selected. See [Choosing a profile for a new chat](/docs/guides/agents/#choosing-a-profile-for-a-new-chat). Otherwise SAM offers a few repo-aware **starter prompts** instead (for example, "What's in this repo?" or "Run the tests and fix any failures") so you can get moving without a blank page. Pick one or type your own.
 
 To send on a desktop keyboard, press **Cmd+Enter** on Mac or **Ctrl+Enter** on Windows/Linux — plain **Enter** inserts a new line so you can write multi-line prompts. The composer shows the correct shortcut for your platform as a hint. On mobile, tap the send button; **Enter** always inserts a new line.
 

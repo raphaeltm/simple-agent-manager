@@ -284,23 +284,52 @@ export interface ResolvedAgentProfile {
   githubCliPolicy: GitHubCliPolicy | null;
 }
 
+/** One profile's use in the caller's own new chats in a project (GET .../agent-profiles/picker). */
+export interface ProfilePickerUsage {
+  profileId: string;
+  /** ISO timestamp of the caller's latest new chat with this profile in the window. */
+  lastUsedAt: string;
+  chatCount: number;
+}
+
+/** The caller's new-chat picker state for one project. */
+export interface ProfilePickerState {
+  usage: ProfilePickerUsage[];
+  /** Profiles this person hid from the new-chat picker in this project. */
+  hiddenProfileIds: string[];
+  /** Days of chats counted in `usage` (admin setting `chat.profileUsageWindowDays`). */
+  usageWindowDays: number;
+}
+
+/** Body for PATCH .../agent-profiles/picker. Hiding only affects the caller's picker. */
+export interface UpdateProfilePickerRequest {
+  hide?: string[];
+  unhide?: string[];
+}
+
 // =============================================================================
 // Skills (per-project repeatable-work definitions)
 // =============================================================================
 
-export interface AgentSkill extends Omit<AgentProfile, 'effort'> {
+export interface AgentSkill extends Omit<AgentProfile, 'effort' | 'agentType'> {
+  /** null = use the agent of the profile chosen for the run. A skill only overrides what it sets. */
+  agentType: string | null;
   /** null = inherit from the selected/default profile. */
   effort: AgentEffort | null;
   resourceRequirementsJson: string | null;
   defaultProfileId: string | null;
 }
 
-export interface CreateSkillRequest extends CreateAgentProfileRequest {
+export interface CreateSkillRequest extends Omit<CreateAgentProfileRequest, 'agentType'> {
+  /** Omit or null to use the chosen profile's agent. */
+  agentType?: string | null;
   resourceRequirementsJson?: string | null;
   defaultProfileId?: string | null;
 }
 
-export interface UpdateSkillRequest extends UpdateAgentProfileRequest {
+export interface UpdateSkillRequest extends Omit<UpdateAgentProfileRequest, 'agentType'> {
+  /** null clears the override so the chosen profile's agent is used. */
+  agentType?: string | null;
   resourceRequirementsJson?: string | null;
   defaultProfileId?: string | null;
 }

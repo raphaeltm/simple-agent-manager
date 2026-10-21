@@ -375,7 +375,9 @@ describe('create flow', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/projects/p1/automation/new');
   });
 
-  it('creates a webhook automation and shows its token once', async () => {
+  // Walks all four steps and types about 40 characters key by key. It takes 3-4 s
+  // on CI, too close to the 5 s default, so it gets its own budget.
+  it('creates a webhook automation and shows its token once', { timeout: 15_000 }, async () => {
     const user = userEvent.setup();
     api.createTrigger.mockResolvedValue({
       ...trigger({ id: 'trg-new', sourceType: 'webhook', status: 'active' }),

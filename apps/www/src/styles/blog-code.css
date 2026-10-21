@@ -1,0 +1,36 @@
+/* Code blocks in blog posts. Imported by `layouts/BlogPost.astro`.
+
+   Blog Markdown is rendered by the same Expressive Code setup as the docs (configured by
+   Starlight in `astro.config.ts`). It paints frames with Starlight's theme variables, which
+   only docs pages define, so on a blog page the border, background and fonts all resolved to
+   nothing and code blocks looked like plain text. These declarations give those variables
+   the marketing palette. Dark-theme frame colours are resolved on `:root`, so they must be
+   declared there rather than on `.post-body`.
+
+   The names come from @astrojs/starlight's integrations/expressive-code: `preprocessor.ts`
+   (the private `--__sl-font*` font variables) and `theming.ts` (the colour variables). After
+   a Starlight upgrade, check them there; code-blocks.spec.ts fails if they stop resolving. */
+:root {
+  --sl-color-gray-5: var(--color-border); /* frame and tab-bar borders */
+  --sl-color-gray-6: var(--color-bg-surface); /* dark: code background */
+  --sl-color-black: var(--color-bg-canvas); /* dark: tab bar */
+  --sl-color-accent: var(--color-accent); /* light: active-tab marker */
+  --sl-color-accent-high: var(--color-accent-strong); /* dark: active-tab marker */
+  --sl-color-text: var(--color-fg-muted); /* tab label, copy button */
+  --sl-text-code: 0.875rem;
+  --sl-line-height: 1.7;
+  --__sl-font: var(--font-body);
+  --__sl-font-mono: var(--font-mono);
+}
+
+:root[data-theme='light'] {
+  --sl-color-gray-6: var(--color-bg-canvas); /* light: tab bar */
+  --sl-color-gray-7: var(--color-bg-surface); /* light: code background */
+}
+
+/* Round the frame and its tab like the site's other cards (the docs keep square corners). */
+.post-body .expressive-code {
+  --ec-brdRad: var(--radius-md);
+  --ec-frm-edTabBrdRad: var(--radius-md);
+  margin: 28px 0;
+}

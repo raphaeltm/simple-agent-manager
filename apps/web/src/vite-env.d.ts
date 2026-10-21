@@ -8,6 +8,9 @@ interface ImportMetaEnv {
   readonly VITE_PROJECT_LIST_LIMIT?: string;
   readonly VITE_SAM_SETTINGS_POLL_MS?: string;
   readonly VITE_SAM_ACTIVE_POLL_MS?: string;
+  readonly VITE_SAM_STREAMING_POLL_MS?: string;
+  readonly VITE_SAM_STREAM_RECONNECT_MS?: string;
+  readonly VITE_SAM_STREAM_MAX_RECONNECTS?: string;
   readonly VITE_PROJECT_POLL_INTERVAL_MS?: string;
   readonly VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS?: string;
   readonly VITE_WORKSPACE_PORTS_POLL_MS?: string;

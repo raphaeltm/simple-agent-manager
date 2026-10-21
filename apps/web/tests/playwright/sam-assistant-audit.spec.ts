@@ -70,6 +70,10 @@ async function mockSam(
     rejectSend?: boolean;
     legacy?: boolean;
     transcript?: string;
+    /** Hold history reads after a send until `releaseHistory()`, like a slow history read. */
+    holdHistoryAfterSend?: boolean;
+    /** Fields of the send receipt's turn; the default receipt is already completed. */
+    receipt?: Record<string, unknown>;
   } = {}
 ) {
   let enabled = options.enabled ?? true;
@@ -80,6 +84,8 @@ async function mockSam(
   const confirmations: boolean[] = [];
   const cursors: string[] = [];
   let historyReads = 0;
+  let heldHistory: Promise<void> | null = null;
+  let releaseHistory = () => {};
   await page.addInitScript(() =>
     localStorage.setItem('sam-onboarding-wizard-dismissed-sam-user', 'true')
   );
@@ -115,11 +121,20 @@ async function mockSam(
           failSend = false;
           return route.abort('failed');
         }
-        const receipt = turn('accepted', { message: body.message, request_key: body.requestKey });
+        const receipt = turn('accepted', {
+          message: body.message,
+          request_key: body.requestKey,
+          ...options.receipt,
+        });
         turns = [...turns, receipt];
+        if (options.holdHistoryAfterSend)
+          heldHistory = new Promise((resolve) => {
+            releaseHistory = resolve;
+          });
         return respond({ turn: receipt, accepted: true, replayed: false });
       }
       historyReads++;
+      if (heldHistory) await heldHistory;
       if (failHistory)
         return respond({ error: 'UNAVAILABLE', message: 'History could not load' }, 503);
       const before = url.searchParams.get('before');
@@ -135,6 +150,8 @@ async function mockSam(
         work: options.work ?? [],
       });
     }
+    // No live stream unless a test installs one (see `liveStream`); history carries progress.
+    if (path.endsWith('/stream')) return route.fulfill({ status: 204 });
     if (path.endsWith('/seen')) {
       for (const item of options.work ?? [])
         item.updates = { unread: 0, lastEventType: null, lastEventAt: null };
@@ -167,6 +184,10 @@ async function mockSam(
     confirmations,
     cursors,
     historyReads: () => historyReads,
+    releaseHistory: () => releaseHistory(),
+    setTurns: (update: (current: typeof turns) => typeof turns) => {
+      turns = update(turns);
+    },
     disable: () => {
       enabled = false;
     },
@@ -206,13 +227,25 @@ async function checkComposerTouchTargets(page: Page) {
     });
 }
 
-/** The composer is pinned: fully on screen, and the newest turn ends above it. */
+/**
+ * The composer is pinned: fully on screen at the bottom edge of the shell, the shell's
+ * <main> has nothing of its own to scroll, and the newest turn ends above the composer.
+ */
 async function checkComposerPinned(page: Page) {
   const composer = page.locator('form').filter({ has: page.getByLabel('Message SAM') });
   await expect(composer).toBeInViewport({ ratio: 1 });
   const viewport = page.viewportSize()!;
   const composerBox = (await composer.boundingBox())!;
   expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(viewport.height + 1);
+  const main = await page.locator('#main-content').evaluate((element) => ({
+    bottom: element.getBoundingClientRect().bottom,
+    scrollable: element.scrollHeight - element.clientHeight,
+    scrollTop: element.scrollTop,
+  }));
+  // A composer dragged up the screen also passes the "above the viewport bottom" check.
+  expect(Math.abs(composerBox.y + composerBox.height - main.bottom)).toBeLessThanOrEqual(1);
+  expect(main.scrollable, 'SAM content leaks into the shell scroll area').toBeLessThanOrEqual(1);
+  expect(main.scrollTop).toBe(0);
   const newest = page.locator('article').last();
   if ((await newest.count()) > 0) {
     await expect(newest).toBeInViewport();
@@ -470,8 +503,8 @@ test('unavailable action retains its receipt without confirmation controls', asy
 test('active turn can stop without cancelling project work', async ({ page }) => {
   await mockSam(page, { turns: [turn('running', { state: 'running', response: null })] });
   await page.goto('/sam');
-  await expect(page.getByText('Working… You can leave this page and return.')).toBeVisible();
-  await expect(page.getByText('SAM · working', { exact: true })).toBeVisible();
+  await expect(page.getByText('You can leave this page and come back.')).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Starting' })).toBeVisible();
   const stopHint = page.getByText('Stopping SAM won’t cancel project work it already started.');
   await expect(stopHint).toBeVisible();
   await checkComposerTouchTargets(page);
@@ -486,6 +519,206 @@ test('active turn can stop without cancelling project work', async ({ page }) =>
   await expect(page.getByLabel('Message SAM')).toHaveValue('My next draft');
   await expect(stopHint).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+});
+
+/**
+ * A live stream the test feeds event by event: `fetch` for the stream URL is answered
+ * in the page, so the UI sees a real ReadableStream arrive over time.
+ */
+async function liveStream(page: Page) {
+  await page.addInitScript(() => {
+    const encoder = new TextEncoder();
+    const queued: string[] = [];
+    let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const live = {
+      opened: 0,
+      push: (event: unknown) => {
+        const frame = `data: ${JSON.stringify(event)}\n\n`;
+        if (controller) controller.enqueue(encoder.encode(frame));
+        else queued.push(frame);
+      },
+    };
+    (window as unknown as { __samLive: typeof live }).__samLive = live;
+    const original = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!/\/api\/sam\/turns\/[^/]+\/stream$/.test(new URL(url, location.href).pathname))
+        return original(input, init);
+      live.opened++;
+      const body = new ReadableStream<Uint8Array>({
+        start(next) {
+          controller = next;
+          for (const frame of queued.splice(0)) next.enqueue(encoder.encode(frame));
+        },
+      });
+      return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+    };
+  });
+  return (event: Record<string, unknown>) =>
+    page.evaluate(
+      (payload) =>
+        (window as unknown as { __samLive: { push: (e: unknown) => void } }).__samLive.push(
+          payload
+        ),
+      event
+    );
+}
+
+const liveSnapshot = {
+  type: 'snapshot',
+  turnId: 'live',
+  phase: 'thinking',
+  elapsedMs: 12_000,
+  text: '',
+  thinking: 'Check what changed across your projects today.',
+  activity: [],
+};
+
+test('a running turn shows each step, its thinking and the answer as it is written', async ({
+  page,
+}) => {
+  const mock = await mockSam(page, {
+    turns: [
+      turn('earlier', { message: 'Earlier question', response: 'Earlier answer.' }),
+      turn('live', { message: 'What shipped today?', state: 'running', response: null }),
+    ],
+  });
+  const push = await liveStream(page);
+  await page.goto('/sam');
+  await push(liveSnapshot);
+  const status = page.getByRole('status').filter({ hasText: 'Thinking' });
+  await expect(status).toBeVisible();
+  await expect(page.getByText('Check what changed across your projects today.')).toBeVisible();
+  // Elapsed time is anchored to the server's elapsedMs, not the client clock.
+  await expect(page.getByText(/^0:1[2-9]$/)).toBeVisible();
+  await checkLayout(page, 'sam-live-thinking');
+  await push({
+    type: 'tool',
+    activity: { id: 'c1', operation: 'sam_projects_list', state: 'completed', count: 4 },
+  });
+  await push({
+    type: 'tool',
+    activity: {
+      id: 'c2',
+      operation: 'sam_tasks_list',
+      state: 'running',
+      target: { limit: 20, projectId: 'project-1' },
+    },
+  });
+  await push({ type: 'phase', phase: 'working' });
+  const steps = page.getByRole('list', { name: 'What SAM is doing' });
+  await expect(steps.getByText('Listed 4 projects')).toBeVisible();
+  await expect(
+    steps.getByText('Looking through your 20 most recent tasks in Website redesign…')
+  ).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Working' })).toBeVisible();
+  await checkComposerPinned(page);
+  await checkLayout(page, 'sam-live-working');
+  await push({
+    type: 'tool',
+    activity: {
+      id: 'c2',
+      operation: 'sam_tasks_list',
+      state: 'completed',
+      target: { limit: 20, projectId: 'project-1' },
+      count: 20,
+      more: true,
+    },
+  });
+  await expect(
+    steps.getByText('Read 20 recent tasks in Website redesign (more available)')
+  ).toBeVisible();
+  const readsBefore = mock.historyReads();
+  await push({ type: 'phase', phase: 'writing' });
+  await push({ type: 'text', at: 0, text: '**Shipped today:** the mobile scroll ' });
+  await expect(page.getByText('Shipped today:')).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Writing' })).toBeVisible();
+  await push({ type: 'text', at: 37, text: 'fix and live answers. ' });
+  await expect(page.getByText(/the mobile scroll fix and live answers\./)).toBeVisible();
+  // The thinking line belongs to the thinking phase only.
+  await expect(page.getByText('Check what changed across your projects today.')).toHaveCount(0);
+  await expect(page.locator('article').last()).toBeInViewport();
+  await checkComposerPinned(page);
+  await checkLayout(page, 'sam-live-writing');
+  // A connected stream relaxes history polling (2s → 15s); the settled step refreshed once.
+  // The window is the measurement, so it is a fixed wait; the stream must be the open one.
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __samLive: { opened: number } }).__samLive.opened
+    )
+  ).toBe(1);
+  await page.waitForTimeout(4_500);
+  expect(mock.historyReads() - readsBefore).toBeLessThanOrEqual(1);
+});
+
+test('a sent message shows at once and streams while history is still loading', async ({
+  page,
+}) => {
+  const mock = await mockSam(page, {
+    turns: [turn('earlier', { message: 'Earlier question', response: 'Earlier answer.' })],
+    holdHistoryAfterSend: true,
+    // As the server answers: the turn is admitted and running, with no answer yet.
+    receipt: { state: 'accepted', response: null, created_at: Date.now() },
+  });
+  const push = await liveStream(page);
+  await page.goto('/sam');
+  await page.getByLabel('Message SAM').fill('What shipped recently?');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  // The history read after the send is held; the accepted turn shows from the send receipt.
+  const newest = page.locator('article').last();
+  await expect(newest.getByText('What shipped recently?')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop SAM turn' })).toBeVisible();
+  await expect(page.getByText('Sending…')).toHaveCount(0);
+  await push({
+    ...liveSnapshot,
+    turnId: 'accepted',
+    phase: 'writing',
+    thinking: null,
+    text: 'Two changes shipped today.',
+  });
+  await expect(newest.getByText('Two changes shipped today.')).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Writing' })).toBeVisible();
+  await checkComposerPinned(page);
+  await checkLayout(page, 'sam-sent-streaming');
+  // The held read returns the finished turn: it replaces the shown one rather than adding one.
+  mock.setTurns((all) =>
+    all.map((item) =>
+      item.id === 'accepted'
+        ? { ...item, state: 'completed', response: 'Two changes shipped today.' }
+        : item
+    )
+  );
+  mock.releaseHistory();
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop SAM turn' })).toHaveCount(0);
+  await expect(page.locator('article')).toHaveCount(2);
+  await expect(page.getByText('Two changes shipped today.')).toHaveCount(1);
+});
+
+test('without a stream, polled history still shows the running turn’s progress', async ({
+  page,
+}) => {
+  await mockSam(page, {
+    turns: [
+      turn('live', {
+        message: 'What needs my attention?',
+        state: 'running',
+        response: null,
+        live: {
+          ...liveSnapshot,
+          phase: 'writing',
+          thinking: null,
+          text: 'Two chats need an answer from you.',
+          activity: [{ id: 'c1', operation: 'sam_inbox_get', state: 'completed' }],
+        },
+      }),
+    ],
+  });
+  await page.goto('/sam');
+  await expect(page.getByText('Two chats need an answer from you.')).toBeVisible();
+  await expect(page.getByText('Checked your inbox')).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Writing' })).toBeVisible();
+  await checkLayout(page, 'sam-live-polled');
 });
 
 test('stale tabs lose conversation access when disabled elsewhere', async ({ page }) => {
@@ -555,6 +788,38 @@ test('long conversations open at the newest turn above a pinned composer', async
   await jump.click();
   await expect(page.locator('article').last()).toBeInViewport();
   await expect(jump).toHaveCount(0);
+});
+
+test('scrolling past the newest turn never moves the page or the composer', async ({ page }) => {
+  // Reported on Android (2026-10-21): the turns' sr-only labels escaped the scroller,
+  // so the overscroll chained to the shell and dragged the composer up the screen.
+  await mockSam(page, {
+    turns: Array.from({ length: 12 }, (_, index) =>
+      turn(`overscroll-${index}`, {
+        message: `Question ${index}`,
+        response: `Answer ${index}. ${'A grounded line about recent work. '.repeat(6)}`,
+      })
+    ),
+  });
+  await page.goto('/sam');
+  await expect(page.locator('article')).toHaveCount(12);
+  await expect(page.locator('article').last()).toBeInViewport();
+  const scroller = page.getByTestId('sam-conversation-scroller');
+  const box = (await scroller.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  for (let gesture = 0; gesture < 3; gesture++) await page.mouse.wheel(0, 2500);
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollHeight - element.scrollTop))
+    .toBeLessThanOrEqual(box.height + 2);
+  await expect(page.getByRole('heading', { name: 'SAM', exact: true })).toBeInViewport();
+  await checkComposerPinned(page);
+  await checkLayout(page, 'sam-overscroll');
+  // The reporting phone's width (412×891), which no project in the matrix covers.
+  await page.setViewportSize({ width: 412, height: 891 });
+  await page.mouse.move(206, 445);
+  for (let gesture = 0; gesture < 3; gesture++) await page.mouse.wheel(0, 2500);
+  await expect(page.getByRole('heading', { name: 'SAM', exact: true })).toBeInViewport();
+  await checkComposerPinned(page);
 });
 
 test('loading older messages keeps the reader on the turn they were reading', async ({ page }) => {

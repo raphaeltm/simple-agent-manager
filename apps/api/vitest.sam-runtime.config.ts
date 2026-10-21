@@ -10,6 +10,7 @@ export default defineConfig({
     include: [
       'tests/workers/sam-session-do.test.ts',
       'tests/workers/sam-grounding-runtime.test.ts',
+      'tests/workers/sam-live-stream.test.ts',
     ],
     testTimeout: 20_000,
     hookTimeout: 60_000,

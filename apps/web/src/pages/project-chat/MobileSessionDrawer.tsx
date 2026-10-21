@@ -1,14 +1,16 @@
 import { ChevronDown, ChevronRight, Search, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useScrollLock } from '../../hooks/useScrollLock';
 import type { ChatSessionListItem } from '../../lib/api';
-import { isStaleSession } from '../../lib/chat-session-utils';
-import { stripMarkdown } from '../../lib/text-utils';
 import { SessionList } from './SessionList';
 import type { SessionScope } from './useProjectChatState';
+import { useSessionFilters } from './useSessionFilters';
 import type { TaskInfo } from './useTaskGroups';
+
+/** A stable default, so the session filters don't recompute on every render. */
+const EMPTY_TASK_INFO_MAP = new Map<string, TaskInfo>();
 
 export function MobileSessionDrawer({
   sessions,
@@ -19,7 +21,7 @@ export function MobileSessionDrawer({
   realtimeDegraded = false,
   isRefreshing = false,
   onRefresh,
-  taskInfoMap = new Map(),
+  taskInfoMap = EMPTY_TASK_INFO_MAP,
   onShowHierarchy,
   sessionScope,
   onSessionScopeChange,
@@ -49,39 +51,13 @@ export function MobileSessionDrawer({
     window.setTimeout(onClose, 250);
   }, [isClosing, onClose]);
 
-  const { recent, stale } = useMemo(() => {
-    const r: ChatSessionListItem[] = [];
-    const s: ChatSessionListItem[] = [];
-    for (const sess of sessions) {
-      if (isStaleSession(sess)) s.push(sess);
-      else r.push(sess);
-    }
-    return { recent: r, stale: s };
-  }, [sessions]);
-
-  const filteredR = useMemo(() => {
-    if (!mobileSearch.trim()) return recent;
-    const q = mobileSearch.toLowerCase();
-    return recent.filter(
-      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q))
-        || s.id.includes(q)
-        || (s.createdBy?.name?.toLowerCase().includes(q) ?? false)
-        || (s.createdBy?.email?.toLowerCase().includes(q) ?? false),
-    );
-  }, [recent, mobileSearch]);
-
-  const filteredS = useMemo(() => {
-    if (!mobileSearch.trim()) return stale;
-    const q = mobileSearch.toLowerCase();
-    return stale.filter(
-      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q))
-        || s.id.includes(q)
-        || (s.createdBy?.name?.toLowerCase().includes(q) ?? false)
-        || (s.createdBy?.email?.toLowerCase().includes(q) ?? false),
-    );
-  }, [stale, mobileSearch]);
-
-  const showOlder = mobileShowStale || !!mobileSearch.trim();
+  // Same buckets and search as the desktop list, so stopped forks and retries collapse
+  // into Older here too.
+  const {
+    filteredRecent: filteredR,
+    filteredStale: filteredS,
+    effectiveShowStale: showOlder,
+  } = useSessionFilters(sessions, taskInfoMap, mobileSearch, mobileShowStale);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -168,7 +144,10 @@ export function MobileSessionDrawer({
             )}
           </div>
           {showOwnership && (
-            <div className="grid grid-cols-2 gap-1 rounded-md border border-border-default bg-surface/40 p-0.5" aria-label="Session ownership filter">
+            <div
+              className="grid grid-cols-2 gap-1 rounded-md border border-border-default bg-surface/40 p-0.5"
+              aria-label="Session ownership filter"
+            >
               {(['my', 'all'] as const).map((scope) => (
                 <button
                   key={scope}
@@ -190,7 +169,11 @@ export function MobileSessionDrawer({
 
         {/* Subtle refresh indicator */}
         {isRefreshing && (
-          <div className="h-0.5 bg-accent animate-pulse" role="status" aria-label="Refreshing sessions" />
+          <div
+            className="h-0.5 bg-accent animate-pulse"
+            role="status"
+            aria-label="Refreshing sessions"
+          />
         )}
 
         {/* Session list */}
@@ -228,6 +211,6 @@ export function MobileSessionDrawer({
         </nav>
       </div>
     </>,
-    document.body,
+    document.body
   );
 }

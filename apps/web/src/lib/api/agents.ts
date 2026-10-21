@@ -9,10 +9,12 @@ import type {
   CreateSkillRequest,
   CredentialResponse,
   ModelCatalogResponse,
+  ProfilePickerState,
   ProjectRuntimeConfigResponse,
   SaveAgentCredentialRequest,
   SaveAgentSettingsRequest,
   UpdateAgentProfileRequest,
+  UpdateProfilePickerRequest,
   UpdateSkillRequest,
   UpsertProjectRuntimeEnvVarRequest,
   UpsertProjectRuntimeFileRequest,
@@ -190,6 +192,22 @@ export async function deleteAgentSettings(agentType: string): Promise<void> {
 export async function listAgentProfiles(projectId: string): Promise<AgentProfile[]> {
   const res = await request<{ items: AgentProfile[] }>(`/api/projects/${projectId}/agent-profiles`);
   return res.items ?? [];
+}
+
+/** The caller's own new-chat picker state: recent profile usage and hidden profiles. */
+export async function getProfilePickerState(projectId: string): Promise<ProfilePickerState> {
+  return request<ProfilePickerState>(`/api/projects/${projectId}/agent-profiles/picker`);
+}
+
+/** Hide or show profiles in the caller's own new-chat picker. */
+export async function updateProfilePicker(
+  projectId: string,
+  data: UpdateProfilePickerRequest
+): Promise<{ hiddenProfileIds: string[] }> {
+  return request<{ hiddenProfileIds: string[] }>(
+    `/api/projects/${projectId}/agent-profiles/picker`,
+    { method: 'PATCH', body: JSON.stringify(data) }
+  );
 }
 
 export async function createAgentProfile(

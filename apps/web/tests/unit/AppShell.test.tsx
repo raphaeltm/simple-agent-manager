@@ -142,16 +142,10 @@ describe('AppShell (global context)', () => {
     expect(screen.getByText('Settings')).toBeInTheDocument();
   });
 
-  it('shows Infrastructure section for non-superadmins', () => {
+  it('shows Infrastructure as a top-level link to the Nodes page', () => {
     renderAppShell();
-    expect(screen.getByText('Infrastructure')).toBeInTheDocument();
-  });
-
-  it('expands Infrastructure to show Nodes and Workspaces in primary nav', () => {
-    renderAppShell();
-    fireEvent.click(screen.getByText('Infrastructure'));
-    expect(screen.getByText('Nodes')).toBeInTheDocument();
-    expect(screen.getByText('Workspaces')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Infrastructure' })).toHaveAttribute('href', '/nodes');
+    expect(screen.queryByText('Workspaces')).not.toBeInTheDocument();
   });
 
   it('renders SAM branding', () => {
@@ -371,22 +365,13 @@ describe('AppShell (mobile)', () => {
     expect(within(drawer).getByText('Project')).toBeInTheDocument();
   });
 
-  it('shows Infrastructure section in mobile drawer for non-superadmins', () => {
+  it('shows Infrastructure as a top-level item in the mobile drawer', () => {
     renderAppShell();
 
     fireEvent.click(screen.getByLabelText('Open navigation menu'));
 
-    expect(screen.getByText('Infrastructure')).toBeInTheDocument();
-  });
-
-  it('expands Infrastructure to show Nodes and Workspaces in mobile drawer', () => {
-    renderAppShell();
-
-    fireEvent.click(screen.getByLabelText('Open navigation menu'));
-    fireEvent.click(screen.getByText('Infrastructure'));
-
-    expect(screen.getByRole('button', { name: 'Nodes' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Workspaces' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Infrastructure' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Workspaces' })).not.toBeInTheDocument();
   });
 
   it('renders sign out with icon in mobile drawer', () => {

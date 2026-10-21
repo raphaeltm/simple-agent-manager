@@ -81,13 +81,79 @@ If you need a new tag, use lowercase kebab-case.
 ### Formatting Conventions
 
 - **Headings**: Use `##` for main sections, `###` for subsections. Never use `#` (the title comes from frontmatter).
-- **Code blocks**: Always specify the language for syntax highlighting (` ```typescript `, ` ```go `, ` ```yaml `, etc.).
+- **Code blocks**: Always specify the language (` ```typescript `, ` ```go `, ` ```yaml `, etc.). It drives the highlighting and the label on the block's tab. When the code comes from a file, put the path in the tab instead: ` ```typescript title="apps/api/src/services/skills.ts" `. Code gets line numbers automatically; shell commands (`bash`, `sh`) render as a terminal window without them, and `text` output gets neither. Highlight the lines that matter with ` ```typescript {4-6} `.
 - **Inline code**: Use backticks for function names, file paths, env vars, CLI commands (`getPostBySlug()`, `apps/www/src/`, `NODE_WARM_TIMEOUT_MS`, `pnpm build`).
 - **Bold**: Use for key terms on first introduction or emphasis. Don't overuse.
 - **Links**: Link to source code, docs pages, and specs when referencing them. Use relative links for internal content, absolute URLs for external.
 - **Lists**: Use bullet lists for unordered items, numbered lists for sequences/steps.
 - **Tables**: Use for structured comparisons (e.g., "Option A vs Option B").
 - **Blockquotes**: Use for callouts, important notes, or quoting external sources.
+
+## UI Renders
+
+When a post covers something people see or touch in the app (a new control, panel, layout, empty state or message), show it. Add one to three small renders of the real UI next to the paragraph that describes them. A reader should not have to picture a screen from prose. Posts about backend changes with no visible effect need none.
+
+### What a good render looks like
+
+- **Small and focused.** Capture the component that changed (the control, popover, card or panel), not the whole page. Stay under about 640 CSS px wide where you can: wider renders shrink on phones until their text is unreadable. A phone-width capture (375 px) is often the most legible choice.
+- **The real component, fake data.** Render the production UI with mocked API data: never a hand-drawn mockup, never a screenshot of production. Make the data look lived-in and keep it fictional (`acme/payments-api`, "Dana Reyes", profile names like "Careful Reviewer"). No real people, emails, repositories, IDs, URLs or tokens.
+- **The state the post describes.** The open picker, the error card, the filled form, with enough rows to look real and none cut off at an edge.
+- **Both themes.** The blog has light and dark modes. Capture each and pair them (see Embed).
+
+### Capture with Playwright
+
+The app's Playwright suite already renders real pages against mocked APIs. Reuse it:
+
+1. Find the spec that shipped with the UI change: every UI PR adds an `apps/web/tests/playwright/*-audit.spec.ts` with realistic mock data (`gh pr view <number> --json files`). The `docs-screenshots-*.spec.ts` specs are good examples too. If neither covers the surface, write the mocks from the response types in `packages/shared/src/` and the API calls the page makes (its hooks under `apps/web/src/`).
+2. Copy its mocks into `apps/web/tests/playwright/<slug>.local.spec.ts`. That name is gitignored on purpose: the capture spec is scratch work, so the blog PR stays inside `apps/www/` and on the marketing site's narrow CI.
+3. For each theme, seed it, drive the UI to the state you want, assert it rendered, and capture the element with `blogShot()` from `docs-shot.ts`:
+
+   ```typescript
+   import { seedTheme } from './audit-helpers';
+   import { blogShot, opaqueBackdrop } from './docs-shot';
+
+   for (const theme of ['dark', 'light'] as const) {
+     test(`profile picker (${theme})`, async ({ page }) => {
+       await seedTheme(page, theme);
+       // ...mock the API (copied from the audit spec) and open the page
+       await opaqueBackdrop(page, theme); // dialogs and drawers only
+       await page.getByRole('button', { name: /^To / }).click();
+       const picker = page.getByRole('dialog', { name: 'Choose a profile' });
+       await expect(picker).toBeVisible();
+       await blogShot(page, SLUG, `profile-picker-${theme}`, picker);
+     });
+   }
+   ```
+
+   `blogShot()` writes `apps/www/public/images/blog/<slug>/<name>.png` at 2x and prints the CSS `width` and `height` the post needs. `opaqueBackdrop()` stops the page behind a translucent panel from showing through it.
+4. Run it from `apps/web`. The first run builds the app.
+
+   ```bash
+   pnpm --filter "@simple-agent-manager/web^..." build   # once, if packages/*/dist is missing
+   npx playwright install --with-deps chromium            # once, if Chromium is missing
+   npx playwright test <slug>.local --project="Desktop (1280x800)"
+   ```
+
+5. Compress the images: `pnpm --filter @simple-agent-manager/www compress:screenshots public/images/blog/<slug>`.
+6. Open every image and look at it. It must show the intended state, with nothing clipped, no onboarding or dev overlays, no page content bleeding through a panel, and no real data. Then delete the local spec.
+
+### Embed
+
+Use an HTML figure, so the render shows at its real size and stays sharp. Markdown image syntax would show a 2x capture at double size. Mark the pair `shot-dark` and `shot-light`; the site shows the one that matches the reader's theme.
+
+```html
+<figure>
+  <img class="shot-dark" src="/images/blog/<slug>/profile-picker-dark.png" width="440" height="545" alt="The profile picker. A Recent section lists Careful Reviewer, checked as the current choice, then Codex Builder and Quick Questions." loading="lazy" decoding="async" />
+  <img class="shot-light" src="/images/blog/<slug>/profile-picker-light.png" width="440" height="545" alt="The profile picker. A Recent section lists Careful Reviewer, checked as the current choice, then Codex Builder and Quick Questions." loading="lazy" decoding="async" />
+  <figcaption>Opening it lists recent profiles first, with your last pick already selected.</figcaption>
+</figure>
+```
+
+- `width` and `height` are the CSS sizes `blogShot()` printed.
+- The alt text describes what the image shows, for a reader who cannot see it. Both images get the same alt text.
+- The caption states the one thing the reader should notice.
+- Keep blank lines out of the figure: Markdown ends an HTML block at the first blank line.
+- Worked example: `sams-journal-making-agent-choice-explicit.md`.
 
 ## Content Quality Checklist
 
@@ -96,7 +162,8 @@ Before publishing, verify:
 - [ ] Title is under 60 characters and includes the primary keyword
 - [ ] Excerpt is under 160 characters and compelling
 - [ ] Post has a clear thesis or takeaway in the first paragraph
-- [ ] All code blocks have language annotations
+- [ ] All code blocks have language annotations, and code quoted from a file names it with `title="..."`
+- [ ] A post about a UI change shows it with at least one render (dark and light pair), and every image was opened and checked
 - [ ] No `#` headings (title comes from frontmatter)
 - [ ] Links are not broken
 - [ ] Technical claims are accurate — verify against the actual codebase
@@ -142,7 +209,8 @@ These topics have strong source material and broad developer appeal:
 ## Process
 
 1. Write the post as a `.md` file in `apps/www/src/content/blog/`
-2. Preview locally with `pnpm --filter @simple-agent-manager/www dev` and navigate to `/blog/`
-3. Run `pnpm --filter @simple-agent-manager/www build` to verify no build issues
-4. Commit and push on a feature branch
-5. Open a PR for review
+2. For a post about UI, capture its renders (see UI Renders)
+3. Preview locally with `pnpm --filter @simple-agent-manager/www dev`, open the post, and check its renders and code blocks in both themes and at phone width
+4. Run `pnpm --filter @simple-agent-manager/www build` to verify no build issues
+5. Commit and push on a feature branch
+6. Open a PR for review

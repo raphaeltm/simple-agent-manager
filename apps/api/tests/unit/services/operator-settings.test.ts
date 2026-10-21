@@ -33,6 +33,9 @@ describe('typed SAM operator runtime settings', () => {
       eventPageSize: 25,
       workRefreshMs: 30_000,
       watchRetryLimit: 3,
+      streamFlushMs: 80,
+      streamHeartbeatMs: 15_000,
+      streamMaxSubscribers: 4,
     });
     expect(sqlite.prepare('SELECT * FROM platform_settings').all()).toEqual([]);
   });
@@ -43,12 +46,18 @@ describe('typed SAM operator runtime settings', () => {
     set('operations.samOperatorEventPageSize', 10);
     set('operations.samOperatorWorkRefreshMs', 5_000);
     set('operations.samOperatorWatchRetryLimit', 4);
+    set('operations.samOperatorStreamFlushMs', 40);
+    set('operations.samOperatorStreamHeartbeatMs', 5_000);
+    set('operations.samOperatorStreamMaxSubscribers', 2);
     expect(await getOperatorSettings(env)).toEqual({
       disabled: true,
       watchLifetimeMs: 120_000,
       eventPageSize: 10,
       workRefreshMs: 5_000,
       watchRetryLimit: 4,
+      streamFlushMs: 40,
+      streamHeartbeatMs: 5_000,
+      streamMaxSubscribers: 2,
     });
     const view = await readAdminSettings(env);
     expect(
@@ -63,6 +72,9 @@ describe('typed SAM operator runtime settings', () => {
       'operations.samOperatorEventPageSize',
       'operations.samOperatorWorkRefreshMs',
       'operations.samOperatorWatchRetryLimit',
+      'operations.samOperatorStreamFlushMs',
+      'operations.samOperatorStreamHeartbeatMs',
+      'operations.samOperatorStreamMaxSubscribers',
     ]) {
       expect(findAdminSetting(name)?.legacyEnvironment).toBeUndefined();
     }
@@ -101,6 +113,9 @@ describe('typed SAM operator runtime settings', () => {
       'operations.samOperatorEventPageSize',
       'operations.samOperatorWorkRefreshMs',
       'operations.samOperatorWatchRetryLimit',
+      'operations.samOperatorStreamFlushMs',
+      'operations.samOperatorStreamHeartbeatMs',
+      'operations.samOperatorStreamMaxSubscribers',
     ]) {
       const definition = findAdminSetting(name)!;
       expect(definition.secret).toBe(false);

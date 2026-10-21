@@ -27,6 +27,28 @@ const check = (text: string, receipts: OperatorAction[] = []) =>
   assertGroundedOperatorResponse(text, receipts, origin);
 
 describe('operator publication grounding', () => {
+  it('rejects a reply that copies the private history record format', () => {
+    // Seen on staging: the model opened its answer with a record from its own history.
+    const record = JSON.stringify({
+      kind: 'sam_historical_turn_status',
+      authority: 'historical_evidence_only',
+      assistantMessages: ['Here is the current picture.'],
+    });
+    expect(() => check(record)).toThrow('reproduces a private history record');
+    expect(() => check(`  ${record}`)).toThrow('reproduces a private history record');
+    expect(() => check(`Earlier I said: ${record}`)).toThrow('reproduces a private history record');
+    // A copy that drops the kind still carries the record's other keys.
+    for (const partial of [
+      'Status: {"authority": "historical_evidence_only", "state": "completed"}',
+      'Here it is: {"assistantMessages": ["Nothing shipped."]}',
+      '{"turnId": "t", "assistantOmitted": false}',
+    ])
+      expect(() => check(partial)).toThrow('reproduces a private history record');
+    // JSON the user asked for, and prose that names the record, are still answers.
+    expect(() => check('{"name": "website", "branch": "main"}')).not.toThrow();
+    expect(() => check('Use {project} placeholders in the brief.')).not.toThrow();
+    expect(() => check('History is shown as sam_historical_turn_status records.')).not.toThrow();
+  });
   it('grounds a stopped workspace without claiming deletion', () => {
     expect(() =>
       check('I stopped the workspace.', [

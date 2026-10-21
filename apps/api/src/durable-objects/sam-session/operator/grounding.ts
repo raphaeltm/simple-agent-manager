@@ -80,6 +80,37 @@ const claims: Array<{ verbs: string; operations: string[] }> = [
 ];
 const writes = new Set(claims.flatMap((claim) => claim.operations));
 
+/** Kind and authority of the private history records the model reads; never part of an answer. */
+export const HISTORY_RECORD_KIND = 'sam_historical_turn_status';
+export const HISTORY_RECORD_AUTHORITY = 'historical_evidence_only';
+/**
+ * A reply that copies the history record format, wherever it starts. It carries one of the
+ * record's own keys, which no answer needs, and can replay old links and IDs as current.
+ * Ordinary JSON a user asks for has none of them and is unaffected.
+ */
+const HISTORY_RECORD_COPY = new RegExp(
+  [
+    `"kind"\\s*:\\s*"${HISTORY_RECORD_KIND}"`,
+    `"authority"\\s*:\\s*"${HISTORY_RECORD_AUTHORITY}"`,
+    '"assistantMessages"\\s*:',
+    '"assistantOmitted"\\s*:',
+  ].join('|')
+);
+
+/** A ULID or UUID, including any fabricated `_suffix`: the whole token is one identity. */
+export const PLATFORM_IDENTIFIER_PATTERN =
+  /\b(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[_-][A-Za-z0-9_-]+)?\b/gi;
+/** An absolute URL or an app-relative project path. */
+export const PLATFORM_URL_PATTERN = /(?:https?:\/\/[^\s<>"`()[\]]+|\/projects\/[^\s<>"`()[\]]+)/g;
+
+/** What this turn's completed receipts prove; built once per receipt change, checked per text. */
+export interface GroundingIndex {
+  readonly appOrigin: string;
+  readonly identities: ReadonlyMap<Resource, ReadonlySet<string>>;
+  readonly links: ReadonlySet<string>;
+  readonly completed: ReadonlySet<string>;
+}
+
 /**
  * Publication guard, not a universal semantic truth verifier. Platform references
  * need current, completed result metadata. Historical prose and action inputs
@@ -90,6 +121,27 @@ export function assertGroundedOperatorResponse(
   actions: OperatorAction[],
   appOrigin: string
 ): void {
+  assertGroundedText(text, buildGroundingIndex(actions, appOrigin));
+}
+
+/**
+ * Whether `text` may be shown. Identifiers, URLs and claim verbs never contain
+ * whitespace, and each check reads either the text before its match or whole words
+ * after it. A whitespace-bounded prefix of a passing text therefore also passes; it can
+ * only lack a later claim target, which skips that check. The live stream relies on
+ * this to publish an answer word by word.
+ */
+export function isGroundedText(text: string, index: GroundingIndex): boolean {
+  try {
+    assertGroundedText(text, index);
+    return true;
+  } catch {
+    // Any failure, including a malformed URL candidate, withholds publication.
+    return false;
+  }
+}
+
+export function buildGroundingIndex(actions: OperatorAction[], appOrigin: string): GroundingIndex {
   const identities = new Map<Resource, Set<string>>();
   const addIdentity = (kind: Resource, id: unknown) => {
     if (!nonempty(id)) return;
@@ -138,11 +190,18 @@ export function assertGroundedOperatorResponse(
       }
     }
   }
+  return { appOrigin, identities, links, completed };
+}
+
+export function assertGroundedText(text: string, index: GroundingIndex): void {
+  const { appOrigin, identities, links, completed } = index;
+  // A text that contains a record key keeps it in every longer text, so once the key
+  // appears the live stream withholds the rest of the step.
+  if (HISTORY_RECORD_COPY.test(text))
+    throw new OperatorGroundingError('SAM response reproduces a private history record');
   // Match the WHOLE token, including fabricated suffixes; a real profile ID
   // prefix must never ground a made-up session/task ID.
-  const identifiers =
-    /\b(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[_-][A-Za-z0-9_-]+)?\b/gi;
-  for (const match of text.matchAll(identifiers)) {
+  for (const match of text.matchAll(PLATFORM_IDENTIFIER_PATTERN)) {
     const prefix = text.slice(Math.max(0, match.index - 100), match.index).replace(/[*`]/g, '');
     const resourceLabel =
       /\b(project|task|session|chat|conversation|profile|idea)(?:\s+(?:id|identifier))?\s*(?::|=|\bis\b)?\s*['"]?$/i;
@@ -152,8 +211,7 @@ export function assertGroundedOperatorResponse(
     if (resource && !identities.get(resource)?.has(match[0]))
       throw new OperatorGroundingError('SAM response contains an ungrounded platform identity');
   }
-  const urls = /(?:https?:\/\/[^\s<>"`()[\]]+|\/projects\/[^\s<>"`()[\]]+)/g;
-  for (const [candidate] of text.matchAll(urls)) {
+  for (const [candidate] of text.matchAll(PLATFORM_URL_PATTERN)) {
     // Scan backwards once: a suffix regexp retries at every punctuation
     // position when a long punctuation run ends in a non-punctuation byte.
     let end = candidate.length;

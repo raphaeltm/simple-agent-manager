@@ -7,6 +7,7 @@ import { requireProjectAccess } from '../../../middleware/project-auth';
 import { OPERATOR_DEFAULTS } from '../../../services/admin-settings-registry';
 import type { OperatorSettings } from '../../../services/operator-settings';
 import * as projectData from '../../../services/project-data';
+import { projectAccessCache } from './projection';
 
 interface Watch {
   action_id: string;
@@ -277,68 +278,78 @@ export class OperatorWork {
     );
   }
 
-  async view(userId: string): Promise<Array<Record<string, unknown>>> {
-    const work: Array<Record<string, unknown>> = [];
-    for (const row of this.rows()) {
-      try {
-        await requireProjectAccess(drizzle(this.env.DATABASE), row.project_id, userId);
-        const task = await this.env.DATABASE.prepare(
-          'SELECT t.status,t.title AS taskTitle,p.name AS projectName,t.execution_step AS executionStep FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=? AND t.project_id=? AND t.user_id=? AND t.chat_session_id=?'
-        )
-          .bind(row.task_id, row.project_id, userId, row.session_id)
-          .first<{
-            status: string;
-            taskTitle: string;
-            projectName: string;
-            executionStep: string | null;
-          }>();
-        if (!task) continue;
-        const inbox = this.sql
-          .exec(
-            'SELECT COUNT(*) AS unread FROM operator_inbox WHERE action_id=? AND communicated_at IS NULL',
-            row.action_id
+  /**
+   * Runs on every history read, so its D1 reads run in parallel and each project's
+   * membership is checked once; one awaited round trip per card made history slow.
+   */
+  async view(
+    userId: string,
+    projectAccess = projectAccessCache(this.env, userId)
+  ): Promise<Array<Record<string, unknown>>> {
+    const cards = await Promise.all(
+      this.rows().map(async (row) => {
+        try {
+          // Revoked project details are not exposed from stale projections.
+          if (!(await projectAccess(row.project_id))) return null;
+          const task = await this.env.DATABASE.prepare(
+            'SELECT t.status,t.title AS taskTitle,p.name AS projectName,t.execution_step AS executionStep FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=? AND t.project_id=? AND t.user_id=? AND t.chat_session_id=?'
           )
-          .toArray()[0];
-        const last = this.sql
-          .exec(
-            'SELECT event_type,occurred_at FROM operator_inbox WHERE action_id=? ORDER BY occurred_at DESC,event_id DESC LIMIT 1',
-            row.action_id
-          )
-          .toArray()[0];
-        work.push({
-          updates: {
-            unread: Number(inbox?.unread ?? 0),
-            lastEventType: last?.event_type ?? null,
-            lastEventAt: last?.occurred_at ?? null,
-          },
-          actionId: row.action_id,
-          projectId: row.project_id,
-          taskId: row.task_id,
-          sessionId: row.session_id,
-          status: task.status,
-          taskTitle: task.taskTitle,
-          projectName: task.projectName,
-          observedAt: Date.now(),
-          attention:
-            row.status === 'watch_failed' ||
-            task.status === 'failed' ||
-            task.executionStep === 'awaiting_followup',
-          ...(row.status === 'watch_failed'
-            ? {
-                error:
-                  'Automatic updates stopped after repeated failures. Open project work for current status; a requested follow-up resumes updates.',
-              }
-            : row.expires_at <= Date.now()
+            .bind(row.task_id, row.project_id, userId, row.session_id)
+            .first<{
+              status: string;
+              taskTitle: string;
+              projectName: string;
+              executionStep: string | null;
+            }>();
+          if (!task) return null;
+          const inbox = this.sql
+            .exec(
+              'SELECT COUNT(*) AS unread FROM operator_inbox WHERE action_id=? AND communicated_at IS NULL',
+              row.action_id
+            )
+            .toArray()[0];
+          const last = this.sql
+            .exec(
+              'SELECT event_type,occurred_at FROM operator_inbox WHERE action_id=? ORDER BY occurred_at DESC,event_id DESC LIMIT 1',
+              row.action_id
+            )
+            .toArray()[0];
+          return {
+            updates: {
+              unread: Number(inbox?.unread ?? 0),
+              lastEventType: last?.event_type ?? null,
+              lastEventAt: last?.occurred_at ?? null,
+            },
+            actionId: row.action_id,
+            projectId: row.project_id,
+            taskId: row.task_id,
+            sessionId: row.session_id,
+            status: task.status,
+            taskTitle: task.taskTitle,
+            projectName: task.projectName,
+            observedAt: Date.now(),
+            attention:
+              row.status === 'watch_failed' ||
+              task.status === 'failed' ||
+              task.executionStep === 'awaiting_followup',
+            ...(row.status === 'watch_failed'
               ? {
-                  error: 'Automatic updates expired. Open project work for current status.',
+                  error:
+                    'Automatic updates stopped after repeated failures. Open project work for current status; a requested follow-up resumes updates.',
                 }
-              : {}),
-          link: `https://app.${this.env.BASE_DOMAIN}/projects/${row.project_id}/chat/${row.session_id}`,
-        });
-      } catch {
-        /* Revoked project details are not exposed from stale projections. */
-      }
-    }
-    return work;
+              : row.expires_at <= Date.now()
+                ? {
+                    error: 'Automatic updates expired. Open project work for current status.',
+                  }
+                : {}),
+            link: `https://app.${this.env.BASE_DOMAIN}/projects/${row.project_id}/chat/${row.session_id}`,
+          };
+        } catch {
+          /* A failed read hides that card; it never fails the whole history read. */
+          return null;
+        }
+      })
+    );
+    return cards.filter((card) => card !== null);
   }
 }

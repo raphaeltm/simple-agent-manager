@@ -160,6 +160,28 @@ The tells:
 - [ ] Tests enter through the real handler where one can be driven
 - [ ] Each fix was reverted separately and the reddened tests recorded
 
+## The Same Bug in a Stored Override Layer
+
+A persisted layer that overrides another one (a skill over a profile, a project
+default over a platform default) has the same absence problem in its schema. A
+column declared `NOT NULL DEFAULT <value>`, or a create path that stamps a default
+when the field is omitted, cannot store "not set", so every row overrides the layer
+beneath it.
+
+`skills.agent_type` was `NOT NULL DEFAULT 'claude-code'`, and `createSkill` stamped
+`DEFAULT_TASK_AGENT_TYPE` because the skill form had no agent field. Every skill
+therefore replaced the agent of the profile it ran with: in production, `do` with the
+Sol and Opus profiles ran as `opencode`. Migration 0200 made the column nullable,
+creation stores NULL when the field is omitted, and `resolveSkillProfile` keeps
+`skill.agentType ?? profile.agentType`.
+
+- Override columns are nullable, NULL means "use the layer below", and the create
+  path stores NULL for an omitted field rather than an environment default.
+- When the override is set, check its dependants against the value that actually
+  wins. A skill's effort is dropped if the resolved agent doesn't support it.
+- Test the resolver with the override absent (the lower layer wins) and present
+  (the override wins), through the real create path, not a hand-built row.
+
 ## Audit Result for `workspaceRuntimeOpts`
 
 `Lightweight` was the only `bool`. Every other field is a `string` using the
@@ -178,5 +200,7 @@ this rule applies to it verbatim.
 - `.claude/rules/63-widening-a-table-can-delete-an-auth-check.md` — the schema sibling
 - `.claude/rules/71-tightening-a-column-can-delete-a-capability.md` — the mirror image
 - `.claude/rules/44-dual-write-migration-enumerate-writers.md` — enumerate every caller
+- Stored-layer case: `apps/api/src/db/migrations/0200_skills_optional_agent_type.sql`,
+  `apps/api/tests/unit/services/skills-optional-agent-type.test.ts`
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md` — prove the guard discriminating
 - `.claude/rules/61-guards-must-cover-every-runtime.md` — one guard, every runtime

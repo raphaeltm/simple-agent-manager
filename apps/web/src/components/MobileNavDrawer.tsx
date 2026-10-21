@@ -1,5 +1,5 @@
 import { useModalInteraction } from '@simple-agent-manager/ui/hooks/useModalInteraction';
-import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, LogOut } from 'lucide-react';
+import { ArrowLeft, ArrowRight, LogOut } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -15,10 +15,6 @@ export interface MobileNavItem {
   icon?: ReactNode;
 }
 
-interface InfraSection {
-  items: MobileNavItem[];
-}
-
 interface MobileNavDrawerProps {
   onClose: () => void;
   user: { name?: string | null; email: string; image?: string | null };
@@ -28,8 +24,7 @@ interface MobileNavDrawerProps {
   onNavigate: (path: string) => void;
   onSignOut: () => void;
   projectName?: string;
-  infraSection?: InfraSection;
-  /** Rendered below Infrastructure in both default and global panels */
+  /** Rendered below the nav items in both default and global panels */
   projectListSection?: ReactNode;
   projectHealthElement?: ReactNode;
   showGlobalNav?: boolean;
@@ -52,13 +47,11 @@ export function MobileNavDrawer({
   onNavigate,
   onSignOut,
   projectName,
-  infraSection,
   projectListSection,
   projectHealthElement,
   showGlobalNav,
   onToggleGlobalNav,
 }: MobileNavDrawerProps) {
-  const [infraOpen, setInfraOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -217,43 +210,6 @@ export function MobileNavDrawer({
                 );
               })}
 
-              {/* Infrastructure section — only in non-toggle mode */}
-              {!canToggle && infraSection && (
-                <div className="mt-2">
-                  <button
-                    onClick={() => setInfraOpen(!infraOpen)}
-                    className={`flex items-center gap-2 w-full px-5 py-2.5 bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] transition-all duration-[120ms] ${FOCUS_RING}`}
-                    aria-expanded={infraOpen}
-                    aria-controls="mobile-infra-nav-panel"
-                  >
-                    {infraOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    Infrastructure
-                  </button>
-                  {infraOpen && (
-                    <div id="mobile-infra-nav-panel">
-                      {infraSection.items.map((item) => {
-                        const active = isNavItemActive(item.path, currentPath);
-                        return (
-                          <button
-                            key={item.path}
-                            aria-current={active ? 'page' : undefined}
-                            className={`flex items-center gap-3 w-full min-h-11 px-5 pl-8 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${FOCUS_RING} ${
-                              active
-                                ? 'text-accent border-l-accent bg-[var(--sam-chrome-accent-active-subtle)]'
-                                : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]'
-                            }`}
-                            onClick={() => onNavigate(item.path)}
-                          >
-                            {item.icon && <span className="shrink-0">{item.icon}</span>}
-                            {item.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
               {/* Project list — only in non-toggle mode (global nav) */}
               {!canToggle && projectListSection}
             </div>
@@ -283,43 +239,6 @@ export function MobileNavDrawer({
                     </button>
                   );
                 })}
-
-                {/* Infrastructure section — in global view */}
-                {infraSection && (
-                  <div className="mt-2">
-                    <button
-                      onClick={() => setInfraOpen(!infraOpen)}
-                      className={`flex items-center gap-2 w-full px-5 py-2.5 bg-transparent border-none text-xs font-semibold text-fg-muted uppercase tracking-wider cursor-pointer hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] transition-all duration-[120ms] ${FOCUS_RING}`}
-                      aria-expanded={infraOpen}
-                      aria-controls="mobile-infra-nav-panel-global"
-                    >
-                      {infraOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                      Infrastructure
-                    </button>
-                    {infraOpen && (
-                      <div id="mobile-infra-nav-panel-global">
-                        {infraSection.items.map((item) => {
-                          const active = isNavItemActive(item.path, currentPath);
-                          return (
-                            <button
-                              key={item.path}
-                              aria-current={active ? 'page' : undefined}
-                              className={`flex items-center gap-3 w-full min-h-11 px-5 pl-8 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${FOCUS_RING} ${
-                                active
-                                  ? 'text-accent border-l-accent bg-[var(--sam-chrome-accent-active-subtle)]'
-                                  : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]'
-                              }`}
-                              onClick={() => onNavigate(item.path)}
-                            >
-                              {item.icon && <span className="shrink-0">{item.icon}</span>}
-                              {item.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
 
                 {/* Project list — in global view within project context */}
                 {projectListSection}

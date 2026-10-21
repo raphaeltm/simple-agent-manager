@@ -73,6 +73,28 @@ viewport — and `overflow-x-hidden` then hides the evidence.
    `line-clamp-N` with `break-words` wherever the text is user- or
    agent-supplied.
 
+## Absolute Descendants Escape A Scroller That Is Not Positioned
+
+`overflow: auto` clips and scrolls only descendants whose containing block is the scroller
+or inside it. An absolutely positioned descendant (Tailwind `sr-only` is one) uses the
+nearest **positioned** ancestor. If that ancestor sits outside the scroller, the element is
+neither clipped nor scrolled: it stays at its unscrolled static position and its overflow
+propagates to the next scroll container up.
+
+On 2026-10-21 the private SAM conversation (`apps/web/src/pages/Sam.tsx`) had a
+`relative` wrapper around an unpositioned `overflow-y-auto` scroller. Each turn's
+`sr-only` "You:" label escaped the scroller, so the AppShell `<main>` had 5,560px of
+scrollable content for an 829px child. On Android, scrolling past the newest turn chained
+to `<main>` and dragged the header off-screen and the pinned composer to mid-screen.
+
+- Give every scroll container that holds arbitrary content `relative` (or another
+  positioning value) so it is the containing block of its absolute descendants.
+- For full-height surfaces (chat views), assert the shell's `<main>` has no scrollable
+  overflow (`scrollHeight - clientHeight <= 1`) and that the pinned control's bottom edge
+  meets the shell's bottom edge; "bottom <= viewport height" also passes when the control
+  has been dragged up. See `checkComposerPinned` in
+  `apps/web/tests/playwright/sam-assistant-audit.spec.ts`.
+
 ## Required Tests
 
 - Any new or changed UI surface must call `assertNoOverflow` at mobile (375px)
@@ -92,6 +114,8 @@ viewport — and `overflow-x-hidden` then hides the evidence.
 - [ ] Page roots inside the project Outlet wrapper have `w-full min-w-0`
 - [ ] Primary names wrap (`line-clamp` + `break-words`) rather than `truncate`
 - [ ] The new guard was verified to fail on the pre-fix build
+- [ ] Scroll containers with arbitrary content are positioned (`relative`), so absolute
+      descendants cannot leak into an ancestor's scroll area
 
 ## References
 

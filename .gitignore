@@ -67,6 +67,8 @@ pnpm-debug.log*
 !.codex/config.toml
 # Playwright audit screenshots write under apps/web cwd, not the repo root
 **/.codex/tmp/
+# Throwaway Playwright specs, e.g. blog UI captures (apps/www/src/content/CLAUDE.md)
+apps/web/tests/playwright/*.local.spec.ts
 
 # Ephemeral agent scratch space — screenshots, debug dumps, downloads, notes.
 # Anything that should NOT be committed goes in .tmp/ (see .tmp/README.md).

@@ -15,6 +15,7 @@ export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' 
 export type AdminSettingName =
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
   | `connector.${ConnectorSettingKey}`
+  | 'chat.profileUsageWindowDays'
   | 'collaboration.commentMentionsMax'
   | 'collaboration.commentNotificationWindowSeconds'
   | 'collaboration.sessionAccessMaxGrants'
@@ -35,12 +36,15 @@ export type AdminSettingName =
   | 'operations.samOperatorEventPageSize'
   | 'operations.samOperatorWorkRefreshMs'
   | 'operations.samOperatorWatchRetryLimit'
+  | 'operations.samOperatorStreamFlushMs'
+  | 'operations.samOperatorStreamHeartbeatMs'
+  | 'operations.samOperatorStreamMaxSubscribers'
   | 'trials.enabled';
 export interface AdminSettingDefinition {
   readonly name: AdminSettingName;
   readonly type: AdminSettingType;
   readonly defaultValue: AdminSettingValue;
-  readonly category: 'OAuth' | 'Connector' | 'Operations' | 'Trials' | 'Collaboration';
+  readonly category: 'OAuth' | 'Connector' | 'Operations' | 'Trials' | 'Collaboration' | 'Chat';
   readonly description: string;
   readonly secret: boolean;
   readonly risky: boolean;
@@ -52,6 +56,8 @@ export interface AdminSettingDefinition {
   readonly validate: (value: unknown) => boolean;
 }
 
+/** Days of a person's own new chats that order their new-chat profile picker (idea 01M5EW9H86VD88S7E3WWA1D9X1). */
+export const DEFAULT_PROFILE_USAGE_WINDOW_DAYS = 30;
 /** Collaboration defaults (idea 01M59MYE4GY91BWTE8TZF1ZB5D); admins can change them at runtime. */
 export const DEFAULT_SESSION_ACCESS_MAX_GRANTS = 10;
 export const DEFAULT_COMMENT_MENTIONS_MAX = 10;
@@ -64,6 +70,11 @@ export const OPERATOR_DEFAULTS = Object.freeze({
   eventPageSize: MAX_SAM_OPERATOR_EVENT_PAGE_SIZE,
   workRefreshMs: 30_000,
   watchRetryLimit: 3,
+  // About 12 updates a second reads as smooth typing without a frame per token.
+  streamFlushMs: 80,
+  // Below common proxy idle timeouts, so a long tool call does not drop the live view.
+  streamHeartbeatMs: 15_000,
+  streamMaxSubscribers: 4,
 });
 
 const connectorDescriptions: Record<ConnectorSettingKey, string> = {
@@ -297,6 +308,13 @@ const definitions: AdminSettingDefinition[] = [
     { min: 1, max: 50 }
   ),
   integerDefinition(
+    'chat.profileUsageWindowDays',
+    DEFAULT_PROFILE_USAGE_WINDOW_DAYS,
+    'Chat',
+    'Days of each person’s own new chats used to put their recent profiles first and to suggest hiding ones they no longer use.',
+    { min: 1, max: 365 }
+  ),
+  integerDefinition(
     'collaboration.commentNotificationWindowSeconds',
     DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS / 1000,
     'Collaboration',
@@ -344,6 +362,27 @@ const definitions: AdminSettingDefinition[] = [
     'Operations',
     'Consecutive failed private SAM watch refreshes before automatic updates stop. A successful pull or requested follow-up resets the count.',
     { min: 1, max: 25 }
+  ),
+  integerDefinition(
+    'operations.samOperatorStreamFlushMs',
+    OPERATOR_DEFAULTS.streamFlushMs,
+    'Operations',
+    'Milliseconds between live updates while the private SAM assistant is answering.',
+    { min: 16, max: 2_000 }
+  ),
+  integerDefinition(
+    'operations.samOperatorStreamHeartbeatMs',
+    OPERATOR_DEFAULTS.streamHeartbeatMs,
+    'Operations',
+    'Milliseconds between keep-alive frames on a live SAM answer stream.',
+    { min: 1_000, max: 120_000 }
+  ),
+  integerDefinition(
+    'operations.samOperatorStreamMaxSubscribers',
+    OPERATOR_DEFAULTS.streamMaxSubscribers,
+    'Operations',
+    'Browser tabs that can follow one private SAM answer live at the same time.',
+    { min: 1, max: 20 }
   ),
 ];
 

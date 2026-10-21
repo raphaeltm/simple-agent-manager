@@ -24,6 +24,7 @@ import { and, asc, desc, eq, inArray, like, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { chunk } from '../lib/d1-limits';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
@@ -417,14 +418,6 @@ function getListDefaultPageSize(env: Env): number {
   if (!val) return 50;
   const parsed = parseInt(val, 10);
   return isNaN(parsed) || parsed <= 0 ? 50 : parsed;
-}
-
-function chunk<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
 }
 
 export async function listFiles(

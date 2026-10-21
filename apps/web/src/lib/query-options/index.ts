@@ -44,6 +44,7 @@ export {
   agentCredentialsQueryOptions,
   agentProfilesQueryOptions,
   agentQueryKeys,
+  profilePickerQueryOptions,
   projectSkillsQueryOptions,
 } from './agents';
 export {

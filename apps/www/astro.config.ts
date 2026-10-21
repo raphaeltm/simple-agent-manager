@@ -1,6 +1,9 @@
 import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
+
+import { expressiveCode } from './src/lib/expressive-code';
+
 export default defineConfig({
   site: process.env.SITE_URL || 'https://www.simple-agent-manager.org',
   server: {
@@ -81,6 +84,9 @@ export default defineConfig({
           ],
         },
       ],
+      // Code blocks (src/lib/expressive-code.ts). Plugins can be passed here instead of
+      // `ec.config.mjs` because the site does not use the `<Code>` component.
+      expressiveCode,
       customCss: ['./src/styles/starlight-custom.css'],
       head: [
         {
@@ -112,10 +118,5 @@ export default defineConfig({
   ],
   build: {
     assets: '_assets',
-  },
-  markdown: {
-    shikiConfig: {
-      theme: 'night-owl',
-    },
   },
 });

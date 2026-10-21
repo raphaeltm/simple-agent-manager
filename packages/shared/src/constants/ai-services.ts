@@ -215,6 +215,8 @@ export interface PlatformAIModel {
   costPer1kInputTokens: number;
   /** Approximate cost per 1K output tokens (USD) for budget estimation. Actual costs from AI Gateway logs. */
   costPer1kOutputTokens: number;
+  /** Cost per 1K prefix-cache-hit input tokens (USD), when the provider prices them separately. */
+  costPer1kCachedInputTokens?: number;
   /** Context window size in tokens. */
   contextWindow: number;
   /** Tool-call reliability for agent loop suitability. */
@@ -379,10 +381,24 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     tier: 'low-cost',
     costPer1kInputTokens: 0.0001,
     costPer1kOutputTokens: 0.0003,
-    contextWindow: 32768,
+    // Cloudflare model page, verified 2026-10-21.
+    contextWindow: 256000,
     toolCallSupport: 'good',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'workers-coding',
+  }),
+  workersAIModel({
+    // Pricing and limits from the Cloudflare model page, verified 2026-10-21.
+    id: '@cf/zai-org/glm-5.3-flash',
+    label: 'GLM 5.3 Flash',
+    tier: 'low-cost',
+    costPer1kInputTokens: 0.00015,
+    costPer1kCachedInputTokens: 0.00003,
+    costPer1kOutputTokens: 0.0005,
+    contextWindow: 1048576,
+    toolCallSupport: 'good',
+    intendedRole: 'utility',
+    fallbackGroup: 'workers-general',
   }),
   workersAIModel({
     id: '@cf/zai-org/glm-5.2',

@@ -1,4 +1,4 @@
-import { Menu, Monitor, Search, Server, Shield } from 'lucide-react';
+import { Menu, Search, Shield } from 'lucide-react';
 import {
   createContext,
   type ReactNode,
@@ -177,15 +177,6 @@ export function AppShell({ children }: AppShellProps) {
     return items;
   }, [isSuperadmin, sam.enabled]);
 
-  const mobileInfraSection = useMemo(() => {
-    return {
-      items: [
-        { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
-        { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
-      ],
-    };
-  }, []);
-
   const handleProjectNavigate = useCallback(
     (path: string) => {
       navigate(path);
@@ -340,7 +331,6 @@ export function AppShell({ children }: AppShellProps) {
                 }}
                 onSignOut={handleSignOut}
                 projectName={projectId ? projectName || 'Project' : undefined}
-                infraSection={mobileInfraSection}
                 projectListSection={mobileProjectListSection}
                 projectHealthElement={mobileProjectHealthElement}
                 showGlobalNav={showGlobalNav}

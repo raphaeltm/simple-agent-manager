@@ -7,7 +7,18 @@ import { applyCacheHeaders } from '../lib/cache-headers';
 import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
-import { CreateAgentProfileSchema, jsonValidator, SetProjectDefaultProfileSchema,UpdateAgentProfileSchema } from '../schemas';
+import {
+  CreateAgentProfileSchema,
+  jsonValidator,
+  SetProjectDefaultProfileSchema,
+  UpdateAgentProfileSchema,
+  UpdateProfilePickerSchema,
+} from '../schemas';
+import {
+  getProfilePickerState,
+  getProfileUsageWindowDays,
+  updateHiddenProfiles,
+} from '../services/agent-profile-picker';
 import * as agentProfileService from '../services/agent-profiles';
 import { clearCredentialAttributionHealthCache } from '../services/credential-attribution-health';
 
@@ -45,6 +56,42 @@ agentProfileRoutes.post('/', jsonValidator(CreateAgentProfileSchema), async (c) 
   const profile = await agentProfileService.createProfile(db, projectId, userId, body, c.env);
   clearCredentialAttributionHealthCache(projectId);
   return c.json(profile, 201);
+});
+
+/**
+ * GET /picker — the caller's own new-chat picker state: recent usage and hidden profiles.
+ * Registered before `/:profileId` so "picker" is not read as a profile id.
+ */
+agentProfileRoutes.get('/picker', async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireProjectAccess(db, projectId, userId);
+
+  const usageWindowDays = await getProfileUsageWindowDays(c.env);
+  const state = await getProfilePickerState(db, projectId, userId, usageWindowDays);
+  // Never cached: this changes with every chat the caller starts and every hide, and a
+  // cached copy (even stale-while-revalidate) would bring a just-hidden profile back.
+  c.header('Cache-Control', 'private, no-store');
+  return c.json(state);
+});
+
+/** PATCH /picker — hide or show profiles in the caller's own picker (never other members'). */
+agentProfileRoutes.patch('/picker', jsonValidator(UpdateProfilePickerSchema), async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireProjectAccess(db, projectId, userId);
+
+  const hiddenProfileIds = await updateHiddenProfiles(
+    db,
+    projectId,
+    userId,
+    c.req.valid('json')
+  );
+  return c.json({ hiddenProfileIds });
 });
 
 /** GET /:profileId — Get a single profile */

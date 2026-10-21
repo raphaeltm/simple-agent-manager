@@ -36,7 +36,7 @@ function workspacePortTokenCacheMarker(token: string): string {
  *
  * The node and workspace lists were already on TanStack Query, but with **unscoped**
  * keys (`['nodes','list']`, `['workspaces','list',status]`) declared inline in
- * `pages/Nodes.tsx` and `pages/Workspaces.tsx` — with `Nodes.tsx` importing
+ * `pages/Nodes.tsx` and the since-removed `pages/Workspaces.tsx` — with `Nodes.tsx` importing
  * `workspacesKeys` across a page boundary. Relocating both here scopes them to the
  * authenticated identity and removes the page-to-page coupling.
  *

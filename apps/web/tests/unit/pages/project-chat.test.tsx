@@ -1,5 +1,5 @@
 import type { Task } from '@simple-agent-manager/shared';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -33,6 +33,14 @@ const mocks = vi.hoisted(() => ({
         createdAt: '2026-05-28T00:00:00.000Z',
         updatedAt: '2026-05-28T00:00:00.000Z',
       })
+    ),
+  getProfilePickerState: vi
+    .fn()
+    .mockResolvedValue({ usage: [], hiddenProfileIds: [], usageWindowDays: 30 }),
+  updateProfilePicker: vi
+    .fn()
+    .mockImplementation((_projectId: string, change: { hide?: string[] }) =>
+      Promise.resolve({ hiddenProfileIds: change.hide ?? [] })
     ),
   listChatSessions: vi.fn(),
   listCredentials: vi.fn(),
@@ -71,6 +79,8 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   listAgentProfiles: mocks.listAgentProfiles,
   listSkills: mocks.listSkills,
   createAgentProfile: mocks.createAgentProfile,
+  getProfilePickerState: mocks.getProfilePickerState,
+  updateProfilePicker: mocks.updateProfilePicker,
   listChatSessions: mocks.listChatSessions,
   listCredentials: mocks.listCredentials,
   getTrialStatus: mocks.getTrialStatus,
@@ -395,6 +405,17 @@ function setupStaleHierarchyMocks() {
   });
 
   return { parentSession, childSession };
+}
+
+/** The composer's single profile control ("To <profile>"), which opens the picker sheet. */
+function getProfileControl() {
+  return screen.getByRole('button', { name: /^To\b/ });
+}
+
+async function openProfilePicker() {
+  await waitFor(() => expect(getProfileControl()).not.toHaveTextContent('Loading profiles'));
+  fireEvent.click(getProfileControl());
+  return screen.findByRole('dialog', { name: 'Choose a profile' });
 }
 
 async function openProfileWizardFromGate() {
@@ -768,7 +789,7 @@ describe('ProjectChat new chat button', () => {
     expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
     expect(screen.getByText('Forking from: Fix the login bug')).toBeInTheDocument();
     expect(screen.getByText('Branch: sam/fix-login-bug')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Default Profile' })).toBeInTheDocument();
+    expect(getProfileControl()).toHaveTextContent('Default Profile');
     const textarea = screen.getByPlaceholderText(
       'Describe what you want the agent to do...'
     ) as HTMLTextAreaElement;
@@ -875,7 +896,7 @@ describe('ProjectChat new chat button', () => {
     });
     expect(screen.getByText('Retrying: Fix the login bug')).toBeInTheDocument();
     expect(screen.getByText('Error: Agent crashed unexpectedly')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Default Profile' })).toBeInTheDocument();
+    expect(getProfileControl()).toHaveTextContent('Default Profile');
     // Midpoint: the original prompt is still in flight, so Send must stay held.
     expect(screen.getByText('Loading original prompt...')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sending...' })).toBeDisabled();
@@ -1257,8 +1278,7 @@ describe('ProjectChat profile setup wizard', () => {
       },
     });
 
-    expect(await screen.findByText('Fast Chat')).toBeInTheDocument();
-    expect(await screen.findByTitle('Instant container profile')).toBeInTheDocument();
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Chat'));
   });
 
   it('gates multiple agents behind the setup wizard and creates a profile', async () => {
@@ -1354,12 +1374,8 @@ describe('ProjectChat profile setup wizard', () => {
 
     renderProjectChat();
 
-    await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /New/i }).length).toBeGreaterThan(1);
-    });
-
-    const newButtons = screen.getAllByRole('button', { name: /New/i });
-    fireEvent.click(newButtons[newButtons.length - 1]);
+    const sheet = await openProfilePicker();
+    fireEvent.click(within(sheet).getByRole('button', { name: /^New$/ }));
     chooseAgent(/OpenAI Codex/i);
     chooseWorkType(/Build and open PRs/i);
     chooseRuntime(/Cloud VM/i);
@@ -1760,14 +1776,12 @@ describe('ProjectChat agent profile selection', () => {
     });
   });
 
-  it('submits task with the selected profile id', async () => {
+  it('submits task with the profile picked from the new-chat cards', async () => {
     renderProjectChat();
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Fast Implementer' })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Reviewer' }));
+    const cards = await screen.findByRole('region', { name: 'Choose a profile' });
+    fireEvent.click(await within(cards).findByRole('button', { name: /Reviewer/ }));
+    expect(getProfileControl()).toHaveTextContent('Reviewer');
 
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
     fireEvent.change(textarea, { target: { value: 'Build a feature' } });
@@ -1782,6 +1796,236 @@ describe('ProjectChat agent profile selection', () => {
         })
       );
     });
+  });
+
+  it('submits task with a profile picked in the picker sheet', async () => {
+    renderProjectChat();
+
+    const sheet = await openProfilePicker();
+    fireEvent.click(within(sheet).getByRole('button', { name: /Reviewer/ }));
+    expect(screen.queryByRole('dialog', { name: 'Choose a profile' })).not.toBeInTheDocument();
+    expect(getProfileControl()).toHaveTextContent('Reviewer');
+
+    fireEvent.change(screen.getByPlaceholderText('Describe what you want the agent to do...'), {
+      target: { value: 'Review the diff' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({ agentProfileId: 'prof-2' })
+      );
+    });
+  });
+
+  it('pre-selects the last-used profile, never flashing the alphabetical first while loading', async () => {
+    let resolvePicker: (value: unknown) => void = () => undefined;
+    mocks.getProfilePickerState.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolvePicker = resolve;
+      })
+    );
+    renderProjectChat();
+
+    // Midpoint: profiles are loaded but the person's usage is not yet known.
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Loading profiles'));
+    expect(getProfileControl()).not.toHaveTextContent('Fast Implementer');
+
+    await act(async () => {
+      resolvePicker({
+        usage: [{ profileId: 'prof-2', lastUsedAt: '2026-10-20T09:00:00.000Z', chatCount: 3 }],
+        hiddenProfileIds: [],
+        usageWindowDays: 30,
+      });
+    });
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Reviewer'));
+    expect(screen.getByText('Recent')).toBeInTheDocument();
+  });
+
+  it('falls back to the first visible profile when picker state cannot load', async () => {
+    mocks.getProfilePickerState.mockRejectedValueOnce(new Error('picker unavailable'));
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    fireEvent.change(screen.getByPlaceholderText('Describe what you want the agent to do...'), {
+      target: { value: 'Still works' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({ agentProfileId: 'prof-1' })
+      );
+    });
+  });
+
+  it('leaves hidden profiles out of the cards but keeps them in the picker', async () => {
+    mocks.listAgentProfiles.mockResolvedValue([
+      ...TEST_PROFILES,
+      makeAgentProfile({ id: 'prof-3', name: 'Cron Worker', agentType: 'openai-codex' }),
+    ]);
+    mocks.getProfilePickerState.mockResolvedValueOnce({
+      usage: [],
+      hiddenProfileIds: ['prof-3'],
+      usageWindowDays: 30,
+    });
+    renderProjectChat();
+
+    const cards = await screen.findByRole('region', { name: 'Choose a profile' });
+    await waitFor(() =>
+      expect(within(cards).getByRole('button', { name: /Fast Implementer/ })).toBeInTheDocument()
+    );
+    expect(within(cards).queryByRole('button', { name: /Cron Worker/ })).not.toBeInTheDocument();
+    expect(within(cards).getByRole('button', { name: 'All 3 profiles' })).toBeInTheDocument();
+
+    fireEvent.click(within(cards).getByRole('button', { name: 'All 3 profiles' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Choose a profile' });
+    fireEvent.click(within(sheet).getByRole('button', { name: /Hidden from new chat \(1\)/ }));
+    expect(within(sheet).getByRole('button', { name: /Cron Worker/ })).toBeInTheDocument();
+  });
+
+  it('hides a profile from the cards through the picker’s edit mode', async () => {
+    mocks.listAgentProfiles.mockResolvedValue([
+      ...TEST_PROFILES,
+      makeAgentProfile({ id: 'prof-3', name: 'Cron Worker', agentType: 'openai-codex' }),
+    ]);
+    renderProjectChat();
+
+    const cards = await screen.findByRole('region', { name: 'Choose a profile' });
+    await waitFor(() =>
+      expect(within(cards).getByRole('button', { name: /Cron Worker/ })).toBeInTheDocument()
+    );
+
+    const sheet = await openProfilePicker();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Edit list' }));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Hide Cron Worker from new chat' }));
+
+    await waitFor(() => {
+      expect(mocks.updateProfilePicker).toHaveBeenCalledWith(PROJECT_ID, { hide: ['prof-3'] });
+    });
+    // The page behind the open sheet is inert; close it to look at the cards again.
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Close' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Choose a profile' })).not.toBeInTheDocument()
+    );
+    await waitFor(() =>
+      expect(within(cards).queryByRole('button', { name: /Cron Worker/ })).not.toBeInTheDocument()
+    );
+    expect(within(cards).getByRole('button', { name: /Reviewer/ })).toBeInTheDocument();
+  });
+
+  it('keeps the skill reachable through chat options and sends it with the task', async () => {
+    mocks.listSkills.mockResolvedValue([
+      {
+        ...makeAgentProfile({ id: 'skill-1', name: 'do' }),
+        agentType: null,
+        effort: null,
+        resourceRequirementsJson: null,
+        defaultProfileId: null,
+      },
+    ]);
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    expect(screen.queryByRole('combobox', { name: 'Skill' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chat options' }));
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Skill' }), {
+      target: { value: 'skill-1' },
+    });
+    expect(screen.getByRole('button', { name: 'Chat options (1 set)' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Describe what you want the agent to do...'), {
+      target: { value: 'Ship it' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({ agentProfileId: 'prof-1', skillId: 'skill-1' })
+      );
+    });
+  });
+
+  it('sends per-chat resources set in chat options with the task', async () => {
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    expect(screen.queryByLabelText(/^vCPU/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chat options' }));
+    fireEvent.change(await screen.findByLabelText(/^vCPU/), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText(/^Mem/), { target: { value: '8' } });
+    expect(screen.getByRole('button', { name: 'Chat options (1 set)' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Describe what you want the agent to do...'), {
+      target: { value: 'Build the report export' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({
+          agentProfileId: 'prof-1',
+          resourceRequirements: expect.objectContaining({ minVcpu: 4, minMemoryGb: 8 }),
+        })
+      );
+    });
+  });
+
+  it('hides every profile not picked lately with the edit list’s suggestion', async () => {
+    mocks.listAgentProfiles.mockResolvedValue([
+      ...TEST_PROFILES,
+      makeAgentProfile({ id: 'prof-3', name: 'Cron Worker', agentType: 'openai-codex' }),
+      makeAgentProfile({ id: 'prof-4', name: 'Nightly Audit', agentType: 'openai-codex' }),
+    ]);
+    mocks.getProfilePickerState.mockResolvedValueOnce({
+      usage: [{ profileId: 'prof-1', lastUsedAt: new Date().toISOString(), chatCount: 3 }],
+      hiddenProfileIds: [],
+      usageWindowDays: 14,
+    });
+    renderProjectChat();
+
+    const cards = await screen.findByRole('region', { name: 'Choose a profile' });
+    await waitFor(() =>
+      expect(within(cards).getByRole('button', { name: /Fast Implementer/ })).toBeInTheDocument()
+    );
+
+    const sheet = await openProfilePicker();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Edit list' }));
+    expect(within(sheet).getByText('3 profiles you haven’t picked in 14 days')).toBeInTheDocument();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Hide 3 from new chat' }));
+
+    await waitFor(() => {
+      expect(mocks.updateProfilePicker).toHaveBeenCalledWith(PROJECT_ID, {
+        hide: ['prof-2', 'prof-3', 'prof-4'],
+      });
+    });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Close' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Choose a profile' })).not.toBeInTheDocument()
+    );
+    // One visible profile is left, so the cards give way to the starter prompts; the
+    // person's recent profile stays selected.
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: 'Choose a profile' })).not.toBeInTheDocument()
+    );
+    expect(getProfileControl()).toHaveTextContent('Fast Implementer');
+  });
+
+  it('opens the file picker from the toolbar attach button', async () => {
+    const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    expect(screen.getAllByRole('button', { name: 'Attach files to this task' })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Attach files to this task' }));
+
+    expect(click).toHaveBeenCalledTimes(1);
+    expect((click.mock.contexts[0] as HTMLInputElement).type).toBe('file');
+    click.mockRestore();
   });
 
   it('starts an instant session for a cf-container profile without cloud credentials', async () => {
@@ -1827,10 +2071,9 @@ describe('ProjectChat agent profile selection', () => {
 
     renderProjectChat();
 
-    await waitFor(() => {
-      expect(screen.getByTitle('Instant Chat')).toBeInTheDocument();
-    });
-    expect(screen.getByTitle('Instant container profile')).toBeInTheDocument();
+    // One profile: no cards to choose from, the To control simply names it.
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Instant Chat'));
+    expect(screen.queryByRole('region', { name: 'Choose a profile' })).not.toBeInTheDocument();
 
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
     fireEvent.change(textarea, { target: { value: 'Read the repo and summarize it' } });
@@ -1850,15 +2093,11 @@ describe('ProjectChat agent profile selection', () => {
     });
   });
 
-  it('opens a new profile wizard from the profile bar', async () => {
+  it('opens the new-profile wizard from the picker sheet', async () => {
     renderProjectChat();
 
-    await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /New/i }).length).toBeGreaterThan(1);
-    });
-
-    const newButtons = screen.getAllByRole('button', { name: /New/i });
-    fireEvent.click(newButtons[newButtons.length - 1]);
+    const sheet = await openProfilePicker();
+    fireEvent.click(within(sheet).getByRole('button', { name: /^New$/ }));
 
     expect(screen.getByText('What kind of work?')).toBeInTheDocument();
     expect(screen.queryByText('Which agent?')).not.toBeInTheDocument();
