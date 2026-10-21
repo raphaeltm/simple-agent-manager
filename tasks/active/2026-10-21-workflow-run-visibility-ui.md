@@ -95,7 +95,7 @@ engine does not support (no retry/skip/pause/cancel/create); creation stays MCP-
 ### Release
 
 - [ ] Rebase onto main after the foundation PR merges (never write the foundation branch).
-- [ ] Specialist reviews (task-completion, UI/UX, security, cloudflare, test, constitution, doc-sync).
+- [x] Specialist reviews (task-completion, UI/UX, security, cloudflare, test, constitution, doc-sync, performance, architecture): all PASS; findings addressed in `e3721bb72` (index deferred to Idea `01M5GBDQVPT4XQM2M7VNFBSY95`).
 - [ ] Staging: coordinate window on `feature.workflows`; real run visible in UI end to end; ≤2 VMs, zero at rest.
 - [ ] PR with UI screenshot evidence, CI green, CodeRabbit request+wait, merge, production deploy + smoke.
 
@@ -122,3 +122,5 @@ engine does not support (no retry/skip/pause/cancel/create); creation stays MCP-
 - 2026-10-21 22:2xZ: web UI committed `3f02b81dc` (list, run page with Steps/Graph/Activity, step details, overview sections, event-wait view). Playwright audit `workflow-runs-audit.spec.ts` 54/54 at 375/390/1280 plus the existing Automation audit 42/42. Real bug found by the 25-step fixture: React Flow fit-view shrank nodes to ~13px, fixed with a 0.75 minimum zoom, sideways scroll centred on the selected step, and a hint.
 - Unit tests `e9d6d469e` (28): view model + rendered pages. Discrimination: removing the 3-day attention window reddens the overview test; polling finished runs reddens the polling test.
 - Docs: public guide `guides/workflows.md` (3 compressed screenshots from `docs-screenshots-workflows.spec.ts`), Automation guide, admin-settings table for `workflow.*` (the foundation added the settings without public docs), contract doc "Reading runs", api-reference section. `www` build, link check (0 broken) and tests (94) pass.
+- 2026-10-21 22:5xZ: nine local reviewers, all PASS. Fixed: shared `useMediaQuery` (architecture HIGH: three copies of the matchMedia hook plus mine), run-page tab ARIA and arrow keys, "Done" group wording, focusable wide graph, content-free skip logs (security), activity read no longer truncated by a formula (bound named from the writer's delivery keys), MCP status mapping kept exactly, `WorkflowArtifactRef` derived from `HandoffArtifactRef`, configuration reference rows. New tests (each proven discriminating by breaking its guard): malformed run mid-list with paging past it, 101-run list beyond one D1 bind batch, no row content in skip logs, hidden-tab polling pause, tab keys, `useMediaQuery`. Deferred with reasons: missions partial index (Idea `01M5GBDQVPT4XQM2M7VNFBSY95`), two overview list reads (the attention read never polls and is merged with the polled list).
+- Foundation PR #2404 merged 22:56Z as `2585626df`; this branch merges main next.
