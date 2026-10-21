@@ -531,7 +531,7 @@ test.describe('Project chat composer audit', () => {
     await chooseWizardOption(page, /OpenAI Codex/i);
     await chooseWizardOption(page, /Chat and explore/i);
     await chooseWizardOption(page, /Instant container/i);
-    await page.getByLabel('Profile name').fill('Codex');
+    await page.getByRole('textbox', { name: 'Profile name' }).fill('Codex');
     await page.getByRole('button', { name: /Create profile/i }).click();
 
     await expect(page.getByText('Profile "Codex" already exists')).toBeVisible();

@@ -1026,10 +1026,10 @@ test.describe('ChatInput — Resource Submit and Reset', () => {
       const textarea = page.locator('textarea').first();
       await expect(textarea).toBeVisible();
 
-      // Open the Resources toggle
-      const resourceBtn = page.getByRole('button', { name: /resource/i }).first();
-      await expect(resourceBtn).toBeVisible({ timeout: 5000 });
-      await resourceBtn.click();
+      // Per-chat resources live under Chat options.
+      const optionsBtn = page.getByRole('button', { name: /^Chat options/ });
+      await expect(optionsBtn).toBeVisible({ timeout: 5000 });
+      await optionsBtn.click();
       await page.waitForTimeout(300);
 
       // Set vCPU override
@@ -1068,10 +1068,10 @@ test.describe('ChatInput — Resource Submit and Reset', () => {
       const textarea = page.locator('textarea').first();
       await expect(textarea).toBeVisible();
 
-      // Open Resources
-      const resourceBtn = page.getByRole('button', { name: /resource/i }).first();
-      await expect(resourceBtn).toBeVisible({ timeout: 5000 });
-      await resourceBtn.click();
+      // Per-chat resources live under Chat options.
+      const optionsBtn = page.getByRole('button', { name: /^Chat options/ });
+      await expect(optionsBtn).toBeVisible({ timeout: 5000 });
+      await optionsBtn.click();
       await page.waitForTimeout(300);
 
       // Set vCPU
@@ -1082,17 +1082,13 @@ test.describe('ChatInput — Resource Submit and Reset', () => {
       await page.getByRole('button', { name: 'Send' }).click();
       await page.waitForTimeout(1000);
 
-      // After submit, vCPU should be cleared
-      const vcpu = page.getByLabel('vCPU');
-      if (await vcpu.isVisible()) {
-        await expect(vcpu).toHaveValue('');
-      }
-      // Button should no longer say "(custom)"
-      const btnText = await page
-        .getByRole('button', { name: /resource/i })
-        .first()
-        .innerText();
-      expect(btnText).not.toContain('(custom)');
+      // The chat opens; back on a new chat (same page, same state), the override is gone.
+      await page.getByRole('button', { name: '+ New Chat' }).click();
+      const options = page.getByRole('button', { name: /^Chat options/ });
+      await expect(options).toHaveAccessibleName('Chat options');
+      // The panel may still be open from before the send; the values are what matter.
+      if ((await options.getAttribute('aria-expanded')) !== 'true') await options.click();
+      await expect(page.getByLabel('vCPU')).toHaveValue('');
 
       await screenshot(page, 'chat-resource-reset-after-submit-desktop');
       assertNoPageErrors(pageErrors);
@@ -1106,10 +1102,10 @@ test.describe('ChatInput — Resource Submit and Reset', () => {
       const textarea = page.locator('textarea').first();
       await expect(textarea).toBeVisible();
 
-      // Open Resources
-      const resourceBtn = page.getByRole('button', { name: /resource/i }).first();
-      await expect(resourceBtn).toBeVisible({ timeout: 5000 });
-      await resourceBtn.click();
+      // Per-chat resources live under Chat options.
+      const optionsBtn = page.getByRole('button', { name: /^Chat options/ });
+      await expect(optionsBtn).toBeVisible({ timeout: 5000 });
+      await optionsBtn.click();
       await page.waitForTimeout(300);
 
       // Set negative vCPU (invalid)
@@ -1158,7 +1154,7 @@ test.describe('ChatInput — Resource Submit and Reset', () => {
       await screenshot(page, 'chat-composer-mobile');
       await assertNoOverflow(page);
 
-      await page.getByRole('button', { name: 'Resources', exact: true }).click();
+      await page.getByRole('button', { name: 'Chat options' }).click();
       const cpu = page.getByLabel('vCPU', { exact: true });
       const memory = page.getByLabel('Mem GB', { exact: true });
       await expect(cpu).toBeVisible();
@@ -1229,7 +1225,7 @@ test.describe('ChatInput — Profile Wizard', () => {
     await cpu.fill('0.5');
     await expect(cpu).toHaveAttribute('aria-invalid', 'false');
     await page.getByRole('button', { name: 'Next', exact: true }).click();
-    await page.getByLabel('Profile name').fill('Validated resources');
+    await page.getByRole('textbox', { name: 'Profile name' }).fill('Validated resources');
     await page.getByRole('button', { name: 'Create profile', exact: true }).click();
     await expect
       .poll(

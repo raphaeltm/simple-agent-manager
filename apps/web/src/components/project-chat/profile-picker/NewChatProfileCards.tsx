@@ -34,7 +34,8 @@ function ProfileCard({
           : 'border-border-default bg-surface hover:border-accent/50'
       }`}
     >
-      <span className="flex min-w-0 items-center gap-2 pr-4">
+      {/* Room for the check only where it shows, so long names keep their full width. */}
+      <span className={`flex min-w-0 items-center gap-2 ${selected ? 'pr-4' : ''}`}>
         <ProfileAvatar profile={profile} size="sm" />
         <span className="line-clamp-2 break-words text-sm font-semibold leading-tight text-fg-primary">
           {profile.name}

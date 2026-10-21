@@ -14,7 +14,13 @@ const SIZES = {
   md: 'h-8 w-8 rounded-md text-xs',
 } as const;
 
-/** A profile's model initial on its agent's tint, e.g. "O" for Opus on Claude amber. */
+/**
+ * A profile's model initial on its agent's tint, e.g. "O" for Opus on Claude amber.
+ * Decorative and aria-hidden: it always sits beside the visible profile name, inside a
+ * control that has its own accessible name. Not the shared `Avatar`, which is a labelled
+ * identity badge (a name's initials, human/agent/neutral tones) rather than a model glyph
+ * tinted per agent family.
+ */
 export function ProfileAvatar({
   profile,
   size = 'md',
