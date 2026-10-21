@@ -1,33 +1,27 @@
 /**
  * The one read of a durable workflow run, shared by every surface (policy 5cb362e8): MCP
- * `get_workflow_run` for the owner's agent and REST `GET /api/projects/:projectId/workflows`
+ * `get_workflow_run` for the owner's agent and REST `GET /api/projects/:projectId/workflows/:runId`
  * for project members (`routes/workflows.ts`). Callers authorize first; this module loads
- * rows scoped to the project and projects them into each surface's shape.
+ * rows scoped to the project and projects them into each surface's shape. The paged list of
+ * runs is in `workflow-run-list.ts`.
  *
  * JSON columns are parsed field by field (rule 50): a malformed value degrades that field and
  * logs `workflow_read.field_skipped`; it never fails the whole read.
  */
 import {
-  DEFAULT_WORKFLOW_RUN_LIST_LIMIT,
   isWorkflowStepStatus,
-  MAX_WORKFLOW_RUN_LIST_LIMIT,
   parseCompletionEvidenceJson,
   type WorkflowActivityEntry,
   type WorkflowRunDetail,
-  type WorkflowRunListResponse,
   type WorkflowRunStatus,
-  type WorkflowRunSummary,
   type WorkflowStepAgent,
   type WorkflowStepDetail,
   type WorkflowStepOutput,
-  type WorkflowStepStatus,
-  type WorkflowStepSummary,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { errors } from '../middleware/error';
 import { getWorkflowConfig } from './workflow-config';
 import { workflowDependencies, workflowResult } from './workflow-state-validation';
 
@@ -92,7 +86,7 @@ export function toWorkflowRunStatus(stored: string): WorkflowRunStatus {
   return stored === 'active' || stored === 'completed' ? stored : 'needs_attention';
 }
 
-function fieldSkipped(runId: string, field: string, stepKey: string | null, error: unknown) {
+export function fieldSkipped(runId: string, field: string, stepKey: string | null, error: unknown) {
   log.warn('workflow_read.field_skipped', {
     runId,
     field,
@@ -102,7 +96,7 @@ function fieldSkipped(runId: string, field: string, stepKey: string | null, erro
 }
 
 /** Parse each row on its own; a row that does not match is logged and left out (rule 50). */
-function parseRows<TSchema extends v.GenericSchema>(
+export function parseRows<TSchema extends v.GenericSchema>(
   schema: TSchema,
   rows: readonly unknown[] | undefined,
   runId: string,
@@ -318,7 +312,7 @@ function stepDetail(
   };
 }
 
-const isoOrNull = (epochMs: number | null) =>
+export const isoOrNull = (epochMs: number | null) =>
   typeof epochMs === 'number' && Number.isFinite(epochMs) ? new Date(epochMs).toISOString() : null;
 
 /** The REST detail for project members. `maxParallelSteps` comes from the live setting. */
@@ -413,131 +407,3 @@ function mcpResult(runId: string, step: StepRow): unknown {
 
 // ---------------------------------------------------------------------------
 // List
-// ---------------------------------------------------------------------------
-
-/** Longest step reason a list row carries; the run page shows the full text. */
-export const WORKFLOW_LIST_REASON_MAX_CHARS = 300;
-
-const LIST_RUN_ROW = v.object({
-  id: v.string(),
-  user_id: v.string(),
-  title: v.string(),
-  status: v.string(),
-  workflow_deadline_at: v.nullable(v.number()),
-  created_at: v.string(),
-  updated_at: v.string(),
-});
-const LIST_STEP_ROW = v.object({
-  mission_id: v.string(),
-  step_key: v.string(),
-  title: v.string(),
-  state: v.string(),
-  reason: v.nullable(v.string()),
-});
-/** The two columns a page position needs; both are NOT NULL in `missions`. */
-const PAGE_POSITION = v.object({ id: v.string(), created_at: v.string() });
-
-/** An opaque position after the last run of a page: its creation time and ID. */
-function encodeCursor(row: v.InferOutput<typeof PAGE_POSITION>): string {
-  return btoa(JSON.stringify([row.created_at, row.id]))
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replace(/=+$/, '');
-}
-
-const CURSOR = v.tuple([v.string(), v.string()]);
-
-function decodeCursor(cursor: string): [string, string] {
-  try {
-    const json = atob(cursor.replaceAll('-', '+').replaceAll('_', '/'));
-    return v.parse(CURSOR, JSON.parse(json));
-  } catch {
-    throw errors.badRequest('cursor is not valid');
-  }
-}
-
-/** Clamp a requested page size to the contract's bounds. */
-export function workflowRunListLimit(requested: number | null): number {
-  if (requested === null || !Number.isFinite(requested) || requested < 1)
-    return DEFAULT_WORKFLOW_RUN_LIST_LIMIT;
-  return Math.min(Math.floor(requested), MAX_WORKFLOW_RUN_LIST_LIMIT);
-}
-
-const STATUS_PREDICATE: Record<WorkflowRunStatus, string> = {
-  active: " AND status = 'active'",
-  completed: " AND status = 'completed'",
-  // Mirrors toWorkflowRunStatus: everything that is neither active nor completed.
-  needs_attention: " AND status NOT IN ('active', 'completed')",
-};
-
-/** Runs of one project, newest first, each with a summary of every step. */
-export async function listWorkflowRuns(
-  env: Env,
-  projectId: string,
-  options: { status: WorkflowRunStatus | null; cursor: string | null; limit: number }
-): Promise<WorkflowRunListResponse> {
-  const after = options.cursor ? decodeCursor(options.cursor) : null;
-  const page = await env.DATABASE.prepare(
-    `SELECT id, user_id, title, status, workflow_deadline_at, created_at, updated_at
-     FROM missions
-     WHERE project_id = ? AND workflow_plan_json IS NOT NULL${options.status ? STATUS_PREDICATE[options.status] : ''}${
-       after ? ' AND (created_at < ? OR (created_at = ? AND id < ?))' : ''
-     }
-     ORDER BY created_at DESC, id DESC LIMIT ?`
-  )
-    .bind(projectId, ...(after ? [after[0], after[0], after[1]] : []), options.limit + 1)
-    .all();
-  // Page position comes from the raw last row, so a malformed row cannot end paging early.
-  const pageRows = page.results.slice(0, options.limit);
-  const last = v.safeParse(PAGE_POSITION, pageRows.at(-1));
-  const nextCursor =
-    page.results.length > options.limit && last.success ? encodeCursor(last.output) : null;
-  const rows = parseRows(LIST_RUN_ROW, pageRows, `project:${projectId}`, 'missions');
-  if (!rows.length) return { runs: [], nextCursor };
-
-  const steps = await env.DATABASE.prepare(
-    `SELECT mission_id, step_key, title, state, substr(reason, 1, ?) AS reason
-     FROM mission_steps WHERE mission_id IN (${rows.map(() => '?').join(',')})
-     ORDER BY mission_id, ordinal`
-  )
-    .bind(WORKFLOW_LIST_REASON_MAX_CHARS, ...rows.map((row) => row.id))
-    .all();
-  const byRun = new Map<string, WorkflowStepSummary[]>();
-  for (const step of parseRows(
-    LIST_STEP_ROW,
-    steps.results,
-    `project:${projectId}`,
-    'mission_steps'
-  )) {
-    if (!isWorkflowStepStatus(step.state)) {
-      fieldSkipped(
-        step.mission_id,
-        'state',
-        step.step_key,
-        new Error(`Unknown step state ${step.state}`)
-      );
-      continue;
-    }
-    const status: WorkflowStepStatus = step.state;
-    const list = byRun.get(step.mission_id) ?? [];
-    list.push({
-      key: step.step_key,
-      title: step.title,
-      kind: 'agent',
-      status,
-      reason: step.reason,
-    });
-    byRun.set(step.mission_id, list);
-  }
-  const runs: WorkflowRunSummary[] = rows.map((row) => ({
-    id: row.id,
-    title: row.title,
-    status: toWorkflowRunStatus(row.status),
-    startedByUserId: row.user_id,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    deadlineAt: isoOrNull(row.workflow_deadline_at),
-    steps: byRun.get(row.id) ?? [],
-  }));
-  return { runs, nextCursor };
-}

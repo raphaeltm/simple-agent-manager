@@ -15,12 +15,8 @@ import type { Env } from '../env';
 import { requireRouteParam } from '../lib/route-helpers';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import {
-  listWorkflowRuns,
-  loadWorkflowRun,
-  toWorkflowRunDetail,
-  workflowRunListLimit,
-} from '../services/workflow-run-read';
+import { listWorkflowRuns, workflowRunListLimit } from '../services/workflow-run-list';
+import { loadWorkflowRun, toWorkflowRunDetail } from '../services/workflow-run-read';
 import { requireProjectTaskRead } from './task-project-auth';
 
 const workflowRoutes = new Hono<{ Bindings: Env }>();
