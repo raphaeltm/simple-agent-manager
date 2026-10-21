@@ -1,12 +1,16 @@
 import type { AgentProfile, ProfilePickerState } from '@simple-agent-manager/shared';
 import { ChevronRight } from 'lucide-react';
 
-import { useIsMobile } from '../../../hooks/useIsMobile';
 import { profileCardSet, profileSubtitle } from './model';
 import { ProfileAvatar } from './ProfileAvatar';
 
 /** Cards fit two rows on a phone and one row on desktop; the rest is one tap away. */
 const CARD_LIMIT = 4;
+/**
+ * Columns follow the chat area's width, not the screen's: on a tablet the two sidebars
+ * leave the chat about 250px, where four columns would hide every name.
+ */
+const GRID_CLASSES = 'grid grid-cols-1 gap-2 @2xs:grid-cols-2 @2xl:grid-cols-4';
 
 function ProfileCard({
   profile,
@@ -51,8 +55,8 @@ function CardSkeleton() {
 
 /**
  * The empty new-chat screen's "Who should take this?": the person's recent profiles as
- * cards (or their first profiles when they have no recent chats), plus PR builders on
- * desktop. Hidden profiles are left out; "All N profiles" opens the full picker.
+ * cards (or their first profiles when they have no recent chats), plus PR builders where
+ * a full row fits. Hidden profiles are left out; "All N profiles" opens the full picker.
  */
 export function NewChatProfileCards({
   profiles,
@@ -69,14 +73,12 @@ export function NewChatProfileCards({
   onSelect: (profileId: string) => void;
   onShowAll: () => void;
 }>) {
-  const isMobile = useIsMobile();
   const cards = profileCardSet(profiles, pickerState, CARD_LIMIT);
-  const builders = isMobile ? [] : cards.builders;
 
   return (
     <section
       aria-label="Choose a profile"
-      className="flex w-full min-w-0 max-w-[720px] flex-col gap-3"
+      className="@container flex w-full min-w-0 max-w-[720px] flex-col gap-3"
     >
       <div className="text-center">
         <h2 className="m-0 text-base font-semibold text-fg-primary">Who should take this?</h2>
@@ -87,7 +89,7 @@ export function NewChatProfileCards({
       <div className="text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
         {cards.kind === 'recent' ? 'Recent' : 'Your profiles'}
       </div>
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+      <div className={GRID_CLASSES}>
         {loading
           ? Array.from({ length: CARD_LIMIT }, (_, index) => <CardSkeleton key={index} />)
           : cards.items.map((profile) => (
@@ -99,13 +101,14 @@ export function NewChatProfileCards({
               />
             ))}
       </div>
-      {!loading && builders.length > 0 && (
-        <>
+      {/* PR builders only where a full row of cards fits; the picker lists them everywhere. */}
+      {!loading && cards.builders.length > 0 && (
+        <div className="hidden flex-col gap-3 @2xl:flex">
           <div className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
             Builds and opens PRs
           </div>
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-            {builders.map((profile) => (
+          <div className={GRID_CLASSES}>
+            {cards.builders.map((profile) => (
               <ProfileCard
                 key={profile.id}
                 profile={profile}
@@ -114,7 +117,7 @@ export function NewChatProfileCards({
               />
             ))}
           </div>
-        </>
+        </div>
       )}
       <button
         type="button"

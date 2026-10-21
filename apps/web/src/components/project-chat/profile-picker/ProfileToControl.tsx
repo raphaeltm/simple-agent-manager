@@ -32,12 +32,14 @@ export function ProfileToControl({
       }
       className="flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-full border border-border-default bg-surface py-1 pl-3 pr-3 text-left transition-colors hover:border-accent/60 disabled:opacity-50"
     >
-      <span className="text-xs text-fg-muted">To</span>
+      {/* In a very narrow chat area the name needs the room more than the label does. */}
+      <span className="hidden text-xs text-fg-muted @[10rem]:inline">To</span>
       {profile ? (
         <>
           <ProfileAvatar profile={profile} size="sm" />
           <span className="truncate text-sm font-medium text-fg-primary">{profile.name}</span>
-          <span className="hidden truncate text-xs text-fg-muted md:inline">
+          {/* Needs an `@container` ancestor; shown only when the toolbar has room for it. */}
+          <span className="hidden truncate text-xs text-fg-muted @md:inline">
             {profileSubtitle(profile)}
           </span>
         </>

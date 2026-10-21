@@ -301,6 +301,21 @@ async function assertToolbarTouchTargets(page: Page) {
   }
 }
 
+/**
+ * Every card must be wide enough to read its name. Columns follow the chat area, which
+ * is ~250px on a tablet beside two sidebars; screen breakpoints crushed the cards there.
+ */
+async function assertCardsReadable(page: Page, minWidthPx = 140) {
+  const profileCards = cards(page).locator('button[aria-pressed]');
+  const count = await profileCards.count();
+  expect(count).toBeGreaterThan(0);
+  for (let index = 0; index < count; index += 1) {
+    const box = await profileCards.nth(index).boundingBox();
+    // Hidden builder cards have no box; every rendered card must be readable.
+    if (box) expect(box.width).toBeGreaterThanOrEqual(minWidthPx);
+  }
+}
+
 async function composerShareOfViewport(page: Page): Promise<number> {
   return page.evaluate(() => {
     const textarea = document.querySelector('textarea[role="combobox"]');
@@ -325,6 +340,7 @@ test.describe('New-chat profile picker', () => {
       await expect(cards(page).getByRole('button', { name: new RegExp(`^${name}`) })).toBeVisible();
     }
     await expect(cards(page).getByRole('button', { name: 'All 15 profiles' })).toBeVisible();
+    await assertCardsReadable(page);
     // Acceptance: the composer no longer dominates a phone screen.
     if ((page.viewportSize()?.width ?? 0) <= 390) {
       expect(await composerShareOfViewport(page)).toBeLessThanOrEqual(0.25);
@@ -428,6 +444,7 @@ test.describe('New-chat profile picker', () => {
 
     await expect(cards(page).getByRole('button', { name: /^部署 π/ })).toBeVisible();
     await expect(cards(page).getByText('<script>alert(1)</script> & co')).toBeVisible();
+    await assertCardsReadable(page);
     await screenshot(page, `new-chat-picker-stress-cards-${suffix}`);
     await assertNoOverflow(page);
 

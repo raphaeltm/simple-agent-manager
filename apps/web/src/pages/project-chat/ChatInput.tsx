@@ -195,7 +195,7 @@ export function ChatInput({
 
       {showToolbar && (
         <div className="mb-2 flex items-center gap-2">
-          <div className="min-w-0 flex-1">
+          <div className="@container min-w-0 flex-1">
             <ProfileToControl
               profile={selectedProfile}
               loading={profilePicker.picker.status === 'loading'}
