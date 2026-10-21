@@ -70,7 +70,7 @@ function setup() {
   }
 }
 
-describe('0200 workflow migration', () => {
+describe('0202 workflow migration', () => {
   it('preserves populated checkpoints, parent rows, foreign keys and index definitions during upgrade', () => {
     setup();
     const rows = db.prepare('SELECT * FROM task_submission_checkpoints ORDER BY task_id').all();
@@ -83,7 +83,7 @@ describe('0200 workflow migration', () => {
       .all();
     const foreignKeys = db.prepare('PRAGMA foreign_key_list(task_submission_checkpoints)').all();
 
-    migrate('0200_workflow_steps.sql');
+    migrate('0202_workflow_steps.sql');
 
     expect(db.prepare('SELECT * FROM task_submission_checkpoints ORDER BY task_id').all()).toEqual(
       rows
@@ -121,7 +121,7 @@ describe('0200 workflow migration', () => {
 
   it('retains uniqueness, source validation and parent identity enforcement after the rebuild', () => {
     setup();
-    migrate('0200_workflow_steps.sql');
+    migrate('0202_workflow_steps.sql');
     for (const overrides of [
       { chat_session_id: 'session-trigger' },
       { initial_message_id: 'message-trigger' },
