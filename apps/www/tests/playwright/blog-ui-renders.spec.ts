@@ -85,6 +85,44 @@ test('every blog UI render is a captioned, theme-paired 2x figure', () => {
   expect(figures?.length).toBe(2);
 });
 
+/**
+ * Posts are written by an agent and may now carry raw HTML (render figures). Outside code,
+ * nothing in a post may be able to run script.
+ */
+const SCRIPTABLE_HTML =
+  /<\s*(?:script|iframe|object|embed|form|style|link|meta|base)\b|<[^>]*\son[a-z]+\s*=|<[^>]*=\s*["']?\s*javascript:|\]\(\s*javascript:/i;
+
+function withoutCode(markdown: string): string {
+  return markdown
+    .replace(/^---\n[\s\S]*?\n---\n/, '')
+    .replace(/(^|\n)(```|~~~)[^\n]*\n[\s\S]*?\n\2[^\n]*/g, '\n')
+    .replace(/(`+)[^`\n]*?\1/g, '');
+}
+
+test('blog posts contain no script-capable raw HTML outside code', () => {
+  const posts = readdirSync(BLOG_DIR).filter((name) => name.endsWith('.md'));
+  expect(posts.length).toBeGreaterThan(0);
+  const offenders = posts.flatMap((name) => {
+    const match = SCRIPTABLE_HTML.exec(
+      withoutCode(readFileSync(path.join(BLOG_DIR, name), 'utf8'))
+    );
+    return match ? [`${name}: ${match[0]}`] : [];
+  });
+  expect(offenders).toEqual([]);
+  // Liveness: the same check catches a handler attribute and a script link in a paragraph,
+  // and leaves prose and code alone.
+  expect(
+    SCRIPTABLE_HTML.test(withoutCode('A post.\n\n<img src="x.png" onerror="alert(1)">\n'))
+  ).toBe(true);
+  expect(SCRIPTABLE_HTML.test(withoutCode('[click](javascript:alert(1))'))).toBe(true);
+  expect(SCRIPTABLE_HTML.test(withoutCode('Use only = one sign; javascript: the language.'))).toBe(
+    false
+  );
+  expect(
+    SCRIPTABLE_HTML.test(withoutCode('Use `<script>` here.\n\n```html\n<script></script>\n```\n'))
+  ).toBe(false);
+});
+
 async function visibleRenders(page: Page) {
   return page.locator('.post-body > figure img').evaluateAll((images) =>
     images

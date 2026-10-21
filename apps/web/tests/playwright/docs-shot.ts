@@ -20,6 +20,19 @@ export interface DocsShotClip {
 }
 
 /**
+ * Docs and blog images are published, so they must come from the local build with mocked
+ * API data. Refuse anything else, such as a run pointed at staging with real accounts.
+ */
+function assertLocalPage(page: Page): void {
+  const { hostname } = new URL(page.url());
+  if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+    throw new Error(
+      `Refusing to capture ${page.url()}: published images must come from a local build`
+    );
+  }
+}
+
+/**
  * Capture a focused element, a page region, or the whole viewport into the docs image
  * directory when DOCS_SHOTS is set, otherwise into the gitignored tmp dir with a viewport
  * suffix.
@@ -29,6 +42,7 @@ export async function docsShot(
   name: string,
   target?: Locator | DocsShotClip
 ): Promise<void> {
+  assertLocalPage(page);
   await page.waitForTimeout(500);
   let path: string;
   if (process.env.DOCS_SHOTS) {
@@ -63,6 +77,7 @@ export async function blogShot(
   name: string,
   target: Locator
 ): Promise<{ width: number; height: number }> {
+  assertLocalPage(page);
   await page.waitForTimeout(500);
   const box = await target.boundingBox();
   if (!box) throw new Error(`blogShot: "${name}" is not on screen`);
