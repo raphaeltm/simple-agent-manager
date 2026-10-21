@@ -34,6 +34,9 @@ export type AdminSettingName =
   | 'operations.samOperatorEventPageSize'
   | 'operations.samOperatorWorkRefreshMs'
   | 'operations.samOperatorWatchRetryLimit'
+  | 'operations.samOperatorStreamFlushMs'
+  | 'operations.samOperatorStreamHeartbeatMs'
+  | 'operations.samOperatorStreamMaxSubscribers'
   | 'trials.enabled';
 export interface AdminSettingDefinition {
   readonly name: AdminSettingName;
@@ -65,6 +68,11 @@ export const OPERATOR_DEFAULTS = Object.freeze({
   eventPageSize: MAX_SAM_OPERATOR_EVENT_PAGE_SIZE,
   workRefreshMs: 30_000,
   watchRetryLimit: 3,
+  // About 12 updates a second reads as smooth typing without a frame per token.
+  streamFlushMs: 80,
+  // Below common proxy idle timeouts, so a long tool call does not drop the live view.
+  streamHeartbeatMs: 15_000,
+  streamMaxSubscribers: 4,
 });
 
 const connectorDescriptions: Record<ConnectorSettingKey, string> = {
@@ -343,6 +351,27 @@ const definitions: AdminSettingDefinition[] = [
     'Operations',
     'Consecutive failed private SAM watch refreshes before automatic updates stop. A successful pull or requested follow-up resets the count.',
     { min: 1, max: 25 }
+  ),
+  integerDefinition(
+    'operations.samOperatorStreamFlushMs',
+    OPERATOR_DEFAULTS.streamFlushMs,
+    'Operations',
+    'Milliseconds between live updates while the private SAM assistant is answering.',
+    { min: 16, max: 2_000 }
+  ),
+  integerDefinition(
+    'operations.samOperatorStreamHeartbeatMs',
+    OPERATOR_DEFAULTS.streamHeartbeatMs,
+    'Operations',
+    'Milliseconds between keep-alive frames on a live SAM answer stream.',
+    { min: 1_000, max: 120_000 }
+  ),
+  integerDefinition(
+    'operations.samOperatorStreamMaxSubscribers',
+    OPERATOR_DEFAULTS.streamMaxSubscribers,
+    'Operations',
+    'Browser tabs that can follow one private SAM answer live at the same time.',
+    { min: 1, max: 20 }
   ),
 ];
 

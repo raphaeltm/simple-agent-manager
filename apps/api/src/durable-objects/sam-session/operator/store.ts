@@ -321,12 +321,16 @@ export class OperatorStore {
     return this.contextEntries(limit).map(({ role, content }) => ({ role, content }));
   }
 
-  contextEntries(
-    limit: number
-  ): Array<{ id: string; role: 'user' | 'assistant'; content: string }> {
+  contextEntries(limit: number): Array<{
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    /** UTC `YYYY-MM-DD HH:MM:SS` from SQLite `datetime('now')`; forks keep the original. */
+    createdAt: string | null;
+  }> {
     return this.sql
       .exec(
-        "SELECT id,role,content FROM messages WHERE conversation_id=? AND role IN ('user','assistant') ORDER BY sequence DESC LIMIT ?",
+        "SELECT id,role,content,created_at FROM messages WHERE conversation_id=? AND role IN ('user','assistant') ORDER BY sequence DESC LIMIT ?",
         required(this.settings().conversationId),
         limit
       )
@@ -336,6 +340,7 @@ export class OperatorStore {
         id: String(row.id),
         role: row.role === 'user' ? ('user' as const) : ('assistant' as const),
         content: String(row.content),
+        createdAt: typeof row.created_at === 'string' ? row.created_at : null,
       }));
   }
 

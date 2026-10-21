@@ -80,6 +80,14 @@ const claims: Array<{ verbs: string; operations: string[] }> = [
 ];
 const writes = new Set(claims.flatMap((claim) => claim.operations));
 
+/** What this turn's completed receipts prove; built once per receipt change, checked per text. */
+export interface GroundingIndex {
+  readonly appOrigin: string;
+  readonly identities: ReadonlyMap<Resource, ReadonlySet<string>>;
+  readonly links: ReadonlySet<string>;
+  readonly completed: ReadonlySet<string>;
+}
+
 /**
  * Publication guard, not a universal semantic truth verifier. Platform references
  * need current, completed result metadata. Historical prose and action inputs
@@ -90,6 +98,27 @@ export function assertGroundedOperatorResponse(
   actions: OperatorAction[],
   appOrigin: string
 ): void {
+  assertGroundedText(text, buildGroundingIndex(actions, appOrigin));
+}
+
+/**
+ * Whether `text` may be shown. Identifiers, URLs and claim verbs never contain
+ * whitespace, and each check reads either the text before its match or whole words
+ * after it. A whitespace-bounded prefix of a passing text therefore also passes; it can
+ * only lack a later claim target, which skips that check. The live stream relies on
+ * this to publish an answer word by word.
+ */
+export function isGroundedText(text: string, index: GroundingIndex): boolean {
+  try {
+    assertGroundedText(text, index);
+    return true;
+  } catch {
+    // Any failure, including a malformed URL candidate, withholds publication.
+    return false;
+  }
+}
+
+export function buildGroundingIndex(actions: OperatorAction[], appOrigin: string): GroundingIndex {
   const identities = new Map<Resource, Set<string>>();
   const addIdentity = (kind: Resource, id: unknown) => {
     if (!nonempty(id)) return;
@@ -138,6 +167,11 @@ export function assertGroundedOperatorResponse(
       }
     }
   }
+  return { appOrigin, identities, links, completed };
+}
+
+export function assertGroundedText(text: string, index: GroundingIndex): void {
+  const { appOrigin, identities, links, completed } = index;
   // Match the WHOLE token, including fabricated suffixes; a real profile ID
   // prefix must never ground a made-up session/task ID.
   const identifiers =

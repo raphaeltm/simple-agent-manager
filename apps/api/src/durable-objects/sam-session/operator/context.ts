@@ -7,6 +7,16 @@ interface Group {
   messages: Message[];
   actions: OperatorAction[];
   assistantOmitted: boolean;
+  /** When the group's first message was stored, so the model can tell old history from now. */
+  recordedAt: string | null;
+}
+
+/** SQLite `datetime('now')` text is UTC without a zone marker. */
+function utcIso(value: string | null): string | null {
+  if (!value) return null;
+  const zoned = /(?:z|[+-]\d\d:?\d\d)$/i.test(value);
+  const parsed = Date.parse(`${value.replace(' ', 'T')}${zoned ? '' : 'Z'}`);
+  return Number.isNaN(parsed) ? null : new Date(parsed).toISOString();
 }
 
 /**
@@ -48,6 +58,7 @@ export function projectOperatorContext(input: {
           messages: [],
           actions: source ? store.actions(source.id) : [],
           assistantOmitted: false,
+          recordedAt: utcIso(entry.createdAt),
         };
         groups.push(group);
         if (source) knownGroups.set(source.id, group);
@@ -64,6 +75,7 @@ export function projectOperatorContext(input: {
       content: JSON.stringify({
         kind: 'sam_historical_turn_status',
         authority: 'historical_evidence_only',
+        recordedAt: group.recordedAt,
         turnId: group.turn?.id ?? null,
         state: group.turn?.state ?? 'unknown',
         assistantOmitted: group.assistantOmitted,

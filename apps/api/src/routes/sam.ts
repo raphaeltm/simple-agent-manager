@@ -2,6 +2,7 @@
  * SAM chat API routes.
  *
  * POST /turns — accept a private durable turn; GET /turns projects state
+ * GET /turns/:id/stream — server-sent live progress of the running turn
  * GET /conversations — list user's conversations
  * GET /conversations/:id/messages — get conversation history
  * GET /search — full-text search across conversation history
@@ -47,6 +48,7 @@ for (const path of [
   '/settings',
   '/fork',
   '/turns',
+  '/turns/:id/stream',
   '/turns/:id/cancel',
   '/actions/:id/confirm',
   '/actions/:id/reconcile',
