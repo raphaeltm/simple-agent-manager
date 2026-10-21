@@ -38,7 +38,8 @@ now, 2026-10-21 11:17 UTC") and flagged stale running tasks. Run 1's cost works 
 - `GET /api/sam/turns` took 4.0–7.6 s for this user (91 turns, 10 project-work cards); other
   SAM requests took 0.4–0.8 s. `OperatorWork.view` did three D1 reads per card in sequence.
 - Send waited for that read before showing the turn. Now the turn shows from the send receipt
-  (0.9 s in run 3) and the reads run in parallel.
+  (0.9 s in run 3) and the reads run in parallel: on `a262f0ee9` the same read took 1.25–1.47 s
+  (93 turns, 10 cards).
 
 ## Screenshots
 
