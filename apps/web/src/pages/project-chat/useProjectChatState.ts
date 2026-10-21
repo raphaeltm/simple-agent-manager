@@ -1,4 +1,3 @@
-// FILE SIZE EXCEPTION: Pre-existing project chat state hook exceeds the 800-line gate on main; split as follow-up outside shared runtime fix scope.
 import type {
   ProviderCatalog,
   Task,
@@ -27,7 +26,7 @@ import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { useTrialStatus } from '../../hooks/useTrialStatus';
 import { useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
-import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
+import type { ChatSessionResponse } from '../../lib/api';
 import {
   closeConversationTask,
   getProjectTask,
@@ -40,14 +39,13 @@ import {
   stopChatSession,
   submitTask,
 } from '../../lib/api';
-import { getSessionState, isStaleSession } from '../../lib/chat-session-utils';
+import { getSessionState } from '../../lib/chat-session-utils';
 import {
   applyMessageCommentRealtimeEventToQueryCache,
   chatQueryKeys,
 } from '../../lib/query-options';
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
-import { isRetryOrFork } from './lineageUtils';
 import { buildForkMessage } from './profileWizardHelpers';
 import {
   buildBaseSubmitRequest,
@@ -66,6 +64,7 @@ import { DEFAULT_ATTACHMENT_MESSAGE, useAttachments } from './useAttachments';
 import { useProfileChoice } from './useProfileChoice';
 import { useProjectSkills } from './useProjectSkills';
 import { useProvisioningTracker } from './useProvisioningTracker';
+import { useSessionFilters } from './useSessionFilters';
 import { useSessionReducer } from './useSessionReducer';
 import { rawToSessionEvent } from './useSessionReducer';
 import { useStableTaskInfoMap } from './useStableTaskInfoMap';
@@ -246,55 +245,12 @@ export function useProjectChatState() {
   const [closingConversation, setClosingConversation] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
 
-  // ---------------------------------------------------------------------------
-  // Session filtering
-  // ---------------------------------------------------------------------------
-
-  const { recentSessions, staleSessions } = useMemo(() => {
-    const recent: ChatSessionListItem[] = [];
-    const stale: ChatSessionListItem[] = [];
-    for (const s of sessions) {
-      // Stopped retries/forks auto-collapse into the Older bucket.
-      // A stopped retry/fork is a terminated session whose task has a
-      // parentTaskId and was user-triggered (not agent-dispatched).
-      const isStoppedRetryOrFork = (() => {
-        if (s.status !== 'stopped' || !s.taskId) return false;
-        const info = taskInfoMap.get(s.taskId);
-        if (!info?.parentTaskId) return false;
-        return isRetryOrFork(info);
-      })();
-
-      if (isStaleSession(s) || isStoppedRetryOrFork) stale.push(s);
-      else recent.push(s);
-    }
-    return { recentSessions: recent, staleSessions: stale };
-  }, [sessions, taskInfoMap]);
-
-  const filteredRecent = useMemo(() => {
-    if (!searchQuery.trim()) return recentSessions;
-    const q = searchQuery.toLowerCase();
-    return recentSessions.filter(
-      (s) =>
-        (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) ||
-        s.id.includes(q) ||
-        (s.createdBy?.name?.toLowerCase().includes(q) ?? false) ||
-        (s.createdBy?.email?.toLowerCase().includes(q) ?? false)
-    );
-  }, [recentSessions, searchQuery]);
-
-  const filteredStale = useMemo(() => {
-    if (!searchQuery.trim()) return staleSessions;
-    const q = searchQuery.toLowerCase();
-    return staleSessions.filter(
-      (s) =>
-        (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) ||
-        s.id.includes(q) ||
-        (s.createdBy?.name?.toLowerCase().includes(q) ?? false) ||
-        (s.createdBy?.email?.toLowerCase().includes(q) ?? false)
-    );
-  }, [staleSessions, searchQuery]);
-
-  const effectiveShowStale = showStale || !!searchQuery.trim();
+  const { filteredRecent, filteredStale, effectiveShowStale } = useSessionFilters(
+    sessions,
+    taskInfoMap,
+    searchQuery,
+    showStale
+  );
 
   // ---------------------------------------------------------------------------
   // Effects
