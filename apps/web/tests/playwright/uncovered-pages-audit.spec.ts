@@ -231,7 +231,7 @@ const runtimeConfig = {
   ],
 };
 
-async function setupMocks(page: Page, options: { emptyWorkspaces?: boolean } = {}) {
+async function setupMocks(page: Page) {
   await page.addInitScript(() =>
     localStorage.setItem('sam-onboarding-wizard-dismissed-sweep-user', 'true')
   );
@@ -264,9 +264,7 @@ async function setupMocks(page: Page, options: { emptyWorkspaces?: boolean } = {
       });
     }
     if (path.startsWith('/api/github')) return respond(200, []);
-    if (path === '/api/workspaces') {
-      return respond(200, options.emptyWorkspaces ? [] : workspaces);
-    }
+    if (path === '/api/workspaces') return respond(200, workspaces);
     if (path === '/api/nodes') return respond(200, nodes);
     if (path === '/api/credentials/resolution-status') return respond(200, { consumers: [] });
     if (path.startsWith('/api/credentials')) {
@@ -340,16 +338,6 @@ async function visit(page: Page, path: string, name: string) {
 }
 
 test.describe('Uncovered pages sweep', () => {
-  test('workspaces list — populated states', async ({ page }) => {
-    await setupMocks(page);
-    await visit(page, '/workspaces', 'sweep-workspaces-list');
-  });
-
-  test('workspaces list — empty state', async ({ page }) => {
-    await setupMocks(page, { emptyWorkspaces: true });
-    await visit(page, '/workspaces', 'sweep-workspaces-empty');
-  });
-
   test('create workspace form', async ({ page }) => {
     await setupMocks(page);
     await visit(page, '/workspaces/new', 'sweep-create-workspace');

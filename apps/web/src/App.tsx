@@ -220,7 +220,6 @@ const TryDiscovery = lazyNamed(() => import('./pages/TryDiscovery'), 'TryDiscove
 const TryWaitlistThanks = lazyNamed(() => import('./pages/TryWaitlistThanks'), 'TryWaitlistThanks');
 const UiStandards = lazyNamed(() => import('./pages/UiStandards'), 'UiStandards');
 const Workspace = lazyNamed(() => import('./pages/workspace'), 'Workspace');
-const Workspaces = lazyNamed(() => import('./pages/Workspaces'), 'Workspaces');
 
 /**
  * Wrap a code-split route element in its own Suspense boundary.
@@ -378,7 +377,8 @@ export default function App() {
 
                       <Route path="/nodes" element={page(<Nodes />)} />
                       <Route path="/nodes/:id" element={page(<Node />)} />
-                      <Route path="/workspaces" element={page(<Workspaces />)} />
+                      {/* The Workspaces list was removed; old links land on Infrastructure. */}
+                      <Route path="/workspaces" element={<Navigate to="/nodes" replace />} />
                       <Route path="/workspaces/new" element={page(<CreateWorkspace />)} />
                       <Route path="/settings" element={page(<Settings />)}>
                         <Route index element={<Navigate to="cloud-provider" replace />} />

@@ -433,7 +433,7 @@ export function CreateWorkspace() {
         className="mb-4"
         segments={[
           { label: 'Home', path: '/dashboard' },
-          { label: 'Workspaces', path: '/workspaces' },
+          { label: 'Infrastructure', path: '/nodes' },
           { label: isProjectLinked && linkedProject ? `New \u2014 ${linkedProject.name}` : 'New' },
         ]}
       />

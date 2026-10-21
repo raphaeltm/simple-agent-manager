@@ -166,7 +166,7 @@ export const NODE_LIST_POLL_MS = resolveIntervalMs(
   DEFAULT_NODE_LIST_POLL_MS
 );
 
-/** Workspace list refresh on the `/workspaces` and `/nodes` pages. */
+/** Workspace list refresh on the `/nodes` page. */
 const DEFAULT_WORKSPACE_LIST_POLL_MS = 10_000;
 export const WORKSPACE_LIST_POLL_MS = resolveIntervalMs(
   import.meta.env.VITE_WORKSPACE_LIST_POLL_MS,
