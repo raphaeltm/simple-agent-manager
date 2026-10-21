@@ -91,7 +91,8 @@ describe('agent profile picker routes', () => {
     expect(body.usage.map((entry) => [entry.profileId, entry.chatCount])).toEqual([['prof-a', 1]]);
     expect(body.hiddenProfileIds).toEqual([]);
     expect(mocks.resolveAdminSetting).toHaveBeenCalledWith(env, 'chat.profileUsageWindowDays');
-    expect(res.headers.get('cache-control')).toContain('private');
+    // Changes on every new chat and hide, so the browser must not serve a cached copy.
+    expect(res.headers.get('cache-control')).toBeNull();
   });
 
   it('rejects non-members on both methods without touching data', async () => {
