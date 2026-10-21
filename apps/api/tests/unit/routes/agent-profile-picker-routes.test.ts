@@ -124,9 +124,9 @@ describe('agent profile picker routes', () => {
       env
     );
     expect(hideRes.status).toBe(200);
-    expect(((await hideRes.json()) as { hiddenProfileIds: string[] }).hiddenProfileIds.sort()).toEqual(
-      ['prof-a', 'prof-b']
-    );
+    expect(
+      ((await hideRes.json()) as { hiddenProfileIds: string[] }).hiddenProfileIds.sort()
+    ).toEqual(['prof-a', 'prof-b']);
 
     const showRes = await app.request(
       `${BASE}/p1/agent-profiles/picker`,

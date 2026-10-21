@@ -25,8 +25,8 @@ Lowering the share limit does not remove anyone's access. It only blocks new sha
 
 ## Chat
 
-| Setting                       | Default | Range | What it controls                                                                                                                                         |
-| ----------------------------- | ------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Setting                       | Default | Range | What it controls                                                                                                                                                                                       |
+| ----------------------------- | ------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `chat.profileUsageWindowDays` | 30      | 1–365 | Days of each person's own new chats used to show their recent profiles first and to suggest hiding profiles they haven't picked. See [Agents](/docs/guides/agents/#choosing-a-profile-for-a-new-chat). |
 
 ## Storage and consistency

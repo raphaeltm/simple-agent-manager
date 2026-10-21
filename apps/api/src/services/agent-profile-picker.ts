@@ -34,7 +34,9 @@ export async function getProfileUsageWindowDays(env: Env): Promise<number> {
 
 /** D1 `datetime('now')` defaults lack the ISO `T`/`Z`; normalise so clients can order them. */
 function toIsoTimestamp(value: string): string {
-  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ? `${value.replace(' ', 'T')}Z` : value;
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)
+    ? `${value.replace(' ', 'T')}Z`
+    : value;
 }
 
 /** A person's own hand-started new chats: not dispatched, triggered, recovered or an idea draft. */

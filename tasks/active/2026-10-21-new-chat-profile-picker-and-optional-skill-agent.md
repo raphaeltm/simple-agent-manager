@@ -6,6 +6,7 @@ Approved by Raphaël: "I agree with your rec. Let's get it built and shipped to 
 ## Problem
 
 ### 1. Skills always override the profile's agent
+
 - `skills.agent_type` is `NOT NULL DEFAULT 'claude-code'` (`apps/api/src/db/schema.ts`).
 - `createSkill` stamps `body.agentType ?? env.DEFAULT_TASK_AGENT_TYPE ?? 'opencode'` through `baseProfileInsertValues` (`apps/api/src/services/profile-fields.ts`).
 - The skill form (`SkillFormDialog.tsx`) has no agent field at all, so every UI-created skill silently carries the server default.
@@ -15,6 +16,7 @@ Approved by Raphaël: "I agree with your rec. Let's get it built and shipped to 
   - 18 other skills (TTV 7 codex with model+effort; verifiedby 7 claude-code, 6 with effort; RaphOps 4) carry deliberate agent config, so keep them.
 
 ### 2. New-chat screen with many profiles is chaotic
+
 - The audit in idea `01M5EW9H86VD88S7E3WWA1D9X1` and library `/engineering/ux-audits/new-chat-profiles-2026-10-21/` found:
   - With 15 profiles the composer takes 71% of a 375×667 phone screen (7 rows of chips), and 125% with the keyboard open.
   - The default is alphabetical (`selectProfileId` → `profiles[0]`; `listProfiles` orders by name).
@@ -24,6 +26,7 @@ Approved by Raphaël: "I agree with your rec. Let's get it built and shipped to 
   - Message text does not predict the pick.
 
 ## Research findings
+
 - **Picker UI:** `apps/web/src/pages/project-chat/ChatInput.tsx` (714 lines) renders the chip wall, edit gear, "+ New", the Resources toggle and the profile wizard. The Skill select lives inside `components/project-chat/ProjectChatComposer.tsx`.
 - **New-chat empty state:** `apps/web/src/pages/project-chat/index.tsx` (594 lines) shows the hero plus 4 generic starter prompts.
 - **State:** `useProjectChatState.ts` (948 lines) holds `selectedProfileId`, the auto-select effect and the wizard. Splitting is required by rule 18 when modified.
@@ -40,6 +43,7 @@ Approved by Raphaël: "I agree with your rec. Let's get it built and shipped to 
 ## Implementation checklist
 
 ### A. Skills: optional agent type
+
 - [ ] Migration `0200_skills_optional_agent_type.sql`: add nullable `agent_type_new`, copy `agent_type` where not null, drop old column, rename the new one. Preserves every existing value.
 - [ ] Drizzle `skills.agentType` nullable; `SkillRow` and `AgentSkill.agentType: string | null`; Create/UpdateSkillRequest accept `agentType?: string | null`.
 - [ ] `createSkill`: store `body.agentType ?? null` (no env default). Validate effort against the agent only when the skill sets one.
@@ -56,6 +60,7 @@ Approved by Raphaël: "I agree with your rec. Let's get it built and shipped to 
 - [ ] Docs: agents.md and concepts.mdx describe "a skill only overrides what it sets".
 
 ### B. Picker API
+
 - [ ] Migration `0201_agent_profile_picker_hidden.sql` + drizzle table `agent_profile_picker_hidden (user_id, project_id, profile_id, created_at; PK user+project+profile; FKs cascade)`.
 - [ ] Admin setting `chat.profileUsageWindowDays` (integer, default 30, 1–365) plus a reader.
 - [ ] Service `agent-profile-picker.ts`:
@@ -69,6 +74,7 @@ Approved by Raphaël: "I agree with your rec. Let's get it built and shipped to 
   - routes: non-member rejected
 
 ### C. Picker UI
+
 - [ ] Shared helpers (`apps/web/src/components/project-chat/profile-picker/model.ts`): glyph, subtitle, recent, sections, idle, default selection.
 - [ ] API client + TanStack query options/hook for picker state; optimistic hide/unhide; invalidate after a chat is started.
 - [ ] Components:
@@ -99,10 +105,12 @@ Approved by Raphaël: "I agree with your rec. Let's get it built and shipped to 
 - [ ] Docs: chat-features.md (picking a profile, cards, hide, Options) and agents.md (profile picker).
 
 ### D. Release
+
 - [ ] Staging: migrations applied (D1 check that `agent_type` is nullable and values are preserved); UI flow end-to-end incl. sending a short chat with a picked profile (verify `tasks.agent_profile_hint`); hide/unhide; skill created in UI has null agent type and a chat with it runs on the profile's agent.
 - [ ] Prod: after deploy, clear `agentType` on the 19 SAM-project skills via MCP `update_skill` (agentType null) and verify with `list_skills`.
 
 ## Acceptance criteria
+
 - [ ] New skills created without an agent type store NULL; a chat using profile X + that skill runs on X's agent.
 - [ ] Existing skills keep their stored agent type (migration preserves values); the 19 SAM skills show agentType null after the post-deploy fix.
 - [ ] Opening a new chat pre-selects the user's last-used (visible) profile in this project, not the alphabetical first.
@@ -113,5 +121,6 @@ Approved by Raphaël: "I agree with your rec. Let's get it built and shipped to 
 - [ ] Docs updated; all tests green; staging verified end-to-end.
 
 ## References
+
 - Prototype: branch `sam/id-take-screenshot-mobile-7xtbf0` commit `905b81684` (`?pp=c`). Do not merge that branch.
 - Rules: 18 (file size), 28 (SQL guards on real engine), 31 (migration safety), 48 (TanStack/SWR), 60 (I/O budgets), 62 (real trigger), 17/56 (visual audit).
