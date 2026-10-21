@@ -76,7 +76,13 @@ export async function startWorkflowRun(
 ) {
   await assertReservedTaskCreatorAuthority(env, 'workflow', input.projectId, input.userId);
   const config = await getWorkflowConfig(env);
-  const plan = parseWorkflowPlan(input.plan, env, config.maxSteps);
+  let plan: WorkflowPlan;
+  try {
+    plan = parseWorkflowPlan(input.plan, env, config.maxSteps);
+  } catch (error) {
+    if (error instanceof Error) throw new WorkflowInputError(error.message, { cause: error });
+    throw error;
+  }
   if (!/^[a-zA-Z0-9_.:-]{1,160}$/.test(input.requestKey))
     throw new WorkflowInputError(
       'requestKey must be 1–160 letters, digits, dots, colons, underscores or hyphens'
@@ -149,9 +155,9 @@ export async function startWorkflowRun(
       input.userId,
       env
     );
-    if (!profile) throw new Error(`Profile unavailable for ${step.key}`);
+    if (!profile) throw new WorkflowInputError(`Profile unavailable for ${step.key}`);
     if (profile.runtime === 'cf-container')
-      throw new Error('Workflow steps currently require a VM profile');
+      throw new WorkflowInputError('Workflow steps currently require a VM profile');
     profiles.push(profile);
   }
   const id = crypto.randomUUID();
@@ -241,7 +247,7 @@ export async function getWorkflowRun(env: Env, projectId: string, userId: string
   )
     .bind(runId, projectId, userId)
     .first<WorkflowRunRow>();
-  if (!run) throw new Error('Workflow run not found');
+  if (!run) throw new WorkflowInputError('Workflow run not found');
   const steps = await loadWorkflowSteps(env, runId);
   const activity = await env.DATABASE.prepare(
     `SELECT event_type, event_payload_json, created_at FROM mission_workflow_events
