@@ -615,6 +615,13 @@ describe('durable workflow execution', () => {
       .bind(f.run.runId)
       .run();
     await expect(assertTaskRunnerStartGuard(testEnv, guard)).rejects.toThrow();
+    await env.DATABASE.prepare("UPDATE tasks SET status='in_progress' WHERE id=?")
+      .bind(first.task_id)
+      .run();
+    await env.DATABASE.prepare('UPDATE missions SET workflow_deadline_at=0 WHERE id=?')
+      .bind(f.run.runId)
+      .run();
+    await expect(assertTaskRunnerStartGuard(testEnv, guard)).resolves.toBeUndefined();
   });
 
   it('rejects invalid graphs before creating work', () => {
