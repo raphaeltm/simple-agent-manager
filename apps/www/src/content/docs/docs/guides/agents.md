@@ -179,9 +179,10 @@ In a [shared project](/docs/guides/collaboration/), agent profiles (and skills, 
 
 When work starts, the agent is resolved in this order:
 
-1. The profile you selected (or the trigger's profile)
-2. The project's default profile
-3. The platform default (`DEFAULT_TASK_AGENT_TYPE`, `opencode` in the checked-in Worker config)
+1. The skill you picked, if it sets an agent (a skill can leave the agent empty, and then the profile's runs)
+2. The profile you selected (or the trigger's profile)
+3. The project's default profile
+4. The platform default (`DEFAULT_TASK_AGENT_TYPE`, `opencode` in the checked-in Worker config)
 
 Type `@` in a chat message to choose a profile from the mention list. Mentions are optional hints to the receiving agent: unknown names leave your message unchanged. Names such as `@gcp-deployer`, `@release.bot`, and `@部署` are supported; names with spaces use quotes, such as `@"Code Reviewer"`. The mention list handles quoting and escaping for you. Email addresses and npm scopes such as `@types/node` stay ordinary text. Selecting the profile that runs a chat remains strict: an invalid selection is rejected.
 
