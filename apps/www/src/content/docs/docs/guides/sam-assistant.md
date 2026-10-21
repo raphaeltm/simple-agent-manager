@@ -13,6 +13,14 @@ Requests that require reading or changing repository files run in a visible proj
 
 Use the microphone button to transcribe a message into the composer. You still review and send that text yourself. On desktop, Ctrl+Enter (Cmd+Enter on a Mac) sends; Enter adds a new line.
 
+## Follow an answer as it is written
+
+While SAM works, its reply shows what it is doing right now: **Thinking**, **Working** or **Writing**, with the time elapsed. Each step appears as a plain line when it starts and is updated when it finishes, for example _Looking through your 20 most recent tasks…_ becoming _Read 20 recent tasks_. While it thinks, the latest line of its reasoning is shown in italics. The answer then appears word by word.
+
+The live view is a preview of the stored reply. Text that refers to a project, task or chat appears only once a completed step in the same turn returned that item, so a guessed identifier or link is never shown while SAM is still writing. When the turn ends, the stored answer and its receipts replace the live view.
+
+For questions about current work, such as what shipped or changed recently, SAM is told today's date and reads live project data in that turn. Earlier messages in your SAM history carry their dates and count as past context, not current status.
+
 ## Review actions and recover safely
 
 Actions that require confirmation say what will happen and in which project, and link to the target so you can review it first. Confirm with the action's own button, such as **Confirm stop**, or decline it, such as **Keep running**. **Exact request** shows the exact recorded input. Agent forms containing sensitive values must be completed directly in the linked project session. Do not paste secrets into the account conversation.

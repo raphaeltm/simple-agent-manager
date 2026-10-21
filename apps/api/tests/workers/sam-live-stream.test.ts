@@ -121,7 +121,7 @@ async function setup() {
     };
     return { page, turn: page.turns.find((item) => item.id === id) };
   };
-  return { userId, request, start, turn };
+  return { userId, stub, request, start, turn };
 }
 
 describe('SAM live answer stream in workerd', () => {
@@ -230,6 +230,61 @@ describe('SAM live answer stream in workerd', () => {
     await live.done;
     expect(live.text()).toBe('You have no projects yet.');
     expect(live.events.at(-1)).toEqual({ type: 'done', state: 'completed' });
+  });
+
+  it('runs GLM 5.3 Flash at low reasoning effort, previews its reasoning, and bills cached input at the cached price', async () => {
+    const glm = '@cf/zai-org/glm-5.3-flash';
+    const { userId, stub, request, start } = await setup();
+    await stub.testEnvironment({ SAM_MODEL: glm });
+    const thought = deferred();
+    const reasoning = (text: string) => ({
+      ...base,
+      model: glm,
+      choices: [{ index: 0, delta: { reasoning_content: text }, finish_reason: null }],
+    });
+    reply = () =>
+      gated([
+        reasoning('The user asks what is new.\n'),
+        reasoning('Answer directly without tools.\n'),
+        thought.promise,
+        content('Nothing new yet today.'),
+        finish('stop', {
+          prompt_tokens: 1_000,
+          completion_tokens: 100,
+          total_tokens: 1_100,
+          prompt_tokens_details: { cached_tokens: 800 },
+        } as unknown as Record<string, number>),
+      ]);
+    const id = await start('Anything new?');
+    const live = follow(await request(`/turns/${id}/stream`));
+    await vi.waitFor(
+      () =>
+        expect(live.events).toContainEqual({
+          type: 'thinking',
+          text: 'Answer directly without tools.',
+        }),
+      { timeout: 10_000, interval: 20 }
+    );
+    expect(live.text()).toBe('');
+    thought.release();
+    await live.done;
+    expect(live.text()).toBe('Nothing new yet today.');
+    expect(modelRequests[0]?.body).toMatchObject({
+      model: glm,
+      stream: true,
+      reasoning_effort: 'low',
+    });
+    const date = new Date().toISOString().slice(0, 10);
+    const usage = await env.KV.get<
+      Record<string, { estimatedCostUsd: number; inputTokens: number }>
+    >(`ai-provider-usage:${userId}:${date}`, 'json');
+    const [entry] = Object.values(usage ?? {});
+    expect(entry?.inputTokens).toBe(1_000);
+    // 200 uncached + 800 cached input tokens, 100 output tokens, at the catalog's per-1K prices.
+    expect(entry?.estimatedCostUsd).toBeCloseTo(
+      (200 * 0.00015 + 800 * 0.00003 + 100 * 0.0005) / 1000,
+      12
+    );
   });
 
   it('charges an estimated cost when a streamed step reports no usage', async () => {
