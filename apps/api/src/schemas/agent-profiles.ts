@@ -68,8 +68,8 @@ export const UpdateAgentProfileSchema = v.object({
  * Profile ids are server-issued and checked against the project's profiles, so these are
  * request-sanity bounds only (.claude/rules/51): far above any real id or profile count.
  */
-const PROFILE_PICKER_MAX_ID_LENGTH = 512;
-const PROFILE_PICKER_MAX_IDS_PER_REQUEST = 500;
+export const PROFILE_PICKER_MAX_ID_LENGTH = 512;
+export const PROFILE_PICKER_MAX_IDS_PER_REQUEST = 500;
 const ProfilePickerIdListSchema = v.pipe(
   v.array(v.pipe(v.string(), v.minLength(1), v.maxLength(PROFILE_PICKER_MAX_ID_LENGTH))),
   v.maxLength(PROFILE_PICKER_MAX_IDS_PER_REQUEST)

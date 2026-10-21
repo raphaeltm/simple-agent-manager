@@ -10,11 +10,17 @@ import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import { D1_MAX_BOUND_PARAMETERS } from '../../../src/lib/d1-limits';
 import {
   getProfilePickerState,
   updateHiddenProfiles,
 } from '../../../src/services/agent-profile-picker';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  applySqliteMigration,
+  createAllSchemaTables,
+  createSqliteD1,
+  createSqliteD1WithBindLimit,
+} from '../../helpers/sqlite-d1';
 
 const NOW = new Date('2026-10-21T12:00:00.000Z');
 const WINDOW_DAYS = 30;
@@ -101,6 +107,19 @@ describe('agent profile picker state', () => {
       ]);
     });
 
+    it('counts a chat started exactly at the window’s start, and not one a moment earlier', async () => {
+      const windowStart = daysAgo(WINDOW_DAYS);
+      seedTask({ agent_profile_hint: 'prof-a', created_at: windowStart });
+      seedTask({
+        agent_profile_hint: 'prof-b',
+        created_at: new Date(Date.parse(windowStart) - 1).toISOString(),
+      });
+
+      expect((await state()).usage).toEqual([
+        { profileId: 'prof-a', lastUsedAt: windowStart, chatCount: 1 },
+      ]);
+    });
+
     it('returns empty usage for someone with no chats yet (liveness: hidden ids still load)', async () => {
       await updateHiddenProfiles(db, 'p1', 'u1', { hide: ['prof-a'] });
 
@@ -126,10 +145,17 @@ describe('agent profile picker state', () => {
       expect(hidden).toEqual(['prof-b']);
     });
 
-    it('rejects hiding a profile from another project or another person’s global profile', async () => {
+    it('rejects hiding a profile from another project', async () => {
       await expect(
         updateHiddenProfiles(db, 'p1', 'u1', { hide: ['prof-other-project'] })
       ).rejects.toMatchObject({ statusCode: 400 });
+
+      expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_profile_picker_hidden').get()).toEqual(
+        { n: 0 }
+      );
+    });
+
+    it('rejects hiding another person’s global profile', async () => {
       await expect(
         updateHiddenProfiles(db, 'p1', 'u1', { hide: ['prof-global-theirs'] })
       ).rejects.toMatchObject({ statusCode: 400 });
@@ -137,6 +163,35 @@ describe('agent profile picker state', () => {
       expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_profile_picker_hidden').get()).toEqual(
         { n: 0 }
       );
+    });
+
+    it('treats showing a profile that was never hidden as a no-op', async () => {
+      await updateHiddenProfiles(db, 'p1', 'u1', { hide: ['prof-a'] });
+      await updateHiddenProfiles(db, 'p1', 'u2', { hide: ['prof-b'] });
+
+      const shown = await updateHiddenProfiles(db, 'p1', 'u1', {
+        unhide: ['prof-b', 'no-such-profile'],
+      });
+
+      expect(shown).toEqual(['prof-a']);
+      expect((await state('p1', 'u2')).hiddenProfileIds).toEqual(['prof-b']);
+    });
+
+    it('hides and shows more profiles than one D1 statement can bind', async () => {
+      const many = Array.from(
+        { length: D1_MAX_BOUND_PARAMETERS + 20 },
+        (_, index) => `bulk-${index}`
+      );
+      for (const id of many) seedProfile(id, 'p1', 'u2');
+      const limited = drizzle(createSqliteD1WithBindLimit(sqlite, D1_MAX_BOUND_PARAMETERS), {
+        schema,
+      });
+
+      const hidden = await updateHiddenProfiles(limited, 'p1', 'u1', { hide: many });
+      expect(hidden).toHaveLength(many.length);
+
+      const shown = await updateHiddenProfiles(limited, 'p1', 'u1', { unhide: many });
+      expect(shown).toEqual([]);
     });
 
     it('never changes another person’s picker', async () => {
@@ -161,5 +216,50 @@ describe('agent profile picker state', () => {
         updateHiddenProfiles(db, 'p1', 'u1', { hide: ['prof-a'], unhide: ['prof-a'] })
       ).rejects.toMatchObject({ statusCode: 400 });
     });
+  });
+});
+
+describe('migration 0201: a hidden row goes with its profile, project or person', () => {
+  it('cascades deletes with foreign keys enforced, as D1 does', () => {
+    const sqlite = new Database(':memory:');
+    try {
+      sqlite.pragma('foreign_keys = ON');
+      for (const table of ['users', 'projects', 'agent_profiles']) {
+        sqlite.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY)`);
+      }
+      applySqliteMigration(
+        sqlite,
+        new URL('../../../src/db/migrations/0201_agent_profile_picker_hidden.sql', import.meta.url)
+      );
+      sqlite.exec(`INSERT INTO users (id) VALUES ('u1'), ('u2')`);
+      sqlite.exec(`INSERT INTO projects (id) VALUES ('p1'), ('p2')`);
+      sqlite.exec(`INSERT INTO agent_profiles (id) VALUES ('a'), ('b'), ('c')`);
+      const hide = sqlite.prepare(
+        'INSERT INTO agent_profile_picker_hidden (user_id, project_id, profile_id) VALUES (?, ?, ?)'
+      );
+      hide.run('u1', 'p1', 'a');
+      hide.run('u1', 'p1', 'b');
+      hide.run('u2', 'p1', 'b');
+      hide.run('u1', 'p2', 'c');
+      const rows = () =>
+        sqlite
+          .prepare(
+            `SELECT user_id || '/' || project_id || '/' || profile_id AS k
+             FROM agent_profile_picker_hidden ORDER BY k`
+          )
+          .all()
+          .map((row) => (row as { k: string }).k);
+
+      sqlite.exec(`DELETE FROM agent_profiles WHERE id = 'a'`);
+      expect(rows()).toEqual(['u1/p1/b', 'u1/p2/c', 'u2/p1/b']);
+
+      sqlite.exec(`DELETE FROM projects WHERE id = 'p2'`);
+      expect(rows()).toEqual(['u1/p1/b', 'u2/p1/b']);
+
+      sqlite.exec(`DELETE FROM users WHERE id = 'u2'`);
+      expect(rows()).toEqual(['u1/p1/b']);
+    } finally {
+      sqlite.close();
+    }
   });
 });

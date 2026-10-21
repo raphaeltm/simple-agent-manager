@@ -71,8 +71,9 @@ agentProfileRoutes.get('/picker', async (c) => {
 
   const usageWindowDays = await getProfileUsageWindowDays(c.env);
   const state = await getProfilePickerState(db, projectId, userId, usageWindowDays);
-  // No cache policy: this changes with every chat the caller starts and every hide, and a
-  // browser-cached copy (even stale-while-revalidate) would bring a just-hidden profile back.
+  // Never cached: this changes with every chat the caller starts and every hide, and a
+  // cached copy (even stale-while-revalidate) would bring a just-hidden profile back.
+  c.header('Cache-Control', 'private, no-store');
   return c.json(state);
 });
 

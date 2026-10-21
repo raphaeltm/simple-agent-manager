@@ -31,6 +31,10 @@ vi.mock('../../../src/services/admin-settings', () => ({
 }));
 
 import { agentProfileRoutes } from '../../../src/routes/agent-profiles';
+import {
+  PROFILE_PICKER_MAX_ID_LENGTH,
+  PROFILE_PICKER_MAX_IDS_PER_REQUEST,
+} from '../../../src/schemas/agent-profiles';
 
 const BASE = 'https://api.test.example.com/api/projects';
 const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
@@ -91,8 +95,8 @@ describe('agent profile picker routes', () => {
     expect(body.usage.map((entry) => [entry.profileId, entry.chatCount])).toEqual([['prof-a', 1]]);
     expect(body.hiddenProfileIds).toEqual([]);
     expect(mocks.resolveAdminSetting).toHaveBeenCalledWith(env, 'chat.profileUsageWindowDays');
-    // Changes on every new chat and hide, so the browser must not serve a cached copy.
-    expect(res.headers.get('cache-control')).toBeNull();
+    // Changes on every new chat and hide, so no cache may serve a stored copy.
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
   });
 
   it('rejects non-members on both methods without touching data', async () => {
@@ -161,5 +165,49 @@ describe('agent profile picker routes', () => {
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_profile_picker_hidden').get()).toEqual({
       n: 0,
     });
+  });
+
+  const patch = (body: unknown) =>
+    app.request(
+      `${BASE}/p1/agent-profiles/picker`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      env
+    );
+  const hiddenCount = () =>
+    sqlite.prepare('SELECT COUNT(*) AS n FROM agent_profile_picker_hidden').get();
+
+  it('caps how many ids one request may carry', async () => {
+    const overLimit = await patch({
+      hide: Array.from({ length: PROFILE_PICKER_MAX_IDS_PER_REQUEST + 1 }, () => 'prof-a'),
+    });
+    expect(overLimit.status).toBe(400);
+    expect(hiddenCount()).toEqual({ n: 0 });
+
+    // At the limit the request is accepted (duplicates collapse to one row).
+    const atLimit = await patch({
+      hide: Array.from({ length: PROFILE_PICKER_MAX_IDS_PER_REQUEST }, () => 'prof-a'),
+    });
+    expect(atLimit.status).toBe(200);
+    expect(await atLimit.json()).toEqual({ hiddenProfileIds: ['prof-a'] });
+  });
+
+  it('caps id length in the schema, before the profile lookup', async () => {
+    const tooLong = await patch({ hide: ['x'.repeat(PROFILE_PICKER_MAX_ID_LENGTH + 1)] });
+    expect(tooLong.status).toBe(400);
+    expect(((await tooLong.json()) as { message: string }).message).not.toContain(
+      'not available in this project'
+    );
+
+    // At the limit the schema accepts it and the profile lookup is what refuses it.
+    const atLimit = await patch({ hide: ['x'.repeat(PROFILE_PICKER_MAX_ID_LENGTH)] });
+    expect(atLimit.status).toBe(400);
+    expect(((await atLimit.json()) as { message: string }).message).toContain(
+      'not available in this project'
+    );
+    expect(hiddenCount()).toEqual({ n: 0 });
   });
 });

@@ -15,6 +15,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { chunk, D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { resolveAdminSetting } from './admin-settings';
@@ -23,6 +24,10 @@ import { DEFAULT_PROFILE_USAGE_WINDOW_DAYS } from './admin-settings-registry';
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
 const DAY_MS = 86_400_000;
+/** Profile ids per `IN (...)` list: the D1 bind limit less the user and project. */
+const IDS_PER_STATEMENT = D1_MAX_BOUND_PARAMETERS - 2;
+/** Rows per insert: user, project and profile are bound; created_at is a SQL default. */
+const ROWS_PER_INSERT = Math.floor(D1_MAX_BOUND_PARAMETERS / 3);
 
 /** Admin setting `chat.profileUsageWindowDays`; degrades to the default on a store outage. */
 export async function getProfileUsageWindowDays(env: Env): Promise<number> {
@@ -123,19 +128,22 @@ export async function updateHiddenProfiles(
   }
 
   if (hide.length > 0) {
-    const accessible = await db
-      .select({ id: schema.agentProfiles.id })
-      .from(schema.agentProfiles)
-      .where(
-        and(
-          inArray(schema.agentProfiles.id, hide),
-          or(
-            eq(schema.agentProfiles.projectId, projectId),
-            and(isNull(schema.agentProfiles.projectId), eq(schema.agentProfiles.userId, userId))
+    const accessibleIds = new Set<string>();
+    for (const ids of chunk(hide, IDS_PER_STATEMENT)) {
+      const accessible = await db
+        .select({ id: schema.agentProfiles.id })
+        .from(schema.agentProfiles)
+        .where(
+          and(
+            inArray(schema.agentProfiles.id, ids),
+            or(
+              eq(schema.agentProfiles.projectId, projectId),
+              and(isNull(schema.agentProfiles.projectId), eq(schema.agentProfiles.userId, userId))
+            )
           )
-        )
-      );
-    const accessibleIds = new Set(accessible.map((row) => row.id));
+        );
+      for (const row of accessible) accessibleIds.add(row.id);
+    }
     const rejected = hide.filter((id) => !accessibleIds.has(id));
     if (rejected.length > 0) {
       log.warn('agent_profile_picker.hide_rejected', {
@@ -146,19 +154,21 @@ export async function updateHiddenProfiles(
       });
       throw errors.badRequest('One or more profiles are not available in this project');
     }
-    await db
-      .insert(schema.agentProfilePickerHidden)
-      .values(hide.map((profileId) => ({ userId, projectId, profileId })))
-      .onConflictDoNothing();
+    for (const ids of chunk(hide, ROWS_PER_INSERT)) {
+      await db
+        .insert(schema.agentProfilePickerHidden)
+        .values(ids.map((profileId) => ({ userId, projectId, profileId })))
+        .onConflictDoNothing();
+    }
   }
-  if (unhide.length > 0) {
+  for (const ids of chunk(unhide, IDS_PER_STATEMENT)) {
     await db
       .delete(schema.agentProfilePickerHidden)
       .where(
         and(
           eq(schema.agentProfilePickerHidden.userId, userId),
           eq(schema.agentProfilePickerHidden.projectId, projectId),
-          inArray(schema.agentProfilePickerHidden.profileId, unhide)
+          inArray(schema.agentProfilePickerHidden.profileId, ids)
         )
       );
   }

@@ -1,4 +1,4 @@
-import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
+import { chunk, D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 
 export interface VMErrorCorrelationRequest {
   workspaceId: string | null;
@@ -33,14 +33,6 @@ interface CorrelationRow {
   task_created_at: string | null;
   task_started_at: string | null;
   task_completed_at: string | null;
-}
-
-function chunk<T>(values: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let index = 0; index < values.length; index += size) {
-    chunks.push(values.slice(index, index + size));
-  }
-  return chunks;
 }
 
 function parseDatabaseTimestamp(value: string | null): number | null {
