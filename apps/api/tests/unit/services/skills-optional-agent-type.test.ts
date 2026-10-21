@@ -182,6 +182,41 @@ describe('skills only override the agent when they set one', () => {
     expect(storedAgentType(skill.id)).toEqual({ agent_type: null });
   });
 
+  it('treats a blank agent type as unset on create', async () => {
+    const empty = await createSkill(db, PROJECT, USER, { name: 'blank', agentType: '' }, ENV);
+    const spaces = await createSkill(db, PROJECT, USER, { name: 'spaces', agentType: '  ' }, ENV);
+
+    expect(storedAgentType(empty.id)).toEqual({ agent_type: null });
+    expect(storedAgentType(spaces.id)).toEqual({ agent_type: null });
+  });
+
+  it('clears an override with an empty string, as clients with a string-only schema send it', async () => {
+    const skill = await createSkill(
+      db,
+      PROJECT,
+      USER,
+      { name: 'stamped', agentType: 'opencode' },
+      ENV
+    );
+
+    const updated = await updateSkill(db, PROJECT, skill.id, USER, { agentType: '' });
+
+    expect(updated.agentType).toBeNull();
+    expect(storedAgentType(skill.id)).toEqual({ agent_type: null });
+    const resolved = await resolveSkillProfile(db, PROJECT, 'p-claude', skill.id, USER, ENV);
+    expect(resolved.agentType).toBe('claude-code');
+  });
+
+  it('runs a skill whose stored agent type is blank on the profile’s agent', async () => {
+    const skill = await createSkill(db, PROJECT, USER, { name: 'legacy-blank' }, ENV);
+    // As the API could store it before blanks were normalized.
+    sqlite.prepare("UPDATE skills SET agent_type = '' WHERE id = ?").run(skill.id);
+
+    const resolved = await resolveSkillProfile(db, PROJECT, 'p-codex', skill.id, USER, ENV);
+
+    expect(resolved.agentType).toBe('openai-codex');
+  });
+
   it('rejects an update that sets an agent lacking the requested effort', async () => {
     const skill = await createSkill(db, PROJECT, USER, { name: 'tune' }, ENV);
 

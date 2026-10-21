@@ -639,6 +639,8 @@ describe('MCP Skill Tools', () => {
 
     it('passes agentType: null through so the override can be cleared', () => {
       expect(extractSkillFields({ agentType: null })).toEqual({ agentType: null });
+      // A blank string passes through; the skills service stores it as no override.
+      expect(extractSkillFields({ agentType: '' })).toEqual({ agentType: '' });
       expect(extractSkillFields({ agentType: 'openai-codex' })).toEqual({
         agentType: 'openai-codex',
       });

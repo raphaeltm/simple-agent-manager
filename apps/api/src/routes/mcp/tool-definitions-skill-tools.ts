@@ -15,7 +15,7 @@ const SKILL_FIELD_PROPERTIES = {
   agentType: {
     type: ['string', 'null'],
     description:
-      'Optional agent type override (e.g., claude-code, openai-codex). Leave unset so the run uses the agent of the profile chosen for it; a skill only overrides what it sets. null clears the override.',
+      'Optional agent type override (e.g., claude-code, openai-codex). Leave unset so the run uses the agent of the profile chosen for it; a skill only overrides what it sets. null or an empty string clears the override.',
   },
   resourceRequirementsJson: {
     type: ['string', 'null'],
