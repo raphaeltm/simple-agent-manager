@@ -106,19 +106,19 @@ Approved by Raphaël: "I agree with your rec. Let's get it built and shipped to 
 
 ### D. Release
 
-- [ ] Staging: migrations applied (D1 check that `agent_type` is nullable and values are preserved); UI flow end-to-end incl. sending a short chat with a picked profile (verify `tasks.agent_profile_hint`); hide/unhide; skill created in UI has null agent type and a chat with it runs on the profile's agent.
+- [x] Staging: migrations applied (D1 check that `agent_type` is nullable and values are preserved); UI flow end-to-end incl. sending a short chat with a picked profile (verify `tasks.agent_profile_hint`); hide/unhide; skill created in UI has null agent type and a chat with it runs on the profile's agent.
 - [ ] Prod: after deploy, clear `agentType` on the 19 SAM-project skills via MCP `update_skill` (agentType null) and verify with `list_skills`.
 
 ## Acceptance criteria
 
-- [ ] New skills created without an agent type store NULL; a chat using profile X + that skill runs on X's agent.
+- [x] New skills created without an agent type store NULL; a chat using profile X + that skill runs on X's agent.
 - [ ] Existing skills keep their stored agent type (migration preserves values); the 19 SAM skills show agentType null after the post-deploy fix.
 - [x] Opening a new chat pre-selects the user's last-used (visible) profile in this project, not the alphabetical first.
 - [x] With 2+ visible profiles, the empty new-chat screen shows recent profile cards; tapping one selects it, and the "To:" control shows it.
 - [x] The composer shows one toolbar row (To / attach / Options) and the message box; skill and resources are reachable via Options and still reach the submit request.
-- [ ] Hide/unhide per user works (bulk and single), persists across devices, never affects other users, and hidden profiles stay usable.
+- [x] Hide/unhide per user works (bulk and single), persists across devices, never affects other users, and hidden profiles stay usable.
 - [x] Phone 375×667: the composer takes ≤ 25% of the viewport with 15 profiles; at 375×400 with the keyboard the message box stays visible; no horizontal overflow at any tested viewport.
-- [ ] Docs updated; all tests green; staging verified end-to-end.
+- [x] Docs updated; all tests green; staging verified end-to-end.
 
 ## References
 
@@ -139,3 +139,20 @@ Approved by Raphaël: "I agree with your rec. Let's get it built and shipped to 
   - `tasks/backlog/2026-10-21-composer-audit-provisioning-progress-test-fails-on-main.md`
   - `tasks/backlog/2026-10-21-docs-expired-chat-spec-drift.md`
 - Marketing chat scene and feature screenshot still show the old layout. That needs a scene redesign, so it is tracked as idea `01M5F2QXNM6K385XNQJD105CRZ`.
+
+## Staging verification (2026-10-21)
+
+Deploys 39599286437 and 39607048694 (SHA 5da46b59a). Another agent's deploy replaced the first one at about 13:08, so the remaining checks ran on the redeploy. Smoke user, project Potato.
+
+- **D1:** `d1_migrations` records 0200 and 0201, and `skills.agent_type` is nullable. Two skills seeded under the old code kept their values (`opencode` stamped by the server, and an explicit `claude-code`). `agent_profile_picker_hidden` exists with its primary key and index.
+- **Default selection:** the last-used profile (`rollout-recovery-phase1-live`) was pre-selected, not the alphabetical "Conversation profile". Recent cards, the To control and the sheet worked on desktop and at 375px, with no console errors, no failed API calls and no overflow.
+- **Hiding:** hiding "Task profile" from Edit list wrote one row (smoke user, Potato, that profile). It persisted across a reload, and showing it again removed it. Edit mode offered "1 profile you haven't picked in 30 days".
+- **Sending:** a short chat on `picker-check-instant`, picked from the sheet, created task `01M5F93YZT9TEEZFH4JRR6DY0P` with `agent_profile_hint` set to that profile and `triggered_by='user'`. The agent session ran `claude-code` in a Cloudflare container (no VM) and replied "OK". The next new chat pre-selected that profile and showed it first under Recent.
+- **Skill created in the UI:** stored `agent_type = NULL`. Choosing it in Chat options showed "Chat options (1 set)".
+- **Skill resolution:** `GET .../skills/:id/resolve` is the resolver the chat routes use.
+  - The agent-less skill with a Claude profile resolved to `claude-code`; a skill with `opencode` set resolved to `opencode`.
+  - `PATCH {"agentType": null}` cleared it, and it then resolved to `claude-code`.
+  - No second agent chat was sent, because the smoke user's claude-code runs in `sam` mode and another agent needed that staging token budget.
+- **Cleanup:** the test chat is closed and its workspace removed. The three test skills and the test profile are deleted; no hidden rows remain.
+
+The production data fix for the 19 SAM skills runs after the production deploy and is recorded on the PR.
