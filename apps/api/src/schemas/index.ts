@@ -65,6 +65,7 @@ export {
   CreateAgentProfileSchema,
   SetProjectDefaultProfileSchema,
   UpdateAgentProfileSchema,
+  UpdateProfilePickerSchema,
 } from './agent-profiles';
 
 // Skill schemas

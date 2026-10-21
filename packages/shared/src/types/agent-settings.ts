@@ -284,6 +284,29 @@ export interface ResolvedAgentProfile {
   githubCliPolicy: GitHubCliPolicy | null;
 }
 
+/** One profile's use in the caller's own new chats in a project (GET .../agent-profiles/picker). */
+export interface ProfilePickerUsage {
+  profileId: string;
+  /** ISO timestamp of the caller's latest new chat with this profile in the window. */
+  lastUsedAt: string;
+  chatCount: number;
+}
+
+/** The caller's new-chat picker state for one project. */
+export interface ProfilePickerState {
+  usage: ProfilePickerUsage[];
+  /** Profiles this person hid from the new-chat picker in this project. */
+  hiddenProfileIds: string[];
+  /** Days of chats counted in `usage` (admin setting `chat.profileUsageWindowDays`). */
+  usageWindowDays: number;
+}
+
+/** Body for PATCH .../agent-profiles/picker. Hiding only affects the caller's picker. */
+export interface UpdateProfilePickerRequest {
+  hide?: string[];
+  unhide?: string[];
+}
+
 // =============================================================================
 // Skills (per-project repeatable-work definitions)
 // =============================================================================

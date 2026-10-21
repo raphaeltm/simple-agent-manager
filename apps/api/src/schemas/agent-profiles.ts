@@ -64,6 +64,23 @@ export const UpdateAgentProfileSchema = v.object({
   githubCliPolicy: v.optional(v.nullable(GitHubCliPolicySchema)),
 });
 
+/**
+ * Profile ids are server-issued and checked against the project's profiles, so these are
+ * request-sanity bounds only (.claude/rules/51): far above any real id or profile count.
+ */
+const PROFILE_PICKER_MAX_ID_LENGTH = 512;
+const PROFILE_PICKER_MAX_IDS_PER_REQUEST = 500;
+const ProfilePickerIdListSchema = v.pipe(
+  v.array(v.pipe(v.string(), v.minLength(1), v.maxLength(PROFILE_PICKER_MAX_ID_LENGTH))),
+  v.maxLength(PROFILE_PICKER_MAX_IDS_PER_REQUEST)
+);
+
+/** PATCH /api/projects/:projectId/agent-profiles/picker — hide/show in the caller's own picker. */
+export const UpdateProfilePickerSchema = v.object({
+  hide: v.optional(ProfilePickerIdListSchema),
+  unhide: v.optional(ProfilePickerIdListSchema),
+});
+
 export const SetProjectDefaultProfileSchema = v.object({
   profileNameOrId: v.optional(v.nullable(v.string())),
 });

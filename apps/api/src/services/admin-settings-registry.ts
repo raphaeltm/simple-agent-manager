@@ -13,6 +13,7 @@ export type AdminSettingValue = boolean | number | string | readonly string[] | 
 export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
 export type AdminSettingName =
   | `connector.${ConnectorSettingKey}`
+  | 'chat.profileUsageWindowDays'
   | 'collaboration.commentMentionsMax'
   | 'collaboration.commentNotificationWindowSeconds'
   | 'collaboration.sessionAccessMaxGrants'
@@ -38,7 +39,7 @@ export interface AdminSettingDefinition {
   readonly name: AdminSettingName;
   readonly type: AdminSettingType;
   readonly defaultValue: AdminSettingValue;
-  readonly category: 'OAuth' | 'Connector' | 'Operations' | 'Trials' | 'Collaboration';
+  readonly category: 'OAuth' | 'Connector' | 'Operations' | 'Trials' | 'Collaboration' | 'Chat';
   readonly description: string;
   readonly secret: boolean;
   readonly risky: boolean;
@@ -50,6 +51,8 @@ export interface AdminSettingDefinition {
   readonly validate: (value: unknown) => boolean;
 }
 
+/** Days of a person's own new chats that order their new-chat profile picker (idea 01M5EW9H86VD88S7E3WWA1D9X1). */
+export const DEFAULT_PROFILE_USAGE_WINDOW_DAYS = 30;
 /** Collaboration defaults (idea 01M59MYE4GY91BWTE8TZF1ZB5D); admins can change them at runtime. */
 export const DEFAULT_SESSION_ACCESS_MAX_GRANTS = 10;
 export const DEFAULT_COMMENT_MENTIONS_MAX = 10;
@@ -284,6 +287,13 @@ const definitions: AdminSettingDefinition[] = [
     'Collaboration',
     'Maximum people one comment can @mention.',
     { min: 1, max: 50 }
+  ),
+  integerDefinition(
+    'chat.profileUsageWindowDays',
+    DEFAULT_PROFILE_USAGE_WINDOW_DAYS,
+    'Chat',
+    'Days of each person’s own new chats used to put their recent profiles first and to suggest hiding ones they no longer use.',
+    { min: 1, max: 365 }
   ),
   integerDefinition(
     'collaboration.commentNotificationWindowSeconds',

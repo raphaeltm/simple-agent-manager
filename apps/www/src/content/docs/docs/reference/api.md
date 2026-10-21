@@ -589,6 +589,14 @@ Submit an idea for autonomous execution. This is the chat-first path used by the
 
 `resourceRequirements` is additive modern workload input. The API validates known fields and persists the normalized JSON through task launch inputs. Legacy `vmSize` is still accepted for old clients as a deprecated compatibility hint; clients should not infer provider hardware from it. Profiles, skills, and triggers persist the same modern data as `resourceRequirementsJson` for compatibility, with explicit `null` clearing that layer and omitted fields preserving inherited behavior.
 
+### `GET /api/projects/:id/agent-profiles/picker`
+
+Returns the caller's own new-chat picker state for the project: `{ usage, hiddenProfileIds, usageWindowDays }`. `usage` lists `{ profileId, lastUsedAt, chatCount }` for profiles the caller started new chats with in the last `usageWindowDays` days (admin setting `chat.profileUsageWindowDays`, default 30), most recent first. Only chats the caller started by hand count; dispatched, triggered, recovered and idea drafts do not. Any active project member can read their own state.
+
+### `PATCH /api/projects/:id/agent-profiles/picker`
+
+Takes `{ "hide": ["<profileId>"], "unhide": ["<profileId>"] }` and returns `{ hiddenProfileIds }`. Hiding only removes a profile from the caller's own new-chat picker in this project; the profile, other members' pickers, triggers, dispatch and @mentions are unaffected. Only profiles the caller can use in the project can be hidden (`400` otherwise), and one profile cannot appear in both lists.
+
 ## File Proxy (Project Chat)
 
 These endpoints proxy file operations to the workspace's VM agent, accessed through a project chat session.
