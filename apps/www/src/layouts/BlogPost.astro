@@ -3,6 +3,7 @@ import Base from './Base.astro';
 import Header from '../components/Header.astro';
 import CtaFooter from '../components/CtaFooter.astro';
 import { categoryColors } from '../lib/blog-utils';
+import '../styles/blog-code.css';
 import '../styles/blog-mermaid.css';
 
 interface Props {
@@ -220,13 +221,27 @@ const formattedDate = date.toLocaleDateString('en-US', {
     color: var(--color-fg-primary);
   }
 
-  .post-body :global(pre) {
-    margin: 24px 0;
-    padding: 20px;
+  /* UI renders: <figure> blocks written in the post (src/content/CLAUDE.md, "UI renders").
+     Direct children only, so code-block frames (also <figure>) are untouched. */
+  .post-body > :global(figure) {
+    margin: 32px 0;
+  }
+
+  .post-body > :global(figure) :global(img) {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto;
+    border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
-    overflow-x: auto;
+  }
+
+  .post-body > :global(figure) > :global(figcaption) {
+    margin-top: 12px;
     font-size: 0.875rem;
-    line-height: 1.6;
+    line-height: 1.5;
+    color: var(--color-fg-muted);
+    text-align: center;
   }
 
   .post-body :global(code:not(pre code)) {

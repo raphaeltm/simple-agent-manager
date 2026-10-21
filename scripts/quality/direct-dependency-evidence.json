@@ -13,6 +13,10 @@
       "registryUrl": "https://www.npmjs.com/package/@eslint/js",
       "necessity": "Provides supported ESLint flat recommended configuration."
     },
+    "@expressive-code/plugin-line-numbers": {
+      "registryUrl": "https://www.npmjs.com/package/@expressive-code/plugin-line-numbers",
+      "necessity": "Adds line-number gutters to docs and blog code blocks."
+    },
     "@modelcontextprotocol/sdk": {
       "registryUrl": "https://www.npmjs.com/package/@modelcontextprotocol/sdk",
       "necessity": "Runs the disposable HTTPS MCP service and notification fixture for ACP URL completion verification."

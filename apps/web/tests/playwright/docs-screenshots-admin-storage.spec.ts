@@ -13,8 +13,8 @@
  * Write the committed image with:
  *   DOCS_SHOTS=1 npx playwright test docs-screenshots-admin-storage --project="iPhone SE (375x667)"
  *
- * The committed PNGs were then palette-compressed (about 5x smaller, no visible change), from
- * apps/www: sharp(file).png({ palette: true, quality: 90, effort: 10, dither: 0.6 }).
+ * The committed PNGs were then palette-compressed (about 5x smaller, no visible change) with
+ * `pnpm --filter @simple-agent-manager/www compress:screenshots public/images/docs`.
  */
 import { expect, type Page, test } from '@playwright/test';
 

@@ -17,6 +17,18 @@ An agent profile is a saved setup for starting a coding agent. It can name the a
 
 In the composer, the **To** control opens the profile picker. Profiles used recently appear first, and SAM starts with the last profile you picked. Chat options, such as a skill or workspace resources, stay beside that choice. The picker also adapts to narrow chat areas, so the same controls fit on a phone.
 
+<figure>
+  <img class="shot-dark" src="/images/blog/sams-journal-making-agent-choice-explicit/composer-to-control-dark.png" width="375" height="142" alt="The new-chat composer at phone width. A To control names the chosen profile, Careful Reviewer, with attach and chat-option buttons beside it and the message box below." loading="lazy" decoding="async" />
+  <img class="shot-light" src="/images/blog/sams-journal-making-agent-choice-explicit/composer-to-control-light.png" width="375" height="142" alt="The new-chat composer at phone width. A To control names the chosen profile, Careful Reviewer, with attach and chat-option buttons beside it and the message box below." loading="lazy" decoding="async" />
+  <figcaption>On a phone, the To control names the profile that will start the chat.</figcaption>
+</figure>
+
+<figure>
+  <img class="shot-dark" src="/images/blog/sams-journal-making-agent-choice-explicit/profile-picker-dark.png" width="440" height="545" alt="The profile picker. A Recent section lists Careful Reviewer, checked as the current choice, then Codex Builder and Quick Questions. Sections for chatting and exploring, and for building and opening pull requests, follow." loading="lazy" decoding="async" />
+  <img class="shot-light" src="/images/blog/sams-journal-making-agent-choice-explicit/profile-picker-light.png" width="440" height="545" alt="The profile picker. A Recent section lists Careful Reviewer, checked as the current choice, then Codex Builder and Quick Questions. Sections for chatting and exploring, and for building and opening pull requests, follow." loading="lazy" decoding="async" />
+  <figcaption>Opening it lists recent profiles first, with your last pick already selected.</figcaption>
+</figure>
+
 The picker lives in the React chat composer. A TypeScript service reads the recent list from Cloudflare D1, SAM's project database. It only counts new chats you started yourself. Since SAM already records which profile starts a task, it can derive the list from existing task records instead of adding a separate click-tracking system. The time window is configurable by a project administrator.
 
 You can also hide a profile from your own new-chat picker. That preference is stored for one person in one project; it doesn't remove the profile for teammates or affect automation, task dispatch, or mentions. This is a useful distinction: organizing your chooser should not change what the project can do.
@@ -27,7 +39,7 @@ A skill is a reusable set of instructions and run options, such as a project's p
 
 The resolver now treats an unset skill agent as “keep the profile's agent.” In the TypeScript service, the choice is explicit:
 
-```typescript
+```typescript title="apps/api/src/services/skills.ts"
 const profile = await resolveAgentProfile(
   db,
   projectId,
@@ -36,7 +48,7 @@ const profile = await resolveAgentProfile(
   env,
   options
 );
-const agentType = skill?.agentType ?? profile.agentType;
+const agentType = skill?.agentType || profile.agentType;
 ```
 
 If a skill does set `agentType`, SAM uses that override. If it leaves the field empty, SAM carries forward the selected profile. The database now allows the field to be `NULL` to represent that difference between “use the profile” and “choose a specific agent.” Existing skills keep their saved agent setting through the migration.

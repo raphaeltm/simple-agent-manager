@@ -1,5 +1,6 @@
 /**
- * Shared capture helper for the documentation screenshot specs.
+ * Shared capture helpers for the documentation screenshot specs and for blog post UI
+ * renders (`blogShot`).
  *
  * Lives outside the spec files because two of them need it and rule 24 bans a second
  * copy: a divergent `DOCS_IMAGE_DIR` would silently write half the docs images to the
@@ -46,13 +47,40 @@ export async function docsShot(
   await (target ?? page).screenshot({ path });
 }
 
+/** Where blog post UI renders live, relative to `apps/web`: one directory per post slug. */
+export const BLOG_IMAGE_DIR = resolve(process.cwd(), '../www/public/images/blog');
+
+/**
+ * Capture one element as a UI render for a blog post, into
+ * `apps/www/public/images/blog/<slug>/<name>.png`, and print its size in CSS pixels. The
+ * capture is at the project's device scale (2x), so the post's `<img>` must declare these
+ * CSS sizes as `width` and `height` to show the render at its real size, sharply.
+ * See "UI renders" in `apps/www/src/content/CLAUDE.md`.
+ */
+export async function blogShot(
+  page: Page,
+  slug: string,
+  name: string,
+  target: Locator
+): Promise<{ width: number; height: number }> {
+  await page.waitForTimeout(500);
+  const box = await target.boundingBox();
+  if (!box) throw new Error(`blogShot: "${name}" is not on screen`);
+  const dir = resolve(BLOG_IMAGE_DIR, slug);
+  mkdirSync(dir, { recursive: true });
+  await target.screenshot({ path: `${dir}/${name}.png`, animations: 'disabled' });
+  const size = { width: Math.round(box.width), height: Math.round(box.height) };
+  console.log(`${slug}/${name}.png  width="${size.width}" height="${size.height}"`);
+  return size;
+}
+
 /**
  * Make the modal backdrop fully opaque so the page behind a drawer does not bleed
- * through its rounded corners in a cropped docs image.
+ * through its rounded corners in a cropped docs or blog image.
  */
-export async function opaqueBackdrop(page: Page): Promise<void> {
+export async function opaqueBackdrop(page: Page, theme: 'dark' | 'light' = 'dark'): Promise<void> {
+  const background = theme === 'dark' ? '#0a0e0c' : '#eef3ef';
   await page.addStyleTag({
-    content:
-      '.glass-backdrop-dim{background:#0a0e0c !important;opacity:1 !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}',
+    content: `.glass-backdrop-dim{background:${background} !important;opacity:1 !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}`,
   });
 }

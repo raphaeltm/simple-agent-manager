@@ -133,6 +133,8 @@ html[data-theme='light'] .post-body .mermaid-error {
 
 .post-body .mermaid-error pre {
   margin-top: 12px;
+  font-size: 0.875rem;
+  line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
 }
