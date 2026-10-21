@@ -207,6 +207,20 @@ describe('skills only override the agent when they set one', () => {
     expect(resolved.agentType).toBe('claude-code');
   });
 
+  it('leaves an existing agent type untouched when an unrelated field is updated', async () => {
+    const skill = await createSkill(
+      db,
+      PROJECT,
+      USER,
+      { name: 'kept', agentType: 'openai-codex' },
+      ENV
+    );
+
+    await updateSkill(db, PROJECT, skill.id, USER, { description: 'unrelated change' });
+
+    expect(storedAgentType(skill.id)).toEqual({ agent_type: 'openai-codex' });
+  });
+
   it('runs a skill whose stored agent type is blank on the profile’s agent', async () => {
     const skill = await createSkill(db, PROJECT, USER, { name: 'legacy-blank' }, ENV);
     // As the API could store it before blanks were normalized.
