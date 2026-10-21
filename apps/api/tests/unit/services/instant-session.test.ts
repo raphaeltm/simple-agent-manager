@@ -53,7 +53,12 @@ vi.mock('../../../src/services/task-terminal-transition', () => ({
   transitionTaskToTerminal: mocks.transitionTaskToTerminal,
 }));
 
-import { launchInstantSession } from '../../../src/services/instant-session';
+import {
+  acceptInstantSession,
+  continueInstantSessionLaunch,
+  launchInstantSession,
+  type LaunchInstantSessionInput,
+} from '../../../src/services/instant-session';
 
 function makeDb(selectResults: unknown[][] = []) {
   const inserts: unknown[] = [];
@@ -150,6 +155,66 @@ describe('launchInstantSession', () => {
     mocks.container.destroyVmAgentContainer.mockResolvedValue(undefined);
     mocks.container.launchVmAgentContainer.mockResolvedValue(undefined);
     mocks.container.runContainerPhase.mockImplementation((_phase, _detail, fn) => fn());
+  });
+
+  it('checks the server effect fence before Instant node allocation', async () => {
+    const { db } = makeDb();
+    const fence = vi.fn().mockRejectedValue(new Error('SAM disabled'));
+    await expect(
+      acceptInstantSession(db as never, env, {
+        ...(baseLaunchInput() as LaunchInstantSessionInput),
+        assertLaunchAllowed: fence,
+      })
+    ).rejects.toThrow('SAM disabled');
+    expect(fence).toHaveBeenCalledTimes(1);
+    expect(mocks.nodes.createNodeRecord).not.toHaveBeenCalled();
+    expect(mocks.container.launchVmAgentContainer).not.toHaveBeenCalled();
+  });
+
+  it('checks the server effect fence again before physical Instant launch', async () => {
+    const { db } = makeDb();
+    const fence = vi.fn().mockRejectedValue(new Error('SAM disabled'));
+    await expect(
+      continueInstantSessionLaunch(
+        db as never,
+        env,
+        {
+          ...(baseLaunchInput() as LaunchInstantSessionInput),
+          assertLaunchAllowed: fence,
+        },
+        {} as never
+      )
+    ).rejects.toThrow('SAM disabled');
+    expect(fence).toHaveBeenCalledTimes(1);
+    expect(mocks.container.launchVmAgentContainer).not.toHaveBeenCalled();
+    expect(mocks.nodeAgent.createWorkspaceOnNode).not.toHaveBeenCalled();
+  });
+
+  it('preserves SAM reserved session and message identities on Instant admission', async () => {
+    const { db } = makeDb();
+    await acceptInstantSession(db as never, env, {
+      ...(baseLaunchInput() as LaunchInstantSessionInput),
+      chatSessionId: 'reserved-session',
+      initialMessageId: 'reserved-message',
+    });
+    expect(mocks.projectData.createSession).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'workspace-1',
+      expect.any(String),
+      'task-1',
+      'user-1',
+      'reserved-session'
+    );
+    expect(mocks.projectData.persistMessage).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'chat-session-1',
+      'user',
+      'prompt',
+      null,
+      'reserved-message'
+    );
   });
 
   it('creates a linked cf-container workspace, ACP session, and running agent session', async () => {

@@ -34,7 +34,7 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     ],
   },
   {
-    filePath: 'apps/api/src/services/submit-task.ts',
+    filePath: 'apps/api/src/services/submit-task-implementation.ts',
     table: 'tasks',
     owner: 'submitTaskImplementation',
     role: 'shared user task submission service',

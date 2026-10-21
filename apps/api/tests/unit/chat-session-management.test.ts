@@ -13,7 +13,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const taskSubmitSource = readFileSync(
-  resolve(process.cwd(), 'src/services/submit-task.ts'),
+  resolve(process.cwd(), 'src/services/submit-task-implementation.ts'),
   'utf8'
 );
 const taskRunsSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/run.ts'), 'utf8');

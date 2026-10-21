@@ -67,6 +67,26 @@ Use `GH_WEBHOOK_SECRET` in GitHub Actions because secret names cannot start with
 
 See `apps/api/.env.example` for the full list. Key variables are listed below.
 
+### Private SAM assistant runtime controls
+
+Use the typed **Operations** admin settings below for live configuration. All five are non-secret settings stored in D1. User opt-in is a separate per-user setting and defaults to off; clearing the installation switch never enables SAM for a user.
+
+| Admin setting key                       | Default    | Permitted range and meaning                                                                                                         |
+| --------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.samOperatorDisabled`        | `false`    | Boolean; disables assistant turns/actions installation-wide while preserving saved user preferences.                                |
+| `operations.samOperatorWatchLifetimeMs` | `86400000` | Integer `1`–`2147483647`; own-work observation lifetime in milliseconds (24 hours). Expiry does not cancel the project task.        |
+| `operations.samOperatorEventPageSize`   | `25`       | Integer `1`–`25`; maximum watches per scan, events per watch, and visible work cards.                                               |
+| `operations.samOperatorWorkRefreshMs`   | `30000`    | Integer `1000`–`2147483647`; durable own-work refresh cadence in milliseconds, separate from browser refresh.                       |
+| `operations.samOperatorWatchRetryLimit` | `3`        | Integer `1`–`25`; consecutive failed watch refreshes before updates stop. Successful pulls or requested follow-ups reset the count. |
+
+Each refresh selects at most 25 watches and reads at most 25 events per watch: at most 325 caller D1 reads, 75 cold ProjectData RPCs, and 625 local event-reference inserts, plus fixed alarm setup. A work-card read performs at most 75 D1 reads. Each watch persists its next check and charges an attempt before I/O; the alarm uses the earliest watch deadline. Failed watches defer until that deadline and stop after the retry limit, with a visible update warning. The watch lifetime also stops observation independently; neither condition cancels project work.
+
+Admin setting overrides take precedence over registry defaults. The disabled setting is read without the normal settings cache before effects and fails closed when settings storage is unavailable. These controls use the typed settings registry only; no Worker bindings or deployment variables are needed.
+
+Sources: `apps/api/src/services/operator-settings.ts`, `admin-settings-registry.ts`, and `apps/api/src/durable-objects/sam-session/operator/work.ts`.
+
+The assistant reuses existing `SAM_MODEL`, context/window, tool-result and model-step limits from `resolveSamConfig`, plus `SAM_LLM_TIMEOUT_MS` (operator fallback `120000`). Operator turn admission uses `SAM_MESSAGE_MAX_LENGTH` with a `16000`-character fallback; legacy subtask-message readers can have a different fallback. No new provider API key is required specifically for enabling the assistant: it uses the installation's supported platform AI configuration and usage gate.
+
 ### How Worker variables are set
 
 `scripts/deploy/sync-wrangler-config.ts` (`getApiWorkerVars`) builds each deployed API Worker's

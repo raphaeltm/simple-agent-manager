@@ -36,9 +36,9 @@ export default defineConfig({
         __dirname,
         './tests/workers/support/cloudflare-sandbox-stub.ts'
       ),
-      // src/index.ts eagerly registers TTS routes, but these Worker/DO tests do
-      // not exercise TTS. Avoid pulling Mastra's Node CLI/filesystem graph into
-      // workerd during collection; the stub throws if a test crosses the seam.
+      // Native SAM tests exercise real Mastra; this pool's stub rejects accidental use.
+      '@mastra/core/llm': resolve(__dirname, './tests/workers/support/mastra-agent-stub.ts'),
+      '@mastra/core/tools': resolve(__dirname, './tests/workers/support/mastra-agent-stub.ts'),
       '@mastra/core/agent': resolve(__dirname, './tests/workers/support/mastra-agent-stub.ts'),
     },
   },
@@ -151,6 +151,11 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['tests/workers/**/*.test.ts'],
+    // Executed by vitest.sam-runtime.config.ts in the same test:workers command.
+    exclude: [
+      'tests/workers/sam-session-do.test.ts',
+      'tests/workers/sam-grounding-runtime.test.ts',
+    ],
     setupFiles: ['./tests/workers/setup-d1-migrations.ts'],
     provide: {
       D1_MIGRATIONS_JSON: JSON.stringify(d1Migrations),
@@ -174,7 +179,6 @@ export default defineConfig({
       : 'null',
   },
 });
-
 
 /** Keep Reliability C test registrations together while retaining the base DO fixtures. */
 function withReliabilityStorageObjects<T extends Record<string, unknown>>(existing: T) {

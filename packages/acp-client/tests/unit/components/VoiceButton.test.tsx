@@ -1,5 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { VoiceButton } from '../../../src/components/VoiceButton';
 
 // Mock MediaRecorder
@@ -13,12 +15,17 @@ class MockMediaRecorder {
   static isTypeSupported = vi.fn().mockReturnValue(true);
   /** Lets a test reach the recorder the component created, to fire deferred events. */
   static lastInstance: MockMediaRecorder | null = null;
+  /** Failures a real browser can raise after the microphone was already granted. */
+  static constructError: Error | null = null;
+  static startError: Error | null = null;
 
   constructor() {
+    if (MockMediaRecorder.constructError) throw MockMediaRecorder.constructError;
     MockMediaRecorder.lastInstance = this;
   }
 
   start() {
+    if (MockMediaRecorder.startError) throw MockMediaRecorder.startError;
     this.state = 'recording';
   }
 
@@ -59,6 +66,8 @@ describe('VoiceButton', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    MockMediaRecorder.constructError = null;
+    MockMediaRecorder.startError = null;
     originalMediaDevices = navigator.mediaDevices;
     originalMediaRecorder = globalThis.MediaRecorder;
 
@@ -497,6 +506,198 @@ describe('VoiceButton', () => {
     await waitFor(() => {
       const errorButton = screen.getByTitle(/microphone not supported/i);
       expect(errorButton).toBeTruthy();
+    });
+  });
+
+  describe('a microphone grant that arrives late', () => {
+    /** A permission prompt the test answers later, plus the stream it will yield. */
+    function deferPermission() {
+      let grant!: () => void;
+      const stream = createMockStream();
+      const pending = new Promise<MediaStream>((resolve) => {
+        grant = () => resolve(stream);
+      });
+      Object.defineProperty(navigator, 'mediaDevices', {
+        value: { getUserMedia: vi.fn().mockReturnValue(pending) },
+        writable: true,
+        configurable: true,
+      });
+      const track = stream.getTracks()[0] as unknown as { stop: ReturnType<typeof vi.fn> };
+      return { grant, track };
+    }
+
+    beforeEach(() => {
+      MockMediaRecorder.lastInstance = null;
+    });
+
+    it('is released without recording when the host unmounted first', async () => {
+      const { grant, track } = deferPermission();
+      const { unmount } = render(
+        <VoiceButton
+          onTranscription={mockOnTranscription}
+          apiUrl="https://api.example.com/api/transcribe"
+        />
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /start voice input/i }));
+      });
+      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+
+      unmount();
+      await act(async () => {
+        grant();
+      });
+
+      expect(track.stop).toHaveBeenCalled();
+      expect(MockMediaRecorder.lastInstance).toBeNull();
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('is released without recording when the host disabled voice input first', async () => {
+      const { grant, track } = deferPermission();
+      const onStateChange = vi.fn();
+      const { rerender } = render(
+        <VoiceButton
+          onTranscription={mockOnTranscription}
+          apiUrl="https://api.example.com/api/transcribe"
+          onStateChange={onStateChange}
+        />
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /start voice input/i }));
+      });
+
+      // e.g. the user pressed Send while the browser permission prompt was still open.
+      rerender(
+        <VoiceButton
+          onTranscription={mockOnTranscription}
+          apiUrl="https://api.example.com/api/transcribe"
+          onStateChange={onStateChange}
+          disabled
+        />
+      );
+      await act(async () => {
+        grant();
+      });
+
+      expect(track.stop).toHaveBeenCalled();
+      expect(MockMediaRecorder.lastInstance).toBeNull();
+      expect(onStateChange).not.toHaveBeenCalledWith('recording');
+      // Liveness: the control is still present and simply idle and disabled.
+      const button = screen.getByRole('button', { name: /start voice input/i });
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it('still records when nothing changed while the prompt was open (control)', async () => {
+      const { grant, track } = deferPermission();
+      render(
+        <VoiceButton
+          onTranscription={mockOnTranscription}
+          apiUrl="https://api.example.com/api/transcribe"
+        />
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /start voice input/i }));
+      });
+      await act(async () => {
+        grant();
+      });
+
+      expect(track.stop).not.toHaveBeenCalled();
+      expect(MockMediaRecorder.lastInstance?.state).toBe('recording');
+      expect(screen.getByRole('button', { name: /stop recording/i })).toBeTruthy();
+    });
+  });
+
+  it('keeps Stop usable when the host disables voice input mid-recording', async () => {
+    const { rerender } = render(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+      />
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /start voice input/i }));
+    });
+    rerender(
+      <VoiceButton
+        onTranscription={mockOnTranscription}
+        apiUrl="https://api.example.com/api/transcribe"
+        disabled
+      />
+    );
+
+    const stop = screen.getByRole('button', { name: /stop recording/i });
+    expect((stop as HTMLButtonElement).disabled).toBe(false);
+    const recorder = MockMediaRecorder.lastInstance;
+    await act(async () => {
+      fireEvent.click(stop);
+    });
+    expect(recorder?.state).toBe('inactive');
+  });
+
+  it('uploads normally under React StrictMode (double-invoked effects)', async () => {
+    render(
+      <StrictMode>
+        <VoiceButton
+          onTranscription={mockOnTranscription}
+          apiUrl="https://api.example.com/api/transcribe"
+        />
+      </StrictMode>
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /start voice input/i }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /stop recording/i }));
+    });
+
+    await waitFor(() => expect(mockOnTranscription).toHaveBeenCalledWith('Transcribed text'));
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  describe('a recorder that fails after the microphone was granted', () => {
+    function grantedStream() {
+      const stream = createMockStream();
+      Object.defineProperty(navigator, 'mediaDevices', {
+        value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
+        writable: true,
+        configurable: true,
+      });
+      return stream.getTracks()[0] as unknown as { stop: ReturnType<typeof vi.fn> };
+    }
+
+    it.each([
+      ['start() throws', 'startError'],
+      ['construction throws', 'constructError'],
+    ] as const)('releases the microphone when %s', async (_label, hook) => {
+      const track = grantedStream();
+      // Browsers raise a NotSupportedError DOMException here (jsdom's DOMException is
+      // not an Error subclass, so the test uses an Error carrying the same name).
+      MockMediaRecorder[hook] = Object.assign(new Error('Recorder not supported'), {
+        name: 'NotSupportedError',
+      });
+      const onError = vi.fn();
+      render(
+        <VoiceButton
+          onTranscription={mockOnTranscription}
+          apiUrl="https://api.example.com/api/transcribe"
+          onError={onError}
+        />
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /start voice input/i }));
+      });
+
+      expect(track.stop).toHaveBeenCalled();
+      // The failure is visible, and no recording control or upload follows.
+      expect(screen.getByTitle('Recorder not supported')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /stop recording/i })).toBeNull();
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'Recorder not supported' })
+      );
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     });
   });
 });

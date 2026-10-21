@@ -37,7 +37,7 @@ const serviceSource = readFileSync(
   'utf8'
 );
 const submitRouteSource = readFileSync(
-  resolve(process.cwd(), 'src/services/submit-task.ts'),
+  resolve(process.cwd(), 'src/services/submit-task-implementation.ts'),
   'utf8'
 );
 const mcpDispatchRouteSource = readFileSync(

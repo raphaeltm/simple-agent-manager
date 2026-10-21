@@ -1,14 +1,17 @@
 /**
  * SAM chat API routes.
  *
- * POST /chat — send a message to SAM, get SSE stream back
+ * POST /turns — accept a private durable turn; GET /turns projects state
  * GET /conversations — list user's conversations
  * GET /conversations/:id/messages — get conversation history
  * GET /search — full-text search across conversation history
  */
+import { DEFAULT_SAM_MAX_REQUEST_BODY_BYTES } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 
 import type { Env } from '../env';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { normalizeSearchQuery } from '../lib/search-query-limits';
 import { requireApproved, requireAuth } from '../middleware/auth';
@@ -18,6 +21,20 @@ const app = new Hono<{ Bindings: Env }>();
 
 // All SAM routes require an approved account: chat spends the platform LLM budget.
 app.use('/*', requireAuth(), requireApproved());
+app.use('/*', (c, next) =>
+  bodyLimit({
+    maxSize: parsePositiveInt(c.env.SAM_MAX_REQUEST_BODY_BYTES, DEFAULT_SAM_MAX_REQUEST_BODY_BYTES),
+    onError: (ctx) =>
+      ctx.json(
+        {
+          error: 'request_too_large',
+          message: 'SAM request exceeds the configured body limit',
+          rejectedBeforeEffects: true,
+        },
+        413
+      ),
+  })(c, next)
+);
 
 /** Get the SamSession DO stub for the current user. */
 function getSamSession(env: Env, userId: string): DurableObjectStub {
@@ -25,7 +42,32 @@ function getSamSession(env: Env, userId: string): DurableObjectStub {
   return env.SAM_SESSION.get(id);
 }
 
-/** POST /chat — send a message and stream the response. */
+/** Private operator endpoints share the same authenticated per-user Durable Object. */
+for (const path of [
+  '/settings',
+  '/fork',
+  '/turns',
+  '/turns/:id/cancel',
+  '/actions/:id/confirm',
+  '/actions/:id/reconcile',
+  '/updates/:id/seen',
+]) {
+  app.all(path, async (c) => {
+    const userId = c.get('auth').user.id;
+    const incoming = new URL(c.req.url);
+    const response = await getSamSession(c.env, userId).fetch(
+      `https://sam-session${incoming.pathname.replace(/^\/api\/sam/, '')}${incoming.search}`,
+      {
+        method: c.req.method,
+        headers: { 'content-type': 'application/json', 'x-sam-user-id': userId },
+        body: c.req.method === 'GET' || c.req.method === 'HEAD' ? undefined : await c.req.text(),
+      }
+    );
+    return new Response(response.body, { status: response.status, headers: response.headers });
+  });
+}
+
+/** Legacy transport relay; SamSession rejects inference and tells stale clients to refresh. */
 app.post('/chat', jsonValidator(AgentChatRequestSchema), async (c) => {
   const userId = c.get('auth').user.id;
   const body = c.req.valid('json');
@@ -44,6 +86,9 @@ app.post('/chat', jsonValidator(AgentChatRequestSchema), async (c) => {
       userId,
     }),
   });
+
+  if (!response.ok)
+    return new Response(response.body, { status: response.status, headers: response.headers });
 
   // Relay the SSE stream from the DO
   if (!response.body) {
@@ -69,7 +114,10 @@ app.get('/conversations', async (c) => {
     : 'https://sam-session/conversations';
   const response = await stub.fetch(url);
   const data = await response.json();
-  return c.json(data);
+  return new Response(JSON.stringify(data), {
+    status: response.status,
+    headers: { 'content-type': 'application/json' },
+  });
 });
 
 /** GET /conversations/:id/messages — get messages for a conversation. */
@@ -77,13 +125,20 @@ app.get('/conversations/:id/messages', async (c) => {
   const userId = c.get('auth').user.id;
   const conversationId = c.req.param('id');
   const limit = c.req.query('limit') || '';
+  const before = c.req.query('before') || '';
   const stub = getSamSession(c.env, userId);
   const url = limit
     ? `https://sam-session/conversations/${conversationId}/messages?limit=${encodeURIComponent(limit)}`
     : `https://sam-session/conversations/${conversationId}/messages`;
-  const response = await stub.fetch(url);
+  const historyUrl = before
+    ? `${url}${url.includes('?') ? '&' : '?'}before=${encodeURIComponent(before)}`
+    : url;
+  const response = await stub.fetch(historyUrl);
   const data = await response.json();
-  return c.json(data);
+  return new Response(JSON.stringify(data), {
+    status: response.status,
+    headers: { 'content-type': 'application/json' },
+  });
 });
 
 /** GET /search — full-text search across conversation history. */

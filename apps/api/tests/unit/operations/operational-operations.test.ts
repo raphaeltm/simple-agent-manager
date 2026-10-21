@@ -99,7 +99,7 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
       INSERT INTO workspaces(id,project_id,user_id,node_id,name,repository,branch,vm_size,vm_location,status,chat_session_id)
         VALUES ('workspace','p','owner','node','Workspace','repo','main','small','fsn1','running','chat');
       INSERT INTO agent_sessions(id,workspace_id,user_id,agent_type,status) VALUES ('agent','workspace','owner','claude-code','running');`);
-    env = { DATABASE: createSqliteD1(sqlite) } as unknown as Env;
+    env = { DATABASE: createSqliteD1(sqlite), BASE_DOMAIN: 'example.test' } as unknown as Env;
     mocks.access.mockImplementation(async (_env, projectId, sessionId, userId) => ({
       session:
         projectId === 'p' && sessionId === 'chat'
@@ -285,11 +285,19 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
       },
     ]);
     expect(await samChatRead.run(ctx('grantee'), session)).toMatchObject({
+      projectId: 'p',
+      sessionId: 'chat',
+      link: 'https://app.example.test/projects/p/chat/chat',
       pendingInteractions: [
         expect.objectContaining({ answerOptions: [{ id: 'allow-once', name: 'Allow once' }] }),
       ],
     });
     const reader = await samChatRead.run(ctx('reader'), session);
+    expect(reader).toMatchObject({
+      projectId: 'p',
+      sessionId: 'chat',
+      link: 'https://app.example.test/projects/p/chat/chat',
+    });
     expect(reader).not.toHaveProperty('pendingInteractions');
   });
   it('changes cursor tracks retained state and rejects actor/session cursor reuse', async () => {

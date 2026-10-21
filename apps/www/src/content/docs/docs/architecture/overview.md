@@ -7,6 +7,8 @@ SAM is a serverless platform for ephemeral AI coding environments. The architect
 
 For instant sessions, SAM can also run one standalone vm-agent in a raw Cloudflare Container. The deployment workflow builds the Linux vm-agent from the deployment commit, records its version and SHA-256 digest, and bakes it into the container image before Wrangler deploys the Worker. Cloudflare Worker deployment versions therefore provide the matching image/Worker rollback boundary. The image contains only SAM runtime tooling: project, profile, and skill files, environment variables, and secrets remain outside the image and are fetched and applied when the ACP session starts.
 
+The optional [SAM account assistant](/docs/architecture/sam-account-assistant/) keeps canonical private history in a per-user `SamSession` Durable Object and delegates repository work into visible project tasks.
+
 ## High-Level Architecture
 
 ```mermaid

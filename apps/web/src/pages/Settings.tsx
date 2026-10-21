@@ -2,6 +2,7 @@ import { Alert, Breadcrumb, PageLayout, Tabs } from '@simple-agent-manager/ui';
 import { useCallback, useMemo, useState } from 'react';
 import { Outlet } from 'react-router';
 
+import { SamSettingsCard } from '../components/SamSettingsCard';
 import { useCredentials, useInvalidateCredentials } from '../hooks/useCredentials';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { SettingsContext } from './SettingsContext';
@@ -58,6 +59,8 @@ export function Settings() {
           </Alert>
         </div>
       )}
+
+      <SamSettingsCard />
 
       <div className="grid gap-4 mt-4">
         <Tabs tabs={tabs} basePath="/settings" />

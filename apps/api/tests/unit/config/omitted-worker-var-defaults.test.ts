@@ -75,7 +75,7 @@ import {
 import { configFromEnv as storageReliefPreflightConfig } from '../../../src/scheduled/project-data-storage-relief-preflight';
 import { getAcpInteractionConfig } from '../../../src/services/acp-interaction-config';
 import { buildAcpInteractionRuntimeConfig } from '../../../src/services/acp-interaction-runtime-config';
-import { adminSettingCacheMs,readAdminSettings } from '../../../src/services/admin-settings';
+import { adminSettingCacheMs, readAdminSettings } from '../../../src/services/admin-settings';
 import { resolveCredentialLimitConfig } from '../../../src/services/credential-limit-events/config';
 import { getCacheConfig as getDevcontainerCacheConfig } from '../../../src/services/devcontainer-cache';
 import { resolveDiagnosisCompletedStepDelayMs } from '../../../src/services/diagnosis-runner-policy';
@@ -87,6 +87,7 @@ import {
   resolveOperationalKillSwitchCacheMs,
   resolveOperationalLoopKvKey,
 } from '../../../src/services/operational-kill-switch';
+import { getOperatorSettings } from '../../../src/services/operator-settings';
 import {
   getProjectDataArchiveManualCanaryConfig,
   getProjectDataArchiveRolloutListConfig,
@@ -136,11 +137,23 @@ const READ_PATHS: readonly ReadPath[] = [
         await fixture.env.KV.put('trials:enabled', 'true');
         const view = await readAdminSettings(fixture.env, { fresh: true });
         return {
-          controls: view.settings.filter(
-            (setting) => setting.category === 'Operations' || setting.category === 'Trials'
-          ),
+          controls: view.settings
+            .filter((setting) => setting.category === 'Operations' || setting.category === 'Trials')
+            .map(({ name, value }) => ({ name, value })),
           cacheMs: adminSettingCacheMs(fixture.env, 'operations.cronSweepsEnabled'),
         };
+      } finally {
+        fixture.sqlite.close();
+      }
+    },
+  },
+  {
+    label: 'private SAM operator settings',
+    sources: [`${API}/services/operator-settings.ts`, `${API}/services/admin-settings-registry.ts`],
+    read: async (vars) => {
+      const fixture = createAdminSettingsEnv(vars);
+      try {
+        return await getOperatorSettings(fixture.env);
       } finally {
         fixture.sqlite.close();
       }

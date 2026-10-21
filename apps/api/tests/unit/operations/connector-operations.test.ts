@@ -415,6 +415,35 @@ describe('connector operations current membership and creator authority', () => 
       undefined
     );
   });
+  it('requires server-owned reservation for SAM and forwards its fence without accepting model identity', async () => {
+    const c: OperationContext = { ...ctx(), actor: { ...ctx().actor, via: 'sam' } };
+    await expect(
+      samChatStart.run(c, { projectId: 'project', message: 'Work' })
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+    });
+    expect(mocks.submit).not.toHaveBeenCalled();
+    c.samDispatchReservation = {
+      taskId: 'reserved-task',
+      sessionId: 'reserved-session',
+      initialMessageId: 'reserved-message',
+      statusEventId: 'reserved-status',
+    };
+    c.assertEffectAllowed = vi.fn().mockResolvedValue(undefined);
+    await samChatStart.run(c, { projectId: 'project', message: 'Work', agentProfileId: 'profile' });
+    expect(mocks.submit).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ id: 'owner' }),
+      'project',
+      { projectId: 'project', message: 'Work', agentProfileId: 'profile' },
+      expect.any(Function),
+      'sam',
+      'Claude',
+      undefined,
+      c.samDispatchReservation,
+      c.assertEffectAllowed
+    );
+  });
   it('replays a successful start by key without calling provisioning twice and denies after membership removal', async () => {
     const c = ctx();
     c.idempotencyKey = 'same-request';

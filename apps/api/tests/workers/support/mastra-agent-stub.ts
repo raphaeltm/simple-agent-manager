@@ -1,12 +1,16 @@
 /**
- * The Worker/DO suite does not exercise TTS, but src/index.ts eagerly imports
- * the TTS route and therefore @mastra/core/agent. Mastra's Node-oriented
- * package graph includes child_process and filesystem modules that cannot be
- * collected by the workerd test runner. Keep that unrelated graph outside the
- * harness and fail loudly if a Worker test starts exercising TTS.
+ * Unrelated Workers pool tests cannot collect Mastra's Node module graph.
+ * The separate native SAM suite bundles and executes the real library in workerd.
+ * Fail loudly if an unrelated test crosses this seam instead of returning fake AI.
  */
 export class Agent {
   constructor() {
     throw new Error('@mastra/core/agent is unavailable in Worker/DO tests');
   }
+}
+
+export class ModelRouterLanguageModel extends Agent {}
+export class ModelsDevGateway extends Agent {}
+export function createTool() {
+  throw new Error('Mastra tools are exercised by the native SAM runtime suite');
 }

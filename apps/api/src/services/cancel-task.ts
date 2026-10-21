@@ -18,6 +18,7 @@ export async function cancelTask(
   userId: string,
   options: Omit<NonNullable<Parameters<typeof setTaskStatus>[5]>, 'callbackFence'> & {
     source?: string;
+    requireStopAcknowledgement?: boolean;
     waitUntil?: (promise: Promise<unknown>) => void;
   } = {}
 ): Promise<schema.Task> {
@@ -67,6 +68,7 @@ export async function cancelTask(
     status: terminal ? (task.status as 'completed' | 'failed' | 'cancelled') : 'cancelled',
     errorMessage: updated.errorMessage,
     requiredUserId: userId,
+    requireStopAcknowledgement: options.requireStopAcknowledgement,
     projectId: task.projectId,
     failureLogEvent: 'task.terminal_cleanup_failed',
     logContext: { projectId: task.projectId, source: options.source ?? 'tasks.status' },

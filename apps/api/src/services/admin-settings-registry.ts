@@ -28,6 +28,11 @@ export type AdminSettingName =
   | 'operations.cronSweepsEnabled'
   | 'operations.doAlarmsEnabled'
   | 'operations.stalledTaskClassifierEnabled'
+  | 'operations.samOperatorDisabled'
+  | 'operations.samOperatorWatchLifetimeMs'
+  | 'operations.samOperatorEventPageSize'
+  | 'operations.samOperatorWorkRefreshMs'
+  | 'operations.samOperatorWatchRetryLimit'
   | 'trials.enabled';
 export interface AdminSettingDefinition {
   readonly name: AdminSettingName;
@@ -48,6 +53,16 @@ export interface AdminSettingDefinition {
 /** Collaboration defaults (idea 01M59MYE4GY91BWTE8TZF1ZB5D); admins can change them at runtime. */
 export const DEFAULT_SESSION_ACCESS_MAX_GRANTS = 10;
 export const DEFAULT_COMMENT_MENTIONS_MAX = 10;
+// A fresh watch performs up to 13 D1 reads and 3 cold ProjectData RPCs.
+// Keep one refresh at most 400 caller I/O operations, plus fixed alarm setup.
+export const MAX_SAM_OPERATOR_EVENT_PAGE_SIZE = 25;
+export const OPERATOR_DEFAULTS = Object.freeze({
+  disabled: false,
+  watchLifetimeMs: 86_400_000,
+  eventPageSize: MAX_SAM_OPERATOR_EVENT_PAGE_SIZE,
+  workRefreshMs: 30_000,
+  watchRetryLimit: 3,
+});
 
 const connectorDescriptions: Record<ConnectorSettingKey, string> = {
   enabled: 'Allow authenticated external clients to use the SAM Connector.',
@@ -283,6 +298,41 @@ const definitions: AdminSettingDefinition[] = [
     'Operations',
     'Allow stalled-task classification; existing liveness checks remain active.',
     { legacyEnvironment: 'STALLED_TASK_CLASSIFIER_ENABLED' }
+  ),
+  switchDefinition(
+    'operations.samOperatorDisabled',
+    OPERATOR_DEFAULTS.disabled,
+    'Operations',
+    'Disable the private SAM assistant for every account. Does not opt users in.',
+    {}
+  ),
+  integerDefinition(
+    'operations.samOperatorWatchLifetimeMs',
+    OPERATOR_DEFAULTS.watchLifetimeMs,
+    'Operations',
+    'Maximum lifetime in milliseconds of private SAM project-work watches.',
+    { min: 1, max: 2_147_483_647 }
+  ),
+  integerDefinition(
+    'operations.samOperatorEventPageSize',
+    OPERATOR_DEFAULTS.eventPageSize,
+    'Operations',
+    'Maximum watches per refresh, events per watch, and visible private SAM work cards.',
+    { min: 1, max: MAX_SAM_OPERATOR_EVENT_PAGE_SIZE }
+  ),
+  integerDefinition(
+    'operations.samOperatorWorkRefreshMs',
+    OPERATOR_DEFAULTS.workRefreshMs,
+    'Operations',
+    'Milliseconds between private SAM project-work refreshes.',
+    { min: 1_000, max: 2_147_483_647 }
+  ),
+  integerDefinition(
+    'operations.samOperatorWatchRetryLimit',
+    OPERATOR_DEFAULTS.watchRetryLimit,
+    'Operations',
+    'Consecutive failed private SAM watch refreshes before automatic updates stop. A successful pull or requested follow-up resets the count.',
+    { min: 1, max: 25 }
   ),
 ];
 

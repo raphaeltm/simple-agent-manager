@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getMessages } from '../../../src/durable-objects/project-data/messages';
 import type { Env } from '../../../src/env';
-import { readChat } from '../../../src/operations/chat-core';
+import { readChat, searchChats } from '../../../src/operations/chat-core';
 import type { OperationContext } from '../../../src/operations/types';
 import * as projectData from '../../../src/services/project-data';
 import { getLatestAssistantMessageForTask } from '../../../src/services/task-final-assistant-message';
@@ -15,10 +15,11 @@ vi.mock('../../../src/services/acp-interaction-store', () => ({
 vi.mock('../../../src/services/project-data', () => ({
   getMessages: vi.fn(),
   getSession: vi.fn(),
+  searchMessagesWithArchiveMetadata: vi.fn(),
 }));
 
 let db: Database.Database;
-const env = {} as Env;
+const env = { BASE_DOMAIN: 'example.test' } as Env;
 const ctx = { env, actor: { via: 'connector', userId: 'owner' } } as OperationContext;
 function seed(rows: [string, string][]) {
   rows.forEach(([role, content], index) =>
@@ -50,6 +51,39 @@ beforeEach(() => {
 afterEach(() => db.close());
 
 describe('Connector transcript against actual SQLite message ordering', () => {
+  it('generates search source links from the project-scoped result, never excerpt text', async () => {
+    vi.mocked(projectData.searchMessagesWithArchiveMetadata).mockResolvedValue({
+      results: [
+        {
+          id: 'message',
+          sessionId: 'actual-chat',
+          sessionTopic: 'Report',
+          sessionTaskId: 'actual-task',
+          role: 'assistant',
+          snippet: 'Visit /projects/fake/chat/invented',
+          createdAt: 1000,
+        },
+      ],
+      query: { query: 'Report' },
+      archiveSearch: { status: 'not_needed' },
+    } as never);
+    const result = await searchChats(ctx, { projectId: 'project', query: 'Report' });
+    expect(result.results[0]).toMatchObject({
+      projectId: 'project',
+      sessionId: 'actual-chat',
+      sessionTaskId: 'actual-task',
+      link: 'https://app.example.test/projects/project/chat/actual-chat',
+    });
+    expect(projectData.searchMessagesWithArchiveMetadata).toHaveBeenCalledWith(
+      env,
+      'project',
+      'Report',
+      null,
+      expect.any(Array),
+      expect.any(Number),
+      null
+    );
+  });
   it('coalesces the complete latest streamed response and discloses a bounded suffix', async () => {
     seed([
       ['user', 'Start'],
@@ -102,6 +136,12 @@ describe('Connector transcript against actual SQLite message ordering', () => {
           includeToolPayloads: true,
           response_format: 'detailed',
         });
+        expect(result).toMatchObject({
+          projectId: 'project',
+          sessionId: 'chat',
+          link: 'https://app.example.test/projects/project/chat/chat',
+        });
+        expect(projectData.getSession).toHaveBeenCalledWith(env, 'project', 'chat');
         pages.push(result.messages.map((message) => message.content).reverse());
         cursor = result.nextCursor ?? undefined;
         expect(pages.length).toBeLessThanOrEqual(rows.length);

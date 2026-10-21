@@ -1,4 +1,9 @@
-import { fireEvent, render as baseRender, type RenderOptions, screen } from '@testing-library/react';
+import {
+  fireEvent,
+  render as baseRender,
+  type RenderOptions,
+  screen,
+} from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
@@ -14,6 +19,10 @@ function render(ui: ReactElement, options?: Omit<RenderOptions, 'wrapper'>) {
 }
 
 // Mock AuthProvider to provide superadmin context
+vi.mock('../../../src/hooks/useSamSettings', () => ({
+  useSamSettings: () => ({ enabled: false }),
+}));
+
 vi.mock('../../../src/components/AuthProvider', () => ({
   useAuth: () => ({ isSuperadmin: false }),
 }));
@@ -55,7 +64,7 @@ describe('NavSidebar — desktop toggle', () => {
           showGlobalNav={options.showGlobalNav ?? false}
           onToggleGlobalNav={options.onToggleGlobalNav ?? (() => {})}
         />
-      </MemoryRouter>,
+      </MemoryRouter>
     );
   }
 
@@ -113,7 +122,7 @@ describe('NavSidebar — desktop toggle', () => {
     render(
       <MemoryRouter initialEntries={['/dashboard']}>
         <NavSidebar />
-      </MemoryRouter>,
+      </MemoryRouter>
     );
     expect(screen.getByRole('link', { name: 'Home' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Projects' })).toBeTruthy();
@@ -156,7 +165,7 @@ describe('MobileNavDrawer — toggle', () => {
         globalNavItems={globalNavItems}
         showGlobalNav={false}
         onToggleGlobalNav={vi.fn()}
-      />,
+      />
     );
     const toggle = screen.getByTestId('mobile-nav-toggle');
     expect(toggle).toBeTruthy();
@@ -171,7 +180,7 @@ describe('MobileNavDrawer — toggle', () => {
         globalNavItems={globalNavItems}
         showGlobalNav={true}
         onToggleGlobalNav={vi.fn()}
-      />,
+      />
     );
     // Toggle should show "Back to [project name]"
     const toggle = screen.getByTestId('mobile-nav-toggle');
@@ -187,7 +196,7 @@ describe('MobileNavDrawer — toggle', () => {
         globalNavItems={globalNavItems}
         showGlobalNav={false}
         onToggleGlobalNav={toggleFn}
-      />,
+      />
     );
     fireEvent.click(screen.getByTestId('mobile-nav-toggle'));
     expect(toggleFn).toHaveBeenCalledOnce();
@@ -200,7 +209,7 @@ describe('MobileNavDrawer — toggle', () => {
         navItems={globalNavItems}
         projectName={undefined}
         currentPath="/dashboard"
-      />,
+      />
     );
     expect(screen.queryByTestId('mobile-nav-toggle')).toBeNull();
   });
@@ -213,7 +222,7 @@ describe('MobileNavDrawer — toggle', () => {
         globalNavItems={globalNavItems}
         showGlobalNav={false}
         onToggleGlobalNav={vi.fn()}
-      />,
+      />
     );
     expect(screen.getByTitle('Test Project')).toBeTruthy();
   });

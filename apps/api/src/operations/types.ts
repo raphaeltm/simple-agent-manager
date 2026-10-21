@@ -4,6 +4,7 @@ import type { Env } from '../env';
 import { AppError } from '../middleware/error';
 import { auditConnectorWrite } from '../services/connector-execution';
 import type { ConnectorSettings } from '../services/connector-settings';
+import type { SamDispatchReservation } from '../services/sam-dispatch-reservation';
 import { OperationError } from './errors';
 
 export type OperationKind = 'read' | 'write' | 'destructive';
@@ -25,6 +26,10 @@ export interface OperationContext {
   idempotencyKey?: string;
   connectorSettings?: ConnectorSettings;
   execCtx?: ExecutionContext;
+  /** SAM-owned durable identities; never populated from model or HTTP tool arguments. */
+  samDispatchReservation?: SamDispatchReservation;
+  /** Rechecks the SAM enablement generation immediately before dispatch effects. */
+  assertEffectAllowed?: () => Promise<void>;
 }
 
 export interface Operation<I, O> {

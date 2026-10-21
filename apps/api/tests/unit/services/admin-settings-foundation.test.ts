@@ -45,8 +45,8 @@ function rows(enabled: boolean): AdminSettingOverrideRow[] {
 
 describe('Phase 1 settings registry', () => {
   it('covers bounded Phase 1 controls and reuses Connector defaults', () => {
-    expect(new Set(ADMIN_SETTINGS_REGISTRY.map((setting) => setting.name)).size).toBe(26);
-    expect(ADMIN_SETTINGS_REGISTRY).toHaveLength(26);
+    expect(new Set(ADMIN_SETTINGS_REGISTRY.map((setting) => setting.name)).size).toBe(31);
+    expect(ADMIN_SETTINGS_REGISTRY).toHaveLength(31);
     for (const [key, value] of Object.entries(CONNECTOR_DEFAULTS)) {
       const definition = findAdminSetting(`connector.${key}`)!;
       expect(definition.defaultValue).toEqual(value);

@@ -7,6 +7,7 @@ import { groupTokensIntoMessages } from '../services/message-groups';
 import * as projectDataService from '../services/project-data';
 import { describeRootSearchCoverage } from '../services/project-data-search-coverage';
 import { requireSessionWriter } from '../services/session-access';
+import { operationLink } from './connector-read-core';
 import { OperationError } from './errors';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
@@ -108,6 +109,9 @@ export async function readChat(
   return {
     ...(ctx.actor.via !== 'workspace-agent'
       ? {
+          // The session was found in this authorized project's own Durable Object.
+          projectId: input.projectId,
+          link: operationLink(ctx, input.projectId, sessionId),
           untrustedContent: true,
           paginationUnit: 'stored_rows',
           nextCursor:
@@ -180,6 +184,12 @@ export async function searchChats(
   );
   return {
     results: search.results.map((result) => ({
+      ...(ctx.actor.via !== 'workspace-agent'
+        ? {
+            projectId: input.projectId,
+            link: operationLink(ctx, input.projectId, result.sessionId),
+          }
+        : {}),
       messageId: result.id,
       sessionId: result.sessionId,
       sessionTopic: result.sessionTopic,

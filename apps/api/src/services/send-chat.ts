@@ -68,7 +68,8 @@ export async function sendChat(
   projectId: string,
   sessionId: string,
   body: v.InferOutput<typeof SendChatMessageSchema>,
-  authorized?: AuthorizedSendChat
+  authorized?: AuthorizedSendChat,
+  assertEffectAllowed?: () => Promise<void>
 ) {
   const db = drizzle(env.DATABASE, { schema });
 
@@ -82,6 +83,8 @@ export async function sendChat(
   // Every refusal comes before the first side effect (validating uploads, cancelling a
   // scheduled sleep), so a refused prompt changes nothing.
   const durableConfig = resolveDurableExecutionConfig(env);
+  if (assertEffectAllowed && !durableConfig.deliveryEnabled)
+    throw errors.conflict('SAM follow-ups require durable prompt delivery');
   const attachments = body.attachments ?? [];
   if (shared && !durableConfig.deliveryEnabled) {
     // Durable delivery is what carries sender attribution and lets revocation cancel a queued
@@ -106,6 +109,7 @@ export async function sendChat(
   );
   // A follow-up is an immediate keep-awake gesture. Cancel only an unclaimed
   // idle sleep; durable delivery wakes a sleep that has already begun.
+  await assertEffectAllowed?.();
   await cancelScheduledSessionSleep(db, sessionId);
   if (durableConfig.deliveryEnabled) {
     const names = shared
@@ -114,6 +118,7 @@ export async function sendChat(
     const deliveryMessage = names
       ? `${buildSharedSessionSpeakerLine(names)}\n\n${enrichedMessage}`
       : enrichedMessage;
+    await assertEffectAllowed?.();
     const accepted = await projectDataService.acceptPromptDelivery(env, projectId, {
       targetSessionId: sessionId,
       displayContent: buildVisibleInitialPrompt({ message: content, attachments }),

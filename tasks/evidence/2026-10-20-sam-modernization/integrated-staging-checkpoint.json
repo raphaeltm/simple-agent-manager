@@ -1,0 +1,79 @@
+{
+  "recordedAt": "2026-10-20T14:30:00Z",
+  "candidate": "f8c4ae0706a1f0f0980acba169974a9f3278295b",
+  "baseMain": "14aee282772846d49bbfdd8658a4647de6a7bc08",
+  "ci": { "run": 39434284707, "result": "success" },
+  "e2eSmoke": { "run": 39434284731, "result": "success" },
+  "staging": {
+    "run": 39434288667,
+    "result": "success",
+    "cloudflareDeployment": "9e063a64-6294-4b8e-ac77-83e771f4b97c",
+    "cloudflareVersion": "c373d434-8668-4837-87dd-881b61dd9296",
+    "trafficPercent": 100
+  },
+  "browserJourney": {
+    "result": "passed",
+    "coverage": [
+      "default off",
+      "enable and persisted refresh",
+      "durable chat and reconnect",
+      "same intent replay and conflicting payload",
+      "cancellation",
+      "user isolation",
+      "stale-tab disable",
+      "dashboard",
+      "projects",
+      "settings"
+    ],
+    "pageErrors": 0,
+    "unattributedConsoleErrors": 1,
+    "disableMs": 601,
+    "bothAccountsOffAfterCleanup": true
+  },
+  "followupRecovery": {
+    "result": "passed",
+    "originalInterruptedStateAndReceiptsPreserved": true,
+    "originalLedgerSha256": "51ccaee92a1656bb614db99f4d92eed7dc33b0675a1ba41bb4c604796d3481b8",
+    "newCompletedReadOperations": 1,
+    "newWriteOperations": 0,
+    "originalResourcesAbsent": true,
+    "accountOffAfterCleanup": true
+  },
+  "awakeStopAttempt": {
+    "result": "failed before dispatch",
+    "turnState": "interrupted",
+    "actionCount": 0,
+    "unsupportedDraftPublished": false,
+    "modelProblem": "Fabricated completed dispatch without tool calls",
+    "independentReconciliation": {
+      "noTaskForOwnedTemporaryProfile": true,
+      "noNewWorkspaceOrNode": true,
+      "ownedTemporaryProfileRemoved": true,
+      "accountOff": true
+    }
+  },
+  "behaviorReview": {
+    "originalPlaywrightRunsRemainFailed": true,
+    "predicateDefects": ["page-scoped count wording", "passive no-merge prohibition"],
+    "postRunReview": "all six completed scenarios verified; not a Playwright pass",
+    "readOperations": 1,
+    "writeOperations": 0,
+    "cleanupOff": true,
+    "predicateUnitCasesPassed": 31
+  },
+  "remaining": [
+    "bounded correction validation and security review",
+    "corrected candidate staging",
+    "real awake dispatch and confirmed stop",
+    "repeated confirmation and teardown",
+    "final-head checks and reviews",
+    "merge",
+    "exact production deployment and basic smoke"
+  ],
+  "limitations": [
+    "Bounded behavior observations do not establish general model accuracy",
+    "One browser console error is unattributed",
+    "Raw transcripts, synthetic private canaries and authenticated screenshots remain private",
+    "No production completion is claimed"
+  ]
+}

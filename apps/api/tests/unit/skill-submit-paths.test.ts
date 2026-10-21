@@ -9,7 +9,7 @@ function apiSrc(path: string) {
 
 describe('skill submit path source contracts', () => {
   it('user task submit resolves skill/profile settings and persists skill metadata', () => {
-    const submit = apiSrc('services/submit-task.ts');
+    const submit = apiSrc('services/submit-task-implementation.ts');
     const placementResolver = apiSrc('services/placement-resolver.ts');
     expect(submit).toContain('resolveSkillProfile');
     expect(submit).toContain('body.skillId');

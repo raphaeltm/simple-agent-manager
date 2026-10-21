@@ -141,8 +141,8 @@ vi.mock('../../src/pages/UiStandards', () => ({
   UiStandards: () => <div data-testid="ui-standards-page" />,
 }));
 
-vi.mock('../../src/pages/SamPrototype', () => ({
-  SamPrototype: () => <div data-testid="sam-prototype-page" />,
+vi.mock('../../src/pages/Sam', () => ({
+  Sam: () => <div data-testid="sam-page" />,
 }));
 
 vi.mock('../../src/pages/TrialChatGateHarness', () => ({
@@ -332,11 +332,15 @@ describe('App routes', () => {
     expect(await screen.findByTestId('task-redirect-page')).toBeInTheDocument();
   });
 
-  it('keeps prototype and test harness routes available in local/test mode', async () => {
+  it('routes the account SAM assistant in production', async () => {
+    vi.stubEnv('DEV', false);
+    vi.stubEnv('PROD', true);
+    vi.stubEnv('MODE', 'production');
     renderAt('/sam');
-    expect(await screen.findByTestId('sam-prototype-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('sam-page')).toBeInTheDocument();
+  });
 
-    cleanup();
+  it('keeps test harness routes available in local/test mode', async () => {
     renderAt('/__test/trial-chat-gate');
     expect(await screen.findByTestId('trial-chat-gate-harness-page')).toBeInTheDocument();
 
@@ -396,7 +400,6 @@ describe('App routes', () => {
     vi.stubEnv('MODE', 'production');
 
     expect(DEV_ONLY_ROUTE_PATHS).toEqual([
-      '/sam',
       '/__test/trial-chat-gate',
       '/__test/error-boundary',
       '/ui-standards',
@@ -408,7 +411,7 @@ describe('App routes', () => {
       renderAt(routePath);
 
       expect(screen.getByTestId('landing-page')).toBeInTheDocument();
-      expect(screen.queryByTestId('sam-prototype-page')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('sam-page')).not.toBeInTheDocument();
       expect(screen.queryByTestId('trial-chat-gate-harness-page')).not.toBeInTheDocument();
       expect(screen.queryByTestId('ui-standards-page')).not.toBeInTheDocument();
     }
