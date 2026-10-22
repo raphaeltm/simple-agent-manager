@@ -226,18 +226,18 @@ It is idempotent, runs after the API Worker deploy, and is unit-tested with a mo
 - [x] Provider: `AgentEmailSender` plus the Cloudflare implementation; `Env.AGENT_EMAIL?: SendEmail`
 - [x] MCP `reply_to_email`: definition, handler, dispatch, gate, pinned recipient, headers, atomic cap, audit row
 - [x] Admin settings: `agentEmail.*` entries (max inbound bytes, max body chars, max reply chars, max replies per run, inbound per trigger per hour)
-- [ ] `GET /api/config/agent-email`; admin status + fixed loopback test (superadmin route + UI card; loopback receipt recorded in KV) — API done (routes + KV receipt); UI card with the UI work
+- [x] `GET /api/config/agent-email`; admin status + fixed loopback test (superadmin route + UI card; loopback receipt recorded in KV)
 - [x] Deploy: `configure-agent-email.ts` (+ test) runs BEFORE `sync-wrangler-config.ts` and writes a marker; `sync-wrangler-config.ts` generates the `AGENT_EMAIL` send_email binding only from the marker (+ test); `agent_email` staging-only dispatch input on `deploy-staging.yml` → `deploy-reusable.yml`
-- [ ] Web: Email start kind across `automation-routes`/`model`/`ui`/`state`/`requests`/`steps-start-when`; allowed-senders field; address display with copy button; variable hints; hidden when email is unavailable
+- [x] Web: Email start kind across `automation-routes`/`model`/`ui`/`state`/`requests`/`steps-start-when`; allowed-senders field; address display with copy button; variable hints; hidden when email is unavailable
 - [x] Docs: `apps/www` automation guide (email triggers); `self-hosting.mdx` optional email permissions; API reference
-- [ ] Tests (detailed under Acceptance criteria) and a Playwright visual audit of the editor and trigger detail at 375 and 1280 px
+- [x] Tests (detailed under Acceptance criteria) and a Playwright visual audit of the editor and trigger detail at 375 and 1280 px
 
 ## Acceptance criteria
 
 - [x] An email to an email trigger's address from an allowed sender starts exactly one task. The rendered prompt contains the sender, subject and body. Covered by a vertical-slice test through `handleInboundEmail` with real SQLite D1 and the real admission code, plus staging.
 - [x] Mail from a sender not on the list, to an unknown or deleted key, auto-generated, list mail, or oversized mail is rejected, and no task is created. Each case is tested, and each test also asserts that the allowed path still works.
 - [x] `reply_to_email` sends exactly one recipient (the original `From`) from the trigger address, with `In-Reply-To`/`References`/`Auto-Submitted`. It refuses non-email tasks, tasks from another project and deleted triggers. It enforces the per-run cap atomically. Tested against real SQLite, with a fake send binding that enforces the Cloudflare contract.
-- [ ] With no binding, or a token that lacks permissions, the deploy leaves email off, and the UI hides the Email option.
+- [x] With no binding, or a token that lacks permissions, the deploy leaves email off, and the UI hides the Email option.
 - [x] With the permissions, the deploy configures routing, subaddressing, the rule and the sending subdomain, and never changes existing apex MX/SPF records (Cloudflare-only additions to an empty apex are reported). Tested with a mocked CF API, including the Google-MX apex case.
 - [ ] Staging, end to end:
   1. Create an email trigger in the UI.
@@ -297,3 +297,5 @@ It is idempotent, runs after the API Worker deploy, and is unit-tested with a mo
 - 2026-10-22: Security review (0 critical, 1 high, 2 medium, 2 low) fixed in 877c06929 and f8806b0da: delivery lease and takeover that never starts an email twice; a submitted email whose bookkeeping fails reports success; unparseable mail rejected; loopback sender check and rate limit; linear-time HTML to text (the regex version went quadratic on hostile markup, and bounding its input dropped the text of mail with long styles); DMARC advice in the docs.
 - 2026-10-22: Cloudflare review (1 high, 3 medium, 2 low) fixed in f8806b0da: apex guard covers MX and SPF, fails on any change to existing records or a non-Cloudflare addition, reports Cloudflare additions; reports a still-verifying sending subdomain; `addresses` comment; docs. Open: confirm the Email Sending permission's scope in the token picker, and what Cloudflare does after a thrown `email()` handler (verify on staging, then update the comment in `inbound.ts`).
 - 2026-10-22: Staging blocked on the deploy token's email permissions (run 39823114470 logged Zone Settings 403). Asked Raphaël to add them; waiting.
+- 2026-10-22: UI committed (d85468104): Email start hidden when agent email is off (the builder had shown it disabled; hidden matches the plan and keeps production free of an unusable option), address + copy on the automation page, admin panel with loopback test and Refresh. Web 4,486/4,486, Playwright 14/14 at 375 and 1280 px; screenshots opened and checked.
+- 2026-10-22: Reviews: constitution (1 medium fixed), doc sync (1 medium + 1 low fixed; it also led to fixing MCP update_trigger clearing webhook/email profiles), task-completion validator PASS (no critical/high).
