@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { log } from '../../src/lib/logger';
 import { handleReplyToEmail } from '../../src/routes/mcp/agent-email-tools';
 import { updateAdminSettings } from '../../src/services/admin-settings';
 import {
@@ -105,6 +106,40 @@ function inbound(
     raw: new Response(raw).body as ReadableStream<Uint8Array>,
     rawSize: envelope.rawSize ?? raw.length,
     setReject: vi.fn(),
+  };
+}
+
+/** Wrap a D1 adapter so the next "mark this email accepted" write fails once. */
+function failNextAcceptedWrite(base: D1Database): { db: D1Database; arm(): void } {
+  let armed = false;
+  type Statement = { bind: (...params: unknown[]) => Record<string, unknown> };
+  const prepare = (sql: string) => {
+    const statement = (base as unknown as { prepare(sql: string): Statement }).prepare(sql);
+    return {
+      ...statement,
+      bind: (...params: unknown[]) => {
+        const bound = statement.bind(...params);
+        // Drizzle orders SET parameters by column, so look for the value, not its position.
+        if (
+          armed &&
+          sql.startsWith('update "trigger_email_messages"') &&
+          params.includes('accepted')
+        ) {
+          armed = false;
+          const fail = async () => {
+            throw new Error('D1_ERROR: simulated write failure');
+          };
+          return { ...bound, run: fail, all: fail, raw: fail, first: fail };
+        }
+        return bound;
+      },
+    };
+  };
+  return {
+    db: { ...(base as unknown as Record<string, unknown>), prepare } as unknown as D1Database,
+    arm: () => {
+      armed = true;
+    },
   };
 }
 
@@ -415,6 +450,114 @@ describe('agent email vertical slice', () => {
 
     expect(retry).toMatchObject({ kind: 'accepted' });
     expect(submitter).toHaveBeenCalledTimes(2);
+    expect(sqlite.prepare(`SELECT status FROM trigger_email_messages`).all()).toEqual([
+      { status: 'accepted' },
+    ]);
+  });
+
+  it('rejects unreadable mail cleanly instead of crashing, for triggers and the loopback', async () => {
+    const parts = Array.from(
+      { length: 600 },
+      (_, index) => `--b\r\nContent-Type: text/plain\r\n\r\npart ${index}`
+    );
+    const raw = [
+      'From: Alice <alice@example.com>',
+      `To: ${ADDRESS}`,
+      'Subject: Too many parts',
+      'Message-ID: <parts@example.com>',
+      'Content-Type: multipart/mixed; boundary="b"',
+      '',
+      ...parts,
+      '--b--',
+    ].join('\r\n');
+
+    for (const to of [ADDRESS, `agent+loopback@mail.${BASE_DOMAIN}`]) {
+      const delivery = inbound(raw, { to });
+      const outcome = await handleInboundAgentEmail(delivery, env, { submitter });
+
+      expect(outcome).toEqual({ kind: 'rejected', reason: 'This email could not be read' });
+      expect(delivery.setReject).toHaveBeenCalledWith('This email could not be read');
+    }
+    expect(submitter).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT count(*) AS n FROM trigger_email_messages').get()).toEqual({
+      n: 0,
+    });
+    // Liveness: a well-formed email still goes through afterwards.
+    expect(await handleInboundAgentEmail(inbound(rawEmail()), env, { submitter })).toMatchObject({
+      kind: 'accepted',
+    });
+  });
+
+  it("only lets this deployment's agent addresses write the loopback status, and bounds it", async () => {
+    const outsider = inbound(rawEmail({ from: 'Mallory <mallory@example.net>' }), {
+      from: 'mallory@example.net',
+      to: `agent+loopback@mail.${BASE_DOMAIN}`,
+    });
+    expect(await handleInboundAgentEmail(outsider, env, { submitter })).toMatchObject({
+      kind: 'rejected',
+    });
+    expect((await readLoopbackStatus(env)).lastReceived).toBeNull();
+
+    await updateAdminSettings(env, {
+      changes: [{ name: 'agentEmail.loopbackPerHour', value: 2 }],
+      actorUserId: 'admin-1',
+    });
+    const fromAgent = () =>
+      inbound(rawEmail({ from: `Support inbox <${ADDRESS}>`, subject: 'Re: loopback' }), {
+        from: ADDRESS,
+        to: `agent+loopback@mail.${BASE_DOMAIN}`,
+      });
+    // The outsider above used one of the two slots in this hour.
+    expect(await handleInboundAgentEmail(fromAgent(), env, { submitter })).toEqual({
+      kind: 'loopback',
+    });
+    expect(await handleInboundAgentEmail(fromAgent(), env, { submitter })).toMatchObject({
+      kind: 'rejected',
+      reason: expect.stringMatching(/Too many loopback/),
+    });
+  });
+
+  it('reports accepted, and never starts a second task, when recording acceptance fails', async () => {
+    const errorLog = vi.spyOn(log, 'error');
+    const failing = failNextAcceptedWrite(env.DATABASE);
+    env.DATABASE = failing.db;
+    const realSubmitter = submitter.getMockImplementation()!;
+    submitter.mockImplementation(async (submitEnv, input) => {
+      const result = await realSubmitter(submitEnv, input);
+      failing.arm();
+      return result;
+    });
+
+    const first = await handleInboundAgentEmail(inbound(rawEmail()), env, { submitter });
+    const retry = await handleInboundAgentEmail(inbound(rawEmail()), env, { submitter });
+
+    expect(first).toMatchObject({ kind: 'accepted' });
+    // Liveness: the injected failure really happened on the acceptance write.
+    expect(errorLog).toHaveBeenCalledWith(
+      'agent_email.inbound_bookkeeping_failed',
+      expect.objectContaining({ error: expect.stringContaining('update "trigger_email_messages"') })
+    );
+    expect(retry).toEqual({ kind: 'duplicate' });
+    expect(submitter).toHaveBeenCalledTimes(1);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM tasks').get()).toEqual({ n: 1 });
+    errorLog.mockRestore();
+  });
+
+  it('does not resubmit an email whose task exists when a crashed attempt is taken over', async () => {
+    const accepted = await handleInboundAgentEmail(inbound(rawEmail()), env, { submitter });
+    if (accepted.kind !== 'accepted') throw new Error('fixture email was not accepted');
+    // Simulate a Worker that died after submitting: the row is still processing, lease expired.
+    sqlite
+      .prepare(
+        `UPDATE trigger_email_messages SET status = 'processing', lease_expires_at = ?
+          WHERE direction = 'inbound'`
+      )
+      .run('2000-01-01T00:00:00.000Z');
+
+    const redelivery = await handleInboundAgentEmail(inbound(rawEmail()), env, { submitter });
+
+    expect(redelivery).toEqual({ kind: 'duplicate' });
+    expect(submitter).toHaveBeenCalledTimes(1);
     expect(sqlite.prepare(`SELECT status FROM trigger_email_messages`).all()).toEqual([
       { status: 'accepted' },
     ]);

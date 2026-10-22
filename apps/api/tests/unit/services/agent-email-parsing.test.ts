@@ -184,6 +184,56 @@ describe('inbound email parsing', () => {
     expect(cut).toMatchObject({ text: 'Hello', textTruncated: true });
   });
 
+  function htmlMail(html: string[]): string {
+    return mime([
+      'From: bob@example.org',
+      'Subject: HTML',
+      'Message-ID: <m4@example.org>',
+      'Content-Type: text/html; charset=utf-8',
+      'Content-Transfer-Encoding: 8bit',
+      '',
+      ...html,
+    ]);
+  }
+
+  it('keeps the text of HTML mail whose head is far longer than the body limit', async () => {
+    const styles = Array.from({ length: 2000 }, (_, index) => `.c${index}{color:red}`);
+    const raw = htmlMail([
+      '<html><head><style>',
+      ...styles,
+      '</style></head>',
+      '<body><p>Deploy the fix</p></body></html>',
+    ]);
+
+    const email = await parseInboundEmail(raw, envelope, 100);
+
+    expect(email).toMatchObject({ text: 'Deploy the fix', textTruncated: false });
+  });
+
+  it('decodes entities, drops comments, scripts and markup, and keeps Unicode intact', async () => {
+    const raw = htmlMail([
+      '<p>İstanbul &amp; caf&#233; &#x2014; it&#8217;s <!-- a > hidden note --><B>done</B></p>',
+      '<SCRIPT type="text/javascript">document.write("</p>visible?")</SCRIPT>',
+      '<p>&bogus; &#xFFFFFF; &lt;b&gt;</p>',
+    ]);
+
+    const email = await parseInboundEmail(raw, envelope, 1000);
+
+    expect(email.text).toBe('İstanbul & café — it’s done\n\n&bogus; &#xFFFFFF; <b>');
+  });
+
+  it.each([
+    ['unclosed tags', '<'.repeat(100_000)],
+    ['unclosed skipped elements', '<style>'.repeat(60_000)],
+    ['a long run of spaces inside a line', `start${' '.repeat(100_000)}end`],
+  ])('converts hostile HTML (%s) in linear time', async (_case, hostile) => {
+    const started = performance.now();
+
+    await parseInboundEmail(htmlMail(['<p>Hello</p>', hostile]), envelope, 1000);
+
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+
   it('reports a missing or malformed From as null rather than guessing', async () => {
     const raw = mime(['Subject: No sender', 'Message-ID: <m3@example.org>', '', 'body']);
     expect((await parseInboundEmail(raw, envelope, 100)).from).toBeNull();
