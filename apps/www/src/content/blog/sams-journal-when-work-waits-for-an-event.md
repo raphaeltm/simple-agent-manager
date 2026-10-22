@@ -19,7 +19,7 @@ A workflow is a plan made of agent steps and event waits. Each step can depend o
 2. SAM listens for that pull request's CI completion event.
 3. When the event arrives, SAM starts the next agent step.
 
-The wait has a source, event type, optional subject, and finite timeout. In this example, the subject limits the match to one pull request. Events from before the wait began do not satisfy it. If no matching event arrives before the deadline, the wait fails and dependent steps do not start.
+The wait has a source, event type, optional subject, and finite timeout. In this example, the subject limits the match to one pull request. An event recorded before SAM creates the subscription has no match for this wait. A delayed event can still count if it is recorded and matched before the deadline, even when its original occurrence time was earlier. If no matching event arrives before the deadline, the wait fails and dependent steps do not start.
 
 ## Store the wait, not a running watcher
 
@@ -34,11 +34,11 @@ const created = await createProjectEventSubscription(env, run.project_id, {
   filter: filter(wait),
   deliveryPreference: { requested: 'record_only', resolved: 'record_only', target },
   reason: `Workflow ${run.id} step ${step.step_key}`,
-  expiresAt: run.workflow_deadline_at + projectEventRetentionWindow,
+  expiresAt: run.workflow_deadline_at + resolveProjectEventLimits(env).retentionDays * 86_400_000,
 });
 ```
 
-The snippet omits the filter construction and calculates `projectEventRetentionWindow` from the configured event-retention setting. The workflow's own wait deadline remains the earlier limit for accepting a match.
+This excerpt omits the surrounding setup and filter construction. It uses the same configured retention calculation as the implementation; the workflow's own wait deadline remains the limit for accepting a match.
 
 The timeout is deliberately part of the design. Event-driven work should have a clear point where it stops waiting and reports what happened, rather than leaving a workflow active forever.
 
