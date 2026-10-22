@@ -85,7 +85,10 @@ export function ModelPickerCategorySection({
         )}
       </div>
       {!collapsed && (
-        <ul id={headingId} className="m-0 grid min-w-0 list-none divide-y divide-border-default p-0">
+        <ul
+          id={headingId}
+          className="m-0 grid min-w-0 list-none divide-y divide-border-default p-0"
+        >
           {visibleModels.map((model) => (
             <ModelPickerRow
               key={model.id}

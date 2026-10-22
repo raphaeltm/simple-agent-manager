@@ -244,14 +244,10 @@ export function ProjectSettingsInfrastructure() {
     const isProjectSwitch = lastProjectIdRef.current !== project.id;
     lastProjectIdRef.current = project.id;
     // Always sync timeout (it has its own save button, no dirty tracking needed)
-    setWorkspaceIdleTimeoutMs(
-      project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
-    );
+    setWorkspaceIdleTimeoutMs(project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS);
     // Only reset resource draft on project switch or when not dirty
     if (isProjectSwitch || !resourceDirtyRef.current) {
-      setResourceReqs(
-        deserializeResourceRequirements(project.resourceRequirementsJson)
-      );
+      setResourceReqs(deserializeResourceRequirements(project.resourceRequirementsJson));
       setLegacyCleared(false);
       resourceDirtyRef.current = false;
     }
@@ -308,8 +304,15 @@ export function ProjectSettingsInfrastructure() {
         </div>
         <ResourceRequirementsInput
           value={resourceReqs}
-          onChange={(next) => { setResourceReqs(next); setResourceErrors({}); resourceDirtyRef.current = true; }}
-          onClearLegacy={() => { setLegacyCleared(true); resourceDirtyRef.current = true; }}
+          onChange={(next) => {
+            setResourceReqs(next);
+            setResourceErrors({});
+            resourceDirtyRef.current = true;
+          }}
+          onClearLegacy={() => {
+            setLegacyCleared(true);
+            resourceDirtyRef.current = true;
+          }}
           disabled={savingResources}
           legacyVmSize={legacyCleared ? null : legacyVmSize}
           inheritLabel="platform default"

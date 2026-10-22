@@ -177,9 +177,7 @@ export function ModelPicker({
         className="fixed inset-0 bg-overlay glass-backdrop-dim transition-opacity duration-150 ease-in-out"
         onClick={requestClose}
       />
-      <div
-        className="glass-panel-container glass-composited relative z-10 flex h-full w-full min-w-0 flex-col overflow-hidden glass-modal shadow-overlay sm:h-[85vh] sm:max-w-2xl sm:rounded-lg"
-      >
+      <div className="glass-panel-container glass-composited relative z-10 flex h-full w-full min-w-0 flex-col overflow-hidden glass-modal shadow-overlay sm:h-[85vh] sm:max-w-2xl sm:rounded-lg">
         <div className="flex-shrink-0 border-b border-border-default px-4 py-3">
           <div className="flex min-w-0 items-start justify-between gap-3">
             <div className="min-w-0">

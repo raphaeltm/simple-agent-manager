@@ -116,7 +116,13 @@ describe('SkillFormDialog — AI model calls field', () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(
       <QueryTestWrapper>
-        <SkillFormDialog isOpen onClose={vi.fn()} onSave={onSave} profiles={[]} projectId="proj_1" />
+        <SkillFormDialog
+          isOpen
+          onClose={vi.fn()}
+          onSave={onSave}
+          profiles={[]}
+          projectId="proj_1"
+        />
       </QueryTestWrapper>
     );
 
@@ -161,7 +167,9 @@ describe('SkillFormDialog — AI model calls field', () => {
     fireEvent.click(screen.getByRole('switch', { name: /turn on clef-flash/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(screen.queryByText('Choose callable models')).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByText('Choose callable models')).not.toBeInTheDocument()
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Create Skill' }));
 
     await waitFor(() =>

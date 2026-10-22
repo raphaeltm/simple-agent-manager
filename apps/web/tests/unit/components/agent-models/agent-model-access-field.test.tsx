@@ -120,7 +120,7 @@ describe('AgentModelAccessField', () => {
     mocks.getProjectAgentModelSettings.mockReset();
   });
 
-  it('profile context: inherits SAM\'s recommended defaults when the project has no override', async () => {
+  it("profile context: inherits SAM's recommended defaults when the project has no override", async () => {
     mocks.getProjectAgentModelSettings.mockResolvedValue(makeProjectSettings({ models: null }));
     renderField({ initialValue: null });
 
@@ -158,9 +158,7 @@ describe('AgentModelAccessField', () => {
     await waitFor(() =>
       expect(screen.getByRole<HTMLSelectElement>('combobox').value).toBe('custom')
     );
-    expect(
-      await screen.findByText(/2 models — clef-omni, clef-flash/)
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/2 models — clef-omni, clef-flash/)).toBeInTheDocument();
   });
 
   it('profile context: cancelling out of Custom does not commit a value — stays Inherit', async () => {
@@ -197,9 +195,7 @@ describe('AgentModelAccessField', () => {
     await waitFor(() =>
       expect(screen.getByRole<HTMLSelectElement>('combobox').value).toBe('inherit')
     );
-    expect(
-      await screen.findByText(/Inherits from SAM's recommended defaults/)
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Inherits from SAM's recommended defaults/)).toBeInTheDocument();
   });
 
   it('a custom empty selection reads clearly, not as a bare count', async () => {
@@ -218,7 +214,9 @@ describe('AgentModelAccessField', () => {
       fallbackProfile: { name: 'Builder', agentModels: ['m-decision-2'] },
     });
 
-    expect(await screen.findByText(/Inherits from profile "Builder": 1 model — clef-omni/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Inherits from profile "Builder": 1 model — clef-omni/)
+    ).toBeInTheDocument();
   });
 
   it('skill context: falls back to the project when the chosen profile has no override', async () => {
@@ -230,7 +228,9 @@ describe('AgentModelAccessField', () => {
       fallbackProfile: { name: 'Builder', agentModels: null },
     });
 
-    expect(await screen.findByText(/Inherits from the project: 1 model — clef-omni/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Inherits from the project: 1 model — clef-omni/)
+    ).toBeInTheDocument();
   });
 
   it('skill context: falls back to recommended defaults when no profile is chosen and the project has none', async () => {

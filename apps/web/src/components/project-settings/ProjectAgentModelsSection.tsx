@@ -25,7 +25,10 @@ function formatResetDate(iso: string): string {
 
 function SectionShell({ headingId, children }: { headingId: string; children: ReactNode }) {
   return (
-    <section className="glass-surface grid min-w-0 gap-3 rounded-lg p-4" aria-labelledby={headingId}>
+    <section
+      className="glass-surface grid min-w-0 gap-3 rounded-lg p-4"
+      aria-labelledby={headingId}
+    >
       <div>
         <h2 id={headingId} className="sam-type-section-heading m-0 text-fg-primary">
           AI Model Calls
@@ -53,7 +56,10 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
     enabled,
   });
   const catalogQuery = useQuery({ ...agentModelCatalogQueryOptions(queryScope), enabled });
-  const catalogById = useMemo(() => indexCatalog(catalogQuery.data?.models ?? []), [catalogQuery.data]);
+  const catalogById = useMemo(
+    () => indexCatalog(catalogQuery.data?.models ?? []),
+    [catalogQuery.data]
+  );
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [budgetInput, setBudgetInput] = useState('');
@@ -62,7 +68,8 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
 
   const settings = settingsQuery.data;
   const queryKey = agentModelQueryKeys.projectSettings(queryScope, projectId);
-  const effectiveBudgetDefault = settings?.monthlyBudgetUsd ?? settings?.effectiveMonthlyBudgetUsd ?? 0;
+  const effectiveBudgetDefault =
+    settings?.monthlyBudgetUsd ?? settings?.effectiveMonthlyBudgetUsd ?? 0;
 
   useEffect(() => {
     if (!budgetDirtyRef.current) setBudgetInput(String(effectiveBudgetDefault));
@@ -107,7 +114,12 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
   // `if (!settings) return` narrowing above into a nested function's closure over `settings`.
   const maxMonthlyBudgetUsd = settings.maxMonthlyBudgetUsd;
   const spent = settings.usage.spentUsd + settings.usage.reservedUsd;
-  const usedFraction = settings.effectiveMonthlyBudgetUsd > 0 ? spent / settings.effectiveMonthlyBudgetUsd : spent > 0 ? 1 : 0;
+  const usedFraction =
+    settings.effectiveMonthlyBudgetUsd > 0
+      ? spent / settings.effectiveMonthlyBudgetUsd
+      : spent > 0
+        ? 1
+        : 0;
   const isFullyUsed = usedFraction >= 1;
   const isNearlyUsed = usedFraction >= NEARLY_USED_FRACTION && !isFullyUsed;
   const barClass = isFullyUsed ? 'bg-danger' : isNearlyUsed ? 'bg-warning' : 'bg-accent';
@@ -129,7 +141,8 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
     budgetInputRef.current?.select();
   }
 
-  const modelsSource = settings.models === null ? "SAM's recommended defaults" : 'a custom selection';
+  const modelsSource =
+    settings.models === null ? "SAM's recommended defaults" : 'a custom selection';
   const usedModels = settings.usage.byModel.slice(0, 5);
   // A platform-level feature toggle outranks the per-project role check: when
   // an administrator has turned agent model calls off, every control is
@@ -245,7 +258,8 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
                   {catalogById.get(item.modelId)?.name ?? item.modelId}
                 </span>
                 <span className="shrink-0 tabular-nums text-fg-muted">
-                  {item.callCount} call{item.callCount === 1 ? '' : 's'} · {formatUsd(item.spentUsd)}
+                  {item.callCount} call{item.callCount === 1 ? '' : 's'} ·{' '}
+                  {formatUsd(item.spentUsd)}
                 </span>
               </li>
             ))}
@@ -256,7 +270,8 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
       <div className="grid min-w-0 gap-2 border-t border-border-default pt-3">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
           <span className="min-w-0 break-words text-sm text-fg-primary">
-            Using {modelsSource} — {summarizeModelSelection(settings.effectiveModelIds, catalogById)}
+            Using {modelsSource} —{' '}
+            {summarizeModelSelection(settings.effectiveModelIds, catalogById)}
           </span>
           {controlsEnabled && (
             <div className="flex shrink-0 gap-2">

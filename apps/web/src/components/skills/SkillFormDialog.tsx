@@ -204,7 +204,10 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
           </div>
           <ResourceRequirementsInput
             value={resourceReqs}
-            onChange={(next) => { setResourceReqs(next); setResourceErrors({}); }}
+            onChange={(next) => {
+              setResourceReqs(next);
+              setResourceErrors({});
+            }}
             onClearLegacy={() => setVmSizeOverride('')}
             disabled={saving}
             legacyVmSize={vmSizeOverride}

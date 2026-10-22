@@ -166,13 +166,17 @@ describe('ProfileFormDialog — AI model calls field', () => {
     // what's beneath it — `handleSave` is async, so the picker is still
     // present (and its background-hide of the dialog still active) for at
     // least one microtask after the click returns.
-    await waitFor(() => expect(screen.queryByText('Choose callable models')).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByText('Choose callable models')).not.toBeInTheDocument()
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Create Profile' }));
 
     await waitFor(() =>
       expect(onSave).toHaveBeenCalledWith(
-        expect.objectContaining({ agentModels: expect.arrayContaining(['m-decision-1', 'm-decision-2']) })
+        expect.objectContaining({
+          agentModels: expect.arrayContaining(['m-decision-1', 'm-decision-2']),
+        })
       )
     );
   });

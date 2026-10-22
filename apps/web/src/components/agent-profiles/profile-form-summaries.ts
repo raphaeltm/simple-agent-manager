@@ -1,5 +1,13 @@
-import type { AgentEffort, GitHubCliPermissionLevel, GitHubCliPolicy } from '@simple-agent-manager/shared';
-import { AGENT_CATALOG, AGENT_PERMISSION_MODE_LABELS, DEFAULT_AGENT_EFFORT } from '@simple-agent-manager/shared';
+import type {
+  AgentEffort,
+  GitHubCliPermissionLevel,
+  GitHubCliPolicy,
+} from '@simple-agent-manager/shared';
+import {
+  AGENT_CATALOG,
+  AGENT_PERMISSION_MODE_LABELS,
+  DEFAULT_AGENT_EFFORT,
+} from '@simple-agent-manager/shared';
 
 import type { ResourceRequirementsFormState } from '../resource-requirements';
 import { hasAnyResourceValue } from '../resource-requirements';
@@ -83,8 +91,5 @@ export function infraSummary(
   } else if (vmSize) {
     resourcePart = `${vmSize} (legacy)`;
   }
-  return joinOrDefault(
-    [runtimeSummary(runtime), resourcePart, workspaceProfile, taskMode],
-    ' · '
-  );
+  return joinOrDefault([runtimeSummary(runtime), resourcePart, workspaceProfile, taskMode], ' · ');
 }

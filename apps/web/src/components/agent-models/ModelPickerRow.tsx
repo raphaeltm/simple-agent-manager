@@ -56,7 +56,9 @@ export function ModelPickerRow({
           {recommended && (
             <span className={`${BADGE_CLASS} bg-accent-tint text-accent`}>Recommended</span>
           )}
-          {model.beta && <span className={`${BADGE_CLASS} bg-warning-tint text-warning-fg`}>Beta</span>}
+          {model.beta && (
+            <span className={`${BADGE_CLASS} bg-warning-tint text-warning-fg`}>Beta</span>
+          )}
           {model.partner && (
             <span className={`${BADGE_CLASS} bg-info-tint text-info-fg`}>Partner</span>
           )}

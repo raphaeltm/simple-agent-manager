@@ -138,8 +138,10 @@ async function setupProjectSettingsMocks(page: Page, options: MockOptions = {}) 
 
   await setupAuditRoutes(page, (path, respond) => {
     if (path.startsWith('/api/auth/')) return respond(200, user);
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
-    if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
+    if (path === '/api/projects')
+      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
     if (path === '/api/credentials') return respond(200, []);
@@ -167,24 +169,35 @@ async function setupProjectSettingsMocks(page: Page, options: MockOptions = {}) 
 
   await page.route('**/api/agent-models/catalog', (route: Route) => {
     if (options.catalogStatus && options.catalogStatus >= 400) {
-      return jsonResponse(route, options.catalogStatus, { error: 'CATALOG_ERROR', message: 'Could not reach Cloudflare' });
+      return jsonResponse(route, options.catalogStatus, {
+        error: 'CATALOG_ERROR',
+        message: 'Could not reach Cloudflare',
+      });
     }
     return jsonResponse(route, 200, catalog);
   });
 
   await page.route(`**/api/projects/${MOCK_PROJECT.id}/agent-models`, (route: Route) => {
     if (route.request().method() === 'PUT') {
-      const body = route.request().postDataJSON() as { models?: string[] | null; monthlyBudgetUsd?: number | null };
+      const body = route.request().postDataJSON() as {
+        models?: string[] | null;
+        monthlyBudgetUsd?: number | null;
+      };
       if ('models' in body) settingsState = { ...settingsState, models: body.models ?? null };
       if ('monthlyBudgetUsd' in body) {
         settingsState = {
           ...settingsState,
           monthlyBudgetUsd: body.monthlyBudgetUsd ?? null,
-          effectiveMonthlyBudgetUsd: body.monthlyBudgetUsd ?? settingsState.effectiveMonthlyBudgetUsd,
+          effectiveMonthlyBudgetUsd:
+            body.monthlyBudgetUsd ?? settingsState.effectiveMonthlyBudgetUsd,
         };
       }
       if (settingsState.models !== null) {
-        settingsState = { ...settingsState, effectiveSource: 'project', effectiveModelIds: settingsState.models };
+        settingsState = {
+          ...settingsState,
+          effectiveSource: 'project',
+          effectiveModelIds: settingsState.models,
+        };
       } else {
         settingsState = {
           ...settingsState,
@@ -201,7 +214,9 @@ async function setupProjectSettingsMocks(page: Page, options: MockOptions = {}) 
 test.describe('Agent model calls — Project Settings', () => {
   test.setTimeout(60_000);
 
-  test('recommended defaults with normal usage render budget, used-this-month, and selection summary', async ({ page }) => {
+  test('recommended defaults with normal usage render budget, used-this-month, and selection summary', async ({
+    page,
+  }) => {
     await setupProjectSettingsMocks(page, { settings: makeProjectAgentModelSettings() });
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
 
@@ -215,7 +230,9 @@ test.describe('Agent model calls — Project Settings', () => {
     await assertNoClippedOverflow(page);
   });
 
-  test('custom selection with a retired model id — opens the picker and shows "No longer available"', async ({ page }) => {
+  test('custom selection with a retired model id — opens the picker and shows "No longer available"', async ({
+    page,
+  }) => {
     await setupProjectSettingsMocks(page, {
       settings: makeProjectAgentModelSettings({
         models: CUSTOM_SELECTION_IDS,
@@ -238,7 +255,9 @@ test.describe('Agent model calls — Project Settings', () => {
     await assertNoClippedOverflow(page);
   });
 
-  test('budget nearly used shows a cautionary bar and percentage without an alert box', async ({ page }) => {
+  test('budget nearly used shows a cautionary bar and percentage without an alert box', async ({
+    page,
+  }) => {
     await setupProjectSettingsMocks(page, {
       settings: makeProjectAgentModelSettings({ effectiveMonthlyBudgetUsd: 20, spentUsd: 18.7 }),
     });
@@ -251,7 +270,9 @@ test.describe('Agent model calls — Project Settings', () => {
     await assertNoOverflow(page);
   });
 
-  test('budget fully used shows a needs-attention alert with a Raise-limit fix', async ({ page }) => {
+  test('budget fully used shows a needs-attention alert with a Raise-limit fix', async ({
+    page,
+  }) => {
     await setupProjectSettingsMocks(page, {
       settings: makeProjectAgentModelSettings({ effectiveMonthlyBudgetUsd: 20, spentUsd: 20 }),
     });
@@ -268,19 +289,25 @@ test.describe('Agent model calls — Project Settings', () => {
   });
 
   test('read-only hides the edit controls and states the reason', async ({ page }) => {
-    await setupProjectSettingsMocks(page, { settings: makeProjectAgentModelSettings({ canEdit: false }) });
+    await setupProjectSettingsMocks(page, {
+      settings: makeProjectAgentModelSettings({ canEdit: false }),
+    });
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
 
     await expect(page.getByLabel('Monthly limit (USD)')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Change' })).toHaveCount(0);
-    await expect(page.getByText('Only project owners and admins can change the limit.')).toBeVisible();
+    await expect(
+      page.getByText('Only project owners and admins can change the limit.')
+    ).toBeVisible();
 
     await screenshotAgentModelsSection(page, 'project-settings-read-only');
     await assertNoOverflow(page);
   });
 
   test('feature disabled shows a calm banner', async ({ page }) => {
-    await setupProjectSettingsMocks(page, { settings: makeProjectAgentModelSettings({ featureEnabled: false }) });
+    await setupProjectSettingsMocks(page, {
+      settings: makeProjectAgentModelSettings({ featureEnabled: false }),
+    });
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
 
     await expect(page.getByText('Turned off by your SAM administrator.')).toBeVisible();
@@ -297,7 +324,9 @@ test.describe('Agent model calls — Project Settings', () => {
     await expect(page.getByText(/Couldn.t load the model list/)).toBeVisible();
     await screenshot(page, 'picker-catalog-error');
 
-    await page.route('**/api/agent-models/catalog', (route: Route) => jsonResponse(route, 200, NORMAL_CATALOG_RESPONSE));
+    await page.route('**/api/agent-models/catalog', (route: Route) =>
+      jsonResponse(route, 200, NORMAL_CATALOG_RESPONSE)
+    );
     await page.getByRole('button', { name: 'Retry' }).click();
     await expect(page.getByRole('button', { name: /^Decision \d+ of \d+ on$/ })).toBeVisible();
 
@@ -305,7 +334,10 @@ test.describe('Agent model calls — Project Settings', () => {
   });
 
   test('empty catalog shows a calm empty state in the picker', async ({ page }) => {
-    await setupProjectSettingsMocks(page, { catalog: EMPTY_CATALOG_RESPONSE, settings: makeProjectAgentModelSettings({ effectiveModelIds: [] }) });
+    await setupProjectSettingsMocks(page, {
+      catalog: EMPTY_CATALOG_RESPONSE,
+      settings: makeProjectAgentModelSettings({ effectiveModelIds: [] }),
+    });
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
 
     await expect(page.getByText('No models')).toBeVisible();
@@ -320,7 +352,9 @@ test.describe('Agent model calls — Project Settings', () => {
 test.describe('Agent model calls — Model Picker (realistic catalog)', () => {
   test.setTimeout(60_000);
 
-  test('the full 73-model catalog renders grouped and searchable without overflow', async ({ page }) => {
+  test('the full 73-model catalog renders grouped and searchable without overflow', async ({
+    page,
+  }) => {
     await setupProjectSettingsMocks(page);
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
     await page.getByRole('button', { name: 'Change' }).click();
@@ -340,7 +374,9 @@ test.describe('Agent model calls — Model Picker (realistic catalog)', () => {
     await assertNoOverflow(page);
   });
 
-  test('a 300+ character description and a very long name wrap without horizontal overflow', async ({ page }) => {
+  test('a 300+ character description and a very long name wrap without horizontal overflow', async ({
+    page,
+  }) => {
     await setupProjectSettingsMocks(page, { catalog: LONG_TEXT_CATALOG_RESPONSE });
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
     await page.getByRole('button', { name: 'Change' }).click();
@@ -373,7 +409,9 @@ test.describe('Agent model calls — Model Picker (realistic catalog)', () => {
 test.describe('Agent model calls — Profile and Skill dialogs', () => {
   test.setTimeout(60_000);
 
-  test('profile dialog: AI Models section — inherit summary, then switching to custom', async ({ page }) => {
+  test('profile dialog: AI Models section — inherit summary, then switching to custom', async ({
+    page,
+  }) => {
     await setupProjectSettingsMocks(page);
     await page.goto(`/projects/${MOCK_PROJECT.id}/profiles`);
     await page.getByRole('button', { name: 'New Profile' }).click();
@@ -400,7 +438,9 @@ test.describe('Agent model calls — Profile and Skill dialogs', () => {
     await assertNoOverflow(page);
   });
 
-  test('skill dialog: AI Models field renders and lets the user open the picker', async ({ page }) => {
+  test('skill dialog: AI Models field renders and lets the user open the picker', async ({
+    page,
+  }) => {
     await setupProjectSettingsMocks(page);
     await page.goto(`/projects/${MOCK_PROJECT.id}/skills`);
     await page.getByRole('button', { name: 'New Skill' }).click();

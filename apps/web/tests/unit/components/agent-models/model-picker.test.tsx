@@ -1,4 +1,7 @@
-import type { AgentModelCatalogEntry, AgentModelCatalogResponse } from '@simple-agent-manager/shared';
+import type {
+  AgentModelCatalogEntry,
+  AgentModelCatalogResponse,
+} from '@simple-agent-manager/shared';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -279,12 +282,7 @@ describe('ModelPicker', () => {
     const onSave = vi.fn();
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
-        <ModelPicker
-          isOpen
-          initialSelection={['m-decision-1']}
-          onClose={vi.fn()}
-          onSave={onSave}
-        />
+        <ModelPicker isOpen initialSelection={['m-decision-1']} onClose={vi.fn()} onSave={onSave} />
       </QueryClientProvider>
     );
     await screen.findByText('clef-omni');
@@ -294,12 +292,7 @@ describe('ModelPicker', () => {
     // refetch that resolved while the picker stayed open.
     rerender(
       <QueryClientProvider client={queryClient}>
-        <ModelPicker
-          isOpen
-          initialSelection={['m-decision-1']}
-          onClose={vi.fn()}
-          onSave={onSave}
-        />
+        <ModelPicker isOpen initialSelection={['m-decision-1']} onClose={vi.fn()} onSave={onSave} />
       </QueryClientProvider>
     );
 
@@ -314,12 +307,7 @@ describe('ModelPicker', () => {
     const onSave = vi.fn();
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
-        <ModelPicker
-          isOpen
-          initialSelection={['m-decision-1']}
-          onClose={vi.fn()}
-          onSave={onSave}
-        />
+        <ModelPicker isOpen initialSelection={['m-decision-1']} onClose={vi.fn()} onSave={onSave} />
       </QueryClientProvider>
     );
     await screen.findByText('clef-omni');
@@ -337,12 +325,7 @@ describe('ModelPicker', () => {
     );
     rerender(
       <QueryClientProvider client={queryClient}>
-        <ModelPicker
-          isOpen
-          initialSelection={['m-decision-2']}
-          onClose={vi.fn()}
-          onSave={onSave}
-        />
+        <ModelPicker isOpen initialSelection={['m-decision-2']} onClose={vi.fn()} onSave={onSave} />
       </QueryClientProvider>
     );
 

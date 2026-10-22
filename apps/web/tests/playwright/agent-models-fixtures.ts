@@ -1,5 +1,11 @@
-import type { AgentModelCatalogEntry, AgentModelCatalogResponse } from '@simple-agent-manager/shared';
-import { computeDefaultAgentModelIds, DEFAULT_AGENT_MODEL_DEFAULT_CATEGORIES } from '@simple-agent-manager/shared';
+import type {
+  AgentModelCatalogEntry,
+  AgentModelCatalogResponse,
+} from '@simple-agent-manager/shared';
+import {
+  computeDefaultAgentModelIds,
+  DEFAULT_AGENT_MODEL_DEFAULT_CATEGORIES,
+} from '@simple-agent-manager/shared';
 
 /**
  * Fixtures for the agent-models Playwright visual audit.

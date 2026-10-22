@@ -342,7 +342,11 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
         </Section>
 
         <Section title="Platform Policy" summary={policySummary(githubCliPolicy)}>
-          <GitHubCliPolicyFields policy={githubCliPolicy} onChange={setGithubCliPolicy} disabled={saving} />
+          <GitHubCliPolicyFields
+            policy={githubCliPolicy}
+            onChange={setGithubCliPolicy}
+            disabled={saving}
+          />
         </Section>
 
         <Section title="Execution" summary={executionSummary(maxTurns, systemPromptAppend)}>

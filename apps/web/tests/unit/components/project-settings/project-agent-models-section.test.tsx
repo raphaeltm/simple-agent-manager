@@ -189,7 +189,9 @@ describe('ProjectAgentModelsSection', () => {
 
     expect(screen.queryByLabelText('Monthly limit (USD)')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Change' })).not.toBeInTheDocument();
-    expect(screen.getByText('Only project owners and admins can change the limit.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Only project owners and admins can change the limit.')
+    ).toBeInTheDocument();
     expect(
       screen.getByText('Only project owners and admins can change which models agents may call.')
     ).toBeInTheDocument();

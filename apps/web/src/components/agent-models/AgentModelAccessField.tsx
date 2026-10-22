@@ -4,7 +4,10 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
-import { agentModelCatalogQueryOptions, projectAgentModelSettingsQueryOptions } from '../../lib/query-options';
+import {
+  agentModelCatalogQueryOptions,
+  projectAgentModelSettingsQueryOptions,
+} from '../../lib/query-options';
 import { indexCatalog, summarizeModelSelection } from './model-picker-utils';
 import { ModelPicker } from './ModelPicker';
 

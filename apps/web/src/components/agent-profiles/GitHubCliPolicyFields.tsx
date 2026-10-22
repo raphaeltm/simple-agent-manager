@@ -42,8 +42,7 @@ export function GitHubCliPolicyFields({ policy, onChange, disabled }: GitHubCliP
             These permissions apply to the project&rsquo;s selected repository set &mdash; the
             primary repository plus any additional repositories added under Repository Access
             &mdash; not only the primary repo. The token is narrowed to that set before each mint.
-            Code contents must stay readable so the workspace can clone and fetch the
-            repositories.
+            Code contents must stay readable so the workspace can clone and fetch the repositories.
           </p>
           {GITHUB_PERMISSION_ROWS.map((row) => (
             <label
