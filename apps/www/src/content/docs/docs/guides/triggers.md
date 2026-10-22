@@ -167,5 +167,8 @@ Agents manage triggers with `list_triggers`, `create_trigger`, `update_trigger`,
   how to redeem it safely.
 
 `agentProfileId` is optional for schedule and GitHub triggers, which then use the project default.
+Webhook and email triggers must keep one: `update_trigger` refuses to clear it. Agents can list,
+update and delete [email triggers](/docs/guides/email-triggers/), but not create them; create them
+in the app.
 `update_trigger` replaces a GitHub trigger's whole `githubConfig` when you send one, so include the
 `eventType` (`filters: {}` clears the filters); a trigger's source can't be changed.

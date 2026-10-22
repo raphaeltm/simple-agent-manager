@@ -40,6 +40,7 @@ import {
 } from '../../services/resource-requirements-input';
 import { clearTriggerPageCaches } from '../../services/trigger-cache';
 import {
+  assertKeepsAgentProfile,
   createTrigger,
   validateCron,
   validateReferences,
@@ -264,12 +265,7 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
   if (body.webhookConfig && trigger.sourceType !== 'webhook') {
     throw errors.badRequest('webhookConfig is only valid for webhook triggers');
   }
-  if (
-    (trigger.sourceType === 'webhook' || trigger.sourceType === 'email') &&
-    body.agentProfileId === null
-  ) {
-    throw errors.badRequest(`agentProfileId is required for ${trigger.sourceType} triggers`);
-  }
+  assertKeepsAgentProfile(trigger.sourceType, body.agentProfileId);
   const emailAllowedSenders = body.emailConfig?.allowedSenders
     ? await resolveAllowedSenders(db, c.env, trigger.userId, body.emailConfig.allowedSenders)
     : undefined;

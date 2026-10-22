@@ -3,7 +3,7 @@ title: Dynamic admin settings
 description: Change Phase 1 platform controls without redeploying the Worker.
 ---
 
-Active, approved superadmins can use **Admin → Settings** to search and edit platform settings from a phone or desktop. This page covers the Phase 1 controls: GitHub, Google login, Google infrastructure and GitLab OAuth configuration; the ten Connector settings; anonymous trials; cron sweeps; Durable Object alarms; stalled-task classification; the Collaboration limits for shared chats and comments; the Chat setting for the new-chat profile picker; the Operations limits for workflows; and the AI models controls for agent model calls. Other deployment and resource settings remain in their existing interfaces.
+Active, approved superadmins can use **Admin → Settings** to search and edit platform settings from a phone or desktop. This page covers the Phase 1 controls: GitHub, Google login, Google infrastructure and GitLab OAuth configuration; the ten Connector settings; anonymous trials; cron sweeps; Durable Object alarms; stalled-task classification; the Collaboration limits for shared chats and comments; the Chat setting for the new-chat profile picker; the Operations limits for workflows; the AI models controls for agent model calls; and the Email limits for agent email (preview). Other deployment and resource settings remain in their existing interfaces.
 
 The editor shows each setting's effective value, code default and source. Secret fields show only whether a value is configured. Enter a replacement to change a secret; leaving a password field empty does not reveal or erase the current secret. Related OAuth client IDs and secrets must satisfy the existing provider validation together. Risky saves and resets require confirmation.
 
@@ -65,6 +65,21 @@ These control [AI models for agents](/docs/guides/ai-models-for-agents/): the Cl
 | `aiModels.catalogCacheSeconds`          | 21,600                               | 60–604,800        | Seconds the Cloudflare model catalog is cached                                                                    |
 
 Lowering the maximum also caps projects that set a higher limit earlier.
+
+## Email
+
+These limit [email triggers](/docs/guides/email-triggers/) (preview). Every value is a whole number.
+
+| Setting                               | Default   | Range            | What it limits                                                                      |
+| ------------------------------------- | --------- | ---------------- | ----------------------------------------------------------------------------------- |
+| `agentEmail.maxInboundBytes`          | 5,242,880 | 1,024–26,214,400 | Bytes in one email an agent address accepts (5 MiB). Larger mail is rejected        |
+| `agentEmail.maxBodyChars`             | 12,000    | 200–100,000      | Characters of an email body placed in the agent's prompt                            |
+| `agentEmail.maxReplyChars`            | 20,000    | 100–200,000      | Characters in one reply an agent sends                                              |
+| `agentEmail.maxRepliesPerRun`         | 5         | 1–50             | Replies one email-started run can send. Failed attempts count                       |
+| `agentEmail.maxAllowedSenders`        | 20        | 1–200            | Allowed senders one email trigger can list                                          |
+| `agentEmail.inboundPerTriggerPerHour` | 20        | 1–10,000         | Emails one email trigger accepts per hour                                           |
+| `agentEmail.processingLeaseSeconds`   | 120       | 10–3,600         | Seconds one delivery attempt holds an email before a retried delivery may take over |
+| `agentEmail.loopbackPerHour`          | 10        | 1–100            | Loopback test emails one superadmin can send per hour                               |
 
 ## Storage and consistency
 

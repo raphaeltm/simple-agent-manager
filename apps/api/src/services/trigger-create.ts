@@ -120,6 +120,20 @@ export function validateTriggerSourceFields(
     throw errors.badRequest('emailConfig is only valid for email triggers');
 }
 
+/** Webhook and email triggers start agents from outside input, so they always name a profile. */
+const EXPLICIT_PROFILE_SOURCES = new Set(['webhook', 'email']);
+
+/**
+ * Refuses an update that would clear the agent profile of a trigger that must keep one.
+ * Shared by the REST PATCH route and MCP `update_trigger`; `undefined` means not supplied.
+ */
+export function assertKeepsAgentProfile(sourceType: string, agentProfileId: unknown): void {
+  if (!EXPLICIT_PROFILE_SOURCES.has(sourceType)) return;
+  if (agentProfileId === null || (typeof agentProfileId === 'string' && !agentProfileId.trim())) {
+    throw errors.badRequest(`agentProfileId is required for ${sourceType} triggers`);
+  }
+}
+
 function validateTriggerCreation(env: Env, body: v.InferOutput<typeof CreateTriggerSchema>) {
   const name = body.name.trim();
   const promptTemplate = body.promptTemplate.trim();

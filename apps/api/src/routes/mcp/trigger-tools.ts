@@ -31,7 +31,10 @@ import {
   serializeResourceRequirementsInput,
 } from '../../services/resource-requirements-input';
 import { clearTriggerPageCaches } from '../../services/trigger-cache';
-import { validateTriggerSourceFields } from '../../services/trigger-create';
+import {
+  assertKeepsAgentProfile,
+  validateTriggerSourceFields,
+} from '../../services/trigger-create';
 import {
   INVALID_PARAMS,
   jsonRpcError,
@@ -57,6 +60,7 @@ export async function handleUpdateTrigger(
   const { triggerId, trigger: existingTrigger } = ownedTrigger;
   try {
     validateTriggerSourceFields(existingTrigger.source_type, params);
+    assertKeepsAgentProfile(existingTrigger.source_type, params.agentProfileId);
     if (params.sourceType !== undefined)
       return jsonRpcError(requestId, INVALID_PARAMS, 'sourceType cannot be changed');
     if (params.githubConfig !== undefined) {
