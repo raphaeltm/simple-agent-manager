@@ -201,6 +201,11 @@ export async function recordStrandedDeploymentReleasePlacement(
  * (`requireAuthority` in provisioning-authority.ts). Any other cancellation,
  * such as an `AppError` from a caller's authorization check, gets a generic
  * reason; the raw message stays in the server log.
+ *
+ * Matched by name, like `isPlacementCancellation`, rather than `instanceof`:
+ * importing provisioning-authority.ts here pulls its node-deletion chain into
+ * every route that records release failures. Only that class's constructor
+ * sets this name; keep `ProvisioningAuthorityError` messages literal.
  */
 function strandedPlacementShownReason(error: unknown): string {
   if (error instanceof Error && error.name === 'ProvisioningAuthorityError') {
