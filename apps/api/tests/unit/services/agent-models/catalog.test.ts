@@ -271,6 +271,39 @@ describe('getAgentModelCatalog', () => {
     expect(modelsMock).toHaveBeenNthCalledWith(2, { per_page: 100, page: 2 });
   });
 
+  it('warns when the last page it may read is full, and not when a short page ends the list', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const fullPage = (page: number) =>
+        Array.from({ length: 100 }, (_, index) => ({
+          name: `@cf/acme/model-${page}-${index}`,
+          task: { name: 'Text Generation' },
+        }));
+      const capped = createEnv(async (params) => fullPage(params?.page ?? 0));
+      const result = await getAgentModelCatalog(capped.env, 3600, 1_700_000_000_000);
+      expect(capped.modelsMock).toHaveBeenCalledTimes(10);
+      expect(result.models).toHaveLength(1_000);
+      const capWarnings = warn.mock.calls.filter(([line]) =>
+        String(line).includes('agent_models.catalog.catalog_page_cap_reached')
+      );
+      expect(capWarnings).toHaveLength(1);
+      expect(JSON.parse(String(capWarnings[0]?.[0]))).toMatchObject({ pages: 10, rows: 1_000 });
+
+      resetAgentModelCatalogCacheForTests();
+      warn.mockClear();
+      const shortList = createEnv(async (params) =>
+        params?.page === 1 ? fullPage(1) : fullPage(2).slice(0, 3)
+      );
+      await getAgentModelCatalog(shortList.env, 3600, 1_700_000_000_000);
+      expect(shortList.modelsMock).toHaveBeenCalledTimes(2);
+      expect(
+        warn.mock.calls.some(([line]) => String(line).includes('catalog_page_cap_reached'))
+      ).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('does not refetch within the cache TTL', async () => {
     const { env, modelsMock } = createEnv(async () => [
       { name: '@cf/acme/model-a', task: { name: 'Text Generation' } },

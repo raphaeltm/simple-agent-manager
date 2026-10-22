@@ -111,6 +111,10 @@ selection UIs.
 7. **Who can edit.** Model access and budget are human-controlled (REST plus UI, `project:update`).
    The MCP profile/skill tools do not get the field.
 8. **Kill switch and limits** live in the admin settings registry (new category "AI models").
+9. **Catalog flags not modelled, on purpose.**
+   - `require_workers_paid` (8 models, e.g. GLM 5.3, Kimi, DeepSeek v4) gets no badge or refusal. Every SAM deployment already needs the Workers Paid plan (`self-hosting.mdx`: Durable Objects and Containers), so these models are always callable, and a badge would be noise on the hosted platform.
+   - `async_queue` (19 models) marks an optional batch API. Synchronous `env.AI.run` still works for those models (gpt-oss, Whisper), so nothing is refused.
+   - Websocket-only realtime models are refused (`unsupported_model`).
 
 ## Implementation checklist
 

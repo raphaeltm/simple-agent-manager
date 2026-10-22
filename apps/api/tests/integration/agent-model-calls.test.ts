@@ -27,9 +27,9 @@ vi.mock('../../src/services/workspace-file-transfer', async (importOriginal) => 
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
-import * as agentProfileService from '../../src/services/agent-profiles';
 import { resetAgentModelCatalogCacheForTests } from '../../src/services/agent-models/catalog';
 import { updateProjectAgentModelSettings } from '../../src/services/agent-models/project-settings';
+import * as agentProfileService from '../../src/services/agent-profiles';
 import * as skillService from '../../src/services/skills';
 import { callMcpTool, createJsonKv, createMcpApp, toolResult } from '../helpers/mcp-route';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';

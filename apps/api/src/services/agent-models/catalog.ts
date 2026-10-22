@@ -156,11 +156,17 @@ export function normalizeCatalog(rows: readonly unknown[]): AgentModelCatalogEnt
 async function fetchCatalogFromCloudflare(env: Env): Promise<AgentModelCatalogEntry[]> {
   const ai = getWorkersAiBinding(env);
   const rows: unknown[] = [];
+  let pageCapReached = false;
   for (let page = 1; page <= CATALOG_MAX_PAGES; page++) {
     const batch = await ai.models({ per_page: CATALOG_PAGE_SIZE, page });
     if (!Array.isArray(batch)) break;
     rows.push(...batch);
     if (batch.length < CATALOG_PAGE_SIZE) break;
+    pageCapReached = page === CATALOG_MAX_PAGES;
+  }
+  // The last allowed page came back full, so Cloudflare may list more models than SAM read.
+  if (pageCapReached) {
+    log.warn('catalog_page_cap_reached', { pages: CATALOG_MAX_PAGES, rows: rows.length });
   }
   const models = normalizeCatalog(rows);
   if (models.length === 0) throw new Error('Cloudflare returned an empty model catalog');
