@@ -337,6 +337,16 @@ Review of `142d1463a` ([PR comment](https://github.com/raphaeltm/simple-agent-ma
 
 Every new guard was proven discriminating. Test teardown now restores spies and timers, so one failing test cannot cascade into the next. The GitHub inbox has the same pre-existing late-task race: `tasks/backlog/2026-10-22-github-trigger-late-task-after-exhaustion.md`.
 
+### Verification — Astra High, task `01M5JS6YCDW8Y88P0DPN0S68QN`, 2026-10-22
+
+Review of `4e4bca278` ([PR comment](https://github.com/raphaeltm/simple-agent-manager/pull/2413#issuecomment-6352072371)). R2 and R3 fixed; Astra's run of the two test files passed 74/74. R1 was not fully fixed. One should-fix item remained:
+
+- **SHOULD-FIX: the first reservation of an email's execution was unfenced.** An attempt that stalled before reserving could reserve after the email was given up. That left a `queued` execution holding the run slot until the stale-execution cleanup.
+  - **Fix (`ace021f86`):** the reservation insert requires the attempt's email lease. A reservation refused for that reason returns a failed admission, and nothing is recorded as skipped.
+  - **Test:** an attempt paused just before its reservation batch; the email given up; the attempt resumed. Nothing is reserved, and the trigger's next email gets the slot. Removing the lease condition, or the lost-lease branch, fails exactly this test.
+
+The reviewer's session went to sleep after posting instead of completing its task, so the durable wait never fired; the result was found on the PR.
+
 ## Notes / log
 
 - 2026-10-22: Research complete. Astra plan review: approve-with-changes (above). Building with those changes.
