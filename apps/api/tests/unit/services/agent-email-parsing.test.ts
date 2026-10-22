@@ -8,6 +8,7 @@ import {
   parseAgentEmailRecipient,
 } from '../../../src/services/agent-email/address';
 import {
+  MAX_HEADER_VALUE_BYTES,
   MAX_REFERENCES,
   parseMessageIdList,
   parseSingleMessageId,
@@ -91,6 +92,29 @@ describe('agent email header handling', () => {
     expect(chain).toHaveLength(MAX_REFERENCES);
     expect(chain.at(-1)).toBe('<m@example.com>');
     expect(replyReferences(['<m@example.com>'], '<m@example.com>')).toEqual(['<m@example.com>']);
+  });
+
+  it('keeps the reference chain within the header size limit, dropping the oldest first', () => {
+    // The longest ids parseMessageIdList accepts: 200 characters on each side of the @.
+    const longId = (index: number) => `<${String(index).padStart(200, 'r')}@${'d'.repeat(200)}>`;
+    const many = Array.from({ length: 20 }, (_, index) => longId(index));
+    const current = longId(99);
+
+    const chain = replyReferences(many, current);
+
+    expect(new TextEncoder().encode(chain.join(' ')).byteLength).toBeLessThanOrEqual(
+      MAX_HEADER_VALUE_BYTES
+    );
+    expect(chain.at(-1)).toBe(current);
+    expect(chain.slice(0, -1)).toEqual(many.slice(-(chain.length - 1)));
+
+    // Multi-byte ids are measured in bytes, not characters.
+    const wide = Array.from({ length: 20 }, (_, index) => `<${'é'.repeat(150)}${index}@x>`);
+    const wideChain = replyReferences(wide, '<m@example.com>');
+    expect(new TextEncoder().encode(wideChain.join(' ')).byteLength).toBeLessThanOrEqual(
+      MAX_HEADER_VALUE_BYTES
+    );
+    expect(wideChain.at(-1)).toBe('<m@example.com>');
   });
 
   it('builds a single-line reply subject', () => {

@@ -63,7 +63,9 @@ function contractSendBinding() {
       if (recipients.length > 50) throw new Error('E_TOO_MANY_RECIPIENTS');
       for (const [name, value] of Object.entries(message.headers ?? {})) {
         if (!ALLOWED_HEADERS.has(name.toLowerCase())) throw new Error('E_HEADER_NOT_ALLOWED');
-        if (value.length > 2048) throw new Error('E_HEADER_VALUE_TOO_LONG');
+        if (new TextEncoder().encode(value).byteLength > 2048) {
+          throw new Error('E_HEADER_VALUE_TOO_LONG');
+        }
         if (/[\r\n]/.test(value)) throw new Error('E_VALIDATION_ERROR');
       }
       if (/[\r\n]/.test(message.subject)) throw new Error('E_VALIDATION_ERROR');
@@ -816,6 +818,29 @@ describe('agent email vertical slice', () => {
 
       expect(mail.sent[0]?.subject).toBe('Re: Hello Bcc: evil@example.net');
       expect(mail.sent[0]?.to).toBe('alice@example.com');
+    });
+
+    it('can still reply to an email with a long reference chain', async () => {
+      // Twenty of the longest ids the parser accepts join to about 8 KB; Cloudflare's limit
+      // is 2,048 bytes per header value.
+      const ids = Array.from(
+        { length: 20 },
+        (_, index) => `<${String(index).padStart(200, 'r')}@${'d'.repeat(200)}>`
+      );
+      const message = inbound(rawEmail({ references: ids.join('\r\n ') }));
+      const accepted = await handleInboundAgentEmail(message, env, { submitter });
+      if (accepted.kind !== 'accepted') throw new Error('fixture email was not accepted');
+
+      await replyToTriggerEmail(
+        env,
+        { projectId: PROJECT_ID, taskId: accepted.executionId, body: 'Looking now.' },
+        agentEmailSenderFor(env)
+      );
+
+      const references = mail.sent[0]?.headers?.References ?? '';
+      expect(new TextEncoder().encode(references).byteLength).toBeLessThanOrEqual(2048);
+      expect(references.endsWith('<m1@example.com>')).toBe(true);
+      expect(references).toContain(ids.at(-1));
     });
   });
 });

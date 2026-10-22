@@ -9,6 +9,8 @@ const MESSAGE_ID_TOKEN = /<[^<>\s]{1,402}>/g;
 const MAX_MESSAGE_ID_LENGTH = 404;
 /** References kept on a reply; newest last. Cloudflare rejects replies past 100 entries. */
 export const MAX_REFERENCES = 20;
+/** Cloudflare Email Sending rejects any header value longer than this many bytes. */
+export const MAX_HEADER_VALUE_BYTES = 2048;
 export const MAX_SUBJECT_LENGTH = 300;
 const MAX_DISPLAY_NAME_LENGTH = 100;
 
@@ -50,10 +52,19 @@ export function parseSingleMessageId(value: string | null | undefined): string |
   return isValidMessageId(trimmed) ? trimmed : null;
 }
 
-/** References for a reply: the original's references plus its own id, newest last. */
+function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+/**
+ * References for a reply: the original's references plus its own id, newest last. The oldest
+ * are dropped until the chain fits both the count and the header size limit; the original's own
+ * id always stays (it is at most 404 characters, well under the limit).
+ */
 export function replyReferences(references: string[], messageId: string): string[] {
-  const chain = [...references.filter((id) => id !== messageId), messageId];
-  return chain.slice(-MAX_REFERENCES);
+  const chain = [...references.filter((id) => id !== messageId), messageId].slice(-MAX_REFERENCES);
+  while (chain.length > 1 && utf8Bytes(chain.join(' ')) > MAX_HEADER_VALUE_BYTES) chain.shift();
+  return chain;
 }
 
 export function replySubject(subject: string): string {
