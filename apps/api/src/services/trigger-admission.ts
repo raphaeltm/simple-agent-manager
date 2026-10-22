@@ -66,9 +66,10 @@ export interface TriggerAdmissionInput {
    */
   executionId?: string;
   /**
-   * The stored agent email this attempt holds. Admission's writes to the execution (taking a
-   * failed one back, recording a failure) apply only while the attempt still holds this lease,
-   * so an attempt that lost the email cannot change the execution of the attempt that took over.
+   * The stored agent email this attempt holds. Admission's writes to the execution (reserving
+   * it, taking a failed one back, recording a failure) apply only while the attempt still holds
+   * this lease, so an attempt that lost the email cannot change the execution of the attempt
+   * that took over, or reserve a run slot for an email SAM already gave up on.
    */
   emailLease?: { rowId: string; leaseToken: string };
 }
@@ -79,6 +80,17 @@ const HOLDS_EMAIL_LEASE_SQL = `(? IS NULL OR EXISTS (SELECT 1 FROM trigger_email
 
 function emailLeaseBindings(lease: TriggerAdmissionInput['emailLease']): (string | null)[] {
   return [lease?.rowId ?? null, lease?.rowId ?? null, lease?.leaseToken ?? null];
+}
+
+async function lostEmailLease(env: Env, lease: TriggerAdmissionInput['emailLease']) {
+  if (!lease) return false;
+  const held = await env.DATABASE.prepare(
+    `SELECT 1 AS held FROM trigger_email_messages
+     WHERE id = ? AND status = 'processing' AND lease_token = ?`
+  )
+    .bind(lease.rowId, lease.leaseToken)
+    .first<{ held: number }>();
+  return !held;
 }
 
 async function consecutiveFailureCount(
@@ -284,7 +296,8 @@ export async function admitAndSubmitTriggerExecution(
              LEFT JOIN tasks t ON t.id = e.task_id
              WHERE e.trigger_id = triggers.id
                AND ${EXECUTION_HOLDS_RUN_SLOT_SQL})
-            < CASE WHEN skip_if_running = 1 THEN 1 ELSE max_concurrent END`
+            < CASE WHEN skip_if_running = 1 THEN 1 ELSE max_concurrent END
+        AND ${HOLDS_EMAIL_LEASE_SQL}`
   ).bind(
     executionId,
     input.eventType,
@@ -296,7 +309,8 @@ export async function admitAndSubmitTriggerExecution(
     trigger.id,
     trigger.projectId,
     allowPaused,
-    ...EXECUTION_HOLDS_RUN_SLOT_BINDINGS
+    ...EXECUTION_HOLDS_RUN_SLOT_BINDINGS,
+    ...emailLeaseBindings(input.emailLease)
   );
   const increment = env.DATABASE.prepare(
     `UPDATE triggers SET next_execution_sequence = next_execution_sequence + 1, updated_at = ?
@@ -306,6 +320,11 @@ export async function admitAndSubmitTriggerExecution(
   const [reserveResult] = previous ? [] : await env.DATABASE.batch([reserve, increment]);
 
   if (!previous && !reserveResult?.meta.changes) {
+    // Refused because the attempt lost its email, not because the trigger is busy: nothing was
+    // reserved, and there is nothing to record as skipped.
+    if (await lostEmailLease(env, input.emailLease)) {
+      return { outcome: 'failed', executionId, error: 'Another attempt took over this email' };
+    }
     if (input.githubDeliveryId) {
       const winner = await env.DATABASE.prepare(
         'SELECT id FROM trigger_executions WHERE github_delivery_id = ? AND trigger_id = ?'

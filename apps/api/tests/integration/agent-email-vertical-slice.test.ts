@@ -164,6 +164,48 @@ function operatorInbox(sqlite: Database.Database) {
   return { namespace: namespace as unknown as DurableObjectNamespace, received };
 }
 
+/**
+ * Wrap a D1 adapter so the first batch containing a statement prepared from SQL that includes
+ * `sqlFragment` waits until released, as an attempt stalled at that point would.
+ */
+function pauseFirstBatchWith(base: D1Database, sqlFragment: string) {
+  type Statement = { bind: (...params: unknown[]) => object };
+  const tagged = new WeakSet<object>();
+  let armed = true;
+  let markReached: () => void = () => undefined;
+  const reached = new Promise<void>((resolve) => (markReached = resolve));
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  const baseDb = base as unknown as {
+    prepare(sql: string): Statement;
+    batch(statements: object[]): Promise<unknown>;
+  };
+  const db = {
+    ...(base as unknown as Record<string, unknown>),
+    prepare: (sql: string) => {
+      const statement = baseDb.prepare(sql);
+      if (!sql.includes(sqlFragment)) return statement;
+      return {
+        ...statement,
+        bind: (...params: unknown[]) => {
+          const bound = statement.bind(...params);
+          tagged.add(bound);
+          return bound;
+        },
+      };
+    },
+    batch: async (statements: object[]) => {
+      if (armed && statements.some((statement) => tagged.has(statement))) {
+        armed = false;
+        markReached();
+        await released;
+      }
+      return baseDb.batch(statements);
+    },
+  } as unknown as D1Database;
+  return { db, reached, release: () => release() };
+}
+
 /** Wrap a D1 adapter so the next "mark this email accepted" write fails once. */
 function failNextAcceptedWrite(base: D1Database): { db: D1Database; arm(): void } {
   let armed = false;
@@ -758,6 +800,48 @@ describe('agent email vertical slice', () => {
     ).toEqual({ status: 'failed', task_id: null });
 
     // So the trigger's single run slot is free for the next email right away.
+    const next = await handleInboundAgentEmail(
+      inbound(rawEmail({ messageId: '<m2@example.com>', subject: 'Next one' })),
+      env,
+      { submitter, now: at }
+    );
+    expect(next).toMatchObject({ kind: 'accepted' });
+    expect(sqlite.prepare('SELECT count(*) AS n FROM tasks').get()).toEqual({ n: 1 });
+  });
+
+  it('reserves no run for an email given up while its first attempt stalled before reserving', async () => {
+    await updateAdminSettings(env, {
+      changes: [{ name: 'agentEmail.maxDeliveryAttempts', value: 1 }],
+      actorUserId: 'admin-1',
+    });
+    sqlite.prepare('UPDATE triggers SET max_concurrent = 1 WHERE id = ?').run(TRIGGER_ID);
+    let clock = new Date();
+    const at = () => clock;
+    // The only attempt stores the email, then stalls just before reserving its execution.
+    const paused = pauseFirstBatchWith(env.DATABASE, 'INSERT OR IGNORE INTO trigger_executions');
+    env.DATABASE = paused.db;
+    const first = handleInboundAgentEmail(inbound(rawEmail()), env, { submitter, now: at });
+    await paused.reached;
+    const { leaseExpiresAt } = sqlite
+      .prepare('SELECT lease_expires_at AS leaseExpiresAt FROM trigger_email_messages')
+      .get() as { leaseExpiresAt: string };
+
+    // Its lease runs out and the sweep gives the email up, with no execution reserved yet.
+    clock = new Date(Date.parse(leaseExpiresAt) + 1);
+    expect(await runAgentEmailRecovery(env, undefined, { submitter, now: at })).toMatchObject({
+      gaveUp: 1,
+    });
+
+    // The stalled attempt resumes. It no longer holds the email, so it reserves nothing.
+    paused.release();
+    expect(await first).toEqual({ kind: 'queued' });
+    expect(sqlite.prepare('SELECT count(*) AS n FROM trigger_executions').get()).toEqual({ n: 0 });
+    expect(sqlite.prepare('SELECT status FROM trigger_email_messages').get()).toEqual({
+      status: 'rejected',
+    });
+    expect(submitter).not.toHaveBeenCalled();
+
+    // The trigger's single run slot is free for its next email.
     const next = await handleInboundAgentEmail(
       inbound(rawEmail({ messageId: '<m2@example.com>', subject: 'Next one' })),
       env,
