@@ -24,7 +24,7 @@ Each project also has a monthly spending limit for these calls, $5 by default.
 
 ## Choose the models for a project
 
-Open **Project settings → Agents → AI models**. Here you can:
+Open **Project settings → Agents → AI Models**. Here you can:
 
 - see the limit, this month's spend and which models were used
 - turn models on and off, grouped by what they do, with their published prices
@@ -35,7 +35,7 @@ Project owners and admins can change these settings. Other members can see them.
 
 ## Give a profile or skill its own models
 
-An [agent profile](/docs/guides/agents/#agent-profiles) or a skill can choose its own models instead of using the project's. Open the profile or skill and pick **Choose models** under **AI models**.
+An [agent profile](/docs/guides/agents/#agent-profiles) or a skill can choose its own models instead of using the project's. Open the profile or skill and set **AI models this profile can call** (or **this skill can call**) to **Choose models**.
 
 The most specific choice wins: a skill's choice beats its profile's, and a profile's beats the project's. Choosing no models at all turns model calls off for agents using that profile or skill.
 

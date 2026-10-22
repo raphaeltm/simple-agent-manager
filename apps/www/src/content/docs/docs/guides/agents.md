@@ -208,7 +208,7 @@ ID is refused.
 
 Besides its own model, an agent can call Cloudflare-hosted AI models, such as decision, extraction,
 speech and image models, through the `run_ai_model` tool. A profile or skill can choose its own set
-under **AI models**, which overrides the project's choice. See
+of models, which overrides the project's choice. See
 [AI models for agents](/docs/guides/ai-models-for-agents/).
 
 ### Permission mode
