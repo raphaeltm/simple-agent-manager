@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 
 import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
@@ -24,6 +24,17 @@ import { AgentEmailReplyError, replyToTriggerEmail } from '../../src/services/ag
 import type { McpTokenData } from '../../src/services/mcp-token';
 import type { TriggerTaskSubmitter } from '../../src/services/trigger-admission';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
+
+// The Worker entry imports Cloudflare runtime modules that cannot load in Node. Stub only those,
+// as the other Worker-entry tests do; drizzle and SQLite stay real.
+vi.mock('cloudflare:workers', () => ({ DurableObject: class {}, WorkerEntrypoint: class {} }), {
+  virtual: true,
+});
+vi.mock('@cloudflare/sandbox', () => ({ Sandbox: class {} }));
+vi.mock('@cloudflare/containers', () => ({
+  Container: class {},
+  switchPort: vi.fn((request: Request) => request),
+}));
 
 const BASE_DOMAIN = 'fixture.example';
 const ADDRESS_ID = 'k3j2h7m9q2xw4n8p';
@@ -543,6 +554,46 @@ describe('agent email vertical slice', () => {
     errorLog.mockRestore();
   });
 
+  it('asks for a retry, and starts nothing twice, while the same email is still being delivered', async () => {
+    const submit = submitter.getMockImplementation();
+    if (!submit) throw new Error('fixture submitter has no implementation');
+    let releaseFirst: () => void = () => undefined;
+    submitter.mockImplementationOnce(async (submitEnv, input) => {
+      await new Promise<void>((resolve) => (releaseFirst = resolve));
+      return submit(submitEnv, input);
+    });
+    const first = handleInboundAgentEmail(inbound(rawEmail()), env, { submitter });
+    // Hold the first delivery inside submission: its lease is live and its run is linked.
+    await vi.waitFor(() => expect(submitter).toHaveBeenCalledTimes(1));
+    expect(
+      sqlite
+        .prepare(
+          `SELECT status, trigger_execution_id IS NOT NULL AS linked FROM trigger_email_messages`
+        )
+        .all()
+    ).toEqual([{ status: 'processing', linked: 1 }]);
+
+    // Acknowledging this copy would lose the email if the first attempt then failed, so it
+    // must fail temporarily (the sender's server retries) instead.
+    const concurrent = inbound(rawEmail());
+    await expect(handleInboundAgentEmail(concurrent, env, { submitter })).rejects.toThrow(
+      /already in progress/
+    );
+    expect(concurrent.setReject).not.toHaveBeenCalled();
+
+    releaseFirst();
+    expect(await first).toMatchObject({ kind: 'accepted' });
+    expect(submitter).toHaveBeenCalledTimes(1);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM tasks').get()).toEqual({ n: 1 });
+    expect(sqlite.prepare(`SELECT status FROM trigger_email_messages`).all()).toEqual([
+      { status: 'accepted' },
+    ]);
+    // The sender's retry then arrives after acceptance and is acknowledged once.
+    expect(await handleInboundAgentEmail(inbound(rawEmail()), env, { submitter })).toEqual({
+      kind: 'duplicate',
+    });
+  });
+
   it('does not resubmit an email whose task exists when a crashed attempt is taken over', async () => {
     const accepted = await handleInboundAgentEmail(inbound(rawEmail()), env, { submitter });
     if (accepted.kind !== 'accepted') throw new Error('fixture email was not accepted');
@@ -581,6 +632,56 @@ describe('agent email vertical slice', () => {
       from: ADDRESS,
       subject: 'Re: SAM agent email loopback test',
       autoSubmitted: 'auto-replied',
+    });
+  });
+
+  describe('through the Worker email() export', () => {
+    let worker: (typeof import('../../src/index'))['default'];
+    // Loading the whole Worker takes a while the first time.
+    beforeAll(async () => {
+      worker = (await import('../../src/index')).default;
+    }, 120_000);
+
+    const deliver = (message: ReturnType<typeof inbound>) =>
+      worker.email(message as unknown as ForwardableEmailMessage, env);
+
+    it('refuses at SMTP time through the real export, without throwing', async () => {
+      const message = inbound(rawEmail({ from: 'Mallory <mallory@example.net>' }), {
+        from: 'mallory@example.net',
+      });
+
+      await expect(deliver(message)).resolves.toBeUndefined();
+
+      expect(message.setReject).toHaveBeenCalledWith('Sender not allowed');
+      expect(sqlite.prepare('SELECT count(*) AS n FROM tasks').get()).toEqual({ n: 0 });
+    });
+
+    it('fails the delivery temporarily, instead of rejecting it, when it must be retried', async () => {
+      // An earlier attempt of the same email still holds a live lease.
+      sqlite
+        .prepare(
+          `INSERT INTO trigger_email_messages
+             (id, trigger_id, project_id, direction, status, message_id, from_address,
+              to_address, subject, raw_size, lease_expires_at, created_at, updated_at)
+           VALUES ('in-flight', ?, ?, 'inbound', 'processing', '<m1@example.com>',
+                   'alice@example.com', ?, 'Please fix the login bug', 100, ?, ?, ?)`
+        )
+        .run(
+          TRIGGER_ID,
+          PROJECT_ID,
+          ADDRESS,
+          new Date(Date.now() + 60_000).toISOString(),
+          new Date().toISOString(),
+          new Date().toISOString()
+        );
+      const message = inbound(rawEmail());
+
+      await expect(deliver(message)).rejects.toThrow(/already in progress/);
+
+      expect(message.setReject).not.toHaveBeenCalled();
+      expect(sqlite.prepare(`SELECT status FROM trigger_email_messages`).all()).toEqual([
+        { status: 'processing' },
+      ]);
     });
   });
 
