@@ -35,3 +35,6 @@ Wizard introduced in `0b81beb30` (#1233) created profiles without writing the pr
 
 ## Release gate repair
 CI marketing job timed out twice at 15 minutes while browser tests were progressing without failures (run39779448324 attempts1–2). Attempt2 needed about11 minutes before its358 browser scenarios began. Raised the job timeout to25 minutes to retain the complete required suite. No product runtime change after staging verification.
+
+## Review correction
+CodeRabbit identified overlapping saves via Back/step navigation during pending task setup. Added a synchronous save guard and disabled navigation through the full default/profile save. Deferred-promise regression failed before the fix and all26 wizard tests now pass. Mobile/desktop browser tests verify disabled pending controls and successful unlock. Typecheck and changed-file lint pass. Final staging and CI verification follow on the corrected head.

@@ -243,7 +243,11 @@ test.describe('Project onboarding wizard', () => {
     const defaults: string[] = [];
     let failSave = true;
     let profilesCreated = 0;
-    await page.route('**/api/projects/proj-audit-1', (route) => {
+    let releaseTaskSave!: () => void;
+    const taskSaveGate = new Promise<void>((resolve) => {
+      releaseTaskSave = resolve;
+    });
+    await page.route('**/api/projects/proj-audit-1', async (route) => {
       const body = route.request().postDataJSON();
       if (failSave)
         return route.fulfill({
@@ -253,6 +257,7 @@ test.describe('Project onboarding wizard', () => {
             message: 'Could not save the project default. Please retry.',
           },
         });
+      if (body.defaultAgentType === 'openai-codex') await taskSaveGate;
       defaults.push(body.defaultAgentType);
       return route.fulfill({ status: 200, json: { ...CREATED_PROJECT, ...body } });
     });
@@ -299,6 +304,17 @@ test.describe('Project onboarding wizard', () => {
     await screenshot(page, 'setup-default-task-controls');
     await assertNoOverflow(page);
     await page.getByRole('button', { name: /Create profile/ }).click();
+    await expect(page.getByRole('button', { name: /Back/ })).toBeDisabled();
+    await expect(page.getByRole('button', { name: /Creating/ })).toBeDisabled();
+    await expect(page.getByRole('button', { name: /Skip/ })).toBeDisabled();
+    if ((page.viewportSize()?.width ?? 0) >= 1024) {
+      await expect(
+        page.getByRole('button', { name: 'Conversation agent', exact: true })
+      ).toBeDisabled();
+    }
+    await screenshot(page, 'setup-default-task-pending');
+    await assertNoOverflow(page);
+    releaseTaskSave();
     await expect(page.getByRole('heading', { name: /Schedule automation/ })).toBeVisible();
     expect(defaults).toEqual(['claude-code', 'openai-codex']);
     expect(profilesCreated).toBe(2);

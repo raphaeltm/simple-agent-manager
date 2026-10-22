@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -443,6 +443,49 @@ describe('ProjectOnboardingWizard', () => {
       defaultAgentType: 'openai-codex',
     });
     expect(mockCreateAgentProfile).toHaveBeenCalledTimes(2);
+  });
+
+  it('blocks navigation and duplicate saves until the entire task profile save finishes', async () => {
+    let finishDefault!: (value: unknown) => void;
+    let finishProfile!: (value: unknown) => void;
+    mockUpdateProject.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishDefault = resolve;
+        })
+    );
+    mockCreateAgentProfile.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishProfile = resolve;
+        })
+    );
+    await advanceToSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/ }));
+    const assertLocked = () => {
+      expect(screen.getByRole('button', { name: /Back/ })).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: 'Conversation agent', exact: true })
+      ).toBeDisabled();
+      expect(screen.getByRole('button', { name: /Skip/ })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /Creating/ })).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: /Back/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Conversation agent', exact: true }));
+      fireEvent.click(screen.getByRole('button', { name: /Creating/ }));
+      expect(screen.getByRole('heading', { name: 'Set up a task agent' })).toBeInTheDocument();
+      expect(mockUpdateProject).toHaveBeenCalledTimes(1);
+    };
+    assertLocked();
+    await act(async () => finishDefault({ id: 'proj-1', defaultAgentType: 'claude-code' }));
+    await waitFor(() => expect(mockCreateAgentProfile).toHaveBeenCalledTimes(1));
+    assertLocked();
+    await act(async () => finishProfile({ id: 'task', agentType: 'claude-code' }));
+    await screen.findByRole('heading', { name: /Schedule automation/ });
+    expect(screen.getByRole('button', { name: /Back/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation agent', exact: true }));
+    await screen.findByRole('heading', { name: 'Set up a conversation agent' });
   });
 
   it('retains the conversation default when task setup is skipped', async () => {

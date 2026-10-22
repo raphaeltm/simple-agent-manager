@@ -153,10 +153,12 @@ function railBadgeClass(state: RailState): string {
 export function ProgressRail({
   current,
   lockedBeforeIndex = 0,
+  disabled = false,
   onJump,
 }: Readonly<{
   current: OnboardingStepId;
   lockedBeforeIndex?: number;
+  disabled?: boolean;
   onJump: (id: OnboardingStepId) => void;
 }>) {
   const currentIndex = stepIndex(current);
@@ -164,7 +166,7 @@ export function ProgressRail({
     <ol className="grid gap-1" aria-label="Onboarding steps">
       {ONBOARDING_STEPS.map((step, index) => {
         const state = railState(index, currentIndex);
-        const locked = index < lockedBeforeIndex && index !== currentIndex;
+        const locked = disabled || (index < lockedBeforeIndex && index !== currentIndex);
         const Icon = step.icon;
         return (
           <li key={step.id}>

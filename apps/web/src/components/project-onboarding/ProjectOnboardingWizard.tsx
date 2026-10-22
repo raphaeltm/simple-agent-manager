@@ -8,7 +8,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { Alert, Button, Skeleton } from '@simple-agent-manager/ui';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import {
@@ -97,6 +97,7 @@ export function ProjectOnboardingWizard({
   const [triggerStatus, setTriggerStatus] = useState<SetupStatus>('pending');
   const [setupError, setSetupError] = useState<string | null>(null);
   const [savingSetup, setSavingSetup] = useState<string | null>(null);
+  const profileSavePending = useRef(false);
 
   const [conversationProfile, setConversationProfile] = useState<ProfileDraft>({
     name: 'Conversation profile',
@@ -149,6 +150,7 @@ export function ProjectOnboardingWizard({
   }, [step]);
 
   const goToStep = (id: OnboardingStepId) => {
+    if (profileSavePending.current) return;
     // Clear step-scoped setup errors so a failed Create attempt on one step does
     // not surface under a different step's form.
     setSetupError(null);
@@ -374,7 +376,7 @@ export function ProjectOnboardingWizard({
   /* ─── Setup handlers ─── */
 
   const saveProfile = async (kind: 'conversation' | 'task'): Promise<boolean> => {
-    if (!project) return false;
+    if (!project || profileSavePending.current) return false;
     const draft = kind === 'conversation' ? conversationProfile : taskProfile;
     if (!draft.agentType) {
       setSetupError('Choose a configured agent before creating this profile, or skip it.');
@@ -385,6 +387,7 @@ export function ProjectOnboardingWizard({
       return false;
     }
     setSetupError(null);
+    profileSavePending.current = true;
     setSavingSetup(kind);
     try {
       // The task agent wins when both setup profiles exist. Revisiting an earlier
@@ -406,6 +409,7 @@ export function ProjectOnboardingWizard({
       setSetupError(error instanceof Error ? error.message : 'Failed to create profile');
       return false;
     } finally {
+      profileSavePending.current = false;
       setSavingSetup(null);
     }
   };
@@ -456,6 +460,7 @@ export function ProjectOnboardingWizard({
   /* ─── Footer step actions (Create / Skip advance to the next step) ─── */
 
   const createProfileAndAdvance = async (kind: 'conversation' | 'task') => {
+    if (profileSavePending.current) return;
     if (createdProfiles[kind]) {
       goNext();
       return;
@@ -649,7 +654,7 @@ export function ProjectOnboardingWizard({
     }
     if (step === 'kickoff') return null;
     if (step === 'conversation' || step === 'task') {
-      const saving = savingSetup === step;
+      const saving = savingSetup !== null;
       return (
         <div className="flex flex-wrap gap-2">
           <Button
@@ -695,7 +700,12 @@ export function ProjectOnboardingWizard({
     <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
       <aside className="hidden lg:block">
         <div className="sticky top-4">
-          <ProgressRail current={step} lockedBeforeIndex={lockedBeforeIndex} onJump={goToStep} />
+          <ProgressRail
+            current={step}
+            lockedBeforeIndex={lockedBeforeIndex}
+            disabled={savingSetup !== null}
+            onJump={goToStep}
+          />
         </div>
       </aside>
 
@@ -716,6 +726,7 @@ export function ProjectOnboardingWizard({
             onClick={step === 'welcome' ? () => navigate('/projects') : goBack}
             disabled={
               creatingProject ||
+              savingSetup !== null ||
               (currentIndex <= lockedBeforeIndex && currentIndex !== 0 && !!project)
             }
           >
