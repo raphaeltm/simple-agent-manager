@@ -5,7 +5,17 @@ description: User-facing SAM changes from the latest development cycles, with pr
 
 This page summarizes recent changes that affect how people use SAM. Use it as a quick orientation when returning to the product after a week away, then follow the linked guides for the full workflow.
 
-## This cycle: 6 – 13 October 2026
+## This cycle: 20 – 26 October 2026
+
+### For everyone
+
+- **Agents can call other AI models.** Agents can now call Cloudflare-hosted models while they work,
+  for example asking a decision model a yes/no question, extracting fields from a log, or
+  transcribing a recording. Cheap decision, extraction and classifier models are on by default.
+  Choose others, and set a monthly limit, in project settings. A profile or skill can choose its own.
+  → [AI models for agents](/docs/guides/ai-models-for-agents/)
+
+## Earlier: 6 – 13 October 2026
 
 ### For everyone
 

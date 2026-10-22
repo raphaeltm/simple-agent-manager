@@ -795,6 +795,9 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('list_subscription_events');
       expect(toolNames).toContain('get_event');
       expect(toolNames).toContain('ack_event_delivery');
+      // Agent model calls (Cloudflare-hosted models)
+      expect(toolNames).toContain('list_ai_models');
+      expect(toolNames).toContain('run_ai_model');
       for (const name of [
         'publish_channel_event',
         'list_event_channels',

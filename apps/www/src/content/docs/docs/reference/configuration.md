@@ -11,22 +11,22 @@ This reference covers the most important configuration variables. For the comple
 
 ## Dynamic admin controls
 
-Use [Admin → Settings](/docs/guides/admin-settings/) for Phase 1 OAuth, Connector, trials and operational controls. D1 overrides take precedence over temporary legacy environment/KV inputs and code defaults. Reset removes the override and can reveal a legacy value. Encryption/signing roots, domains and Cloudflare resource bindings remain bootstrap configuration. New runtime tunables belong in the typed settings registry; the environment tables below retain migration compatibility.
+Use [Admin → Settings](/docs/guides/admin-settings/) for Phase 1 OAuth, Connector, trials and operational controls, and for the [AI models for agents](/docs/guides/ai-models-for-agents/) limits. D1 overrides take precedence over temporary legacy environment/KV inputs and code defaults. Reset removes the override and can reveal a legacy value. Encryption/signing roots, domains and Cloudflare resource bindings remain bootstrap configuration. New runtime tunables belong in the typed settings registry; the environment tables below retain migration compatibility.
 
 ## Private SAM assistant runtime controls
 
 Use the typed **Operations** admin settings below for live configuration. All eight are non-secret settings stored in D1. User opt-in is a separate per-user setting and defaults to off; clearing the installation switch never enables SAM for a user.
 
-| Admin setting key                       | Default    | Permitted range and meaning                                                                                                         |
-| --------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `operations.samOperatorDisabled`        | `false`    | Boolean; disables assistant turns/actions installation-wide while preserving saved user preferences.                                |
-| `operations.samOperatorWatchLifetimeMs` | `86400000` | Integer `1`–`2147483647`; own-work observation lifetime in milliseconds (24 hours). Expiry does not cancel the project task.        |
-| `operations.samOperatorEventPageSize`   | `25`       | Integer `1`–`25`; maximum watches per scan, events per watch, and visible work cards.                                               |
-| `operations.samOperatorWorkRefreshMs`   | `30000`    | Integer `1000`–`2147483647`; durable own-work refresh cadence in milliseconds, separate from browser refresh.                       |
-| `operations.samOperatorWatchRetryLimit` | `3`        | Integer `1`–`25`; consecutive failed watch refreshes before updates stop. Successful pulls or requested follow-ups reset the count. |
-| `operations.samOperatorStreamFlushMs` | `80` | Integer `16`–`2000`; milliseconds between live updates while the assistant answers. |
-| `operations.samOperatorStreamHeartbeatMs` | `15000` | Integer `1000`–`120000`; keep-alive interval on a live answer stream. |
-| `operations.samOperatorStreamMaxSubscribers` | `4` | Integer `1`–`20`; browser tabs that can follow one answer live at the same time. |
+| Admin setting key                            | Default    | Permitted range and meaning                                                                                                         |
+| -------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.samOperatorDisabled`             | `false`    | Boolean; disables assistant turns/actions installation-wide while preserving saved user preferences.                                |
+| `operations.samOperatorWatchLifetimeMs`      | `86400000` | Integer `1`–`2147483647`; own-work observation lifetime in milliseconds (24 hours). Expiry does not cancel the project task.        |
+| `operations.samOperatorEventPageSize`        | `25`       | Integer `1`–`25`; maximum watches per scan, events per watch, and visible work cards.                                               |
+| `operations.samOperatorWorkRefreshMs`        | `30000`    | Integer `1000`–`2147483647`; durable own-work refresh cadence in milliseconds, separate from browser refresh.                       |
+| `operations.samOperatorWatchRetryLimit`      | `3`        | Integer `1`–`25`; consecutive failed watch refreshes before updates stop. Successful pulls or requested follow-ups reset the count. |
+| `operations.samOperatorStreamFlushMs`        | `80`       | Integer `16`–`2000`; milliseconds between live updates while the assistant answers.                                                 |
+| `operations.samOperatorStreamHeartbeatMs`    | `15000`    | Integer `1000`–`120000`; keep-alive interval on a live answer stream.                                                               |
+| `operations.samOperatorStreamMaxSubscribers` | `4`        | Integer `1`–`20`; browser tabs that can follow one answer live at the same time.                                                    |
 
 Each refresh selects at most 25 watches and reads at most 25 events per watch: at most 325 caller D1 reads, 75 cold ProjectData RPCs, and 625 local event-reference inserts, plus fixed alarm setup. A work-card read performs at most 75 D1 reads. Each watch persists its next check and charges an attempt before I/O; the alarm uses the earliest watch deadline. Failed watches defer until that deadline and stop after the retry limit, with a visible update warning. The watch lifetime also stops observation independently; neither condition cancels project work.
 
@@ -1671,65 +1671,64 @@ Project event MCP tools use the ProjectData event limits above: `PROJECT_EVENT_L
 
 ## Web UI (Build-Time)
 
-| Variable                                     | Default            | Description                                                                                          |
-| -------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------- |
-| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`         | `10485760` (10 MB) | Images below this size render inline automatically                                                   |
-| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`           | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link                                 |
-| `VITE_ANALYTICS_MAX_QUEUE_SIZE`              | `100`              | Max client-side analytics events retained before oldest events drop                                  |
-| `VITE_ANALYTICS_FLUSH_THRESHOLD`             | `10`               | Client event count that triggers an immediate analytics flush                                        |
-| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`           | `5000`             | Client analytics background flush interval in milliseconds                                           |
-| `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES`       | `100`              | Max paginated diagnosis-event pages loaded per browser request                                       |
-| `VITE_CHAT_DELTA_MAX_PAGES`                  | `50`               | Max newer-message pages one chat refresh drains before failing visibly                               |
-| `VITE_CHAT_TIMELINE_MAX_PAGES`               | `200`              | Max pages fetched per loop when the chat timeline drawer opens                                       |
-| `VITE_CHAT_LOAD_UNTIL_MAX_PAGES`             | `400`              | Max older-message pages chased while resolving a timeline jump                                       |
-| `VITE_PROJECT_LIST_LIMIT`                    | `50`               | Projects loaded into each shared list-cache entry                                                    |
-| `VITE_PROJECT_POLL_INTERVAL_MS`              | `30000`            | Project-list page refresh cadence in milliseconds; `0` disables                                      |
-| `VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS`      | `60000`            | App-shell project-list refresh cadence in milliseconds; `0` disables                                 |
-| `VITE_WORKSPACE_PORTS_POLL_MS`               | `10000`            | Workspace forwarded-port base refresh cadence in milliseconds                                        |
-| `VITE_WORKSPACE_PORTS_BACKOFF_MAX_MS`        | `120000`           | Maximum backoff between forwarded-port readiness polls                                               |
-| `VITE_WORKSPACE_PORTS_FAILURE_BUDGET`        | `6`                | Consecutive unavailable port-list responses before circuit cooldown                                  |
-| `VITE_WORKSPACE_PORTS_BACKOFF_JITTER_RATIO`  | `0.2`              | +/- jitter ratio applied to forwarded-port readiness backoff delays                                  |
-| `VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS`      | `300000`           | Open-circuit cooldown before probing forwarded-port readiness again                                  |
-| `VITE_SESSION_INFRA_RETRY_DELAYS_MS`         | `2000,5000,10000`  | Comma-separated retry delays for chat Details workspace/node fetches                                 |
-| `VITE_PROJECT_PREFETCH_DELAY_MS`             | `120`              | Mouse dwell before project-detail prefetch; focus/touch are immediate                                |
-| `VITE_BACKGROUND_FETCH_DELAY_MS`             | `150`              | Delay before background query activity is shown and announced                                        |
-| `VITE_ACP_PERMISSION_POLL_MS`                | `2000`             | Pending ACP permission snapshot refresh cadence                                                      |
-| `VITE_ACP_PERMISSION_RECOVERY_POLL_MS`       | `30000`            | Empty-snapshot recovery cadence after a missed realtime attention event                              |
-| `VITE_ACP_PERMISSION_QUERY_RETRY_COUNT`      | `3`                | Transient ACP permission snapshot retries; `0` disables retries                                      |
-| `VITE_CHUNK_LOAD_RETRY_DELAY_MS`             | `350`              | Wait before retrying a failed lazy route-chunk import                                                |
-| `VITE_CHUNK_RELOAD_COOLDOWN_MS`              | `15000`            | Minimum gap between chunk-recovery reloads; guards against a reload loop                             |
-| `VITE_ROUTE_FALLBACK_REVEAL_DELAY_MS`        | `180`              | Delay before the route loading spinner fades in, avoiding a flash                                    |
-| `VITE_QUERY_PERSIST_MAX_AGE_MS`              | `86400000` (24 h)  | How long a persisted query-cache record may be restored after writing                                |
-| `VITE_QUERY_PERSIST_THROTTLE_MS`             | `1000`             | Minimum gap between IndexedDB writes of the query cache                                              |
-| `VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS`      | `250`              | Budget for the initial cache restore before failing open to no cache                                 |
-| `VITE_CHAT_TRANSCRIPT_CACHE_TTL_MS`          | `86400000` (24 h)  | How long a chat transcript stays cached after it was last used                                       |
-| `VITE_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS`    | `20`               | Most chat transcripts cached at once; older ones are evicted                                         |
-| `VITE_CHAT_TRANSCRIPT_PERSIST_MAX_ROWS`      | `500`              | Newest rows of each chat transcript written to IndexedDB                                             |
-| `VITE_AGENT_CATALOG_STALE_TIME_MS`           | `300000`           | Freshness window for the installable agent catalog query                                             |
-| `VITE_PROVIDER_CATALOG_STALE_TIME_MS`        | `300000`           | Freshness window for provider catalog size/location/price metadata                                   |
-| `VITE_TRIAL_STATUS_STALE_TIME_MS`            | `60000`            | Freshness window for trial availability status                                                       |
-| `VITE_CACHED_COMMANDS_STALE_TIME_MS`         | `300000`           | Freshness window for cached slash-command registries                                                 |
-| `VITE_REPORT_ISSUE_CONFIG_STALE_TIME_MS`     | `300000`           | Freshness window for the report-issue availability flag                                              |
-| `VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS`   | `300000`           | Freshness window for project-creation config flags                                                   |
-| `VITE_CREDENTIAL_LIMITS_STALE_TIME_MS`       | `30000`            | Freshness window for credential usage-limit windows shown in the chat header and Settings → Advanced |
-| `VITE_CREDENTIAL_LIMITS_REFETCH_INTERVAL_MS` | `60000`            | Poll cadence for credential usage-limit windows while the tab is visible (paused in the background)  |
-| `VITE_AUTOMATION_POLL_MS`                    | `30000`            | Automation page refresh cadence for schedules and watches while the tab is visible                   |
-| `VITE_AUTOMATION_ATTENTION_WINDOW_MS`        | `259200000` (3 d)  | How long a failed one-time automation or workflow stays under **Needs your attention**               |
-| `VITE_AUTOMATION_RECENT_RUNS_PER_TRIGGER`    | `10`               | Runs read per trigger for the Automation overview, and shown on a watch's page                       |
-| `VITE_AUTOMATION_MAX_RUN_READS`              | `25`               | Most triggers whose runs the Automation overview or History reads, one request each                  |
-| `VITE_AUTOMATION_MAX_LIST_PAGES`             | `2`                | Pages of schedules and watches the Automation overview reads                                         |
-| `VITE_AUTOMATION_PREVIEW_ROWS`               | `5`                | Rows shown in the Automation overview's **Coming up**, **Recently** and **Workflows**                |
-| `VITE_AUTOMATION_RUNS_PAGE_SIZE`             | `20`               | Runs per page on a trigger's Automation page                                                         |
-| `VITE_AUTOMATION_CHAT_PICKER_LIMIT`          | `100`              | Chats offered when an automation messages a chat; capped at the API's 100                            |
-| `VITE_AUTOMATION_MAX_CHANNEL_PAGES`          | `5`                | Channel catalog pages read on **Behind the scenes → Channels**                                       |
-| `VITE_WORKFLOW_RUN_POLL_MS`                  | `10000`            | An open running workflow's refresh cadence while the tab is visible; finished runs are not polled    |
-| `VITE_WORKFLOW_RUNS_PAGE_SIZE`               | `20`               | Workflow runs per page on **Automation → Workflows**; capped at the API's 50                         |
+| Variable                                     | Default            | Description                                                                                           |
+| -------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------- |
+| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`         | `10485760` (10 MB) | Images below this size render inline automatically                                                    |
+| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`           | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link                                  |
+| `VITE_ANALYTICS_MAX_QUEUE_SIZE`              | `100`              | Max client-side analytics events retained before oldest events drop                                   |
+| `VITE_ANALYTICS_FLUSH_THRESHOLD`             | `10`               | Client event count that triggers an immediate analytics flush                                         |
+| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`           | `5000`             | Client analytics background flush interval in milliseconds                                            |
+| `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES`       | `100`              | Max paginated diagnosis-event pages loaded per browser request                                        |
+| `VITE_CHAT_DELTA_MAX_PAGES`                  | `50`               | Max newer-message pages one chat refresh drains before failing visibly                                |
+| `VITE_CHAT_TIMELINE_MAX_PAGES`               | `200`              | Max pages fetched per loop when the chat timeline drawer opens                                        |
+| `VITE_CHAT_LOAD_UNTIL_MAX_PAGES`             | `400`              | Max older-message pages chased while resolving a timeline jump                                        |
+| `VITE_PROJECT_LIST_LIMIT`                    | `50`               | Projects loaded into each shared list-cache entry                                                     |
+| `VITE_PROJECT_POLL_INTERVAL_MS`              | `30000`            | Project-list page refresh cadence in milliseconds; `0` disables                                       |
+| `VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS`      | `60000`            | App-shell project-list refresh cadence in milliseconds; `0` disables                                  |
+| `VITE_WORKSPACE_PORTS_POLL_MS`               | `10000`            | Workspace forwarded-port base refresh cadence in milliseconds                                         |
+| `VITE_WORKSPACE_PORTS_BACKOFF_MAX_MS`        | `120000`           | Maximum backoff between forwarded-port readiness polls                                                |
+| `VITE_WORKSPACE_PORTS_FAILURE_BUDGET`        | `6`                | Consecutive unavailable port-list responses before circuit cooldown                                   |
+| `VITE_WORKSPACE_PORTS_BACKOFF_JITTER_RATIO`  | `0.2`              | +/- jitter ratio applied to forwarded-port readiness backoff delays                                   |
+| `VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS`      | `300000`           | Open-circuit cooldown before probing forwarded-port readiness again                                   |
+| `VITE_SESSION_INFRA_RETRY_DELAYS_MS`         | `2000,5000,10000`  | Comma-separated retry delays for chat Details workspace/node fetches                                  |
+| `VITE_PROJECT_PREFETCH_DELAY_MS`             | `120`              | Mouse dwell before project-detail prefetch; focus/touch are immediate                                 |
+| `VITE_BACKGROUND_FETCH_DELAY_MS`             | `150`              | Delay before background query activity is shown and announced                                         |
+| `VITE_ACP_PERMISSION_POLL_MS`                | `2000`             | Pending ACP permission snapshot refresh cadence                                                       |
+| `VITE_ACP_PERMISSION_RECOVERY_POLL_MS`       | `30000`            | Empty-snapshot recovery cadence after a missed realtime attention event                               |
+| `VITE_ACP_PERMISSION_QUERY_RETRY_COUNT`      | `3`                | Transient ACP permission snapshot retries; `0` disables retries                                       |
+| `VITE_CHUNK_LOAD_RETRY_DELAY_MS`             | `350`              | Wait before retrying a failed lazy route-chunk import                                                 |
+| `VITE_CHUNK_RELOAD_COOLDOWN_MS`              | `15000`            | Minimum gap between chunk-recovery reloads; guards against a reload loop                              |
+| `VITE_ROUTE_FALLBACK_REVEAL_DELAY_MS`        | `180`              | Delay before the route loading spinner fades in, avoiding a flash                                     |
+| `VITE_QUERY_PERSIST_MAX_AGE_MS`              | `86400000` (24 h)  | How long a persisted query-cache record may be restored after writing                                 |
+| `VITE_QUERY_PERSIST_THROTTLE_MS`             | `1000`             | Minimum gap between IndexedDB writes of the query cache                                               |
+| `VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS`      | `250`              | Budget for the initial cache restore before failing open to no cache                                  |
+| `VITE_CHAT_TRANSCRIPT_CACHE_TTL_MS`          | `86400000` (24 h)  | How long a chat transcript stays cached after it was last used                                        |
+| `VITE_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS`    | `20`               | Most chat transcripts cached at once; older ones are evicted                                          |
+| `VITE_CHAT_TRANSCRIPT_PERSIST_MAX_ROWS`      | `500`              | Newest rows of each chat transcript written to IndexedDB                                              |
+| `VITE_AGENT_CATALOG_STALE_TIME_MS`           | `300000`           | Freshness window for the installable agent catalog query                                              |
+| `VITE_PROVIDER_CATALOG_STALE_TIME_MS`        | `300000`           | Freshness window for provider catalog size/location/price metadata                                    |
+| `VITE_TRIAL_STATUS_STALE_TIME_MS`            | `60000`            | Freshness window for trial availability status                                                        |
+| `VITE_CACHED_COMMANDS_STALE_TIME_MS`         | `300000`           | Freshness window for cached slash-command registries                                                  |
+| `VITE_REPORT_ISSUE_CONFIG_STALE_TIME_MS`     | `300000`           | Freshness window for the report-issue availability flag                                               |
+| `VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS`   | `300000`           | Freshness window for project-creation config flags                                                    |
+| `VITE_CREDENTIAL_LIMITS_STALE_TIME_MS`       | `30000`            | Freshness window for credential usage-limit windows shown in the chat header and Settings → Advanced  |
+| `VITE_CREDENTIAL_LIMITS_REFETCH_INTERVAL_MS` | `60000`            | Poll cadence for credential usage-limit windows while the tab is visible (paused in the background)   |
+| `VITE_AUTOMATION_POLL_MS`                    | `30000`            | Automation page refresh cadence for schedules and watches while the tab is visible                    |
+| `VITE_AUTOMATION_ATTENTION_WINDOW_MS`        | `259200000` (3 d)  | How long a failed one-time automation or workflow stays under **Needs your attention**                |
+| `VITE_AUTOMATION_RECENT_RUNS_PER_TRIGGER`    | `10`               | Runs read per trigger for the Automation overview, and shown on a watch's page                        |
+| `VITE_AUTOMATION_MAX_RUN_READS`              | `25`               | Most triggers whose runs the Automation overview or History reads, one request each                   |
+| `VITE_AUTOMATION_MAX_LIST_PAGES`             | `2`                | Pages of schedules and watches the Automation overview reads                                          |
+| `VITE_AUTOMATION_PREVIEW_ROWS`               | `5`                | Rows shown in the Automation overview's **Coming up**, **Recently** and **Workflows**                 |
+| `VITE_AUTOMATION_RUNS_PAGE_SIZE`             | `20`               | Runs per page on a trigger's Automation page                                                          |
+| `VITE_AUTOMATION_CHAT_PICKER_LIMIT`          | `100`              | Chats offered when an automation messages a chat; capped at the API's 100                             |
+| `VITE_AUTOMATION_MAX_CHANNEL_PAGES`          | `5`                | Channel catalog pages read on **Behind the scenes → Channels**                                        |
+| `VITE_WORKFLOW_RUN_POLL_MS`                  | `10000`            | An open running workflow's refresh cadence while the tab is visible; finished runs are not polled     |
+| `VITE_WORKFLOW_RUNS_PAGE_SIZE`               | `20`               | Workflow runs per page on **Automation → Workflows**; capped at the API's 50                          |
 | `VITE_SAM_SETTINGS_POLL_MS`                  | `10000`            | Private SAM preference/availability polling in milliseconds; pauses in hidden tabs                    |
 | `VITE_SAM_ACTIVE_POLL_MS`                    | `2000`             | Private SAM polling while turns, actions or tracked project work remain active; pauses in hidden tabs |
 | `VITE_SAM_STREAMING_POLL_MS`                 | `15000`            | Private SAM safety-net polling while the running turn's live stream is connected                      |
 | `VITE_SAM_STREAM_RECONNECT_MS`               | `1500`             | Delay step before reopening a dropped live SAM stream (grows with each attempt)                       |
 | `VITE_SAM_STREAM_MAX_RECONNECTS`             | `5`                | Live SAM stream reconnect attempts per turn before relying on polling alone                           |
-
 
 ### Query cache persistence
 
