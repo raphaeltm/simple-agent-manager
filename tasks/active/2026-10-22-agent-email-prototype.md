@@ -1,6 +1,6 @@
 # Agent email addresses — first prototype
 
-**Task:** 01M5J8R9VN49FEN19WCE16VZHN · **Branch:** `sam/giving-agents-email-addresses-16vzhn` · **Status:** planning → Astra plan review
+**Task:** 01M5J8R9VN49FEN19WCE16VZHN · **Branch:** `sam/giving-agents-email-addresses-16vzhn` · **Status:** draft PR [#2413](https://github.com/raphaeltm/simple-agent-manager/pull/2413); Astra's PR review addressed; staging end-to-end test pending (see Notes)
 
 **Raphaël's constraints (2026-10-22):** plan first, get Astra High (profile `01M1P6Y4T0NANW8XGMHJHBS7AA`) to review the plan, build, ship to staging, test end to end, get Astra to review the PR. **The PR stays a draft. Do not merge it or mark it ready.** CI must be green.
 
@@ -82,7 +82,8 @@ sequenceDiagram
   - `In-Reply-To`, `References` and `Auto-Submitted` are allowlisted headers. `Message-ID` is set by the platform.
   - At most 50 recipients and 5 MiB per message.
   - The sending domain or subdomain must be onboarded: `POST /zones/{id}/email/sending/subdomains`, then `GET .../{sid}/dns` lists the `cf-bounce` MX/SPF/DKIM and DMARC records to create.
-- **Token permissions the deploy token needs** (none are in the self-host token list today): Zone → Email Routing Rules → Edit; Zone → Zone Settings → Edit (enabling routing DNS is "Zone Settings Write"); Email Sending → Edit. Zone DNS Edit is already present.
+- **Token permissions the deploy token needs** (none are in the self-host token list today): Zone → Email Routing Rules → Edit; Zone → Zone Settings → Edit (the zone's routing settings, including subaddressing); Email Sending → Edit. Zone DNS Edit is already present. Raphaël added all three to the staging deploy token on 2026-10-22.
+- **Enabling routing is not something the deploy may do** (found in Astra's PR review): `POST /zones/{zone}/email/routing/dns` is documented as "Enable your Email Routing zone. Add and lock the necessary MX and SPF records", which writes and locks apex records. The only documented subdomain-only path is the dashboard (Email Routing → Settings → Subdomains), so an operator turns routing on for `mail.<BASE_DOMAIN>` once, by hand.
 - **Workers do NOT see SPF/DKIM/DMARC results.** The Worker gets no `Authentication-Results`, and `ARC-Authentication-Results` has no verdicts. This is the open issue [cloudflare/workerd#6740](https://github.com/cloudflare/workerd/issues/6740), from May 2026. What we do know: Email Routing **rejects mail that fails both SPF and DKIM**, and mail that fails the sender domain's DMARC policy. A forged `From:` at a `p=none` domain therefore still gets through.
 
 ### Live infrastructure (read-only probes, 2026-10-22)
@@ -165,7 +166,7 @@ Outbound replies carry `Auto-Submitted: auto-replied` (RFC 3834). Vacation respo
 - `trigger_email_configs`: `trigger_id` (PK, FK cascade), `address_key` (UNIQUE), `allowed_senders_json`, timestamps.
 - `trigger_email_messages`: metadata only, **no bodies**.
   - Columns: `id`, `trigger_id`, `project_id`, `trigger_execution_id`, `direction`, `status`, `reason`, `message_id`, `in_reply_to`, `references_header`, `from_address`, `to_address`, `subject`, `raw_size`, `provider_message_id`, `created_at`.
-  - Inbound rows are written only for accepted mail. That is the row the reply tool reads. Rejections go to structured logs only, so nothing is written that nobody reads.
+  - An inbound row is written once the email passes every check, before SMTP is answered (migration 0205 adds `payload_json`, `attempts`, `available_at` and `lease_token`; see "PR review outcome" below). It keeps what the prompt needs until the email is accepted or given up, then drops it. Mail refused by a check goes to structured logs only.
 
 ### D5. Provider interface (thin, concrete)
 
@@ -182,14 +183,16 @@ The Worker treats email as available when **the `AGENT_EMAIL` send binding is pr
 
 ### D7. Deploy step: `scripts/deploy/configure-agent-email.ts`
 
-It is idempotent, runs after the API Worker deploy, and is unit-tested with a mocked fetch.
+It is idempotent, runs before `sync-wrangler-config.ts`, and is unit-tested against a strict fake of the Cloudflare API. Superseded parts of the original plan are noted in "PR review outcome" below.
 
 - **Probe.** If the token lacks routing or sending access, emit a `::notice` and do nothing.
-- **Apex-safety guard.** If zone routing is off and the apex has non-Cloudflare MX records (production uses Google Workspace), skip with a `::warning`. Never alter apex mail.
+- **Routing must already be on for the subdomain.** The step never enables Email Routing. It checks that `mail.<BASE_DOMAIN>` has Cloudflare MX records (an operator enabled it in the dashboard) and otherwise skips with instructions.
 - **Configure:**
-  - `POST /email/routing/dns {name: "mail.<BASE_DOMAIN>"}`, then `PATCH` to set `support_subaddress: true`;
+  - `PATCH /email/routing` to set `support_subaddress: true` when it is off;
   - upsert the literal rule `agent@mail.<BASE_DOMAIN>` → API Worker;
-  - onboard the sending subdomain and create its DNS records.
+  - onboard the sending subdomain and create its DNS records, all under `mail.<BASE_DOMAIN>`.
+- **Apex unchanged.** The apex's MX and SPF records are read before and after; any difference, including an addition, fails the deploy.
+- **Marker only when sending works.** The marker (and so the send binding) is written only when Cloudflare reports the sending subdomain enabled, read after its DNS records exist. A subdomain still verifying is `pending`: the feature stays off until a later deploy.
 - **Fail closed.** If the probe passed but configuration fails, the deploy goes red; it does not half-enable.
 
 ### D8. Tunables (admin settings registry)
@@ -198,6 +201,7 @@ It is idempotent, runs after the API Worker deploy, and is unit-tested with a mo
 - `agentEmail.maxBodyChars` for the prompt (12,000)
 - `agentEmail.maxReplyChars` (20,000)
 - `agentEmail.maxRepliesPerRun` (5)
+- Added during the build: the allowed-sender cap, the per-trigger hourly inbound limit, the loopback hourly limit, the processing lease, and (for durable intake) the attempt limit, retry backoff base and cap, and recovery batch size. All 12 are in `services/agent-email/setting-definitions.ts` and listed in the admin settings guide.
 
 ### D9. Run now / preview
 
@@ -238,7 +242,8 @@ It is idempotent, runs after the API Worker deploy, and is unit-tested with a mo
 - [x] Mail from a sender not on the list, to an unknown or deleted key, auto-generated, list mail, or oversized mail is rejected, and no task is created. Each case is tested, and each test also asserts that the allowed path still works.
 - [x] `reply_to_email` sends exactly one recipient (the original `From`) from the trigger address, with `In-Reply-To`/`References`/`Auto-Submitted`. It refuses non-email tasks, tasks from another project and deleted triggers. It enforces the per-run cap atomically. Tested against real SQLite, with a fake send binding that enforces the Cloudflare contract.
 - [x] With no binding, or a token that lacks permissions, the deploy leaves email off, and the UI hides the Email option.
-- [x] With the permissions, the deploy configures routing, subaddressing, the rule and the sending subdomain, and never changes existing apex MX/SPF records (Cloudflare-only additions to an empty apex are reported). Tested with a mocked CF API, including the Google-MX apex case.
+- [x] With the permissions, and routing already on for `mail.<BASE_DOMAIN>`, the deploy sets subaddressing, the rule and the sending subdomain. It never enables routing, and any change to the apex MX/SPF records (including an addition) fails the deploy. The send binding ships only once sending is verified. Tested against a strict fake of the CF API, including Google-MX, SPF-only and empty apexes.
+- [x] An email that passes the checks is stored before SMTP is answered. A failed or crashed start is retried by SAM from storage, on the same trigger execution, with a fenced lease, exponential backoff and a give-up alert. Tested through the real handler and the real recovery sweep against SQLite.
 - [ ] Staging, end to end:
   1. Create an email trigger in the UI.
   2. Send a test email to it.
@@ -267,6 +272,7 @@ It is idempotent, runs after the API Worker deploy, and is unit-tested with a mo
    - A retried delivery of an accepted message is acknowledged without starting a second task. A `failed` row, or a stale `processing` row, is retried.
    - Each admission result maps to an explicit outcome: submitted → accept; skipped (paused or concurrency) → `setReject` with a plain reason; a submission error → throw, which is a temporary SMTP failure so the sender's server retries.
    - A message with no `Message-ID` is rejected.
+   - **Superseded by the PR review (B1, B3):** a submission error no longer throws. The email is stored before SMTP is answered and SAM retries it from storage; see "PR review outcome" below.
 3. **SHOULD-FIX: loopback must use a routed sender.**
    - **Change:** the diagnostic is now a fixed, bounded **loopback**. It sends a fixed test message from the routed address `agent+loopback@mail.<BASE_DOMAIN>` to one existing email-trigger address.
    - Mail arriving at `agent+loopback@` is recorded as loopback status (KV) and nothing more.
@@ -274,6 +280,7 @@ It is idempotent, runs after the API Worker deploy, and is unit-tested with a mo
 4. **SHOULD-FIX: apex protection must be unconditional.**
    - **Change:** every DNS write the deploy step makes must be `mail.<BASE_DOMAIN>` itself or a name under it, or the step throws.
    - Pre-existing apex MX records are compared before and after, whatever the zone's routing state.
+   - **Tightened by the PR review (B2):** the step no longer enables routing at all, and any apex MX/SPF difference, including an addition, fails the deploy.
 5. **SHOULD-FIX: staging-only activation.**
    - **Change:** a new boolean input `agent_email` on `deploy-staging.yml`, default `false`, is passed to `deploy-reusable.yml`. The configure step only attempts setup when it is true.
    - `deploy.yml` (production) never sets it. Production therefore cannot activate agent email until in-Worker sender authentication lands.
@@ -290,12 +297,36 @@ It is idempotent, runs after the API Worker deploy, and is unit-tested with a mo
 3. A narrow loopback only.
 4. Keep subaddressing.
 
+## PR review outcome — Astra High, task `01M5JJJCX7XF7TY9QHWE2QBHAF`, 2026-10-22
+
+Review of `f633d9b41` ([PR comment](https://github.com/raphaeltm/simple-agent-manager/pull/2413#issuecomment-6349941893); it cites the pre-rewrite hash `2f00dbf29` of the same tree). Three blockers and four should-fix items, all addressed:
+
+1. **B1: a takeover did not resume the reserved execution or fence the old attempt.** A crash between reserving the execution and creating the task left an orphaned queued execution holding the run slot, and a slow attempt could overwrite its successor.
+   - **Fix (`b26f33979`):** the stable execution id is created with the inbound row. `admitAndSubmitTriggerExecution` takes a caller-assigned `executionId` and resumes it (a failed one is requeued), and submission converges per execution id. Each attempt holds a lease token, and every write it makes to the row is fenced on that token.
+2. **B2: apex protection checked after the mutation, and allowed additions.**
+   - **Fix (`d369e70b0`):** the deploy never calls the zone-level enable endpoint. Routing for `mail.<BASE_DOMAIN>` is a one-time dashboard step. Any apex MX/SPF difference, additions included, fails the deploy; empty, SPF-only, Google and Cloudflare apexes are all tested unchanged.
+3. **B3: "a throw is a temporary SMTP failure" was never established.**
+   - **Fix (`b26f33979`):** the handler no longer relies on it. An email that passes the checks is stored with its prompt input before SMTP is answered (migration 0205), and SAM retries it from storage in the 5-minute cron (`agent-email/recovery.ts`), with exponential backoff, an attempt limit, a give-up error log and an operator alert. The handler throws only when that store fails, before SAM owns the email.
+4. **S4: a failed acceptance write blocked replies.**
+   - **Fix (`b26f33979`):** `reply_to_email` finds the inbound email by the task's execution id, not by its status. The sweep repairs the status once the lease expires.
+5. **S5: the readiness marker was written while sending was still verifying.**
+   - **Fix (`d369e70b0`):** sending status is read after the DNS records exist. A verifying subdomain is `pending` and writes no marker, so nothing is advertised until a later deploy finds it enabled.
+6. **S6: `References` could exceed Cloudflare's 2,048-byte header limit.**
+   - **Fix (`d4a0e41ac`):** the oldest IDs are dropped until the value fits in UTF-8 bytes, always keeping the current Message-ID; the fake send binding measures bytes.
+7. **S7: the UI implied verified senders and did not say the address must stay private.**
+   - **Fix (`95ba7ad7a`, `0b4fc7969`):** the copy says senders are matched by From address, that SAM cannot verify the sender yet, and to keep the address private.
+
+Astra's re-review of the fixes is task `01M5JP7DXCF0CDV4QCHF72BK91`.
+
 ## Notes / log
 
 - 2026-10-22: Research complete. Astra plan review: approve-with-changes (above). Building with those changes.
-- 2026-10-22: API, deploy and docs built and pushed (commits f9e216aef, 7e3101c13, ebcc390fb, 99f8d5081, 4bbddc244).
-- 2026-10-22: Security review (0 critical, 1 high, 2 medium, 2 low) fixed in 877c06929 and f8806b0da: delivery lease and takeover that never starts an email twice; a submitted email whose bookkeeping fails reports success; unparseable mail rejected; loopback sender check and rate limit; linear-time HTML to text (the regex version went quadratic on hostile markup, and bounding its input dropped the text of mail with long styles); DMARC advice in the docs.
-- 2026-10-22: Cloudflare review (1 high, 3 medium, 2 low) fixed in f8806b0da: apex guard covers MX and SPF, fails on any change to existing records or a non-Cloudflare addition, reports Cloudflare additions; reports a still-verifying sending subdomain; `addresses` comment; docs. Open: confirm the Email Sending permission's scope in the token picker, and what Cloudflare does after a thrown `email()` handler (verify on staging, then update the comment in `inbound.ts`).
+- 2026-10-22: API, deploy and docs built and pushed (commits b04d612d8, 3aeacb6e5, 874bd6f96, ed1eddcfb, ee02e4134).
+- 2026-10-22: Security review (0 critical, 1 high, 2 medium, 2 low) fixed in 46a6b900b and e73f6a4e3: delivery lease and takeover that never starts an email twice; a submitted email whose bookkeeping fails reports success; unparseable mail rejected; loopback sender check and rate limit; linear-time HTML to text (the regex version went quadratic on hostile markup, and bounding its input dropped the text of mail with long styles); DMARC advice in the docs.
+- 2026-10-22: Cloudflare review (1 high, 3 medium, 2 low) fixed in e73f6a4e3: apex guard covers MX and SPF, fails on any change to existing records or a non-Cloudflare addition, reports Cloudflare additions; reports a still-verifying sending subdomain; `addresses` comment; docs. Open: confirm the Email Sending permission's scope in the token picker, and what Cloudflare does after a thrown `email()` handler (verify on staging, then update the comment in `inbound.ts`).
 - 2026-10-22: Staging blocked on the deploy token's email permissions (run 39823114470 logged Zone Settings 403). Asked Raphaël to add them; waiting.
-- 2026-10-22: UI committed (d85468104): Email start hidden when agent email is off (the builder had shown it disabled; hidden matches the plan and keeps production free of an unusable option), address + copy on the automation page, admin panel with loopback test and Refresh. Web 4,486/4,486, Playwright 14/14 at 375 and 1280 px; screenshots opened and checked.
+- 2026-10-22: UI committed (4be1e4c08): Email start hidden when agent email is off (the builder had shown it disabled; hidden matches the plan and keeps production free of an unusable option), address + copy on the automation page, admin panel with loopback test and Refresh. Web 4,486/4,486, Playwright 14/14 at 375 and 1280 px; screenshots opened and checked.
 - 2026-10-22: Reviews: constitution (1 medium fixed), doc sync (1 medium + 1 low fixed; it also led to fixing MCP update_trigger clearing webhook/email profiles), task-completion validator PASS (no critical/high).
+- 2026-10-22: Test review (2 high, 1 medium, 1 low) and UI review (3 low) addressed in 0fd6559d9, ac7f1e0a3 and 4a00e8ca1.
+- 2026-10-22: Draft PR #2413 opened. The branch history was rewritten once to rename identifiers that gitleaks flagged as generic API keys (`KEY_ALPHABET` and test fixtures); hashes above are the current ones.
+- 2026-10-22: Raphaël confirmed the three token permissions. Astra's PR review (above) addressed in d4a0e41ac, 95ba7ad7a, 0b4fc7969, d369e70b0 and b26f33979; give-up alert asserted in 142d1463a. API suite at b26f33979: 13,170 passed, 0 failed, 2 skipped (925 files). Staging needs the one-time dashboard step for `mail.sammy.party` before the end-to-end test.
