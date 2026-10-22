@@ -10,6 +10,15 @@ vi.mock('../../src/components/agent-profiles/ProfileRuntimeSection', () => ({
 vi.mock('../../src/components/ModelSelect', () => ({
   ModelSelect: ({ value }: { value: string }) => <div data-testid="model-select">{value}</div>,
 }));
+// AgentModelAccessField fetches the catalog/project settings via
+// useQueryScope -> useAuth, neither of which this file provides — this
+// suite is about the OTHER fields' edit-stability, not agent models, so
+// stub it the same way the two mocks above stub their own concerns.
+vi.mock('../../src/components/agent-models/AgentModelAccessField', () => ({
+  AgentModelAccessField: ({ value }: { value: string[] | null }) => (
+    <div data-testid="agent-model-access-field">{value ? value.join(',') : 'inherit'}</div>
+  ),
+}));
 
 /**
  * The profile edit form loads its row when it opens and must then leave the

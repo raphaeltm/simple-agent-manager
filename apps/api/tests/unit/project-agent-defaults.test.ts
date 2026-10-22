@@ -420,7 +420,7 @@ describe('Project agent defaults — UI section (unified)', () => {
   // here we only assert the structural wiring to the new unified section.
   const card = webSrc('components/ProjectAgentCard.tsx');
   const section = webSrc('components/ProjectAgentsSection.tsx');
-  const page = webSrc('pages/ProjectSettings.tsx');
+  const page = webSrc('components/project-settings/ProjectSettingsAgentsTab.tsx');
 
   it('ProjectAgentCard imports ModelSelect for model combobox reuse', () => {
     expect(card).toContain("from './ModelSelect'");

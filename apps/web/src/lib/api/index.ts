@@ -110,6 +110,11 @@ export {
   fetchAdminProjectDataStorageTelemetry,
 } from './admin-project-data-storage';
 export {
+  getAgentModelCatalog,
+  getProjectAgentModelSettings,
+  updateProjectAgentModelSettings,
+} from './agent-models';
+export {
   createAgentProfile,
   createSkill,
   deleteAgentCredential,

@@ -32,6 +32,16 @@ vi.mock('../../../src/lib/api', () => ({
   deleteProfileRuntimeFile: vi.fn().mockResolvedValue({ envVars: [], files: [] }),
 }));
 
+// AgentModelAccessField fetches via useQuery/useQueryScope, which need a
+// QueryClientProvider and AuthProvider this file's `Wrapper` doesn't set up —
+// this suite isn't about agent model calls, so stub the field the same way
+// the `lib/api` mock above keeps ProfileRuntimeSection from making requests.
+vi.mock('../../../src/components/agent-models/AgentModelAccessField', () => ({
+  AgentModelAccessField: ({ value }: { value: string[] | null }) => (
+    <div data-testid="agent-model-access-field">{value ? value.join(',') : 'inherit'}</div>
+  ),
+}));
+
 function Wrapper({ children, initialEntries = ['/'] }: { children: ReactNode; initialEntries?: string[] }) {
   return (
     <MemoryRouter initialEntries={initialEntries}>

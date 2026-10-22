@@ -5,8 +5,9 @@ import type {
   UpdateSkillRequest,
 } from '@simple-agent-manager/shared';
 import { Button, Dialog, Input } from '@simple-agent-manager/ui';
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useEffect, useMemo, useState } from 'react';
 
+import { AgentModelAccessField } from '../agent-models/AgentModelAccessField';
 import {
   deserializeResourceRequirements,
   EMPTY_RESOURCE_STATE,
@@ -49,6 +50,7 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
   const [resourceReqs, setResourceReqs] = useState<ResourceRequirementsFormState>({
     ...EMPTY_RESOURCE_STATE,
   });
+  const [agentModels, setAgentModels] = useState<string[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resourceErrors, setResourceErrors] = useState<ResourceValidationErrors>({});
@@ -62,9 +64,17 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
     setVmSizeOverride(skill?.vmSizeOverride ?? '');
     setTaskMode(skill?.taskMode ?? 'task');
     setResourceReqs(deserializeResourceRequirements(skill?.resourceRequirementsJson));
+    setAgentModels(skill?.agentModels ?? null);
     setResourceErrors({});
     setError(null);
   }, [isOpen, skill]);
+
+  /** The chosen default profile's own override, so "Inherit" can check it before falling back to the project. */
+  const fallbackProfile = useMemo(() => {
+    if (!defaultProfileId) return null;
+    const match = profiles.find((profile) => profile.id === defaultProfileId);
+    return match ? { name: match.name, agentModels: match.agentModels } : null;
+  }, [defaultProfileId, profiles]);
 
   const handleSubmit = async () => {
     const trimmedName = name.trim();
@@ -89,6 +99,7 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
         vmSizeOverride: vmSizeOverride || null,
         taskMode: taskMode || 'task',
         resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
+        agentModels,
       });
       onClose();
     } catch (err) {
@@ -199,6 +210,14 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
             legacyVmSize={vmSizeOverride}
             inheritLabel="profile default"
             errors={resourceErrors}
+          />
+          <AgentModelAccessField
+            projectId={projectId}
+            ownerLabel="skill"
+            value={agentModels}
+            onChange={setAgentModels}
+            disabled={saving}
+            fallbackProfile={fallbackProfile}
           />
         </div>
 
