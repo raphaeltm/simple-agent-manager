@@ -38,9 +38,10 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import {
-  DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
   DEPLOYMENT_RELOCATION_CLAIM_FIELD,
-} from './deployment-node-admission';
+  RECOVER_ERRORED_ENVIRONMENT_SET_SQL,
+} from './deployment-environment-state';
+import { DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE } from './deployment-node-admission';
 
 export interface LinkEnvironmentToLegacyNodeOptions {
   env: Env;
@@ -70,6 +71,8 @@ export interface LinkEnvironmentToLegacyNodeOptions {
  * back out of `error` is the `'starting'` → `'active'` move the heartbeat makes
  * when the node reports the release applied. An environment parked in `error`
  * by a placement failure would therefore never receive another release.
+ * `linkEnvironmentToNode` makes the same flip; both use
+ * `RECOVER_ERRORED_ENVIRONMENT_SET_SQL` (deployment-environment-state.ts).
  *
  * @returns true when the reservation was written, false when any invariant failed.
  */
@@ -93,11 +96,7 @@ export async function linkEnvironmentToLegacyNode(
     `UPDATE deployment_environments AS de
         SET resolved_reservation_json = ?,
             updated_at = ?,
-            status = CASE WHEN de.status = 'error' THEN 'starting' ELSE de.status END,
-            observed_error_message = CASE
-              WHEN de.status = 'error' THEN NULL
-              ELSE de.observed_error_message
-            END
+            ${RECOVER_ERRORED_ENVIRONMENT_SET_SQL}
        FROM nodes n
       WHERE de.id = ?
         AND de.node_id = n.id

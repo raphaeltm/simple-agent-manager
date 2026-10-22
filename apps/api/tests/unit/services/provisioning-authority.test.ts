@@ -99,7 +99,7 @@ describe('provisioning authority helpers', () => {
     ).rejects.toBeInstanceOf(ProvisioningAuthorityError);
   });
 
-  it('requires active deployment environment, member, node role, provider, location, native identity, and mode', async () => {
+  it('requires a deployment environment that wants a node, member, node role, provider, location, native identity, and mode', async () => {
     const { env, statements } = makeEnv(() => ({ ok: 1 }));
 
     await assertDeploymentProvisioningAuthority(env, {
@@ -120,7 +120,8 @@ describe('provisioning authority helpers', () => {
     const statement = statements[0]!;
     expect(statement.sql).toContain('FROM deployment_environments de');
     expect(statement.sql).toContain('JOIN project_members pm');
-    expect(statement.sql).toContain("de.status = 'active'");
+    // Behavior per status is covered against real SQL in deployment-error-recovery.test.ts.
+    expect(statement.sql).toContain("de.status IN ('active', 'starting')");
     expect(statement.sql).toContain("n.status IN ('creating', 'running')");
     expect(statement.sql).toContain("n.node_role = 'deployment'");
     expect(statement.sql).toContain('n.cloud_provider = ?');

@@ -9,6 +9,8 @@ import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log, serializeError } from '../lib/logger';
+import { DEPLOYMENT_RELOCATION_CLAIM_FIELD } from './deployment-environment-state';
 
 type DeploymentReleaseDb = ReturnType<typeof drizzle>;
 
@@ -106,4 +108,134 @@ export async function markDeploymentReleasePlacementFailed(
         .where(eq(schema.deploymentEnvironments.id, environmentId));
     }
   }
+}
+
+/**
+ * Environment-side conditions under which nothing else will ever place the
+ * release bound to the trailing `?`: the environment still wants a node, no
+ * node is linked, no relocation claim is in flight, and the release is still
+ * the newest one. Aliased `de`.
+ *
+ * `starting` is included because a recovery release moves `error` to
+ * `starting` in the same write that links its node
+ * (deployment-environment-state.ts), and `rollbackEnvironmentNodeLink`
+ * clears only `node_id` when provisioning then fails.
+ */
+const STRANDED_PLACEMENT_ENVIRONMENT_SQL = `de.status IN ('active', 'starting', 'error')
+          AND de.node_id IS NULL
+          AND CASE
+            WHEN json_valid(de.resolved_reservation_json)
+            THEN COALESCE(json_extract(de.resolved_reservation_json, '$.${DEPLOYMENT_RELOCATION_CLAIM_FIELD}'), 0)
+            ELSE 0
+          END = 0
+          AND ? = (
+            SELECT latest.id FROM deployment_releases latest
+            WHERE latest.environment_id = de.id
+            ORDER BY latest.version DESC
+            LIMIT 1
+          )`;
+
+/**
+ * Record a cancelled placement that nothing else will finish.
+ *
+ * Placement cancellations (`isPlacementCancellation`) are normally not written,
+ * because the usual causes leave another owner: a newer release superseded this
+ * one, the user stopped or deleted the environment, or a concurrent placement
+ * linked another node. When none of those holds, the release would stay
+ * `created` forever with the previous error still on screen (production
+ * environment 01M5HCF0X7Y2S9V74NV0AV3K99, 2026-10-22). Mark it failed and show
+ * why, so the next deploy is an informed retry.
+ *
+ * Both writes repeat every condition, so a supersession or Stop that lands
+ * between them turns the environment write into a no-op.
+ *
+ * Never throws: callers are already handling `error` and rethrow it, so a D1
+ * failure here is logged instead of replacing the original error.
+ *
+ * @returns true when the release was marked failed.
+ */
+export async function recordStrandedDeploymentReleasePlacement(
+  env: Env,
+  environmentId: string,
+  releaseId: string,
+  error: unknown
+): Promise<boolean> {
+  if (typeof env.DATABASE.prepare !== 'function') return false;
+  const reason = (error instanceof Error ? error.message : String(error)).replace(/[.\s]+$/, '');
+  try {
+    const marked = await markStrandedPlacementFailed(
+      env.DATABASE,
+      environmentId,
+      releaseId,
+      reason
+    );
+    if (marked) {
+      log.warn('deployment_release.stranded_placement_failed', {
+        environmentId,
+        releaseId,
+        reason,
+        action: 'marked_failed',
+      });
+    } else {
+      log.info('deployment_release.placement_cancelled', {
+        environmentId,
+        releaseId,
+        reason,
+        action: 'left_to_current_owner',
+      });
+    }
+    return marked;
+  } catch (writeError) {
+    log.error('deployment_release.stranded_placement_record_failed', {
+      environmentId,
+      releaseId,
+      reason,
+      ...serializeError(writeError),
+    });
+    return false;
+  }
+}
+
+async function markStrandedPlacementFailed(
+  database: D1Database,
+  environmentId: string,
+  releaseId: string,
+  reason: string
+): Promise<boolean> {
+  const now = new Date().toISOString();
+  const releaseResult = await database
+    .prepare(
+      `UPDATE deployment_releases
+          SET status = 'failed', status_updated_at = ?
+        WHERE id = ?
+          AND environment_id = ?
+          AND status = 'created'
+          AND EXISTS (
+            SELECT 1 FROM deployment_environments de
+            WHERE de.id = deployment_releases.environment_id
+              AND ${STRANDED_PLACEMENT_ENVIRONMENT_SQL}
+          )`
+    )
+    .bind(now, releaseId, environmentId, releaseId)
+    .run();
+  if ((releaseResult.meta?.changes ?? 0) === 0) return false;
+
+  await database
+    .prepare(
+      `UPDATE deployment_environments AS de
+          SET status = 'error',
+              observed_status = 'failed',
+              observed_error_message = ?,
+              updated_at = ?
+        WHERE de.id = ?
+          AND ${STRANDED_PLACEMENT_ENVIRONMENT_SQL}`
+    )
+    .bind(
+      `Deployment node placement stopped before a server was created: ${reason}. Deploy again to retry.`,
+      now,
+      environmentId,
+      releaseId
+    )
+    .run();
+  return true;
 }

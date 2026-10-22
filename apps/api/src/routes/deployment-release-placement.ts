@@ -17,7 +17,10 @@ import {
   provisionDeploymentNode,
   restoreDeploymentEnvironmentRelocation,
 } from '../services/deployment-provisioning';
-import { markDeploymentReleasePlacementFailed } from '../services/deployment-release-failure';
+import {
+  markDeploymentReleasePlacementFailed,
+  recordStrandedDeploymentReleasePlacement,
+} from '../services/deployment-release-failure';
 import {
   attachEnvironmentVolumesToLinkedNode,
   detachEnvironmentVolumes,
@@ -408,6 +411,13 @@ function observeProvisioningResult(params: {
         params.releaseId,
         err
       );
+    } else {
+      await recordStrandedDeploymentReleasePlacement(
+        params.env,
+        params.envId,
+        params.releaseId,
+        err
+      );
     }
     throw err;
   });
@@ -472,7 +482,15 @@ async function provisionNodeForRelease(params: {
       releaseId: params.releaseId,
       ...serializeError(err),
     });
-    if (isPlacementCancellation(err)) throw err;
+    if (isPlacementCancellation(err)) {
+      await recordStrandedDeploymentReleasePlacement(
+        params.env,
+        params.envId,
+        params.releaseId,
+        err
+      );
+      throw err;
+    }
     await markDeploymentReleasePlacementFailed(
       params.db,
       params.env,

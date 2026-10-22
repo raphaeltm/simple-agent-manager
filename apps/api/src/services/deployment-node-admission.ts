@@ -9,6 +9,10 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { parsePositiveInt } from '../lib/route-helpers';
+import {
+  DEPLOYMENT_RELOCATION_CLAIM_FIELD,
+  RECOVER_ERRORED_ENVIRONMENT_SET_SQL,
+} from './deployment-environment-state';
 import type { DeploymentPlacement } from './deployment-provisioning';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import {
@@ -27,8 +31,6 @@ import {
 
 /** Default maximum number of deployment environments placed on one deployment node. */
 export const DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE = 5;
-/** Reservation JSON field that fences an environment during relocation. */
-export const DEPLOYMENT_RELOCATION_CLAIM_FIELD = 'samRelocationClaim';
 
 interface DeploymentNodeCandidate extends CapacityAwareNodePlacementRow, WorkspaceResourceNode {
   id: string;
@@ -277,6 +279,11 @@ export async function readEnvironmentNodeId(
   return rows[0]?.nodeId ?? null;
 }
 
+/**
+ * Atomically reserve `nodeId` for an environment. The same write moves an
+ * `error` environment to `starting` so the heartbeat delivers the new release
+ * (see deployment-environment-state.ts).
+ */
 export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions): Promise<boolean> {
   const { env, envId, nodeId, placement, userId, expectedNodeStatus, nodeMode } = opts;
   if (typeof env.DATABASE.prepare !== 'function') return false;
@@ -406,7 +413,8 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
        ${authority.sql}
      )
      UPDATE deployment_environments AS de
-     SET node_id = ?, provider = ?, location = ?, resolved_reservation_json = ?, updated_at = ?
+     SET node_id = ?, provider = ?, location = ?, resolved_reservation_json = ?, updated_at = ?,
+            ${RECOVER_ERRORED_ENVIRONMENT_SET_SQL}
      FROM nodes n
      JOIN authorized_node authorized ON authorized.id = n.id
      WHERE de.id = ?
