@@ -534,6 +534,28 @@ describe('agent email vertical slice', () => {
       ]);
     });
 
+    it('reports a reply as sent even if recording it fails after the email left', async () => {
+      const taskId = await acceptedTaskId();
+      const realSend = mail.binding.send.bind(mail.binding);
+      env.AGENT_EMAIL = {
+        async send(message: EmailMessageBuilder) {
+          const result = await realSend(message);
+          // The provider accepted the email; now the bookkeeping write cannot succeed.
+          sqlite.exec('ALTER TABLE trigger_email_messages RENAME TO trigger_email_messages_gone');
+          return result;
+        },
+      } as unknown as SendEmail;
+
+      const result = await replyToTriggerEmail(
+        env,
+        { projectId: PROJECT_ID, taskId, body: 'Done.' },
+        agentEmailSenderFor(env)
+      );
+
+      expect(result).toMatchObject({ to: 'alice@example.com', repliesRemaining: 0 });
+      expect(mail.sent).toHaveLength(1);
+    });
+
     it('never lets stored inbound header text reach outbound headers unsanitized', async () => {
       const taskId = await acceptedTaskId();
       // postal-mime already folds CR/LF out of decoded subjects; another provider may not.

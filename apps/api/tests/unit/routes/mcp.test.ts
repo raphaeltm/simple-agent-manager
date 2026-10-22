@@ -907,6 +907,7 @@ describe('MCP Routes', () => {
         'webhook',
         'github',
         'incident',
+        'email',
       ]);
       expect(listTriggers.inputSchema.properties.limit.type).toBe('number');
       expect(listTriggers.inputSchema.properties.limit.minimum).toBe(1);

@@ -207,8 +207,9 @@ export async function replyToTriggerEmail(
     );
   }
 
+  let providerMessageId: string;
   try {
-    const { providerMessageId } = await sender.send({
+    ({ providerMessageId } = await sender.send({
       from: { email: fromAddress, name: sanitizeDisplayName(trigger.name) || 'SAM agent' },
       to: inbound.fromAddress,
       subject,
@@ -218,30 +219,7 @@ export async function replyToTriggerEmail(
         References: references,
         'Auto-Submitted': 'auto-replied',
       },
-    });
-    await db
-      .update(schema.triggerEmailMessages)
-      .set({ status: 'sent', providerMessageId, updatedAt: new Date().toISOString() })
-      .where(eq(schema.triggerEmailMessages.id, rowId));
-    const used = await db.$count(
-      schema.triggerEmailMessages,
-      and(
-        eq(schema.triggerEmailMessages.triggerExecutionId, executionId),
-        eq(schema.triggerEmailMessages.direction, 'outbound')
-      )
-    );
-    log.info('agent_email.reply_sent', {
-      projectId: input.projectId,
-      taskId: input.taskId,
-      triggerId: inbound.triggerId,
-      providerMessageId,
-    });
-    return {
-      to: inbound.fromAddress,
-      subject,
-      providerMessageId,
-      repliesRemaining: Math.max(0, limits.maxRepliesPerRun - used),
-    };
+    }));
   } catch (error) {
     const reason = sanitizeHeaderText(error instanceof Error ? error.message : String(error), 300);
     await db
@@ -256,4 +234,41 @@ export async function replyToTriggerEmail(
     });
     throw new AgentEmailReplyError('send_failed', `The email could not be sent: ${reason}`);
   }
+
+  // The email has left. A bookkeeping failure below must not report the send as failed,
+  // or the agent would retry and the sender would get the reply twice; the claimed row
+  // still counts against the cap either way.
+  let used = limits.maxRepliesPerRun;
+  try {
+    await db
+      .update(schema.triggerEmailMessages)
+      .set({ status: 'sent', providerMessageId, updatedAt: new Date().toISOString() })
+      .where(eq(schema.triggerEmailMessages.id, rowId));
+    used = await db.$count(
+      schema.triggerEmailMessages,
+      and(
+        eq(schema.triggerEmailMessages.triggerExecutionId, executionId),
+        eq(schema.triggerEmailMessages.direction, 'outbound')
+      )
+    );
+  } catch (error) {
+    log.error('agent_email.reply_bookkeeping_failed', {
+      projectId: input.projectId,
+      taskId: input.taskId,
+      providerMessageId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  log.info('agent_email.reply_sent', {
+    projectId: input.projectId,
+    taskId: input.taskId,
+    triggerId: inbound.triggerId,
+    providerMessageId,
+  });
+  return {
+    to: inbound.fromAddress,
+    subject,
+    providerMessageId,
+    repliesRemaining: Math.max(0, limits.maxRepliesPerRun - used),
+  };
 }

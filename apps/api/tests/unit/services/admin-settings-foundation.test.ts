@@ -45,8 +45,8 @@ function rows(enabled: boolean): AdminSettingOverrideRow[] {
 
 describe('Phase 1 settings registry', () => {
   it('covers bounded Phase 1 controls and reuses Connector defaults', () => {
-    expect(new Set(ADMIN_SETTINGS_REGISTRY.map((setting) => setting.name)).size).toBe(56);
-    expect(ADMIN_SETTINGS_REGISTRY).toHaveLength(56);
+    expect(new Set(ADMIN_SETTINGS_REGISTRY.map((setting) => setting.name)).size).toBe(64);
+    expect(ADMIN_SETTINGS_REGISTRY).toHaveLength(64);
     for (const [key, value] of Object.entries(CONNECTOR_DEFAULTS)) {
       const definition = findAdminSetting(`connector.${key}`)!;
       expect(definition.defaultValue).toEqual(value);
@@ -68,6 +68,22 @@ describe('Phase 1 settings registry', () => {
       range: { min: 1, max: 365 },
     });
     for (const value of [0, 366, 1.5, '30']) expect(usageWindow.validate(value)).toBe(false);
+    const agentEmail = ADMIN_SETTINGS_REGISTRY.filter((setting) =>
+      setting.name.startsWith('agentEmail.')
+    );
+    expect(
+      Object.fromEntries(agentEmail.map((setting) => [setting.name, setting.defaultValue]))
+    ).toEqual({
+      'agentEmail.maxInboundBytes': 5 * 1024 * 1024,
+      'agentEmail.maxBodyChars': 12_000,
+      'agentEmail.maxReplyChars': 20_000,
+      'agentEmail.maxRepliesPerRun': 5,
+      'agentEmail.maxAllowedSenders': 20,
+      'agentEmail.inboundPerTriggerPerHour': 20,
+      'agentEmail.processingLeaseSeconds': 120,
+      'agentEmail.loopbackPerHour': 10,
+    });
+    expect(agentEmail.every((setting) => setting.category === 'Email')).toBe(true);
     expect(findAdminSetting('feedback.projectId')).toBeUndefined();
     expect(findAdminSetting('integration.github.appPrivateKey')).toBeUndefined();
     expect(findAdminSetting('__proto__')).toBeUndefined();

@@ -284,10 +284,13 @@ export async function handleInboundAgentEmail(
     if (admission.outcome === 'failed') {
       throw new Error(`Trigger submission failed: ${admission.error}`);
     }
-    const reason =
-      admission.outcome === 'inactive'
-        ? 'This agent address is paused'
-        : 'This agent is busy with earlier email; try again later';
+    let reason = 'This agent is busy with earlier email; try again later';
+    if (admission.outcome === 'inactive') {
+      reason =
+        admission.reason === 'paused'
+          ? 'This agent address is paused'
+          : 'This agent address is turned off';
+    }
     await finishDelivery(db, claim, 'rejected', now, { reason: admission.reason });
     log.info('agent_email.inbound_rejected', { ...logContext, reason: admission.outcome });
     return reject(message, reason);
