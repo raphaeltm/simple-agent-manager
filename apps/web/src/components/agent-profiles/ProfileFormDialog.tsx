@@ -398,7 +398,11 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
 
         <Section
           title="AI Models"
-          summary={agentModels === null ? 'Inherit from project' : `${agentModels.length} custom`}
+          summary={
+            agentModels === null
+              ? 'Same as project'
+              : `Custom: ${agentModels.length} model${agentModels.length === 1 ? '' : 's'}`
+          }
         >
           <AgentModelAccessField
             projectId={projectId}

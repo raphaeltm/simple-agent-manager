@@ -125,7 +125,7 @@ describe('ModelPicker', () => {
     renderPicker();
     await screen.findByText('bge-base');
 
-    fireEvent.change(screen.getByPlaceholderText('Search by name, author, or category'), {
+    fireEvent.change(screen.getByPlaceholderText('Search models'), {
       target: { value: 'vectors' },
     });
 
@@ -137,11 +137,28 @@ describe('ModelPicker', () => {
     renderPicker();
     await screen.findByText('clef-omni');
 
-    fireEvent.change(screen.getByPlaceholderText('Search by name, author, or category'), {
+    fireEvent.change(screen.getByPlaceholderText('Search models'), {
       target: { value: 'no-such-model-xyz' },
     });
 
     expect(await screen.findByText('No models match "no-such-model-xyz".')).toBeInTheDocument();
+  });
+
+  it('distinguishes a genuinely empty catalog from an "On only" filter with nothing on', async () => {
+    mocks.getAgentModelCatalog.mockReset();
+    mocks.getAgentModelCatalog.mockResolvedValue({ ...CATALOG, models: [] });
+    renderPicker({ initialSelection: [] });
+
+    expect(await screen.findByText('No models are available right now.')).toBeInTheDocument();
+  });
+
+  it('"On only" with nothing toggled on shows its own distinct message', async () => {
+    renderPicker({ initialSelection: [] });
+    await screen.findByText('clef-omni');
+
+    fireEvent.click(screen.getByRole('button', { name: 'On only' }));
+
+    expect(await screen.findByText('No models are on.')).toBeInTheDocument();
   });
 
   it('category bulk "All off" turns off every model in that category', async () => {
@@ -182,7 +199,7 @@ describe('ModelPicker', () => {
     await screen.findByText('clef-omni');
 
     fireEvent.click(screen.getByRole('switch', { name: /turn on clef-omni/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close model picker' }));
 
     expect(await screen.findByText('Discard unsaved changes?')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
@@ -190,7 +207,7 @@ describe('ModelPicker', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
     expect(screen.queryByText('Discard unsaved changes?')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close model picker' }));
     // The footer's own "Discard" is disabled while the banner is up (asserted
     // below), so scope this click to the banner's copy of the button.
     const banner = screen.getByRole('alert');
@@ -203,7 +220,7 @@ describe('ModelPicker', () => {
     await screen.findByText('clef-omni');
 
     fireEvent.click(screen.getByRole('switch', { name: /turn on clef-omni/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close model picker' }));
     await screen.findByText('Discard unsaved changes?');
 
     const footerDiscard = screen
@@ -250,11 +267,15 @@ describe('ModelPicker', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('flags a selected id no longer in the catalog and lets the user remove it', async () => {
+  it('flags a selected id no longer in the catalog, excludes it from the footer count, and lets the user remove it', async () => {
     renderPicker({ initialSelection: ['m-decision-1', 'retired-model-id'] });
 
     expect(await screen.findByText('No longer available')).toBeInTheDocument();
     expect(screen.getByText('retired-model-id')).toBeInTheDocument();
+    // The footer must not count the stale id as a model that will run — it
+    // reports the 1 real selection plus a separate stale disclosure, not "2
+    // models".
+    expect(screen.getByText('1 model: Decision 1 · 1 no longer available')).toBeInTheDocument();
     const saveButton = screen.getByRole('button', { name: 'Save' });
     expect(saveButton).toBeDisabled();
 
@@ -338,5 +359,42 @@ describe('ModelPicker', () => {
       'aria-checked',
       'false'
     );
+  });
+
+  it('B2: the dirty baseline is frozen at open time — a background `initialSelection` change plus an unrelated interaction must not falsely mark the picker dirty', async () => {
+    const queryClient = createTestQueryClient();
+    const onSave = vi.fn();
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <ModelPicker isOpen initialSelection={['m-decision-1']} onClose={onClose} onSave={onSave} />
+      </QueryClientProvider>
+    );
+    await screen.findByText('clef-omni');
+
+    // Control: before any background change, Save is disabled and the
+    // dismiss button correctly reads "Close" — nothing to discard yet.
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+
+    // Simulate a background settings refetch while the picker stays open and
+    // the user has not touched anything — e.g. another admin changed the
+    // project's models in another tab.
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ModelPicker isOpen initialSelection={['m-decision-2']} onClose={onClose} onSave={onSave} />
+      </QueryClientProvider>
+    );
+
+    // An unrelated interaction that touches zero model toggles: collapsing
+    // the "Decision" category.
+    fireEvent.click(screen.getByRole('button', { name: /Decision/ }));
+
+    // The baseline was frozen at open time, so neither the background prop
+    // change nor the unrelated interaction should have marked the draft
+    // dirty.
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument();
   });
 });

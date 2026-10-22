@@ -2,7 +2,7 @@ import type { AgentModelCategory } from '@simple-agent-manager/shared';
 import { Alert, Button, Input, Skeleton, useModalInteraction } from '@simple-agent-manager/ui';
 import { useQuery } from '@tanstack/react-query';
 import { X } from 'lucide-react';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
@@ -12,7 +12,7 @@ import {
   groupModelsByCategory,
   indexCatalog,
   setsHaveSameMembers,
-  summarizeModelSelection,
+  summarizeModelsByCategory,
   toggleSetMember,
 } from './model-picker-utils';
 import { ModelPickerCategorySection } from './ModelPickerCategorySection';
@@ -54,7 +54,7 @@ export function ModelPicker({
   initialSelection,
   onSave,
   saving = false,
-  title = 'Choose callable models',
+  title = 'Choose AI models',
 }: ModelPickerProps) {
   const queryScope = useQueryScope();
   const catalogQuery = useQuery({
@@ -66,6 +66,15 @@ export function ModelPicker({
   const headingId = useId();
 
   const [draft, setDraft] = useState<ReadonlySet<string>>(() => new Set(initialSelection));
+  // The dirty-check baseline, frozen at seed time (see the `[isOpen]` effect
+  // below) — NOT re-derived from `initialSelectionRef` on every render. A
+  // background refetch that updates `initialSelection` while the picker
+  // stays open must not retroactively change what counts as "dirty": that
+  // would flip Save from disabled to enabled, and Close to Discard, purely
+  // from an unrelated re-render (e.g. collapsing a category), with zero user
+  // edits. See `.claude/rules/62` — proven discriminating in
+  // `model-picker.test.tsx`.
+  const [baseline, setBaseline] = useState<ReadonlySet<string>>(() => new Set(initialSelection));
   const [query, setQuery] = useState('');
   const [onlyOn, setOnlyOn] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<AgentModelCategory>>(new Set());
@@ -82,7 +91,9 @@ export function ModelPicker({
   }, [initialSelection]);
   useEffect(() => {
     if (!isOpen) return;
-    setDraft(new Set(initialSelectionRef.current));
+    const seed = new Set(initialSelectionRef.current);
+    setDraft(seed);
+    setBaseline(seed);
     setQuery('');
     setOnlyOn(false);
     setCollapsed(new Set());
@@ -90,7 +101,7 @@ export function ModelPicker({
     setSaveError(null);
   }, [isOpen]);
 
-  const isDirty = !setsHaveSameMembers(draft, new Set(initialSelectionRef.current));
+  const isDirty = !setsHaveSameMembers(draft, baseline);
 
   function requestClose() {
     if (confirmingDiscard) {
@@ -112,8 +123,8 @@ export function ModelPicker({
   // a fresh array every render while `catalogQuery.data` is still undefined.
   const models = useMemo(() => catalogQuery.data?.models ?? [], [catalogQuery.data]);
   const catalogById = useMemo(() => indexCatalog(models), [models]);
-  const defaultModelIds = useMemo(
-    () => new Set(catalogQuery.data?.defaultModelIds ?? []),
+  const defaultCategories = useMemo(
+    () => new Set(catalogQuery.data?.defaultCategories ?? []),
     [catalogQuery.data]
   );
   const staleIds = useMemo(() => findStaleModelIds([...draft], catalogById), [draft, catalogById]);
@@ -122,12 +133,21 @@ export function ModelPicker({
     [models, draft, query, onlyOn]
   );
   const renderableGroups = groups.filter((group) => group.visibleModels.length > 0);
+  const footerSummary = summarizeModelsByCategory([...draft], catalogById);
+  const footerText =
+    staleIds.length > 0
+      ? `${footerSummary} · ${staleIds.length} no longer available`
+      : footerSummary;
 
-  function handleToggleModel(id: string) {
+  // Stable across renders (`.claude/rules/64` siblings): `ModelPickerRow` and
+  // `ModelPickerCategorySection` are memoized, so passing a fresh closure
+  // here on every render would defeat that — every row would still see a
+  // "changed" `onToggle` prop and re-render regardless of memoization.
+  const handleToggleModel = useCallback((id: string) => {
     setDraft((prev) => toggleSetMember(prev, id));
-  }
+  }, []);
 
-  function handleBulkToggle(ids: readonly string[], turnOn: boolean) {
+  const handleBulkToggle = useCallback((ids: readonly string[], turnOn: boolean) => {
     setDraft((prev) => {
       const next = new Set(prev);
       for (const id of ids) {
@@ -136,7 +156,11 @@ export function ModelPicker({
       }
       return next;
     });
-  }
+  }, []);
+
+  const handleToggleCollapsed = useCallback((category: AgentModelCategory) => {
+    setCollapsed((prev) => toggleSetMember(prev, category));
+  }, []);
 
   function handleRemoveStale(id: string) {
     setDraft((prev) => {
@@ -144,10 +168,6 @@ export function ModelPicker({
       next.delete(id);
       return next;
     });
-  }
-
-  function handleToggleCollapsed(category: AgentModelCategory) {
-    setCollapsed((prev) => toggleSetMember(prev, category));
   }
 
   async function handleSave() {
@@ -185,14 +205,13 @@ export function ModelPicker({
                 {title}
               </h2>
               <p className="m-0 mt-0.5 text-xs text-fg-muted">
-                Extra Cloudflare-hosted models agents can call as tools — not the agent&rsquo;s own
-                chat model. Uses the <code>run_ai_model</code> tool.
+                Turn on the models agents may call. Prices are Cloudflare&rsquo;s published rates.
               </p>
             </div>
             <button
               type="button"
               onClick={requestClose}
-              aria-label="Close"
+              aria-label="Close model picker"
               className="shrink-0 rounded-md p-1.5 text-fg-muted hover:bg-[var(--sam-form-focus-inset)] hover:text-fg-primary"
             >
               <X size={18} aria-hidden />
@@ -202,7 +221,7 @@ export function ModelPicker({
             <Input
               type="search"
               aria-label="Search models"
-              placeholder="Search by name, author, or category"
+              placeholder="Search models"
               value={query}
               onChange={(event) => setQuery(event.currentTarget.value)}
               className="min-w-0 flex-1 [&::-webkit-search-cancel-button]:appearance-none"
@@ -301,7 +320,11 @@ export function ModelPicker({
               )}
               {renderableGroups.length === 0 ? (
                 <p className="m-0 py-6 text-center text-sm text-fg-muted">
-                  {query ? `No models match "${query}".` : 'No models are on.'}
+                  {models.length === 0
+                    ? 'No models are available right now.'
+                    : query
+                      ? `No models match "${query}".`
+                      : 'No models are on.'}
                 </p>
               ) : (
                 renderableGroups.map((group) => (
@@ -309,9 +332,9 @@ export function ModelPicker({
                     key={group.category}
                     group={group}
                     selected={draft}
-                    defaultModelIds={defaultModelIds}
+                    isRecommended={defaultCategories.has(group.category)}
                     collapsed={collapsed.has(group.category)}
-                    onToggleCollapsed={() => handleToggleCollapsed(group.category)}
+                    onToggleCollapsed={handleToggleCollapsed}
                     onToggleModel={handleToggleModel}
                     onBulkToggle={handleBulkToggle}
                     disabled={saving}
@@ -324,9 +347,7 @@ export function ModelPicker({
 
         <div className="flex-shrink-0 border-t border-border-default px-4 py-3">
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-            <span className="min-w-0 break-words text-sm text-fg-muted">
-              {summarizeModelSelection([...draft], catalogById)}
-            </span>
+            <span className="min-w-0 break-words text-sm text-fg-muted">{footerText}</span>
             {/*
              * The footer button bypasses `requestClose`'s confirm banner on
              * purpose: its own label ("Discard") already states the

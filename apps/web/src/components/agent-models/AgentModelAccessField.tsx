@@ -8,12 +8,12 @@ import {
   agentModelCatalogQueryOptions,
   projectAgentModelSettingsQueryOptions,
 } from '../../lib/query-options';
-import { indexCatalog, summarizeModelSelection } from './model-picker-utils';
+import { indexCatalog, summarizeModelsByCategory } from './model-picker-utils';
 import { ModelPicker } from './ModelPicker';
 
 export interface AgentModelAccessFieldProps {
   projectId: string;
-  /** Copy only: renders as "AI models this {ownerLabel} can call". */
+  /** Copy only: renders as "AI models this {ownerLabel} can call". Also selects the inherit-option wording and "Same as profile" vs "Same as project" context. */
   ownerLabel: 'profile' | 'skill';
   /** The stored override on this profile/skill. null = inherit the layer below. */
   value: string[] | null;
@@ -21,9 +21,9 @@ export interface AgentModelAccessFieldProps {
   disabled?: boolean;
   /**
    * Skill context only: the skill's chosen default profile (or `null` when
-   * none is chosen), so "Inherit" checks the profile's own override before
-   * falling back to the project. Omit entirely for profile context, where
-   * the only layer below is the project.
+   * none is chosen), so "Same as profile" seeds Custom from the profile's
+   * own override before falling back to the project. Omit entirely for
+   * profile context, where the only layer below is the project.
    */
   fallbackProfile?: { name: string; agentModels: string[] | null } | null;
 }
@@ -54,6 +54,11 @@ export function AgentModelAccessField({
   const catalogById = indexCatalog(catalogQuery.data?.models ?? []);
   const defaultModelIds = catalogQuery.data?.defaultModelIds ?? [];
   const resolving = catalogQuery.isLoading || projectSettingsQuery.isLoading;
+  const isSkillContext = fallbackProfile !== undefined;
+
+  // What this profile/skill would actually get right now if left on
+  // "inherit" — used to SEED the picker when switching into Custom, so the
+  // starting point is the effective current state, not an empty selection.
   const inherited = resolveAgentModelAccess(
     {
       profile: fallbackProfile ? fallbackProfile.agentModels : undefined,
@@ -61,12 +66,15 @@ export function AgentModelAccessField({
     },
     defaultModelIds
   );
-  const inheritedLabel =
-    inherited.source === 'profile' && fallbackProfile
-      ? `profile "${fallbackProfile.name}"`
-      : inherited.source === 'project'
-        ? 'the project'
-        : "SAM's recommended defaults";
+
+  // The project's OWN layer alone (ignoring any profile override) — the
+  // skill helper text's "Project: <summary>" is a stable reference point
+  // regardless of which profile ends up chosen when a task actually runs,
+  // since `defaultProfileId` is only a default, not a hard binding.
+  const projectOnly = resolveAgentModelAccess(
+    { project: projectSettingsQuery.data?.models },
+    defaultModelIds
+  );
 
   // The Select's displayed mode leads `value` while the picker is open: opening
   // it must not itself commit a custom override (`onChange` fires only on Save),
@@ -90,23 +98,25 @@ export function AgentModelAccessField({
           onChange={(event) => handleModeChange(event.target.value as 'inherit' | 'custom')}
           disabled={disabled}
         >
-          <option value="inherit">Inherit ({inheritedLabel})</option>
-          <option value="custom">Use a custom selection</option>
+          <option value="inherit">{isSkillContext ? 'Same as profile' : 'Same as project'}</option>
+          <option value="custom">Choose models</option>
         </Select>
       </label>
 
       {mode === 'inherit' ? (
         <p className="m-0 min-w-0 break-words text-xs text-fg-muted">
           {resolving
-            ? 'Loading the inherited selection…'
-            : `Inherits from ${inheritedLabel}: ${summarizeModelSelection(inherited.modelIds, catalogById)}`}
+            ? 'Loading…'
+            : isSkillContext
+              ? `Uses the profile's models, or the project's if the profile has none. Project: ${summarizeModelsByCategory(projectOnly.modelIds, catalogById)}`
+              : `Uses the project's models: ${summarizeModelsByCategory(inherited.modelIds, catalogById)}`}
         </p>
       ) : (
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-border-default bg-inset px-3 py-2.5">
           <span className="min-w-0 break-words text-sm text-fg-primary">
             {(value?.length ?? 0) === 0
-              ? "No models — agents can't call any"
-              : summarizeModelSelection(value ?? [], catalogById)}
+              ? `No models. Agents using this ${ownerLabel} can't call any.`
+              : summarizeModelsByCategory(value ?? [], catalogById)}
           </span>
           <Button
             size="sm"
@@ -119,17 +129,11 @@ export function AgentModelAccessField({
         </div>
       )}
 
-      <p className="m-0 text-xs text-fg-muted">
-        Extra Cloudflare-hosted models callable with <code>run_ai_model</code> — not the{' '}
-        {ownerLabel}&rsquo;s own chat model above.
-      </p>
-
       <ModelPicker
         isOpen={pickerOpen}
         onClose={() => setPickerOpen(false)}
         initialSelection={value ?? inherited.modelIds}
         onSave={(ids) => onChange(ids)}
-        title="Choose callable models"
       />
     </div>
   );

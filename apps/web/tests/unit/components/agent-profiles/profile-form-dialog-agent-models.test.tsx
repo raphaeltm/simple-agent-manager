@@ -151,7 +151,7 @@ describe('ProfileFormDialog — AI model calls field', () => {
     });
 
     expandAiModelsSection();
-    await screen.findByText(/Inherits from SAM's recommended defaults/);
+    await screen.findByText(/Uses the project's models/);
     fireEvent.change(screen.getByRole('combobox', { name: /AI models this profile can call/i }), {
       target: { value: 'custom' },
     });
@@ -166,9 +166,7 @@ describe('ProfileFormDialog — AI model calls field', () => {
     // what's beneath it — `handleSave` is async, so the picker is still
     // present (and its background-hide of the dialog still active) for at
     // least one microtask after the click returns.
-    await waitFor(() =>
-      expect(screen.queryByText('Choose callable models')).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.queryByText('Choose AI models')).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: 'Create Profile' }));
 
@@ -207,5 +205,43 @@ describe('ProfileFormDialog — AI model calls field', () => {
     await waitFor(() =>
       expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ agentModels: null }))
     );
+  });
+
+  it('the collapsed accordion summary reads "Same as project" when inherited', async () => {
+    render(
+      <QueryTestWrapper>
+        <ProfileFormDialog
+          isOpen
+          onClose={vi.fn()}
+          onSave={vi.fn()}
+          projectId="proj_1"
+          profile={makeProfile({ agentModels: null })}
+        />
+      </QueryTestWrapper>
+    );
+    // Scoped to the accordion toggle button specifically: the collapsed
+    // section's own (CSS-hidden but still DOM-present) "Same as project"
+    // `<option>` would otherwise also match a plain text query.
+    expect(
+      await screen.findByRole('button', { name: /AI Models.*Same as project/ })
+    ).toBeInTheDocument();
+  });
+
+  it('the collapsed accordion summary reads "Custom: N models" for a custom selection', async () => {
+    // A different profile id so `ProfileFormDialog`'s populate effect (keyed
+    // on `[isOpen, profileId]`, deliberately not on the whole `profile`
+    // object — see its own comment) actually re-seeds for this render.
+    render(
+      <QueryTestWrapper>
+        <ProfileFormDialog
+          isOpen
+          onClose={vi.fn()}
+          onSave={vi.fn()}
+          projectId="proj_1"
+          profile={makeProfile({ id: 'prof_2', agentModels: ['m-decision-1', 'm-decision-2'] })}
+        />
+      </QueryTestWrapper>
+    );
+    expect(await screen.findByText('Custom: 2 models')).toBeInTheDocument();
   });
 });

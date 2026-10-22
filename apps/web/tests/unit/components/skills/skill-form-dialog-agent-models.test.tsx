@@ -157,7 +157,9 @@ describe('SkillFormDialog — AI model calls field', () => {
       target: { value: profile.id },
     });
     expect(
-      await screen.findByText(/Inherits from profile "Builder": 1 model — clef-omni/)
+      await screen.findByText(
+        "Uses the profile's models, or the project's if the profile has none. Project: 1 model: Decision 1"
+      )
     ).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('combobox', { name: /AI models this skill can call/i }), {
@@ -167,9 +169,7 @@ describe('SkillFormDialog — AI model calls field', () => {
     fireEvent.click(screen.getByRole('switch', { name: /turn on clef-flash/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() =>
-      expect(screen.queryByText('Choose callable models')).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.queryByText('Choose AI models')).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Create Skill' }));
 
     await waitFor(() =>
@@ -179,5 +179,69 @@ describe('SkillFormDialog — AI model calls field', () => {
         })
       )
     );
+  });
+
+  it('B1: a background refetch that hands in a new `skill` object of the same id must not wipe in-progress Name or AI-models edits', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const skillV1 = {
+      id: 'skill_1',
+      projectId: 'proj_1',
+      name: 'Refactor',
+      description: 'Refactors code',
+      defaultProfileId: null,
+      systemPromptAppend: null,
+      vmSizeOverride: null,
+      taskMode: 'task' as const,
+      resourceRequirementsJson: null,
+      agentModels: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const { rerender } = render(
+      <QueryTestWrapper>
+        <SkillFormDialog
+          isOpen
+          onClose={vi.fn()}
+          onSave={onSave}
+          profiles={[]}
+          projectId="proj_1"
+          skill={skillV1}
+        />
+      </QueryTestWrapper>
+    );
+
+    // User is mid-edit: renames, and switches AI models to a custom
+    // selection that it then Saves inside the nested picker.
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Renamed by user' } });
+    fireEvent.change(screen.getByRole('combobox', { name: /AI models this skill can call/i }), {
+      target: { value: 'custom' },
+    });
+    await screen.findByText('clef-flash');
+    fireEvent.click(screen.getByRole('switch', { name: /turn on clef-flash/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('1 model: Decision 1');
+
+    expect(screen.getByLabelText('Name')).toHaveValue('Renamed by user');
+
+    // Background refetch of the skills list resolves: a BRAND NEW `skill`
+    // object, same id, same content — exactly what `SkillList`'s
+    // `skills.find(...)` returns after any refetch, even one that changed
+    // nothing the user is editing.
+    const skillV2 = { ...skillV1 };
+    rerender(
+      <QueryTestWrapper>
+        <SkillFormDialog
+          isOpen
+          onClose={vi.fn()}
+          onSave={onSave}
+          profiles={[]}
+          projectId="proj_1"
+          skill={skillV2}
+        />
+      </QueryTestWrapper>
+    );
+
+    expect(screen.getByLabelText('Name')).toHaveValue('Renamed by user');
+    expect(screen.getByText('1 model: Decision 1')).toBeInTheDocument();
   });
 });

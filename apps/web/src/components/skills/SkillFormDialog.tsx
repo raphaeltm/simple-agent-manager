@@ -5,7 +5,7 @@ import type {
   UpdateSkillRequest,
 } from '@simple-agent-manager/shared';
 import { Button, Dialog, Input } from '@simple-agent-manager/ui';
-import { type FC, useEffect, useMemo, useState } from 'react';
+import { type FC, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AgentModelAccessField } from '../agent-models/AgentModelAccessField';
 import {
@@ -55,8 +55,26 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [resourceErrors, setResourceErrors] = useState<ResourceValidationErrors>({});
 
+  /**
+   * Populate the form once per (open, skill id) — deliberately NOT keyed on
+   * the `skill` object, mirroring `ProfileFormDialog`'s exact fix for the
+   * same hazard (see its comment there for the full rationale). `SkillList`
+   * recomputes the `editingSkill` passed in here via `.find()` over a fresh
+   * `skills` array on every refetch, so a background list refresh hands this
+   * dialog a brand-new `skill` object with identical content. Keying the
+   * populate effect on that object's identity re-ran every `setX(skill.…)`
+   * below and silently reverted in-progress edits — including a Save just
+   * completed inside the nested AI-models picker.
+   */
+  const skillRef = useRef(skill);
+  useEffect(() => {
+    skillRef.current = skill;
+  }, [skill]);
+  const skillId = skill?.id ?? null;
+
   useEffect(() => {
     if (!isOpen) return;
+    const skill = skillRef.current;
     setName(skill?.name ?? '');
     setDescription(skill?.description ?? '');
     setDefaultProfileId(skill?.defaultProfileId ?? '');
@@ -67,7 +85,7 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
     setAgentModels(skill?.agentModels ?? null);
     setResourceErrors({});
     setError(null);
-  }, [isOpen, skill]);
+  }, [isOpen, skillId]);
 
   /** The chosen default profile's own override, so "Inherit" can check it before falling back to the project. */
   const fallbackProfile = useMemo(() => {

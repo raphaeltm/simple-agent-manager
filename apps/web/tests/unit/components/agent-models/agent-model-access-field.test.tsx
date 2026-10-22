@@ -22,6 +22,10 @@ vi.mock('../../../../src/lib/api/agent-models', () => ({
   updateProjectAgentModelSettings: vi.fn(),
 }));
 
+// Two "decision" models plus one "embeddings" model: a one-model selection
+// always summarizes to "1 model: Decision 1" by category regardless of
+// *which* decision model it is, so distinguishing scenarios by their
+// displayed text requires at least one model in a different category.
 const CATALOG: AgentModelCatalogResponse = {
   models: [
     {
@@ -47,6 +51,21 @@ const CATALOG: AgentModelCatalogResponse = {
       category: 'decision',
       task: 'Text Generation',
       prices: [{ unit: 'per M input tokens', usd: 0.04 }],
+      contextWindow: null,
+      capabilities: [],
+      beta: false,
+      partner: false,
+      infoUrl: null,
+      termsUrl: null,
+    },
+    {
+      id: 'm-embed-1',
+      name: 'bge-base',
+      author: 'baai',
+      description: 'Turn text into vectors.',
+      category: 'embeddings',
+      task: 'Text Embeddings',
+      prices: [{ unit: 'per M input tokens', usd: 0.01 }],
       contextWindow: null,
       capabilities: [],
       beta: false,
@@ -120,94 +139,127 @@ describe('AgentModelAccessField', () => {
     mocks.getProjectAgentModelSettings.mockReset();
   });
 
-  it("profile context: inherits SAM's recommended defaults when the project has no override", async () => {
+  it('profile context: select options read "Same as project" / "Choose models" — no "Inherit" jargon, nothing to truncate', async () => {
     mocks.getProjectAgentModelSettings.mockResolvedValue(makeProjectSettings({ models: null }));
     renderField({ initialValue: null });
 
-    expect(screen.getByRole<HTMLSelectElement>('combobox').value).toBe('inherit');
+    const select = screen.getByRole<HTMLSelectElement>('combobox');
+    expect(select.value).toBe('inherit');
+    const options = Array.from(select.options).map((option) => option.text);
+    expect(options).toEqual(['Same as project', 'Choose models']);
+  });
+
+  it("profile context: shows the project's recommended defaults as a category summary", async () => {
+    mocks.getProjectAgentModelSettings.mockResolvedValue(makeProjectSettings({ models: null }));
+    renderField({ initialValue: null });
+
     expect(
-      await screen.findByText(/Inherits from SAM's recommended defaults: 1 model — clef-flash/)
+      await screen.findByText("Uses the project's models: 1 model: Decision 1")
     ).toBeInTheDocument();
   });
 
-  it("profile context: inherits the project's own selection when the project has one", async () => {
+  it("profile context: shows the project's own multi-category selection", async () => {
     mocks.getProjectAgentModelSettings.mockResolvedValue(
-      makeProjectSettings({ models: ['m-decision-2'], effectiveModelIds: ['m-decision-2'] })
+      makeProjectSettings({
+        models: ['m-decision-1', 'm-embed-1'],
+        effectiveModelIds: ['m-decision-1', 'm-embed-1'],
+      })
     );
     renderField({ initialValue: null });
 
     expect(
-      await screen.findByText(/Inherits from the project: 1 model — clef-omni/)
+      await screen.findByText("Uses the project's models: 2 models: Decision 1 · Embeddings 1")
     ).toBeInTheDocument();
   });
 
-  it('profile context: switching to Custom opens the picker, and Save sends an array to onChange', async () => {
+  it('profile context: switching to Custom seeds from the inherited selection, and Save sends the combined array', async () => {
     mocks.getProjectAgentModelSettings.mockResolvedValue(
-      makeProjectSettings({ models: ['m-decision-2'], effectiveModelIds: ['m-decision-2'] })
+      makeProjectSettings({ models: ['m-embed-1'], effectiveModelIds: ['m-embed-1'] })
     );
     renderField({ initialValue: null });
-    await screen.findByText(/Inherits from the project/);
+    await screen.findByText(/Uses the project's models/);
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
 
-    // Seeded from the inherited selection: clef-omni starts on, clef-flash off.
-    await screen.findByText('clef-flash');
+    // Seeded from the inherited selection: bge-base starts on.
+    await screen.findByText('bge-base');
+    expect(screen.getByRole('switch', { name: /turn off bge-base/i })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
     fireEvent.click(screen.getByRole('switch', { name: /turn on clef-flash/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() =>
       expect(screen.getByRole<HTMLSelectElement>('combobox').value).toBe('custom')
     );
-    expect(await screen.findByText(/2 models — clef-omni, clef-flash/)).toBeInTheDocument();
+    expect(await screen.findByText('2 models: Decision 1 · Embeddings 1')).toBeInTheDocument();
   });
 
-  it('profile context: cancelling out of Custom does not commit a value — stays Inherit', async () => {
+  it('profile context: cancelling out of Custom does not commit a value — stays on "Same as project"', async () => {
     mocks.getProjectAgentModelSettings.mockResolvedValue(
-      makeProjectSettings({ models: ['m-decision-2'], effectiveModelIds: ['m-decision-2'] })
+      makeProjectSettings({ models: ['m-embed-1'], effectiveModelIds: ['m-embed-1'] })
     );
     renderField({ initialValue: null });
-    await screen.findByText(/Inherits from the project/);
+    await screen.findByText(/Uses the project's models/);
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
-    await screen.findByText('clef-flash');
+    await screen.findByText('bge-base');
 
     // Nothing toggled, so the footer's dismiss action reads "Close" (not
-    // dirty) — same accessible name as the header's icon-only close button,
-    // so disambiguate by picking the last match (footer is last in the DOM).
-    const closeButtons = screen.getAllByRole('button', { name: 'Close' });
-    fireEvent.click(closeButtons[closeButtons.length - 1]!);
+    // dirty) — same accessible name as the header's icon-only close button
+    // in round 1, now disambiguated by its own distinct "Close model picker"
+    // label (B3), so the plain "Close" query is unambiguous here.
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
     await waitFor(() =>
       expect(screen.getByRole<HTMLSelectElement>('combobox').value).toBe('inherit')
     );
-    expect(screen.getByText(/Inherits from the project/)).toBeInTheDocument();
+    expect(screen.getByText(/Uses the project's models/)).toBeInTheDocument();
   });
 
-  it('switching an existing custom selection back to Inherit sends null', async () => {
-    mocks.getProjectAgentModelSettings.mockResolvedValue(makeProjectSettings({ models: null }));
+  it('switching an existing custom selection back to "Same as project" sends null and refreshes the displayed summary', async () => {
+    mocks.getProjectAgentModelSettings.mockResolvedValue(
+      makeProjectSettings({ models: ['m-embed-1'], effectiveModelIds: ['m-embed-1'] })
+    );
     renderField({ initialValue: ['m-decision-2'] });
 
     expect(screen.getByRole<HTMLSelectElement>('combobox').value).toBe('custom');
-    expect(await screen.findByText('1 model — clef-omni')).toBeInTheDocument();
+    expect(await screen.findByText('1 model: Decision 1')).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'inherit' } });
 
     await waitFor(() =>
       expect(screen.getByRole<HTMLSelectElement>('combobox').value).toBe('inherit')
     );
-    expect(await screen.findByText(/Inherits from SAM's recommended defaults/)).toBeInTheDocument();
+    // Distinct from the custom selection's text above — proves the display
+    // actually switched to the project's value, not a leftover custom string.
+    expect(
+      await screen.findByText("Uses the project's models: 1 model: Embeddings 1")
+    ).toBeInTheDocument();
   });
 
   it('a custom empty selection reads clearly, not as a bare count', async () => {
     mocks.getProjectAgentModelSettings.mockResolvedValue(makeProjectSettings());
     renderField({ initialValue: [] });
 
-    expect(await screen.findByText("No models — agents can't call any")).toBeInTheDocument();
+    expect(
+      await screen.findByText("No models. Agents using this profile can't call any.")
+    ).toBeInTheDocument();
   });
 
-  it('skill context: inherits the chosen profile when that profile has its own override', async () => {
+  it('skill context: select options read "Same as profile" / "Choose models"', async () => {
+    mocks.getProjectAgentModelSettings.mockResolvedValue(makeProjectSettings());
+    renderField({ initialValue: null, fallbackProfile: null });
+
+    const select = screen.getByRole<HTMLSelectElement>('combobox');
+    const options = Array.from(select.options).map((option) => option.text);
+    expect(options).toEqual(['Same as profile', 'Choose models']);
+  });
+
+  it("skill context: the helper text always anchors to the project's own selection, even when the chosen profile has its own override", async () => {
     mocks.getProjectAgentModelSettings.mockResolvedValue(
-      makeProjectSettings({ models: ['m-decision-1'], effectiveModelIds: ['m-decision-1'] })
+      makeProjectSettings({ models: ['m-embed-1'], effectiveModelIds: ['m-embed-1'] })
     );
     renderField({
       initialValue: null,
@@ -215,30 +267,51 @@ describe('AgentModelAccessField', () => {
     });
 
     expect(
-      await screen.findByText(/Inherits from profile "Builder": 1 model — clef-omni/)
+      await screen.findByText(
+        "Uses the profile's models, or the project's if the profile has none. Project: 1 model: Embeddings 1"
+      )
     ).toBeInTheDocument();
   });
 
-  it('skill context: falls back to the project when the chosen profile has no override', async () => {
+  it("skill context: switching to Custom seeds from the chosen profile's own override, not the project", async () => {
     mocks.getProjectAgentModelSettings.mockResolvedValue(
-      makeProjectSettings({ models: ['m-decision-2'], effectiveModelIds: ['m-decision-2'] })
+      makeProjectSettings({ models: ['m-embed-1'], effectiveModelIds: ['m-embed-1'] })
+    );
+    renderField({
+      initialValue: null,
+      fallbackProfile: { name: 'Builder', agentModels: ['m-decision-2'] },
+    });
+    await screen.findByText(/Uses the profile's models/);
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
+    await screen.findByText('clef-omni');
+
+    expect(screen.getByRole('switch', { name: /turn off clef-omni/i })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
+    expect(screen.getByRole('switch', { name: /turn on bge-base/i })).toHaveAttribute(
+      'aria-checked',
+      'false'
+    );
+  });
+
+  it('skill context: switching to Custom seeds from the project when the chosen profile has no override', async () => {
+    mocks.getProjectAgentModelSettings.mockResolvedValue(
+      makeProjectSettings({ models: ['m-embed-1'], effectiveModelIds: ['m-embed-1'] })
     );
     renderField({
       initialValue: null,
       fallbackProfile: { name: 'Builder', agentModels: null },
     });
+    await screen.findByText(/Uses the profile's models/);
 
-    expect(
-      await screen.findByText(/Inherits from the project: 1 model — clef-omni/)
-    ).toBeInTheDocument();
-  });
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
+    await screen.findByText('bge-base');
 
-  it('skill context: falls back to recommended defaults when no profile is chosen and the project has none', async () => {
-    mocks.getProjectAgentModelSettings.mockResolvedValue(makeProjectSettings({ models: null }));
-    renderField({ initialValue: null, fallbackProfile: null });
-
-    expect(
-      await screen.findByText(/Inherits from SAM's recommended defaults: 1 model — clef-flash/)
-    ).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: /turn off bge-base/i })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
   });
 });

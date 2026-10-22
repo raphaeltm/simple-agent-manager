@@ -1,5 +1,8 @@
 import type { AgentModelCatalogEntry, AgentModelCategory } from '@simple-agent-manager/shared';
-import { AGENT_MODEL_CATEGORIES } from '@simple-agent-manager/shared';
+import { AGENT_MODEL_CATEGORIES, AGENT_MODEL_CATEGORY_LABELS } from '@simple-agent-manager/shared';
+
+/** Above this many distinct categories, {@link summarizeModelsByCategory} truncates to the first 3 + "+N more". */
+const MAX_SUMMARY_CATEGORIES = 4;
 
 /** Builds `id -> entry` once per catalog fetch; every summary/lookup below takes this instead of re-scanning the array. */
 export function indexCatalog(
@@ -83,19 +86,40 @@ export function setsHaveSameMembers(a: ReadonlySet<string>, b: ReadonlySet<strin
 }
 
 /**
- * "3 models — clef-flash, clairic, bge-reranker-base" / "No models" / falls
- * back to the raw id for a selection the catalog doesn't (or no longer)
- * recognize, so a stale id still reads as something rather than disappearing.
+ * "7 models: Decision 3 · Extraction 1 · Classification 3" / "1 model: Decision 1"
+ * / "No models" — summarizes a selection by category (in
+ * `AGENT_MODEL_CATEGORIES` display order) rather than by the first few names
+ * in array order, which skewed toward whichever models happened to sort
+ * first rather than anything meaningful to the person reading it.
+ *
+ * Ids that no longer resolve in the catalog (stale/retired) are excluded
+ * from both the count and the breakdown — a category summary should only
+ * describe models that will actually run. Callers that also want to disclose
+ * a stale count (the picker footer, which already shows a dedicated "No
+ * longer available" section) append that separately.
  */
-export function summarizeModelSelection(
+export function summarizeModelsByCategory(
   ids: readonly string[],
-  catalogById: ReadonlyMap<string, AgentModelCatalogEntry>,
-  maxNames = 3
+  catalogById: ReadonlyMap<string, AgentModelCatalogEntry>
 ): string {
-  if (ids.length === 0) return 'No models';
-  const names = ids.map((id) => catalogById.get(id)?.name ?? id);
-  const shown = names.slice(0, maxNames).join(', ');
-  const remaining = names.length - maxNames;
-  const countLabel = `${ids.length} model${ids.length === 1 ? '' : 's'}`;
-  return remaining > 0 ? `${countLabel} — ${shown} +${remaining} more` : `${countLabel} — ${shown}`;
+  const counts = new Map<AgentModelCategory, number>();
+  let resolvedCount = 0;
+  for (const id of ids) {
+    const model = catalogById.get(id);
+    if (!model) continue;
+    resolvedCount += 1;
+    counts.set(model.category, (counts.get(model.category) ?? 0) + 1);
+  }
+  if (resolvedCount === 0) return 'No models';
+
+  const ordered = AGENT_MODEL_CATEGORIES.filter((category) => counts.has(category));
+  const truncate = ordered.length > MAX_SUMMARY_CATEGORIES;
+  const shown = truncate ? ordered.slice(0, 3) : ordered;
+  const parts = shown.map(
+    (category) => `${AGENT_MODEL_CATEGORY_LABELS[category]} ${counts.get(category)}`
+  );
+  if (truncate) parts.push(`+${ordered.length - 3} more`);
+
+  const countLabel = `${resolvedCount} model${resolvedCount === 1 ? '' : 's'}`;
+  return `${countLabel}: ${parts.join(' · ')}`;
 }

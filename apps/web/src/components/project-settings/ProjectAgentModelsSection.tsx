@@ -11,7 +11,7 @@ import {
   agentModelQueryKeys,
   projectAgentModelSettingsQueryOptions,
 } from '../../lib/query-options';
-import { indexCatalog, summarizeModelSelection } from '../agent-models/model-picker-utils';
+import { indexCatalog, summarizeModelsByCategory } from '../agent-models/model-picker-utils';
 import { ModelPicker } from '../agent-models/ModelPicker';
 
 /** Fraction of the effective budget at which the bar turns cautionary, before it is fully used. */
@@ -31,12 +31,16 @@ function SectionShell({ headingId, children }: { headingId: string; children: Re
     >
       <div>
         <h2 id={headingId} className="sam-type-section-heading m-0 text-fg-primary">
-          AI Model Calls
+          AI Models
         </h2>
         <p className="m-0 mt-1 text-xs text-fg-muted">
-          Extra Cloudflare-hosted models agents can call as tools with <code>run_ai_model</code> —
-          separate from each agent&rsquo;s own chat model above. Say when to use them in your
-          project instructions.
+          Extra Cloudflare-hosted models agents can call while they work. These are separate from
+          each agent&rsquo;s own model. Say when to use them in your project instructions.
+        </p>
+        {/* The run_ai_model tool name is mentioned exactly once in this whole
+            feature — here, since this section is where people land first. */}
+        <p className="m-0 mt-1 text-xs text-fg-muted">
+          Agents call these with the <code>run_ai_model</code> tool.
         </p>
       </div>
       {children}
@@ -123,15 +127,19 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
   const isFullyUsed = usedFraction >= 1;
   const isNearlyUsed = usedFraction >= NEARLY_USED_FRACTION && !isFullyUsed;
   const barClass = isFullyUsed ? 'bg-danger' : isNearlyUsed ? 'bg-warning' : 'bg-accent';
+  const progressPercent = Math.round(Math.min(100, Math.max(0, usedFraction * 100)));
+
+  const parsedBudget = Number(budgetInput);
+  const budgetIsEmpty = budgetInput.trim() === '';
+  const budgetIsInvalid = budgetIsEmpty || !Number.isFinite(parsedBudget) || parsedBudget < 0;
+  const budgetExceedsMax = !budgetIsInvalid && parsedBudget > maxMonthlyBudgetUsd;
+  const budgetHasError = budgetIsInvalid || budgetExceedsMax;
+  const budgetUnchanged = !budgetIsInvalid && parsedBudget === effectiveBudgetDefault;
 
   function handleSaveBudget() {
-    const parsed = Number(budgetInput);
-    if (!Number.isFinite(parsed) || parsed < 0 || parsed > maxMonthlyBudgetUsd) {
-      toast.error(`Enter an amount between $0 and ${formatUsd(maxMonthlyBudgetUsd)}.`);
-      return;
-    }
+    if (budgetHasError) return;
     saveMutation.mutate(
-      { monthlyBudgetUsd: parsed },
+      { monthlyBudgetUsd: parsedBudget },
       { onSuccess: () => toast.success('Monthly limit saved') }
     );
   }
@@ -141,8 +149,6 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
     budgetInputRef.current?.select();
   }
 
-  const modelsSource =
-    settings.models === null ? "SAM's recommended defaults" : 'a custom selection';
   const usedModels = settings.usage.byModel.slice(0, 5);
   // A platform-level feature toggle outranks the per-project role check: when
   // an administrator has turned agent model calls off, every control is
@@ -175,64 +181,74 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
             {formatUsd(spent)} of {formatUsd(settings.effectiveMonthlyBudgetUsd)} used this month
             {isNearlyUsed && ` (${Math.round(usedFraction * 100)}%)`}
           </span>
-          <span className="shrink-0 text-xs text-fg-muted">
+          <span className="ml-auto shrink-0 text-xs text-fg-muted">
             resets {formatResetDate(settings.usage.resetsAt)}
           </span>
         </div>
-        <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--sam-form-border)]">
+        <div
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progressPercent}
+          aria-valuetext={`${formatUsd(spent)} of ${formatUsd(settings.effectiveMonthlyBudgetUsd)} used`}
+          className="h-2 w-full overflow-hidden rounded-full bg-[var(--sam-form-border)]"
+        >
           <div
             className={`h-full rounded-full transition-[width] ${barClass}`}
-            style={{ width: `${Math.min(100, Math.max(0, usedFraction * 100))}%` }}
+            style={{ width: `${progressPercent}%` }}
           />
         </div>
         {controlsEnabled ? (
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="grid gap-1">
-              <span className="text-xs text-fg-muted">Monthly limit (USD)</span>
-              <Input
-                ref={budgetInputRef}
-                type="number"
-                inputMode="decimal"
-                min={0}
-                max={settings.maxMonthlyBudgetUsd}
-                step="0.01"
-                value={budgetInput}
-                disabled={saveMutation.isPending}
-                onChange={(event) => {
-                  budgetDirtyRef.current = true;
-                  setBudgetInput(event.currentTarget.value);
-                }}
-                className="w-32"
-              />
-            </label>
-            <Button
-              size="sm"
-              variant="secondary"
-              loading={saveMutation.isPending}
-              disabled={
-                saveMutation.isPending ||
-                budgetInput.trim() === '' ||
-                Number(budgetInput) === effectiveBudgetDefault
-              }
-              onClick={handleSaveBudget}
-            >
-              Save
-            </Button>
-            {settings.monthlyBudgetUsd !== null && (
+          <div className="grid min-w-0 gap-1.5">
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="grid gap-1">
+                <span className="text-xs text-fg-muted">Monthly limit (USD)</span>
+                <Input
+                  ref={budgetInputRef}
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  max={settings.maxMonthlyBudgetUsd}
+                  step="0.01"
+                  value={budgetInput}
+                  disabled={saveMutation.isPending}
+                  onChange={(event) => {
+                    budgetDirtyRef.current = true;
+                    setBudgetInput(event.currentTarget.value);
+                  }}
+                  className="w-32"
+                />
+              </label>
               <Button
                 size="sm"
-                variant="ghost"
-                disabled={saveMutation.isPending}
-                onClick={() =>
-                  saveMutation.mutate(
-                    { monthlyBudgetUsd: null },
-                    { onSuccess: () => toast.success('Using the installation default limit') }
-                  )
-                }
+                variant="secondary"
+                loading={saveMutation.isPending}
+                disabled={saveMutation.isPending || budgetHasError || budgetUnchanged}
+                onClick={handleSaveBudget}
               >
-                Use installation default
+                Save
               </Button>
-            )}
+              {settings.monthlyBudgetUsd !== null && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={saveMutation.isPending}
+                  onClick={() =>
+                    saveMutation.mutate(
+                      { monthlyBudgetUsd: null },
+                      { onSuccess: () => toast.success('Using the installation default limit') }
+                    )
+                  }
+                >
+                  Use installation default
+                </Button>
+              )}
+            </div>
+            <p className={`m-0 text-xs ${budgetExceedsMax ? 'text-danger' : 'text-fg-muted'}`}>
+              Up to {formatUsd(maxMonthlyBudgetUsd)}
+              {settings.monthlyBudgetUsd === null &&
+                ` · Default: ${formatUsd(settings.effectiveMonthlyBudgetUsd)}`}
+            </p>
           </div>
         ) : (
           settings.featureEnabled && (
@@ -270,11 +286,11 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
       <div className="grid min-w-0 gap-2 border-t border-border-default pt-3">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
           <span className="min-w-0 break-words text-sm text-fg-primary">
-            Using {modelsSource} —{' '}
-            {summarizeModelSelection(settings.effectiveModelIds, catalogById)}
+            {settings.models === null ? 'Recommended models' : 'Your selection'} ·{' '}
+            {summarizeModelsByCategory(settings.effectiveModelIds, catalogById)}
           </span>
           {controlsEnabled && (
-            <div className="flex shrink-0 gap-2">
+            <div className="flex shrink-0 flex-wrap gap-2">
               {settings.models !== null && (
                 <Button
                   size="sm"
@@ -287,7 +303,7 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
                     )
                   }
                 >
-                  Reset to recommended
+                  Use recommended
                 </Button>
               )}
               <Button
@@ -296,7 +312,7 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
                 disabled={saveMutation.isPending}
                 onClick={() => setPickerOpen(true)}
               >
-                Change
+                Choose models
               </Button>
             </div>
           )}

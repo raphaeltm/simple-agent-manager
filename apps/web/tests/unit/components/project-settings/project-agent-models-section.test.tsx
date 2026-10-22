@@ -100,14 +100,42 @@ describe('ProjectAgentModelsSection', () => {
     mocks.toast.error.mockReset();
   });
 
-  it('shows budget usage, reset date, and the recommended-defaults summary', async () => {
+  it('shows the "AI Models" heading, budget usage, reset date, and the recommended-models category summary', async () => {
     renderSection(makeSettings());
 
+    expect(screen.getByRole('heading', { name: 'AI Models' })).toBeInTheDocument();
     expect(await screen.findByText('$2.00 of $20.00 used this month')).toBeInTheDocument();
     expect(screen.getByText(/resets Nov 1/)).toBeInTheDocument();
-    expect(screen.getByText(/Using SAM's recommended defaults/)).toBeInTheDocument();
-    // "clef-flash" legitimately appears twice (selection summary + used-this-month row).
-    expect(screen.getAllByText(/clef-flash/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('Recommended models · 1 model: Decision 1')).toBeInTheDocument();
+    // "clef-flash" appears once, in the "Used this month" list — the
+    // selection summary is category-based and never names a specific model.
+    expect(screen.getAllByText(/clef-flash/)).toHaveLength(1);
+  });
+
+  it('mentions run_ai_model exactly once, in the section subtitle', async () => {
+    renderSection(makeSettings());
+    await screen.findByText('$2.00 of $20.00 used this month');
+
+    expect(
+      screen.getAllByText((_, element) => element?.textContent === 'run_ai_model')
+    ).toHaveLength(1);
+  });
+
+  it('the budget bar exposes progressbar semantics', async () => {
+    renderSection(makeSettings());
+    await screen.findByText('$2.00 of $20.00 used this month');
+
+    const bar = screen.getByRole('progressbar');
+    expect(bar).toHaveAttribute('aria-valuemin', '0');
+    expect(bar).toHaveAttribute('aria-valuemax', '100');
+    expect(bar).toHaveAttribute('aria-valuenow', '10'); // $2 of $20 = 10%
+  });
+
+  it('shows the installation default inline when the project has no budget override', async () => {
+    renderSection(makeSettings({ monthlyBudgetUsd: null, effectiveMonthlyBudgetUsd: 20 }));
+    await screen.findByText('$2.00 of $20.00 used this month');
+
+    expect(screen.getByText('Up to $100.00 · Default: $20.00')).toBeInTheDocument();
   });
 
   it('saves a new monthly budget with the right PUT body', async () => {
@@ -130,16 +158,35 @@ describe('ProjectAgentModelsSection', () => {
     expect(mocks.toast.success).toHaveBeenCalledWith('Monthly limit saved');
   });
 
-  it('rejects a budget above the installation max without calling the API', async () => {
+  it('disables Save and shows a red "Up to $X" hint when the typed budget exceeds the max', async () => {
     renderSection(makeSettings());
     await screen.findByText('$2.00 of $20.00 used this month');
 
     const input = screen.getByLabelText('Monthly limit (USD)');
     fireEvent.change(input, { target: { value: '500' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
+    const saveButton = screen.getByRole('button', { name: 'Save' });
+    expect(saveButton).toBeDisabled();
+    const hint = screen.getByText(/Up to \$100\.00/);
+    expect(hint).toHaveClass('text-danger');
     expect(mocks.updateProjectAgentModelSettings).not.toHaveBeenCalled();
-    expect(mocks.toast.error).toHaveBeenCalledWith('Enter an amount between $0 and $100.00.');
+
+    fireEvent.click(saveButton);
+    expect(mocks.updateProjectAgentModelSettings).not.toHaveBeenCalled();
+  });
+
+  it('disables Save for an empty or negative budget value', async () => {
+    renderSection(makeSettings());
+    await screen.findByText('$2.00 of $20.00 used this month');
+
+    const input = screen.getByLabelText('Monthly limit (USD)');
+    const saveButton = screen.getByRole('button', { name: 'Save' });
+
+    fireEvent.change(input, { target: { value: '' } });
+    expect(saveButton).toBeDisabled();
+
+    fireEvent.change(input, { target: { value: '-5' } });
+    expect(saveButton).toBeDisabled();
   });
 
   it('shows a needs-attention alert with a Raise-limit fix when the budget is fully used', async () => {
@@ -168,12 +215,12 @@ describe('ProjectAgentModelsSection', () => {
     expect(mocks.toast.success).toHaveBeenCalledWith('Using the installation default limit');
   });
 
-  it('resets a custom model selection back to recommended defaults', async () => {
+  it('resets a custom model selection back to recommended with "Use recommended"', async () => {
     mocks.updateProjectAgentModelSettings.mockResolvedValue(makeSettings());
     renderSection(makeSettings({ models: ['m-decision-1'], effectiveSource: 'project' }));
-    await screen.findByText(/Using a custom selection/);
+    await screen.findByText('Your selection · 1 model: Decision 1');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reset to recommended' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use recommended' }));
 
     await waitFor(() =>
       expect(mocks.updateProjectAgentModelSettings).toHaveBeenCalledWith('proj-1', {
@@ -183,12 +230,27 @@ describe('ProjectAgentModelsSection', () => {
     expect(mocks.toast.success).toHaveBeenCalledWith('Reset to recommended models');
   });
 
+  it('opens the picker from "Choose models", and the action buttons do not jam on a narrow layout', async () => {
+    renderSection(makeSettings({ models: ['m-decision-1'], effectiveSource: 'project' }));
+    await screen.findByText('Your selection · 1 model: Decision 1');
+
+    const chooseButton = screen.getByRole('button', { name: 'Choose models' });
+    const useRecommendedButton = screen.getByRole('button', { name: 'Use recommended' });
+    const buttonRow = chooseButton.parentElement!;
+    expect(buttonRow).toContainElement(useRecommendedButton);
+    expect(buttonRow.className).toMatch(/\bgap-2\b/);
+    expect(buttonRow.className).toMatch(/\bflex-wrap\b/);
+
+    fireEvent.click(chooseButton);
+    expect(await screen.findByText('Choose AI models')).toBeInTheDocument();
+  });
+
   it('hides edit controls and shows a reason when the caller cannot edit', async () => {
     renderSection(makeSettings({ canEdit: false }));
     await screen.findByText('$2.00 of $20.00 used this month');
 
     expect(screen.queryByLabelText('Monthly limit (USD)')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Change' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Choose models' })).not.toBeInTheDocument();
     expect(
       screen.getByText('Only project owners and admins can change the limit.')
     ).toBeInTheDocument();
@@ -204,7 +266,7 @@ describe('ProjectAgentModelsSection', () => {
 
     expect(await screen.findByText('Turned off by your SAM administrator.')).toBeInTheDocument();
     expect(screen.queryByLabelText('Monthly limit (USD)')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Change' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Choose models' })).not.toBeInTheDocument();
     // The per-control permission reason must not appear — it would
     // incorrectly imply a role problem when the real cause is the platform
     // toggle, which the banner above already explains.

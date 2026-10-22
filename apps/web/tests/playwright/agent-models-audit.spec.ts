@@ -31,7 +31,7 @@ import {
  * which is immune to that and also keeps the shot focused on what changed.
  */
 async function screenshotAgentModelsSection(page: Page, name: string) {
-  await screenshotSectionNearHeading(page, 'AI Model Calls', name, { outputDir: SCREENSHOT_DIR });
+  await screenshotSectionNearHeading(page, 'AI Models', name, { outputDir: SCREENSHOT_DIR });
 }
 
 const TIMESTAMP = '2026-10-22T00:00:00.000Z';
@@ -220,9 +220,9 @@ test.describe('Agent model calls — Project Settings', () => {
     await setupProjectSettingsMocks(page, { settings: makeProjectAgentModelSettings() });
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
 
-    await expect(page.getByText('AI Model Calls')).toBeVisible();
+    await expect(page.getByText('AI Models')).toBeVisible();
     await expect(page.getByText(/\$2\.47 of \$20\.00 used this month/)).toBeVisible();
-    await expect(page.getByText(/Using SAM's recommended defaults/)).toBeVisible();
+    await expect(page.getByText(/Recommended models · /)).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Used this month' })).toBeVisible();
 
     await screenshotAgentModelsSection(page, 'project-settings-defaults');
@@ -242,12 +242,12 @@ test.describe('Agent model calls — Project Settings', () => {
     });
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
 
-    await expect(page.getByText(/Using a custom selection/)).toBeVisible();
+    await expect(page.getByText(/Your selection · /)).toBeVisible();
     await screenshotAgentModelsSection(page, 'project-settings-custom-selection');
 
-    await page.getByRole('button', { name: 'Change' }).click();
-    await expect(page.getByText('Choose callable models')).toBeVisible();
-    await expect(page.getByText('No longer available')).toBeVisible();
+    await page.getByRole('button', { name: 'Choose models' }).click();
+    await expect(page.getByText('Choose AI models')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'No longer available' })).toBeVisible();
     await expect(page.getByText(CUSTOM_SELECTION_IDS.at(-1)!)).toBeVisible();
 
     await screenshot(page, 'project-settings-picker-stale-ids');
@@ -295,7 +295,7 @@ test.describe('Agent model calls — Project Settings', () => {
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
 
     await expect(page.getByLabel('Monthly limit (USD)')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Change' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Choose models' })).toHaveCount(0);
     await expect(
       page.getByText('Only project owners and admins can change the limit.')
     ).toBeVisible();
@@ -319,7 +319,7 @@ test.describe('Agent model calls — Project Settings', () => {
   test('catalog error inside the picker shows Retry, and retry recovers', async ({ page }) => {
     await setupProjectSettingsMocks(page, { catalogStatus: 500 });
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
-    await page.getByRole('button', { name: 'Change' }).click();
+    await page.getByRole('button', { name: 'Choose models' }).click();
 
     await expect(page.getByText(/Couldn.t load the model list/)).toBeVisible();
     await screenshot(page, 'picker-catalog-error');
@@ -328,7 +328,9 @@ test.describe('Agent model calls — Project Settings', () => {
       jsonResponse(route, 200, NORMAL_CATALOG_RESPONSE)
     );
     await page.getByRole('button', { name: 'Retry' }).click();
-    await expect(page.getByRole('button', { name: /^Decision \d+ of \d+ on$/ })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: /^Decision \d+ of \d+ on(?: Recommended)?$/ })
+    ).toBeVisible();
 
     await assertNoOverflow(page);
   });
@@ -341,8 +343,8 @@ test.describe('Agent model calls — Project Settings', () => {
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
 
     await expect(page.getByText('No models')).toBeVisible();
-    await page.getByRole('button', { name: 'Change' }).click();
-    await expect(page.getByText('No models are on.')).toBeVisible();
+    await page.getByRole('button', { name: 'Choose models' }).click();
+    await expect(page.getByText('No models are available right now.')).toBeVisible();
 
     await screenshot(page, 'picker-empty-catalog');
     await assertNoOverflow(page);
@@ -357,17 +359,21 @@ test.describe('Agent model calls — Model Picker (realistic catalog)', () => {
   }) => {
     await setupProjectSettingsMocks(page);
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
-    await page.getByRole('button', { name: 'Change' }).click();
-    await expect(page.getByText('Choose callable models')).toBeVisible();
-    const textGenHeader = page.getByRole('button', { name: /^Text generation \d+ of \d+ on$/ });
+    await page.getByRole('button', { name: 'Choose models' }).click();
+    await expect(page.getByText('Choose AI models')).toBeVisible();
+    const textGenHeader = page.getByRole('button', {
+      name: /^Text generation \d+ of \d+ on(?: Recommended)?$/,
+    });
     await expect(textGenHeader).toBeVisible();
 
     await screenshot(page, 'picker-realistic-catalog-default');
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
 
-    await page.getByPlaceholder('Search by name, author, or category').fill('embed');
-    await expect(page.getByRole('button', { name: /^Embeddings \d+ of \d+ on$/ })).toBeVisible();
+    await page.getByPlaceholder('Search models').fill('embed');
+    await expect(
+      page.getByRole('button', { name: /^Embeddings \d+ of \d+ on(?: Recommended)?$/ })
+    ).toBeVisible();
     await expect(textGenHeader).toHaveCount(0);
 
     await screenshot(page, 'picker-realistic-catalog-search');
@@ -379,8 +385,8 @@ test.describe('Agent model calls — Model Picker (realistic catalog)', () => {
   }) => {
     await setupProjectSettingsMocks(page, { catalog: LONG_TEXT_CATALOG_RESPONSE });
     await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
-    await page.getByRole('button', { name: 'Change' }).click();
-    await page.getByPlaceholder('Search by name, author, or category').fill('stress-test-author');
+    await page.getByRole('button', { name: 'Choose models' }).click();
+    await page.getByPlaceholder('Search models').fill('stress-test-author');
     await expect(page.getByText(LONG_TEXT_MODEL.name)).toBeVisible();
 
     await screenshot(page, 'picker-long-text-model');
@@ -399,7 +405,7 @@ test.describe('Agent model calls — Model Picker (realistic catalog)', () => {
     expect(authorBox).not.toBeNull();
     expect(authorBox!.x + authorBox!.width).toBeLessThanOrEqual(viewportWidth + 1);
 
-    const root = page.getByRole('dialog', { name: 'Choose callable models' });
+    const root = page.getByRole('dialog', { name: 'Choose AI models' });
     const rootBox = await root.boundingBox();
     expect(rootBox).not.toBeNull();
     expect(rootBox!.width).toBeLessThanOrEqual(viewportWidth + 1);
@@ -418,7 +424,7 @@ test.describe('Agent model calls — Profile and Skill dialogs', () => {
     await expect(page.getByText('Create Agent Profile')).toBeVisible();
 
     await page.getByRole('button', { name: /AI Models/ }).click();
-    const inheritSummary = page.getByText(/Inherits from SAM's recommended defaults/);
+    const inheritSummary = page.getByText(/Uses the project's models/);
     await expect(inheritSummary).toBeVisible();
     // The dialog body scrolls internally (`Dialog.tsx`'s `overflow-y-auto`),
     // so a screenshot without scrolling first can silently miss content below
@@ -432,7 +438,7 @@ test.describe('Agent model calls — Profile and Skill dialogs', () => {
     await page
       .getByRole('combobox', { name: /AI models this profile can call/i })
       .selectOption('custom');
-    await expect(page.getByText('Choose callable models')).toBeVisible();
+    await expect(page.getByText('Choose AI models')).toBeVisible();
 
     await screenshot(page, 'profile-dialog-ai-models-custom-picker');
     await assertNoOverflow(page);
@@ -446,7 +452,7 @@ test.describe('Agent model calls — Profile and Skill dialogs', () => {
     await page.getByRole('button', { name: 'New Skill' }).click();
     await expect(page.getByRole('heading', { name: 'Create Skill' })).toBeVisible();
     await expect(page.getByText(/AI models this skill can call/)).toBeVisible();
-    const inheritSummary = page.getByText(/Inherits from SAM's recommended defaults/);
+    const inheritSummary = page.getByText(/Uses the profile's models/);
     await expect(inheritSummary).toBeVisible();
 
     await inheritSummary.scrollIntoViewIfNeeded();
