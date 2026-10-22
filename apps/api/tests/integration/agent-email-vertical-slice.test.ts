@@ -574,9 +574,14 @@ describe('agent email vertical slice', () => {
     const at = () => clock;
     submitter.mockRejectedValue(new Error('TaskRunner unavailable'));
 
+    // Operators hear about a give-up through the failed-sweep alert, which claims this
+    // throttle key before notifying them.
+    const alertKey = 'cron-failure-notification:agent_email_delivery_gave_up';
+
     expect(await handleInboundAgentEmail(inbound(rawEmail()), env, { submitter, now: at })).toEqual(
       { kind: 'queued' }
     );
+    expect(await env.KV.get(alertKey)).toBeNull();
     const { availableAt } = sqlite
       .prepare('SELECT available_at AS availableAt FROM trigger_email_messages')
       .get() as { availableAt: string };
@@ -592,6 +597,7 @@ describe('agent email vertical slice', () => {
       'agent_email.delivery_gave_up',
       expect.objectContaining({ attempt: 2 })
     );
+    expect(await env.KV.get(alertKey)).not.toBeNull();
     expect(sqlite.prepare('SELECT count(*) AS n FROM tasks').get()).toEqual({ n: 0 });
 
     clock = new Date(clock.getTime() + 24 * 60 * 60 * 1000);
