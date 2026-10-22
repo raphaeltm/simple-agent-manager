@@ -100,8 +100,27 @@ Tells:
   value like `updated_at` is read the way production reads it, rather than handed to the comparison
   directly (`.claude/rules/62`).
 
+## The Same Bug in a Status Gate
+
+A status condition added to an authority check is the same tightening. #2030 required
+`deployment_environments.status = 'active'` in `assertDeploymentProvisioningAuthority`, the check
+run before SAM pays for a deployment server. Two callers reached it in other states: Start sets
+`starting` first, and a release meant to recover an environment arrives while it is `error`. Both
+were refused. The refusal was classified as a placement cancellation, so nothing was recorded: on
+2026-10-22 production environment `01M5HCF0X7Y2S9V74NV0AV3K99` kept every later release at
+`created` behind its old error, and the agent created a second environment to get a deploy out.
+
+- List each caller of the gate and the status the record has when that caller reaches it. A gate
+  that admits fewer states than its callers hold deletes their operation.
+- A refusal that callers treat as benign (cancelled, superseded, skipped) needs a recorder for the
+  case where nothing else owns the work, or the deleted capability fails silently
+  (`recordStrandedDeploymentReleasePlacement`).
+- Test each caller's real entry point against the real predicate:
+  `apps/api/tests/unit/services/deployment-error-recovery.test.ts`.
+
 ## Quick Compliance Check
 
+- [ ] Every caller of a tightened status gate is listed with the state it arrives in
 - [ ] The migration says what existing rows can still do, not just that they fail closed
 - [ ] Every pre-existing row has a backfill, a fallback proof, or an operator escape path
 - [ ] No guard is stricter than the validator it calls
@@ -114,6 +133,8 @@ Tells:
 
 - Task: `tasks/archive/2026-09-08-legacy-node-credential-proof-undeletable.md`; PR #2019 (the
   tightening), this fix's PR
+- Status-gate case: `tasks/archive/2026-10-22-deployment-env-error-recovery.md`; #2030 (the
+  tightening)
 - Implementation: `apps/api/src/services/provider-credential-exact.ts`
   (`hasExactProviderCredentialGenerationProof`), `apps/api/src/services/strict-node-deletion.ts`
 - `.claude/rules/63-widening-a-table-can-delete-an-auth-check.md` — the mirror image
