@@ -238,6 +238,8 @@ export interface ProjectAgentModelSettingsResponse {
   monthlyBudgetUsd: number | null;
   /** Budget in force this month. */
   effectiveMonthlyBudgetUsd: number;
+  /** Installation default a project gets when it has not set its own budget. */
+  defaultMonthlyBudgetUsd: number;
   /** Highest monthly budget a project may set. */
   maxMonthlyBudgetUsd: number;
   usage: AgentModelMonthlyUsage;

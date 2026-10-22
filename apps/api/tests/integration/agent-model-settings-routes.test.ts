@@ -131,6 +131,7 @@ describe('agent model settings routes', () => {
       effectiveModelIds: ['@cf/cloudflare/clef'],
       monthlyBudgetUsd: null,
       effectiveMonthlyBudgetUsd: 5,
+      defaultMonthlyBudgetUsd: 5,
       maxMonthlyBudgetUsd: 50,
       canEdit: false,
       usage: { spentUsd: 0, callCount: 0 },
@@ -155,6 +156,7 @@ describe('agent model settings routes', () => {
       effectiveSource: 'project',
       monthlyBudgetUsd: 12.34,
       effectiveMonthlyBudgetUsd: 12.34,
+      defaultMonthlyBudgetUsd: 5,
       canEdit: true,
     });
     expect(

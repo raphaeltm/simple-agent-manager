@@ -67,6 +67,7 @@ export async function buildProjectAgentModelSettings(
     effectiveMonthlyBudgetUsd: microUsdToUsd(
       effectiveMonthlyBudgetMicroUsd(ownBudgetCents, settings)
     ),
+    defaultMonthlyBudgetUsd: microUsdToUsd(effectiveMonthlyBudgetMicroUsd(null, settings)),
     maxMonthlyBudgetUsd: microUsdToUsd(settings.maxMonthlyBudgetMicroUsd),
     usage,
     canEdit: projectRoleHasCapability(role, 'project:update'),
