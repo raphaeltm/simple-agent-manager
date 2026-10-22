@@ -160,35 +160,36 @@ export async function recordStrandedDeploymentReleasePlacement(
   if (typeof env.DATABASE.prepare !== 'function' || typeof env.DATABASE.batch !== 'function') {
     return false;
   }
-  const reason = (error instanceof Error ? error.message : String(error)).replace(/[.\s]+$/, '');
+  // Like `serializeError`, never log the raw message: log what the user is shown
+  // and the error's class.
+  const details = {
+    environmentId,
+    releaseId,
+    cancellationName: error instanceof Error ? error.name : typeof error,
+    shownReason: strandedPlacementShownReason(error),
+  };
   try {
     const marked = await markStrandedPlacementFailed(
       env.DATABASE,
       environmentId,
       releaseId,
-      strandedPlacementShownReason(error)
+      details.shownReason
     );
     if (marked) {
       log.warn('deployment_release.stranded_placement_failed', {
-        environmentId,
-        releaseId,
-        reason,
+        ...details,
         action: 'marked_failed',
       });
     } else {
       log.info('deployment_release.placement_cancelled', {
-        environmentId,
-        releaseId,
-        reason,
+        ...details,
         action: 'left_to_current_owner',
       });
     }
     return marked;
   } catch (writeError) {
     log.error('deployment_release.stranded_placement_record_failed', {
-      environmentId,
-      releaseId,
-      reason,
+      ...details,
       ...serializeError(writeError),
     });
     return false;
@@ -200,7 +201,8 @@ export async function recordStrandedDeploymentReleasePlacement(
  * paid-boundary refusals are shown verbatim: their messages are fixed strings
  * (`requireAuthority` in provisioning-authority.ts). Any other cancellation,
  * such as an `AppError` from a caller's authorization check, gets a generic
- * reason; the raw message stays in the server log.
+ * reason, and `recordStrandedDeploymentReleasePlacement` does not log its raw
+ * message either.
  *
  * Matched by name, like `isPlacementCancellation`, rather than `instanceof`:
  * importing provisioning-authority.ts here pulls its node-deletion chain into

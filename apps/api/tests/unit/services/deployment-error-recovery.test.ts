@@ -32,6 +32,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { log } from '../../../src/lib/logger';
 import { AppError } from '../../../src/middleware/error';
 import { registerDeploymentEnvironmentLifecycleRoutes } from '../../../src/routes/deployment-environment-lifecycle';
 import { placeReleaseOnDeploymentNode } from '../../../src/routes/deployment-release-placement';
@@ -79,11 +80,10 @@ const harness = vi.hoisted(() => ({
   volumeAttachments: [] as string[],
 }));
 
-vi.mock('../../../src/lib/logger', () => ({
+// Only `log` is replaced; the real `serializeError` redacts messages as it does in production.
+vi.mock('../../../src/lib/logger', async (load) => ({
+  ...(await load<typeof import('../../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-  serializeError: (error: unknown) => ({
-    error: error instanceof Error ? error.message : String(error),
-  }),
 }));
 
 vi.mock('../../../src/services/canonical-vm-allocation', async (load) => {
@@ -881,24 +881,89 @@ describe('recordStrandedDeploymentReleasePlacement', () => {
     }
   );
 
-  it('shows a generic reason for any other cancellation and keeps its text out of the row', async () => {
-    const f = fixture({ status: 'active' });
-    f.insertRelease('release-v1', 1, 'created');
-    const callerRefusal = Object.assign(
+  const GENERIC_REASON = 'the request that started it is no longer authorized';
+  const callerRefusal = () =>
+    Object.assign(
       new Error('Workspace ws-secret-123 callback token tok_live_abc is no longer current'),
       { name: 'AppError' }
     );
+  const loggedText = () =>
+    JSON.stringify(
+      [log.debug, log.info, log.warn, log.error].map((logFn) => vi.mocked(logFn).mock.calls)
+    );
+
+  it('shows a generic reason for any other cancellation and keeps its text out of the row and logs', async () => {
+    const f = fixture({ status: 'active' });
+    f.insertRelease('release-v1', 1, 'created');
 
     await expect(
-      recordStrandedDeploymentReleasePlacement(f.env, ENV_ID, 'release-v1', callerRefusal)
+      recordStrandedDeploymentReleasePlacement(f.env, ENV_ID, 'release-v1', callerRefusal())
     ).resolves.toBe(true);
     const environment = f.environment();
     expect(environment.observedErrorMessage).toBe(
       'Deployment node placement stopped before a server was created: ' +
-        'the request that started it is no longer authorized. Deploy again to retry.'
+        `${GENERIC_REASON}. Deploy again to retry.`
     );
     expect(environment.observedErrorMessage).not.toContain('tok_live_abc');
     expect(f.releaseStatus('release-v1')).toBe('failed');
+    expect(log.warn).toHaveBeenCalledWith('deployment_release.stranded_placement_failed', {
+      environmentId: ENV_ID,
+      releaseId: 'release-v1',
+      cancellationName: 'AppError',
+      shownReason: GENERIC_REASON,
+      action: 'marked_failed',
+    });
+    expect(loggedText()).not.toMatch(/tok_live_abc|ws-secret-123/);
+  });
+
+  it('logs a cancellation it leaves to the current owner without its text', async () => {
+    const f = fixture({ status: 'active' });
+    f.insertRelease('release-v1', 1, 'created');
+    f.insertRelease('release-v2', 2, 'created');
+
+    await expect(
+      recordStrandedDeploymentReleasePlacement(f.env, ENV_ID, 'release-v1', callerRefusal())
+    ).resolves.toBe(false);
+    expect(f.releaseStatus('release-v1')).toBe('created');
+    expect(log.info).toHaveBeenCalledWith('deployment_release.placement_cancelled', {
+      environmentId: ENV_ID,
+      releaseId: 'release-v1',
+      cancellationName: 'AppError',
+      shownReason: GENERIC_REASON,
+      action: 'left_to_current_owner',
+    });
+    expect(loggedText()).not.toMatch(/tok_live_abc|ws-secret-123/);
+  });
+
+  it('logs a failed write without either error text and does not throw', async () => {
+    const f = fixture({ status: 'active' });
+    f.insertRelease('release-v1', 1, 'created');
+    const before = f.environment();
+    const failingEnv = {
+      DATABASE: {
+        ...f.env.DATABASE,
+        batch: async () => {
+          throw new Error('D1_ERROR: write rejected for token tok_live_abc');
+        },
+      },
+    } as unknown as Env;
+
+    await expect(
+      recordStrandedDeploymentReleasePlacement(failingEnv, ENV_ID, 'release-v1', callerRefusal())
+    ).resolves.toBe(false);
+    expect(f.releaseStatus('release-v1')).toBe('created');
+    expect(f.environment()).toEqual(before);
+    expect(log.error).toHaveBeenCalledWith(
+      'deployment_release.stranded_placement_record_failed',
+      expect.objectContaining({
+        environmentId: ENV_ID,
+        releaseId: 'release-v1',
+        cancellationName: 'AppError',
+        shownReason: GENERIC_REASON,
+        errorName: 'Error',
+      })
+    );
+    expect(loggedText()).not.toMatch(/tok_live_abc|ws-secret-123/);
   });
 
   it.each<[string, (f: ReturnType<typeof fixture>) => void]>([
