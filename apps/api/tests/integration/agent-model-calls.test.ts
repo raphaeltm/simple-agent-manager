@@ -541,4 +541,82 @@ describe('agent model calls through the MCP route', () => {
     expect(usageRow(PROJECT)?.calls).toBe(1);
     expect(usageRow(OTHER_PROJECT)).toBeUndefined();
   });
+
+  it('refuses a model id that is not in the live catalog at all, before any spend', async () => {
+    const response = await callMcpTool(app, env, TOKEN, 'run_ai_model', {
+      model: '@cf/acme/does-not-exist',
+      input: { state: 'x', questions: {} },
+    });
+
+    expect(response.error?.message).toContain("is not in Cloudflare's hosted model catalog");
+    expect(aiRun).not.toHaveBeenCalled();
+    expect(usageRow()).toBeUndefined();
+  });
+
+  it('list_ai_models discloses a stored id that dropped out of the catalog, and excludes it from the enabled list', async () => {
+    await updateProjectAgentModelSettings(env, db(), PROJECT, {
+      models: [CLEF_FLASH, '@cf/acme/retired-model'],
+    });
+
+    const result = toolResult<{
+      models: Array<{ id: string }>;
+      noLongerAvailable?: string[];
+    }>(await callMcpTool(app, env, TOKEN, 'list_ai_models', {}));
+
+    expect(result.models.map((model) => model.id)).toEqual([CLEF_FLASH]);
+    expect(result.noLongerAvailable).toEqual(['@cf/acme/retired-model']);
+  });
+
+  it('releases the hold and reports a plain network failure distinctly from a timeout', async () => {
+    aiRun.mockRejectedValue(new Error('fetch failed: ECONNRESET'));
+    const response = await callMcpTool(app, env, TOKEN, 'run_ai_model', {
+      model: CLEF_FLASH,
+      input: { state: 'x', questions: {} },
+    });
+
+    expect(response.error?.message).toContain('The model call failed: fetch failed: ECONNRESET');
+    // A plain network failure (never reached the model) releases the whole reservation, unlike
+    // a timeout — which keeps the estimate charged because the model may have run to completion.
+    expect(usageRow()).toEqual({ reserved: 0, spent: 0, calls: 1 });
+  });
+
+  it('surfaces a 429 upstream rate limit distinctly from a 400 input rejection, and releases the hold', async () => {
+    aiRun.mockResolvedValue(
+      jsonResponse({ success: false, errors: [{ message: 'rate limited' }] }, 429)
+    );
+    const response = await callMcpTool(app, env, TOKEN, 'run_ai_model', {
+      model: CLEF_FLASH,
+      input: { state: 'x', questions: {} },
+    });
+
+    expect(response.error?.message).toContain('Cloudflare is rate limiting this model (429)');
+    expect(usageRow()).toEqual({ reserved: 0, spent: 0, calls: 1 });
+  });
+
+  it('surfaces a 413 response as input_too_large, distinctly from a 400', async () => {
+    aiRun.mockResolvedValue(jsonResponse({ success: false, errors: [] }, 413));
+    const response = await callMcpTool(app, env, TOKEN, 'run_ai_model', {
+      model: CLEF_FLASH,
+      input: { state: 'x', questions: {} },
+    });
+
+    expect(response.error?.message).toContain('The request is too large for this model (413)');
+    expect(usageRow()).toEqual({ reserved: 0, spent: 0, calls: 1 });
+  });
+
+  it('falls back to the raw response text when a failing upstream response body is not JSON', async () => {
+    aiRun.mockResolvedValue(
+      new Response('Internal Server Error', {
+        status: 500,
+        headers: { 'content-type': 'text/plain' },
+      })
+    );
+    const response = await callMcpTool(app, env, TOKEN, 'run_ai_model', {
+      model: CLEF_FLASH,
+      input: { state: 'x', questions: {} },
+    });
+
+    expect(response.error?.message).toContain('Cloudflare returned 500: Internal Server Error');
+    expect(usageRow()).toEqual({ reserved: 0, spent: 0, calls: 1 });
+  });
 });
