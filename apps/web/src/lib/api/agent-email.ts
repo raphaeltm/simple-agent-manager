@@ -19,6 +19,8 @@ export interface AgentEmailLoopbackReceived {
   from: string;
   subject: string;
   autoSubmitted: string | null;
+  /** The Message-ID the reply answers, which ties it to one loopback test. */
+  inReplyTo?: string | null;
   receivedAt: string;
 }
 

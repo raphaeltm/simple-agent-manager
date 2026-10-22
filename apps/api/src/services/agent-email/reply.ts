@@ -80,15 +80,16 @@ async function loadReplyContext(env: Env, projectId: string, taskId: string) {
         eq(schema.triggerEmailMessages.triggerExecutionId, task.triggerExecutionId),
         eq(schema.triggerEmailMessages.triggerId, task.triggerId),
         eq(schema.triggerEmailMessages.projectId, projectId),
-        eq(schema.triggerEmailMessages.direction, 'inbound'),
-        eq(schema.triggerEmailMessages.status, 'accepted')
+        eq(schema.triggerEmailMessages.direction, 'inbound')
       )
     )
     .get();
+  // The task's own execution id is the proof this email started it; the row's status is
+  // bookkeeping that may lag (a failed acceptance write is repaired later by the sweep).
   if (!inbound?.messageId) {
     throw new AgentEmailReplyError(
       'not_email_task',
-      'No accepted email is recorded for this task, so there is nothing to reply to'
+      'No email is recorded for this task, so there is nothing to reply to'
     );
   }
   const trigger = await db

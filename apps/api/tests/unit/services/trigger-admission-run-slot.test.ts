@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   githubTriggerInbox,
   tasks,
+  triggerEmailMessages,
   triggerExecutions,
   type TriggerRow,
   triggers,
@@ -49,7 +50,13 @@ afterEach(() => {
 function setup(skipIfRunning: boolean) {
   const sqlite = new Database(':memory:');
   databases.push(sqlite);
-  createSchemaTables(sqlite, [tasks, triggers, triggerExecutions, githubTriggerInbox]);
+  createSchemaTables(sqlite, [
+    tasks,
+    triggers,
+    triggerExecutions,
+    githubTriggerInbox,
+    triggerEmailMessages,
+  ]);
   sqlite
     .prepare(
       `INSERT INTO triggers

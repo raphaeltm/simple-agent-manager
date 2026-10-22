@@ -75,6 +75,21 @@ starts:
 If the same email is delivered twice, the second delivery is acknowledged without starting another
 run.
 
+## When the agent cannot start right away
+
+Once an email passes these checks, SAM stores it before answering the sender's mail server, so it
+is not lost if SAM cannot start the agent right away. The stored text is deleted once the run
+starts or SAM gives up on the email. SAM then retries on its own, in the
+background, with the same run each time, so an email never starts two runs:
+
+- up to **agentEmail.maxDeliveryAttempts** attempts in all (5 by default);
+- the first retry after **agentEmail.retryBaseSeconds** (60 by default), then twice as long each
+  time, at most **agentEmail.retryMaxSeconds** apart (900 by default).
+
+On a retry, an automation that is still busy counts as a failed attempt rather than a refusal. If
+every attempt fails, SAM gives up on that email and alerts admins. The sender's mail server sees a
+temporary failure only if SAM could not store the email at all.
+
 ## Security
 
 - **The address is the key.** Its 16-character random part cannot be guessed. Anyone who learns it

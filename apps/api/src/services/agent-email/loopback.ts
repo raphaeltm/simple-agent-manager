@@ -30,6 +30,11 @@ export interface LoopbackReceived {
   from: string;
   subject: string;
   autoSubmitted: string | null;
+  /**
+   * The Message-ID the reply answers. It matches the `message_id` of the trigger's stored
+   * inbound row for the test, which ties this receipt to that test rather than to any reply.
+   */
+  inReplyTo: string | null;
   receivedAt: string;
 }
 

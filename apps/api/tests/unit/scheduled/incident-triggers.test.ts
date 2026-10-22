@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { runIncidentTriggerSweep } from '../../../src/scheduled/incident-triggers';
 import { claimIncident, resolveIncident } from '../../../src/services/platform-feedback-incidents';
+import { createAgentEmailTables } from '../../helpers/agent-email-tables';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const IMPLEMENTATION_TASK_ID = '01M0YGSPRC0E17FPQMZYW012R8';
@@ -76,6 +77,7 @@ function setup(options: { withTrigger?: boolean } = {}) {
       'utf8'
     )
   );
+  createAgentEmailTables(sqlite);
   if (options.withTrigger !== false) {
     sqlite.exec(`
     INSERT INTO triggers (

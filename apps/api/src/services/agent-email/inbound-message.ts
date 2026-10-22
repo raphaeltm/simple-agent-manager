@@ -26,6 +26,8 @@ export interface InboundAgentEmail {
   fromName: string;
   subject: string;
   messageId: string | null;
+  /** The message this one replies to, when it says so. */
+  inReplyTo: string | null;
   references: string[];
   text: string;
   textTruncated: boolean;
@@ -166,6 +168,7 @@ export async function parseInboundEmail(
     fromName: sanitizeDisplayName(sender?.name),
     subject: sanitizeSubject(parsed.subject),
     messageId: parseSingleMessageId(parsed.messageId),
+    inReplyTo: parseSingleMessageId(parsed.inReplyTo),
     references: parseMessageIdList(parsed.references),
     text: textTruncated ? body.slice(0, maxBodyChars) : body,
     textTruncated,

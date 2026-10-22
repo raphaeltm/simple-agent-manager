@@ -164,4 +164,57 @@ describe('0204 agent email migration', () => {
     expect(db.prepare('SELECT count(*) AS n FROM trigger_email_messages').get()).toEqual({ n: 0 });
     expect(db.prepare('SELECT count(*) AS n FROM trigger_email_configs').get()).toEqual({ n: 0 });
   });
+
+  it('0205 adds durable intake columns to existing rows without changing them', () => {
+    setup();
+    migrate('0204_agent_email_triggers.sql');
+    db.prepare(
+      "INSERT INTO trigger_email_configs (trigger_id, address_key) VALUES ('trigger-1', 'k3j2h7m9q2xw4n8p')"
+    ).run();
+    db.prepare(
+      `INSERT INTO trigger_email_messages
+        (id, trigger_id, project_id, trigger_execution_id, direction, status, message_id,
+         from_address, to_address, lease_expires_at)
+       VALUES ('in-1', 'trigger-1', 'project', 'exec-1', 'inbound', 'accepted', '<m1@example.com>',
+               'a@example.com', 'agent+k@mail.example.com', NULL)`
+    ).run();
+
+    migrate('0205_agent_email_durable_intake.sql');
+
+    expect(
+      db
+        .prepare(
+          `SELECT id, status, trigger_execution_id, payload_json, attempts, available_at, lease_token
+             FROM trigger_email_messages`
+        )
+        .all()
+    ).toEqual([
+      {
+        id: 'in-1',
+        status: 'accepted',
+        trigger_execution_id: 'exec-1',
+        payload_json: null,
+        attempts: 0,
+        available_at: null,
+        lease_token: null,
+      },
+    ]);
+    const indexes = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'trigger_email_messages'"
+      )
+      .all();
+    expect(indexes).toContainEqual({ name: 'idx_trigger_email_messages_due' });
+    // The inbound dedupe index still holds.
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO trigger_email_messages (id, trigger_id, project_id, direction, status,
+             message_id, from_address, to_address)
+           VALUES ('in-2', 'trigger-1', 'project', 'inbound', 'processing', '<m1@example.com>',
+                   'a@example.com', 'agent+k@mail.example.com')`
+        )
+        .run()
+    ).toThrow(/UNIQUE constraint/);
+  });
 });

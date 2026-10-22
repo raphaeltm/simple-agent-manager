@@ -70,16 +70,20 @@ Lowering the maximum also caps projects that set a higher limit earlier.
 
 These limit [email triggers](/docs/guides/email-triggers/) (preview). Every value is a whole number.
 
-| Setting                               | Default   | Range            | What it limits                                                                      |
-| ------------------------------------- | --------- | ---------------- | ----------------------------------------------------------------------------------- |
-| `agentEmail.maxInboundBytes`          | 5,242,880 | 1,024–26,214,400 | Bytes in one email an agent address accepts (5 MiB). Larger mail is rejected        |
-| `agentEmail.maxBodyChars`             | 12,000    | 200–100,000      | Characters of an email body placed in the agent's prompt                            |
-| `agentEmail.maxReplyChars`            | 20,000    | 100–200,000      | Characters in one reply an agent sends                                              |
-| `agentEmail.maxRepliesPerRun`         | 5         | 1–50             | Replies one email-started run can send. Failed attempts count                       |
-| `agentEmail.maxAllowedSenders`        | 20        | 1–200            | Allowed senders one email trigger can list                                          |
-| `agentEmail.inboundPerTriggerPerHour` | 20        | 1–10,000         | Emails one email trigger accepts per hour                                           |
-| `agentEmail.processingLeaseSeconds`   | 120       | 10–3,600         | Seconds one delivery attempt holds an email before a retried delivery may take over |
-| `agentEmail.loopbackPerHour`          | 10        | 1–100            | Loopback test emails one superadmin can send per hour                               |
+| Setting                               | Default   | Range            | What it limits                                                                    |
+| ------------------------------------- | --------- | ---------------- | --------------------------------------------------------------------------------- |
+| `agentEmail.maxInboundBytes`          | 5,242,880 | 1,024–26,214,400 | Bytes in one email an agent address accepts (5 MiB). Larger mail is rejected      |
+| `agentEmail.maxBodyChars`             | 12,000    | 200–100,000      | Characters of an email body placed in the agent's prompt                          |
+| `agentEmail.maxReplyChars`            | 20,000    | 100–200,000      | Characters in one reply an agent sends                                            |
+| `agentEmail.maxRepliesPerRun`         | 5         | 1–50             | Replies one email-started run can send. Failed attempts count                     |
+| `agentEmail.maxAllowedSenders`        | 20        | 1–200            | Allowed senders one email trigger can list                                        |
+| `agentEmail.inboundPerTriggerPerHour` | 20        | 1–10,000         | Emails one email trigger accepts per hour                                         |
+| `agentEmail.processingLeaseSeconds`   | 120       | 10–3,600         | Seconds one attempt to start the agent owns an email before a retry may take over |
+| `agentEmail.loopbackPerHour`          | 10        | 1–100            | Loopback test emails one superadmin can send per hour                             |
+| `agentEmail.maxDeliveryAttempts`      | 5         | 1–20             | Attempts to start the agent for one accepted email before SAM gives up on it      |
+| `agentEmail.retryBaseSeconds`         | 60        | 10–3,600         | Seconds before the first retry; each later retry waits twice as long              |
+| `agentEmail.retryMaxSeconds`          | 900       | 60–86,400        | Longest wait between two retries of one email                                     |
+| `agentEmail.recoveryBatchSize`        | 10        | 1–100            | Emails one 5-minute recovery sweep retries                                        |
 
 ## Storage and consistency
 

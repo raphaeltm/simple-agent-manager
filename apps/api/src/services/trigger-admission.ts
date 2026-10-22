@@ -2,7 +2,6 @@ import {
   DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES,
   TASK_TERMINAL_STATUSES,
   type TriggeredBy,
-  type TriggerSkipReason,
 } from '@simple-agent-manager/shared';
 
 import type * as schema from '../db/schema';
@@ -10,46 +9,21 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
-import {
-  SLEEPING_TASK_STATUSES,
-  taskStatusIsNonTerminalSql,
-  TERMINAL_STATUS_VALUES,
-} from './task-status';
+import { TERMINAL_STATUS_VALUES } from './task-status';
 import { readTriggerAdmissionSnapshot } from './trigger-admission-snapshot';
 import { resolveTriggerExecutionUserId } from './trigger-execution-principal';
+import {
+  type AdmissionSkipReason,
+  classifyReservationFailure,
+  EXECUTION_HOLDS_RUN_SLOT_BINDINGS,
+  EXECUTION_HOLDS_RUN_SLOT_SQL,
+} from './trigger-run-slots';
 import { type SubmittedTriggerTask, TriggerTaskSubmissionPendingError } from './trigger-submission';
 import { submitTriggeredTask } from './trigger-submit';
 
 export type TriggerTaskSubmitter = typeof submitTriggeredTask;
 
-type AdmissionSkipReason = Extract<TriggerSkipReason, 'still_running' | 'concurrent_limit'>;
 const TERMINAL_TASK_STATUSES = new Set<string>(TASK_TERMINAL_STATUSES);
-
-/**
- * Whether execution `e` (with its linked task `t` LEFT JOINed) still holds one of its
- * trigger's run slots, for both skip_if_running and max_concurrent. A reserved or
- * running execution holds it, and so does any execution whose linked task has not
- * terminalized, which covers the cleanup sweep's hard-residence backstop.
- *
- * A sleeping run does not: its task released the runtime and is not running. It stays
- * wakeable, so a follow-up can still resume it, but it must not block the next run
- * until its snapshot expires days later.
- *
- * Both task-status checks are denylists, so a new task status holds the slot until
- * someone decides otherwise (`packages/shared/.claude/rules/79`). The status
- * classification test in `trigger-admission-run-slot.test.ts` fails until it does.
- * Bind {@link EXECUTION_HOLDS_RUN_SLOT_BINDINGS} at this predicate's position.
- */
-const EXECUTION_HOLDS_RUN_SLOT_SQL = `(
-  (
-    e.status IN ('queued', 'running')
-    OR (e.task_id IS NOT NULL AND ${taskStatusIsNonTerminalSql('t.status')})
-    OR (e.status = 'failed' AND e.task_id IS NULL
-      AND EXISTS (SELECT 1 FROM github_trigger_inbox g WHERE g.id = e.github_delivery_id AND g.state IN ('pending', 'processing')))
-  )
-  AND (t.status IS NULL OR t.status NOT IN (${SLEEPING_TASK_STATUSES.map(() => '?').join(', ')}))
-)`;
-const EXECUTION_HOLDS_RUN_SLOT_BINDINGS = [...TERMINAL_STATUS_VALUES, ...SLEEPING_TASK_STATUSES];
 
 export type TriggerAdmissionResult =
   | {
@@ -85,6 +59,12 @@ export interface TriggerAdmissionInput {
   ) => string;
   /** Durable hook used to link source admission state before external submission begins. */
   beforeSubmit?: (executionId: string) => Promise<void>;
+  /**
+   * An execution id the caller stored durably before calling (email intake). A later call with
+   * the same id resumes that execution, including its rendered prompt, instead of reserving
+   * another, the way a GitHub delivery id does. Submission is idempotent per execution id.
+   */
+  executionId?: string;
 }
 
 async function consecutiveFailureCount(
@@ -205,50 +185,34 @@ async function recordTaskBoundary(
   }
 }
 
-async function classifyReservationFailure(
-  env: Env,
-  trigger: schema.TriggerRow
-): Promise<'paused' | 'disabled' | AdmissionSkipReason> {
-  const state = await env.DATABASE.prepare(
-    `SELECT status, skip_if_running AS skipIfRunning, max_concurrent AS maxConcurrent,
-       (SELECT COUNT(*) FROM trigger_executions e
-          LEFT JOIN tasks t ON t.id = e.task_id
-         WHERE e.trigger_id = triggers.id
-           AND ${EXECUTION_HOLDS_RUN_SLOT_SQL}) AS activeCount
-     FROM triggers WHERE id = ? AND project_id = ?`
-  )
-    .bind(...EXECUTION_HOLDS_RUN_SLOT_BINDINGS, trigger.id, trigger.projectId)
-    .first<{
-      status: string;
-      skipIfRunning: number;
-      maxConcurrent: number;
-      activeCount: number;
-    }>();
-  if (!state || state.status === 'disabled') return 'disabled';
-  if (state.status === 'paused') return 'paused';
-  return state.skipIfRunning && state.activeCount > 0 ? 'still_running' : 'concurrent_limit';
-}
-
 export async function admitAndSubmitTriggerExecution(
   env: Env,
   input: TriggerAdmissionInput,
   submitter: TriggerTaskSubmitter = submitTriggeredTask
 ): Promise<TriggerAdmissionResult> {
   let { trigger } = input;
-  const previous = input.githubDeliveryId
-    ? await env.DATABASE.prepare(
-        'SELECT * FROM trigger_executions WHERE github_delivery_id = ? AND trigger_id = ?'
-      )
-        .bind(input.githubDeliveryId, trigger.id)
-        .first<{
-          id: string;
-          status: string;
-          skip_reason: AdmissionSkipReason | null;
-          sequence_number: number;
-          rendered_prompt: string | null;
-          admission_snapshot_json: string | null;
-        }>()
-    : null;
+  type PreviousExecution = {
+    id: string;
+    status: string;
+    skip_reason: AdmissionSkipReason | null;
+    sequence_number: number;
+    rendered_prompt: string | null;
+    admission_snapshot_json: string | null;
+  };
+  let previous: PreviousExecution | null = null;
+  if (input.githubDeliveryId) {
+    previous = await env.DATABASE.prepare(
+      'SELECT * FROM trigger_executions WHERE github_delivery_id = ? AND trigger_id = ?'
+    )
+      .bind(input.githubDeliveryId, trigger.id)
+      .first<PreviousExecution>();
+  } else if (input.executionId) {
+    previous = await env.DATABASE.prepare(
+      'SELECT * FROM trigger_executions WHERE id = ? AND trigger_id = ?'
+    )
+      .bind(input.executionId, trigger.id)
+      .first<PreviousExecution>();
+  }
   if (previous?.status === 'skipped') {
     if (!previous.skip_reason) throw new Error('Skipped execution lacks a reason');
     return { outcome: 'skipped', executionId: previous.id, reason: previous.skip_reason };
@@ -290,7 +254,7 @@ export async function admitAndSubmitTriggerExecution(
     if (state?.status !== 'active') break;
   }
 
-  const executionId = previous?.id ?? ulid();
+  const executionId = previous?.id ?? input.executionId ?? ulid();
   const now = new Date().toISOString();
   const scheduledAt = input.scheduledAt ?? now;
   const allowPaused = input.allowPaused ? 1 : 0;
@@ -417,6 +381,15 @@ export async function admitAndSubmitTriggerExecution(
            AND EXISTS (SELECT 1 FROM github_trigger_inbox g WHERE g.id = ? AND g.state IN ('pending','processing'))`
       )
         .bind(executionId, input.githubDeliveryId)
+        .run();
+    } else if (previous && input.executionId) {
+      // A caller-owned retry (its own lease is checked in beforeSubmit) takes the failed
+      // attempt's execution back rather than reserving another.
+      await env.DATABASE.prepare(
+        `UPDATE trigger_executions SET status = 'queued', completed_at = NULL
+         WHERE id = ? AND status = 'failed' AND task_id IS NULL`
+      )
+        .bind(executionId)
         .run();
     }
     await input.beforeSubmit?.(executionId);

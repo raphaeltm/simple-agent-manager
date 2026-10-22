@@ -7,6 +7,11 @@
  * (cloudflare/workerd#6740); the unguessable address plus the sender allowlist are the
  * prototype's controls, and aligned sender authentication is the production gate
  * (idea 01KS4X886T3NRKR3696H25A2AN).
+ *
+ * An email that passes the checks is stored before SMTP is answered (inbound-delivery.ts).
+ * After that the handler never throws: a failed or crashed attempt is retried by SAM from
+ * storage (recovery.ts), not by the sender's server. The only failure left to the sender is
+ * the store itself failing, before SAM has taken responsibility for the email.
  */
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -20,13 +25,11 @@ import {
   DEFAULT_WINDOW_SECONDS,
   getCurrentWindowStart,
 } from '../../middleware/rate-limit';
-import { admitAndSubmitTriggerExecution } from '../trigger-admission';
-import { submitTriggeredTask } from '../trigger-submit';
 import { agentEmailAddress, isAgentEmailAvailable, parseAgentEmailRecipient } from './address';
-import { buildEmailContext, renderEmailPrompt } from './context';
 import { sanitizeHeaderText } from './headers';
-import { claimDelivery, finishDelivery } from './inbound-delivery';
+import { recordIntake } from './inbound-delivery';
 import { type InboundAgentEmail, parseInboundEmail } from './inbound-message';
+import { attemptDelivery, type AttemptOptions } from './inbound-process';
 import { recordLoopbackReceipt } from './loopback';
 import { type AgentEmailLimits, getAgentEmailLimits } from './settings';
 import { parseAllowedSenders } from './trigger-config';
@@ -42,14 +45,13 @@ export interface InboundEmailMessage {
 
 export type InboundOutcome =
   | { kind: 'accepted'; executionId: string }
+  /** Stored, and SAM will retry starting the agent. */
+  | { kind: 'queued' }
   | { kind: 'duplicate' }
   | { kind: 'loopback' }
   | { kind: 'rejected'; reason: string };
 
-export interface InboundDeps {
-  submitter?: Parameters<typeof admitAndSubmitTriggerExecution>[2];
-  now?: () => Date;
-}
+export type InboundDeps = Omit<AttemptOptions, 'refuseBusy'>;
 
 const BULK_PRECEDENCE = new Set(['bulk', 'list', 'junk']);
 const SYSTEM_SENDER = /^(mailer-daemon|postmaster)@/i;
@@ -120,6 +122,7 @@ async function receiveLoopback(
     from: email.from,
     subject: email.subject,
     autoSubmitted: sanitizeHeaderText(email.autoSubmitted, 40) || null,
+    inReplyTo: email.inReplyTo,
     receivedAt: now.toISOString(),
   });
   return { kind: 'loopback' };
@@ -186,7 +189,9 @@ export async function handleInboundAgentEmail(
   if (!email.messageId) return reject(message, 'A Message-ID header is required');
 
   const address = agentEmailAddress(env.BASE_DOMAIN, recipient.key);
-  const claim = await claimDelivery(
+  // The one write that may still fail the delivery back to the sender: until it commits,
+  // nothing about this email exists in SAM.
+  const intake = await recordIntake(
     db,
     {
       triggerId: trigger.id,
@@ -198,91 +203,27 @@ export async function handleInboundAgentEmail(
       subject: email.subject,
       rawSize: message.rawSize,
     },
+    { email, receivedAt: now.toISOString() },
     now,
     limits.processingLeaseSeconds * 1000
   );
-  if (claim === 'duplicate') return { kind: 'duplicate' };
-  if (claim === 'busy') throw new Error('Delivery of this message is already in progress');
-  const { rowId } = claim;
+  if (intake.kind === 'duplicate') return { kind: 'duplicate' };
 
-  let submittedExecutionId: string | null = null;
-  try {
-    const admission = await admitAndSubmitTriggerExecution(
-      env,
-      {
-        trigger,
-        eventType: 'email',
-        triggeredBy: 'email',
-        scheduledAt: now.toISOString(),
-        beforeSubmit: async (executionId) => {
-          await db
-            .update(schema.triggerEmailMessages)
-            .set({ triggerExecutionId: executionId, updatedAt: now.toISOString() })
-            .where(eq(schema.triggerEmailMessages.id, rowId));
-        },
-        renderPrompt: (executionId, sequenceNumber) =>
-          renderEmailPrompt(
-            trigger.promptTemplate,
-            buildEmailContext({
-              email,
-              address,
-              receivedAt: now.toISOString(),
-              trigger,
-              projectName: found.projectName,
-              executionId,
-              sequenceNumber,
-            }),
-            limits.maxBodyChars
-          ),
-      },
-      deps.submitter ?? submitTriggeredTask
-    );
-
-    if (admission.outcome === 'submitted' || admission.outcome === 'pending') {
-      submittedExecutionId = admission.executionId;
-      await finishDelivery(db, rowId, 'accepted', now, {
-        triggerExecutionId: admission.executionId,
-      });
-      log.info('agent_email.inbound_accepted', {
-        ...logContext,
-        executionId: admission.executionId,
-        outcome: admission.outcome,
-      });
-      return { kind: 'accepted', executionId: admission.executionId };
-    }
-    if (admission.outcome === 'failed') {
-      throw new Error(`Trigger submission failed: ${admission.error}`);
-    }
-    let reason = 'This agent is busy with earlier email; try again later';
-    if (admission.outcome === 'inactive') {
-      reason =
-        admission.reason === 'paused'
-          ? 'This agent address is paused'
-          : 'This agent address is turned off';
-    }
-    await finishDelivery(db, rowId, 'rejected', now, { reason: admission.reason });
-    log.info('agent_email.inbound_rejected', { ...logContext, reason: admission.outcome });
-    return reject(message, reason);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    if (submittedExecutionId) {
-      // The task exists; only recording it failed. Report success: a thrown handler is
-      // retried, and the retry must not start this email twice. A later takeover of the row
-      // finds the linked task and stops there (inbound-delivery.ts:alreadySubmitted).
-      log.error('agent_email.inbound_bookkeeping_failed', {
-        ...logContext,
-        executionId: submittedExecutionId,
-        error: detail,
-      });
-      return { kind: 'accepted', executionId: submittedExecutionId };
-    }
-    // Not a reject: setReject is permanent, and this failure may be temporary. Cloudflare does
-    // not document whether it redelivers after a thrown handler. Marking the claim failed first
-    // lets any redelivery, or a resend of the same Message-ID, run again.
-    await finishDelivery(db, rowId, 'failed', now, { reason: detail.slice(0, 500) }).catch(
-      () => undefined
-    );
-    log.error('agent_email.inbound_failed', { ...logContext, error: detail });
-    throw error;
+  const outcome = await attemptDelivery(
+    env,
+    { db, trigger, projectName: found.projectName, address, limits },
+    intake.delivery,
+    { ...deps, refuseBusy: true }
+  );
+  switch (outcome.kind) {
+    case 'accepted':
+      return { kind: 'accepted', executionId: outcome.executionId };
+    case 'refused':
+      return reject(message, outcome.reason);
+    case 'gave_up':
+      return reject(message, 'This agent could not be started; try again later');
+    case 'retrying':
+    case 'superseded':
+      return { kind: 'queued' };
   }
 }

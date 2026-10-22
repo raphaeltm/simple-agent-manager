@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
+import { createAgentEmailTables } from '../helpers/agent-email-tables';
 import { createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const project = vi.hoisted(() => ({
@@ -154,6 +155,7 @@ describe('webhook trigger management vertical slice', () => {
         'utf8'
       )
     );
+    createAgentEmailTables(sqlite);
     sqlite.pragma('foreign_keys = ON');
     authState.userId = 'user-1';
     admissionState.renderedPrompt = '';

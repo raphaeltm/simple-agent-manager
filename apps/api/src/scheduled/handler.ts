@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { runAgentEmailRecovery } from '../services/agent-email/recovery';
 import { reconcileDiagnosisRuns } from '../services/diagnosis-runner';
 import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-reconciliation';
 import { runGitHubTriggerRecovery } from '../services/github-trigger-recovery';
@@ -125,6 +126,9 @@ export async function scheduled(
   const sweeps = createSweepIsolator(env);
   const githubTriggerRecovery = await sweeps.isolate('github_trigger_recovery', () =>
     runGitHubTriggerRecovery(env, ctx.waitUntil.bind(ctx))
+  );
+  const agentEmailRecovery = await sweeps.isolate('agent_email_recovery', () =>
+    runAgentEmailRecovery(env, ctx.waitUntil.bind(ctx))
   );
   const diagnosisRecovery = await sweeps.isolate('diagnosis_reconcile', () =>
     reconcileDiagnosisRuns(env)
@@ -287,6 +291,7 @@ export async function scheduled(
     observabilityPurgedByAge: observabilityPurge?.deletedByAge,
     observabilityPurgedByCount: observabilityPurge?.deletedByCount,
     githubTriggerRecovery,
+    agentEmailRecovery,
     cronTriggersChecked: cronTriggers?.checked,
     cronTriggersFired: cronTriggers?.fired,
     cronTriggersSkipped: cronTriggers?.skipped,

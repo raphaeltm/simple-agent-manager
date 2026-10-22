@@ -3094,7 +3094,11 @@ export const triggerEmailConfigs = sqliteTable('trigger_email_configs', {
 
 export type TriggerEmailConfigRow = typeof triggerEmailConfigs.$inferSelect;
 
-/** Email metadata only (never bodies): inbound dedupe and outbound reply accounting. */
+/**
+ * Inbound dedupe and durable intake, and outbound reply accounting. An inbound row keeps the
+ * parsed email (payload_json, the body capped by agentEmail.maxBodyChars) only until the email
+ * is accepted or given up on; attachments are summarized, never stored.
+ */
 export const triggerEmailMessages = sqliteTable(
   'trigger_email_messages',
   {
@@ -3117,6 +3121,13 @@ export const triggerEmailMessages = sqliteTable(
     rawSize: integer('raw_size'),
     providerMessageId: text('provider_message_id'),
     leaseExpiresAt: text('lease_expires_at'),
+    /** Inbound only: what the prompt needs, kept until the email is accepted or given up on. */
+    payloadJson: text('payload_json'),
+    attempts: integer('attempts').notNull().default(0),
+    /** Inbound only: when a failed attempt may be retried. */
+    availableAt: text('available_at'),
+    /** Inbound only: the attempt that currently owns the row; fences its writes. */
+    leaseToken: text('lease_token'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -3132,6 +3143,9 @@ export const triggerEmailMessages = sqliteTable(
       table.triggerExecutionId,
       table.direction
     ),
+    dueIdx: index('idx_trigger_email_messages_due')
+      .on(table.status, table.availableAt)
+      .where(sql`direction = 'inbound'`),
   })
 );
 

@@ -22,6 +22,7 @@ import {
   purgeExpiredWebhookDeliveries,
   rotateWebhookToken,
 } from '../../src/services/webhook-trigger-store';
+import { createAgentEmailTables } from '../helpers/agent-email-tables';
 import { createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const SCHEMA = `
@@ -162,6 +163,7 @@ describe('generic webhook ingress vertical slice', () => {
         'utf8'
       )
     );
+    createAgentEmailTables(sqlite);
     taskRunnerStates = new Map();
     token = generateWebhookToken();
     const now = new Date().toISOString();

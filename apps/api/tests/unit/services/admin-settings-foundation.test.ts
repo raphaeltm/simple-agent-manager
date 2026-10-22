@@ -45,8 +45,8 @@ function rows(enabled: boolean): AdminSettingOverrideRow[] {
 
 describe('Phase 1 settings registry', () => {
   it('covers bounded Phase 1 controls and reuses Connector defaults', () => {
-    expect(new Set(ADMIN_SETTINGS_REGISTRY.map((setting) => setting.name)).size).toBe(64);
-    expect(ADMIN_SETTINGS_REGISTRY).toHaveLength(64);
+    expect(new Set(ADMIN_SETTINGS_REGISTRY.map((setting) => setting.name)).size).toBe(68);
+    expect(ADMIN_SETTINGS_REGISTRY).toHaveLength(68);
     for (const [key, value] of Object.entries(CONNECTOR_DEFAULTS)) {
       const definition = findAdminSetting(`connector.${key}`)!;
       expect(definition.defaultValue).toEqual(value);
@@ -82,6 +82,10 @@ describe('Phase 1 settings registry', () => {
       'agentEmail.inboundPerTriggerPerHour': 20,
       'agentEmail.processingLeaseSeconds': 120,
       'agentEmail.loopbackPerHour': 10,
+      'agentEmail.maxDeliveryAttempts': 5,
+      'agentEmail.retryBaseSeconds': 60,
+      'agentEmail.retryMaxSeconds': 900,
+      'agentEmail.recoveryBatchSize': 10,
     });
     expect(agentEmail.every((setting) => setting.category === 'Email')).toBe(true);
     expect(findAdminSetting('feedback.projectId')).toBeUndefined();
