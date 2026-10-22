@@ -90,10 +90,11 @@ export function renderEmailPrompt(
   context: EmailTemplateContext,
   maxBodyChars: number
 ): string {
-  // EmailTemplateContext is built entirely by buildEmailContext; the widening only satisfies
-  // renderTemplate's structural Record parameter.
-  const record = context as unknown as Record<string, unknown>;
   const fieldLimit = maxBodyChars + 200;
-  return renderTemplate(template, record, DEFAULT_CRON_TEMPLATE_MAX_LENGTH + fieldLimit, fieldLimit)
-    .rendered;
+  return renderTemplate(
+    template,
+    context,
+    DEFAULT_CRON_TEMPLATE_MAX_LENGTH + fieldLimit,
+    fieldLimit
+  ).rendered;
 }

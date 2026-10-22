@@ -55,6 +55,7 @@ export default defineConfig({
             { slug: 'docs/guides/notifications' },
             { slug: 'docs/guides/triggers' },
             { slug: 'docs/guides/webhook-triggers' },
+            { slug: 'docs/guides/email-triggers' },
             { slug: 'docs/guides/scheduled-actions' },
             { slug: 'docs/guides/workflows' },
             { slug: 'docs/guides/mcp-servers' },

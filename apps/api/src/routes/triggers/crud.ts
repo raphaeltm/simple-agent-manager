@@ -24,6 +24,7 @@ import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../s
 import {
   loadEmailTriggerConfig,
   resolveAllowedSenders,
+  toEmailTriggerConfig,
 } from '../../services/agent-email/trigger-config';
 import { buildCredentialAttributionForTriggers } from '../../services/credential-attribution-health';
 import { cronToNextFire } from '../../services/cron-utils';
@@ -174,7 +175,8 @@ crudRoutes.get('/', async (c) => {
   const project = await requireProjectTaskRead(db, projectId, getAuth(c).user.id);
   const rows = await listTriggerRows(db, projectId);
   const ids = rows.map((row) => row.id);
-  const [githubConfigs, webhookConfigs, attributionById] = await Promise.all([
+  const emailIds = rows.filter((row) => row.sourceType === 'email').map((row) => row.id);
+  const [githubConfigs, webhookConfigs, emailConfigs, attributionById] = await Promise.all([
     ids.length
       ? db
           .select()
@@ -187,10 +189,17 @@ crudRoutes.get('/', async (c) => {
           .from(schema.webhookTriggerConfigs)
           .where(inArray(schema.webhookTriggerConfigs.triggerId, ids))
       : [],
+    emailIds.length
+      ? db
+          .select()
+          .from(schema.triggerEmailConfigs)
+          .where(inArray(schema.triggerEmailConfigs.triggerId, emailIds))
+      : [],
     attribution(db, c.env, project, rows),
   ]);
   const githubById = new Map(githubConfigs.map((config) => [config.triggerId, config]));
   const webhookById = new Map(webhookConfigs.map((config) => [config.triggerId, config]));
+  const emailById = new Map(emailConfigs.map((config) => [config.triggerId, config]));
   const triggers = rows.map((row) => {
     const response = toTriggerResponse(row);
     response.credentialAttribution = attributionById.get(row.id);
@@ -207,6 +216,8 @@ crudRoutes.get('/', async (c) => {
     }
     const webhook = webhookById.get(row.id);
     if (webhook) response.webhookConfig = toWebhookTriggerConfig(webhook);
+    const email = emailById.get(row.id);
+    if (email) response.emailConfig = toEmailTriggerConfig(email, c.env.BASE_DOMAIN);
     return response;
   });
   const response: ListTriggersResponse = { triggers };

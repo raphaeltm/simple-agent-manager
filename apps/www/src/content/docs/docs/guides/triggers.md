@@ -18,6 +18,9 @@ You can create triggers yourself, or ask an agent in the project to create them 
 | **GitHub event** | An issue, issue comment, pull request, or push on the project's repository matches filters | Triage each new issue labelled `bug`; answer `/sam` comments   |
 | **Webhook**      | Another service sends SAM an authenticated JSON request                                    | Investigate a failed deployment reported by your CI or hosting |
 
+A fourth kind, **Email** (preview), gives an automation its own email address. See
+[Email Triggers](/docs/guides/email-triggers/).
+
 ## Create a trigger yourself
 
 1. Open the project, select **Automation** in the project navigation, then **New automation**.

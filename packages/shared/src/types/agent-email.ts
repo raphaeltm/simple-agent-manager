@@ -19,8 +19,11 @@ export interface EmailTriggerConfig {
   allowedSenders: string[];
 }
 
-/** Variables available as `{{email.*}}`, `{{trigger.*}}`, ... in an email trigger's prompt. */
-export interface EmailTemplateContext {
+/**
+ * Variables available as `{{email.*}}`, `{{trigger.*}}`, ... in an email trigger's prompt.
+ * A type alias (not an interface) so it is assignable to the template renderer's record type.
+ */
+export type EmailTemplateContext = {
   email: {
     /** Sender address from the `From:` header. */
     from: string;
@@ -50,7 +53,7 @@ export interface EmailTemplateContext {
     id: string;
     sequenceNumber: string;
   };
-}
+};
 
 /** `GET /api/config/agent-email`: whether this deployment can receive and send agent email. */
 export interface AgentEmailConfigResponse {
