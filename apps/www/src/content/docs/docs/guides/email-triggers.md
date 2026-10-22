@@ -30,15 +30,15 @@ Email triggers cannot be started with **Run now**: there would be no email to an
 
 ## What the agent sees
 
-| Variable                                           | Meaning                                                         |
-| -------------------------------------------------- | --------------------------------------------------------------- |
-| `{{email.from}}`, `{{email.fromName}}`             | The sender's address and display name                           |
-| `{{email.to}}`                                     | The automation's address                                        |
-| `{{email.subject}}`                                | The subject                                                     |
-| `{{email.text}}`                                   | The plain-text body (HTML-only mail is converted to text)       |
-| `{{email.attachments}}`                            | One line per attachment: name, type and size. Contents are not kept |
-| `{{email.receivedAt}}`, `{{email.messageId}}`      | When it arrived, and its `Message-ID`                           |
-| `{{trigger.*}}`, `{{project.*}}`, `{{execution.*}}` | The same identity fields as other triggers                      |
+| Variable                                            | Meaning                                                             |
+| --------------------------------------------------- | ------------------------------------------------------------------- |
+| `{{email.from}}`, `{{email.fromName}}`              | The sender's address and display name                               |
+| `{{email.to}}`                                      | The automation's address                                            |
+| `{{email.subject}}`                                 | The subject                                                         |
+| `{{email.text}}`                                    | The plain-text body (HTML-only mail is converted to text)           |
+| `{{email.attachments}}`                             | One line per attachment: name, type and size. Contents are not kept |
+| `{{email.receivedAt}}`, `{{email.messageId}}`       | When it arrived, and its `Message-ID`                               |
+| `{{trigger.*}}`, `{{project.*}}`, `{{execution.*}}` | The same identity fields as other triggers                          |
 
 Long bodies are cut at the **agentEmail.maxBodyChars** admin setting (12,000 characters by default)
 and the prompt says so.
@@ -83,6 +83,9 @@ run.
   confirm the `From:` address itself. Someone who knows the address could fake an allowed sender at
   a domain whose DMARC policy is `p=none`. Verifying the sender's DKIM signature inside SAM is
   required before this leaves preview.
+- **Prefer senders whose domain enforces DMARC.** Until then, an allowed sender at a domain that
+  publishes `p=quarantine` or `p=reject` is much harder to fake than one at a domain with `p=none`
+  or no DMARC record. Any DMARC lookup tool shows a domain's policy.
 - **An email can ask the agent to do anything the automation's agent can do.** Give email
   automations a profile with only the access they need.
 
@@ -94,6 +97,9 @@ a fixed loopback test: add `agent+loopback@mail.<your-domain>` to an automation'
 replies, the reply comes back to SAM and appears under **Last reply received**. The same is
 available through [`/api/admin/agent-email`](/docs/reference/api/#agent-email-preview).
 
+Cloudflare's Email Routing summary lists every reply an agent sends as **dropped**, even when it was
+delivered. Check Email Sending's metrics and logs for replies instead.
+
 ## Set it up (self-hosting)
 
 Agent email needs Cloudflare Email Routing and Email Sending (Workers Paid) on your zone, plus three
@@ -101,3 +107,7 @@ more permissions on the deploy token. See the agent email note in
 [Self-Hosting](/docs/guides/self-hosting/). The deploy configures only `mail.<your-domain>`. It
 skips any zone whose main domain already receives mail elsewhere, and the production deploy does not
 turn the preview on.
+
+After the first deploy, Cloudflare verifies the new sending records, usually within 5 to 15
+minutes. Mail can arrive before then, but replies fail until it finishes. The deploy log says when
+verification is still pending.

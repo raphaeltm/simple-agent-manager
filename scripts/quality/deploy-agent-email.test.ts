@@ -227,7 +227,12 @@ describe('configureAgentEmail', () => {
 
     const first = await run(fake);
 
-    expect(first).toMatchObject({ status: 'configured', domain: 'mail.fixture.example' });
+    expect(first).toMatchObject({
+      status: 'configured',
+      domain: 'mail.fixture.example',
+      apexMailRecordsAdded: [],
+      sendingEnabled: true,
+    });
     expect(fake.dns.some((r) => r.type === 'MX' && r.name === 'mail.fixture.example')).toBe(true);
     expect(fake.routing.support_subaddress).toBe(true);
     expect(fake.rules).toEqual([
@@ -287,7 +292,7 @@ describe('configureAgentEmail', () => {
       state.dns = state.dns.filter((r) => r.name !== 'fixture.example');
     };
 
-    await expect(run(fake)).rejects.toThrow(/changed the pre-existing apex MX/);
+    await expect(run(fake)).rejects.toThrow(/changed the MX\/SPF records of fixture\.example/);
   });
 
   it('refuses to write a sending DNS record outside the agent email subdomain', async () => {
@@ -301,18 +306,79 @@ describe('configureAgentEmail', () => {
     expect(fake.dns.some((r) => r.name === '_dmarc.fixture.example')).toBe(false);
   });
 
-  it('tolerates Cloudflare adding apex MX records to an apex that had none', async () => {
+  it('reports Cloudflare mail records added to an apex that had none', async () => {
     const fake = new FakeCloudflare();
     fake.onEnableSubdomain = (state) => {
+      state.dns.push(
+        { type: 'MX', name: 'fixture.example', content: 'route1.mx.cloudflare.net', priority: 13 },
+        {
+          type: 'TXT',
+          name: 'fixture.example',
+          content: '"v=spf1 include:_spf.mx.cloudflare.net ~all"',
+        }
+      );
+    };
+
+    await expect(run(fake)).resolves.toMatchObject({
+      status: 'configured',
+      apexMailRecordsAdded: [
+        'MX route1.mx.cloudflare.net',
+        'TXT v=spf1 include:_spf.mx.cloudflare.net ~all',
+      ],
+    });
+  });
+
+  it('fails the deploy if a non-Cloudflare mail record appears on an apex that had none', async () => {
+    const fake = new FakeCloudflare();
+    fake.onEnableSubdomain = (state) => {
+      state.dns.push({ type: 'MX', name: 'fixture.example', content: 'mx.evil.test', priority: 1 });
+    };
+
+    await expect(run(fake)).rejects.toThrow(/added non-Cloudflare mail records/);
+  });
+
+  it('fails the deploy if an apex with mail records gains another one', async () => {
+    const fake = new FakeCloudflare();
+    // SPF only: this apex sends mail elsewhere but has no MX, so the skip guard lets it through.
+    fake.dns.push({
+      type: 'TXT',
+      name: 'fixture.example',
+      content: '"v=spf1 include:amazonses.com ~all"',
+    });
+    fake.onEnableSubdomain = (state) => {
       state.dns.push({
-        type: 'MX',
+        type: 'TXT',
         name: 'fixture.example',
-        content: 'route1.mx.cloudflare.net',
-        priority: 13,
+        content: '"v=spf1 include:_spf.mx.cloudflare.net ~all"',
       });
     };
 
-    await expect(run(fake)).resolves.toMatchObject({ status: 'configured' });
+    await expect(run(fake)).rejects.toThrow(/changed the MX\/SPF records of fixture\.example/);
+  });
+
+  it('ignores apex TXT records that are not SPF', async () => {
+    const fake = new FakeCloudflare();
+    fake.dns.push({
+      type: 'TXT',
+      name: 'fixture.example',
+      content: '"google-site-verification=x"',
+    });
+    fake.onEnableSubdomain = (state) => {
+      state.dns.push({ type: 'TXT', name: 'fixture.example', content: '"other-verification=y"' });
+    };
+
+    await expect(run(fake)).resolves.toMatchObject({
+      status: 'configured',
+      apexMailRecordsAdded: [],
+    });
+  });
+
+  it('reports a sending subdomain that is still verifying', async () => {
+    const fake = new FakeCloudflare();
+    fake.sending.push({ tag: 'tag-pending', name: 'mail.fixture.example', enabled: false });
+    fake.sendingDns['tag-pending'] = [];
+
+    await expect(run(fake)).resolves.toMatchObject({ status: 'configured', sendingEnabled: false });
   });
 });
 
@@ -325,7 +391,16 @@ describe('agent email marker', () => {
 
   it('records the configured domain and clears it when email is off', () => {
     dir = mkdtempSync(join(tmpdir(), 'sam-agent-email-'));
-    writeAgentEmailMarker({ status: 'configured', domain: 'mail.fixture.example', writes: 3 }, dir);
+    writeAgentEmailMarker(
+      {
+        status: 'configured',
+        domain: 'mail.fixture.example',
+        writes: 3,
+        apexMailRecordsAdded: [],
+        sendingEnabled: true,
+      },
+      dir
+    );
     expect(readAgentEmailMarker(dir)).toBe('mail.fixture.example');
 
     writeAgentEmailMarker({ status: 'skipped', reason: 'no permission' }, dir);

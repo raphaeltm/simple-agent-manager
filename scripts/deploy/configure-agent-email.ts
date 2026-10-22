@@ -22,8 +22,9 @@
  * Fail closed: a deploy token without the email permissions leaves the feature off.
  * DNS safety: every DNS write must target `mail.<BASE_DOMAIN>` or a name under it. When
  * zone routing is off and the apex already has non-Cloudflare MX records (production uses
- * Google Workspace) the step skips without writing, and any change to pre-existing apex
- * MX records after enabling the subdomain fails the deploy.
+ * Google Workspace) the step skips without writing. Enabling the subdomain may not change
+ * the apex's existing MX or SPF records; if the apex had none, it may only gain Cloudflare's
+ * own, and the deploy reports them (see `checkApexMailRecords`).
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -38,6 +39,7 @@ export const AGENT_EMAIL_RULE_NAME = 'SAM agent email';
 export const AGENT_EMAIL_MARKER_FILE = 'agent-email-domain';
 
 const CLOUDFLARE_MX_PATTERN = /\.mx\.cloudflare\.net\.?$/i;
+const CLOUDFLARE_SPF_INCLUDE = 'include:_spf.mx.cloudflare.net';
 const RULES_PAGE_SIZE = 50;
 const MAX_RULE_PAGES = 20;
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
@@ -83,7 +85,16 @@ interface SendingSubdomain {
 }
 
 export type AgentEmailOutcome =
-  { status: 'configured'; domain: string; writes: number } | { status: 'skipped'; reason: string };
+  | {
+      status: 'configured';
+      domain: string;
+      writes: number;
+      /** Cloudflare mail records that appeared on an apex that had none, as `TYPE content`. */
+      apexMailRecordsAdded: string[];
+      /** False while Cloudflare is still verifying the sending subdomain's DNS. */
+      sendingEnabled: boolean;
+    }
+  | { status: 'skipped'; reason: string };
 
 export interface ConfigureAgentEmailOptions {
   zoneId: string;
@@ -182,11 +193,66 @@ async function listDnsRecords(api: Api, zoneId: string, type: string, name: stri
   return api.call<DnsRecord[]>('GET', `/zones/${zoneId}/dns_records?${query}`);
 }
 
-function mxSignature(records: DnsRecord[]): string {
+function isSpfRecord(record: DnsRecord): boolean {
+  return normalizeContent(record.content).startsWith('v=spf1');
+}
+
+function describeRecord(record: DnsRecord): string {
+  return `${record.type} ${normalizeContent(record.content)}`;
+}
+
+/** The records that decide where a name's mail goes and who may send as it: MX and SPF. */
+async function listMailRecords(api: Api, zoneId: string, name: string): Promise<DnsRecord[]> {
+  const mx = await listDnsRecords(api, zoneId, 'MX', name);
+  const txt = await listDnsRecords(api, zoneId, 'TXT', name);
+  return [...mx, ...txt.filter(isSpfRecord)];
+}
+
+function mailSignature(records: DnsRecord[]): string {
   return records
-    .map((record) => `${record.priority ?? ''}:${normalizeContent(record.content)}`)
+    .map((record) => `${record.type}:${record.priority ?? ''}:${normalizeContent(record.content)}`)
     .sort()
     .join(',');
+}
+
+function isCloudflareMailRecord(record: DnsRecord): boolean {
+  if (record.type === 'MX') return CLOUDFLARE_MX_PATTERN.test(normalizeContent(record.content));
+  return normalizeContent(record.content).includes(CLOUDFLARE_SPF_INCLUDE);
+}
+
+/**
+ * Cloudflare models subdomain routing as an extension of zone routing, so enabling it may
+ * also publish Cloudflare records on the apex. Apex mail records that existed before must
+ * come out unchanged: a second SPF record, or an extra MX, breaks mail the operator already
+ * relies on. An apex with no mail records may gain only Cloudflare's own. Mail to it was
+ * undeliverable before and is refused by Email Routing after (no apex rule exists), so the
+ * addition is reported rather than fatal. Returns the added records.
+ */
+function checkApexMailRecords(
+  apex: string,
+  domain: string,
+  before: DnsRecord[],
+  after: DnsRecord[]
+): string[] {
+  if (before.length > 0) {
+    if (mailSignature(before) !== mailSignature(after)) {
+      throw new Error(
+        `Enabling routing for ${domain} changed the MX/SPF records of ${apex}: before [${before
+          .map(describeRecord)
+          .join(', ')}], after [${after.map(describeRecord).join(', ')}]`
+      );
+    }
+    return [];
+  }
+  const foreign = after.filter((record) => !isCloudflareMailRecord(record));
+  if (foreign.length > 0) {
+    throw new Error(
+      `Enabling routing for ${domain} added non-Cloudflare mail records to ${apex}: ${foreign
+        .map(describeRecord)
+        .join(', ')}`
+    );
+  }
+  return after.map(describeRecord);
 }
 
 async function ensureRoutingForSubdomain(api: Api, zoneId: string, domain: string): Promise<void> {
@@ -236,6 +302,9 @@ async function findRule(api: Api, zoneId: string, address: string): Promise<Rout
   throw new Error(`More than ${MAX_RULE_PAGES * RULES_PAGE_SIZE} routing rules; refusing to guess`);
 }
 
+// The rule is managed through this REST call. Do not also add a top-level `addresses` field
+// to apps/api/wrangler.toml without moving this logic there: Wrangler reconciles that field on
+// every deploy and would take over, or remove, this rule.
 async function ensureRoutingRule(
   api: Api,
   zoneId: string,
@@ -286,7 +355,8 @@ async function ensureDnsRecord(
   });
 }
 
-async function ensureSendingSubdomain(api: Api, zoneId: string, domain: string): Promise<void> {
+/** Returns whether Cloudflare reports the sending subdomain as verified and enabled. */
+async function ensureSendingSubdomain(api: Api, zoneId: string, domain: string): Promise<boolean> {
   const subdomains = await api.call<SendingSubdomain[]>(
     'GET',
     `/zones/${zoneId}/email/sending/subdomains`
@@ -301,6 +371,7 @@ async function ensureSendingSubdomain(api: Api, zoneId: string, domain: string):
     `/zones/${zoneId}/email/sending/subdomains/${subdomain.tag}/dns`
   );
   for (const record of records) await ensureDnsRecord(api, zoneId, domain, record);
+  return subdomain.enabled === true;
 }
 
 /**
@@ -321,8 +392,10 @@ export async function configureAgentEmail(
   const zone = await api.call<{ name: string }>('GET', `/zones/${zoneId}`);
   const apex = normalizeName(zone.name);
   const settings = await api.call<{ enabled?: boolean }>('GET', `/zones/${zoneId}/email/routing`);
-  const apexMx = await listDnsRecords(api, zoneId, 'MX', apex);
-  const thirdPartyApexMx = apexMx.filter((record) => !CLOUDFLARE_MX_PATTERN.test(record.content));
+  const apexMailBefore = await listMailRecords(api, zoneId, apex);
+  const thirdPartyApexMx = apexMailBefore.filter(
+    (record) => record.type === 'MX' && !CLOUDFLARE_MX_PATTERN.test(record.content)
+  );
   if (settings.enabled !== true && thirdPartyApexMx.length > 0) {
     return {
       status: 'skipped',
@@ -333,27 +406,17 @@ export async function configureAgentEmail(
   }
 
   await ensureRoutingForSubdomain(api, zoneId, domain);
-  const apexMxAfter = await listDnsRecords(api, zoneId, 'MX', apex);
-  const preExisting = mxSignature(apexMx);
-  const stillPresent = mxSignature(
-    apexMxAfter.filter((record) =>
-      apexMx.some(
-        (before) =>
-          normalizeContent(before.content) === normalizeContent(record.content) &&
-          before.priority === record.priority
-      )
-    )
+  const apexMailRecordsAdded = checkApexMailRecords(
+    apex,
+    domain,
+    apexMailBefore,
+    await listMailRecords(api, zoneId, apex)
   );
-  if (preExisting !== stillPresent) {
-    throw new Error(
-      `Enabling routing for ${domain} changed the pre-existing apex MX records of ${apex}`
-    );
-  }
 
   await ensureSubaddressing(api, zoneId);
   await ensureRoutingRule(api, zoneId, agentEmailRoutedAddress(options.baseDomain), workerName);
-  await ensureSendingSubdomain(api, zoneId, domain);
-  return { status: 'configured', domain, writes: api.writes };
+  const sendingEnabled = await ensureSendingSubdomain(api, zoneId, domain);
+  return { status: 'configured', domain, writes: api.writes, apexMailRecordsAdded, sendingEnabled };
 }
 
 export function writeAgentEmailMarker(
@@ -439,6 +502,16 @@ async function main(): Promise<void> {
     console.log(
       `Agent email configured for ${outcome.domain} (${outcome.writes} Cloudflare write(s))`
     );
+    if (outcome.apexMailRecordsAdded.length > 0) {
+      console.log(
+        `::warning::Cloudflare added mail records to the zone apex while enabling ${outcome.domain}: ${outcome.apexMailRecordsAdded.join('; ')}. Mail to the bare domain is now refused by Email Routing instead of undeliverable.`
+      );
+    }
+    if (!outcome.sendingEnabled) {
+      console.log(
+        `::notice::Email Sending for ${outcome.domain} is still verifying its DNS records. Agent replies fail until Cloudflare marks it enabled.`
+      );
+    }
   } else {
     console.log(`::notice::Agent email is off for this deployment: ${outcome.reason}`);
   }
