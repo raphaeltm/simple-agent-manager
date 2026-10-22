@@ -114,7 +114,12 @@ Raphaël: "Fix it and ship it."
 - [x] Stopped, stopping and deleting environments still never reach the provider.
 - [x] A placement blocked for an unexplained reason marks the release `failed` and shows the reason
       on the environment; superseded or stopped placements still write nothing.
-- [ ] Staging: an environment forced into `error` recovers through a new release end to end.
+- [x] Staging: an environment forced into `error` recovers through a new release end to end.
+      Old build (fd26aff8): env `recovery-e2e` `01M5HHB0MG2H0J1MABDZGCG55X` v1 applied, Stop, Start →
+      `error` "Deployment provisioning authority is no longer current" within 9 s (bug reproduced).
+      Fix (b1ee94670, staging run 39764421159): release v2 → env `active` immediately, node created,
+      v2 applied 10:58:22Z, public route HTTP 200; Stop → Start → `starting` → `active`, applied
+      11:05:38Z, route HTTP 200; environment deleted (node + DNS removed), zero staging VMs left.
 
 ## References
 
