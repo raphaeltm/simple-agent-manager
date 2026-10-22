@@ -76,7 +76,8 @@ describe('cf-container runtime spike contracts', () => {
   it('routes Worker-to-vm-agent service calls through raw Container for cf-container nodes only', () => {
     const nodeAgent = read('services/node-agent.ts');
     const workspaceTools = read('routes/mcp/workspace-tools.ts');
-    const libraryTools = read('routes/mcp/library-tools.ts');
+    // Library tools and agent model calls share the workspace file-transfer service.
+    const workspaceFileTransfer = read('services/workspace-file-transfer.ts');
     const projectFiles = read('routes/projects/files.ts');
     const localForward = read('routes/workspaces/local-forward.ts');
     const nodesRoute = read('routes/nodes/diagnostics.ts');
@@ -94,8 +95,8 @@ describe('cf-container runtime spike contracts', () => {
     );
     expect(workspaceTools).toContain("import { fetchNodeAgent } from '../../services/node-agent'");
     expect(workspaceTools).toContain('fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs)');
-    expect(libraryTools).toContain("import { fetchNodeAgent } from '../../services/node-agent'");
-    expect(libraryTools).toContain('fetchNodeAgent(');
+    expect(workspaceFileTransfer).toContain("import { fetchNodeAgent } from './node-agent'");
+    expect(workspaceFileTransfer).toContain('fetchNodeAgent(');
     expect(projectFiles).toContain("import { fetchNodeAgent } from '../../services/node-agent'");
     expect(projectFiles).toContain('fetchNodeAgent(');
     expect(localForward).toContain(

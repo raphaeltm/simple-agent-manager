@@ -16,7 +16,9 @@ export const AGENT_MODEL_SETTING_DEFAULTS = Object.freeze({
   ]) as readonly string[],
   defaultMonthlyBudgetCents: 500,
   maxMonthlyBudgetCents: 5_000,
-  callTimeoutSeconds: 120,
+  // Below the 60 s default MCP tool timeout of common agent harnesses (Codex), so the agent
+  // sees SAM's timeout message rather than its harness giving up while the call still runs.
+  callTimeoutSeconds: 55,
   maxInputBytes: 10 * 1024 * 1024,
   maxInlineOutputBytes: 32 * 1024,
   unpricedCallEstimateMicroUsd: 10_000,

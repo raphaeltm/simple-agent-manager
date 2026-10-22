@@ -81,7 +81,7 @@ SAM does not decide which model an agent should call. Put that guidance where yo
 - Calls running at the same time cannot overspend the limit: each one must fit before it starts.
 - Some models have no published price. Those are charged a fixed estimate per call, $0.01 by default.
 - The real bill goes to the Cloudflare account that runs SAM. For a self-hosted SAM, that is your account.
-- A call stops after 120 seconds by default. Streaming responses and realtime (websocket-only) models are not supported.
+- A call stops after 55 seconds by default, just under the 60-second limit some agents put on a tool call. For long answers from big models, ask for a lower `max_tokens`. Streaming responses and realtime (websocket-only) models are not supported.
 
 ## For administrators
 
