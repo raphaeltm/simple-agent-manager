@@ -17,9 +17,10 @@ triggers, see [Triggers](/docs/guides/triggers/).
 
 ## Create one
 
-1. Open the project, select **Automation**, then **New automation**, and choose **Email**.
+1. Open the project, select **Automation**, then **New automation**, and choose **By email**.
 2. Under **Allowed senders**, list the addresses that may start it. It starts with your own
-   account email. Mail from anyone else is refused.
+   account email. Mail whose `From:` address is not on the list is refused. SAM matches the
+   `From:` address; it cannot yet verify who really sent the email (see [Security](#security)).
 3. Pick the **Agent**. Email automations always need an explicit agent profile.
 4. Write what it should do. The starting prompt passes the email to the agent and asks it to
    reply when it is done.

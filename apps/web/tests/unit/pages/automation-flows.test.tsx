@@ -497,7 +497,7 @@ describe('create flow', () => {
     // seeds the starting prompt — both only when the field was still empty.
     expect(screen.getByLabelText('Allowed senders')).toHaveValue('owner@example.com');
     expect(
-      screen.getByText('Only mail from the senders you list here starts it.')
+      screen.getByText('Mail whose From address is on this list starts it.')
     ).toBeInTheDocument();
     expect(screen.queryByText(/Times use your time zone/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Continue' }));
@@ -971,6 +971,8 @@ describe('trigger page', () => {
     renderAt('/projects/p1/automation/trigger/trg-email');
     const address = await screen.findByTestId('email-trigger-address');
     expect(address).toHaveTextContent('agent+k3j2h7m9q2xw4n8p@mail.example.com');
+    // The address is the real protection while senders are unverified, so the page says so.
+    expect(screen.getByText(/Anyone who has this address can email the agent/)).toBeInTheDocument();
     const senders = screen.getByTestId('email-allowed-senders');
     expect(within(senders).getByText('a@x.test')).toBeInTheDocument();
     expect(within(senders).getByText('b@x.test')).toBeInTheDocument();

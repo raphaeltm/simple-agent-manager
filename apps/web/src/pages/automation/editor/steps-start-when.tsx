@@ -39,7 +39,7 @@ const STARTS: Array<{ id: AutomationStart; title: string; text: string; advanced
   {
     id: 'email',
     title: 'By email',
-    text: 'SAM gives it its own address. An email from an allowed sender starts it, and the agent can reply.',
+    text: 'SAM gives it its own address. Email from an address you list starts it, and the agent can reply.',
   },
   {
     id: 'event',
@@ -188,7 +188,7 @@ export function StepWhen({
         <div className="flex flex-col gap-3">
           <Notice>
             {creating
-              ? 'SAM gives this automation its own email address once you save it. Only the senders below can start it, and the agent can reply to them by email.'
+              ? 'SAM gives this automation its own email address once you save it. Mail whose From address is on the list below starts it, and the agent can reply by email. Senders are not verified yet, so keep that address private.'
               : 'Its address stays the same — see it on this automation’s page. Saving changes who may use it.'}
           </Notice>
           <EmailTriggerFields

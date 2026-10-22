@@ -13,7 +13,7 @@ export function ConnectEmail({ trigger }: { trigger: TriggerResponse }) {
   const address = config?.address ?? null;
   return (
     <div className="flex flex-col gap-2">
-      <SectionTitle title="Its email address" hint="Mail from an allowed sender starts it" />
+      <SectionTitle title="Its email address" hint="Keep it private, like a password" />
       <Panel className="flex flex-col gap-4 p-4 md:p-5" label="Email address">
         <div className="flex flex-col gap-1.5">
           <span className="text-[13px] text-fg-muted">Address</span>
@@ -30,6 +30,10 @@ export function ConnectEmail({ trigger }: { trigger: TriggerResponse }) {
           ) : (
             <span className="text-[14px] text-fg-muted">Not available.</span>
           )}
+          <span className="text-[13px] text-fg-muted">
+            Anyone who has this address can email the agent, and SAM cannot yet verify who really
+            sent an email. Share it only with the people listed below.
+          </span>
         </div>
         <div className="flex flex-col gap-1.5">
           <span className="text-[13px] text-fg-muted">Allowed senders</span>
@@ -51,8 +55,8 @@ export function ConnectEmail({ trigger }: { trigger: TriggerResponse }) {
             <span className="text-[14px] text-fg-muted">No senders allowed yet.</span>
           )}
           <span className="text-[13px] text-fg-muted">
-            The agent can reply to these senders by email. Edit this automation to change who may
-            use it.
+            Mail whose From address is on this list starts the automation, and the agent can reply
+            to it. Edit this automation to change the list.
           </span>
         </div>
       </Panel>

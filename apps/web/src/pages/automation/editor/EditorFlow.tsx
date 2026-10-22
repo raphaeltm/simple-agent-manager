@@ -52,7 +52,7 @@ const WHEN_TITLES: Partial<Record<NonNullable<EditorState['start']>, string>> = 
 
 /** Email runs when mail arrives, so the default note about time zones does not apply. */
 const WHEN_HINTS: Partial<Record<NonNullable<EditorState['start']>, string>> = {
-  email: 'Only mail from the senders you list here starts it.',
+  email: 'Mail whose From address is on this list starts it.',
 };
 
 export function EditorFlow({
