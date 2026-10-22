@@ -35,12 +35,16 @@ import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { registerDeploymentEnvironmentLifecycleRoutes } from '../../../src/routes/deployment-environment-lifecycle';
 import { placeReleaseOnDeploymentNode } from '../../../src/routes/deployment-release-placement';
+import { resolveCanonicalVmAllocationPlan } from '../../../src/services/canonical-vm-allocation';
 import {
   type DeploymentPlacement,
   linkEnvironmentToNode,
 } from '../../../src/services/deployment-provisioning';
 import { recordStrandedDeploymentReleasePlacement } from '../../../src/services/deployment-release-failure';
-import { assertDeploymentProvisioningAuthority } from '../../../src/services/provisioning-authority';
+import {
+  assertDeploymentProvisioningAuthority,
+  ProvisioningAuthorityError,
+} from '../../../src/services/provisioning-authority';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const USER_ID = 'user-1';
@@ -146,6 +150,14 @@ vi.mock('../../../src/services/nodes', async (load) => {
           markError(harness.providerError.message);
           throw harness.providerError;
         }
+        // Production re-checks authority after createVM returns, while the node is still
+        // `creating`, and only then publishes `running`.
+        try {
+          await options?.assertExternalMutationAuthority?.();
+        } catch (error) {
+          markError(error instanceof Error ? error.message : String(error));
+          throw error;
+        }
         sqlite
           .prepare(
             `UPDATE nodes SET status = 'running', health_status = 'healthy',
@@ -153,7 +165,6 @@ vi.mock('../../../src/services/nodes', async (load) => {
               WHERE id = ?`
           )
           .run(`server-${nodeId}`, nodeId);
-        await options?.assertExternalMutationAuthority?.();
         return { allocationConfirmed: true };
       }
     ),
@@ -659,13 +670,13 @@ describe('a fix release for an environment that kept its node', () => {
     });
   });
 
-  it('leaves a starting environment to Start', async () => {
-    const { f, linked } = await relink('starting');
+  it.each(['active', 'starting'])('leaves a %s environment as it is', async (status) => {
+    const { f, linked } = await relink(status);
 
     // Liveness: the reservation was written; only the status was left alone.
     expect(linked).toBe(true);
     expect(f.environment()).toMatchObject({
-      status: 'starting',
+      status,
       nodeId: 'node-running',
       resolvedReservationJson: JSON.stringify(RESERVATION),
     });
@@ -793,6 +804,29 @@ describe('a placement blocked for a reason nothing else will resolve is shown to
     }
   );
 
+  it('records a cancellation thrown before any node record exists', async () => {
+    const f = fixture({ status: 'active' });
+    f.insertRelease('release-v1', 1, 'created');
+    vi.mocked(resolveCanonicalVmAllocationPlan).mockRejectedValueOnce(
+      new AppError(403, 'FORBIDDEN', 'Workspace ws-secret-1 may no longer deploy')
+    );
+
+    const outcome = await f.placeRelease('release-v1');
+
+    expect(outcome).toBeInstanceOf(AppError);
+    // Liveness: placement got as far as resolving where to put the node.
+    expect(resolveCanonicalVmAllocationPlan).toHaveBeenCalled();
+    expect(harness.authorityAttempts).toBe(0);
+    expect(f.releaseStatus('release-v1')).toBe('failed');
+    expect(f.environment()).toMatchObject({
+      status: 'error',
+      nodeId: null,
+      observedErrorMessage:
+        'Deployment node placement stopped before a server was created: ' +
+        'the request that started it is no longer authorized. Deploy again to retry.',
+    });
+  });
+
   it('leaves a superseded release to the newer one', async () => {
     const f = fixture({ status: 'active' });
     f.insertRelease('release-v1', 1, 'created');
@@ -823,7 +857,9 @@ describe('a placement blocked for a reason nothing else will resolve is shown to
 });
 
 describe('recordStrandedDeploymentReleasePlacement', () => {
-  const blocked = new Error('Deployment provisioning authority is no longer current');
+  const blocked = new ProvisioningAuthorityError(
+    'Deployment provisioning authority is no longer current'
+  );
 
   it.each(['active', 'error'])(
     'marks the newest created release of a %s environment with no node',
@@ -844,6 +880,26 @@ describe('recordStrandedDeploymentReleasePlacement', () => {
       });
     }
   );
+
+  it('shows a generic reason for any other cancellation and keeps its text out of the row', async () => {
+    const f = fixture({ status: 'active' });
+    f.insertRelease('release-v1', 1, 'created');
+    const callerRefusal = Object.assign(
+      new Error('Workspace ws-secret-123 callback token tok_live_abc is no longer current'),
+      { name: 'AppError' }
+    );
+
+    await expect(
+      recordStrandedDeploymentReleasePlacement(f.env, ENV_ID, 'release-v1', callerRefusal)
+    ).resolves.toBe(true);
+    const environment = f.environment();
+    expect(environment.observedErrorMessage).toBe(
+      'Deployment node placement stopped before a server was created: ' +
+        'the request that started it is no longer authorized. Deploy again to retry.'
+    );
+    expect(environment.observedErrorMessage).not.toContain('tok_live_abc');
+    expect(f.releaseStatus('release-v1')).toBe('failed');
+  });
 
   it.each<[string, (f: ReturnType<typeof fixture>) => void]>([
     ['a newer release exists', (f) => f.insertRelease('release-v2', 2, 'created')],

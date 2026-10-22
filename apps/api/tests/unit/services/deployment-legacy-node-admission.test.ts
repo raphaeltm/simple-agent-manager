@@ -236,6 +236,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema);
+  // The node owner is an active project owner, as in production for every legacy environment.
+  sqlite
+    .prepare(
+      `INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, 'owner', 'active')`
+    )
+    .run(PROJECT_ID, USER_ID);
   mockProvisionDeploymentNode.mockResolvedValue(null);
 });
 
@@ -364,6 +370,21 @@ describe('linkEnvironmentToLegacyNode — refusals', () => {
     await expect(run()).resolves.toBe(false);
     expect(readEnvironment()).toEqual(expected);
   }
+
+  it.each([
+    [
+      'removed from the project',
+      `UPDATE project_members SET status = 'removed', removed_at = '2026-10-22T00:00:00.000Z'`,
+    ],
+    ['demoted to viewer', `UPDATE project_members SET role = 'viewer'`],
+    [
+      'a member of a different project only',
+      `UPDATE project_members SET project_id = 'other-project'`,
+    ],
+  ])('refuses when the node owner is %s', async (_label, change) => {
+    sqlite.prepare(change).run();
+    await expectRefusedAndUntouched(() => adopt());
+  });
 
   it('refuses a pooled node (capacity_pool_id set)', async () => {
     sqlite.prepare(`UPDATE nodes SET capacity_pool_id = 'pool-1' WHERE id = ?`).run(NODE_ID);

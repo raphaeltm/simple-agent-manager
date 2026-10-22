@@ -166,7 +166,7 @@ export async function recordStrandedDeploymentReleasePlacement(
       env.DATABASE,
       environmentId,
       releaseId,
-      reason
+      strandedPlacementShownReason(error)
     );
     if (marked) {
       log.warn('deployment_release.stranded_placement_failed', {
@@ -193,6 +193,20 @@ export async function recordStrandedDeploymentReleasePlacement(
     });
     return false;
   }
+}
+
+/**
+ * The reason every project member (and their agents) will see. Only SAM's own
+ * paid-boundary refusals are shown verbatim: their messages are fixed strings
+ * (`requireAuthority` in provisioning-authority.ts). Any other cancellation,
+ * such as an `AppError` from a caller's authorization check, gets a generic
+ * reason; the raw message stays in the server log.
+ */
+function strandedPlacementShownReason(error: unknown): string {
+  if (error instanceof Error && error.name === 'ProvisioningAuthorityError') {
+    return error.message.replace(/[.\s]+$/, '');
+  }
+  return 'the request that started it is no longer authorized';
 }
 
 async function markStrandedPlacementFailed(

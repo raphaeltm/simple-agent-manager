@@ -614,7 +614,11 @@ function impossiblePredicate(): PlacementAuthoritySqlPredicate {
   return { sql: 'AND 0 = 1', binds: [] };
 }
 
-function projectMemberRoleCapabilitySql(alias: string, capability: ProjectCapability): string {
+/** SQL predicate: the `project_members` row aliased `alias` grants `capability`. */
+export function projectMemberRoleCapabilitySql(
+  alias: string,
+  capability: ProjectCapability
+): string {
   const safeAliasName = safeSqlAlias(alias);
   const roles = projectMemberRolesWithCapability(capability);
   if (roles.length === 0) return '0 = 1';

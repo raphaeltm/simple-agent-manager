@@ -22,7 +22,8 @@
  * reservation write that repeats every invariant in its own predicate
  * (`apps/api/.claude/rules/69-aggregate-capacity-at-final-reservation.md`):
  * the environment must already be on this node, the node must be a running,
- * healthy, deployment-role node owned by the release's user, the node must
+ * healthy, deployment-role node owned by the release's user, that user must
+ * still be an active project member allowed to deploy, the node must
  * still be legacy-shaped, occupancy must respect the node mode, the release
  * must still be the newest one, and the stored reservation must be exactly what
  * the caller observed.
@@ -42,6 +43,7 @@ import {
   RECOVER_ERRORED_ENVIRONMENT_SET_SQL,
 } from './deployment-environment-state';
 import { DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE } from './deployment-node-admission';
+import { projectMemberRoleCapabilitySql } from './placement-authority';
 
 export interface LinkEnvironmentToLegacyNodeOptions {
   env: Env;
@@ -100,6 +102,14 @@ export async function linkEnvironmentToLegacyNode(
         AND de.node_id = n.id
         AND n.id = ?
         AND n.user_id = ?
+        AND EXISTS (
+          SELECT 1 FROM project_members pm
+          WHERE pm.project_id = de.project_id
+            AND pm.user_id = n.user_id
+            AND pm.status = 'active'
+            AND pm.removed_at IS NULL
+            AND ${projectMemberRoleCapabilitySql('pm', 'deployment:deploy')}
+        )
         AND n.status = 'running'
         AND n.node_role = 'deployment'
         AND COALESCE(n.health_status, 'healthy') != 'unhealthy'
