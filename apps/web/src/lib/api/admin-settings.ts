@@ -10,6 +10,7 @@ export const ADMIN_SETTING_CATEGORIES = [
   'Trials',
   'Collaboration',
   'Chat',
+  'AI models',
 ] as const;
 export type AdminSettingCategory = (typeof ADMIN_SETTING_CATEGORIES)[number];
 

@@ -465,6 +465,13 @@ export const projects = sqliteTable(
     nodeMemoryThresholdPercent: integer('node_memory_threshold_percent'),
     /** Per-project max triggers override. null = use platform default (MAX_TRIGGERS_PER_PROJECT). */
     maxTriggers: integer('max_triggers'),
+    /**
+     * JSON array of Cloudflare-hosted model ids agents may call with run_ai_model.
+     * null = SAM defaults; '[]' = none. Profiles and skills can override (most specific wins).
+     */
+    agentModelsJson: text('agent_models_json'),
+    /** Monthly spending limit for agent model calls, in cents. null = installation default. */
+    agentModelsMonthlyBudgetCents: integer('agent_models_monthly_budget_cents'),
     status: text('status').notNull().default('active'),
     lastActivityAt: text('last_activity_at'),
     activeSessionCount: integer('active_session_count').notNull().default(0),
@@ -2118,6 +2125,8 @@ export const agentProfiles = sqliteTable(
     taskMode: text('task_mode'),
     /** JSON GitHubCliPolicy. null = inherit full installation token behavior. */
     githubCliPolicy: text('github_cli_policy'),
+    /** JSON array of callable model ids for run_ai_model. null = inherit the project. */
+    agentModelsJson: text('agent_models_json'),
     isBuiltin: integer('is_builtin').notNull().default(0),
     createdAt: text('created_at')
       .notNull()
@@ -2200,6 +2209,8 @@ export const skills = sqliteTable(
     defaultProfileId: text('default_profile_id').references(() => agentProfiles.id, {
       onDelete: 'set null',
     }),
+    /** JSON array of callable model ids for run_ai_model. null = inherit the profile/project. */
+    agentModelsJson: text('agent_models_json'),
     isBuiltin: integer('is_builtin').notNull().default(0),
     createdAt: text('created_at')
       .notNull()
@@ -2218,6 +2229,47 @@ export const skills = sqliteTable(
 
 export type SkillRow = typeof skills.$inferSelect;
 export type NewSkillRow = typeof skills.$inferInsert;
+
+// =============================================================================
+// Agent model call usage (per project, per UTC month; amounts in micro-USD)
+// =============================================================================
+
+export const agentModelMonthlyUsage = sqliteTable(
+  'agent_model_monthly_usage',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    /** UTC month, YYYY-MM. */
+    month: text('month').notNull(),
+    /** Estimates held by calls still running. */
+    reservedMicroUsd: integer('reserved_micro_usd').notNull().default(0),
+    spentMicroUsd: integer('spent_micro_usd').notNull().default(0),
+    callCount: integer('call_count').notNull().default(0),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.month] }),
+  })
+);
+
+export const agentModelUsageByModel = sqliteTable(
+  'agent_model_usage_by_model',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    month: text('month').notNull(),
+    modelId: text('model_id').notNull(),
+    callCount: integer('call_count').notNull().default(0),
+    errorCount: integer('error_count').notNull().default(0),
+    spentMicroUsd: integer('spent_micro_usd').notNull().default(0),
+    lastCalledAt: integer('last_called_at'),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.month, table.modelId] }),
+  })
+);
 
 /**
  * Bring-your-own MCP servers injected into agent sessions alongside SAM's own `sam-mcp`.

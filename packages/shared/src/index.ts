@@ -13,6 +13,9 @@ export * from './provider-presets';
 // Model Catalog
 export * from './model-catalog';
 
+// Agent model calls (Cloudflare-hosted models agents can call)
+export * from './agent-models';
+
 // Constants
 export * from './constants';
 

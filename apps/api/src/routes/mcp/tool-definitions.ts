@@ -39,6 +39,7 @@ export { TASK_LIFECYCLE_TOOLS } from './tool-definitions-task-tools';
 export { TRIGGER_TOOLS } from './tool-definitions-trigger-tools';
 export { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 
+import { AGENT_MODEL_TOOLS } from './tool-definitions-agent-model-tools';
 import { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 import { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
 import { PROJECT_EVENT_SUBSCRIPTION_TOOLS } from './tool-definitions-event-subscription-tools';
@@ -67,6 +68,7 @@ export const MCP_TOOLS = [
   ...PROJECT_AWARENESS_TOOLS,
   ...SESSION_IDEA_TOOLS,
   ...WORKSPACE_TOOLS,
+  ...AGENT_MODEL_TOOLS,
   ...DEPLOYMENT_TOOLS,
   ...LIBRARY_TOOLS,
   ...ORCHESTRATION_TOOLS,

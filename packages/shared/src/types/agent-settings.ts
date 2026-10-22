@@ -22,11 +22,7 @@ export const VALID_AGENT_PROVIDER_MODES: readonly AgentProviderMode[] = [
 
 /** Valid permission modes for agent sessions */
 export type AgentPermissionMode =
-  | 'default'
-  | 'acceptEdits'
-  | 'plan'
-  | 'dontAsk'
-  | 'bypassPermissions';
+  'default' | 'acceptEdits' | 'plan' | 'dontAsk' | 'bypassPermissions';
 
 /** Valid OpenCode inference provider types */
 export type OpenCodeProvider = 'opencode-zen' | 'opencode-go' | 'custom';
@@ -202,6 +198,11 @@ export interface AgentProfile {
   taskMode: string | null;
   /** SAM platform policy slice for GitHub CLI installation-token scoping. */
   githubCliPolicy: GitHubCliPolicy | null;
+  /**
+   * Cloudflare-hosted models agents may call with `run_ai_model`. null = inherit the
+   * layer below (a skill inherits the profile, a profile inherits the project); [] = none.
+   */
+  agentModels: string[] | null;
   isBuiltin: boolean;
   createdAt: string;
   updatedAt: string;
@@ -231,6 +232,8 @@ export interface CreateAgentProfileRequest {
   taskMode?: string | null;
   /** SAM platform policy slice for GitHub CLI installation-token scoping. */
   githubCliPolicy?: GitHubCliPolicy | null;
+  /** Callable models for `run_ai_model`. Omit or null = inherit; [] = none. */
+  agentModels?: string[] | null;
 }
 
 /** Request body for PUT /api/projects/:projectId/agent-profiles/:profileId */
@@ -257,6 +260,8 @@ export interface UpdateAgentProfileRequest {
   taskMode?: string | null;
   /** SAM platform policy slice for GitHub CLI installation-token scoping. */
   githubCliPolicy?: GitHubCliPolicy | null;
+  /** Callable models for `run_ai_model`. Omit = keep; null = inherit; [] = none. */
+  agentModels?: string[] | null;
 }
 
 /** Resolved agent profile for task execution */

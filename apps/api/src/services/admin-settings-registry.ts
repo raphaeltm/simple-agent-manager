@@ -3,6 +3,10 @@ import { DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS } from '@simple-agent-manager/sh
 
 import type { Env } from '../env';
 import {
+  agentModelSettingDefinitions,
+  type AgentModelSettingKey,
+} from './agent-models/settings-definition';
+import {
   CONNECTOR_DEFAULTS,
   type ConnectorSettingKey,
   validateConnectorSetting,
@@ -14,6 +18,7 @@ export type AdminSettingValue = boolean | number | string | readonly string[] | 
 export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
 export type AdminSettingName =
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
+  | `aiModels.${AgentModelSettingKey}`
   | `connector.${ConnectorSettingKey}`
   | 'chat.profileUsageWindowDays'
   | 'collaboration.commentMentionsMax'
@@ -44,7 +49,8 @@ export interface AdminSettingDefinition {
   readonly name: AdminSettingName;
   readonly type: AdminSettingType;
   readonly defaultValue: AdminSettingValue;
-  readonly category: 'OAuth' | 'Connector' | 'Operations' | 'Trials' | 'Collaboration' | 'Chat';
+  readonly category:
+    'OAuth' | 'Connector' | 'Operations' | 'Trials' | 'Collaboration' | 'Chat' | 'AI models';
   readonly description: string;
   readonly secret: boolean;
   readonly risky: boolean;
@@ -211,6 +217,7 @@ function validGitLabHost(value: unknown): boolean {
 
 const definitions: AdminSettingDefinition[] = [
   ...Object.keys(CONNECTOR_DEFAULTS).map((key) => connectorDefinition(key as ConnectorSettingKey)),
+  ...agentModelSettingDefinitions(),
   oauthDefinition(
     SETTING_KEYS.githubClientId,
     ENV_KEYS.githubClientId,

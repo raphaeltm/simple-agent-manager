@@ -137,7 +137,7 @@ export function projectMemberRolesWithCapability(
  * as `notFound('Project')`. Order matters for the error a caller sees — the project assertion
  * is evaluated first, exactly as when these ran sequentially.
  */
-async function requireActiveProjectMembership(
+export async function requireActiveProjectMembership(
   db: AppDb,
   projectId: string,
   userId: string

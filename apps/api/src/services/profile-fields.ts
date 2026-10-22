@@ -7,6 +7,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import { agentModelsResponse, serializeAgentModelSelection } from './agent-models/selection';
 
 /**
  * Field mappers shared by agent profiles and skills. Both entities store the
@@ -39,6 +40,8 @@ export interface BaseProfileRow {
   runtime: unknown;
   devcontainerConfigName: string | null;
   taskMode: string | null;
+  /** JSON array of callable model ids for run_ai_model; null = inherit. */
+  agentModelsJson: string | null;
   createdAt: string;
   updatedAt: string;
   isBuiltin: number;
@@ -65,6 +68,7 @@ export interface BaseProfileFieldsResponse {
   runtime: AgentProfileRuntime | null;
   devcontainerConfigName: string | null;
   taskMode: string | null;
+  agentModels: string[] | null;
   createdAt: string;
   updatedAt: string;
   isBuiltin: boolean;
@@ -99,6 +103,10 @@ export function toBaseProfileFields<R extends BaseProfileRow>(
     runtime: isAgentProfileRuntime(row.runtime) ? row.runtime : null,
     devcontainerConfigName: row.devcontainerConfigName,
     taskMode: row.taskMode,
+    agentModels: agentModelsResponse(row.agentModelsJson, {
+      table: 'profile_or_skill',
+      id: row.id,
+    }),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     isBuiltin: row.isBuiltin === 1,
@@ -122,6 +130,8 @@ export interface BaseProfileWriteInput {
   workspaceProfile?: string | null;
   runtime?: AgentProfileRuntime | null;
   devcontainerConfigName?: string | null;
+  /** Callable models for run_ai_model. Omit = keep (update) / inherit (create); null = inherit. */
+  agentModels?: readonly string[] | null;
 }
 
 /**
@@ -150,6 +160,7 @@ export function baseProfileInsertValues(
     workspaceProfile: body.workspaceProfile ?? null,
     runtime: body.runtime ?? null,
     devcontainerConfigName: body.devcontainerConfigName ?? null,
+    agentModelsJson: serializeAgentModelSelection(body.agentModels ?? null),
   };
 }
 
@@ -189,6 +200,9 @@ export function applyBaseProfileUpdates<T extends Record<string, unknown>>(
   const set = updates as Record<string, unknown>;
   if (body.name !== undefined) set.name = body.name.trim();
   if (body.effort !== undefined) set.effort = body.effort ?? DEFAULT_AGENT_EFFORT;
+  if (body.agentModels !== undefined) {
+    set.agentModelsJson = serializeAgentModelSelection(body.agentModels);
+  }
   for (const field of BASE_PROFILE_UPDATE_FIELDS) {
     if (body[field] !== undefined) {
       set[field] = body[field];

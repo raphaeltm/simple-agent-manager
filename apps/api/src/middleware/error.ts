@@ -49,4 +49,7 @@ export const errors = {
     new AppError(429, 'TOO_MANY_REQUESTS', message),
 
   internal: (message = 'Internal server error') => new AppError(500, 'INTERNAL_ERROR', message),
+
+  serviceUnavailable: (message = 'Service unavailable') =>
+    new AppError(503, 'SERVICE_UNAVAILABLE', message),
 };

@@ -71,6 +71,9 @@ export {
 // Skill schemas
 export { CreateSkillSchema, UpdateSkillSchema } from './skills';
 
+// Agent model call schemas
+export { AgentModelSelectionSchema, UpdateProjectAgentModelsSchema } from './agent-models';
+
 // Bring-your-own MCP server schemas
 export { CreateMcpConnectionSchema, UpdateMcpConnectionSchema } from './mcp-connections';
 

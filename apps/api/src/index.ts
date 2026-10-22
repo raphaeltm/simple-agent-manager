@@ -70,6 +70,7 @@ import { adminTrialsRoutes } from './routes/admin-trials';
 import { adminUsageRoutes } from './routes/admin-usage';
 import { agentRoutes } from './routes/agent';
 import { agentCredentialSetupSessionsRoutes } from './routes/agent-credential-setup-sessions';
+import { agentModelCatalogRoutes, projectAgentModelRoutes } from './routes/agent-models';
 import { agentProfileRoutes } from './routes/agent-profiles';
 import { agentSettingsRoutes } from './routes/agent-settings';
 import { agentsCatalogRoutes } from './routes/agents-catalog';
@@ -845,6 +846,7 @@ app.route('/api/projects/:projectId/agent-profiles/:profileId/runtime', profileR
 app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);
 app.route('/api/projects/:projectId/skills/:skillId/runtime', skillRuntimeRoutes);
 app.route('/api/projects/:projectId/skills', skillRoutes);
+app.route('/api/projects/:projectId/agent-models', projectAgentModelRoutes);
 app.route('/api/projects/:projectId/mcp-connections', projectMcpConnectionRoutes);
 app.route('/api/projects/:projectId/triggers', triggersRoutes);
 app.route('/api/projects/:projectId/knowledge', knowledgeRoutes);
@@ -883,6 +885,7 @@ app.route('/api/admin/github-installation-leak-sweep', adminGithubInstallationLe
 app.route('/api/admin/sandbox', adminSandboxRoutes);
 app.route('/api/admin/ai-allowance', adminAiAllowanceRoutes);
 app.route('/api/usage', usageRoutes);
+app.route('/api/agent-models', agentModelCatalogRoutes);
 app.route('/api/report-issue', reportIssueRoutes);
 app.route('/api/account-map', accountMapRoutes);
 app.route('/api/dashboard', dashboardRoutes);
