@@ -83,8 +83,7 @@ interface SendingSubdomain {
 }
 
 export type AgentEmailOutcome =
-  | { status: 'configured'; domain: string; writes: number }
-  | { status: 'skipped'; reason: string };
+  { status: 'configured'; domain: string; writes: number } | { status: 'skipped'; reason: string };
 
 export interface ConfigureAgentEmailOptions {
   zoneId: string;
@@ -109,7 +108,9 @@ class CloudflareApiError extends Error {
     const detail = (response.body.errors ?? [])
       .map((error) => `${error.code ?? '?'} ${error.message ?? ''}`.trim())
       .join('; ');
-    super(`Cloudflare ${method} ${path} failed with HTTP ${response.status}: ${detail || 'no detail'}`);
+    super(
+      `Cloudflare ${method} ${path} failed with HTTP ${response.status}: ${detail || 'no detail'}`
+    );
   }
 }
 
@@ -169,7 +170,11 @@ function normalizeName(name: string): string {
 }
 
 function normalizeContent(content: string): string {
-  return content.trim().replace(/^"(.*)"$/s, '$1').replace(/\.$/, '').toLowerCase();
+  return content
+    .trim()
+    .replace(/^"(.*)"$/s, '$1')
+    .replace(/\.$/, '')
+    .toLowerCase();
 }
 
 async function listDnsRecords(api: Api, zoneId: string, type: string, name: string) {
@@ -379,13 +384,35 @@ function fetchRequest(apiToken: string): CloudflareRequest {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await response.text();
-    let parsed: CloudflareEnvelope = {};
+    let parsed: unknown = {};
     try {
-      parsed = text ? (JSON.parse(text) as CloudflareEnvelope) : {};
+      parsed = text ? (JSON.parse(text) as unknown) : {};
     } catch {
       parsed = { success: false, errors: [{ message: text.slice(0, 200) }] };
     }
-    return { status: response.status, body: parsed };
+    return { status: response.status, body: toEnvelope(parsed) };
+  };
+}
+
+/** Narrow a Cloudflare v4 response body; anything unexpected becomes an unsuccessful envelope. */
+export function toEnvelope(value: unknown): CloudflareEnvelope {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { success: false, errors: [{ message: 'Cloudflare returned a non-object body' }] };
+  }
+  const record = value as Record<string, unknown>;
+  const errors = Array.isArray(record.errors)
+    ? record.errors.map((entry) => {
+        const error = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {};
+        return {
+          code: typeof error.code === 'number' ? error.code : undefined,
+          message: typeof error.message === 'string' ? error.message : undefined,
+        };
+      })
+    : undefined;
+  return {
+    success: typeof record.success === 'boolean' ? record.success : undefined,
+    errors,
+    result: record.result,
   };
 }
 
@@ -420,7 +447,9 @@ async function main(): Promise<void> {
 const isDirectExecution = process.argv[1]?.endsWith('configure-agent-email.ts');
 if (isDirectExecution) {
   main().catch((error) => {
-    console.error(`::error::Agent email configuration failed: ${error instanceof Error ? error.message : error}`);
+    console.error(
+      `::error::Agent email configuration failed: ${error instanceof Error ? error.message : error}`
+    );
     process.exit(1);
   });
 }

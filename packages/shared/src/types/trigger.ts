@@ -1,3 +1,4 @@
+import type { EmailTriggerConfig, EmailTriggerConfigInput } from './agent-email';
 import type { CredentialAttributionCheck } from './project';
 import type { ResourceRequirements } from './resource';
 import type { TaskMode } from './task';
@@ -9,7 +10,7 @@ import type { TaskMode } from './task';
 export const TRIGGER_STATUSES = ['active', 'paused', 'disabled'] as const;
 export type TriggerStatus = (typeof TRIGGER_STATUSES)[number];
 
-export const TRIGGER_SOURCE_TYPES = ['cron', 'webhook', 'github', 'incident'] as const;
+export const TRIGGER_SOURCE_TYPES = ['cron', 'webhook', 'github', 'incident', 'email'] as const;
 export type TriggerSourceType = (typeof TRIGGER_SOURCE_TYPES)[number];
 
 export const TRIGGER_EXECUTION_STATUSES = [
@@ -38,6 +39,7 @@ export const TRIGGERED_BY_VALUES = [
   'incident',
   'mcp',
   'connector',
+  'email',
 ] as const;
 export type TriggeredBy = (typeof TRIGGERED_BY_VALUES)[number];
 
@@ -114,6 +116,7 @@ export interface CreateTriggerRequest {
     filters?: GitHubTriggerFilters;
   };
   webhookConfig?: WebhookTriggerConfigInput;
+  emailConfig?: EmailTriggerConfigInput;
 }
 
 export interface UpdateTriggerRequest {
@@ -136,6 +139,7 @@ export interface UpdateTriggerRequest {
     filters?: GitHubTriggerFilters;
   };
   webhookConfig?: WebhookTriggerConfigInput;
+  emailConfig?: EmailTriggerConfigInput;
 }
 
 export interface TriggerResponse extends Trigger {
@@ -154,6 +158,8 @@ export interface TriggerResponse extends Trigger {
   };
   /** Redacted webhook configuration, present when sourceType is 'webhook'. */
   webhookConfig?: WebhookTriggerConfig;
+  /** Email address and allowed senders, present when sourceType is 'email'. */
+  emailConfig?: EmailTriggerConfig;
 }
 
 /** Create response. The raw webhook credential is present only on webhook creation. */

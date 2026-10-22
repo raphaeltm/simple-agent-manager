@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -59,7 +60,10 @@ class FakeCloudflare {
   }
 
   private denied(): CloudflareResponse {
-    return { status: 403, body: { success: false, errors: [{ code: 10000, message: 'Authentication error' }] } };
+    return {
+      status: 403,
+      body: { success: false, errors: [{ code: 10000, message: 'Authentication error' }] },
+    };
   }
 
   private handle(method: HttpMethod, rawPath: string, body: unknown): CloudflareResponse {
@@ -77,12 +81,24 @@ class FakeCloudflare {
     }
     if (route === 'POST /dns_records') {
       const record = body as DnsRecord & { ttl: number; proxied: boolean };
-      expect(record).toMatchObject({ type: expect.any(String), name: expect.any(String), content: expect.any(String), ttl: 1, proxied: false });
-      this.dns.push({ type: record.type, name: record.name, content: record.content, priority: record.priority });
+      expect(record).toMatchObject({
+        type: expect.any(String),
+        name: expect.any(String),
+        content: expect.any(String),
+        ttl: 1,
+        proxied: false,
+      });
+      this.dns.push({
+        type: record.type,
+        name: record.name,
+        content: record.content,
+        priority: record.priority,
+      });
       return this.ok({ id: `dns-${this.dns.length}` });
     }
     if (path.startsWith(`${zonePrefix}/email/routing`)) {
-      if (!this.permissions.has(path.includes('/rules') ? 'routingRules' : 'zoneSettings')) return this.denied();
+      if (!this.permissions.has(path.includes('/rules') ? 'routingRules' : 'zoneSettings'))
+        return this.denied();
     }
     if (path.startsWith(`${zonePrefix}/email/sending`) && !this.permissions.has('sending')) {
       return this.denied();
@@ -96,7 +112,11 @@ class FakeCloudflare {
     if (route === 'POST /email/routing/dns') {
       const { name } = body as { name: string };
       expect(name).toMatch(/^mail\./);
-      for (const [priority, host] of [[13, 'route1'], [86, 'route2'], [24, 'route3']] as const) {
+      for (const [priority, host] of [
+        [13, 'route1'],
+        [86, 'route2'],
+        [24, 'route3'],
+      ] as const) {
         this.dns.push({ type: 'MX', name, content: `${host}.mx.cloudflare.net`, priority });
       }
       this.dns.push({ type: 'TXT', name, content: '"v=spf1 include:_spf.mx.cloudflare.net ~all"' });
@@ -129,8 +149,17 @@ class FakeCloudflare {
       const tag = `tag-${this.sending.length + 1}`;
       this.sending.push({ tag, name, enabled: true });
       this.sendingDns[tag] = [
-        { type: 'MX', name: `cf-bounce.${name}`, content: 'route1.mx.cloudflare.net', priority: 10 },
-        { type: 'TXT', name: `cf-bounce.${name}`, content: 'v=spf1 include:_spf.mx.cloudflare.net ~all' },
+        {
+          type: 'MX',
+          name: `cf-bounce.${name}`,
+          content: 'route1.mx.cloudflare.net',
+          priority: 10,
+        },
+        {
+          type: 'TXT',
+          name: `cf-bounce.${name}`,
+          content: 'v=spf1 include:_spf.mx.cloudflare.net ~all',
+        },
         { type: 'TXT', name: `cf-bounce._domainkey.${name}`, content: 'v=DKIM1; k=rsa; p=MIIB' },
         { type: 'TXT', name: `_dmarc.${name}`, content: 'v=DMARC1; p=none' },
       ];
@@ -156,7 +185,11 @@ class FakeCloudflare {
 }
 
 function run(fake: FakeCloudflare) {
-  return configureAgentEmail(fake.request, { zoneId: ZONE, baseDomain: 'fixture.example', workerName: WORKER });
+  return configureAgentEmail(fake.request, {
+    zoneId: ZONE,
+    baseDomain: 'fixture.example',
+    workerName: WORKER,
+  });
 }
 
 describe('configureAgentEmail', () => {
@@ -166,7 +199,10 @@ describe('configureAgentEmail', () => {
 
     const outcome = await run(fake);
 
-    expect(outcome).toMatchObject({ status: 'skipped', reason: expect.stringContaining('Email Sending') });
+    expect(outcome).toMatchObject({
+      status: 'skipped',
+      reason: expect.stringContaining('Email Sending'),
+    });
     expect(fake.writes()).toBe(0);
   });
 
@@ -176,7 +212,10 @@ describe('configureAgentEmail', () => {
 
     const outcome = await run(fake);
 
-    expect(outcome).toMatchObject({ status: 'skipped', reason: expect.stringContaining('smtp.google.com') });
+    expect(outcome).toMatchObject({
+      status: 'skipped',
+      reason: expect.stringContaining('smtp.google.com'),
+    });
     expect(fake.writes()).toBe(0);
     expect(fake.dns.filter((r) => r.name === 'fixture.example')).toEqual([
       { type: 'MX', name: 'fixture.example', content: 'smtp.google.com', priority: 1 },
@@ -202,7 +241,9 @@ describe('configureAgentEmail', () => {
     ]);
     expect(fake.sending.map((s) => s.name)).toEqual(['mail.fixture.example']);
     for (const record of fake.sendingDns['tag-1']!) {
-      expect(fake.dns).toContainEqual(expect.objectContaining({ type: record.type, name: record.name }));
+      expect(fake.dns).toContainEqual(
+        expect.objectContaining({ type: record.type, name: record.name })
+      );
     }
     // The apex is not touched.
     expect(fake.dns.filter((r) => r.name === 'fixture.example')).toEqual([]);
@@ -227,13 +268,21 @@ describe('configureAgentEmail', () => {
     await run(fake);
 
     expect(fake.rules).toHaveLength(1);
-    expect(fake.rules[0]).toMatchObject({ id: 'rule-old', actions: [{ type: 'worker', value: [WORKER] }] });
+    expect(fake.rules[0]).toMatchObject({
+      id: 'rule-old',
+      actions: [{ type: 'worker', value: [WORKER] }],
+    });
   });
 
   it('fails the deploy if enabling the subdomain changed pre-existing apex MX records', async () => {
     const fake = new FakeCloudflare();
     fake.routing.enabled = true;
-    fake.dns.push({ type: 'MX', name: 'fixture.example', content: 'route1.mx.cloudflare.net', priority: 13 });
+    fake.dns.push({
+      type: 'MX',
+      name: 'fixture.example',
+      content: 'route1.mx.cloudflare.net',
+      priority: 13,
+    });
     fake.onEnableSubdomain = (state) => {
       state.dns = state.dns.filter((r) => r.name !== 'fixture.example');
     };
@@ -255,7 +304,12 @@ describe('configureAgentEmail', () => {
   it('tolerates Cloudflare adding apex MX records to an apex that had none', async () => {
     const fake = new FakeCloudflare();
     fake.onEnableSubdomain = (state) => {
-      state.dns.push({ type: 'MX', name: 'fixture.example', content: 'route1.mx.cloudflare.net', priority: 13 });
+      state.dns.push({
+        type: 'MX',
+        name: 'fixture.example',
+        content: 'route1.mx.cloudflare.net',
+        priority: 13,
+      });
     };
 
     await expect(run(fake)).resolves.toMatchObject({ status: 'configured' });

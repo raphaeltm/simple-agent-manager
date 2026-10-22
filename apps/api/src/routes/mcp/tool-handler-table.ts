@@ -4,6 +4,7 @@
  */
 import type { Env } from '../../env';
 import type { JsonRpcResponse, McpTokenData } from './_helpers';
+import { handleReplyToEmail } from './agent-email-tools';
 import { handleListAiModels, handleRunAiModel } from './agent-model-tools';
 import { handleBuildAndPublish, handleGetPublishStatus } from './compose-publish-tools';
 import { handleListDeploymentRoutes, handleReadDeploymentLogs } from './deployment-tools';
@@ -158,6 +159,7 @@ export const MCP_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
   ['get_resource_history', handleGetResourceHistory],
   ['search_messages', handleSearchMessages],
   ['update_session_topic', handleUpdateSessionTopic],
+  ['reply_to_email', handleReplyToEmail],
   ['link_idea', handleLinkIdea],
   ['unlink_idea', handleUnlinkIdea],
   ['list_linked_ideas', handleListLinkedIdeas],

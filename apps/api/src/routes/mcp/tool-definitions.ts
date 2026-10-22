@@ -1,3 +1,4 @@
+import { AGENT_EMAIL_TOOLS } from './tool-definitions-agent-email-tools';
 import { PROJECT_SCHEDULE_TOOLS } from './tool-definitions-project-schedule-tools';
 import { SECRET_EXEC_TOOLS } from './tool-definitions-secret-exec';
 import { WORKFLOW_TOOLS } from './tool-definitions-workflow-tools';
@@ -79,6 +80,7 @@ export const MCP_TOOLS = [
   ...PROJECT_SCHEDULE_TOOLS,
   ...PROJECT_EVENT_TOOLS,
   ...TRIGGER_TOOLS,
+  ...AGENT_EMAIL_TOOLS,
   ...INCIDENT_TOOLS,
   ...PROFILE_TOOLS,
   ...SKILL_TOOLS,

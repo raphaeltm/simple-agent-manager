@@ -3,7 +3,7 @@ import * as v from 'valibot';
 
 import { ResourceRequirementsSchema } from './resource-requirements';
 
-const TriggerSourceTypeSchema = v.picklist(['cron', 'webhook', 'github', 'incident']);
+const TriggerSourceTypeSchema = v.picklist(['cron', 'webhook', 'github', 'incident', 'email']);
 const TriggerStatusSchema = v.picklist(['active', 'paused', 'disabled']);
 const TaskModeSchema = v.picklist(['task', 'conversation']);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
@@ -80,6 +80,23 @@ const WebhookConfigValueSchema = v.strictObject({
 
 const WebhookConfigSchema = v.optional(WebhookConfigValueSchema);
 
+/** Allowed senders are compared lower-cased; the per-trigger count cap is an admin setting. */
+const AllowedSenderSchema = v.pipe(
+  v.string(),
+  v.trim(),
+  v.toLowerCase(),
+  v.maxLength(254, 'Allowed sender is too long'),
+  v.email('Each allowed sender must be an email address')
+);
+
+const EmailConfigValueSchema = v.strictObject({
+  allowedSenders: v.optional(
+    v.pipe(v.array(AllowedSenderSchema), v.minLength(1, 'Add at least one allowed sender'))
+  ),
+});
+
+const EmailConfigSchema = v.optional(EmailConfigValueSchema);
+
 export const CreateTriggerSchema = v.object({
   name: v.string(),
   description: v.optional(v.string()),
@@ -97,6 +114,7 @@ export const CreateTriggerSchema = v.object({
   maxConcurrent: v.optional(v.number()),
   githubConfig: GitHubConfigSchema,
   webhookConfig: WebhookConfigSchema,
+  emailConfig: EmailConfigSchema,
 });
 
 export const UpdateTriggerSchema = v.object({
@@ -116,6 +134,7 @@ export const UpdateTriggerSchema = v.object({
   maxConcurrent: v.optional(v.number()),
   githubConfig: GitHubConfigSchema,
   webhookConfig: WebhookConfigSchema,
+  emailConfig: EmailConfigSchema,
 });
 
 export const TriggerPreviewSchema = v.strictObject({
@@ -123,4 +142,4 @@ export const TriggerPreviewSchema = v.strictObject({
   headers: v.optional(v.record(v.string(), v.string())),
 });
 
-export { WebhookConfigValueSchema };
+export { EmailConfigValueSchema, WebhookConfigValueSchema };

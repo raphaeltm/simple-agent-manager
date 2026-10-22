@@ -44,6 +44,7 @@
     "hono": "4.13.4",
     "isomorphic-git": "^1.38.7",
     "jose": "6.2.3",
+    "postal-mime": "4.0.11",
     "tsx": "catalog:",
     "valibot": "1.5.0",
     "workers-ai-provider": "4.0.0",

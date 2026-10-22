@@ -1,5 +1,12 @@
 /** Phase 1 only. Existing readers are wired here after the recovery wave releases integration. */
-import { DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_AGENT_EMAIL_MAX_ALLOWED_SENDERS,
+  DEFAULT_AGENT_EMAIL_MAX_BODY_CHARS,
+  DEFAULT_AGENT_EMAIL_MAX_INBOUND_BYTES,
+  DEFAULT_AGENT_EMAIL_MAX_REPLIES_PER_RUN,
+  DEFAULT_AGENT_EMAIL_MAX_REPLY_CHARS,
+  DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS,
+} from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import {
@@ -20,6 +27,14 @@ export type AdminSettingName =
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
   | `aiModels.${AgentModelSettingKey}`
   | `connector.${ConnectorSettingKey}`
+  | 'agentEmail.maxInboundBytes'
+  | 'agentEmail.maxBodyChars'
+  | 'agentEmail.maxReplyChars'
+  | 'agentEmail.maxRepliesPerRun'
+  | 'agentEmail.maxAllowedSenders'
+  | 'agentEmail.inboundPerTriggerPerHour'
+  | 'agentEmail.processingLeaseSeconds'
+  | 'agentEmail.loopbackPerHour'
   | 'chat.profileUsageWindowDays'
   | 'collaboration.commentMentionsMax'
   | 'collaboration.commentNotificationWindowSeconds'
@@ -50,7 +65,7 @@ export interface AdminSettingDefinition {
   readonly type: AdminSettingType;
   readonly defaultValue: AdminSettingValue;
   readonly category:
-    'OAuth' | 'Connector' | 'Operations' | 'Trials' | 'Collaboration' | 'Chat' | 'AI models';
+    'OAuth' | 'Connector' | 'Operations' | 'Trials' | 'Collaboration' | 'Chat' | 'AI models' | 'Email';
   readonly description: string;
   readonly secret: boolean;
   readonly risky: boolean;
@@ -64,6 +79,12 @@ export interface AdminSettingDefinition {
 
 /** Days of a person's own new chats that order their new-chat profile picker (idea 01M5EW9H86VD88S7E3WWA1D9X1). */
 export const DEFAULT_PROFILE_USAGE_WINDOW_DAYS = 30;
+/** Inbound emails one email trigger accepts per hour before further mail is rejected. */
+export const DEFAULT_AGENT_EMAIL_INBOUND_PER_TRIGGER_PER_HOUR = 20;
+/** Seconds one inbound delivery attempt holds a message before a retry may take it over. */
+export const DEFAULT_AGENT_EMAIL_PROCESSING_LEASE_SECONDS = 120;
+/** Loopback self-test emails one superadmin may send per hour. */
+export const DEFAULT_AGENT_EMAIL_LOOPBACK_PER_HOUR = 10;
 /** Collaboration defaults (idea 01M59MYE4GY91BWTE8TZF1ZB5D); admins can change them at runtime. */
 export const DEFAULT_SESSION_ACCESS_MAX_GRANTS = 10;
 export const DEFAULT_COMMENT_MENTIONS_MAX = 10;
@@ -313,6 +334,62 @@ const definitions: AdminSettingDefinition[] = [
     'Collaboration',
     'Maximum people one comment can @mention.',
     { min: 1, max: 50 }
+  ),
+  integerDefinition(
+    'agentEmail.maxInboundBytes',
+    DEFAULT_AGENT_EMAIL_MAX_INBOUND_BYTES,
+    'Email',
+    'Largest email, in bytes, an agent email address accepts. Larger mail is rejected.',
+    { min: 1_024, max: 25 * 1024 * 1024 }
+  ),
+  integerDefinition(
+    'agentEmail.maxBodyChars',
+    DEFAULT_AGENT_EMAIL_MAX_BODY_CHARS,
+    'Email',
+    'Characters of an email body placed into the agent prompt.',
+    { min: 200, max: 100_000 }
+  ),
+  integerDefinition(
+    'agentEmail.maxReplyChars',
+    DEFAULT_AGENT_EMAIL_MAX_REPLY_CHARS,
+    'Email',
+    'Longest reply, in characters, an agent may send.',
+    { min: 100, max: 200_000 }
+  ),
+  integerDefinition(
+    'agentEmail.maxRepliesPerRun',
+    DEFAULT_AGENT_EMAIL_MAX_REPLIES_PER_RUN,
+    'Email',
+    'Replies an agent may send from one email-started run. Failed attempts count.',
+    { min: 1, max: 50 }
+  ),
+  integerDefinition(
+    'agentEmail.maxAllowedSenders',
+    DEFAULT_AGENT_EMAIL_MAX_ALLOWED_SENDERS,
+    'Email',
+    'Allowed senders one email trigger may list.',
+    { min: 1, max: 200 }
+  ),
+  integerDefinition(
+    'agentEmail.inboundPerTriggerPerHour',
+    DEFAULT_AGENT_EMAIL_INBOUND_PER_TRIGGER_PER_HOUR,
+    'Email',
+    'Emails one email trigger accepts per hour. Further mail is rejected until the hour resets.',
+    { min: 1, max: 10_000 }
+  ),
+  integerDefinition(
+    'agentEmail.processingLeaseSeconds',
+    DEFAULT_AGENT_EMAIL_PROCESSING_LEASE_SECONDS,
+    'Email',
+    'Seconds one delivery attempt of an inbound email holds it before a retried delivery may take over.',
+    { min: 10, max: 3_600 }
+  ),
+  integerDefinition(
+    'agentEmail.loopbackPerHour',
+    DEFAULT_AGENT_EMAIL_LOOPBACK_PER_HOUR,
+    'Email',
+    'Loopback test emails one superadmin may send per hour.',
+    { min: 1, max: 100 }
   ),
   integerDefinition(
     'chat.profileUsageWindowDays',

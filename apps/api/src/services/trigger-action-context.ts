@@ -1,6 +1,7 @@
-import type { WebhookTriggerConfig } from '@simple-agent-manager/shared';
+import type { EmailTriggerConfig, WebhookTriggerConfig } from '@simple-agent-manager/shared';
 
 import type * as schema from '../db/schema';
+import { sampleEmailContext } from './agent-email/context';
 import { buildGitHubContext } from './github-trigger-context';
 import type { GitHubWebhookEvent } from './github-trigger-filter';
 import { buildCronContext } from './trigger-template';
@@ -9,7 +10,8 @@ import { buildWebhookContext, selectWebhookHeaders } from './webhook-trigger-pay
 export type TriggerActionSourceConfig =
   | { sourceType: 'cron' }
   | { sourceType: 'github'; eventType: string }
-  | { sourceType: 'webhook'; config: WebhookTriggerConfig };
+  | { sourceType: 'webhook'; config: WebhookTriggerConfig }
+  | { sourceType: 'email'; config: EmailTriggerConfig };
 
 interface TriggerActionContextInput {
   trigger: schema.TriggerRow;
@@ -40,6 +42,17 @@ export function buildTriggerActionContext(input: TriggerActionContextInput) {
       receivedAt: now.toISOString(),
       deliveryId: 'manual',
       sourceLabel: source.config.sourceLabel,
+      trigger,
+      projectName: project.name,
+      executionId,
+      sequenceNumber,
+    });
+  }
+  if (source.sourceType === 'email') {
+    return sampleEmailContext({
+      from: source.config.allowedSenders[0] ?? 'someone@example.com',
+      address: source.config.address,
+      receivedAt: now.toISOString(),
       trigger,
       projectName: project.name,
       executionId,

@@ -21,6 +21,10 @@ import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
 import { getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../schemas';
+import {
+  loadEmailTriggerConfig,
+  resolveAllowedSenders,
+} from '../../services/agent-email/trigger-config';
 import { buildCredentialAttributionForTriggers } from '../../services/credential-attribution-health';
 import { cronToNextFire } from '../../services/cron-utils';
 import {
@@ -108,6 +112,7 @@ function triggerResourceRequirementsJson(body: {
 
 async function enrichTrigger(
   db: Database,
+  env: Env,
   row: schema.TriggerRow,
   credentialAttribution?: TriggerResponse['credentialAttribution']
 ): Promise<TriggerResponse> {
@@ -138,6 +143,9 @@ async function enrichTrigger(
       .get();
     if (config) response.webhookConfig = toWebhookTriggerConfig(config);
   }
+  if (row.sourceType === 'email') {
+    response.emailConfig = await loadEmailTriggerConfig(db, env, row.id);
+  }
   return response;
 }
 
@@ -152,7 +160,7 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
   clearTriggerPageCaches(projectId);
   const attributionById = await attribution(db, c.env, project, [created]);
   const response: CreateTriggerResponse = {
-    ...(await enrichTrigger(db, created, attributionById.get(id))),
+    ...(await enrichTrigger(db, c.env, created, attributionById.get(id))),
     webhookCredential: webhookToken ? buildWebhookCredential(c.env, webhookToken.token) : undefined,
   };
   log.info('trigger.created', { triggerId: id, projectId, sourceType: body.sourceType });
@@ -224,7 +232,7 @@ crudRoutes.get('/:triggerId', async (c) => {
     .orderBy(desc(schema.triggerExecutions.createdAt))
     .limit(5);
   return c.json({
-    ...(await enrichTrigger(db, trigger, attributionById.get(triggerId))),
+    ...(await enrichTrigger(db, c.env, trigger, attributionById.get(triggerId))),
     recentExecutions,
   });
 });
@@ -245,9 +253,15 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
   if (body.webhookConfig && trigger.sourceType !== 'webhook') {
     throw errors.badRequest('webhookConfig is only valid for webhook triggers');
   }
-  if (trigger.sourceType === 'webhook' && body.agentProfileId === null) {
-    throw errors.badRequest('agentProfileId is required for webhook triggers');
+  if (
+    (trigger.sourceType === 'webhook' || trigger.sourceType === 'email') &&
+    body.agentProfileId === null
+  ) {
+    throw errors.badRequest(`agentProfileId is required for ${trigger.sourceType} triggers`);
   }
+  const emailAllowedSenders = body.emailConfig?.allowedSenders
+    ? await resolveAllowedSenders(db, c.env, trigger.userId, body.emailConfig.allowedSenders)
+    : undefined;
   await validateReferences(db, projectId, body.agentProfileId, body.skillId);
   const now = new Date().toISOString();
   const updates: Omit<Partial<schema.NewTriggerRow>, 'autoPauseResetSequence'> & {
@@ -346,6 +360,14 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
       triggerUpdate,
       githubTriggerConfigUpdate(db, triggerId, body.githubConfig, now),
     ]);
+  } else if (emailAllowedSenders) {
+    await db.batch([
+      triggerUpdate,
+      db
+        .update(schema.triggerEmailConfigs)
+        .set({ allowedSendersJson: JSON.stringify(emailAllowedSenders), updatedAt: now })
+        .where(eq(schema.triggerEmailConfigs.triggerId, triggerId)),
+    ]);
   } else if (effectiveWebhookConfig) {
     await db.batch([
       triggerUpdate,
@@ -366,7 +388,7 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
   clearTriggerPageCaches(projectId);
   const attributionById = await attribution(db, c.env, project, [updated]);
   log.info('trigger.updated', { triggerId, projectId, fields: Object.keys(body) });
-  return c.json(await enrichTrigger(db, updated, attributionById.get(triggerId)));
+  return c.json(await enrichTrigger(db, c.env, updated, attributionById.get(triggerId)));
 });
 
 crudRoutes.delete('/:triggerId', async (c) => {

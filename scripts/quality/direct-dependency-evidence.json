@@ -97,6 +97,11 @@
       "registryUrl": "https://www.npmjs.com/package/oxlint",
       "necessity": "Measures native lint findings in shadow mode."
     },
+    "postal-mime": {
+      "registryUrl": "https://www.npmjs.com/package/postal-mime",
+      "homepageUrl": "https://github.com/postalsys/postal-mime",
+      "necessity": "Parses inbound RFC 5322/MIME email in the API Worker email() handler for agent email triggers; zero dependencies and the parser Cloudflare documents for Email Workers."
+    },
     "sharp": {
       "registryUrl": "https://www.npmjs.com/package/sharp",
       "necessity": "Downscales marketing feature screenshots and writes their WebP siblings (apps/www optimize:features)."

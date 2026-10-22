@@ -11,6 +11,7 @@ import { expectJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
 import { getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
+import { toEmailTriggerConfig } from '../../services/agent-email/trigger-config';
 import {
   buildTriggerActionContext,
   type TriggerActionSourceConfig,
@@ -38,7 +39,8 @@ async function loadTrigger(
 
 async function loadSourceConfig(
   db: ReturnType<typeof drizzle<typeof schema>>,
-  trigger: schema.TriggerRow
+  trigger: schema.TriggerRow,
+  baseDomain: string
 ): Promise<TriggerActionSourceConfig> {
   if (trigger.sourceType === 'webhook') {
     const row = await db
@@ -59,6 +61,15 @@ async function loadSourceConfig(
     return { sourceType: 'github', eventType: row.eventType };
   }
   if (trigger.sourceType === 'cron') return { sourceType: 'cron' };
+  if (trigger.sourceType === 'email') {
+    const row = await db
+      .select()
+      .from(schema.triggerEmailConfigs)
+      .where(eq(schema.triggerEmailConfigs.triggerId, trigger.id))
+      .get();
+    if (!row) throw errors.notFound('Email trigger');
+    return { sourceType: 'email', config: toEmailTriggerConfig(row, baseDomain) };
+  }
   throw errors.conflict('Incident triggers run from the private incident backlog sweep');
 }
 
@@ -75,7 +86,7 @@ actionRoutes.post('/:triggerId/test', async (c) => {
   const context = buildTriggerActionContext({
     trigger,
     project,
-    source: await loadSourceConfig(db, trigger),
+    source: await loadSourceConfig(db, trigger, c.env.BASE_DOMAIN),
     now,
     executionId: ulid(),
     sequenceNumber: trigger.nextExecutionSequence,
@@ -96,12 +107,16 @@ actionRoutes.post('/:triggerId/run', async (c) => {
   if (trigger.sourceType === 'incident') {
     throw errors.conflict('Incident triggers run from the private incident backlog sweep');
   }
+  if (trigger.sourceType === 'email') {
+    // A manual run has no email to answer, so reply_to_email could never work in it.
+    throw errors.conflict('Email triggers run when an email arrives at their address');
+  }
   const input: unknown = await c.req.json().catch(() => ({}));
   const preview =
     input && typeof input === 'object' && !Array.isArray(input)
       ? (input as { payload?: Record<string, unknown>; headers?: Record<string, string> })
       : {};
-  const source = await loadSourceConfig(db, trigger);
+  const source = await loadSourceConfig(db, trigger, c.env.BASE_DOMAIN);
   const now = new Date();
   const admission = await admitAndSubmitTriggerExecution(c.env, {
     trigger,

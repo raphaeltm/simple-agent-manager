@@ -24,8 +24,8 @@ import { resolve } from 'node:path';
 import * as TOML from '@iarna/toml';
 import * as v from 'valibot';
 
-import { readAgentEmailMarker } from './configure-agent-email.js';
 import { DEPLOYMENT_CONFIG } from './config.js';
+import { readAgentEmailMarker } from './configure-agent-email.js';
 import {
   getDeployedWorkerMigrationTag,
   resolveDurableObjectMigrations,

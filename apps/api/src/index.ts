@@ -1,5 +1,6 @@
 export { McpRateCounter } from './durable-objects/mcp-rate-counter';
 export { WorkspaceBootLog } from './durable-objects/workspace-boot-log';
+import { adminAgentEmailRoutes } from './routes/admin-agent-email';
 import { cliOperationReceiptRoutes } from './routes/cli-operation-receipts';
 import { cliProjectMetadataRoutes } from './routes/cli-project-metadata';
 import { projectScheduleRoutes } from './routes/project-schedules';
@@ -177,6 +178,8 @@ import {
   workspacePortsStateForStatus,
 } from './routes/workspaces/ports-readiness';
 import { scheduled } from './scheduled/handler';
+import { agentEmailConfig } from './services/agent-email/address';
+import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
 import { assertSessionUserApproved } from './services/signup-approval';
 import { recordNodeRoutingMetric } from './services/telemetry';
@@ -724,6 +727,12 @@ app.get('/api/config/artifacts-enabled', (c) => {
   return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
 });
 
+// Public config — whether this deployment can receive and send agent email (preview).
+app.get('/api/config/agent-email', (c) => {
+  applyCacheHeaders(c, 'public-config');
+  return c.json(agentEmailConfig(c.env));
+});
+
 // The VAPID public key is runtime configuration: deploy-generated keys do not
 // exist when the web bundle is built. Never expose the corresponding private key.
 app.get('/api/config/vapid-public-key', (c) => {
@@ -875,6 +884,7 @@ app.route('/api/admin/platform-credentials', adminPlatformCredentialRoutes);
 app.route('/api/admin/project-events', adminProjectEventRoutes);
 app.route('/api/admin/trials', adminTrialsRoutes);
 app.route('/api/admin/quotas', adminQuotaRoutes);
+app.route('/api/admin/agent-email', adminAgentEmailRoutes);
 app.route('/api/admin/runtime-controls', adminRuntimeControlRoutes);
 app.route('/api/admin/settings', adminSettingsRoutes);
 app.route('/api/admin/usage', adminUsageRoutes);
@@ -948,4 +958,9 @@ export default {
   fetch: (request: Request, env: Env, ctx: ExecutionContext) =>
     app.fetch(request, withRequestScopedD1Bindings(env), ctx),
   scheduled,
+  // Email Routing deliveries for agent email triggers (preview). Raw bindings, like
+  // `scheduled`: it is not a browser request.
+  email: async (message: ForwardableEmailMessage, env: Env) => {
+    await handleInboundAgentEmail(message, env);
+  },
 };
