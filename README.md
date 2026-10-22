@@ -110,7 +110,7 @@ The control plane runs on Cloudflare Workers, so there is no control-plane VM to
 You need:
 
 - A [Cloudflare account](https://dash.cloudflare.com/sign-up) on the Workers Paid plan ($5 a month), with a domain on Cloudflare
-- A [GitHub App](https://simple-agent-manager.org/docs/guides/self-hosting/#github-setup) for sign-in and repository access
+- A [GitHub App](https://simple-agent-manager.org/docs/guides/self-hosting/#step-4-create-github-app) for sign-in and repository access
 - A cloud provider account for VMs (optional if you only use Instant sessions)
 
 SAM deploys from GitHub Actions in your fork. The [self-hosting guide](https://simple-agent-manager.org/docs/guides/self-hosting/) walks through every step.
