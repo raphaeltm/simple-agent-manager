@@ -36,21 +36,39 @@ UI code. The test came from PR #2389 and was last touched by the merged UI PR #2
 
 ## Implementation Checklist
 
-- [ ] Add one named wait budget for the attention card (findBy `timeout`) and a matching test
-      budget, with a comment saying why
-- [ ] Use the budget in both tests that wait for the "Dependency audit" card
-- [ ] Viewer test: wait for the card, then assert no `Resume` inside it and that the viewer's
+- [x] Add one named wait budget (`CHAINED_LOAD = { timeout: 5_000 }`) and a matching 15 s test
+      budget (`describe('overview', { timeout: 15_000 }, …)`), with a comment saying why
+- [x] Use the budget in both tests that wait for the "Dependency audit" card
+- [x] Viewer test: wait for the card, then assert no `Resume` inside it and that the viewer's
       "Take a look" link is there
-- [ ] Prove the fix: the throttled and coverage repro fails on the old test and passes every time on the new one
-- [ ] Prove the viewer assertion discriminating: show `Resume` to viewers temporarily, and the test must go red
-- [ ] Run the web unit suite with coverage (CI command), plus lint, typecheck and format checks
+- [x] Review finding (test-engineer, MEDIUM): "Calls received" on the trigger page is the same
+      chained load (`TriggerDetail` waits for the trigger, then `WebhookDeliveries` fetches its
+      calls), so its wait uses the same budget and the test gets `{ timeout: 15_000 }`
+- [x] Prove the fix: the throttled and coverage repro fails on the old test and passes every time on the new one
+- [x] Prove the viewer assertion discriminating: show `Resume` to viewers temporarily, and the test must go red
+- [ ] Run the web unit suite with coverage (CI command), plus lint, typecheck and format checks (lint, typecheck and format pass; full suite running)
 
 ## Acceptance Criteria
 
-- [ ] The three overview tests pass under the throttled and coverage repro across repeated runs (old code fails it)
-- [ ] The viewer test fails if a viewer is shown `Resume` on the attention card
+- [x] The three overview tests pass under the throttled and coverage repro across repeated runs (old code fails it)
+- [x] The viewer test fails if a viewer is shown `Resume` on the attention card
 - [ ] `pnpm --filter @simple-agent-manager/web test:coverage` passes
-- [ ] No product code, backend or PR #2406 changes
+- [x] No product code, backend or PR #2406 changes
+
+## Evidence
+
+- **A/B under throttle** (`taskset -c 0` with 7 busy loops on core 0, V8 coverage, `-t overview`,
+  alternating runs). Old test (`6d882363c`): both card tests failed with the CI error in all 5
+  runs (10/10 failures). New test (`2538fa648`): all four overview tests passed in all 5 runs,
+  and the two card tests took 4.7–7.9 s. That exceeds vitest's 5 s default, which is why the
+  suite budget is needed too. A 6th, unthrottled control round passed on both versions in under 1 s.
+- **Viewer discrimination:** with `inlineResume` temporarily ignoring `canWrite` in
+  `overview-sections.tsx`, the new viewer test failed with
+  `Unable to find … role "link" and name "Take a look"`. Source reverted.
+- **Main is affected too:** main CI run 39717873907 on `e063961fb` (PR #2406's merge) failed this
+  same test, and Deploy Production 39719134099 was skipped.
+- **Checks:** changed file 27/27; ESLint and prettier pass; web `tsc` passes. `tests/` sits outside
+  web's tsconfig, so I also type-checked the test file with a temporary config: clean.
 
 ## References
 

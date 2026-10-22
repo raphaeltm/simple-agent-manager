@@ -299,11 +299,12 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-// The attention card renders only after two requests in a row: the trigger list, then that
-// trigger's recent runs. The first render is cold, and on a busy CI runner with coverage that
-// chain can outlast Testing Library's 1 s default. Waits for the card allow 5 s, and the
-// overview tests get a budget above vitest's 5 s default to match.
-const ATTENTION_CARD = { timeout: 5_000 };
+// Some sections render only after two requests in a row: the overview's attention card needs the
+// trigger list, then that trigger's recent runs; a trigger page's "Calls received" needs the
+// trigger, then its calls. On a busy CI runner with coverage such a chained load can outlast
+// Testing Library's 1 s default, above all on a cold first render. Waits for these sections
+// allow 5 s, and the tests making them get a budget above vitest's 5 s default to match.
+const CHAINED_LOAD = { timeout: 5_000 };
 
 describe('overview', { timeout: 15_000 }, () => {
   it('resumes a trigger SAM paused after failures, from its attention card', async () => {
@@ -315,7 +316,7 @@ describe('overview', { timeout: 15_000 }, () => {
     });
     api.updateTrigger.mockResolvedValue({ ...paused, status: 'active' });
     renderAt('/projects/p1/automation');
-    const card = await screen.findByRole('region', { name: 'Dependency audit' }, ATTENTION_CARD);
+    const card = await screen.findByRole('region', { name: 'Dependency audit' }, CHAINED_LOAD);
     expect(within(card).getByText('Paused · its last 3 runs failed')).toBeInTheDocument();
     await userEvent.click(within(card).getByRole('button', { name: 'Resume' }));
     await waitFor(() =>
@@ -334,7 +335,7 @@ describe('overview', { timeout: 15_000 }, () => {
       nextCursor: null,
     });
     renderAt('/projects/p1/automation');
-    const card = await screen.findByRole('region', { name: 'Dependency audit' }, ATTENTION_CARD);
+    const card = await screen.findByRole('region', { name: 'Dependency audit' }, CHAINED_LOAD);
     expect(await within(card).findByRole('button', { name: 'Resume' })).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: /New/ }).length).toBeGreaterThan(0);
   });
@@ -371,7 +372,7 @@ describe('overview', { timeout: 15_000 }, () => {
       await screen.findByText(/Only people who can edit this project can change automation/)
     ).toBeInTheDocument();
     // Resume would sit on the attention card, so "no Resume" only counts once the card is up.
-    const card = await screen.findByRole('region', { name: 'Dependency audit' }, ATTENTION_CARD);
+    const card = await screen.findByRole('region', { name: 'Dependency audit' }, CHAINED_LOAD);
     expect(within(card).getByRole('link', { name: 'Take a look' })).toBeInTheDocument();
     expect(screen.getAllByText('Dependency audit').length).toBeGreaterThan(0);
     expect(screen.queryByRole('link', { name: /New automation/ })).not.toBeInTheDocument();
@@ -724,7 +725,7 @@ describe('trigger page', () => {
     expect(api.rotateWebhookTriggerToken).toHaveBeenCalledWith('p1', 'trg-hook');
   });
 
-  it('says what each webhook call did with its run', async () => {
+  it('says what each webhook call did with its run', { timeout: 15_000 }, async () => {
     api.getTrigger.mockResolvedValue(
       trigger({
         id: 'trg-hook',
@@ -762,7 +763,7 @@ describe('trigger page', () => {
       nextCursor: null,
     });
     renderAt('/projects/p1/automation/trigger/trg-hook');
-    const calls = await screen.findByRole('region', { name: 'Calls received' });
+    const calls = await screen.findByRole('region', { name: 'Calls received' }, CHAINED_LOAD);
     expect(
       await within(calls).findByText('Started a run, listed under Recent runs')
     ).toHaveAttribute('title', 'Run ID exec-started');
