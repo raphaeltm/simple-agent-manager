@@ -6,7 +6,7 @@
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const transfer = vi.hoisted(() => ({
   downloadFromWorkspace: vi.fn(),
@@ -112,6 +112,11 @@ describe('agent model calls through the MCP route', () => {
   let app: Hono;
   let aiRun: ReturnType<typeof vi.fn>;
 
+  // The MCP route imports every tool module; load it once so no single test pays for that.
+  beforeAll(async () => {
+    app = await createMcpApp();
+  }, 60_000);
+
   beforeEach(async () => {
     resetAgentModelCatalogCacheForTests();
     transfer.downloadFromWorkspace.mockReset();
@@ -183,7 +188,6 @@ describe('agent model calls through the MCP route', () => {
       AI_GATEWAY_ID: 'sam-gateway',
       BASE_DOMAIN: 'example.test',
     } as unknown as Env;
-    app = await createMcpApp();
   });
 
   afterEach(() => sqlite.close());
@@ -427,6 +431,24 @@ describe('agent model calls through the MCP route', () => {
     expect(result.output.text).toBe('hello world');
     // 2 minutes at $0.000513 / minute = $0.001026.
     expect(result.costUsd).toBe(0.001026);
+  });
+
+  it('charges the held estimate when the model ran but its output could not be saved', async () => {
+    await updateProjectAgentModelSettings(env, db(), PROJECT, { models: [FLUX] });
+    aiRun.mockResolvedValue(
+      new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9]), {
+        headers: { 'content-type': 'image/png' },
+      })
+    );
+    transfer.uploadToWorkspace.mockRejectedValue(new Error('VM agent upload failed: 507'));
+
+    const response = await callMcpTool(app, env, TOKEN, 'run_ai_model', {
+      model: FLUX,
+      input: { prompt: 'a lighthouse' },
+    });
+
+    expect(response.error?.message).toContain('VM agent upload failed');
+    expect(usageRow()).toEqual({ reserved: 0, spent: 10_000, calls: 1 });
   });
 
   it('honours the administrator kill switch', async () => {

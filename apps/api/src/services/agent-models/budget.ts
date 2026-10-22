@@ -10,6 +10,7 @@
  */
 import type { AgentModelMonthlyUsage, AgentModelUsageByModel } from '@simple-agent-manager/shared';
 
+import { maybeJsonRecord } from '../../lib/runtime-validation';
 import { MICRO_USD_PER_USD } from './settings';
 
 /** UTC month key, `YYYY-MM`. */
@@ -82,7 +83,7 @@ export async function settleAgentModelBudget(
 ): Promise<{ spentMicroUsd: number; reservedMicroUsd: number }> {
   const reserved = Math.max(1, Math.ceil(input.reservedMicroUsd));
   const cost = Math.max(0, Math.ceil(input.costMicroUsd));
-  const [totals] = await db.batch<{ spent_micro_usd: unknown; reserved_micro_usd: unknown }>([
+  const [totals] = await db.batch<Record<string, unknown>>([
     db
       .prepare(
         `UPDATE agent_model_monthly_usage
@@ -107,25 +108,11 @@ export async function settleAgentModelBudget(
       )
       .bind(input.projectId, input.month, input.modelId, input.failed ? 1 : 0, cost, input.now),
   ]);
-  const row = totals?.results?.[0];
+  const row = maybeJsonRecord(totals?.results?.[0]);
   return {
     spentMicroUsd: count(row?.spent_micro_usd),
     reservedMicroUsd: count(row?.reserved_micro_usd),
   };
-}
-
-interface TotalsRow {
-  reserved_micro_usd: unknown;
-  spent_micro_usd: unknown;
-  call_count: unknown;
-}
-
-interface ModelRow {
-  model_id: unknown;
-  call_count: unknown;
-  error_count: unknown;
-  spent_micro_usd: unknown;
-  last_called_at: unknown;
 }
 
 function count(value: unknown): number {
@@ -138,7 +125,7 @@ export async function readAgentModelUsage(
   projectId: string,
   month: string
 ): Promise<AgentModelMonthlyUsage> {
-  const [totals, models] = await db.batch<TotalsRow | ModelRow>([
+  const [totals, models] = await db.batch<Record<string, unknown>>([
     db
       .prepare(
         `SELECT reserved_micro_usd, spent_micro_usd, call_count
@@ -153,16 +140,17 @@ export async function readAgentModelUsage(
       )
       .bind(projectId, month),
   ]);
-  const total = (totals?.results?.[0] ?? null) as TotalsRow | null;
+  const total = maybeJsonRecord(totals?.results?.[0]);
   const byModel: AgentModelUsageByModel[] = [];
-  for (const raw of (models?.results ?? []) as ModelRow[]) {
-    if (typeof raw.model_id !== 'string') continue;
-    const lastCalledAt = typeof raw.last_called_at === 'number' ? raw.last_called_at : null;
+  for (const raw of models?.results ?? []) {
+    const row = maybeJsonRecord(raw);
+    if (!row || typeof row.model_id !== 'string') continue;
+    const lastCalledAt = typeof row.last_called_at === 'number' ? row.last_called_at : null;
     byModel.push({
-      modelId: raw.model_id,
-      callCount: count(raw.call_count),
-      errorCount: count(raw.error_count),
-      spentUsd: microUsdToUsd(count(raw.spent_micro_usd)),
+      modelId: row.model_id,
+      callCount: count(row.call_count),
+      errorCount: count(row.error_count),
+      spentUsd: microUsdToUsd(count(row.spent_micro_usd)),
       lastCalledAt: lastCalledAt ? new Date(lastCalledAt).toISOString() : null,
     });
   }

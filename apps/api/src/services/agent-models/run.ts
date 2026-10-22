@@ -315,6 +315,9 @@ export async function runAgentModelForAgent(
         readUpstreamError(await response.text().catch(() => ''))
       );
     }
+    // The model ran. Until its reported usage is known, charge the full estimate so a failure
+    // while reading or saving the output can never settle a completed call at zero.
+    cost = reservation;
     const { result, outputChars } = await readModelOutput(response, saver);
     const withMedia = await extractBase64Media(result, saver);
     const { output, truncated } = await inlineOrSaveJson(
