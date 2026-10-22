@@ -299,7 +299,13 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('overview', () => {
+// The attention card renders only after two requests in a row: the trigger list, then that
+// trigger's recent runs. The first render is cold, and on a busy CI runner with coverage that
+// chain can outlast Testing Library's 1 s default. Waits for the card allow 5 s, and the
+// overview tests get a budget above vitest's 5 s default to match.
+const ATTENTION_CARD = { timeout: 5_000 };
+
+describe('overview', { timeout: 15_000 }, () => {
   it('resumes a trigger SAM paused after failures, from its attention card', async () => {
     const paused = trigger();
     api.listTriggers.mockResolvedValue({ triggers: [paused] });
@@ -309,7 +315,7 @@ describe('overview', () => {
     });
     api.updateTrigger.mockResolvedValue({ ...paused, status: 'active' });
     renderAt('/projects/p1/automation');
-    const card = await screen.findByRole('region', { name: 'Dependency audit' });
+    const card = await screen.findByRole('region', { name: 'Dependency audit' }, ATTENTION_CARD);
     expect(within(card).getByText('Paused · its last 3 runs failed')).toBeInTheDocument();
     await userEvent.click(within(card).getByRole('button', { name: 'Resume' }));
     await waitFor(() =>
@@ -328,7 +334,7 @@ describe('overview', () => {
       nextCursor: null,
     });
     renderAt('/projects/p1/automation');
-    const card = await screen.findByRole('region', { name: 'Dependency audit' });
+    const card = await screen.findByRole('region', { name: 'Dependency audit' }, ATTENTION_CARD);
     expect(await within(card).findByRole('button', { name: 'Resume' })).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: /New/ }).length).toBeGreaterThan(0);
   });
@@ -364,6 +370,9 @@ describe('overview', () => {
     expect(
       await screen.findByText(/Only people who can edit this project can change automation/)
     ).toBeInTheDocument();
+    // Resume would sit on the attention card, so "no Resume" only counts once the card is up.
+    const card = await screen.findByRole('region', { name: 'Dependency audit' }, ATTENTION_CARD);
+    expect(within(card).getByRole('link', { name: 'Take a look' })).toBeInTheDocument();
     expect(screen.getAllByText('Dependency audit').length).toBeGreaterThan(0);
     expect(screen.queryByRole('link', { name: /New automation/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
