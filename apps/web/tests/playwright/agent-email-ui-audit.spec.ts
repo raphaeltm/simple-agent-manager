@@ -238,9 +238,12 @@ test.describe('Agent email — trigger detail', () => {
     // Top of page first: the long name wraps and no Run now sits in the action bar.
     await audit(page, 'agent-email-detail-stress-top');
     // The address + 18 senders live in the side panel, below the fold on mobile (same trap as
-    // `auditAdminPanel`) — scroll to it for the evidence this test exists to capture.
-    await address.scrollIntoViewIfNeeded();
-    await audit(page, 'agent-email-detail-stress-address');
+    // `auditAdminPanel`) — scroll to it for the evidence this test exists to capture. On desktop
+    // the side panel is already in the first capture, so a second one would repeat it.
+    if ((page.viewportSize()?.width ?? 0) < 768) {
+      await address.scrollIntoViewIfNeeded();
+      await audit(page, 'agent-email-detail-stress-address');
+    }
   });
 
   test('falls back to "No senders allowed yet" when the list is empty', async ({ page }) => {

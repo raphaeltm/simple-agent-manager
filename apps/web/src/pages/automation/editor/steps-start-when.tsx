@@ -196,12 +196,8 @@ export function StepWhen({
             onAllowedSendersChange={(allowedSenders) =>
               onChange({ ...state, email: { ...email, allowedSenders } })
             }
+            error={errors.email}
           />
-          {errors.email && (
-            <p role="alert" className="m-0 text-[13px] font-medium text-danger-fg">
-              {errors.email}
-            </p>
-          )}
         </div>
       );
     }
