@@ -13,7 +13,7 @@ export interface EmailTriggerConfigInput {
 
 /** Email trigger configuration returned by management APIs. */
 export interface EmailTriggerConfig {
-  /** The address mail must be sent to, e.g. `agent+k3j2h7m9q2xw4n8p@mail.example.com`. */
+  /** The address mail must be sent to, e.g. `agent+k3j2h7m9q2xw4n8p@agents.example.com`. */
   address: string;
   /** Lower-cased sender addresses allowed to start the trigger. */
   allowedSenders: string[];
@@ -58,6 +58,6 @@ export type EmailTemplateContext = {
 /** `GET /api/config/agent-email`: whether this deployment can receive and send agent email. */
 export interface AgentEmailConfigResponse {
   enabled: boolean;
-  /** Domain agent addresses live on, e.g. `mail.example.com`, when enabled. */
+  /** Domain agent addresses live on, e.g. `agents.example.com`, when enabled. */
   domain: string | null;
 }

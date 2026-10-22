@@ -93,7 +93,7 @@ function emailTrigger(overrides: Record<string, unknown> = {}) {
     createdAt: '2026-09-01T00:00:00Z',
     updatedAt: '2026-10-01T00:00:00Z',
     emailConfig: {
-      address: 'agent+k3j2h7m9q2xw4n8p@mail.a-really-long-self-hosted-staging-domain.example',
+      address: 'agent+k3j2h7m9q2xw4n8p@agents.a-really-long-self-hosted-staging-domain.example',
       allowedSenders: manySenders(18),
     },
     ...overrides,
@@ -123,7 +123,9 @@ async function setupAgentEmailMocks(page: Page, options: MockOptions = {}) {
     if (path === '/api/config/agent-email') {
       return respond(200, {
         enabled: agentEmailEnabled,
-        domain: agentEmailEnabled ? 'mail.a-really-long-self-hosted-staging-domain.example' : null,
+        domain: agentEmailEnabled
+          ? 'agents.a-really-long-self-hosted-staging-domain.example'
+          : null,
       });
     }
     if (path === '/api/projects') return respond(200, { projects: [PROJECT] });
@@ -222,7 +224,7 @@ test.describe('Agent email — trigger detail', () => {
     await page.goto(`${BASE}/trigger/trg-email-stress`);
     await expect(page.getByRole('heading', { level: 1 })).toContainText(LONG_NAME.slice(0, 40));
     const address = page.getByTestId('email-trigger-address');
-    await expect(address).toContainText('agent+k3j2h7m9q2xw4n8p@mail.');
+    await expect(address).toContainText('agent+k3j2h7m9q2xw4n8p@agents.');
     await expect(page.getByRole('button', { name: 'Copy email address' })).toBeVisible();
     const senders = page.getByTestId('email-allowed-senders');
     await expect(senders.locator('li')).toHaveCount(18);
@@ -253,7 +255,7 @@ test.describe('Agent email — trigger detail', () => {
           id: 'trg-email-empty',
           name: 'Empty inbox automation',
           emailConfig: {
-            address: 'agent+a1b2c3d4e5f6g7h8@mail.example.com',
+            address: 'agent+a1b2c3d4e5f6g7h8@agents.example.com',
             allowedSenders: [],
           },
         }),
@@ -377,7 +379,7 @@ interface AdminMockOptions {
 
 async function setupAdminAgentEmailMocks(page: Page, options: AdminMockOptions = {}) {
   const enabled = options.enabled ?? true;
-  const domain = options.domain ?? (enabled ? 'mail.example.com' : null);
+  const domain = options.domain ?? (enabled ? 'agents.example.com' : null);
   await page.addInitScript(() =>
     localStorage.setItem('sam-onboarding-wizard-dismissed-admin-agent-email', 'true')
   );
@@ -446,12 +448,12 @@ test.describe('Agent email — admin panel', () => {
   test('shows the domain and the loopback form with nothing sent yet', async ({ page }) => {
     await setupAdminAgentEmailMocks(page, {
       enabled: true,
-      domain: 'mail.a-really-long-self-hosted-staging-domain.example',
+      domain: 'agents.a-really-long-self-hosted-staging-domain.example',
     });
     await page.goto('/admin/integrations');
     const status = page.getByTestId('agent-email-status');
     await expect(status).toContainText('On');
-    await expect(status).toContainText('mail.a-really-long-self-hosted-staging-domain.example');
+    await expect(status).toContainText('agents.a-really-long-self-hosted-staging-domain.example');
     await expect(page.getByLabel('Send loopback test to')).toBeVisible();
     await expect(page.getByTestId('agent-email-last-sent')).toContainText('Not sent yet');
     await expect(page.getByTestId('agent-email-last-received')).toContainText('None received yet');
@@ -463,14 +465,14 @@ test.describe('Agent email — admin panel', () => {
   }) => {
     await setupAdminAgentEmailMocks(page, {
       enabled: true,
-      domain: 'mail.example.com',
+      domain: 'agents.example.com',
       lastSent: {
-        to: 'agent+k3j2h7m9q2xw4n8p@mail.example.com',
+        to: 'agent+k3j2h7m9q2xw4n8p@agents.example.com',
         sentAt: '2026-10-22T09:00:00Z',
         providerMessageId: 'msg-abc123',
       },
       lastReceived: {
-        from: 'agent+k3j2h7m9q2xw4n8p@mail.example.com',
+        from: 'agent+k3j2h7m9q2xw4n8p@agents.example.com',
         subject: 'Re: SAM agent email loopback test',
         autoSubmitted: 'auto-replied',
         receivedAt: '2026-10-22T09:00:42Z',
@@ -478,7 +480,7 @@ test.describe('Agent email — admin panel', () => {
     });
     await page.goto('/admin/integrations');
     await expect(page.getByTestId('agent-email-last-sent')).toContainText(
-      'agent+k3j2h7m9q2xw4n8p@mail.example.com'
+      'agent+k3j2h7m9q2xw4n8p@agents.example.com'
     );
     await expect(page.getByTestId('agent-email-last-received')).toContainText(
       'Re: SAM agent email loopback test'

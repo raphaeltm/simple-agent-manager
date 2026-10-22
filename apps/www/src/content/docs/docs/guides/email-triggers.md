@@ -10,7 +10,7 @@ staging). The address is the main protection, so treat it like a password. See
 :::
 
 An email trigger gives an automation its own address, such as
-`agent+k3j2h7m9q2xw4n8p@mail.your-domain.com`. When someone you allow emails that address, SAM
+`agent+k3j2h7m9q2xw4n8p@agents.your-domain.com`. When someone you allow emails that address, SAM
 starts the automation's agent with the email in its prompt. The agent can answer by email, and the
 reply arrives in the sender's inbox as a normal threaded reply. For schedule, GitHub and webhook
 triggers, see [Triggers](/docs/guides/triggers/).
@@ -113,7 +113,7 @@ The sender's mail server sees a temporary failure only if SAM could not store th
 ## Check that it works (admins)
 
 **Admin → Integrations → Agent email** shows whether agent email is on and its domain. It can send
-a fixed loopback test: add `agent+loopback@mail.<your-domain>` to an automation's
+a fixed loopback test: add `agent+loopback@agents.<your-domain>` to an automation's
 **Allowed senders**, then send the test to that automation's address. Its agent starts, and when it
 replies, the reply comes back to SAM and appears under **Last reply received**. The same is
 available through [`/api/admin/agent-email`](/docs/reference/api/#agent-email-preview).
@@ -126,7 +126,7 @@ delivered. Check Email Sending's metrics and logs for replies instead.
 Agent email needs Cloudflare Email Routing and Email Sending (Workers Paid) on your zone, and three
 more permissions on the deploy token. See the agent email note in
 [Self-Hosting](/docs/guides/self-hosting/). The deploy turns Email Routing on for
-`mail.<your-domain>` itself. It writes DNS records only under `mail.<your-domain>`, fails if your
+`agents.<your-domain>` itself. It writes DNS records only under `agents.<your-domain>`, fails if your
 main domain's mail records change, and the production deploy does not turn the preview on.
 
 Agent email stays off until Cloudflare has verified the new sending records, usually 5 to 15

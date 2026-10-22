@@ -27,11 +27,11 @@ Decisions Raphaël made explicitly (verbatim intent, from knowledge entity `Arch
 
 ## What this prototype covers (Phase 1 + a minimal Phase 2)
 
-1. **Email trigger.** A new trigger type, `email`. When created, SAM assigns it an address: `agent+<key>@mail.<BASE_DOMAIN>`, for example `agent+k3j2h7m9q2xw4n8p@mail.sammy.party`.
+1. **Email trigger.** A new trigger type, `email`. When created, SAM assigns it an address: `agent+<key>@agents.<BASE_DOMAIN>`, for example `agent+k3j2h7m9q2xw4n8p@agents.sammy.party`.
 2. **Inbound mail starts a session.** Email Routing delivers the message to the API Worker's new `email()` handler. The handler checks the message, then starts a normal trigger run through the existing `admitAndSubmitTriggerExecution` → `submitTriggeredTask` pipeline. The prompt is rendered from the trigger's template with new `{{email.*}}` variables.
 3. **The agent can reply.** A new MCP tool, `reply_to_email`, works only in a task started by an email trigger. It sends exactly one recipient, the original sender, from the trigger's own address. It sets threading headers (`In-Reply-To`, `References`) and `Auto-Submitted: auto-replied`.
 4. **The UI.** The Automation editor gets an **Email** start option with an "allowed senders" field. The trigger shows its address with a copy button.
-5. **Deploy automation.** The deploy configures Email Routing and Email Sending for `mail.<BASE_DOMAIN>`. It does this only when the deploy token has the email permissions; otherwise the feature stays off.
+5. **Deploy automation.** The deploy configures Email Routing and Email Sending for `agents.<BASE_DOMAIN>`. It does this only when the deploy token has the email permissions; otherwise the feature stays off.
 
 ### Deliberately NOT in this prototype (tracked as follow-ups in idea `01KS4X886T3NRKR3696H25A2AN`)
 
@@ -126,7 +126,7 @@ sequenceDiagram
 
 ### D1. The address is a capability, plus a sender allowlist
 
-- **Address format:** `agent+<key>@mail.<BASE_DOMAIN>`. The key is 16 random characters from Crockford base32 (lowercase), about 80 bits.
+- **Address format:** `agent+<key>@agents.<BASE_DOMAIN>`. The key is 16 random characters from Crockford base32 (lowercase), about 80 bits.
   - It is unique and stored in plain text, because users must be able to see it and every reply carries it in `From`.
   - This is the same trust model as webhook triggers, where the bearer secret is in the URL.
 - **Allowed senders.** This is a required list of 1–20 exact addresses, lower-cased.
@@ -186,11 +186,11 @@ The Worker treats email as available when **the `AGENT_EMAIL` send binding is pr
 It is idempotent, runs before `sync-wrangler-config.ts`, and is unit-tested against a strict fake of the Cloudflare API. Superseded parts of the original plan are noted in "PR review outcome" below.
 
 - **Probe.** If the token lacks routing or sending access, emit a `::notice` and do nothing.
-- **Routing must already be on for the subdomain.** The step never enables Email Routing. It checks that `mail.<BASE_DOMAIN>` has Cloudflare MX records (an operator enabled it in the dashboard) and otherwise skips with instructions.
+- **(Superseded 2026-10-22, see Notes.)** **Routing must already be on for the subdomain.** The step never enables Email Routing. It checks that `agents.<BASE_DOMAIN>` has Cloudflare MX records (an operator enabled it in the dashboard) and otherwise skips with instructions.
 - **Configure:**
   - `PATCH /email/routing` to set `support_subaddress: true` when it is off;
-  - upsert the literal rule `agent@mail.<BASE_DOMAIN>` → API Worker;
-  - onboard the sending subdomain and create its DNS records, all under `mail.<BASE_DOMAIN>`.
+  - upsert the literal rule `agent@agents.<BASE_DOMAIN>` → API Worker;
+  - onboard the sending subdomain and create its DNS records, all under `agents.<BASE_DOMAIN>`.
 - **Apex unchanged.** The apex's MX and SPF records are read before and after; any difference, including an addition, fails the deploy.
 - **Marker only when sending works.** The marker (and so the send binding) is written only when Cloudflare reports the sending subdomain enabled, read after its DNS records exist. A subdomain still verifying is `pending`: the feature stays off until a later deploy.
 - **Fail closed.** If the probe passed but configuration fails, the deploy goes red; it does not half-enable.
@@ -359,3 +359,12 @@ The reviewer's session went to sleep after posting instead of completing its tas
 - 2026-10-22: Test review (2 high, 1 medium, 1 low) and UI review (3 low) addressed in 0fd6559d9, ac7f1e0a3 and 4a00e8ca1.
 - 2026-10-22: Draft PR #2413 opened. The branch history was rewritten once to rename identifiers that gitleaks flagged as generic API keys (`KEY_ALPHABET` and test fixtures); hashes above are the current ones.
 - 2026-10-22: Raphaël confirmed the three token permissions. Astra's PR review (above) addressed in d4a0e41ac, 95ba7ad7a, 0b4fc7969, d369e70b0 and b26f33979; give-up alert asserted in 142d1463a. API suite at b26f33979: 13,170 passed, 0 failed, 2 skipped (925 files). Staging needs the one-time dashboard step for `mail.sammy.party` before the end-to-end test.
+- 2026-10-22: Raphaël: self-hosters must not need a dashboard step. Research: Cloudflare support (quoted in cloudflare/terraform-provider-cloudflare#5890) says `POST /zones/{zone}/email/routing/dns` with a subdomain `name` configures that subdomain, while no body enables the apex. The deploy step went back to making that call (a56ed3346).
+- 2026-10-22: Staging test (deploy run 39866499256 @a56ed3346), from DNS snapshots before and after:
+  - **Intended:** the call configured `mail.sammy.party`: 3 locked MX records and an SPF record. The subdomain status is `ready`.
+  - **Unintended:** it also turned Email Routing on for the whole `sammy.party` zone, which is now `misconfigured` because the apex has no MX. It added an apex SPF record (`v=spf1 include:_spf.mx.cloudflare.net ~all`) and an apex DKIM record (`cf2024-1._domainkey.sammy.party`).
+  - The apex guard caught the SPF change and failed the deploy before anything else ran, so no Worker was deployed.
+  - Cloudflare's domain-configuration docs say Email Routing records live on the root domain, and an existing SPF must be merged rather than duplicated.
+  - The agents' Cloudflare token cannot remove these records.
+- 2026-10-22: Raphaël: agent email always lives on a dedicated `agents.<BASE_DOMAIN>` subdomain. Renamed from `mail.` (shared and deploy constants, tests, docs, UI evidence).
+- Open question to Raphaël: for a main domain that has its own mail (production's Google Workspace), should the deploy merge Cloudflare's SPF entry into the existing SPF record, or leave agent email off there until an admin opts in?

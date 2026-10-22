@@ -50,7 +50,7 @@ vi.mock('../../../src/services/credential-attribution-health', () => ({
 
 const { triggersRoutes } = await import('../../../src/routes/triggers');
 
-const ADDRESS_PATTERN = /^agent\+[0-9a-hjkmnp-tv-z]{16}@mail\.fixture\.example$/;
+const ADDRESS_PATTERN = /^agent\+[0-9a-hjkmnp-tv-z]{16}@agents\.fixture\.example$/;
 
 describe('email trigger routes', () => {
   let sqlite: Database.Database;
@@ -131,7 +131,7 @@ describe('email trigger routes', () => {
     const stored = sqlite
       .prepare('SELECT address_key AS key FROM trigger_email_configs WHERE trigger_id = ?')
       .get(created.id) as { key: string };
-    expect(created.emailConfig.address).toBe(`agent+${stored.key}@mail.fixture.example`);
+    expect(created.emailConfig.address).toBe(`agent+${stored.key}@agents.fixture.example`);
 
     const listed = (await (await call('GET', '')).json()) as {
       triggers: Array<{ id: string; emailConfig?: { address: string } }>;

@@ -393,7 +393,7 @@ jobs:
       # Phase 2: Configuration
       # ========================================
       # Agent email (preview). Runs before the config sync: it configures Email Routing and
-      # Email Sending for mail.<BASE_DOMAIN> and writes .wrangler/agent-email-domain only
+      # Email Sending for agents.<BASE_DOMAIN> and writes .wrangler/agent-email-domain only
       # after verifying them, and the sync adds the AGENT_EMAIL binding only from that marker.
       - name: Configure Agent Email (preview)
         if: ${{ inputs.dry_run != true && inputs.agent_email == true }}

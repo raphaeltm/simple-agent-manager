@@ -3076,7 +3076,7 @@ export type WebhookDeliveryRow = typeof webhookDeliveries.$inferSelect;
 export type NewWebhookDeliveryRow = typeof webhookDeliveries.$inferInsert;
 
 // =============================================================================
-// Agent email triggers (prototype). Address: agent+<address_key>@mail.<BASE_DOMAIN>
+// Agent email triggers (prototype). Address: agent+<address_key>@agents.<BASE_DOMAIN>
 // =============================================================================
 export const triggerEmailConfigs = sqliteTable('trigger_email_configs', {
   triggerId: text('trigger_id')

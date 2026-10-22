@@ -35,21 +35,23 @@ describe('agent email addresses', () => {
   });
 
   it('accepts the routed address case-insensitively and nothing else', () => {
-    expect(parseAgentEmailRecipient('Agent+K3J2H7M9Q2XW4N8P@MAIL.fixture.example', BASE)).toEqual({
-      kind: 'trigger',
-      key: SAMPLE_ID,
-    });
-    expect(parseAgentEmailRecipient('agent+loopback@mail.fixture.example', BASE)).toEqual({
+    expect(parseAgentEmailRecipient('Agent+K3J2H7M9Q2XW4N8P@AGENTS.fixture.example', BASE)).toEqual(
+      {
+        kind: 'trigger',
+        key: SAMPLE_ID,
+      }
+    );
+    expect(parseAgentEmailRecipient('agent+loopback@agents.fixture.example', BASE)).toEqual({
       kind: 'loopback',
     });
     for (const rejected of [
-      'agent@mail.fixture.example', // base address, no key
-      'agent+short@mail.fixture.example',
-      'agent+k3j2h7m9q2xw4n8u@mail.fixture.example', // 'u' is not in the alphabet
-      'other+k3j2h7m9q2xw4n8p@mail.fixture.example',
+      'agent@agents.fixture.example', // base address, no key
+      'agent+short@agents.fixture.example',
+      'agent+k3j2h7m9q2xw4n8u@agents.fixture.example', // 'u' is not in the alphabet
+      'other+k3j2h7m9q2xw4n8p@agents.fixture.example',
       'agent+k3j2h7m9q2xw4n8p@fixture.example', // apex, not mail.
-      'agent+k3j2h7m9q2xw4n8p@mail.fixture.example.evil.test',
-      'agent+k3j2h7m9q2xw4n8p@mail.fixture.example@x',
+      'agent+k3j2h7m9q2xw4n8p@agents.fixture.example.evil.test',
+      'agent+k3j2h7m9q2xw4n8p@agents.fixture.example@x',
       '',
     ]) {
       expect(parseAgentEmailRecipient(rejected, BASE)).toBeNull();
@@ -63,7 +65,7 @@ describe('agent email addresses', () => {
     });
     expect(
       agentEmailConfig({ BASE_DOMAIN: 'fixture.example', AGENT_EMAIL: {} as SendEmail })
-    ).toEqual({ enabled: true, domain: 'mail.fixture.example' });
+    ).toEqual({ enabled: true, domain: 'agents.fixture.example' });
   });
 
   it('normalizes mailboxes and refuses anything that is not one', () => {
@@ -132,7 +134,7 @@ function mime(lines: string[]): string {
 }
 
 describe('inbound email parsing', () => {
-  const envelope = { from: 'Alice@Example.com', to: 'agent+k@mail.fixture.example' };
+  const envelope = { from: 'Alice@Example.com', to: 'agent+k@agents.fixture.example' };
 
   it('prefers the plain-text part of a multipart message and summarizes attachments', async () => {
     const raw = mime([

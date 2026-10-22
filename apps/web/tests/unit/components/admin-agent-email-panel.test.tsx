@@ -48,17 +48,17 @@ describe('AdminAgentEmailPanel', () => {
   it('shows the domain and "not sent yet" evidence when on but never tested', async () => {
     mocks.fetchAdminAgentEmail.mockResolvedValue({
       enabled: true,
-      domain: 'mail.example.com',
+      domain: 'agents.example.com',
       loopback: { lastSent: null, lastReceived: null },
     });
     render(<AdminAgentEmailPanel />);
     expect(await screen.findByTestId('agent-email-status')).toHaveTextContent(
-      'On — mail.example.com'
+      'On — agents.example.com'
     );
     expect(screen.getByTestId('agent-email-last-sent')).toHaveTextContent('Not sent yet');
     expect(screen.getByTestId('agent-email-last-received')).toHaveTextContent('None received yet');
     expect(
-      screen.getByPlaceholderText('agent+xxxxxxxxxxxxxxxx@mail.example.com')
+      screen.getByPlaceholderText('agent+xxxxxxxxxxxxxxxx@agents.example.com')
     ).toBeInTheDocument();
   });
 
@@ -67,20 +67,20 @@ describe('AdminAgentEmailPanel', () => {
     mocks.fetchAdminAgentEmail
       .mockResolvedValueOnce({
         enabled: true,
-        domain: 'mail.example.com',
+        domain: 'agents.example.com',
         loopback: { lastSent: null, lastReceived: null },
       })
       .mockResolvedValue({
         enabled: true,
-        domain: 'mail.example.com',
+        domain: 'agents.example.com',
         loopback: {
           lastSent: {
-            to: 'agent+abc123@mail.example.com',
+            to: 'agent+abc123@agents.example.com',
             sentAt: '2026-10-22T09:00:00Z',
             providerMessageId: 'msg-1',
           },
           lastReceived: {
-            from: 'agent+abc123@mail.example.com',
+            from: 'agent+abc123@agents.example.com',
             subject: 'Re: loopback test',
             autoSubmitted: null,
             receivedAt: '2026-10-22T09:00:30Z',
@@ -88,20 +88,20 @@ describe('AdminAgentEmailPanel', () => {
         },
       });
     mocks.sendAgentEmailLoopback.mockResolvedValue({
-      to: 'agent+abc123@mail.example.com',
+      to: 'agent+abc123@agents.example.com',
       sentAt: '2026-10-22T09:00:00Z',
       providerMessageId: 'msg-1',
     });
     render(<AdminAgentEmailPanel />);
     const input = await screen.findByLabelText('Send loopback test to');
-    await user.type(input, 'agent+abc123@mail.example.com');
+    await user.type(input, 'agent+abc123@agents.example.com');
     await user.click(screen.getByRole('button', { name: 'Send loopback test' }));
     await waitFor(() =>
-      expect(mocks.sendAgentEmailLoopback).toHaveBeenCalledWith('agent+abc123@mail.example.com')
+      expect(mocks.sendAgentEmailLoopback).toHaveBeenCalledWith('agent+abc123@agents.example.com')
     );
     expect(await screen.findByText(/Sent\./)).toBeInTheDocument();
     expect(await screen.findByTestId('agent-email-last-sent')).toHaveTextContent(
-      'agent+abc123@mail.example.com'
+      'agent+abc123@agents.example.com'
     );
     expect(screen.getByTestId('agent-email-last-received')).toHaveTextContent('Re: loopback test');
   });
@@ -109,7 +109,7 @@ describe('AdminAgentEmailPanel', () => {
   it('Refresh picks up the reply without a reload and keeps the evidence on screen meanwhile', async () => {
     const user = userEvent.setup();
     const lastSent = {
-      to: 'agent+abc123@mail.example.com',
+      to: 'agent+abc123@agents.example.com',
       sentAt: '2026-10-22T09:00:00Z',
       providerMessageId: 'msg-1',
     };
@@ -117,7 +117,7 @@ describe('AdminAgentEmailPanel', () => {
     mocks.fetchAdminAgentEmail
       .mockResolvedValueOnce({
         enabled: true,
-        domain: 'mail.example.com',
+        domain: 'agents.example.com',
         loopback: { lastSent, lastReceived: null },
       })
       .mockImplementationOnce(() => new Promise((resolve) => (releaseRefresh = resolve)));
@@ -133,7 +133,7 @@ describe('AdminAgentEmailPanel', () => {
 
     releaseRefresh({
       enabled: true,
-      domain: 'mail.example.com',
+      domain: 'agents.example.com',
       loopback: {
         lastSent,
         lastReceived: {
@@ -156,7 +156,7 @@ describe('AdminAgentEmailPanel', () => {
     const user = userEvent.setup();
     mocks.fetchAdminAgentEmail.mockResolvedValue({
       enabled: true,
-      domain: 'mail.example.com',
+      domain: 'agents.example.com',
       loopback: { lastSent: null, lastReceived: null },
     });
     mocks.sendAgentEmailLoopback.mockRejectedValue(
@@ -164,7 +164,7 @@ describe('AdminAgentEmailPanel', () => {
     );
     render(<AdminAgentEmailPanel />);
     const input = await screen.findByLabelText('Send loopback test to');
-    await user.type(input, 'not-a-trigger@mail.example.com');
+    await user.type(input, 'not-a-trigger@agents.example.com');
     await user.click(screen.getByRole('button', { name: 'Send loopback test' }));
     expect(
       await screen.findByText(

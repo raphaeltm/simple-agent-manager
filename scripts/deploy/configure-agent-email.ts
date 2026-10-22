@@ -2,14 +2,14 @@
 /**
  * Configure Cloudflare Email Routing and Email Sending for agent email triggers.
  *
- * An email trigger's address is `agent+<key>@mail.<BASE_DOMAIN>`. This deploy step
+ * An email trigger's address is `agent+<key>@agents.<BASE_DOMAIN>`. This deploy step
  * makes that address real, idempotently:
- *   1. Email Routing is on for `mail.<BASE_DOMAIN>` (turned on for that subdomain only; see
+ *   1. Email Routing is on for `agents.<BASE_DOMAIN>` (turned on for that subdomain only; see
  *      below);
  *   2. subaddressing is honored, so `agent+<key>@` matches the `agent@` rule;
- *   3. one literal rule routes `agent@mail.<BASE_DOMAIN>` to the API Worker's
+ *   3. one literal rule routes `agent@agents.<BASE_DOMAIN>` to the API Worker's
  *      `email()` handler;
- *   4. `mail.<BASE_DOMAIN>` is onboarded for Email Sending and its DNS records exist.
+ *   4. `agents.<BASE_DOMAIN>` is onboarded for Email Sending and its DNS records exist.
  *
  * It runs before sync-wrangler-config. Only when all of that holds AND Cloudflare reports
  * sending as enabled does it write `.wrangler/agent-email-domain`; sync-wrangler-config adds
@@ -30,7 +30,7 @@
  * authentication exists (idea 01KS4X886T3NRKR3696H25A2AN).
  *
  * Fail closed: missing permissions leave the feature off without writing anything. DNS
- * safety: every DNS write must target `mail.<BASE_DOMAIN>` or a name under it, and the apex's
+ * safety: every DNS write must target `agents.<BASE_DOMAIN>` or a name under it, and the apex's
  * MX and SPF records must come out exactly as they went in (no change, no addition), or the
  * deploy fails.
  */
@@ -41,7 +41,7 @@ import { Api, type CloudflareRequest, fetchRequest, isAuthFailure } from './clou
 import { DEPLOYMENT_CONFIG } from './config.js';
 
 /** Subdomain label under BASE_DOMAIN. Mirrors AGENT_EMAIL_SUBDOMAIN_LABEL in packages/shared. */
-export const AGENT_EMAIL_SUBDOMAIN_LABEL = 'mail';
+export const AGENT_EMAIL_SUBDOMAIN_LABEL = 'agents';
 /** Routed local part. Mirrors AGENT_EMAIL_LOCAL_PART in packages/shared. */
 export const AGENT_EMAIL_LOCAL_PART = 'agent';
 export const AGENT_EMAIL_RULE_NAME = 'SAM agent email';

@@ -1,7 +1,7 @@
 /**
  * Inbound agent email: the logic behind the API Worker's `email()` handler.
  *
- * Mail to `agent+<key>@mail.<BASE_DOMAIN>` starts the email trigger that owns `<key>`
+ * Mail to `agent+<key>@agents.<BASE_DOMAIN>` starts the email trigger that owns `<key>`
  * through the shared trigger admission path. Every refusal is an SMTP-time reject, so a
  * forged sender gets no backscatter. Workers cannot see SPF/DKIM/DMARC verdicts
  * (cloudflare/workerd#6740); the unguessable address plus the sender allowlist are the

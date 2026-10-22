@@ -1,6 +1,6 @@
 /**
  * Agent email addresses (prototype). Each email trigger owns a subaddress of one routed
- * address: `agent+<key>@mail.<BASE_DOMAIN>`. Cloudflare Email Routing matches the single
+ * address: `agent+<key>@agents.<BASE_DOMAIN>`. Cloudflare Email Routing matches the single
  * `agent@` rule (subaddressing on) and keeps the `+<key>` detail in the envelope recipient.
  */
 import {
@@ -52,7 +52,7 @@ export function loopbackAddress(baseDomain: string): string {
 
 /**
  * Classify an envelope recipient. Anything that is not exactly
- * `agent+<key>@mail.<BASE_DOMAIN>` or the loopback address returns null.
+ * `agent+<key>@agents.<BASE_DOMAIN>` or the loopback address returns null.
  */
 export function parseAgentEmailRecipient(
   recipient: string,

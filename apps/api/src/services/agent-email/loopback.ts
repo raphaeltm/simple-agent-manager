@@ -1,6 +1,6 @@
 /**
  * Agent email loopback self-test (superadmin diagnostic). Sends one fixed message from the
- * routed address `agent+loopback@mail.<BASE_DOMAIN>` to an existing email trigger. When the
+ * routed address `agent+loopback@agents.<BASE_DOMAIN>` to an existing email trigger. When the
  * trigger's agent replies, the reply is routed back to this Worker and recorded here, which
  * proves outbound delivery and inbound routing end to end without a personal mailbox.
  */

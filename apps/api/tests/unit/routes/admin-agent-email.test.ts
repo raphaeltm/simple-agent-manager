@@ -19,8 +19,8 @@ import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../hel
 
 const BASE_DOMAIN = 'fixture.example';
 const ADDRESS_ID = 'k3j2h7m9q2xw4n8p';
-const ADDRESS = `agent+${ADDRESS_ID}@mail.${BASE_DOMAIN}`;
-const LOOPBACK = `agent+loopback@mail.${BASE_DOMAIN}`;
+const ADDRESS = `agent+${ADDRESS_ID}@agents.${BASE_DOMAIN}`;
+const LOOPBACK = `agent+loopback@agents.${BASE_DOMAIN}`;
 
 type Role = 'superadmin' | 'admin' | 'user';
 
@@ -122,7 +122,7 @@ describe('admin agent email routes', () => {
     expect(status.status).toBe(200);
     expect(await status.json()).toEqual({
       enabled: true,
-      domain: `mail.${BASE_DOMAIN}`,
+      domain: `agents.${BASE_DOMAIN}`,
       loopback: { lastSent: null, lastReceived: null },
     });
   });
@@ -132,8 +132,8 @@ describe('admin agent email routes', () => {
     for (const [to, status] of [
       ['someone@example.com', 400],
       [LOOPBACK, 400],
-      [`agent+${ADDRESS_ID}@mail.other.example`, 400],
-      ['agent+zzzzzzzzzzzzzzzz@mail.fixture.example', 404],
+      [`agent+${ADDRESS_ID}@agents.other.example`, 400],
+      ['agent+zzzzzzzzzzzzzzzz@agents.fixture.example', 404],
     ] as const) {
       expect((await sendLoopback(app, to)).status, to).toBe(status);
     }

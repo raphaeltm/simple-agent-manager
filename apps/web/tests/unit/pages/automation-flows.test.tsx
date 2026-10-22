@@ -304,7 +304,7 @@ beforeEach(() => {
   events.listSchedules.mockResolvedValue({ schedules: [], nextCursor: null });
   events.listStandingWatches.mockResolvedValue({ watches: [], nextCursor: null });
   events.listEventSubscriptions.mockResolvedValue({ subscriptions: [], hasMore: false });
-  api.getAgentEmailConfig.mockResolvedValue({ enabled: true, domain: 'mail.example.com' });
+  api.getAgentEmailConfig.mockResolvedValue({ enabled: true, domain: 'agents.example.com' });
 });
 
 afterEach(() => {
@@ -473,7 +473,7 @@ describe('create flow', () => {
         status: 'active',
         cronExpression: null,
         emailConfig: {
-          address: 'agent+k3j2h7m9q2xw4n8p@mail.example.com',
+          address: 'agent+k3j2h7m9q2xw4n8p@agents.example.com',
           allowedSenders: ['me@example.com'],
         },
       })
@@ -485,7 +485,7 @@ describe('create flow', () => {
         status: 'active',
         cronExpression: null,
         emailConfig: {
-          address: 'agent+k3j2h7m9q2xw4n8p@mail.example.com',
+          address: 'agent+k3j2h7m9q2xw4n8p@agents.example.com',
           allowedSenders: ['me@example.com'],
         },
       })
@@ -938,7 +938,7 @@ describe('trigger page', () => {
         status: 'active',
         sourceType: 'email',
         cronExpression: null,
-        emailConfig: { address: 'agent+abc123@mail.example.com', allowedSenders: ['a@x.test'] },
+        emailConfig: { address: 'agent+abc123@agents.example.com', allowedSenders: ['a@x.test'] },
       })
     );
     renderAt('/projects/p1/automation/trigger/trg-email');
@@ -963,21 +963,21 @@ describe('trigger page', () => {
         sourceType: 'email',
         cronExpression: null,
         emailConfig: {
-          address: 'agent+k3j2h7m9q2xw4n8p@mail.example.com',
+          address: 'agent+k3j2h7m9q2xw4n8p@agents.example.com',
           allowedSenders: ['a@x.test', 'b@x.test'],
         },
       })
     );
     renderAt('/projects/p1/automation/trigger/trg-email');
     const address = await screen.findByTestId('email-trigger-address');
-    expect(address).toHaveTextContent('agent+k3j2h7m9q2xw4n8p@mail.example.com');
+    expect(address).toHaveTextContent('agent+k3j2h7m9q2xw4n8p@agents.example.com');
     // The address is the real protection while senders are unverified, so the page says so.
     expect(screen.getByText(/Anyone who has this address can email the agent/)).toBeInTheDocument();
     const senders = screen.getByTestId('email-allowed-senders');
     expect(within(senders).getByText('a@x.test')).toBeInTheDocument();
     expect(within(senders).getByText('b@x.test')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Copy email address' }));
-    expect(writeText).toHaveBeenCalledWith('agent+k3j2h7m9q2xw4n8p@mail.example.com');
+    expect(writeText).toHaveBeenCalledWith('agent+k3j2h7m9q2xw4n8p@agents.example.com');
   });
 });
 

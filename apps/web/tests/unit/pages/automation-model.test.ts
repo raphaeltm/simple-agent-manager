@@ -220,7 +220,7 @@ describe('trigger presentation', () => {
         sourceType: 'email',
         cronExpression: null,
         emailConfig: {
-          address: 'agent+k3j2h7m9q2xw4n8p@mail.example.com',
+          address: 'agent+k3j2h7m9q2xw4n8p@agents.example.com',
           allowedSenders: ['a@x.test'],
         },
       })
@@ -229,7 +229,7 @@ describe('trigger presentation', () => {
     // `default:` branch and misread as "No schedule" (rule 79 — a denylist default silently
     // reclassifies a new enum member).
     expect(item.start).toBe('email');
-    expect(item.when).toBe('When an email arrives at agent+k3j2h7m9q2xw4n8p@mail.example.com');
+    expect(item.when).toBe('When an email arrives at agent+k3j2h7m9q2xw4n8p@agents.example.com');
     expect(item.whenNote).toBeUndefined();
     expect(item.nextAt).toBeNull();
     expect(isReaction(item)).toBe(true);
@@ -244,8 +244,8 @@ describe('trigger presentation', () => {
 
   it('describes an email trigger before and after it has an address', () => {
     expect(emailTriggerWhen(null)).toBe('When someone emails this automation’s address');
-    expect(emailTriggerWhen('agent+abc@mail.example.com')).toBe(
-      'When an email arrives at agent+abc@mail.example.com'
+    expect(emailTriggerWhen('agent+abc@agents.example.com')).toBe(
+      'When an email arrives at agent+abc@agents.example.com'
     );
   });
 });

@@ -1,6 +1,6 @@
 /**
  * Superadmin agent email status and loopback self-test (preview). The loopback sends one
- * fixed message from `agent+loopback@mail.<BASE_DOMAIN>` to an existing email trigger, so an
+ * fixed message from `agent+loopback@agents.<BASE_DOMAIN>` to an existing email trigger, so an
  * operator can prove routing and sending end to end without a personal mailbox.
  */
 import { eq } from 'drizzle-orm';

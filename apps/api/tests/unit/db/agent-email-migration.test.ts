@@ -147,7 +147,7 @@ describe('0204 agent email migration', () => {
     const insertMessage = db.prepare(
       `INSERT INTO trigger_email_messages
         (id, trigger_id, project_id, direction, status, message_id, from_address, to_address)
-       VALUES (?, 'trigger-1', 'project', ?, ?, ?, 'a@example.com', 'agent+k@mail.example.com')`
+       VALUES (?, 'trigger-1', 'project', ?, ?, ?, 'a@example.com', 'agent+k@agents.example.com')`
     );
     insertMessage.run('in-1', 'inbound', 'accepted', '<m1@example.com>');
     expect(() => insertMessage.run('in-2', 'inbound', 'processing', '<m1@example.com>')).toThrow(
@@ -176,7 +176,7 @@ describe('0204 agent email migration', () => {
         (id, trigger_id, project_id, trigger_execution_id, direction, status, message_id,
          from_address, to_address, lease_expires_at)
        VALUES ('in-1', 'trigger-1', 'project', 'exec-1', 'inbound', 'accepted', '<m1@example.com>',
-               'a@example.com', 'agent+k@mail.example.com', NULL)`
+               'a@example.com', 'agent+k@agents.example.com', NULL)`
     ).run();
 
     migrate('0205_agent_email_durable_intake.sql');
@@ -212,7 +212,7 @@ describe('0204 agent email migration', () => {
           `INSERT INTO trigger_email_messages (id, trigger_id, project_id, direction, status,
              message_id, from_address, to_address)
            VALUES ('in-2', 'trigger-1', 'project', 'inbound', 'processing', '<m1@example.com>',
-                   'a@example.com', 'agent+k@mail.example.com')`
+                   'a@example.com', 'agent+k@agents.example.com')`
         )
         .run()
     ).toThrow(/UNIQUE constraint/);

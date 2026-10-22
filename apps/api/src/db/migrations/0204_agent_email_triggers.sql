@@ -1,6 +1,6 @@
 -- Agent email (prototype): email triggers, their message metadata, and 'email' task provenance.
 
--- One row per email trigger. The address is agent+<address_key>@mail.<BASE_DOMAIN>.
+-- One row per email trigger. The address is agent+<address_key>@agents.<BASE_DOMAIN>.
 CREATE TABLE trigger_email_configs (
   trigger_id TEXT PRIMARY KEY REFERENCES triggers(id) ON DELETE CASCADE,
   address_key TEXT NOT NULL UNIQUE CHECK (length(address_key) BETWEEN 8 AND 64),

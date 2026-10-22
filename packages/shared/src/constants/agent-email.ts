@@ -10,7 +10,7 @@
 // =============================================================================
 
 /** Subdomain label under BASE_DOMAIN that receives and sends agent email. */
-export const AGENT_EMAIL_SUBDOMAIN_LABEL = 'mail';
+export const AGENT_EMAIL_SUBDOMAIN_LABEL = 'agents';
 
 /** Local part of the single routed address; each trigger is a subaddress of it. */
 export const AGENT_EMAIL_LOCAL_PART = 'agent';

@@ -45,7 +45,7 @@ vi.mock('@cloudflare/containers', () => ({
 
 const BASE_DOMAIN = 'fixture.example';
 const ADDRESS_ID = 'k3j2h7m9q2xw4n8p';
-const ADDRESS = `agent+${ADDRESS_ID}@mail.${BASE_DOMAIN}`;
+const ADDRESS = `agent+${ADDRESS_ID}@agents.${BASE_DOMAIN}`;
 const TRIGGER_ID = 'trigger-email-1';
 const PROJECT_ID = 'project-1';
 const OTHER_PROJECT_ID = 'project-2';
@@ -77,7 +77,7 @@ function contractSendBinding() {
       }
       if (/[\r\n]/.test(message.subject)) throw new Error('E_VALIDATION_ERROR');
       sent.push(message);
-      return { messageId: `<cf-${sent.length}@mail.${BASE_DOMAIN}>` };
+      return { messageId: `<cf-${sent.length}@agents.${BASE_DOMAIN}>` };
     },
   } as unknown as SendEmail;
   return {
@@ -296,7 +296,7 @@ describe('agent email vertical slice', () => {
       .run(
         TRIGGER_ID,
         ADDRESS_ID,
-        JSON.stringify(['alice@example.com', `agent+loopback@mail.${BASE_DOMAIN}`])
+        JSON.stringify(['alice@example.com', `agent+loopback@agents.${BASE_DOMAIN}`])
       );
 
     mail = contractSendBinding();
@@ -407,7 +407,7 @@ describe('agent email vertical slice', () => {
       {
         status: 'sent',
         toAddress: 'alice@example.com',
-        providerMessageId: `<cf-1@mail.${BASE_DOMAIN}>`,
+        providerMessageId: `<cf-1@agents.${BASE_DOMAIN}>`,
       },
     ]);
   });
@@ -425,12 +425,12 @@ describe('agent email vertical slice', () => {
       },
       {
         name: 'an unknown address key',
-        message: () => inbound(rawEmail(), { to: `agent+zzzzzzzzzzzzzzzz@mail.${BASE_DOMAIN}` }),
+        message: () => inbound(rawEmail(), { to: `agent+zzzzzzzzzzzzzzzz@agents.${BASE_DOMAIN}` }),
         reason: /Unknown address/,
       },
       {
         name: 'another domain',
-        message: () => inbound(rawEmail(), { to: `agent+${ADDRESS_ID}@mail.elsewhere.example` }),
+        message: () => inbound(rawEmail(), { to: `agent+${ADDRESS_ID}@agents.elsewhere.example` }),
         reason: /Unknown address/,
       },
       {
@@ -715,7 +715,7 @@ describe('agent email vertical slice', () => {
       '--b--',
     ].join('\r\n');
 
-    for (const to of [ADDRESS, `agent+loopback@mail.${BASE_DOMAIN}`]) {
+    for (const to of [ADDRESS, `agent+loopback@agents.${BASE_DOMAIN}`]) {
       const delivery = inbound(raw, { to });
       const outcome = await handleInboundAgentEmail(delivery, env, { submitter });
 
@@ -735,7 +735,7 @@ describe('agent email vertical slice', () => {
   it("only lets this deployment's agent addresses write the loopback status, and bounds it", async () => {
     const outsider = inbound(rawEmail({ from: 'Mallory <mallory@example.net>' }), {
       from: 'mallory@example.net',
-      to: `agent+loopback@mail.${BASE_DOMAIN}`,
+      to: `agent+loopback@agents.${BASE_DOMAIN}`,
     });
     expect(await handleInboundAgentEmail(outsider, env, { submitter })).toMatchObject({
       kind: 'rejected',
@@ -749,7 +749,7 @@ describe('agent email vertical slice', () => {
     const fromAgent = () =>
       inbound(rawEmail({ from: `Support inbox <${ADDRESS}>`, subject: 'Re: loopback' }), {
         from: ADDRESS,
-        to: `agent+loopback@mail.${BASE_DOMAIN}`,
+        to: `agent+loopback@agents.${BASE_DOMAIN}`,
       });
     // The outsider above used one of the two slots in this hour.
     expect(await handleInboundAgentEmail(fromAgent(), env, { submitter })).toEqual({
@@ -1215,7 +1215,7 @@ describe('agent email vertical slice', () => {
         subject: 'Re: SAM agent email loopback test',
         headers: ['Auto-Submitted: auto-replied', 'In-Reply-To: <loopback-test-1@example.com>'],
       }),
-      { from: ADDRESS, to: `agent+loopback@mail.${BASE_DOMAIN}` }
+      { from: ADDRESS, to: `agent+loopback@agents.${BASE_DOMAIN}` }
     );
 
     const outcome = await handleInboundAgentEmail(delivery, env, { submitter });

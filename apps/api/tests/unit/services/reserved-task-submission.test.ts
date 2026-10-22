@@ -1328,7 +1328,7 @@ describe('agent email executions', () => {
 
   const RECEIVED = new Date('2026-09-07T00:00:00.000Z');
   const LEASE_MS = 120_000;
-  const ADDRESS = 'agent+k3j2h7m9q2xw4n8p@mail.example.com';
+  const ADDRESS = 'agent+k3j2h7m9q2xw4n8p@agents.example.com';
 
   function inboundEmail(messageId: string): InboundAgentEmail {
     return {

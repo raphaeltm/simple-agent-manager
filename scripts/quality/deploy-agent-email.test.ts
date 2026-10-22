@@ -55,7 +55,7 @@ class FakeCloudflare {
   calls: Array<{ method: HttpMethod; path: string }> = [];
 
   /** What turning routing on for subdomain `name` leaves behind (dashboard or API). */
-  enableSubdomainRouting(name = 'mail.fixture.example'): this {
+  enableSubdomainRouting(name = 'agents.fixture.example'): this {
     for (const [priority, host] of [
       [13, 'route1'],
       [86, 'route2'],
@@ -231,7 +231,7 @@ class FakeCloudflare {
     expect(rule).toEqual({
       name: expect.any(String),
       enabled: true,
-      matchers: [{ type: 'literal', field: 'to', value: expect.stringMatching(/^agent@mail\./) }],
+      matchers: [{ type: 'literal', field: 'to', value: expect.stringMatching(/^agent@agents\./) }],
       actions: [{ type: 'worker', value: [expect.any(String)] }],
     });
   }
@@ -275,7 +275,7 @@ describe('configureAgentEmail', () => {
     expect(fake.dns).toContainEqual(
       expect.objectContaining({
         type: 'MX',
-        name: 'mail.fixture.example',
+        name: 'agents.fixture.example',
         content: 'route1.mx.cloudflare.net',
       })
     );
@@ -321,18 +321,18 @@ describe('configureAgentEmail', () => {
 
     // Sending verifies once its records exist, which is after the subdomain was created as
     // unverified: only a read taken after the records were written sees it enabled.
-    expect(first).toMatchObject({ status: 'configured', domain: 'mail.fixture.example' });
+    expect(first).toMatchObject({ status: 'configured', domain: 'agents.fixture.example' });
     expect(fake.routing.support_subaddress).toBe(true);
     expect(fake.rules).toEqual([
       {
         id: 'rule-1',
         name: 'SAM agent email',
         enabled: true,
-        matchers: [{ type: 'literal', field: 'to', value: 'agent@mail.fixture.example' }],
+        matchers: [{ type: 'literal', field: 'to', value: 'agent@agents.fixture.example' }],
         actions: [{ type: 'worker', value: [WORKER] }],
       },
     ]);
-    expect(fake.sending.map((s) => s.name)).toEqual(['mail.fixture.example']);
+    expect(fake.sending.map((s) => s.name)).toEqual(['agents.fixture.example']);
     for (const record of fake.sendingDns['tag-1']!) {
       expect(fake.dns).toContainEqual(
         expect.objectContaining({ type: record.type, name: record.name })
@@ -389,7 +389,7 @@ describe('configureAgentEmail', () => {
       id: 'rule-old',
       name: 'old',
       enabled: true,
-      matchers: [{ type: 'literal', field: 'to', value: 'agent@mail.fixture.example' }],
+      matchers: [{ type: 'literal', field: 'to', value: 'agent@agents.fixture.example' }],
       actions: [{ type: 'worker', value: ['some-other-worker'] }],
     });
 
@@ -418,7 +418,7 @@ describe('configureAgentEmail', () => {
       id: 'rule-sam',
       name: 'SAM agent email',
       enabled: true,
-      matchers: [{ type: 'literal', field: 'to', value: 'agent@mail.fixture.example' }],
+      matchers: [{ type: 'literal', field: 'to', value: 'agent@agents.fixture.example' }],
       actions: [{ type: 'worker', value: ['some-other-worker'] }],
     });
 
@@ -477,12 +477,12 @@ describe('configureAgentEmail', () => {
 
   it('refuses to write a sending DNS record outside the agent email subdomain', async () => {
     const fake = new FakeCloudflare().enableSubdomainRouting();
-    fake.sending.push({ tag: 'tag-apex', name: 'mail.fixture.example' });
+    fake.sending.push({ tag: 'tag-apex', name: 'agents.fixture.example' });
     fake.sendingDns['tag-apex'] = [
       { type: 'TXT', name: '_dmarc.fixture.example', content: 'v=DMARC1; p=reject' },
     ];
 
-    await expect(run(fake)).rejects.toThrow(/outside mail\.fixture\.example/);
+    await expect(run(fake)).rejects.toThrow(/outside agents\.fixture\.example/);
     expect(fake.dns.some((r) => r.name === '_dmarc.fixture.example')).toBe(false);
   });
 
@@ -494,11 +494,11 @@ describe('configureAgentEmail', () => {
 
     expect(outcome).toMatchObject({
       status: 'pending',
-      domain: 'mail.fixture.example',
+      domain: 'agents.fixture.example',
       reason: expect.stringContaining('still verifying'),
     });
     expect(fake.rules).toHaveLength(1);
-    expect(fake.sending.map((s) => s.name)).toEqual(['mail.fixture.example']);
+    expect(fake.sending.map((s) => s.name)).toEqual(['agents.fixture.example']);
 
     // The next deploy after verification turns it on.
     fake.sendingVerifies = true;
@@ -515,16 +515,22 @@ describe('agent email marker', () => {
 
   it('records the domain only when agent email is fully configured', () => {
     dir = mkdtempSync(join(tmpdir(), 'sam-agent-email-'));
-    writeAgentEmailMarker({ status: 'configured', domain: 'mail.fixture.example', writes: 3 }, dir);
-    expect(readAgentEmailMarker(dir)).toBe('mail.fixture.example');
+    writeAgentEmailMarker(
+      { status: 'configured', domain: 'agents.fixture.example', writes: 3 },
+      dir
+    );
+    expect(readAgentEmailMarker(dir)).toBe('agents.fixture.example');
 
     writeAgentEmailMarker(
-      { status: 'pending', domain: 'mail.fixture.example', writes: 0, reason: 'verifying' },
+      { status: 'pending', domain: 'agents.fixture.example', writes: 0, reason: 'verifying' },
       dir
     );
     expect(readAgentEmailMarker(dir)).toBeNull();
 
-    writeAgentEmailMarker({ status: 'configured', domain: 'mail.fixture.example', writes: 0 }, dir);
+    writeAgentEmailMarker(
+      { status: 'configured', domain: 'agents.fixture.example', writes: 0 },
+      dir
+    );
     writeAgentEmailMarker({ status: 'skipped', reason: 'no permission' }, dir);
     expect(readAgentEmailMarker(dir)).toBeNull();
   });

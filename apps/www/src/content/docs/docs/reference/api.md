@@ -733,12 +733,12 @@ the switch is enabled again.
 ## Agent Email (preview)
 
 Agent email is off unless the deployment configured Cloudflare Email Routing and Email Sending
-for `mail.<BASE_DOMAIN>` (see [Email Triggers](/docs/guides/email-triggers/)).
+for `agents.<BASE_DOMAIN>` (see [Email Triggers](/docs/guides/email-triggers/)).
 
 ### `GET /api/config/agent-email`
 
 Public. Returns `{ "enabled": boolean, "domain": string | null }`. `domain` is the domain agent
-addresses live on, for example `mail.example.com`, and is `null` when agent email is off.
+addresses live on, for example `agents.example.com`, and is `null` when agent email is off.
 
 ### `GET /api/admin/agent-email`
 
@@ -748,10 +748,10 @@ Loopback status expires after seven days.
 
 ### `POST /api/admin/agent-email/loopback`
 
-Superadmin only. Body `{ "to": "agent+<key>@mail.<BASE_DOMAIN>" }`. Sends one fixed test email
-from `agent+loopback@mail.<BASE_DOMAIN>` to an existing email trigger and returns `202` with the
+Superadmin only. Body `{ "to": "agent+<key>@agents.<BASE_DOMAIN>" }`. Sends one fixed test email
+from `agent+loopback@agents.<BASE_DOMAIN>` to an existing email trigger and returns `202` with the
 `lastSent` record. When that trigger's agent replies, the reply is routed back and recorded as
-`lastReceived`. The trigger must list `agent+loopback@mail.<BASE_DOMAIN>` as an allowed sender.
+`lastReceived`. The trigger must list `agent+loopback@agents.<BASE_DOMAIN>` as an allowed sender.
 Returns `409` when agent email is off, `400` for an address that is not an email trigger
 address, `404` for an unknown trigger, and `429` past the `agentEmail.loopbackPerHour` limit.
 

@@ -287,7 +287,10 @@ describe('editing triggers', () => {
       sourceType: 'email',
       cronExpression: null,
       agentProfileId: 'prof-support',
-      emailConfig: { address: 'agent+abc123@mail.example.com', allowedSenders: ['a@x.test', 'b@x.test'] },
+      emailConfig: {
+        address: 'agent+abc123@agents.example.com',
+        allowedSenders: ['a@x.test', 'b@x.test'],
+      },
     });
     const state = editorStateFromTrigger(original);
     expect(state.start).toBe('email');
