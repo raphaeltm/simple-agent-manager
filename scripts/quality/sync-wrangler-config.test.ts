@@ -405,6 +405,22 @@ describe('sync wrangler config', () => {
     expect(existsSync(summaryPath)).toBe(false);
   });
 
+  it('ships the agent email send binding only when this deploy configured agent email', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const checkedIn = TOML.parse(
+      readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+    ) as WranglerToml;
+
+    const off = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null);
+    const on = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null, true);
+
+    expect(off.send_email).toBeUndefined();
+    expect(on.send_email).toEqual([{ name: 'AGENT_EMAIL' }]);
+    // Never declared at the top level, so Wrangler cannot warn about a top-level binding
+    // that a generated environment omits.
+    expect(checkedIn.send_email).toBeUndefined();
+  });
+
   it('propagates the top-level CPU limit into generated deployment environments', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 

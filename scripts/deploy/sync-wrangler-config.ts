@@ -24,6 +24,7 @@ import { resolve } from 'node:path';
 import * as TOML from '@iarna/toml';
 import * as v from 'valibot';
 
+import { readAgentEmailMarker } from './configure-agent-email.js';
 import { DEPLOYMENT_CONFIG } from './config.js';
 import {
   getDeployedWorkerMigrationTag,
@@ -54,6 +55,8 @@ const TAIL_WORKER_WRANGLER_TOML_PATH = resolve(
   '../../apps/tail-worker/wrangler.toml'
 );
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
+/** send_email binding for agent email; mirrors Env.AGENT_EMAIL in apps/api. */
+export const AGENT_EMAIL_BINDING_NAME = 'AGENT_EMAIL';
 const SETUP_TOKEN_BYTES = 24;
 const DEFAULT_SANDBOX_CONTAINER_MAX_INSTANCES = 6;
 const DEFAULT_VM_AGENT_CONTAINER_MAX_INSTANCES = 3;
@@ -1100,7 +1103,8 @@ export function generateApiWorkerEnv(
   stack: string,
   includeTailConsumers: boolean,
   artifactsBindingEnabled: boolean,
-  deployedMigrationTag: string | null
+  deployedMigrationTag: string | null,
+  agentEmailBindingEnabled = false
 ): WranglerEnvConfig {
   const staticBindings = extractStaticBindings(topLevel);
   const durableObjectMigrations = resolveDurableObjectMigrations(
@@ -1186,6 +1190,11 @@ export function generateApiWorkerEnv(
       includeArtifactsBinding,
       durableObjectMigrations
     ),
+
+    // Agent email (preview). Generated here rather than declared at the top level of
+    // wrangler.toml: it exists only after configure-agent-email.ts verified routing and
+    // sending for this deploy, and its presence is the Worker's "email is available" signal.
+    ...(agentEmailBindingEnabled ? { send_email: [{ name: AGENT_EMAIL_BINDING_NAME }] } : {}),
 
     // Tail consumers (conditional — omitted on first deploy when tail worker doesn't exist)
     ...getTailConsumers(includeTailConsumers, tailWorkerName),
@@ -1294,6 +1303,10 @@ async function main(): Promise<void> {
     artifactsNamespace
   );
 
+  // Agent email binding ships only when configure-agent-email.ts verified this deploy.
+  const agentEmailDomain = readAgentEmailMarker();
+  console.log(`  Agent email: ${agentEmailDomain ? `configured for ${agentEmailDomain}` : 'off'}`);
+
   // Generate complete env section for API worker
   if (!config.env) {
     config.env = {};
@@ -1304,7 +1317,8 @@ async function main(): Promise<void> {
     stack,
     hasTailWorker,
     artifactsBindingEnabled,
-    deployedMigrationTag
+    deployedMigrationTag,
+    agentEmailDomain !== null
   );
   saveWranglerToml(config);
   console.log(`Updated wrangler.toml [env.${envKey}]`);

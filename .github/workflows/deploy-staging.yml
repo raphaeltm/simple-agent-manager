@@ -45,6 +45,11 @@ on:
         description: 'Nonsecret prepared fixture JSON; no tokens or signatures'
         required: false
         type: string
+      agent_email:
+        description: 'Preview: configure agent email (Email Routing + Sending on mail.BASE_DOMAIN) for this staging deploy'
+        required: false
+        type: boolean
+        default: false
 
 # Only one staging deployment at a time; queue (don't cancel) concurrent requests
 concurrency:
@@ -67,6 +72,7 @@ jobs:
       environment: staging
       skip_agent: false # Required: staging VMs need the agent binary in R2
       dry_run: ${{ inputs.dry_run || false }}
+      agent_email: ${{ inputs.agent_email || false }}
     secrets: inherit
 
   # Smoke tests run after successful staging deployment.
