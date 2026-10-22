@@ -562,7 +562,7 @@ describe('a new release recovers an environment parked in error', () => {
     ['with a persistent volume (the production shape)', true],
     ['without volumes', false],
   ])(
-    'provisions a node and moves the environment to starting, %s',
+    'provisions a node and returns the environment to active, %s',
     async (_label, requiresVolumes) => {
       const f = erroredEnvironment({ requiresVolumes });
 
@@ -572,14 +572,15 @@ describe('a new release recovers an environment parked in error', () => {
       expect(harness.createVmCalls).toEqual([nodeId]);
       expect(f.nodeRow(nodeId as string)?.status).toBe('running');
       expect(f.environment()).toMatchObject({
-        status: 'starting',
+        status: 'active',
         nodeId,
+        observedStatus: null,
         observedErrorMessage: null,
       });
       // The relocation claim taken for the volume attach was released again.
       expect(f.environment().resolvedReservationJson).not.toContain('samRelocationClaim');
       expect(harness.volumeAttachments).toEqual(requiresVolumes ? [ENV_ID] : []);
-      // The node's heartbeat applies it: `starting` is what the heartbeat advertises.
+      // The node's heartbeat applies it: it advertises `active` environments.
       expect(f.releaseStatus('release-v2')).toBe('created');
       expect(f.releaseStatus('release-v1')).toBe('failed');
     }
@@ -613,7 +614,7 @@ describe('a new release recovers an environment parked in error', () => {
 });
 
 describe('a fix release for an environment that kept its node', () => {
-  // The heartbeat moves `starting` to `error` when an apply fails and keeps the node linked.
+  // A failed apply after Start (the heartbeat moves `starting` to `error`) keeps the node linked.
   // `reserveExistingNodeForRelease` re-admits the environment through this same write; the
   // pool selection it uses to find the node is covered by the pool suites.
   async function relink(status: string) {
@@ -645,23 +646,29 @@ describe('a fix release for an environment that kept its node', () => {
     return { f, linked };
   }
 
-  it('moves an error environment to starting so the heartbeat delivers the release', async () => {
+  it('returns an error environment to active so the heartbeat delivers the release', async () => {
     const { f, linked } = await relink('error');
 
     expect(linked).toBe(true);
     expect(f.environment()).toMatchObject({
-      status: 'starting',
+      status: 'active',
       nodeId: 'node-running',
+      observedStatus: null,
       observedErrorMessage: null,
       resolvedReservationJson: JSON.stringify(RESERVATION),
     });
   });
 
-  it('leaves an active environment active', async () => {
-    const { f, linked } = await relink('active');
+  it('leaves a starting environment to Start', async () => {
+    const { f, linked } = await relink('starting');
 
+    // Liveness: the reservation was written; only the status was left alone.
     expect(linked).toBe(true);
-    expect(f.environment()).toMatchObject({ status: 'active', nodeId: 'node-running' });
+    expect(f.environment()).toMatchObject({
+      status: 'starting',
+      nodeId: 'node-running',
+      resolvedReservationJson: JSON.stringify(RESERVATION),
+    });
   });
 });
 
@@ -818,19 +825,32 @@ describe('a placement blocked for a reason nothing else will resolve is shown to
 describe('recordStrandedDeploymentReleasePlacement', () => {
   const blocked = new Error('Deployment provisioning authority is no longer current');
 
-  it('marks the newest created release of an environment with no node', async () => {
-    const f = fixture({ status: 'starting' });
-    f.insertRelease('release-v1', 1, 'created');
+  it.each(['active', 'error'])(
+    'marks the newest created release of a %s environment with no node',
+    async (status) => {
+      const f = fixture({ status });
+      f.insertRelease('release-v1', 1, 'created');
 
-    await expect(
-      recordStrandedDeploymentReleasePlacement(f.env, ENV_ID, 'release-v1', blocked)
-    ).resolves.toBe(true);
-    expect(f.releaseStatus('release-v1')).toBe('failed');
-    expect(f.environment().status).toBe('error');
-  });
+      await expect(
+        recordStrandedDeploymentReleasePlacement(f.env, ENV_ID, 'release-v1', blocked)
+      ).resolves.toBe(true);
+      expect(f.releaseStatus('release-v1')).toBe('failed');
+      expect(f.environment()).toMatchObject({
+        status: 'error',
+        observedStatus: 'failed',
+        observedErrorMessage:
+          'Deployment node placement stopped before a server was created: ' +
+          'Deployment provisioning authority is no longer current. Deploy again to retry.',
+      });
+    }
+  );
 
   it.each<[string, (f: ReturnType<typeof fixture>) => void]>([
     ['a newer release exists', (f) => f.insertRelease('release-v2', 2, 'created')],
+    [
+      'a Start is in progress',
+      (f) => f.sqlite.prepare(`UPDATE deployment_environments SET status = 'starting'`).run(),
+    ],
     [
       'the environment is stopped',
       (f) => f.sqlite.prepare(`UPDATE deployment_environments SET status = 'stopped'`).run(),

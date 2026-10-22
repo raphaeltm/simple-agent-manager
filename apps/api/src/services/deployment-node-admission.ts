@@ -281,7 +281,7 @@ export async function readEnvironmentNodeId(
 
 /**
  * Atomically reserve `nodeId` for an environment. The same write moves an
- * `error` environment to `starting` so the heartbeat delivers the new release
+ * `error` environment to `active` so the heartbeat delivers the new release
  * (see deployment-environment-state.ts).
  */
 export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions): Promise<boolean> {

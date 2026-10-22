@@ -115,6 +115,15 @@ A deployment environment can be stopped to release its compute while preserving 
 
 From the user's perspective, **Stop** is the safe way to tear down compute without deleting the deployment environment. Use it when a preview app is idle but you may need its latest release, variables, secrets, domains, or volumes again. Use destructive delete controls only when the environment and its managed resources are no longer needed.
 
+## Recovering from a failed release
+
+If a release cannot be placed (for example, the cloud provider has no room for that server type in that region right now), the environment shows **error** with the reason. Either of these recovers it:
+
+- **Deploy again.** The new release places a node for the environment and moves it back to **active**, clearing the old error. The node then applies the release and reports its progress like any other deploy. If the placement fails again, the environment returns to **error** with the new reason.
+- **Stop, then Start.** Start places a node for the latest release and shows **starting** until the node reports it applied.
+
+If SAM has to abandon a placement before any server is created, for example because the deploying user lost access to the project, the release is marked **failed** and the environment shows `Deployment node placement stopped before a server was created: <reason>`. A placement replaced by a newer release, or by a Stop or delete of the environment, is left to that newer release or action instead.
+
 ## Custom domains
 
 Each public route gets a SAM-owned hostname such as

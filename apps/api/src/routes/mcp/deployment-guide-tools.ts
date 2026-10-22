@@ -140,7 +140,7 @@ After \`build_and_publish\` returns, call \`get_publish_status({ publishJobId })
 - \`failed\`, \`canceled\`, or \`unknown\` means publishing did not complete. Read the returned events and failed step before changing files or retrying.
 - While polling, pass \`sinceSeq\` from the previous response to receive only new events.
 
-This tool requires the named environment to be active, agent deployment to be enabled, and your agent profile to satisfy that environment's policy. If it errors for one of those reasons, report it to the user — do not attempt to bypass the policy.
+This tool requires the named environment to be active (or in \`error\`, waiting for this release to recover it), agent deployment to be enabled, and your agent profile to satisfy that environment's policy. If it errors for one of those reasons, report it to the user — do not attempt to bypass the policy.
 
 ### Step 5 — Verify the release
 

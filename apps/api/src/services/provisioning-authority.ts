@@ -147,14 +147,14 @@ export async function assertDirectWorkspaceProvisioningAuthority(
  * provisioning returns.
  *
  * Environment status must be one that wants a node:
- * - `active`: an ordinary release placement.
- * - `starting`: Start (`startDeploymentEnvironment` sets it first), and a
- *   release that recovers an `error` environment (`linkEnvironmentToNode`
- *   moves `error` to `starting` in the write that links this node; see
- *   deployment-environment-state.ts).
- * `error` is refused: a recovery has already left it, so `error` here means a
- * failure was recorded after the link. `stopping`, `stopped` and `deleting`
- * belong to the Stop and Delete paths and must never buy a server.
+ * - `active`: a release placement, including one that recovers an `error`
+ *   environment (`linkEnvironmentToNode` moves `error` to `active` in the
+ *   write that links this node; see deployment-environment-state.ts).
+ * - `starting`: Start, which sets it before calling `provisionDeploymentNode`.
+ * `error` is refused: admission has already moved a recovering environment
+ * out of it, so `error` here means a failure was recorded after the link.
+ * `stopping`, `stopped` and `deleting` belong to the Stop and Delete paths and
+ * must never buy a server.
  */
 export async function assertDeploymentProvisioningAuthority(
   env: Env,

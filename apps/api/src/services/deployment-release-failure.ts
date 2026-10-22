@@ -112,16 +112,16 @@ export async function markDeploymentReleasePlacementFailed(
 
 /**
  * Environment-side conditions under which nothing else will ever place the
- * release bound to the trailing `?`: the environment still wants a node, no
- * node is linked, no relocation claim is in flight, and the release is still
- * the newest one. Aliased `de`.
+ * release bound to the trailing `?`: a release still wants this environment on
+ * a node (`active`, or `error` awaiting recovery), no node is linked, no
+ * relocation claim is in flight, and the release is still the newest one.
+ * Aliased `de`.
  *
- * `starting` is included because a recovery release moves `error` to
- * `starting` in the same write that links its node
- * (deployment-environment-state.ts), and `rollbackEnvironmentNodeLink`
- * clears only `node_id` when provisioning then fails.
+ * `starting` is excluded: Start owns that state and records its own failures
+ * (`markEnvironmentStartFailed`). `stopping`, `stopped` and `deleting` belong to
+ * the Stop and Delete paths.
  */
-const STRANDED_PLACEMENT_ENVIRONMENT_SQL = `de.status IN ('active', 'starting', 'error')
+const STRANDED_PLACEMENT_ENVIRONMENT_SQL = `de.status IN ('active', 'error')
           AND de.node_id IS NULL
           AND CASE
             WHEN json_valid(de.resolved_reservation_json)

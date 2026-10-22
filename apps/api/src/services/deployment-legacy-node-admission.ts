@@ -67,10 +67,8 @@ export interface LinkEnvironmentToLegacyNodeOptions {
  *
  * The `status` flip is load-bearing, not cosmetic: the node heartbeat only
  * advertises `pendingReleases` for environments whose status is `active` or
- * `starting` (`apps/api/src/routes/node-lifecycle.ts`), and the only transition
- * back out of `error` is the `'starting'` → `'active'` move the heartbeat makes
- * when the node reports the release applied. An environment parked in `error`
- * by a placement failure would therefore never receive another release.
+ * `starting` (`apps/api/src/routes/node-lifecycle.ts`), so an environment
+ * parked in `error` by a placement failure would never receive another release.
  * `linkEnvironmentToNode` makes the same flip; both use
  * `RECOVER_ERRORED_ENVIRONMENT_SET_SQL` (deployment-environment-state.ts).
  *
