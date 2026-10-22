@@ -104,6 +104,8 @@ vi.mock('../../../src/lib/ulid', () => ({
 // Mock logger
 vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  // Trigger routes reach admin settings (email trigger limits), whose modules build loggers.
+  createModuleLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 // =============================================================================

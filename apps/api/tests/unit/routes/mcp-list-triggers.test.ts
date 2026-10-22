@@ -275,14 +275,17 @@ describe('MCP list_triggers handler', () => {
     const invalidStatus = await handleListTriggers('req-1', { status: 'running' }, tokenData, env);
     const invalidSource = await handleListTriggers(
       'req-2',
-      { sourceType: 'email' },
+      { sourceType: 'carrier-pigeon' },
       tokenData,
       env
     );
     const invalidLimit = await handleListTriggers('req-3', { limit: 0 }, tokenData, env);
+    // 'email' became a real source type; it must now pass validation.
+    const emailSource = await handleListTriggers('req-4', { sourceType: 'email' }, tokenData, env);
 
     expect(invalidStatus.error?.message).toContain('status must be');
     expect(invalidSource.error?.message).toContain('sourceType must be');
     expect(invalidLimit.error?.message).toContain('limit must be');
+    expect(emailSource.error).toBeUndefined();
   });
 });

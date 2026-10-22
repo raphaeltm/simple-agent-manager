@@ -48,6 +48,8 @@ vi.mock('../../src/services/credential-attribution-health', () => ({
 
 vi.mock('../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  // Trigger routes reach admin settings (email trigger limits), whose modules build loggers.
+  createModuleLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 import { log } from '../../src/lib/logger';
