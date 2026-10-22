@@ -46,13 +46,13 @@ UI code. The test came from PR #2389 and was last touched by the merged UI PR #2
       calls), so its wait uses the same budget and the test gets `{ timeout: 15_000 }`
 - [x] Prove the fix: the throttled and coverage repro fails on the old test and passes every time on the new one
 - [x] Prove the viewer assertion discriminating: show `Resume` to viewers temporarily, and the test must go red
-- [ ] Run the web unit suite with coverage (CI command), plus lint, typecheck and format checks (lint, typecheck and format pass; full suite running)
+- [x] Run the web unit suite with coverage (CI command), plus lint, typecheck and format checks
 
 ## Acceptance Criteria
 
 - [x] The three overview tests pass under the throttled and coverage repro across repeated runs (old code fails it)
 - [x] The viewer test fails if a viewer is shown `Resume` on the attention card
-- [ ] `pnpm --filter @simple-agent-manager/web test:coverage` passes
+- [x] `pnpm --filter @simple-agent-manager/web test:coverage` passes
 - [x] No product code, backend or PR #2406 changes
 
 ## Evidence
@@ -67,8 +67,10 @@ UI code. The test came from PR #2389 and was last touched by the merged UI PR #2
   `Unable to find … role "link" and name "Take a look"`. Source reverted.
 - **Main is affected too:** main CI run 39717873907 on `e063961fb` (PR #2406's merge) failed this
   same test, and Deploy Production 39719134099 was skipped.
-- **Checks:** changed file 27/27; ESLint and prettier pass; web `tsc` passes. `tests/` sits outside
-  web's tsconfig, so I also type-checked the test file with a temporary config: clean.
+- **Checks:** full web suite with coverage (`vitest run --coverage`, rebased on `e063961fb`): 364
+  files and 4454 tests pass, coverage thresholds met. Changed file 27/27; ESLint and prettier pass;
+  web `tsc` passes. `tests/` sits outside web's tsconfig, so I also type-checked the test file with
+  a temporary config: clean.
 
 ## References
 
