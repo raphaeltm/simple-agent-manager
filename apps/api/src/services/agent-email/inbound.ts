@@ -17,6 +17,7 @@ import { log } from '../../lib/logger';
 import {
   checkRateLimit,
   createRateLimitKey,
+  DEFAULT_WINDOW_SECONDS,
   getCurrentWindowStart,
 } from '../../middleware/rate-limit';
 import { admitAndSubmitTriggerExecution } from '../trigger-admission';
@@ -50,7 +51,6 @@ export interface InboundDeps {
   now?: () => Date;
 }
 
-const RATE_WINDOW_SECONDS = 3600;
 const BULK_PRECEDENCE = new Set(['bulk', 'list', 'junk']);
 const SYSTEM_SENDER = /^(mailer-daemon|postmaster)@/i;
 const UNREADABLE = 'This email could not be read';
@@ -60,9 +60,10 @@ function reject(message: InboundEmailMessage, reason: string): InboundOutcome {
   return { kind: 'rejected', reason };
 }
 
+/** The window is fixed at one hour: the limits are the `agentEmail.*PerHour` settings. */
 async function withinRateLimit(env: Env, scope: string, id: string, limit: number) {
-  const key = createRateLimitKey(scope, id, getCurrentWindowStart(RATE_WINDOW_SECONDS));
-  return (await checkRateLimit(env.KV, key, limit, RATE_WINDOW_SECONDS)).allowed;
+  const key = createRateLimitKey(scope, id, getCurrentWindowStart(DEFAULT_WINDOW_SECONDS));
+  return (await checkRateLimit(env.KV, key, limit, DEFAULT_WINDOW_SECONDS)).allowed;
 }
 
 /** Parse failures (size, nesting and part limits included) are permanent: reject, never retry. */
@@ -106,7 +107,9 @@ async function receiveLoopback(
   limits: AgentEmailLimits,
   now: Date
 ): Promise<InboundOutcome> {
-  if (!(await withinRateLimit(env, 'agent-email-loopback-inbound', 'all', limits.loopbackPerHour))) {
+  if (
+    !(await withinRateLimit(env, 'agent-email-loopback-inbound', 'all', limits.loopbackPerHour))
+  ) {
     return reject(message, 'Too many loopback emails; try again later');
   }
   const email = await readEmail(message, limits, { recipient: 'loopback' });

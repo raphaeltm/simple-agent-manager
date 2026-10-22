@@ -15,6 +15,7 @@ import { errors } from '../middleware/error';
 import {
   checkRateLimit,
   createRateLimitKey,
+  DEFAULT_WINDOW_SECONDS,
   getCurrentWindowStart,
 } from '../middleware/rate-limit';
 import { jsonValidator } from '../schemas';
@@ -26,8 +27,6 @@ import {
 import { readLoopbackStatus, sendLoopbackTest } from '../services/agent-email/loopback';
 import { agentEmailSenderFor } from '../services/agent-email/provider';
 import { getAgentEmailLimits } from '../services/agent-email/settings';
-
-const LOOPBACK_WINDOW_SECONDS = 3600;
 
 const LoopbackSchema = v.object({
   to: v.pipe(v.string(), v.trim(), v.toLowerCase(), v.maxLength(254)),
@@ -58,16 +57,17 @@ adminAgentEmailRoutes.post('/loopback', jsonValidator(LoopbackSchema), async (c)
     .get();
   if (!trigger) throw errors.notFound('Email trigger');
 
+  // One-hour window, matching the agentEmail.loopbackPerHour setting.
   const { loopbackPerHour } = await getAgentEmailLimits(c.env);
   const rate = await checkRateLimit(
     c.env.KV,
     createRateLimitKey(
       'agent-email-loopback',
       getAuth(c).user.id,
-      getCurrentWindowStart(LOOPBACK_WINDOW_SECONDS)
+      getCurrentWindowStart(DEFAULT_WINDOW_SECONDS)
     ),
     loopbackPerHour,
-    LOOPBACK_WINDOW_SECONDS
+    DEFAULT_WINDOW_SECONDS
   );
   if (!rate.allowed) throw errors.tooManyRequests('Loopback test limit reached; try again later');
 
