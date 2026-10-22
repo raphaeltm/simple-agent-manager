@@ -295,6 +295,14 @@ The MCP `create_trigger` tool creates cron, GitHub, and webhook triggers in the 
 
 With `confine=workdir`, the VM agent's list, raw, download, git file and git diff endpoints accept only relative paths, resolve symlinks inside the workspace, refuse anything outside the working tree or in any `.git` directory (`404`, `..` included, although the control plane already rejects `.`/`..` segments with `400`), and answer `X-SAM-Path-Confinement: workdir` (`packages/vm-agent/internal/server/file_confinement.go`). The control plane sends it for a grantee's reads through `/api/projects/:projectId/sessions/:sessionId/files/*` and `/git/*`, and returns `409` when an older agent does not confirm it. Session file upload stays owner-only.
 
+## Agent Model Calls
+
+- `GET /api/agent-models/catalog` — Cloudflare-hosted Workers AI model catalog (any signed-in user); cached per `aiModels.catalogCacheSeconds`
+- `GET /api/projects/:projectId/agent-models` — Project's model selection, monthly budget, and this month's usage (active members)
+- `PUT /api/projects/:projectId/agent-models` — Change the project's model selection (`models`) or monthly budget (`monthlyBudgetUsd`); `null` resets either to the default (requires `project:update`: owners and admins)
+
+MCP tools `list_ai_models` / `run_ai_model` (`routes/mcp/agent-model-tools.ts`, services in `services/agent-models/`) let a running agent call Cloudflare-hosted Workers AI models besides its own chat model. Access resolves skill → profile → project → SAM defaults (the most specific non-null selection wins; `[]` turns calls off, `null` inherits — `agent_models_json` on `skills`, `agent_profiles`, and `projects`). Each call reserves its estimated cost atomically before running and settles after, against a per-project, per-UTC-month budget (`agent_model_monthly_usage`, `agent_model_usage_by_model`); a call that times out after the model ran is charged its reservation. Websocket-only models and `stream: true` are refused. Files pass through the workspace only: `{"$file": path}` in an input, `{"$savedFile": {path, contentType, sizeBytes}}` under `.ai-outputs/` (or `outputDirectory`) in an output. Twelve `aiModels.*` admin settings gate and bound the feature (Admin → Settings → AI models). The MCP profile and skill tools do not accept `agentModels`, so agents cannot change their own access. Public guide: `apps/www/src/content/docs/docs/guides/ai-models-for-agents.md`.
+
 ## Voice Transcription
 
 - `POST /api/transcribe` — Transcribe audio via Workers AI (Whisper). Rate-limited per user (`RATE_LIMIT_TRANSCRIBE`, default 30 per `RATE_LIMIT_TRANSCRIBE_WINDOW_SECONDS` = 60)
