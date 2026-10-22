@@ -216,29 +216,29 @@ It is idempotent, runs after the API Worker deploy, and is unit-tested with a mo
 
 ## Implementation checklist
 
-- [ ] Shared: add `'email'` to the source and provenance enums; add `EmailTriggerConfig`, `EmailTriggerConfigInput`, `EmailTemplateContext`, `CreateTriggerRequest.emailConfig`, `TriggerResponse.emailConfig`, and constants (address local part, key length, default limits)
-- [ ] Migration 0204: `trigger_email_configs` and `trigger_email_messages`, plus the checkpoint CHECK widening (0202 pattern); Drizzle schema; `pnpm quality:migration-safety`
-- [ ] Valibot: `sourceType` gets `email`; add `EmailConfigSchema` (allowed senders as lower-cased emails, 1–20)
-- [ ] `trigger-create.ts`: email validation and persistence (key generation; default allowed senders = creator email); 409 when email is unavailable
-- [ ] CRUD: attach `emailConfig` (address, allowed senders) in `enrichTrigger`; PATCH can update allowed senders
-- [ ] Inbound: `services/agent-email/inbound.ts` (parse, guards, lookup, allowlist, per-trigger rate limit, Message-ID dedup/lease, explicit admission outcomes) and the `email` export in `index.ts`
-- [ ] Context and template: `buildEmailContext` (`email.from/to/subject/text/receivedAt/messageId/attachments`); default prompt template; preview sample; Run now 409
-- [ ] Provider: `AgentEmailSender` plus the Cloudflare implementation; `Env.AGENT_EMAIL?: SendEmail`
-- [ ] MCP `reply_to_email`: definition, handler, dispatch, gate, pinned recipient, headers, atomic cap, audit row
-- [ ] Admin settings: `agentEmail.*` entries (max inbound bytes, max body chars, max reply chars, max replies per run, inbound per trigger per hour)
-- [ ] `GET /api/config/agent-email`; admin status + fixed loopback test (superadmin route + UI card; loopback receipt recorded in KV)
-- [ ] Deploy: `configure-agent-email.ts` (+ test) runs BEFORE `sync-wrangler-config.ts` and writes a marker; `sync-wrangler-config.ts` generates the `AGENT_EMAIL` send_email binding only from the marker (+ test); `agent_email` staging-only dispatch input on `deploy-staging.yml` → `deploy-reusable.yml`
+- [x] Shared: add `'email'` to the source and provenance enums; add `EmailTriggerConfig`, `EmailTriggerConfigInput`, `EmailTemplateContext`, `CreateTriggerRequest.emailConfig`, `TriggerResponse.emailConfig`, and constants (address local part, key length, default limits)
+- [x] Migration 0204: `trigger_email_configs` and `trigger_email_messages`, plus the checkpoint CHECK widening (0202 pattern); Drizzle schema; `pnpm quality:migration-safety`
+- [x] Valibot: `sourceType` gets `email`; add `EmailConfigSchema` (allowed senders as lower-cased emails, 1–20)
+- [x] `trigger-create.ts`: email validation and persistence (key generation; default allowed senders = creator email); 409 when email is unavailable
+- [x] CRUD: attach `emailConfig` (address, allowed senders) in `enrichTrigger`; PATCH can update allowed senders
+- [x] Inbound: `services/agent-email/inbound.ts` (parse, guards, lookup, allowlist, per-trigger rate limit, Message-ID dedup/lease, explicit admission outcomes) and the `email` export in `index.ts`
+- [x] Context and template: `buildEmailContext` (`email.from/to/subject/text/receivedAt/messageId/attachments`); default prompt template; preview sample; Run now 409
+- [x] Provider: `AgentEmailSender` plus the Cloudflare implementation; `Env.AGENT_EMAIL?: SendEmail`
+- [x] MCP `reply_to_email`: definition, handler, dispatch, gate, pinned recipient, headers, atomic cap, audit row
+- [x] Admin settings: `agentEmail.*` entries (max inbound bytes, max body chars, max reply chars, max replies per run, inbound per trigger per hour)
+- [ ] `GET /api/config/agent-email`; admin status + fixed loopback test (superadmin route + UI card; loopback receipt recorded in KV) — API done (routes + KV receipt); UI card with the UI work
+- [x] Deploy: `configure-agent-email.ts` (+ test) runs BEFORE `sync-wrangler-config.ts` and writes a marker; `sync-wrangler-config.ts` generates the `AGENT_EMAIL` send_email binding only from the marker (+ test); `agent_email` staging-only dispatch input on `deploy-staging.yml` → `deploy-reusable.yml`
 - [ ] Web: Email start kind across `automation-routes`/`model`/`ui`/`state`/`requests`/`steps-start-when`; allowed-senders field; address display with copy button; variable hints; hidden when email is unavailable
-- [ ] Docs: `apps/www` automation guide (email triggers); `self-hosting.mdx` optional email permissions; API reference
+- [x] Docs: `apps/www` automation guide (email triggers); `self-hosting.mdx` optional email permissions; API reference
 - [ ] Tests (detailed under Acceptance criteria) and a Playwright visual audit of the editor and trigger detail at 375 and 1280 px
 
 ## Acceptance criteria
 
-- [ ] An email to an email trigger's address from an allowed sender starts exactly one task. The rendered prompt contains the sender, subject and body. Covered by a vertical-slice test through `handleInboundEmail` with real SQLite D1 and the real admission code, plus staging.
-- [ ] Mail from a sender not on the list, to an unknown or deleted key, auto-generated, list mail, or oversized mail is rejected, and no task is created. Each case is tested, and each test also asserts that the allowed path still works.
-- [ ] `reply_to_email` sends exactly one recipient (the original `From`) from the trigger address, with `In-Reply-To`/`References`/`Auto-Submitted`. It refuses non-email tasks, tasks from another project and deleted triggers. It enforces the per-run cap atomically. Tested against real SQLite, with a fake send binding that enforces the Cloudflare contract.
+- [x] An email to an email trigger's address from an allowed sender starts exactly one task. The rendered prompt contains the sender, subject and body. Covered by a vertical-slice test through `handleInboundEmail` with real SQLite D1 and the real admission code, plus staging.
+- [x] Mail from a sender not on the list, to an unknown or deleted key, auto-generated, list mail, or oversized mail is rejected, and no task is created. Each case is tested, and each test also asserts that the allowed path still works.
+- [x] `reply_to_email` sends exactly one recipient (the original `From`) from the trigger address, with `In-Reply-To`/`References`/`Auto-Submitted`. It refuses non-email tasks, tasks from another project and deleted triggers. It enforces the per-run cap atomically. Tested against real SQLite, with a fake send binding that enforces the Cloudflare contract.
 - [ ] With no binding, or a token that lacks permissions, the deploy leaves email off, and the UI hides the Email option.
-- [ ] With the permissions, the deploy configures routing, subaddressing, the rule and the sending subdomain, and never touches apex MX. Tested with a mocked CF API, including the Google-MX apex case.
+- [x] With the permissions, the deploy configures routing, subaddressing, the rule and the sending subdomain, and never changes existing apex MX/SPF records (Cloudflare-only additions to an empty apex are reported). Tested with a mocked CF API, including the Google-MX apex case.
 - [ ] Staging, end to end:
   1. Create an email trigger in the UI.
   2. Send a test email to it.
@@ -293,3 +293,7 @@ It is idempotent, runs after the API Worker deploy, and is unit-tested with a mo
 ## Notes / log
 
 - 2026-10-22: Research complete. Astra plan review: approve-with-changes (above). Building with those changes.
+- 2026-10-22: API, deploy and docs built and pushed (commits f9e216aef, 7e3101c13, ebcc390fb, 99f8d5081, 4bbddc244).
+- 2026-10-22: Security review (0 critical, 1 high, 2 medium, 2 low) fixed in 877c06929 and f8806b0da: delivery lease and takeover that never starts an email twice; a submitted email whose bookkeeping fails reports success; unparseable mail rejected; loopback sender check and rate limit; linear-time HTML to text (the regex version went quadratic on hostile markup, and bounding its input dropped the text of mail with long styles); DMARC advice in the docs.
+- 2026-10-22: Cloudflare review (1 high, 3 medium, 2 low) fixed in f8806b0da: apex guard covers MX and SPF, fails on any change to existing records or a non-Cloudflare addition, reports Cloudflare additions; reports a still-verifying sending subdomain; `addresses` comment; docs. Open: confirm the Email Sending permission's scope in the token picker, and what Cloudflare does after a thrown `email()` handler (verify on staging, then update the comment in `inbound.ts`).
+- 2026-10-22: Staging blocked on the deploy token's email permissions (run 39823114470 logged Zone Settings 403). Asked Raphaël to add them; waiting.
