@@ -68,41 +68,51 @@ Raphaël: "Fix it and ship it."
 
 ## Implementation checklist
 
-- [ ] `linkEnvironmentToNode`: in the same atomic write that links the node, move `error` →
-      `starting` and clear the stale `observed_error_message`/`observed_status`, mirroring
-      `linkEnvironmentToLegacyNode`. Leave every other status untouched.
-- [ ] `assertDeploymentProvisioningAuthority`: accept `de.status IN ('active', 'starting')`.
-      Keep `error`, `stopping`, `stopped`, `deleting` refused, with a comment naming the writers.
-- [ ] Stranded-placement reconciliation: when a fresh-node placement is cancelled
-      (`observeProvisioningResult`, `provisionNodeForRelease`), record a visible failure only when
-      nothing else explains the cancellation: the release is still the newest and still `created`,
-      the environment is `active`/`starting`/`error`, no node is linked, and no relocation claim is
-      in progress. One fenced write per table; superseded/stopped/relinked cases write nothing.
-- [ ] Real-SQL tests (`createAllSchemaTables` + `createSqliteD1WithBindLimit`):
-  - [ ] Incident: `error` environment + new release through `placeReleaseOnDeploymentNode`
-        → environment `starting`, linked, provisioning passes the real authority SQL
-        (red before the fix).
-  - [ ] Start path: `stopped` and `error` environments through the real Start route reach the
-        provider (red before the fix).
-  - [ ] Failed apply keeps its node: a fix release relinks and flips `error` → `starting`.
-  - [ ] Authority accepts `active`/`starting`; refuses `error`/`stopping`/`stopped`/`deleting`.
-  - [ ] Link leaves `active`/`starting` unchanged, flips only `error`.
-  - [ ] Blocked placement: unexplained authority loss → release `failed`, environment `error` with
-        a readable message. Controls: superseded release, stopped environment, relinked
-        environment → no write. Liveness assertion beside each absence assertion.
-- [ ] Update the source-contract assertion in `provisioning-authority.test.ts`.
-- [ ] Docs: `apps/www/src/content/docs/docs/guides/app-deployments.md` recovery paragraph;
-      align `get_deployment_guide` wording if needed.
-- [ ] File SAM idea for orphaned pre-`createVM` placeholder node rows.
+- [x] `linkEnvironmentToNode`: in the same atomic write that links the node, move `error` →
+      `active` and clear the stale `observed_status`/`observed_error_message`. Shared with
+      `linkEnvironmentToLegacyNode` via `RECOVER_ERRORED_ENVIRONMENT_SET_SQL`
+      (`deployment-environment-state.ts`). Every other status is left as it is.
+      Design note: first cut moved `error` → `starting` (the legacy-adoption precedent). Changed to
+      `active`: while `starting` lasts, Stop is refused (409) and agent deployment tools cannot see
+      the environment, so a recovery that never finished would strand it. `active` is the status
+      every release rolls out under; a failed apply then shows through the observed fields, exactly
+      like a failed release on a healthy environment.
+- [x] `assertDeploymentProvisioningAuthority`: accept `de.status IN ('active', 'starting')`
+      (`starting` for Start). `error`, `stopping`, `stopped`, `deleting` refused; comment names why.
+- [x] Stranded-placement reconciliation (`recordStrandedDeploymentReleasePlacement`): when a
+      fresh-node placement is cancelled (`observeProvisioningResult`, `provisionNodeForRelease`),
+      mark the release failed and the environment `error` with the reason only when nothing else
+      explains it: the release is still the newest and still `created`, the environment is
+      `active`/`error` (not Start-owned `starting`), no node is linked, no relocation claim.
+- [x] Real-SQL tests (`tests/unit/services/deployment-error-recovery.test.ts`, SQLite built from
+      the shipped migrations):
+  - [x] Incident replay, with and without a volume: release → environment `active`, node
+        provisioned through the real authority SQL (red before the fix).
+  - [x] Recovery hitting capacity again returns to `error` with the new reason.
+  - [x] Start from `stopped` and `error` reaches the provider (red before the fix).
+  - [x] Failed apply keeps its node: the relink returns `error` to `active`; `starting` left alone.
+  - [x] Authority admits `active`/`starting`, refuses `error`/`stopping`/`stopped`/`deleting`.
+  - [x] Stopped/deleting environments never buy a server (with liveness assertions).
+  - [x] Blocked placement → release `failed`, environment `error` with readable message;
+        controls for superseded, stopping, Start in progress, stopped, deleting, node linked,
+        relocation claim, release already moved on.
+  - [x] Each fix and each predicate conjunct verified discriminating by reverting it.
+- [x] Update the source-contract assertion in `provisioning-authority.test.ts`; legacy adoption
+      tests expect `active`.
+- [x] Docs: `app-deployments.md` "Recovering from a failed release"; `get_deployment_guide` text
+      notes `error` environments accept `build_and_publish`.
+- [x] SAM idea `01M5HGYYRBCJGWBKQK8HZEXA8F` for out-of-scope follow-ups (orphan placeholder
+      nodes, deployment offering fallback, stale `created` releases, placement file size).
 
 ## Acceptance criteria
 
-- [ ] A new release for an `error` environment with no node provisions a node and leaves the
-      environment `starting` (then `active` when the heartbeat reports it applied).
-- [ ] A new release for an `error` environment that still has its node is advertised again.
-- [ ] Start from `stopped` or `error` provisions a fresh node instead of failing the authority check.
-- [ ] Stopped, stopping and deleting environments still never reach the provider.
-- [ ] A placement blocked for an unexplained reason marks the release `failed` and shows the reason
+- [x] A new release for an `error` environment with no node provisions a node and leaves the
+      environment `active` (test: incident replay).
+- [x] A new release for an `error` environment that still has its node is advertised again
+      (test: relink).
+- [x] Start from `stopped` or `error` provisions a fresh node instead of failing the authority check.
+- [x] Stopped, stopping and deleting environments still never reach the provider.
+- [x] A placement blocked for an unexplained reason marks the release `failed` and shows the reason
       on the environment; superseded or stopped placements still write nothing.
 - [ ] Staging: an environment forced into `error` recovers through a new release end to end.
 
