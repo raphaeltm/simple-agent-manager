@@ -85,18 +85,32 @@ export function setsHaveSameMembers(a: ReadonlySet<string>, b: ReadonlySet<strin
   return true;
 }
 
+function pluralModelCount(count: number): string {
+  return `${count} model${count === 1 ? '' : 's'}`;
+}
+
 /**
- * "7 models: Decision 3 · Extraction 1 · Classification 3" / "1 model: Decision 1"
- * / "No models" — summarizes a selection by category (in
+ * "7 models (Decision 3 · Extraction 1 · Classification 3)" / "1 model
+ * (Decision 1)" / "No models" — summarizes a selection by category (in
  * `AGENT_MODEL_CATEGORIES` display order) rather than by the first few names
  * in array order, which skewed toward whichever models happened to sort
- * first rather than anything meaningful to the person reading it.
+ * first rather than anything meaningful to the person reading it. The
+ * breakdown is parenthetical (not colon-joined) so callers can prefix it with
+ * their own "label: " without producing a double colon, e.g. "The project's
+ * choice: 7 models (...)".
+ *
+ * Above {@link MAX_SUMMARY_CATEGORIES} distinct categories, the breakdown
+ * truncates to the first 3 plus a trailing "+N more" — joined by a single
+ * space, not " · ", e.g. "Decision 3 · Extraction 1 · Text generation 5 +2
+ * more" — "+N more" is a summary of the omitted categories, not another
+ * category entry.
  *
  * Ids that no longer resolve in the catalog (stale/retired) are excluded
  * from both the count and the breakdown — a category summary should only
  * describe models that will actually run. Callers that also want to disclose
  * a stale count (the picker footer, which already shows a dedicated "No
- * longer available" section) append that separately.
+ * longer available" section) append that separately, and only once the
+ * catalog has actually loaded — see {@link summarizeRawSelectionCount}.
  */
 export function summarizeModelsByCategory(
   ids: readonly string[],
@@ -118,8 +132,22 @@ export function summarizeModelsByCategory(
   const parts = shown.map(
     (category) => `${AGENT_MODEL_CATEGORY_LABELS[category]} ${counts.get(category)}`
   );
-  if (truncate) parts.push(`+${ordered.length - 3} more`);
+  let breakdown = parts.join(' · ');
+  if (truncate) breakdown += ` +${ordered.length - 3} more`;
 
-  const countLabel = `${resolvedCount} model${resolvedCount === 1 ? '' : 's'}`;
-  return `${countLabel}: ${parts.join(' · ')}`;
+  return `${pluralModelCount(resolvedCount)} (${breakdown})`;
+}
+
+/**
+ * A bare "N models" count, with no category breakdown — for the one place a
+ * selection must be summarized BEFORE the catalog has loaded (the picker
+ * footer while `catalogQuery` is loading or errored). Without a loaded
+ * catalog, every id's category — and even whether it's stale — is unknown,
+ * so `summarizeModelsByCategory` would (wrongly) report every selected id as
+ * "no longer available". This reports only what's actually knowable: how
+ * many ids are in the draft.
+ */
+export function summarizeRawSelectionCount(ids: readonly string[]): string {
+  if (ids.length === 0) return 'No models';
+  return pluralModelCount(ids.length);
 }

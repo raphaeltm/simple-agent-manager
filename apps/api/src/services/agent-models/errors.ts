@@ -5,6 +5,7 @@
 export type AgentModelCallErrorCode =
   | 'disabled'
   | 'unknown_model'
+  | 'unsupported_model'
   | 'not_enabled'
   | 'budget_exhausted'
   | 'invalid_input'

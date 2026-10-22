@@ -40,6 +40,8 @@ export function agentModelCatalogQueryOptions(queryScope: string) {
     queryKey: agentModelQueryKeys.catalog(queryScope),
     queryFn: getAgentModelCatalog,
     staleTime: AGENT_MODEL_CATALOG_STALE_TIME_MS,
+    // Keep the cached catalog for as long as it is fresh, even with no picker mounted.
+    gcTime: AGENT_MODEL_CATALOG_STALE_TIME_MS,
   });
 }
 

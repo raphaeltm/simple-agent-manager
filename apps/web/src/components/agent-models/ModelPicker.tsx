@@ -13,6 +13,7 @@ import {
   indexCatalog,
   setsHaveSameMembers,
   summarizeModelsByCategory,
+  summarizeRawSelectionCount,
   toggleSetMember,
 } from './model-picker-utils';
 import { ModelPickerCategorySection } from './ModelPickerCategorySection';
@@ -127,17 +128,27 @@ export function ModelPicker({
     () => new Set(catalogQuery.data?.defaultCategories ?? []),
     [catalogQuery.data]
   );
-  const staleIds = useMemo(() => findStaleModelIds([...draft], catalogById), [draft, catalogById]);
+  // Whether we actually have a catalog to resolve ids against — NOT the same
+  // as "not loading": a failed fetch also leaves `catalogQuery.data`
+  // undefined. Without a loaded catalog, every id in `draft` is
+  // indistinguishable from "stale" (none resolve against an empty map), so
+  // staleness and the category breakdown must not be computed from it — see
+  // `summarizeRawSelectionCount`.
+  const catalogLoaded = Boolean(catalogQuery.data);
+  const staleIds = useMemo(
+    () => (catalogLoaded ? findStaleModelIds([...draft], catalogById) : []),
+    [draft, catalogById, catalogLoaded]
+  );
   const groups = useMemo(
     () => groupModelsByCategory(models, draft, query, onlyOn),
     [models, draft, query, onlyOn]
   );
   const renderableGroups = groups.filter((group) => group.visibleModels.length > 0);
-  const footerSummary = summarizeModelsByCategory([...draft], catalogById);
-  const footerText =
-    staleIds.length > 0
-      ? `${footerSummary} · ${staleIds.length} no longer available`
-      : footerSummary;
+  const footerText = catalogLoaded
+    ? staleIds.length > 0
+      ? `${summarizeModelsByCategory([...draft], catalogById)} · ${staleIds.length} no longer available`
+      : summarizeModelsByCategory([...draft], catalogById)
+    : summarizeRawSelectionCount([...draft]);
 
   // Stable across renders (`.claude/rules/64` siblings): `ModelPickerRow` and
   // `ModelPickerCategorySection` are memoized, so passing a fresh closure

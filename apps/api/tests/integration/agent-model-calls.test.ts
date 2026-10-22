@@ -92,6 +92,12 @@ const CATALOG_ROWS = [
     properties: [{ property_id: 'price', value: [price('per audio minute', 0.000513)] }],
   },
   {
+    name: '@cf/deepgram/flux',
+    description: 'Realtime speech recognition over a websocket.',
+    task: { name: 'Automatic Speech Recognition' },
+    properties: [{ property_id: 'price', value: [price('per audio minute (websocket)', 0.0077)] }],
+  },
+  {
     name: FLUX,
     description: 'Image generation.',
     task: { name: 'Text-to-Image' },
@@ -216,7 +222,7 @@ describe('agent model calls through the MCP route', () => {
       DISTILBERT,
     ]);
     expect(result.chosenBy).toContain('recommended');
-    expect(result.otherModelsNotEnabled).toBe(3);
+    expect(result.otherModelsNotEnabled).toBe(4);
     expect(result.budget).toMatchObject({ limitUsd: 5, remainingUsd: 5 });
   });
 
@@ -449,6 +455,32 @@ describe('agent model calls through the MCP route', () => {
 
     expect(response.error?.message).toContain('VM agent upload failed');
     expect(usageRow()).toEqual({ reserved: 0, spent: 10_000, calls: 1 });
+  });
+
+  it('refuses an absolute or escaping outputDirectory before any call', async () => {
+    for (const outputDirectory of ['/etc/cron.d', '../outside']) {
+      const response = await callMcpTool(app, env, TOKEN, 'run_ai_model', {
+        model: CLEF_FLASH,
+        input: { state: 'x', questions: {} },
+        outputDirectory,
+      });
+      expect(response.error?.message).toContain('outputDirectory');
+    }
+    expect(aiRun).not.toHaveBeenCalled();
+    expect(usageRow()).toBeUndefined();
+  });
+
+  it('refuses a websocket-only model before holding any budget', async () => {
+    await updateProjectAgentModelSettings(env, db(), PROJECT, { models: ['@cf/deepgram/flux'] });
+
+    const response = await callMcpTool(app, env, TOKEN, 'run_ai_model', {
+      model: '@cf/deepgram/flux',
+      input: { audio: 'AAAA' },
+    });
+
+    expect(response.error?.message).toContain('realtime (websocket)');
+    expect(aiRun).not.toHaveBeenCalled();
+    expect(usageRow()).toBeUndefined();
   });
 
   it('honours the administrator kill switch', async () => {

@@ -102,8 +102,9 @@ selection UIs.
    `agent_model_usage_by_model`. Each call does an atomic conditional reserve (`UPDATE … WHERE spent +
    reserved + ? <= limit`), the call, then a settle with a cost computed from catalog prices and the
    reported usage. Unpriced models are charged a configurable per-call estimate.
-5. **Calls** go through the existing AI Gateway (policy 7b6f6fa8) via REST so tests can mock fetch.
-   Calls carry `cf-aig-metadata` and have a configurable timeout.
+5. **Calls** go through the existing AI Gateway (policy 7b6f6fa8) via the Workers AI binding
+   (`env.AI.run(model, input, {returnRawResponse, gateway})`). Calls carry gateway metadata and have a
+   configurable timeout. Tests stub the binding.
 6. **Binary I/O.** `{"$file": "<workspace path>"}` placeholders in input are read from the workspace
    (reusing the library-tools transfer helpers). Binary outputs and oversized JSON are written into
    the workspace (default dir `.ai-outputs/`) and returned by path.
@@ -114,42 +115,42 @@ selection UIs.
 ## Implementation checklist
 
 ### Refactors (separate commits, rule 18)
-- [ ] Split `routes/mcp/index.ts` dispatch (move simple one-line tool cases into handler maps) so the file is < 500 lines
-- [ ] Extract workspace file-transfer helpers from `routes/mcp/library-tools.ts` into a shared module (library tools import them)
-- [ ] Move `ProjectSettingsAgents` out of `ProjectSettings.tsx`
-- [ ] Split `ProfileFormDialog.tsx` (extract accordion `Section` + a section) before adding a field
+- [x] Split `routes/mcp/index.ts` dispatch (move simple one-line tool cases into handler maps) so the file is < 500 lines
+- [x] Extract workspace file-transfer helpers from `routes/mcp/library-tools.ts` into a shared module (library tools import them)
+- [x] Move `ProjectSettingsAgents` out of `ProjectSettings.tsx`
+- [x] Split `ProfileFormDialog.tsx` (extract accordion `Section` + a section) before adding a field
 
 ### Shared (`packages/shared`)
-- [ ] `types/agent-models.ts`: categories, catalog entry, settings/usage responses, update request
-- [ ] Add `agentModels: string[] | null` to AgentProfile/AgentSkill + create/update request types
-- [ ] Constants: defaults, id pattern, category mapping helpers, limits defaults
-- [ ] Pure helpers (catalog normalization, price parsing, cost estimation, resolution) with unit tests
+- [x] `types/agent-models.ts`: categories, catalog entry, settings/usage responses, update request
+- [x] Add `agentModels: string[] | null` to AgentProfile/AgentSkill + create/update request types
+- [x] Constants: defaults, id pattern, category mapping helpers, limits defaults
+- [x] Pure helpers (catalog normalization, price parsing, cost estimation, resolution) with unit tests
 
 ### API (`apps/api`)
-- [ ] Migration 0204: columns + usage tables; Drizzle schema
-- [ ] Admin settings: `aiModels.*` (enabled, defaultCategories, default/max monthly budget, call timeout, max input bytes, max inline output bytes, unpriced call estimate, reservation output tokens, catalog cache TTL); new category in API + web lists; bump registry-length test; docs table
-- [ ] Catalog service: list (binding `env.AI.models()` with REST fallback) + normalize + KV/isolate cache; schema fetch (REST, cached), graceful when unavailable
-- [ ] Access resolver (skill → profile → project → defaults) via `resolveWorkspaceRuntimeAssetContext`
-- [ ] Budget service: reserve (atomic conditional UPDATE), settle, release; usage read
-- [ ] Model runner: gateway REST call, timeout, response parsing (JSON / binary), `$file` input resolution, output saving, cost settlement
-- [ ] MCP tools `list_ai_models`, `run_ai_model` (definitions, handlers, dispatch, onboarding guide line, mcp.test name list)
-- [ ] REST: `GET /api/agent-models/catalog`, `GET/PUT /api/projects/:id/agent-models` (owner/admin write)
-- [ ] Profile/skill create/update/read carry `agentModels` (Valibot validated, unknown ids rejected)
-- [ ] Tests: resolution cascade (absent/present per layer, real create paths), budget race (sqlite-d1), cost estimation per unit, catalog normalization fixture, MCP vertical slice (enabled/disabled/budget exhausted/happy path/$file/binary output), route auth (owner/admin vs maintainer/viewer vs non-member)
+- [x] Migration 0204: columns + usage tables; Drizzle schema
+- [x] Admin settings: `aiModels.*` (enabled, defaultCategories, default/max monthly budget, call timeout, max input bytes, max inline output bytes, unpriced call estimate, reservation output tokens, catalog cache TTL); new category in API + web lists; bump registry-length test; docs table
+- [x] Catalog service: list (binding `env.AI.models()` with REST fallback) + normalize + KV/isolate cache; schema fetch (REST, cached), graceful when unavailable
+- [x] Access resolver (skill → profile → project → defaults) via `resolveWorkspaceRuntimeAssetContext`
+- [x] Budget service: reserve (atomic conditional UPDATE), settle, release; usage read
+- [x] Model runner: gateway REST call, timeout, response parsing (JSON / binary), `$file` input resolution, output saving, cost settlement
+- [x] MCP tools `list_ai_models`, `run_ai_model` (definitions, handlers, dispatch, onboarding guide line, mcp.test name list)
+- [x] REST: `GET /api/agent-models/catalog`, `GET/PUT /api/projects/:id/agent-models` (owner/admin write)
+- [x] Profile/skill create/update/read carry `agentModels` (Valibot validated, unknown ids rejected)
+- [x] Tests: resolution cascade (absent/present per layer, real create paths), budget race (sqlite-d1), cost estimation per unit, catalog normalization fixture, MCP vertical slice (enabled/disabled/budget exhausted/happy path/$file/binary output), route auth (owner/admin vs maintainer/viewer vs non-member)
 
 ### Web (`apps/web`)
-- [ ] API module + TanStack query options/hooks for catalog + project settings
-- [ ] Shared picker component (search, grouped categories, toggles, price, badges, counts, reset)
-- [ ] Project settings → Agents tab: "AI models agents can call" section with budget + usage + picker
-- [ ] Profile form: AI models field (inherit project / custom)
-- [ ] Skill form: AI models field (inherit / custom)
-- [ ] Behavioral tests (picker toggling/search, inherit/custom switch sends payload, save flows)
-- [ ] Playwright visual audits (normal, long text, many, empty, error; mobile + desktop)
-- [ ] UI/UX iteration rounds with agent reviews (≥2 rounds) before staging
+- [x] API module + TanStack query options/hooks for catalog + project settings
+- [x] Shared picker component (search, grouped categories, toggles, price, badges, counts, reset)
+- [x] Project settings → Agents tab: "AI models agents can call" section with budget + usage + picker
+- [x] Profile form: AI models field (inherit project / custom)
+- [x] Skill form: AI models field (inherit / custom)
+- [x] Behavioral tests (picker toggling/search, inherit/custom switch sends payload, save flows)
+- [x] Playwright visual audits (normal, long text, many, empty, error; mobile + desktop)
+- [ ] UI/UX iteration rounds with agent reviews (≥2 rounds) before staging — round 1 (2 reviewers), round 2 fixes done, round 3 polish in progress, final review pending
 
 ### Docs
-- [ ] New guide `guides/ai-models-for-agents.md` + sidebar entry
-- [ ] Update `guides/agents.md` (MCP tools table, profiles), `concepts.mdx`, `guides/admin-settings.md`, `reference/configuration.md`, `guides/recent-product-changes.md`
+- [x] New guide `guides/ai-models-for-agents.md` + sidebar entry
+- [x] Update `guides/agents.md` (MCP tools table, profiles), `concepts.mdx`, `guides/admin-settings.md`, `reference/configuration.md`, `guides/recent-product-changes.md`
 
 ### Staging
 - [ ] Deploy branch, configure project models + budget via UI as smoke user
@@ -171,3 +172,13 @@ selection UIs.
 ## References
 - Idea `01M5JBWGEP7MBHNXZ19450MV4B` (design), idea `01M2TSPBDV1GDVRN9CS5A89EMH` (Jev research)
 - Rules: 18, 31 (migrations), 41/50 (row fault isolation), 43, 59, 60, 62, 65, 69, 73 (stored override layer), 74
+
+## Implementation notes (2026-10-22)
+
+- **Catalog via the Workers AI binding.** `env.AI.models()` lists the catalog and `env.AI.run(model, input, {returnRawResponse, gateway})` makes calls. That needs no new API-token permission, and calls go through `AI_GATEWAY_ID`. Only model schemas use REST with `CF_API_TOKEN`, and that is optional.
+- **Not in the "concepts" doc.** `concepts.mdx` was not changed. Profiles and skills are documented in `guides/agents.md`, which links the new guide.
+- **Agents cannot change model access.** The MCP profile and skill tools allowlist their fields; tested.
+- **Default call timeout is 55 s.** It sits below Codex's 60 s default MCP tool timeout.
+- **Stale model ids are kept, not stripped.** Access intersects the live catalog at call time. The UI shows "No longer available" with a Remove button.
+- **Model id pattern tightened.** Each segment now has to start with an alphanumeric, so `@cf/../x` is rejected. The unit-test agent found this.
+- **Test fixtures updated.** The webhook-trigger test's hand-written projects table gained the 2 new columns. The cf-container contract test now reads `services/workspace-file-transfer.ts`. The project-agent-defaults test now reads `ProjectSettingsAgentsTab.tsx`.

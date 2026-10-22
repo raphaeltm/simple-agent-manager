@@ -1,6 +1,10 @@
 /**
  * Admin-editable tunables for agent model calls (`aiModels.*`). Typed code defaults live here
  * and the admin settings registry renders and stores overrides (policy 9017df94).
+ *
+ * Unlike the Connector settings, this module builds its own `AdminSettingDefinition`s, which keeps
+ * twelve more entries out of the registry file. The dependency back to the registry is type-only,
+ * so there is no runtime import cycle.
  */
 import {
   AGENT_MODEL_CATEGORIES,

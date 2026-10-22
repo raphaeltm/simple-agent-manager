@@ -65,10 +65,27 @@ function isTrue(value: unknown): boolean {
   return value === true || (typeof value === 'string' && value.trim().toLowerCase() === 'true');
 }
 
+/**
+ * The REST search API returns `price` as an array; the binding's type declares every property
+ * value a string. Accept both, so a stringified price can never silently turn every model into an
+ * unpriced one.
+ */
+function priceArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function parsePrices(value: unknown): AgentModelPrice[] {
-  if (!Array.isArray(value)) return [];
+  const entries = priceArray(value);
+  if (entries.length === 0) return [];
   const prices: AgentModelPrice[] = [];
-  for (const entry of value) {
+  for (const entry of entries) {
     const record = maybeJsonRecord(entry);
     if (!record) continue;
     const usd = typeof record.price === 'number' ? record.price : Number.NaN;

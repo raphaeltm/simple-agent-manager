@@ -75,6 +75,40 @@ describe('normalizeCatalog / normalizeCatalogModel (real catalog fixture)', () =
     ]);
   });
 
+  it('parses a price the binding returns as a JSON string, the same as an array', () => {
+    const asArray = normalizeCatalogModel({
+      name: '@cf/cloudflare/clef-flash',
+      task: { name: 'Text Generation' },
+      properties: [
+        {
+          property_id: 'price',
+          value: [{ unit: 'per M input tokens', price: 0.038, currency: 'USD' }],
+        },
+      ],
+    });
+    const asString = normalizeCatalogModel({
+      name: '@cf/cloudflare/clef-flash',
+      task: { name: 'Text Generation' },
+      properties: [
+        {
+          property_id: 'price',
+          value: JSON.stringify([{ unit: 'per M input tokens', price: 0.038, currency: 'USD' }]),
+        },
+      ],
+    });
+    expect(asString?.prices).toEqual([{ unit: 'per M input tokens', usd: 0.038 }]);
+    expect(asString?.prices).toEqual(asArray?.prices);
+  });
+
+  it('treats an unparseable price string as unpublished', () => {
+    const model = normalizeCatalogModel({
+      name: '@cf/cloudflare/clef-flash',
+      task: { name: 'Text Generation' },
+      properties: [{ property_id: 'price', value: 'not json' }],
+    });
+    expect(model?.prices).toEqual([]);
+  });
+
   it('drops a published "0 USD per step" price as unpublished', () => {
     const byId = new Map(normalizeCatalog(catalogFixture).map((model) => [model.id, model]));
     expect(byId.get('@cf/bytedance/stable-diffusion-xl-lightning')?.prices).toEqual([]);

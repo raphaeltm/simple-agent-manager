@@ -16,6 +16,7 @@ import * as v from 'valibot';
 import type { Env } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
+import { validateRelativePath } from '../workspace-file-transfer';
 import { effectiveAgentModelAccess, loadAgentModelCallContext } from './access';
 import {
   microUsdToUsd,
@@ -25,7 +26,12 @@ import {
   usageMonth,
 } from './budget';
 import { getAgentModelCatalog } from './catalog';
-import { costMicroUsd, estimateReservationQuantities, reportedQuantities } from './cost';
+import {
+  costMicroUsd,
+  estimateReservationQuantities,
+  isWebsocketOnly,
+  reportedQuantities,
+} from './cost';
 import { AgentModelCallError } from './errors';
 import {
   DEFAULT_AGENT_MODEL_OUTPUT_DIR,
@@ -83,6 +89,11 @@ function parseArgs(raw: unknown): v.InferOutput<typeof RunArgsSchema> {
     const issue = result.issues[0];
     const path = issue?.path?.map((entry) => String(entry.key)).join('.') || 'arguments';
     throw new AgentModelCallError('invalid_input', `${path}: ${issue?.message ?? 'invalid'}`);
+  }
+  const outputDirectory = result.output.outputDirectory;
+  const directoryError = outputDirectory ? validateRelativePath(outputDirectory) : null;
+  if (directoryError) {
+    throw new AgentModelCallError('invalid_input', `outputDirectory: ${directoryError}`);
   }
   if (result.output.input.stream === true) {
     throw new AgentModelCallError(
@@ -205,6 +216,13 @@ export async function runAgentModelForAgent(
     );
   }
 
+  if (isWebsocketOnly(entry.prices)) {
+    throw new AgentModelCallError(
+      'unsupported_model',
+      `${entry.id} only works over a realtime (websocket) connection, which run_ai_model does not support.`
+    );
+  }
+
   if (JSON.stringify(args.input).length > settings.maxInputBytes) {
     throw new AgentModelCallError(
       'input_too_large',
@@ -269,6 +287,16 @@ export async function runAgentModelForAgent(
       failed,
       now: Date.now(),
     }).then((totals) => {
+      if (cost > reservation) {
+        // Spend can pass the cap by the estimation error of one call; surface it so the
+        // reservation heuristics can be tuned (cost.ts, aiModels.reservationOutputTokens).
+        log.warn('settled_over_reservation', {
+          projectId: context.projectId,
+          modelId: entry.id,
+          costMicroUsd: cost,
+          reservedMicroUsd: reservation,
+        });
+      }
       log.info('settled', {
         projectId: context.projectId,
         modelId: entry.id,

@@ -8,6 +8,8 @@ import {
   formatAgentModelPrice,
 } from '@simple-agent-manager/shared';
 
+import { isWebsocketOnly } from './cost';
+
 /** Longest description returned in a model list; the per-model view returns it in full. */
 const LIST_DESCRIPTION_MAX_CHARS = 240;
 
@@ -44,5 +46,8 @@ export function listEntry(model: AgentModelCatalogEntry) {
     price: describePrices(model),
     ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
     ...(model.capabilities.length > 0 ? { capabilities: model.capabilities } : {}),
+    ...(isWebsocketOnly(model.prices)
+      ? { note: 'Realtime only: cannot be called with run_ai_model' }
+      : {}),
   };
 }

@@ -240,14 +240,13 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
                     )
                   }
                 >
-                  Use installation default
+                  Use default ({formatUsd(settings.defaultMonthlyBudgetUsd)})
                 </Button>
               )}
             </div>
             <p className={`m-0 text-xs ${budgetExceedsMax ? 'text-danger' : 'text-fg-muted'}`}>
-              Up to {formatUsd(maxMonthlyBudgetUsd)}
-              {settings.monthlyBudgetUsd === null &&
-                ` · Default: ${formatUsd(settings.effectiveMonthlyBudgetUsd)}`}
+              Up to {formatUsd(maxMonthlyBudgetUsd)} · Default:{' '}
+              {formatUsd(settings.defaultMonthlyBudgetUsd)}
             </p>
           </div>
         ) : (
@@ -286,7 +285,7 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
       <div className="grid min-w-0 gap-2 border-t border-border-default pt-3">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
           <span className="min-w-0 break-words text-sm text-fg-primary">
-            {settings.models === null ? 'Recommended models' : 'Your selection'} ·{' '}
+            {settings.models === null ? 'Recommended' : 'Your selection'} ·{' '}
             {summarizeModelsByCategory(settings.effectiveModelIds, catalogById)}
           </span>
           {controlsEnabled && (

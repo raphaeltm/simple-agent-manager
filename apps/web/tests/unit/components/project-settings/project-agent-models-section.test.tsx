@@ -57,6 +57,7 @@ function makeSettings(
     effectiveSource: 'default',
     monthlyBudgetUsd: null,
     effectiveMonthlyBudgetUsd: 20,
+    defaultMonthlyBudgetUsd: 20,
     maxMonthlyBudgetUsd: 100,
     usage: {
       month: '2026-10',
@@ -106,7 +107,7 @@ describe('ProjectAgentModelsSection', () => {
     expect(screen.getByRole('heading', { name: 'AI Models' })).toBeInTheDocument();
     expect(await screen.findByText('$2.00 of $20.00 used this month')).toBeInTheDocument();
     expect(screen.getByText(/resets Nov 1/)).toBeInTheDocument();
-    expect(screen.getByText('Recommended models · 1 model: Decision 1')).toBeInTheDocument();
+    expect(screen.getByText('Recommended · 1 model (Decision 1)')).toBeInTheDocument();
     // "clef-flash" appears once, in the "Used this month" list — the
     // selection summary is category-based and never names a specific model.
     expect(screen.getAllByText(/clef-flash/)).toHaveLength(1);
@@ -136,6 +137,21 @@ describe('ProjectAgentModelsSection', () => {
     await screen.findByText('$2.00 of $20.00 used this month');
 
     expect(screen.getByText('Up to $100.00 · Default: $20.00')).toBeInTheDocument();
+  });
+
+  it('still shows the installation default when the project has its own budget override', async () => {
+    renderSection(
+      makeSettings({
+        monthlyBudgetUsd: 30,
+        effectiveMonthlyBudgetUsd: 30,
+        maxMonthlyBudgetUsd: 50,
+        defaultMonthlyBudgetUsd: 5,
+      })
+    );
+    await screen.findByText('$2.00 of $30.00 used this month');
+
+    expect(screen.getByText('Up to $50.00 · Default: $5.00')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use default ($5.00)' })).toBeInTheDocument();
   });
 
   it('saves a new monthly budget with the right PUT body', async () => {
@@ -205,7 +221,7 @@ describe('ProjectAgentModelsSection', () => {
     renderSection(makeSettings({ monthlyBudgetUsd: 50, effectiveMonthlyBudgetUsd: 50 }));
     await screen.findByText('$2.00 of $50.00 used this month');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use installation default' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use default ($20.00)' }));
 
     await waitFor(() =>
       expect(mocks.updateProjectAgentModelSettings).toHaveBeenCalledWith('proj-1', {
@@ -218,7 +234,7 @@ describe('ProjectAgentModelsSection', () => {
   it('resets a custom model selection back to recommended with "Use recommended"', async () => {
     mocks.updateProjectAgentModelSettings.mockResolvedValue(makeSettings());
     renderSection(makeSettings({ models: ['m-decision-1'], effectiveSource: 'project' }));
-    await screen.findByText('Your selection · 1 model: Decision 1');
+    await screen.findByText('Your selection · 1 model (Decision 1)');
 
     fireEvent.click(screen.getByRole('button', { name: 'Use recommended' }));
 
@@ -232,7 +248,7 @@ describe('ProjectAgentModelsSection', () => {
 
   it('opens the picker from "Choose models", and the action buttons do not jam on a narrow layout', async () => {
     renderSection(makeSettings({ models: ['m-decision-1'], effectiveSource: 'project' }));
-    await screen.findByText('Your selection · 1 model: Decision 1');
+    await screen.findByText('Your selection · 1 model (Decision 1)');
 
     const chooseButton = screen.getByRole('button', { name: 'Choose models' });
     const useRecommendedButton = screen.getByRole('button', { name: 'Use recommended' });

@@ -139,7 +139,14 @@ export async function resolveFileReferences(
             : `At most ${maxFileReferences} $file references per call.`
         );
       }
-      const { data, contentType } = await files.read(reference.path, maxTotalBytes - totalBytes);
+      const remaining = maxTotalBytes - totalBytes;
+      if (remaining <= 0) {
+        throw new AgentModelCallError(
+          'input_too_large',
+          `Files in this call exceed ${maxTotalBytes} bytes.`
+        );
+      }
+      const { data, contentType } = await files.read(reference.path, remaining);
       totalBytes += data.byteLength;
       if (totalBytes > maxTotalBytes) {
         throw new AgentModelCallError(
@@ -154,13 +161,19 @@ export async function resolveFileReferences(
       }
       return base64;
     }
-    if (Array.isArray(value)) return Promise.all(value.map(visit));
+    // Files are read one at a time, never in parallel: each read is handed only the budget the
+    // previous reads left, so many sibling references cannot together pull more than the cap
+    // into the Worker.
+    if (Array.isArray(value)) {
+      const items: unknown[] = [];
+      for (const item of value) items.push(await visit(item));
+      return items;
+    }
     const record = maybeJsonRecord(value);
     if (!record) return value;
-    const entries = await Promise.all(
-      Object.entries(record).map(async ([key, child]) => [key, await visit(child)] as const)
-    );
-    return Object.fromEntries(entries);
+    const result: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(record)) result[key] = await visit(child);
+    return result;
   };
   const resolved = maybeJsonRecord(await visit(input)) ?? {};
   return { input: resolved, fileCount };

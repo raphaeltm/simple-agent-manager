@@ -23,7 +23,7 @@ vi.mock('../../../../src/lib/api/agent-models', () => ({
 }));
 
 // Two "decision" models plus one "embeddings" model: a one-model selection
-// always summarizes to "1 model: Decision 1" by category regardless of
+// always summarizes to "1 model (Decision 1)" by category regardless of
 // *which* decision model it is, so distinguishing scenarios by their
 // displayed text requires at least one model in a different category.
 const CATALOG: AgentModelCatalogResponse = {
@@ -89,6 +89,7 @@ function makeProjectSettings(
     effectiveSource: 'default',
     monthlyBudgetUsd: null,
     effectiveMonthlyBudgetUsd: 20,
+    defaultMonthlyBudgetUsd: 20,
     maxMonthlyBudgetUsd: 100,
     usage: {
       month: '2026-10',
@@ -154,7 +155,7 @@ describe('AgentModelAccessField', () => {
     renderField({ initialValue: null });
 
     expect(
-      await screen.findByText("Uses the project's models: 1 model: Decision 1")
+      await screen.findByText("The project's choice: 1 model (Decision 1)")
     ).toBeInTheDocument();
   });
 
@@ -168,7 +169,7 @@ describe('AgentModelAccessField', () => {
     renderField({ initialValue: null });
 
     expect(
-      await screen.findByText("Uses the project's models: 2 models: Decision 1 · Embeddings 1")
+      await screen.findByText("The project's choice: 2 models (Decision 1 · Embeddings 1)")
     ).toBeInTheDocument();
   });
 
@@ -177,7 +178,7 @@ describe('AgentModelAccessField', () => {
       makeProjectSettings({ models: ['m-embed-1'], effectiveModelIds: ['m-embed-1'] })
     );
     renderField({ initialValue: null });
-    await screen.findByText(/Uses the project's models/);
+    await screen.findByText(/The project's choice/);
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
 
@@ -193,7 +194,7 @@ describe('AgentModelAccessField', () => {
     await waitFor(() =>
       expect(screen.getByRole<HTMLSelectElement>('combobox').value).toBe('custom')
     );
-    expect(await screen.findByText('2 models: Decision 1 · Embeddings 1')).toBeInTheDocument();
+    expect(await screen.findByText('2 models (Decision 1 · Embeddings 1)')).toBeInTheDocument();
   });
 
   it('profile context: cancelling out of Custom does not commit a value — stays on "Same as project"', async () => {
@@ -201,7 +202,7 @@ describe('AgentModelAccessField', () => {
       makeProjectSettings({ models: ['m-embed-1'], effectiveModelIds: ['m-embed-1'] })
     );
     renderField({ initialValue: null });
-    await screen.findByText(/Uses the project's models/);
+    await screen.findByText(/The project's choice/);
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
     await screen.findByText('bge-base');
@@ -215,7 +216,7 @@ describe('AgentModelAccessField', () => {
     await waitFor(() =>
       expect(screen.getByRole<HTMLSelectElement>('combobox').value).toBe('inherit')
     );
-    expect(screen.getByText(/Uses the project's models/)).toBeInTheDocument();
+    expect(screen.getByText(/The project's choice/)).toBeInTheDocument();
   });
 
   it('switching an existing custom selection back to "Same as project" sends null and refreshes the displayed summary', async () => {
@@ -225,7 +226,7 @@ describe('AgentModelAccessField', () => {
     renderField({ initialValue: ['m-decision-2'] });
 
     expect(screen.getByRole<HTMLSelectElement>('combobox').value).toBe('custom');
-    expect(await screen.findByText('1 model: Decision 1')).toBeInTheDocument();
+    expect(await screen.findByText('1 model (Decision 1)')).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'inherit' } });
 
@@ -235,7 +236,7 @@ describe('AgentModelAccessField', () => {
     // Distinct from the custom selection's text above — proves the display
     // actually switched to the project's value, not a leftover custom string.
     expect(
-      await screen.findByText("Uses the project's models: 1 model: Embeddings 1")
+      await screen.findByText("The project's choice: 1 model (Embeddings 1)")
     ).toBeInTheDocument();
   });
 
@@ -268,7 +269,7 @@ describe('AgentModelAccessField', () => {
 
     expect(
       await screen.findByText(
-        "Uses the profile's models, or the project's if the profile has none. Project: 1 model: Embeddings 1"
+        "Uses the profile's choice, or the project's if the profile has none. Project's choice: 1 model (Embeddings 1)"
       )
     ).toBeInTheDocument();
   });
@@ -281,7 +282,7 @@ describe('AgentModelAccessField', () => {
       initialValue: null,
       fallbackProfile: { name: 'Builder', agentModels: ['m-decision-2'] },
     });
-    await screen.findByText(/Uses the profile's models/);
+    await screen.findByText(/Uses the profile's choice/);
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
     await screen.findByText('clef-omni');
@@ -304,7 +305,7 @@ describe('AgentModelAccessField', () => {
       initialValue: null,
       fallbackProfile: { name: 'Builder', agentModels: null },
     });
-    await screen.findByText(/Uses the profile's models/);
+    await screen.findByText(/Uses the profile's choice/);
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
     await screen.findByText('bge-base');

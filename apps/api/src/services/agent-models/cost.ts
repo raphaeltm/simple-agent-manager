@@ -62,6 +62,14 @@ export function classifyPrice(price: AgentModelPrice): PricedMeasure | null {
   return null;
 }
 
+/**
+ * True when every published price is for a websocket session. Such models (e.g. a streaming
+ * speech model) cannot be called through a request/response `run_ai_model` call.
+ */
+export function isWebsocketOnly(prices: readonly AgentModelPrice[]): boolean {
+  return prices.length > 0 && prices.every((price) => /websocket/i.test(price.unit));
+}
+
 export function classifyPrices(prices: readonly AgentModelPrice[]): PricedMeasure[] {
   return prices.map(classifyPrice).filter((entry): entry is PricedMeasure => entry !== null);
 }

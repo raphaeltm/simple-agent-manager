@@ -6,6 +6,7 @@
  *   GET /api/projects/:projectId/agent-models    — project selection, budget, usage (members)
  *   PUT /api/projects/:projectId/agent-models    — change selection or budget (owners, admins)
  */
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -16,8 +17,8 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import {
+  projectRoleHasCapability,
   requireActiveProjectMembership,
-  requireProjectCapability,
 } from '../middleware/project-auth';
 import { jsonValidator, UpdateProjectAgentModelsSchema } from '../schemas';
 import { buildCatalogResponse, getAgentModelCatalog } from '../services/agent-models/catalog';
@@ -55,11 +56,22 @@ projectAgentModelRoutes.get('/', async (c) => {
 });
 
 projectAgentModelRoutes.put('/', jsonValidator(UpdateProjectAgentModelsSchema), async (c) => {
-  const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireProjectCapability(db, projectId, userId, 'project:update');
+  // One membership read serves both the capability check and the response (rule 60).
+  const { project, membership } = await requireActiveProjectMembership(db, projectId, getUserId(c));
+  if (!projectRoleHasCapability(membership.role, 'project:update')) {
+    throw errors.forbidden('Project capability is required');
+  }
   await updateProjectAgentModelSettings(c.env, db, projectId, c.req.valid('json'));
-  const { project, membership } = await requireActiveProjectMembership(db, projectId, userId);
-  return c.json(await buildProjectAgentModelSettings(c.env, project, membership.role));
+  const [updated] = await db
+    .select({
+      id: schema.projects.id,
+      agentModelsJson: schema.projects.agentModelsJson,
+      agentModelsMonthlyBudgetCents: schema.projects.agentModelsMonthlyBudgetCents,
+    })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .limit(1);
+  return c.json(await buildProjectAgentModelSettings(c.env, updated ?? project, membership.role));
 });

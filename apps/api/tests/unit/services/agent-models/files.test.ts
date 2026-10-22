@@ -158,6 +158,31 @@ describe('resolveFileReferences', () => {
     expect(fileCount).toBe(16);
   });
 
+  it('reads sibling files one at a time, each within what the earlier ones left', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const read = vi.fn(async (_path: string, maxBytes: number) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return { data: new ArrayBuffer(Math.min(600, maxBytes)), contentType: 'audio/mpeg' };
+    });
+    const files = createFiles({ read });
+
+    await expect(
+      resolveFileReferences(
+        { a: { $file: 'a.mp3' }, b: { $file: 'b.mp3' }, list: [{ $file: 'c.mp3' }] },
+        files,
+        limits(1000)
+      )
+    ).rejects.toMatchObject({ code: 'input_too_large' });
+
+    expect(maxInFlight).toBe(1);
+    // The second read may only use what the first one left: 1000 - 600.
+    expect(read.mock.calls.map(([, maxBytes]) => maxBytes)).toEqual([1000, 400]);
+  });
+
   it('refuses any $file reference when the administrator sets the cap to 0', async () => {
     const files = createFiles();
     await expect(

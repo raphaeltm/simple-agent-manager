@@ -108,8 +108,8 @@ export function AgentModelAccessField({
           {resolving
             ? 'Loading…'
             : isSkillContext
-              ? `Uses the profile's models, or the project's if the profile has none. Project: ${summarizeModelsByCategory(projectOnly.modelIds, catalogById)}`
-              : `Uses the project's models: ${summarizeModelsByCategory(inherited.modelIds, catalogById)}`}
+              ? `Uses the profile's choice, or the project's if the profile has none. Project's choice: ${summarizeModelsByCategory(projectOnly.modelIds, catalogById)}`
+              : `The project's choice: ${summarizeModelsByCategory(inherited.modelIds, catalogById)}`}
         </p>
       ) : (
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-border-default bg-inset px-3 py-2.5">

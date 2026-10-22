@@ -275,7 +275,7 @@ describe('ModelPicker', () => {
     // The footer must not count the stale id as a model that will run — it
     // reports the 1 real selection plus a separate stale disclosure, not "2
     // models".
-    expect(screen.getByText('1 model: Decision 1 · 1 no longer available')).toBeInTheDocument();
+    expect(screen.getByText('1 model (Decision 1) · 1 no longer available')).toBeInTheDocument();
     const saveButton = screen.getByRole('button', { name: 'Save' });
     expect(saveButton).toBeDisabled();
 
@@ -296,6 +296,31 @@ describe('ModelPicker', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
 
     await screen.findByText('clef-flash');
+  });
+
+  it('while the catalog has errored, the footer shows a bare selection count — no category breakdown, no stale-ids suffix, no stale-ids banner', async () => {
+    mocks.getAgentModelCatalog.mockReset();
+    mocks.getAgentModelCatalog.mockRejectedValueOnce(new Error('network down'));
+    renderPicker({ initialSelection: ['m-decision-1', 'm-decision-2', 'retired-model-id'] });
+
+    expect(await screen.findByText(/couldn.t load the model list/i)).toBeInTheDocument();
+    // Without a loaded catalog, every one of the 3 selected ids is
+    // indistinguishable from "stale" (none resolve against an empty map) —
+    // the footer must not report that, nor render the "No longer available"
+    // banner, since we genuinely don't know yet.
+    expect(screen.queryByText('No longer available')).not.toBeInTheDocument();
+    expect(screen.queryByText(/no longer available/)).not.toBeInTheDocument();
+    expect(screen.getByText('3 models')).toBeInTheDocument();
+  });
+
+  it('while the catalog is still loading, the footer also shows a bare selection count', async () => {
+    mocks.getAgentModelCatalog.mockReset();
+    mocks.getAgentModelCatalog.mockReturnValue(new Promise(() => {})); // never resolves
+    renderPicker({ initialSelection: ['m-decision-1', 'm-decision-2'] });
+
+    expect(await screen.findByRole('status', { name: 'Loading models' })).toBeInTheDocument();
+    expect(screen.queryByText('No longer available')).not.toBeInTheDocument();
+    expect(screen.getByText('2 models')).toBeInTheDocument();
   });
 
   it('does not reseed the draft when `initialSelection` changes identity while already open', async () => {

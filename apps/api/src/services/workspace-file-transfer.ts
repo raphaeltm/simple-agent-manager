@@ -175,6 +175,10 @@ export async function downloadFromWorkspace(
   }
 
   const data = await res.arrayBuffer();
+  // Content-Length may be absent; never return more than the caller allowed.
+  if (data.byteLength > maxBytes) {
+    throw new Error(`File too large: ${data.byteLength} bytes exceeds maximum ${maxBytes}`);
+  }
   const contentType = res.headers.get('Content-Type') || 'application/octet-stream';
   return { data, contentType };
 }

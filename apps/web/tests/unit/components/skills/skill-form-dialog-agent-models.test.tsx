@@ -99,6 +99,7 @@ describe('SkillFormDialog — AI model calls field', () => {
       effectiveSource: 'default',
       monthlyBudgetUsd: null,
       effectiveMonthlyBudgetUsd: 20,
+      defaultMonthlyBudgetUsd: 20,
       maxMonthlyBudgetUsd: 100,
       usage: {
         month: '2026-10',
@@ -158,7 +159,7 @@ describe('SkillFormDialog — AI model calls field', () => {
     });
     expect(
       await screen.findByText(
-        "Uses the profile's models, or the project's if the profile has none. Project: 1 model: Decision 1"
+        "Uses the profile's choice, or the project's if the profile has none. Project's choice: 1 model (Decision 1)"
       )
     ).toBeInTheDocument();
 
@@ -219,7 +220,7 @@ describe('SkillFormDialog — AI model calls field', () => {
     await screen.findByText('clef-flash');
     fireEvent.click(screen.getByRole('switch', { name: /turn on clef-flash/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await screen.findByText('1 model: Decision 1');
+    await screen.findByText('1 model (Decision 1)');
 
     expect(screen.getByLabelText('Name')).toHaveValue('Renamed by user');
 
@@ -242,6 +243,6 @@ describe('SkillFormDialog — AI model calls field', () => {
     );
 
     expect(screen.getByLabelText('Name')).toHaveValue('Renamed by user');
-    expect(screen.getByText('1 model: Decision 1')).toBeInTheDocument();
+    expect(screen.getByText('1 model (Decision 1)')).toBeInTheDocument();
   });
 });

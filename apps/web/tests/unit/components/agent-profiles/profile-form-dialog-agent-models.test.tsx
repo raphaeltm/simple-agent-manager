@@ -108,6 +108,7 @@ describe('ProfileFormDialog — AI model calls field', () => {
       effectiveSource: 'default',
       monthlyBudgetUsd: null,
       effectiveMonthlyBudgetUsd: 20,
+      defaultMonthlyBudgetUsd: 20,
       maxMonthlyBudgetUsd: 100,
       usage: {
         month: '2026-10',
@@ -151,7 +152,7 @@ describe('ProfileFormDialog — AI model calls field', () => {
     });
 
     expandAiModelsSection();
-    await screen.findByText(/Uses the project's models/);
+    await screen.findByText(/The project's choice/);
     fireEvent.change(screen.getByRole('combobox', { name: /AI models this profile can call/i }), {
       target: { value: 'custom' },
     });

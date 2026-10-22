@@ -75,6 +75,7 @@ interface ProjectAgentModelSettingsOverrides {
   effectiveSource?: 'project' | 'default';
   monthlyBudgetUsd?: number | null;
   effectiveMonthlyBudgetUsd?: number;
+  defaultMonthlyBudgetUsd?: number;
   maxMonthlyBudgetUsd?: number;
   spentUsd?: number;
   reservedUsd?: number;
@@ -90,6 +91,7 @@ function makeProjectAgentModelSettings(overrides: ProjectAgentModelSettingsOverr
     effectiveSource: overrides.effectiveSource ?? 'default',
     monthlyBudgetUsd: overrides.monthlyBudgetUsd ?? null,
     effectiveMonthlyBudgetUsd,
+    defaultMonthlyBudgetUsd: overrides.defaultMonthlyBudgetUsd ?? 20,
     maxMonthlyBudgetUsd: overrides.maxMonthlyBudgetUsd ?? 200,
     usage: {
       month: '2026-10',
@@ -222,7 +224,7 @@ test.describe('Agent model calls — Project Settings', () => {
 
     await expect(page.getByText('AI Models')).toBeVisible();
     await expect(page.getByText(/\$2\.47 of \$20\.00 used this month/)).toBeVisible();
-    await expect(page.getByText(/Recommended models · /)).toBeVisible();
+    await expect(page.getByText(/Recommended · /)).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Used this month' })).toBeVisible();
 
     await screenshotAgentModelsSection(page, 'project-settings-defaults');
@@ -288,6 +290,26 @@ test.describe('Agent model calls — Project Settings', () => {
     await assertNoOverflow(page);
   });
 
+  test('a project-level budget override still shows the installation default and a reset action', async ({
+    page,
+  }) => {
+    await setupProjectSettingsMocks(page, {
+      settings: makeProjectAgentModelSettings({
+        monthlyBudgetUsd: 30,
+        effectiveMonthlyBudgetUsd: 30,
+        maxMonthlyBudgetUsd: 50,
+        defaultMonthlyBudgetUsd: 5,
+      }),
+    });
+    await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
+
+    await expect(page.getByText('Up to $50.00 · Default: $5.00')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Use default ($5.00)' })).toBeVisible();
+
+    await screenshotAgentModelsSection(page, 'project-settings-budget-override');
+    await assertNoOverflow(page);
+  });
+
   test('read-only hides the edit controls and states the reason', async ({ page }) => {
     await setupProjectSettingsMocks(page, {
       settings: makeProjectAgentModelSettings({ canEdit: false }),
@@ -322,6 +344,12 @@ test.describe('Agent model calls — Project Settings', () => {
     await page.getByRole('button', { name: 'Choose models' }).click();
 
     await expect(page.getByText(/Couldn.t load the model list/)).toBeVisible();
+    // Without a loaded catalog, the footer can't know which ids are stale —
+    // it must show a bare count, never a "No longer available" suffix or
+    // banner for ids it hasn't actually resolved.
+    await expect(page.getByText('7 models')).toBeVisible();
+    await expect(page.getByText(/no longer available/)).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'No longer available' })).toHaveCount(0);
     await screenshot(page, 'picker-catalog-error');
 
     await page.route('**/api/agent-models/catalog', (route: Route) =>
@@ -424,7 +452,7 @@ test.describe('Agent model calls — Profile and Skill dialogs', () => {
     await expect(page.getByText('Create Agent Profile')).toBeVisible();
 
     await page.getByRole('button', { name: /AI Models/ }).click();
-    const inheritSummary = page.getByText(/Uses the project's models/);
+    const inheritSummary = page.getByText(/The project's choice/);
     await expect(inheritSummary).toBeVisible();
     // The dialog body scrolls internally (`Dialog.tsx`'s `overflow-y-auto`),
     // so a screenshot without scrolling first can silently miss content below
@@ -452,7 +480,7 @@ test.describe('Agent model calls — Profile and Skill dialogs', () => {
     await page.getByRole('button', { name: 'New Skill' }).click();
     await expect(page.getByRole('heading', { name: 'Create Skill' })).toBeVisible();
     await expect(page.getByText(/AI models this skill can call/)).toBeVisible();
-    const inheritSummary = page.getByText(/Uses the profile's models/);
+    const inheritSummary = page.getByText(/Uses the profile's choice/);
     await expect(inheritSummary).toBeVisible();
 
     await inheritSummary.scrollIntoViewIfNeeded();
