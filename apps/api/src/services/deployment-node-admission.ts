@@ -11,6 +11,7 @@ import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { parsePositiveInt } from '../lib/route-helpers';
 import {
   DEPLOYMENT_RELOCATION_CLAIM_FIELD,
+  NO_DEPLOYMENT_RELOCATION_CLAIM_SQL,
   RECOVER_ERRORED_ENVIRONMENT_SET_SQL,
 } from './deployment-environment-state';
 import type { DeploymentPlacement } from './deployment-provisioning';
@@ -429,11 +430,7 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
            : ''
        }
        ${hasExpectedReservation ? 'AND de.resolved_reservation_json IS ?' : ''}
-       AND CASE
-         WHEN json_valid(de.resolved_reservation_json)
-         THEN COALESCE(json_extract(de.resolved_reservation_json, '$.${DEPLOYMENT_RELOCATION_CLAIM_FIELD}'), 0)
-         ELSE 0
-       END = 0
+       AND ${NO_DEPLOYMENT_RELOCATION_CLAIM_SQL}
        AND (de.node_id IS NULL OR de.node_id = n.id)
        AND n.id = ?
        AND n.status = ?
@@ -524,11 +521,7 @@ export async function claimDeploymentEnvironmentRelocation(params: {
         }
         AND de.node_id = ? AND de.resolved_reservation_json IS ?
         AND n.id = de.node_id
-        AND CASE
-          WHEN json_valid(de.resolved_reservation_json)
-          THEN COALESCE(json_extract(de.resolved_reservation_json, '$.${DEPLOYMENT_RELOCATION_CLAIM_FIELD}'), 0)
-          ELSE 0
-        END = 0
+        AND ${NO_DEPLOYMENT_RELOCATION_CLAIM_SQL}
         ${authority.sql}
       RETURNING id`
   )

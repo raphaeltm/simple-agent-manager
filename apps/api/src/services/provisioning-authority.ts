@@ -154,7 +154,9 @@ export async function assertDirectWorkspaceProvisioningAuthority(
  * `error` is refused: admission has already moved a recovering environment
  * out of it, so `error` here means a failure was recorded after the link.
  * `stopping`, `stopped` and `deleting` belong to the Stop and Delete paths and
- * must never buy a server.
+ * must never buy a server. The admitted set is deliberately the set the node
+ * heartbeat advertises (`routes/node-lifecycle.ts`) and `environmentCanServeRoutes`
+ * serves: a node bought for any other status would never receive a release.
  */
 export async function assertDeploymentProvisioningAuthority(
   env: Env,

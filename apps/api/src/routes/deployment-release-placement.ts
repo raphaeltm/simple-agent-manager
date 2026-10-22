@@ -6,6 +6,7 @@ import type { ExecutionContext } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
+import { DEPLOYMENT_RELOCATION_CLAIM_FIELD } from '../services/deployment-environment-state';
 import {
   claimDeploymentEnvironmentRelocation,
   completeDeploymentEnvironmentRelocation,
@@ -158,8 +159,7 @@ function hasDeploymentPlacementClaim(reservationJson: string | null): boolean {
     return (
       typeof parsed === 'object' &&
       parsed !== null &&
-      'samRelocationClaim' in parsed &&
-      parsed.samRelocationClaim === true
+      Reflect.get(parsed, DEPLOYMENT_RELOCATION_CLAIM_FIELD) === true
     );
   } catch {
     return false;

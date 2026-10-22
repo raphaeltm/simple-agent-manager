@@ -10,7 +10,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
-import { DEPLOYMENT_RELOCATION_CLAIM_FIELD } from './deployment-environment-state';
+import { NO_DEPLOYMENT_RELOCATION_CLAIM_SQL } from './deployment-environment-state';
 
 type DeploymentReleaseDb = ReturnType<typeof drizzle>;
 
@@ -123,11 +123,7 @@ export async function markDeploymentReleasePlacementFailed(
  */
 const STRANDED_PLACEMENT_ENVIRONMENT_SQL = `de.status IN ('active', 'error')
           AND de.node_id IS NULL
-          AND CASE
-            WHEN json_valid(de.resolved_reservation_json)
-            THEN COALESCE(json_extract(de.resolved_reservation_json, '$.${DEPLOYMENT_RELOCATION_CLAIM_FIELD}'), 0)
-            ELSE 0
-          END = 0
+          AND ${NO_DEPLOYMENT_RELOCATION_CLAIM_SQL}
           AND ? = (
             SELECT latest.id FROM deployment_releases latest
             WHERE latest.environment_id = de.id

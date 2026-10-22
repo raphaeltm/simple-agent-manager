@@ -23,6 +23,17 @@
 export const DEPLOYMENT_RELOCATION_CLAIM_FIELD = 'samRelocationClaim';
 
 /**
+ * SQL predicate: the environment aliased `de` has no relocation claim in flight.
+ * A claim marks the reservation JSON while a placement moves the environment
+ * between nodes; admission and release writes must not run under it.
+ */
+export const NO_DEPLOYMENT_RELOCATION_CLAIM_SQL = `CASE
+            WHEN json_valid(de.resolved_reservation_json)
+            THEN COALESCE(json_extract(de.resolved_reservation_json, '$.${DEPLOYMENT_RELOCATION_CLAIM_FIELD}'), 0)
+            ELSE 0
+          END = 0`;
+
+/**
  * SET-clause fragment for an admission UPDATE whose environment alias is `de`.
  * SQLite evaluates every SET expression against the row as it was before the
  * update, so every column reads the old status.

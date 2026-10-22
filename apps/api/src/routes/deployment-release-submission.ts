@@ -16,6 +16,7 @@ import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import { collectSecretNames } from '../services/compose-renderer';
+import { NO_DEPLOYMENT_RELOCATION_CLAIM_SQL } from '../services/deployment-environment-state';
 import { resolveDeploymentPlacement } from '../services/deployment-provisioning';
 import { createMissingManifestVolumes } from '../services/deployment-volumes';
 import { recordDeploymentReleaseLifecycleEventBestEffort } from '../services/project-lifecycle-events';
@@ -111,11 +112,7 @@ export async function insertDeploymentReleaseWhilePlacementUnlocked(params: {
       WHERE EXISTS (
         SELECT 1 FROM deployment_environments de
         WHERE de.id = ?
-          AND CASE
-            WHEN json_valid(de.resolved_reservation_json)
-            THEN COALESCE(json_extract(de.resolved_reservation_json, '$.samRelocationClaim'), 0)
-            ELSE 0
-          END = 0
+          AND ${NO_DEPLOYMENT_RELOCATION_CLAIM_SQL}
       )`
   )
     .bind(

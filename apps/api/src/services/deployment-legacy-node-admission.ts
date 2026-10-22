@@ -38,7 +38,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import {
-  DEPLOYMENT_RELOCATION_CLAIM_FIELD,
+  NO_DEPLOYMENT_RELOCATION_CLAIM_SQL,
   RECOVER_ERRORED_ENVIRONMENT_SET_SQL,
 } from './deployment-environment-state';
 import { DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE } from './deployment-node-admission';
@@ -119,11 +119,7 @@ export async function linkEnvironmentToLegacyNode(
           LIMIT 1
         )
         AND de.resolved_reservation_json IS ?
-        AND CASE
-          WHEN json_valid(de.resolved_reservation_json)
-          THEN COALESCE(json_extract(de.resolved_reservation_json, '$.${DEPLOYMENT_RELOCATION_CLAIM_FIELD}'), 0)
-          ELSE 0
-        END = 0`
+        AND ${NO_DEPLOYMENT_RELOCATION_CLAIM_SQL}`
   )
     .bind(
       JSON.stringify(reservation),

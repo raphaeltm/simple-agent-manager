@@ -69,7 +69,9 @@ export interface DeploymentAgentPolicy {
  * release placement or node start fails, and the ONLY recovery paths — legacy
  * node adoption in `linkEnvironmentToLegacyNode`
  * (deployment-legacy-node-admission.ts, added by PR #2120) and fresh placement —
- * run when a NEW release is submitted. Excluding `error` therefore locks agents
+ * run when a NEW release is submitted, and both move the environment back to
+ * `active` as they admit its node (deployment-environment-state.ts). Excluding
+ * `error` therefore locks agents
  * out of the exact recovery they are expected to drive, while the human-facing
  * release route (deployment-release-submission.ts) has no status gate at all.
  *
