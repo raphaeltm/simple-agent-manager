@@ -221,13 +221,13 @@ It is idempotent, runs after the API Worker deploy, and is unit-tested with a mo
 - [ ] Valibot: `sourceType` gets `email`; add `EmailConfigSchema` (allowed senders as lower-cased emails, 1–20)
 - [ ] `trigger-create.ts`: email validation and persistence (key generation; default allowed senders = creator email); 409 when email is unavailable
 - [ ] CRUD: attach `emailConfig` (address, allowed senders) in `enrichTrigger`; PATCH can update allowed senders
-- [ ] Inbound: `services/agent-email/inbound.ts` (parse, guards, lookup, allowlist, admission with `beforeSubmit` that records the inbound row) and the `email` export in `index.ts`
+- [ ] Inbound: `services/agent-email/inbound.ts` (parse, guards, lookup, allowlist, per-trigger rate limit, Message-ID dedup/lease, explicit admission outcomes) and the `email` export in `index.ts`
 - [ ] Context and template: `buildEmailContext` (`email.from/to/subject/text/receivedAt/messageId/attachments`); default prompt template; preview sample; Run now 409
 - [ ] Provider: `AgentEmailSender` plus the Cloudflare implementation; `Env.AGENT_EMAIL?: SendEmail`
 - [ ] MCP `reply_to_email`: definition, handler, dispatch, gate, pinned recipient, headers, atomic cap, audit row
-- [ ] Admin settings: four `agentEmail.*` entries
-- [ ] `GET /api/config/agent-email`; admin status + "Send test email" (superadmin route + UI card)
-- [ ] Deploy: `[[send_email]]` in `wrangler.toml`; probe and binding in `sync-wrangler-config.ts` (plus test); `configure-agent-email.ts` (plus test); `deploy-reusable.yml` step after the worker deploy
+- [ ] Admin settings: `agentEmail.*` entries (max inbound bytes, max body chars, max reply chars, max replies per run, inbound per trigger per hour)
+- [ ] `GET /api/config/agent-email`; admin status + fixed loopback test (superadmin route + UI card; loopback receipt recorded in KV)
+- [ ] Deploy: `configure-agent-email.ts` (+ test) runs BEFORE `sync-wrangler-config.ts` and writes a marker; `sync-wrangler-config.ts` generates the `AGENT_EMAIL` send_email binding only from the marker (+ test); `agent_email` staging-only dispatch input on `deploy-staging.yml` → `deploy-reusable.yml`
 - [ ] Web: Email start kind across `automation-routes`/`model`/`ui`/`state`/`requests`/`steps-start-when`; allowed-senders field; address display with copy button; variable hints; hidden when email is unavailable
 - [ ] Docs: `apps/www` automation guide (email triggers); `self-hosting.mdx` optional email permissions; API reference
 - [ ] Tests (detailed under Acceptance criteria) and a Playwright visual audit of the editor and trigger detail at 375 and 1280 px
@@ -254,6 +254,42 @@ It is idempotent, runs after the API Worker deploy, and is unit-tested with a mo
 3. Is the superadmin "Send test email" acceptable as a lasting diagnostic, or should it be avoided?
 4. Is subaddressing (`agent+key@`) acceptable, versus a literal routing rule per address created at runtime (`key@`)? The latter needs a runtime token with Email Routing write, and is capped at 200 rules per domain.
 
+## Plan review outcome — Astra High, task `01M5J9WS98ZJ4P7RTPJWYGCH2S`, 2026-10-22
+
+**Verdict: approve with changes.** SAM returned only the tail of the review. These changes come from its summary and the findings that were readable. They supersede the matching parts of D1–D10 above.
+
+1. **BLOCKER: binding presence is not readiness.** Previously, D6 shipped the binding before D7 had configured anything.
+   - **Change:** `configure-agent-email.ts` now runs **before** `sync-wrangler-config.ts`. It writes `.wrangler/agent-email-domain` only after routing, subaddressing, the rule and sending have all been verified.
+   - `sync-wrangler-config.ts` generates the `[[send_email]] AGENT_EMAIL` binding only from that marker. The binding is not declared at the top level, so Wrangler never sees a top-level binding that is missing from an environment.
+   - Creating triggers, ingesting mail and sending replies are all gated on the binding.
+2. **SHOULD-FIX: durable inbound deduplication and recovery, and explicit admission outcomes.**
+   - **Change:** each inbound row has a unique `(trigger_id, message_id)` and a `processing` → `accepted`/`rejected`/`failed` status, with a lease.
+   - A retried delivery of an accepted message is acknowledged without starting a second task. A `failed` row, or a stale `processing` row, is retried.
+   - Each admission result maps to an explicit outcome: submitted → accept; skipped (paused or concurrency) → `setReject` with a plain reason; a submission error → throw, which is a temporary SMTP failure so the sender's server retries.
+   - A message with no `Message-ID` is rejected.
+3. **SHOULD-FIX: loopback must use a routed sender.**
+   - **Change:** the diagnostic is now a fixed, bounded **loopback**. It sends a fixed test message from the routed address `agent+loopback@mail.<BASE_DOMAIN>` to one existing email-trigger address.
+   - Mail arriving at `agent+loopback@` is recorded as loopback status (KV) and nothing more.
+   - There is no free-form From, To or body. It is superadmin only and rate-limited.
+4. **SHOULD-FIX: apex protection must be unconditional.**
+   - **Change:** every DNS write the deploy step makes must be `mail.<BASE_DOMAIN>` itself or a name under it, or the step throws.
+   - Pre-existing apex MX records are compared before and after, whatever the zone's routing state.
+5. **SHOULD-FIX: staging-only activation.**
+   - **Change:** a new boolean input `agent_email` on `deploy-staging.yml`, default `false`, is passed to `deploy-reusable.yml`. The configure step only attempts setup when it is true.
+   - `deploy.yml` (production) never sets it. Production therefore cannot activate agent email until in-Worker sender authentication lands.
+6. **SHOULD-FIX: input and header validation.**
+   - **Change:** strict parsing of `Message-ID`, `In-Reply-To` and `References`: angle-bracket IDs only, with a count cap and a length cap.
+   - CR/LF are stripped from every value placed in outbound headers or the subject. The subject length is capped. Display names are sanitized.
+7. **SHOULD-FIX: bounded abuse controls.** **Change:** a per-trigger inbound rate limit in KV, admin setting `agentEmail.inboundPerTriggerPerHour` (default 20). Failed send attempts also count against the per-run reply cap.
+8. **SHOULD-FIX: migration needs populated-upgrade coverage.** **Change:** a migration test applies 0204 to a database that already holds checkpoint rows. It asserts that every row and index survives, that `'email'` is accepted and that an unknown value is still rejected.
+
+**Answers to the open questions:**
+
+1. Defer DKIM, but for isolated staging only. It stays a production gate.
+2. Widen `triggered_by` using the 0202 pattern.
+3. A narrow loopback only.
+4. Keep subaddressing.
+
 ## Notes / log
 
-- 2026-10-22: Research complete. Waiting on Astra's plan review before the main build. Low-regret groundwork (the deploy probe) may start in parallel.
+- 2026-10-22: Research complete. Astra plan review: approve-with-changes (above). Building with those changes.
