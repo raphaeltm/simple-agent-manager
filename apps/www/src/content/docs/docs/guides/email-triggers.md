@@ -123,11 +123,11 @@ delivered. Check Email Sending's metrics and logs for replies instead.
 
 ## Set it up (self-hosting)
 
-Agent email needs Cloudflare Email Routing and Email Sending (Workers Paid) on your zone, three
-more permissions on the deploy token, and Email Routing turned on once for `mail.<your-domain>` in
-the Cloudflare dashboard. See the agent email note in [Self-Hosting](/docs/guides/self-hosting/).
-The deploy writes DNS records only under `mail.<your-domain>`, never changes your main domain's mail
-records, and the production deploy does not turn the preview on.
+Agent email needs Cloudflare Email Routing and Email Sending (Workers Paid) on your zone, and three
+more permissions on the deploy token. See the agent email note in
+[Self-Hosting](/docs/guides/self-hosting/). The deploy turns Email Routing on for
+`mail.<your-domain>` itself. It writes DNS records only under `mail.<your-domain>`, fails if your
+main domain's mail records change, and the production deploy does not turn the preview on.
 
 Agent email stays off until Cloudflare has verified the new sending records, usually 5 to 15
 minutes after the first deploy creates them. The deploy log says when verification is still

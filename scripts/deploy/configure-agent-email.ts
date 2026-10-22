@@ -4,8 +4,8 @@
  *
  * An email trigger's address is `agent+<key>@mail.<BASE_DOMAIN>`. This deploy step
  * makes that address real, idempotently:
- *   1. it checks that Email Routing is already on for `mail.<BASE_DOMAIN>` (an operator
- *      enables it once in the dashboard; see below);
+ *   1. Email Routing is on for `mail.<BASE_DOMAIN>` (turned on for that subdomain only; see
+ *      below);
  *   2. subaddressing is honored, so `agent+<key>@` matches the `agent@` rule;
  *   3. one literal rule routes `agent@mail.<BASE_DOMAIN>` to the API Worker's
  *      `email()` handler;
@@ -17,20 +17,22 @@
  * the binding as "agent email is available". A subdomain still verifying its sending records
  * leaves the feature off until a later deploy finds it enabled.
  *
- * Why routing is not enabled here: Cloudflare's enable endpoint
- * (`POST /zones/{zone}/email/routing/dns`) is documented as "Enable your Email Routing zone.
- * Add and lock the necessary MX and SPF records", so it can write and lock records on the
- * zone apex. The only documented subdomain-only path is the dashboard (Email Routing →
- * Settings → Subdomains), which adds records to the subdomain. So this step never calls it.
+ * Turning routing on for the subdomain: `POST /zones/{zone}/email/routing/dns`. Without a
+ * body it enables the zone apex; with `{ name }` it configures that subdomain, and the apex
+ * itself is rejected as a name (Cloudflare support, quoted in
+ * cloudflare/terraform-provider-cloudflare#5890; the public reference only says "Enable your
+ * Email Routing zone"). So the call always names the subdomain, and the apex's mail records
+ * are compared straight after it: the deploy fails before configuring anything else if the
+ * call touched them.
  *
  * Preview: it runs only when AGENT_EMAIL_ENABLED=true, which only the staging dispatch
  * input `agent_email` sets. Production cannot activate it until inbound sender
  * authentication exists (idea 01KS4X886T3NRKR3696H25A2AN).
  *
- * Fail closed: missing permissions or routing that is not on for the subdomain leave the
- * feature off without writing anything. DNS safety: every DNS write must target
- * `mail.<BASE_DOMAIN>` or a name under it, and the apex's MX and SPF records must come out
- * exactly as they went in (no change, no addition), or the deploy fails.
+ * Fail closed: missing permissions leave the feature off without writing anything. DNS
+ * safety: every DNS write must target `mail.<BASE_DOMAIN>` or a name under it, and the apex's
+ * MX and SPF records must come out exactly as they went in (no change, no addition), or the
+ * deploy fails.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -73,7 +75,10 @@ interface SendingSubdomain {
 
 export type AgentEmailOutcome =
   | { status: 'configured'; domain: string; writes: number }
-  /** Everything is set up, but Cloudflare is still verifying the sending records. */
+  /**
+   * Set up as far as Cloudflare allows so far: the routing records are not visible yet, or
+   * sending is still verifying.
+   */
   | { status: 'pending'; domain: string; writes: number; reason: string }
   | { status: 'skipped'; reason: string };
 
@@ -169,6 +174,14 @@ function assertApexUnchanged(apex: string, before: DnsRecord[], after: DnsRecord
 async function subdomainRoutingEnabled(api: Api, zoneId: string, domain: string): Promise<boolean> {
   const mx = await listDnsRecords(api, zoneId, 'MX', domain);
   return mx.some((record) => CLOUDFLARE_MX_PATTERN.test(normalizeContent(record.content)));
+}
+
+/**
+ * Turn Email Routing on for the subdomain only. The body must name the subdomain: without it
+ * the same call enables the zone apex. Callers compare the apex's mail records right after.
+ */
+async function enableSubdomainRouting(api: Api, zoneId: string, domain: string): Promise<void> {
+  await api.call('POST', `/zones/${zoneId}/email/routing/dns`, { name: domain });
 }
 
 async function ensureSubaddressing(api: Api, zoneId: string): Promise<void> {
@@ -298,8 +311,8 @@ async function ensureSendingSubdomain(api: Api, zoneId: string, domain: string):
 
 /**
  * Configure agent email for one deployment. Returns `skipped` without writing anything when
- * the token lacks permissions or routing is not on for the subdomain, and `pending` when
- * everything is set up but sending is still verifying.
+ * the token lacks permissions, and `pending` when everything is set up but Cloudflare has not
+ * finished (routing records not visible yet, or sending still verifying).
  */
 export async function configureAgentEmail(
   request: CloudflareRequest,
@@ -312,16 +325,22 @@ export async function configureAgentEmail(
   const denied = await probeAccess(api, zoneId);
   if (denied) return { status: 'skipped', reason: denied };
 
-  if (!(await subdomainRoutingEnabled(api, zoneId, domain))) {
-    return {
-      status: 'skipped',
-      reason: `Email Routing is not on for ${domain}. Enable it once in the Cloudflare dashboard (Email Routing → Settings → Subdomains → ${domain}), then deploy again`,
-    };
-  }
-
   const zone = await api.call<{ name: string }>('GET', `/zones/${zoneId}`);
   const apex = normalizeName(zone.name);
   const apexMailBefore = await listMailRecords(api, zoneId, apex);
+
+  if (!(await subdomainRoutingEnabled(api, zoneId, domain))) {
+    await enableSubdomainRouting(api, zoneId, domain);
+    assertApexUnchanged(apex, apexMailBefore, await listMailRecords(api, zoneId, apex));
+    if (!(await subdomainRoutingEnabled(api, zoneId, domain))) {
+      return {
+        status: 'pending',
+        domain,
+        writes: api.writes,
+        reason: `Email Routing was turned on for ${domain}, but its MX records are not visible yet; deploy again in a few minutes`,
+      };
+    }
+  }
 
   await ensureSubaddressing(api, zoneId);
   await ensureRoutingRule(api, zoneId, agentEmailRoutedAddress(options.baseDomain), workerName);

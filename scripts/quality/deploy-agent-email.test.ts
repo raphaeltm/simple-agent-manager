@@ -48,9 +48,13 @@ class FakeCloudflare {
   sendingVerifies = true;
   /** Test hook: a side effect of onboarding a sending subdomain (e.g. on the apex). */
   onSendingSubdomainCreated: ((fake: FakeCloudflare) => void) | null = null;
+  /** Test hook: a side effect of turning routing on for a subdomain (e.g. on the apex). */
+  onSubdomainRoutingEnabled: ((fake: FakeCloudflare) => void) | null = null;
+  /** Whether the routing records show up as soon as routing is turned on for a subdomain. */
+  routingRecordsAppear = true;
   calls: Array<{ method: HttpMethod; path: string }> = [];
 
-  /** What the dashboard's Email Routing → Subdomains step leaves behind for `name`. */
+  /** What turning routing on for subdomain `name` leaves behind (dashboard or API). */
   enableSubdomainRouting(name = 'mail.fixture.example'): this {
     for (const [priority, host] of [
       [13, 'route1'],
@@ -148,10 +152,32 @@ class FakeCloudflare {
       this.routing.support_subaddress = true;
       return this.ok({ name: this.zoneName, ...this.routing });
     }
+    if (route === 'POST /email/routing/dns') {
+      // Per Cloudflare support (cloudflare/terraform-provider-cloudflare#5890): no body enables
+      // the zone apex, a subdomain `name` configures that subdomain, and the apex as `name` is
+      // rejected with 2007.
+      const name = (body as { name?: string } | undefined)?.name;
+      if (!name) {
+        this.routing.enabled = true;
+        return this.ok(this.enableSubdomainRouting(this.zoneName).apexMailRecords());
+      }
+      if (!name.endsWith(`.${this.zoneName}`)) {
+        return {
+          status: 422,
+          body: {
+            success: false,
+            errors: [
+              { code: 2007, message: `Invalid Input: must be a a subdomains of ${this.zoneName}` },
+            ],
+          },
+        };
+      }
+      if (this.routingRecordsAppear) this.enableSubdomainRouting(name);
+      this.onSubdomainRoutingEnabled?.(this);
+      return this.ok(this.dns.filter((record) => record.name === name));
+    }
     if (path.startsWith(`${zonePrefix}/email/routing/dns`)) {
-      // Documented as "Enable your Email Routing zone. Add and lock the necessary MX and SPF
-      // records": it can change the apex, so the deploy must never call it.
-      throw new Error(`the deploy called the zone-level routing endpoint: ${route}`);
+      throw new Error(`unexpected routing DNS call: ${route}`);
     }
     if (route === 'GET /email/routing/rules') {
       const page = Number(params.get('page') ?? '1');
@@ -237,21 +263,59 @@ describe('configureAgentEmail', () => {
     expect(fake.writes()).toBe(0);
   });
 
-  it('stays off without writing anything until routing is on for the subdomain', async () => {
+  it('turns Email Routing on for the subdomain by name, never for the zone apex', async () => {
     const fake = new FakeCloudflare();
+
+    await expect(run(fake)).resolves.toMatchObject({ status: 'configured' });
+
+    expect(fake.calls.filter((call) => call.path.endsWith('/email/routing/dns'))).toEqual([
+      { method: 'POST', path: `/zones/${ZONE}/email/routing/dns` },
+    ]);
+    expect(fake.routing.enabled).toBe(false);
+    expect(fake.dns).toContainEqual(
+      expect.objectContaining({
+        type: 'MX',
+        name: 'mail.fixture.example',
+        content: 'route1.mx.cloudflare.net',
+      })
+    );
+    expect(fake.apexMailRecords()).toEqual([]);
+  });
+
+  it('fails the deploy before configuring anything else if turning routing on changed the apex', async () => {
+    const fake = new FakeCloudflare();
+    fake.dns.push({ type: 'MX', name: 'fixture.example', content: 'smtp.google.com', priority: 1 });
+    fake.onSubdomainRoutingEnabled = (cloudflare) => {
+      cloudflare.dns.push({
+        type: 'MX',
+        name: 'fixture.example',
+        content: 'route1.mx.cloudflare.net',
+        priority: 13,
+      });
+    };
+
+    await expect(run(fake)).rejects.toThrow(/MX\/SPF records of fixture\.example changed/);
+
+    expect(fake.rules).toEqual([]);
+    expect(fake.sending).toEqual([]);
+    expect(fake.routing.support_subaddress).toBe(false);
+  });
+
+  it('stays pending, writing no marker, until the routing records are visible', async () => {
+    const fake = new FakeCloudflare();
+    fake.routingRecordsAppear = false;
 
     const outcome = await run(fake);
 
     expect(outcome).toMatchObject({
-      status: 'skipped',
-      reason: expect.stringContaining('Email Routing → Settings → Subdomains'),
+      status: 'pending',
+      reason: expect.stringContaining('MX records are not visible yet'),
     });
-    expect(fake.writes()).toBe(0);
-    expect(fake.dns).toEqual([]);
+    expect(fake.rules).toEqual([]);
   });
 
   it('configures subaddressing, the worker rule and sending, then is idempotent', async () => {
-    const fake = new FakeCloudflare().enableSubdomainRouting();
+    const fake = new FakeCloudflare();
 
     const first = await run(fake);
 
@@ -310,7 +374,7 @@ describe('configureAgentEmail', () => {
   ] as Array<[string, DnsRecord[]]>)(
     'leaves an apex with %s exactly as it was',
     async (_case, apexRecords) => {
-      const fake = new FakeCloudflare().enableSubdomainRouting();
+      const fake = new FakeCloudflare();
       fake.dns.push(...apexRecords.map((record) => ({ ...record })));
 
       await expect(run(fake)).resolves.toMatchObject({ status: 'configured' });
