@@ -80,6 +80,13 @@ interface ProjectAgentModelSettingsOverrides {
   spentUsd?: number;
   reservedUsd?: number;
   canEdit?: boolean;
+  byModel?: Array<{
+    modelId: string;
+    callCount: number;
+    errorCount: number;
+    spentUsd: number;
+    lastCalledAt: string | null;
+  }>;
 }
 
 function makeProjectAgentModelSettings(overrides: ProjectAgentModelSettingsOverrides = {}) {
@@ -99,7 +106,7 @@ function makeProjectAgentModelSettings(overrides: ProjectAgentModelSettingsOverr
       reservedUsd: overrides.reservedUsd ?? 0,
       callCount: 142,
       resetsAt: '2026-11-01T00:00:00.000Z',
-      byModel: [
+      byModel: overrides.byModel ?? [
         {
           modelId: NORMAL_CATALOG_RESPONSE.defaultModelIds[0] ?? '@cf/cloudflare/clef',
           callCount: 98,
@@ -253,6 +260,33 @@ test.describe('Agent model calls — Project Settings', () => {
     await expect(page.getByText(CUSTOM_SELECTION_IDS.at(-1)!)).toBeVisible();
 
     await screenshot(page, 'project-settings-picker-stale-ids');
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+
+  test('many models used this month: five by name, the rest counted in one line', async ({
+    page,
+  }) => {
+    const byModel = [
+      // An id the catalog does not know renders as the raw id, so it must wrap.
+      '@cf/acme-research-laboratories/an-extremely-long-experimental-model-name-that-keeps-going-v2',
+      ...NORMAL_CATALOG_RESPONSE.models.slice(0, 8).map((model) => model.id),
+    ].map((modelId, index) => ({
+      modelId,
+      callCount: 40 - index * 4,
+      errorCount: index === 2 ? 3 : 0,
+      spentUsd: Number((2.4 - index * 0.25).toFixed(2)),
+      lastCalledAt: '2026-10-21T18:00:00.000Z',
+    }));
+    await setupProjectSettingsMocks(page, {
+      settings: makeProjectAgentModelSettings({ spentUsd: 12.6, byModel }),
+    });
+    await page.goto(`/projects/${MOCK_PROJECT.id}/settings/agents`);
+
+    await expect(page.getByText(/\$12\.60 of \$20\.00 used this month/)).toBeVisible();
+    await expect(page.getByText('4 more models', { exact: true })).toBeVisible();
+
+    await screenshotAgentModelsSection(page, 'project-settings-many-models-used');
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
   });

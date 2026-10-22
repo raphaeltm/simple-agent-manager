@@ -174,6 +174,56 @@ describe('ProjectAgentModelsSection', () => {
     expect(mocks.toast.success).toHaveBeenCalledWith('Monthly limit saved');
   });
 
+  it('saves the monthly limit when Enter is pressed in the field, but not an invalid value', async () => {
+    mocks.updateProjectAgentModelSettings.mockResolvedValue(
+      makeSettings({ monthlyBudgetUsd: 50, effectiveMonthlyBudgetUsd: 50 })
+    );
+    renderSection(makeSettings());
+    await screen.findByText('$2.00 of $20.00 used this month');
+    const input = screen.getByLabelText('Monthly limit (USD)');
+
+    fireEvent.change(input, { target: { value: '500' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.change(input, { target: { value: '20' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(mocks.updateProjectAgentModelSettings).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: '50' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() =>
+      expect(mocks.updateProjectAgentModelSettings).toHaveBeenCalledWith('proj-1', {
+        monthlyBudgetUsd: 50,
+      })
+    );
+    expect(mocks.updateProjectAgentModelSettings).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('$2.00 of $50.00 used this month')).toBeInTheDocument();
+  });
+
+  it('lists the five models with the most spend and counts the rest in one line', async () => {
+    const byModel = Array.from({ length: 7 }, (_, index) => ({
+      modelId: `@cf/acme/model-${index + 1}`,
+      callCount: 7 - index,
+      errorCount: 0,
+      spentUsd: (7 - index) / 10,
+      lastCalledAt: '2026-10-20T00:00:00Z',
+    }));
+    renderSection(
+      makeSettings({
+        usage: { ...makeSettings().usage, spentUsd: 2.8, callCount: 28, byModel },
+      })
+    );
+    await screen.findByText('$2.80 of $20.00 used this month');
+
+    for (const index of [1, 2, 3, 4, 5]) {
+      expect(screen.getByText(`@cf/acme/model-${index}`)).toBeInTheDocument();
+    }
+    expect(screen.queryByText('@cf/acme/model-6')).not.toBeInTheDocument();
+    expect(screen.queryByText('@cf/acme/model-7')).not.toBeInTheDocument();
+    const more = screen.getByText('2 more models');
+    // model-6 spent $0.20 and model-7 $0.10; formatUsd trims trailing zeros below $1.
+    expect(more.closest('li')).toHaveTextContent('2 more models$0.3');
+  });
+
   it('disables Save and shows a red "Up to $X" hint when the typed budget exceeds the max', async () => {
     renderSection(makeSettings());
     await screen.findByText('$2.00 of $20.00 used this month');

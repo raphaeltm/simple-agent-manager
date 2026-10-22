@@ -16,6 +16,8 @@ import { ModelPicker } from '../agent-models/ModelPicker';
 
 /** Fraction of the effective budget at which the bar turns cautionary, before it is fully used. */
 const NEARLY_USED_FRACTION = 0.9;
+/** Models listed by name under "Used this month"; any others are counted in one summary line. */
+const USED_MODELS_SHOWN = 5;
 
 function formatResetDate(iso: string): string {
   const parsed = new Date(iso);
@@ -137,7 +139,7 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
   const budgetUnchanged = !budgetIsInvalid && parsedBudget === effectiveBudgetDefault;
 
   function handleSaveBudget() {
-    if (budgetHasError) return;
+    if (budgetHasError || budgetUnchanged || saveMutation.isPending) return;
     saveMutation.mutate(
       { monthlyBudgetUsd: parsedBudget },
       { onSuccess: () => toast.success('Monthly limit saved') }
@@ -149,7 +151,10 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
     budgetInputRef.current?.select();
   }
 
-  const usedModels = settings.usage.byModel.slice(0, 5);
+  // The server ranks models by spend; the rest are summarised in one line (rule 65).
+  const usedModels = settings.usage.byModel.slice(0, USED_MODELS_SHOWN);
+  const otherUsedModels = settings.usage.byModel.slice(USED_MODELS_SHOWN);
+  const otherUsedSpentUsd = otherUsedModels.reduce((total, item) => total + item.spentUsd, 0);
   // A platform-level feature toggle outranks the per-project role check: when
   // an administrator has turned agent model calls off, every control is
   // disabled regardless of whether this caller is an owner/admin.
@@ -216,6 +221,12 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
                     budgetDirtyRef.current = true;
                     setBudgetInput(event.currentTarget.value);
                   }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      handleSaveBudget();
+                    }
+                  }}
                   className="w-32"
                 />
               </label>
@@ -278,6 +289,14 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
                 </span>
               </li>
             ))}
+            {otherUsedModels.length > 0 && (
+              <li className="flex min-w-0 items-center justify-between gap-2 text-xs text-fg-muted">
+                <span className="min-w-0 break-words">
+                  {otherUsedModels.length} more model{otherUsedModels.length === 1 ? '' : 's'}
+                </span>
+                <span className="shrink-0 tabular-nums">{formatUsd(otherUsedSpentUsd)}</span>
+              </li>
+            )}
           </ul>
         )}
       </div>
