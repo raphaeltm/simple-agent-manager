@@ -65,6 +65,20 @@ export interface TriggerAdmissionInput {
    * another, the way a GitHub delivery id does. Submission is idempotent per execution id.
    */
   executionId?: string;
+  /**
+   * The stored agent email this attempt holds. Admission's writes to the execution (taking a
+   * failed one back, recording a failure) apply only while the attempt still holds this lease,
+   * so an attempt that lost the email cannot change the execution of the attempt that took over.
+   */
+  emailLease?: { rowId: string; leaseToken: string };
+}
+
+/** True when the caller holds no agent email, or still holds the email lease it passed. */
+const HOLDS_EMAIL_LEASE_SQL = `(? IS NULL OR EXISTS (SELECT 1 FROM trigger_email_messages m
+  WHERE m.id = ? AND m.status = 'processing' AND m.lease_token = ?))`;
+
+function emailLeaseBindings(lease: TriggerAdmissionInput['emailLease']): (string | null)[] {
+  return [lease?.rowId ?? null, lease?.rowId ?? null, lease?.leaseToken ?? null];
 }
 
 async function consecutiveFailureCount(
@@ -383,13 +397,13 @@ export async function admitAndSubmitTriggerExecution(
         .bind(executionId, input.githubDeliveryId)
         .run();
     } else if (previous && input.executionId) {
-      // A caller-owned retry (its own lease is checked in beforeSubmit) takes the failed
-      // attempt's execution back rather than reserving another.
+      // A caller-owned retry takes the failed attempt's execution back rather than reserving
+      // another, while it still holds its email.
       await env.DATABASE.prepare(
         `UPDATE trigger_executions SET status = 'queued', completed_at = NULL
-         WHERE id = ? AND status = 'failed' AND task_id IS NULL`
+         WHERE id = ? AND status = 'failed' AND task_id IS NULL AND ${HOLDS_EMAIL_LEASE_SQL}`
       )
-        .bind(executionId)
+        .bind(executionId, ...emailLeaseBindings(input.emailLease))
         .run();
     }
     await input.beforeSubmit?.(executionId);
@@ -431,7 +445,8 @@ export async function admitAndSubmitTriggerExecution(
       `UPDATE trigger_executions SET status = 'failed', error_message = ?, completed_at = ?
        WHERE id = ? AND trigger_id = ? AND project_id = ? AND task_id IS NULL
          AND (? IS NULL OR EXISTS (SELECT 1 FROM github_trigger_inbox g
-           WHERE g.id = ? AND g.state = 'processing' AND g.lease_token = ?))`
+           WHERE g.id = ? AND g.state = 'processing' AND g.lease_token = ?))
+         AND ${HOLDS_EMAIL_LEASE_SQL}`
     )
       .bind(
         message,
@@ -441,7 +456,8 @@ export async function admitAndSubmitTriggerExecution(
         trigger.projectId,
         input.githubProcessingToken ?? null,
         input.githubDeliveryId ?? null,
-        input.githubProcessingToken ?? null
+        input.githubProcessingToken ?? null,
+        ...emailLeaseBindings(input.emailLease)
       )
       .run();
     log.error('trigger_admission.submission_failed', {

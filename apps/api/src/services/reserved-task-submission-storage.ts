@@ -106,7 +106,11 @@ export async function commitD1Submission(
         limits.dispatchMaxActivePerProject
       )
     : input.source.kind === 'trigger'
-      ? env.DATABASE.prepare(
+      ? // An execution whose agent email SAM rejected (gave up on, or refused) never gains a
+        // task: a slow attempt that outlived its lease would otherwise start one after the
+        // email's run slot was released (services/agent-email/inbound-delivery.ts,
+        // closeDelivery). Executions of other trigger types have no email rows.
+        env.DATABASE.prepare(
           `INSERT INTO tasks ${insertTaskColumns}
            SELECT ${insertTaskValues}
             WHERE EXISTS (
@@ -115,6 +119,11 @@ export async function commitD1Submission(
                  AND trigger_id = ?
                  AND project_id = ?
                  AND (task_id IS NULL OR task_id = ?)
+                 AND NOT EXISTS (
+                   SELECT 1 FROM trigger_email_messages m
+                    WHERE m.trigger_execution_id = trigger_executions.id
+                      AND m.direction = 'inbound' AND m.status = 'rejected'
+                 )
             )`
         ).bind(
           ...insertTaskBindings,
@@ -127,10 +136,13 @@ export async function commitD1Submission(
           `INSERT INTO tasks ${insertTaskColumns}
            VALUES (${insertTaskValues})`
         ).bind(...insertTaskBindings);
+  // A guarded task insert may insert nothing. The rows that hang off the task are then skipped
+  // too, rather than relying on foreign keys to fail the batch.
+  const taskGuarded = Boolean(workflow) || input.source.kind === 'trigger';
   const insertStatus = env.DATABASE.prepare(
     `INSERT INTO task_status_events
        (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
-     SELECT ?, ?, NULL, 'queued', ?, ?, ?, ? ${workflow ? 'WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ?)' : ''}`
+     SELECT ?, ?, NULL, 'queued', ?, ?, ?, ? ${taskGuarded ? 'WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ?)' : ''}`
   ).bind(
     input.identities.initialStatusEventId,
     input.identities.taskId,
@@ -138,7 +150,7 @@ export async function commitD1Submission(
     input.source.initialStatusActorId,
     input.source.initialStatusReason,
     now,
-    ...(workflow ? [input.identities.taskId] : [])
+    ...(taskGuarded ? [input.identities.taskId] : [])
   );
   const insertCheckpoint = env.DATABASE.prepare(
     `INSERT INTO task_submission_checkpoints
@@ -146,7 +158,7 @@ export async function commitD1Submission(
         initial_status_event_id, source_kind, source_id, source_execution_id, triggered_by,
         intent_fingerprint, accepted_snapshot_json, branch_name, task_title,
         checkpoint_state, created_at, updated_at)
-     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'd1_committed', ?, ? ${workflow ? 'WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ?)' : ''}`
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'd1_committed', ?, ? ${taskGuarded ? 'WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ?)' : ''}`
   ).bind(
     input.identities.taskId,
     input.projectId,
@@ -164,7 +176,7 @@ export async function commitD1Submission(
     prepared.snapshot.task.title,
     now,
     now,
-    ...(workflow ? [input.identities.taskId] : [])
+    ...(taskGuarded ? [input.identities.taskId] : [])
   );
 
   if (input.source.kind === 'trigger') {
@@ -174,15 +186,28 @@ export async function commitD1Submission(
         WHERE id = ?
           AND trigger_id = ?
           AND project_id = ?
-          AND (task_id IS NULL OR task_id = ?)`
+          AND (task_id IS NULL OR task_id = ?)
+          AND EXISTS (SELECT 1 FROM tasks WHERE id = ?)`
     ).bind(
       input.identities.taskId,
       input.source.sourceExecutionId,
       input.source.sourceId,
       input.projectId,
+      input.identities.taskId,
       input.identities.taskId
     );
-    await env.DATABASE.batch([insertTask, insertStatus, insertCheckpoint, linkSource]);
+    const [inserted] = await env.DATABASE.batch([
+      insertTask,
+      insertStatus,
+      insertCheckpoint,
+      linkSource,
+    ]);
+    if (!inserted?.meta.changes) {
+      throw new Error(
+        `Trigger execution ${input.source.sourceExecutionId} can no longer start a task: ` +
+          'it is linked to another task, or its agent email was given up'
+      );
+    }
     return;
   }
 

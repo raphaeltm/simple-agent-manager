@@ -4,11 +4,27 @@
  * Before SMTP is answered, an email is stored with what its prompt needs and a stable
  * execution id. From then on SAM owns it: an attempt that crashes or fails is retried from
  * this row (agent-email/recovery.ts), every attempt resumes the same trigger execution
- * (task submission is idempotent per execution id), and an attempt's writes to the row are
- * fenced by its lease token, so a slow attempt that lost its lease cannot overwrite the
- * attempt that took over.
+ * (task submission is idempotent per execution id), and an attempt's writes are fenced by its
+ * lease token, so a slow attempt that lost its lease cannot overwrite the attempt that took
+ * over. That fence covers this row and admission's writes to the execution (`emailLease` in
+ * trigger-admission.ts). Task creation is fenced by the email's end state instead: once an
+ * email is rejected, its execution can no longer gain a task (reserved-task-submission-storage.ts).
  */
-import { and, asc, eq, gt, gte, isNotNull, lt, lte, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  gte,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  not,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
@@ -173,7 +189,7 @@ export async function claimForRetry(
   };
   const stored = parseStored(row.payloadJson);
   if (!stored) {
-    await finishDelivery(db, delivery, 'rejected', now, 'The stored email could not be read');
+    await closeDelivery(db, delivery, heldBy(delivery), now, 'The stored email could not be read');
     return null;
   }
   return { ...delivery, stored };
@@ -183,6 +199,16 @@ type Owned = Pick<ClaimedDelivery, 'rowId' | 'leaseToken'>;
 
 function ownedBy(delivery: Owned) {
   return and(eq(messages.id, delivery.rowId), eq(messages.leaseToken, delivery.leaseToken));
+}
+
+/** The attempt holding this lease may end the email. */
+export function heldBy(delivery: Owned): SQL {
+  return eq(messages.leaseToken, delivery.leaseToken);
+}
+
+/** The sweep may end an email that used every attempt and is not being worked on. */
+function exhausted(maxAttempts: number, nowIso: string): SQL {
+  return and(gte(messages.attempts, maxAttempts), retryableNow(nowIso)) as SQL;
 }
 
 /** Whether this attempt still owns the row; checked before submitting a task. */
@@ -201,28 +227,71 @@ export async function ownsLease(db: Database, delivery: Owned, now: Date): Promi
   return Boolean(row);
 }
 
-/** Record the final outcome and drop the stored email. A no-op for an attempt that lost its lease. */
-export async function finishDelivery(
-  db: Database,
-  delivery: Owned,
-  status: 'accepted' | 'rejected',
-  now: Date,
-  reason?: string
-): Promise<boolean> {
+function closedFields(nowIso: string) {
+  return {
+    payloadJson: null,
+    leaseToken: null,
+    leaseExpiresAt: null,
+    availableAt: null,
+    updatedAt: nowIso,
+  };
+}
+
+/** Record that the agent started and drop the stored email. A no-op for an attempt that lost its lease. */
+export async function acceptDelivery(db: Database, delivery: Owned, now: Date): Promise<boolean> {
   const updated = await db
     .update(messages)
-    .set({
-      status,
-      reason: reason ?? null,
-      payloadJson: null,
-      leaseToken: null,
-      leaseExpiresAt: null,
-      availableAt: null,
-      updatedAt: now.toISOString(),
-    })
+    .set({ status: 'accepted', reason: null, ...closedFields(now.toISOString()) })
     .where(ownedBy(delivery))
     .returning({ id: messages.id });
   return updated.length > 0;
+}
+
+export type ClosedDelivery = 'rejected' | 'accepted' | 'unchanged';
+
+/**
+ * End a stored email that will not be (re)tried, in one batch. A submission can succeed after
+ * its caller saw an error, so an email whose execution already has a task is accepted, never
+ * rejected. Otherwise the email is rejected, and an execution its attempts reserved but never
+ * started is failed so it stops holding a run slot. A task insert racing this batch either
+ * commits first (the email is then accepted) or sees the rejection and is refused.
+ * `unchanged` means `ownership` no longer held: another attempt or sweep ended it first.
+ */
+export async function closeDelivery(
+  db: Database,
+  delivery: Pick<ClaimedDelivery, 'rowId'>,
+  ownership: SQL,
+  now: Date,
+  reason: string
+): Promise<ClosedDelivery> {
+  const nowIso = now.toISOString();
+  const hasTask = sql`EXISTS (SELECT 1 FROM tasks t WHERE t.trigger_execution_id = ${messages.triggerExecutionId})`;
+  const [rejected, accepted] = await db.batch([
+    db
+      .update(messages)
+      .set({ status: 'rejected', reason, ...closedFields(nowIso) })
+      .where(and(eq(messages.id, delivery.rowId), ownership, not(hasTask)))
+      .returning({ id: messages.id }),
+    db
+      .update(messages)
+      .set({ status: 'accepted', reason: null, ...closedFields(nowIso) })
+      .where(and(eq(messages.id, delivery.rowId), ownership, hasTask))
+      .returning({ id: messages.id }),
+    db
+      .update(schema.triggerExecutions)
+      .set({ status: 'failed', errorMessage: reason, completedAt: nowIso })
+      .where(
+        and(
+          eq(schema.triggerExecutions.status, 'queued'),
+          isNull(schema.triggerExecutions.taskId),
+          sql`${schema.triggerExecutions.id} = (SELECT trigger_execution_id FROM trigger_email_messages
+                WHERE id = ${delivery.rowId} AND status = 'rejected')`
+        )
+      ),
+  ]);
+  if (rejected.length > 0) return 'rejected';
+  if (accepted.length > 0) return 'accepted';
+  return 'unchanged';
 }
 
 /** Release the row for a later retry. A no-op for an attempt that lost its lease. */
@@ -258,15 +327,15 @@ export function retryDelayMs(
 }
 
 /**
- * Give up on stored emails that used every attempt and are not being worked on, so no row
- * stays retryable forever. Returns how many were given up.
+ * End stored emails that used every attempt and are not being worked on, so no row stays
+ * retryable forever: each is given up, or accepted if its task turns out to exist.
  */
-export async function giveUpExhausted(
+export async function closeExhausted(
   db: Database,
   now: Date,
   maxAttempts: number,
   limit: number
-): Promise<number> {
+): Promise<{ gaveUp: number; accepted: number }> {
   const nowIso = now.toISOString();
   const stale = await db
     .select({ id: messages.id })
@@ -275,30 +344,24 @@ export async function giveUpExhausted(
       and(
         eq(messages.direction, 'inbound'),
         isNotNull(messages.payloadJson),
-        gte(messages.attempts, maxAttempts),
-        retryableNow(nowIso)
+        exhausted(maxAttempts, nowIso)
       )
     )
     .limit(limit)
     .all();
-  let gaveUp = 0;
+  const counts = { gaveUp: 0, accepted: 0 };
   for (const { id } of stale) {
-    const updated = await db
-      .update(messages)
-      .set({
-        status: 'rejected',
-        reason: `Gave up after ${maxAttempts} attempts to start the agent`,
-        payloadJson: null,
-        leaseToken: null,
-        leaseExpiresAt: null,
-        availableAt: null,
-        updatedAt: nowIso,
-      })
-      .where(and(eq(messages.id, id), gte(messages.attempts, maxAttempts), retryableNow(nowIso)))
-      .returning({ id: messages.id });
-    gaveUp += updated.length;
+    const closed = await closeDelivery(
+      db,
+      { rowId: id },
+      exhausted(maxAttempts, nowIso),
+      now,
+      `Gave up after ${maxAttempts} attempts to start the agent`
+    );
+    if (closed === 'rejected') counts.gaveUp += 1;
+    if (closed === 'accepted') counts.accepted += 1;
   }
-  return gaveUp;
+  return counts;
 }
 
 /** Stored emails a retry may run now, oldest first. */

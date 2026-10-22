@@ -5,6 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import {
+  closeExhausted,
+  recordIntake,
+  scheduleRetry,
+} from '../../../src/services/agent-email/inbound-delivery';
+import type { InboundAgentEmail } from '../../../src/services/agent-email/inbound-message';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import type { startTaskRunnerDO } from '../../../src/services/task-runner-do';
 import { admitAndSubmitTriggerExecution } from '../../../src/services/trigger-admission';
@@ -1311,5 +1317,170 @@ From that information, derive the repository change request and append a short n
       credentialAttributionSource: 'project',
       cloudProvider: 'hetzner',
     });
+  });
+});
+
+describe('agent email executions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    projectDataBoundary.reset();
+  });
+
+  const RECEIVED = new Date('2026-09-07T00:00:00.000Z');
+  const LEASE_MS = 120_000;
+  const ADDRESS = 'agent+k3j2h7m9q2xw4n8p@mail.example.com';
+
+  function inboundEmail(messageId: string): InboundAgentEmail {
+    return {
+      envelopeFrom: 'alice@example.com',
+      envelopeTo: ADDRESS,
+      from: 'alice@example.com',
+      fromName: 'Alice',
+      subject: 'Please look at this',
+      messageId,
+      inReplyTo: null,
+      references: [],
+      text: 'Hello',
+      textTruncated: false,
+      attachments: [],
+      autoSubmitted: null,
+      precedence: null,
+      hasListId: false,
+    };
+  }
+
+  /**
+   * An email stored the way the email() handler stores it, for the fixture's trigger, with its
+   * execution reserved under the email's own execution id, as admission reserves it.
+   */
+  async function storedEmail(fixture: ReservedFixture, messageId: string, sequence: number) {
+    const db = drizzle(fixture.env.DATABASE, { schema });
+    fixture.sqlite
+      .prepare(`UPDATE triggers SET source_type = 'email', max_concurrent = 1 WHERE id = ?`)
+      .run(fixture.triggerId);
+    const intake = await recordIntake(
+      db,
+      {
+        triggerId: fixture.triggerId,
+        projectId: fixture.projectId,
+        messageId,
+        referencesHeader: null,
+        fromAddress: 'alice@example.com',
+        toAddress: ADDRESS,
+        subject: 'Please look at this',
+        rawSize: 512,
+      },
+      { email: inboundEmail(messageId), receivedAt: RECEIVED.toISOString() },
+      RECEIVED,
+      LEASE_MS
+    );
+    if (intake.kind !== 'new') throw new Error('expected a newly stored email');
+    const { executionId } = intake.delivery;
+    fixture.sqlite
+      .prepare(
+        `INSERT INTO trigger_executions (
+           id, trigger_id, project_id, status, rendered_prompt, scheduled_at, sequence_number,
+           created_at
+         ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?)`
+      )
+      .run(
+        executionId,
+        fixture.triggerId,
+        fixture.projectId,
+        fixture.input.prompt,
+        RECEIVED.toISOString(),
+        sequence,
+        RECEIVED.toISOString()
+      );
+    const input: ReservedTaskSubmissionInput = {
+      ...fixture.input,
+      identities: reservedIdentitiesForTriggerExecution(executionId),
+      source: {
+        ...fixture.input.source,
+        triggeredBy: 'email',
+        repositoryAccessFlow: 'trigger-email',
+        sourceExecutionId: executionId,
+        triggerExecutionId: executionId,
+      },
+    };
+    return { db, delivery: intake.delivery, input };
+  }
+
+  /** Submission dependencies whose title generation waits until released. */
+  function pausedAtTitle() {
+    let titleStarted!: () => void;
+    let releaseTitle!: () => void;
+    const started = new Promise<void>((resolve) => {
+      titleStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseTitle = resolve;
+    });
+    const submission = createSubmissionDependencies({
+      generateTitle: vi.fn(async () => {
+        titleStarted();
+        await release;
+        return 'Slow title';
+      }),
+    });
+    return { ...submission, started, release: () => releaseTitle() };
+  }
+
+  it('refuses a late task for an email SAM gave up on mid-submission, after another email took its slot', async () => {
+    const fixture = seedReservedFixture('email-late-task');
+    const first = await storedEmail(fixture, '<first@example.com>', 2);
+    const slow = pausedAtTitle();
+    // The attempt passed every check and is on its way to creating the task.
+    const late = submitReservedTask(fixture.env, first.input, slow.deps);
+    await slow.started;
+
+    // Its lease ran out and every attempt is used, so the sweep gives the email up. That
+    // releases the run slot the email held.
+    expect(
+      await closeExhausted(first.db, new Date(RECEIVED.getTime() + LEASE_MS + 1), 1, 10)
+    ).toEqual({ gaveUp: 1, accepted: 0 });
+    expect(
+      fixture.sqlite
+        .prepare('SELECT status, task_id FROM trigger_executions WHERE id = ?')
+        .get(first.delivery.executionId)
+    ).toEqual({ status: 'failed', task_id: null });
+
+    // The trigger's next email takes the slot and starts its task.
+    const second = await storedEmail(fixture, '<second@example.com>', 3);
+    const fast = createSubmissionDependencies();
+    expect(await submitReservedTask(fixture.env, second.input, fast.deps)).toMatchObject({
+      outcome: 'admitted',
+    });
+
+    slow.release();
+    await expect(late).rejects.toThrow(/can no longer start a task/);
+
+    expectNoSubmission(fixture, first.input);
+    expectOneSubmission(fixture, second.input);
+    expect(slow.deps.startTaskRunner).not.toHaveBeenCalled();
+    expect(
+      scalar(
+        fixture.sqlite,
+        'SELECT COUNT(*) AS value FROM tasks WHERE trigger_id = ?',
+        fixture.triggerId
+      )
+    ).toBe(1);
+  });
+
+  it('still creates the task of an email that is only waiting for a retry', async () => {
+    const fixture = seedReservedFixture('email-retry-wait');
+    const first = await storedEmail(fixture, '<first@example.com>', 2);
+    const slow = pausedAtTitle();
+    const late = submitReservedTask(fixture.env, first.input, slow.deps);
+    await slow.started;
+
+    // An attempt failed and scheduled a retry: the email is still SAM's to deliver.
+    expect(
+      await scheduleRetry(first.db, first.delivery, RECEIVED, 60_000, 'TaskRunner unavailable')
+    ).toBe(true);
+
+    slow.release();
+    expect(await late).toMatchObject({ outcome: 'admitted' });
+    expectOneSubmission(fixture, first.input);
   });
 });

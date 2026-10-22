@@ -87,8 +87,13 @@ background, with the same run each time, so an email never starts two runs:
   time, at most **agentEmail.retryMaxSeconds** apart (900 by default).
 
 On a retry, an automation that is still busy counts as a failed attempt rather than a refusal. If
-every attempt fails, SAM gives up on that email and alerts admins. The sender's mail server sees a
-temporary failure only if SAM could not store the email at all.
+every attempt fails, SAM gives up on that email and alerts admins straight away. Before giving up,
+SAM checks whether the run started after all, for example when an attempt timed out after creating
+it. If it did, the email counts as delivered. Once SAM has given up on an email, a late attempt can
+no longer start a run for it. The background retry waits for one attempt at most
+**agentEmail.processingLeaseSeconds** (120 by default), then moves on to the next email.
+
+The sender's mail server sees a temporary failure only if SAM could not store the email at all.
 
 ## Security
 

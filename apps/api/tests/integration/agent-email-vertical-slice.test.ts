@@ -7,6 +7,8 @@
 import { readFileSync } from 'node:fs';
 
 import Database from 'better-sqlite3';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
@@ -18,10 +20,13 @@ import {
   handleInboundAgentEmail,
   type InboundEmailMessage,
 } from '../../src/services/agent-email/inbound';
+import { claimForRetry } from '../../src/services/agent-email/inbound-delivery';
+import { attemptDelivery } from '../../src/services/agent-email/inbound-process';
 import { readLoopbackStatus } from '../../src/services/agent-email/loopback';
 import { agentEmailSenderFor } from '../../src/services/agent-email/provider';
 import { runAgentEmailRecovery } from '../../src/services/agent-email/recovery';
 import { AgentEmailReplyError, replyToTriggerEmail } from '../../src/services/agent-email/reply';
+import { getAgentEmailLimits } from '../../src/services/agent-email/settings';
 import type { McpTokenData } from '../../src/services/mcp-token';
 import type { TriggerTaskSubmitter } from '../../src/services/trigger-admission';
 import { createAgentEmailTables } from '../helpers/agent-email-tables';
@@ -122,6 +127,41 @@ function inbound(
     rawSize: envelope.rawSize ?? raw.length,
     setReject: vi.fn(),
   };
+}
+
+/**
+ * Operator notifications, faked at the NotificationService Durable Object boundary: records
+ * what each operator receives, deduplicating per key the way the real object does.
+ */
+function operatorInbox(sqlite: Database.Database) {
+  sqlite
+    .prepare(
+      `INSERT INTO users (id, email, name, role, status) VALUES (?, ?, ?, 'superadmin', 'active')`
+    )
+    .run('operator-1', 'ops@example.com', 'Ops');
+  const received: Array<{ userId: string; title: string; sweepName: unknown }> = [];
+  const claimed = new Set<string>();
+  const namespace = {
+    idFromName: (userId: string) => userId,
+    get: (userId: string) => ({
+      claimNotificationDeduplication: async (key: string) => {
+        if (claimed.has(`${userId}:${key}`)) return false;
+        claimed.add(`${userId}:${key}`);
+        return true;
+      },
+      createNotification: async (
+        recipient: string,
+        notification: { title: string; metadata?: Record<string, unknown> }
+      ) => {
+        received.push({
+          userId: recipient,
+          title: notification.title,
+          sweepName: notification.metadata?.sweepName,
+        });
+      },
+    }),
+  };
+  return { namespace: namespace as unknown as DurableObjectNamespace, received };
 }
 
 /** Wrap a D1 adapter so the next "mark this email accepted" write fails once. */
@@ -253,7 +293,12 @@ describe('agent email vertical slice', () => {
     });
   });
 
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    // A failing test must not leave its log spy or fake timers on for the next one.
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    sqlite.close();
+  });
 
   const token = (taskId: string, projectId = PROJECT_ID): McpTokenData => ({
     taskId,
@@ -570,18 +615,16 @@ describe('agent email vertical slice', () => {
       actorUserId: 'admin-1',
     });
     const errorLog = vi.spyOn(log, 'error');
+    const inbox = operatorInbox(sqlite);
+    env.NOTIFICATION = inbox.namespace;
     let clock = new Date();
     const at = () => clock;
     submitter.mockRejectedValue(new Error('TaskRunner unavailable'));
 
-    // Operators hear about a give-up through the failed-sweep alert, which claims this
-    // throttle key before notifying them.
-    const alertKey = 'cron-failure-notification:agent_email_delivery_gave_up';
-
     expect(await handleInboundAgentEmail(inbound(rawEmail()), env, { submitter, now: at })).toEqual(
       { kind: 'queued' }
     );
-    expect(await env.KV.get(alertKey)).toBeNull();
+    expect(inbox.received).toEqual([]);
     const { availableAt } = sqlite
       .prepare('SELECT available_at AS availableAt FROM trigger_email_messages')
       .get() as { availableAt: string };
@@ -597,7 +640,13 @@ describe('agent email vertical slice', () => {
       'agent_email.delivery_gave_up',
       expect.objectContaining({ attempt: 2 })
     );
-    expect(await env.KV.get(alertKey)).not.toBeNull();
+    expect(inbox.received).toEqual([
+      {
+        userId: 'operator-1',
+        title: 'Operational sweep failed: agent_email_delivery_gave_up',
+        sweepName: 'agent_email_delivery_gave_up',
+      },
+    ]);
     expect(sqlite.prepare('SELECT count(*) AS n FROM tasks').get()).toEqual({ n: 0 });
 
     clock = new Date(clock.getTime() + 24 * 60 * 60 * 1000);
@@ -606,7 +655,6 @@ describe('agent email vertical slice', () => {
       gaveUp: 0,
     });
     expect(submitter).toHaveBeenCalledTimes(2);
-    errorLog.mockRestore();
   });
 
   it('rejects unreadable mail cleanly instead of crashing, for triggers and the loopback', async () => {
@@ -671,25 +719,30 @@ describe('agent email vertical slice', () => {
     });
   });
 
-  it('gives up on an email whose last attempt crashed instead of leaving it stuck', async () => {
+  it('gives up on an email whose last attempt died, releasing its run slot without that attempt', async () => {
     await updateAdminSettings(env, {
       changes: [{ name: 'agentEmail.maxDeliveryAttempts', value: 1 }],
       actorUserId: 'admin-1',
     });
+    sqlite.prepare('UPDATE triggers SET max_concurrent = 1 WHERE id = ?').run(TRIGGER_ID);
     let clock = new Date();
     const at = () => clock;
-    let wakeFirst: () => void = () => undefined;
-    submitter.mockImplementationOnce(async () => {
-      await new Promise<void>((resolve) => (wakeFirst = resolve));
-      throw new Error('TaskRunner timed out');
-    });
-    const first = handleInboundAgentEmail(inbound(rawEmail()), env, { submitter, now: at });
+    // The only attempt reserves its execution, then its Worker dies mid-submission: the
+    // submission never returns, so nothing it would have cleaned up gets cleaned up.
+    submitter.mockImplementationOnce(() => new Promise<never>(() => undefined));
+    void handleInboundAgentEmail(inbound(rawEmail()), env, { submitter, now: at });
     await vi.waitFor(() => expect(submitter).toHaveBeenCalledTimes(1));
-    const { leaseExpiresAt } = sqlite
-      .prepare('SELECT lease_expires_at AS leaseExpiresAt FROM trigger_email_messages')
-      .get() as { leaseExpiresAt: string };
+    const stored = sqlite
+      .prepare(
+        `SELECT trigger_execution_id AS executionId, lease_expires_at AS leaseExpiresAt
+           FROM trigger_email_messages`
+      )
+      .get() as { executionId: string; leaseExpiresAt: string };
+    expect(sqlite.prepare('SELECT status FROM trigger_executions').get()).toEqual({
+      status: 'queued',
+    });
 
-    clock = new Date(Date.parse(leaseExpiresAt) + 1);
+    clock = new Date(Date.parse(stored.leaseExpiresAt) + 1);
     expect(await runAgentEmailRecovery(env, undefined, { submitter, now: at })).toMatchObject({
       gaveUp: 1,
       selected: 0,
@@ -697,14 +750,306 @@ describe('agent email vertical slice', () => {
     expect(sqlite.prepare('SELECT status, payload_json FROM trigger_email_messages').get()).toEqual(
       { status: 'rejected', payload_json: null }
     );
+    // The give-up itself released the execution the dead attempt left reserved.
+    expect(
+      sqlite
+        .prepare('SELECT status, task_id FROM trigger_executions WHERE id = ?')
+        .get(stored.executionId)
+    ).toEqual({ status: 'failed', task_id: null });
 
-    // The crashed attempt wakes up later and changes nothing.
-    wakeFirst();
-    expect(await first).toEqual({ kind: 'queued' });
-    expect(sqlite.prepare('SELECT status FROM trigger_email_messages').get()).toEqual({
-      status: 'rejected',
+    // So the trigger's single run slot is free for the next email right away.
+    const next = await handleInboundAgentEmail(
+      inbound(rawEmail({ messageId: '<m2@example.com>', subject: 'Next one' })),
+      env,
+      { submitter, now: at }
+    );
+    expect(next).toMatchObject({ kind: 'accepted' });
+    expect(sqlite.prepare('SELECT count(*) AS n FROM tasks').get()).toEqual({ n: 1 });
+  });
+
+  it("accepts instead of giving up when the last attempt's task exists but recording it failed", async () => {
+    await updateAdminSettings(env, {
+      changes: [{ name: 'agentEmail.maxDeliveryAttempts', value: 1 }],
+      actorUserId: 'admin-1',
     });
+    const errorLog = vi.spyOn(log, 'error');
+    const inbox = operatorInbox(sqlite);
+    env.NOTIFICATION = inbox.namespace;
+    const failing = failNextAcceptedWrite(env.DATABASE);
+    env.DATABASE = failing.db;
+    const realSubmitter = submitter.getMockImplementation()!;
+    submitter.mockImplementationOnce(async (submitEnv, input) => {
+      const result = await realSubmitter(submitEnv, input);
+      failing.arm();
+      return result;
+    });
+    let clock = new Date();
+    const at = () => clock;
+
+    expect(
+      await handleInboundAgentEmail(inbound(rawEmail()), env, { submitter, now: at })
+    ).toMatchObject({ kind: 'accepted' });
+    const row = sqlite
+      .prepare('SELECT status, lease_expires_at AS leaseExpiresAt FROM trigger_email_messages')
+      .get() as { status: string; leaseExpiresAt: string };
+    expect(row.status).toBe('processing');
+
+    // Every attempt is used and the lease ran out, but the agent did start.
+    clock = new Date(Date.parse(row.leaseExpiresAt) + 1);
+    expect(await runAgentEmailRecovery(env, undefined, { submitter, now: at })).toMatchObject({
+      accepted: 1,
+      gaveUp: 0,
+    });
+    expect(
+      sqlite.prepare('SELECT status, reason, payload_json FROM trigger_email_messages').get()
+    ).toEqual({ status: 'accepted', reason: null, payload_json: null });
+    expect(errorLog).not.toHaveBeenCalledWith('agent_email.delivery_gave_up', expect.anything());
+    expect(inbox.received).toEqual([]);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM tasks').get()).toEqual({ n: 1 });
+  });
+
+  it('accepts instead of refusing when the last attempt saw an error after its task was created', async () => {
+    await updateAdminSettings(env, {
+      changes: [{ name: 'agentEmail.maxDeliveryAttempts', value: 1 }],
+      actorUserId: 'admin-1',
+    });
+    // Like the real submission, the task insert links the execution in the same write; the
+    // caller then sees an error from a later step.
+    submitter.mockImplementationOnce(async (_env, input) => {
+      sqlite
+        .prepare(
+          `INSERT INTO tasks (id, project_id, user_id, title, status, triggered_by, trigger_id,
+             trigger_execution_id, created_at, updated_at)
+           VALUES (?, ?, ?, 'Email task', 'queued', 'email', ?, ?, ?, ?)`
+        )
+        .run(
+          input.triggerExecutionId,
+          input.projectId,
+          input.userId,
+          input.triggerId,
+          input.triggerExecutionId,
+          new Date().toISOString(),
+          new Date().toISOString()
+        );
+      sqlite
+        .prepare('UPDATE trigger_executions SET task_id = ? WHERE id = ?')
+        .run(input.triggerExecutionId, input.triggerExecutionId);
+      throw new Error('TaskRunner start timed out');
+    });
+    const message = inbound(rawEmail());
+
+    const outcome = await handleInboundAgentEmail(message, env, { submitter });
+
+    expect(outcome).toMatchObject({ kind: 'accepted' });
+    expect(message.setReject).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT status, payload_json FROM trigger_email_messages').get()).toEqual(
+      { status: 'accepted', payload_json: null }
+    );
+    expect(sqlite.prepare('SELECT count(*) AS n FROM tasks').get()).toEqual({ n: 1 });
+  });
+
+  it('keeps a replaced attempt from failing the execution its successor is still submitting', async () => {
+    let clock = new Date();
+    const at = () => clock;
+    const submit = submitter.getMockImplementation()!;
+    let failFirst: () => void = () => undefined;
+    submitter.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => (failFirst = resolve));
+      throw new Error('TaskRunner timed out');
+    });
+    let releaseSecond: () => void = () => undefined;
+    submitter.mockImplementationOnce(async (submitEnv, input) => {
+      await new Promise<void>((resolve) => (releaseSecond = resolve));
+      return submit(submitEnv, input);
+    });
+    const first = handleInboundAgentEmail(inbound(rawEmail()), env, { submitter, now: at });
+    await vi.waitFor(() => expect(submitter).toHaveBeenCalledTimes(1));
+    const stored = sqlite
+      .prepare(
+        `SELECT trigger_execution_id AS executionId, lease_expires_at AS leaseExpiresAt
+           FROM trigger_email_messages`
+      )
+      .get() as { executionId: string; leaseExpiresAt: string };
+
+    // The lease runs out; the sweep's attempt takes over and is submitting the same execution.
+    clock = new Date(Date.parse(stored.leaseExpiresAt) + 1);
+    const sweep = runAgentEmailRecovery(env, undefined, { submitter, now: at });
+    await vi.waitFor(() => expect(submitter).toHaveBeenCalledTimes(2));
+
+    // The replaced attempt fails now. It no longer holds the email, so it records nothing.
+    failFirst();
+    expect(await first).toEqual({ kind: 'queued' });
+    expect(sqlite.prepare('SELECT status FROM trigger_executions').get()).toEqual({
+      status: 'queued',
+    });
+    expect(sqlite.prepare('SELECT status, attempts FROM trigger_email_messages').get()).toEqual({
+      status: 'processing',
+      attempts: 2,
+    });
+
+    releaseSecond();
+    expect(await sweep).toMatchObject({ accepted: 1 });
+    expect(sqlite.prepare('SELECT id, status FROM trigger_executions').all()).toEqual([
+      { id: stored.executionId, status: 'running' },
+    ]);
+    expect(sqlite.prepare('SELECT id FROM tasks').all()).toEqual([{ id: stored.executionId }]);
+  });
+
+  it('lets only the attempt holding an email take its failed execution back', async () => {
+    let clock = new Date();
+    const at = () => clock;
+    submitter.mockRejectedValueOnce(new Error('TaskRunner unavailable'));
+    expect(await handleInboundAgentEmail(inbound(rawEmail()), env, { submitter, now: at })).toEqual(
+      { kind: 'queued' }
+    );
+    const stored = sqlite
+      .prepare(
+        `SELECT id, available_at AS availableAt, trigger_execution_id AS executionId
+           FROM trigger_email_messages`
+      )
+      .get() as { id: string; availableAt: string; executionId: string };
+    const db = drizzle(env.DATABASE, { schema });
+    const limits = await getAgentEmailLimits(env);
+    const leaseMs = limits.processingLeaseSeconds * 1000;
+    // One attempt claims the email and stalls past its lease; a second attempt takes over.
+    clock = new Date(Date.parse(stored.availableAt) + 1);
+    const stale = await claimForRetry(db, stored.id, clock, leaseMs, limits.maxDeliveryAttempts);
+    clock = new Date(clock.getTime() + leaseMs + 1);
+    const current = await claimForRetry(db, stored.id, clock, leaseMs, limits.maxDeliveryAttempts);
+    if (!stale || !current) throw new Error('fixture email was not claimable');
+    const trigger = await db
+      .select()
+      .from(schema.triggers)
+      .where(eq(schema.triggers.id, TRIGGER_ID))
+      .get();
+    if (!trigger) throw new Error('fixture trigger missing');
+    const context = { db, trigger, projectName: `Project ${PROJECT_ID}`, address: ADDRESS, limits };
+
+    // The stalled attempt resumes: it neither takes the failed execution back nor submits.
+    expect(
+      await attemptDelivery(env, context, stale, { submitter, now: at, refuseBusy: false })
+    ).toEqual({ kind: 'superseded' });
+    expect(
+      sqlite.prepare('SELECT status FROM trigger_executions WHERE id = ?').get(stored.executionId)
+    ).toEqual({ status: 'failed' });
     expect(submitter).toHaveBeenCalledTimes(1);
+
+    // The attempt holding the email does both.
+    expect(
+      await attemptDelivery(env, context, current, { submitter, now: at, refuseBusy: false })
+    ).toMatchObject({ kind: 'accepted' });
+    expect(sqlite.prepare('SELECT id, status FROM trigger_executions').all()).toEqual([
+      { id: stored.executionId, status: 'running' },
+    ]);
+  });
+
+  it('moves on to the next email when an attempt hangs, instead of stalling the sweep', async () => {
+    let clock = new Date();
+    const at = () => clock;
+    submitter.mockRejectedValueOnce(new Error('TaskRunner unavailable'));
+    submitter.mockRejectedValueOnce(new Error('TaskRunner unavailable'));
+    for (const id of ['<m1@example.com>', '<m2@example.com>']) {
+      expect(
+        await handleInboundAgentEmail(inbound(rawEmail({ messageId: id })), env, {
+          submitter,
+          now: at,
+        })
+      ).toEqual({ kind: 'queued' });
+    }
+    const due = sqlite
+      .prepare('SELECT MAX(available_at) AS availableAt FROM trigger_email_messages')
+      .get() as { availableAt: string };
+    clock = new Date(Date.parse(due.availableAt) + 1);
+    // The first email's retry hangs for good; the second one's goes through.
+    submitter.mockImplementationOnce(() => new Promise<never>(() => undefined));
+    const leaseMs = (await getAgentEmailLimits(env)).processingLeaseSeconds * 1000;
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const sweep = runAgentEmailRecovery(env, undefined, { submitter, now: at });
+      await vi.waitFor(() => expect(submitter).toHaveBeenCalledTimes(3));
+      await vi.advanceTimersByTimeAsync(leaseMs);
+      expect(await sweep).toMatchObject({ selected: 2, accepted: 1, timedOut: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(
+      sqlite
+        .prepare(
+          'SELECT message_id AS messageId, status FROM trigger_email_messages ORDER BY message_id'
+        )
+        .all()
+    ).toEqual([
+      { messageId: '<m1@example.com>', status: 'processing' },
+      { messageId: '<m2@example.com>', status: 'accepted' },
+    ]);
+  });
+
+  it('alerts operators about a given-up email before retrying the rest of the batch', async () => {
+    await updateAdminSettings(env, {
+      changes: [{ name: 'agentEmail.maxDeliveryAttempts', value: 2 }],
+      actorUserId: 'admin-1',
+    });
+    const inbox = operatorInbox(sqlite);
+    env.NOTIFICATION = inbox.namespace;
+    let clock = new Date();
+    const at = () => clock;
+    // Both emails' first attempts fail.
+    submitter.mockRejectedValueOnce(new Error('TaskRunner unavailable'));
+    submitter.mockRejectedValueOnce(new Error('TaskRunner unavailable'));
+    for (const id of ['<m1@example.com>', '<m2@example.com>']) {
+      await handleInboundAgentEmail(inbound(rawEmail({ messageId: id })), env, {
+        submitter,
+        now: at,
+      });
+    }
+    const rows = () =>
+      sqlite
+        .prepare(
+          `SELECT message_id AS messageId, status, attempts, available_at AS availableAt,
+                  lease_expires_at AS leaseExpiresAt
+             FROM trigger_email_messages ORDER BY message_id`
+        )
+        .all() as Array<{
+        messageId: string;
+        status: string;
+        attempts: number;
+        availableAt: string | null;
+        leaseExpiresAt: string | null;
+      }>;
+    clock = new Date(Date.parse(rows()[1]!.availableAt!) + 1);
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      // The first email's last attempt dies mid-submission; this sweep never finishes it.
+      submitter.mockImplementationOnce(() => new Promise<never>(() => undefined));
+      void runAgentEmailRecovery(env, undefined, { submitter, now: at });
+      await vi.waitFor(() => expect(submitter).toHaveBeenCalledTimes(3));
+      expect(rows()[0]).toMatchObject({ status: 'processing', attempts: 2 });
+
+      // Its lease runs out. The next sweep gives it up, and the second email's retry hangs.
+      clock = new Date(Date.parse(rows()[0]!.leaseExpiresAt!) + 1);
+      submitter.mockImplementationOnce(() => new Promise<never>(() => undefined));
+      const background: Array<Promise<unknown>> = [];
+      const stats = await runAgentEmailRecovery(env, (work) => background.push(work), {
+        submitter,
+        now: at,
+      });
+
+      expect(stats).toMatchObject({ gaveUp: 1 });
+      expect(background).toHaveLength(1);
+      // The alert went out with the give-up, not behind the retry still in flight.
+      expect(inbox.received).toEqual([
+        expect.objectContaining({
+          userId: 'operator-1',
+          sweepName: 'agent_email_delivery_gave_up',
+        }),
+      ]);
+      await vi.waitFor(() => expect(submitter).toHaveBeenCalledTimes(4));
+      expect(rows().map((row) => row.status)).toEqual(['rejected', 'processing']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('lets the agent reply even if recording acceptance failed, and the sweep repairs it', async () => {
@@ -749,7 +1094,6 @@ describe('agent email vertical slice', () => {
       sqlite.prepare("SELECT status FROM trigger_email_messages WHERE direction = 'inbound'").all()
     ).toEqual([{ status: 'accepted' }]);
     expect(sqlite.prepare('SELECT count(*) AS n FROM tasks').get()).toEqual({ n: 1 });
-    errorLog.mockRestore();
   });
 
   it('acknowledges a copy that arrives while the first attempt is still running', async () => {

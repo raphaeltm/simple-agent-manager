@@ -68,7 +68,7 @@ export const AGENT_EMAIL_SETTINGS = [
     name: 'agentEmail.processingLeaseSeconds',
     defaultValue: DEFAULT_AGENT_EMAIL_PROCESSING_LEASE_SECONDS,
     description:
-      'Seconds one attempt to start an agent from an email owns it before a retry may take over.',
+      'Seconds one attempt to start an agent from an email owns it before a retry may take over. The retry sweep waits no longer than this for one attempt.',
     range: { min: 10, max: 3_600 },
   },
   {

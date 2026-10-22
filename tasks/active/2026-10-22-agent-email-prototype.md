@@ -316,7 +316,26 @@ Review of `f633d9b41` ([PR comment](https://github.com/raphaeltm/simple-agent-ma
 7. **S7: the UI implied verified senders and did not say the address must stay private.**
    - **Fix (`95ba7ad7a`, `0b4fc7969`):** the copy says senders are matched by From address, that SAM cannot verify the sender yet, and to keep the address private.
 
-Astra's re-review of the fixes is task `01M5JP7DXCF0CDV4QCHF72BK91`.
+### Re-review — Astra High, task `01M5JP7DXCF0CDV4QCHF72BK91`, 2026-10-22
+
+Review of `142d1463a` ([PR comment](https://github.com/raphaeltm/simple-agent-manager/pull/2413#issuecomment-6351355936)): findings 2–7 fixed, finding 1 incomplete. One blocker and two should-fix items, all addressed:
+
+1. **BLOCKER: the email lease did not fence execution writes or late task creation.**
+   - A slow attempt could pass `beforeSubmit`, lose its lease, and create its task after the email was given up and another email took the slot.
+   - An old attempt could mark a newer owner's unlinked execution failed.
+   - **Fix:** admission's requeue and failure writes require the attempt's `emailLease`.
+   - The trigger task insert refuses an execution whose inbound email is rejected, in the same statement.
+   - Rows that hang off the task (status event, checkpoint, execution link) are written only with the task. A refused insert raises an explicit error instead of relying on foreign keys; the SQLite test schema has none.
+2. **SHOULD-FIX: giving up did not reconcile the task or the execution.**
+   - **Fix:** every rejection goes through `closeDelivery`, one batch:
+     - it accepts the email if its task exists;
+     - otherwise it rejects the email and fails an execution its attempts left `queued`, releasing the run slot without waiting for the stale-execution cleanup.
+3. **SHOULD-FIX: a hung submission could stall the sweep, and alerts waited for the batch.**
+   - **Fix:** the sweep waits for one attempt at most its lease, then moves on.
+   - Operators are alerted as soon as an email is given up: before the batch for exhausted emails, and right after an in-batch give-up.
+   - The alert test now checks delivery to an operator at the NotificationService boundary, not a KV key.
+
+Every new guard was proven discriminating. Test teardown now restores spies and timers, so one failing test cannot cascade into the next. The GitHub inbox has the same pre-existing late-task race: `tasks/backlog/2026-10-22-github-trigger-late-task-after-exhaustion.md`.
 
 ## Notes / log
 

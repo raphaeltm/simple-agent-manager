@@ -2,7 +2,8 @@
  * One attempt to start the agent for a stored inbound email. The email() handler makes the
  * first attempt while the sender's server waits; the recovery sweep makes every later one.
  * Each attempt resumes the email's own trigger execution, so a retry can never reserve a
- * second run slot or start a second task for the same email.
+ * second run slot or start a second task for the same email. An attempt ends an email only
+ * through `closeDelivery`, which accepts instead of rejecting when the email's task exists.
  */
 import type { drizzle } from 'drizzle-orm/d1';
 
@@ -13,8 +14,10 @@ import { admitAndSubmitTriggerExecution } from '../trigger-admission';
 import { submitTriggeredTask } from '../trigger-submit';
 import { buildEmailContext, renderEmailPrompt } from './context';
 import {
+  acceptDelivery,
   type ClaimedDelivery,
-  finishDelivery,
+  closeDelivery,
+  heldBy,
   ownsLease,
   retryDelayMs,
   scheduleRetry,
@@ -54,28 +57,56 @@ export interface AttemptOptions {
 
 const BUSY = 'This agent is busy with earlier email; try again later';
 
+function logContextOf(delivery: ClaimedDelivery) {
+  return {
+    triggerId: delivery.triggerId,
+    projectId: delivery.projectId,
+    executionId: delivery.executionId,
+    attempt: delivery.attempts,
+  };
+}
+
+/**
+ * End the email instead of retrying it. `refused` is what the caller reports when the email
+ * was rejected; an email whose task turns out to exist is accepted instead.
+ */
+async function close(
+  context: DeliveryContext,
+  delivery: ClaimedDelivery,
+  now: Date,
+  reason: string,
+  refused: DeliveryOutcome
+): Promise<DeliveryOutcome> {
+  const closed = await closeDelivery(context.db, delivery, heldBy(delivery), now, reason);
+  if (closed === 'accepted') {
+    log.info('agent_email.inbound_accepted', { ...logContextOf(delivery), lateTask: true });
+    return { kind: 'accepted', executionId: delivery.executionId };
+  }
+  if (closed === 'unchanged') {
+    log.info('agent_email.attempt_superseded', logContextOf(delivery));
+    return { kind: 'superseded' };
+  }
+  return refused;
+}
+
 async function retryOrGiveUp(
   context: DeliveryContext,
   delivery: ClaimedDelivery,
   now: Date,
   reason: string
 ): Promise<DeliveryOutcome> {
-  const logContext = {
-    triggerId: delivery.triggerId,
-    projectId: delivery.projectId,
-    executionId: delivery.executionId,
-    attempt: delivery.attempts,
-  };
+  const logContext = logContextOf(delivery);
   if (delivery.attempts >= context.limits.maxDeliveryAttempts) {
-    await finishDelivery(
-      context.db,
+    const outcome = await close(
+      context,
       delivery,
-      'rejected',
       now,
-      `Gave up after ${delivery.attempts} attempts: ${reason}`.slice(0, 500)
-    ).catch(() => false);
-    log.error('agent_email.delivery_gave_up', { ...logContext, reason });
-    return { kind: 'gave_up' };
+      `Gave up after ${delivery.attempts} attempts: ${reason}`.slice(0, 500),
+      { kind: 'gave_up' }
+    );
+    if (outcome.kind === 'gave_up')
+      log.error('agent_email.delivery_gave_up', { ...logContext, reason });
+    return outcome;
   }
   const delayMs = retryDelayMs(delivery.attempts, context.limits);
   // If this write fails too, the lease expires and the sweep retries the row anyway.
@@ -93,12 +124,7 @@ export async function attemptDelivery(
   const clock = options.now ?? (() => new Date());
   const { db, trigger, limits } = context;
   const { email, receivedAt } = delivery.stored;
-  const logContext = {
-    triggerId: trigger.id,
-    projectId: trigger.projectId,
-    executionId: delivery.executionId,
-    attempt: delivery.attempts,
-  };
+  const logContext = logContextOf(delivery);
   try {
     const admission = await admitAndSubmitTriggerExecution(
       env,
@@ -108,8 +134,10 @@ export async function attemptDelivery(
         triggeredBy: 'email',
         scheduledAt: receivedAt,
         executionId: delivery.executionId,
+        emailLease: { rowId: delivery.rowId, leaseToken: delivery.leaseToken },
         // A slow attempt that lost its lease stops before submitting. If it already passed
-        // this check, submission is idempotent per execution id, so both converge on one task.
+        // this check, submission is idempotent per execution id, so both converge on one task,
+        // and once the email has been given up the task insert refuses its execution.
         beforeSubmit: async () => {
           if (!(await ownsLease(db, delivery, clock()))) {
             throw new Error('Another attempt took over this email');
@@ -136,15 +164,13 @@ export async function attemptDelivery(
     if (admission.outcome === 'submitted' || admission.outcome === 'pending') {
       // Replies find the email by its execution id, not by this status, so a failed write here
       // only delays the bookkeeping: the sweep repairs it once the lease expires.
-      const recorded = await finishDelivery(db, delivery, 'accepted', clock()).catch(
-        (error: unknown) => {
-          log.error('agent_email.acceptance_unrecorded', {
-            ...logContext,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          return false;
-        }
-      );
+      const recorded = await acceptDelivery(db, delivery, clock()).catch((error: unknown) => {
+        log.error('agent_email.acceptance_unrecorded', {
+          ...logContext,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      });
       log.info('agent_email.inbound_accepted', {
         ...logContext,
         outcome: admission.outcome,
@@ -157,15 +183,13 @@ export async function attemptDelivery(
         admission.reason === 'paused'
           ? 'This agent address is paused'
           : 'This agent address is turned off';
-      await finishDelivery(db, delivery, 'rejected', clock(), reason);
       log.info('agent_email.inbound_rejected', { ...logContext, reason: admission.reason });
-      return { kind: 'refused', reason };
+      return close(context, delivery, clock(), reason, { kind: 'refused', reason });
     }
     if (admission.outcome === 'skipped') {
       if (!options.refuseBusy) return retryOrGiveUp(context, delivery, clock(), BUSY);
-      await finishDelivery(db, delivery, 'rejected', clock(), admission.reason);
       log.info('agent_email.inbound_rejected', { ...logContext, reason: admission.reason });
-      return { kind: 'refused', reason: BUSY };
+      return close(context, delivery, clock(), admission.reason, { kind: 'refused', reason: BUSY });
     }
     if (!(await ownsLease(db, delivery, clock()))) {
       log.info('agent_email.attempt_superseded', logContext);
