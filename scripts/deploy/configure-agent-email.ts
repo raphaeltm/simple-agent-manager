@@ -29,6 +29,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { Api, type CloudflareRequest, fetchRequest, isAuthFailure } from './cloudflare-rest.js';
 import { DEPLOYMENT_CONFIG } from './config.js';
 
 /** Subdomain label under BASE_DOMAIN. Mirrors AGENT_EMAIL_SUBDOMAIN_LABEL in packages/shared. */
@@ -43,25 +44,6 @@ const CLOUDFLARE_SPF_INCLUDE = 'include:_spf.mx.cloudflare.net';
 const RULES_PAGE_SIZE = 50;
 const MAX_RULE_PAGES = 20;
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
-
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH';
-
-export interface CloudflareEnvelope {
-  success?: boolean;
-  errors?: Array<{ code?: number; message?: string }>;
-  result?: unknown;
-}
-
-export interface CloudflareResponse {
-  status: number;
-  body: CloudflareEnvelope;
-}
-
-export type CloudflareRequest = (
-  method: HttpMethod,
-  path: string,
-  body?: unknown
-) => Promise<CloudflareResponse>;
 
 export interface DnsRecord {
   id?: string;
@@ -108,47 +90,6 @@ export function agentEmailDomain(baseDomain: string): string {
 
 export function agentEmailRoutedAddress(baseDomain: string): string {
   return `${AGENT_EMAIL_LOCAL_PART}@${agentEmailDomain(baseDomain)}`;
-}
-
-class CloudflareApiError extends Error {
-  constructor(
-    readonly method: HttpMethod,
-    readonly path: string,
-    readonly response: CloudflareResponse
-  ) {
-    const detail = (response.body.errors ?? [])
-      .map((error) => `${error.code ?? '?'} ${error.message ?? ''}`.trim())
-      .join('; ');
-    super(
-      `Cloudflare ${method} ${path} failed with HTTP ${response.status}: ${detail || 'no detail'}`
-    );
-  }
-}
-
-function isAuthFailure(response: CloudflareResponse): boolean {
-  if (response.status === 401 || response.status === 403) return true;
-  return (response.body.errors ?? []).some(
-    (error) => error.code === 10000 || /authentication|unauthori[sz]ed/i.test(error.message ?? '')
-  );
-}
-
-/** Counts write calls so idempotent re-runs can be asserted and reported. */
-class Api {
-  writes = 0;
-  constructor(private readonly request: CloudflareRequest) {}
-
-  async raw(method: HttpMethod, path: string, body?: unknown): Promise<CloudflareResponse> {
-    if (method !== 'GET') this.writes += 1;
-    return this.request(method, path, body);
-  }
-
-  async call<T>(method: HttpMethod, path: string, body?: unknown): Promise<T> {
-    const response = await this.raw(method, path, body);
-    if (response.status < 200 || response.status >= 300 || response.body.success === false) {
-      throw new CloudflareApiError(method, path, response);
-    }
-    return response.body.result as T;
-  }
 }
 
 const PERMISSION_PROBES = [
@@ -434,49 +375,6 @@ export function readAgentEmailMarker(stateDirectory = DEPLOY_STATE_DIR): string 
   const path = resolve(stateDirectory, AGENT_EMAIL_MARKER_FILE);
   if (!existsSync(path)) return null;
   return readFileSync(path, 'utf-8').trim() || null;
-}
-
-function fetchRequest(apiToken: string): CloudflareRequest {
-  return async (method, path, body) => {
-    const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const text = await response.text();
-    let parsed: unknown = {};
-    try {
-      parsed = text ? (JSON.parse(text) as unknown) : {};
-    } catch {
-      parsed = { success: false, errors: [{ message: text.slice(0, 200) }] };
-    }
-    return { status: response.status, body: toEnvelope(parsed) };
-  };
-}
-
-/** Narrow a Cloudflare v4 response body; anything unexpected becomes an unsuccessful envelope. */
-export function toEnvelope(value: unknown): CloudflareEnvelope {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { success: false, errors: [{ message: 'Cloudflare returned a non-object body' }] };
-  }
-  const record = value as Record<string, unknown>;
-  const errors = Array.isArray(record.errors)
-    ? record.errors.map((entry) => {
-        const error = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {};
-        return {
-          code: typeof error.code === 'number' ? error.code : undefined,
-          message: typeof error.message === 'string' ? error.message : undefined,
-        };
-      })
-    : undefined;
-  return {
-    success: typeof record.success === 'boolean' ? record.success : undefined,
-    errors,
-    result: record.result,
-  };
 }
 
 function requireEnv(name: string): string {

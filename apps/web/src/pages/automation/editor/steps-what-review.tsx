@@ -11,7 +11,6 @@ import {
   ResourceRequirementsInput,
   validateResourceState,
 } from '../../../components/resource-requirements';
-import { describeCron } from '../../../components/triggers/schedule-cron';
 import {
   CRON_TEMPLATE_VARIABLES,
   EFFORT_LABELS,
@@ -22,20 +21,13 @@ import {
 } from '../../../components/triggers/trigger-form-support';
 import { AUTOMATION_CHAT_PICKER_LIMIT } from '../../../lib/automation-config';
 import type { AutomationLookups } from '../data';
-import {
-  describeEventFilter,
-  emailTriggerWhen,
-  githubTriggerWhen,
-  INCIDENT_TRIGGER_WHEN,
-  webhookTriggerWhen,
-} from '../describe';
 import { CheckRow, ChoiceCards, Field, INPUT_CLASS } from '../fields';
-import { resolveOnceTime } from '../schedule-time';
-import { fullDate, viewerZone } from '../time';
+import { fullDate } from '../time';
 import { Disclosure, Panel, PromptText } from '../ui';
-import { nextRuns, toCron } from './cron';
-import { type Errors, watchFilter } from './requests';
+import { nextRuns } from './cron';
+import type { Errors } from './requests';
 import { canMessageChat, type EditorState, isTriggerStart } from './state';
+import { whenSentence } from './when-sentence';
 
 const VARIABLES = {
   schedule: CRON_TEMPLATE_VARIABLES,
@@ -294,48 +286,6 @@ export function StepWhat({
       )}
     </div>
   );
-}
-
-/** "Weekdays at 9:00 AM (Europe/Paris time)", "When an issue is opened", … */
-export function whenSentence(state: EditorState): string {
-  switch (state.start) {
-    case 'schedule': {
-      const cron = toCron(state.schedule);
-      const described = describeCron(cron);
-      const text =
-        described === cron || described === 'Invalid expression'
-          ? `On the schedule ${cron}`
-          : described;
-      return state.schedule.zone === viewerZone() ? text : `${text} (${state.schedule.zone} time)`;
-    }
-    case 'once': {
-      const time = resolveOnceTime(state.once);
-      return 'dueAt' in time ? `On ${fullDate(time.dueAt, state.once.zone)}` : 'Once';
-    }
-    case 'github':
-      return githubTriggerWhen(state.github.eventType, {
-        actions: state.github.actions
-          .split(',')
-          .map((item) => item.trim())
-          .filter(Boolean),
-        commandPrefix:
-          state.github.eventType === 'issue_comment' ? state.github.commandPrefix : undefined,
-        branches: state.github.branches
-          .split(',')
-          .map((item) => item.trim())
-          .filter(Boolean),
-      });
-    case 'webhook':
-      return webhookTriggerWhen(state.webhook.sourceLabel);
-    case 'email':
-      return emailTriggerWhen(null);
-    case 'event':
-      return `When ${describeEventFilter(watchFilter(state)).clause}`;
-    case 'incident':
-      return INCIDENT_TRIGGER_WHEN;
-    default:
-      return '';
-  }
 }
 
 export function StepReview({

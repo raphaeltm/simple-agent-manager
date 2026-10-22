@@ -8,14 +8,12 @@ import {
   AGENT_EMAIL_LOCAL_PART as SHARED_LOCAL_PART,
   AGENT_EMAIL_SUBDOMAIN_LABEL as SHARED_SUBDOMAIN_LABEL,
 } from '../../packages/shared/src/constants/agent-email';
+import type { CloudflareRequest, CloudflareResponse, HttpMethod } from '../deploy/cloudflare-rest';
 import {
   AGENT_EMAIL_LOCAL_PART,
   AGENT_EMAIL_SUBDOMAIN_LABEL,
-  type CloudflareRequest,
-  type CloudflareResponse,
   configureAgentEmail,
   type DnsRecord,
-  type HttpMethod,
   readAgentEmailMarker,
   writeAgentEmailMarker,
 } from '../deploy/configure-agent-email';
@@ -276,6 +274,39 @@ describe('configureAgentEmail', () => {
     expect(fake.rules[0]).toMatchObject({
       id: 'rule-old',
       actions: [{ type: 'worker', value: [WORKER] }],
+    });
+  });
+
+  it('finds and repoints its rule when the zone has more rules than one page', async () => {
+    const fake = new FakeCloudflare();
+    // One full page of unrelated rules (the deploy reads 50 per page), then SAM's own rule.
+    for (let index = 0; index < 50; index += 1) {
+      fake.rules.push({
+        id: `other-${index}`,
+        name: `forward ${index}`,
+        enabled: true,
+        matchers: [{ type: 'literal', field: 'to', value: `person${index}@fixture.example` }],
+        actions: [{ type: 'forward', value: [`person${index}@elsewhere.example`] }],
+      });
+    }
+    fake.rules.push({
+      id: 'rule-sam',
+      name: 'SAM agent email',
+      enabled: true,
+      matchers: [{ type: 'literal', field: 'to', value: 'agent@mail.fixture.example' }],
+      actions: [{ type: 'worker', value: ['some-other-worker'] }],
+    });
+
+    await run(fake);
+
+    expect(fake.rules).toHaveLength(51);
+    expect(fake.rules.at(-1)).toMatchObject({
+      id: 'rule-sam',
+      actions: [{ type: 'worker', value: [WORKER] }],
+    });
+    expect(fake.calls).toContainEqual({
+      method: 'GET',
+      path: `/zones/${ZONE}/email/routing/rules?page=2&per_page=50`,
     });
   });
 

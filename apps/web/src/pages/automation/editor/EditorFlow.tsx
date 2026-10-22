@@ -17,7 +17,8 @@ import { KindIcon, Panel } from '../ui';
 import { type Errors, type StepId, validateStep } from './requests';
 import { type EditorState, isTriggerStart, withEmailDefaults } from './state';
 import { StepStart, StepWhen } from './steps-start-when';
-import { StepReview, StepWhat, whenSentence } from './steps-what-review';
+import { StepReview, StepWhat } from './steps-what-review';
+import { whenSentence } from './when-sentence';
 
 const STEP_TEXT: Record<StepId, { label: string; title: string; hint: string }> = {
   start: {
