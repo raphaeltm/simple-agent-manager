@@ -15,6 +15,7 @@ import { describeCron } from '../../../components/triggers/schedule-cron';
 import {
   CRON_TEMPLATE_VARIABLES,
   EFFORT_LABELS,
+  EMAIL_TEMPLATE_VARIABLES,
   GITHUB_TEMPLATE_VARIABLES,
   INCIDENT_TEMPLATE_VARIABLES,
   WEBHOOK_TEMPLATE_VARIABLES,
@@ -23,6 +24,7 @@ import { AUTOMATION_CHAT_PICKER_LIMIT } from '../../../lib/automation-config';
 import type { AutomationLookups } from '../data';
 import {
   describeEventFilter,
+  emailTriggerWhen,
   githubTriggerWhen,
   INCIDENT_TRIGGER_WHEN,
   webhookTriggerWhen,
@@ -39,6 +41,7 @@ const VARIABLES = {
   schedule: CRON_TEMPLATE_VARIABLES,
   github: GITHUB_TEMPLATE_VARIABLES,
   webhook: WEBHOOK_TEMPLATE_VARIABLES,
+  email: EMAIL_TEMPLATE_VARIABLES,
   incident: INCIDENT_TEMPLATE_VARIABLES,
 } as const;
 
@@ -175,7 +178,9 @@ export function StepWhat({
             hint={
               state.start === 'webhook'
                 ? 'Webhook runs always use the profile you pick here.'
-                : 'Decides the model, tools and machine.'
+                : state.start === 'email'
+                  ? 'Email runs always use the profile you pick here.'
+                  : 'Decides the model, tools and machine.'
             }
           >
             {({ id, describedBy, invalid }) => (
@@ -187,7 +192,9 @@ export function StepWhat({
                 onChange={(event) => set({ agentProfileId: event.target.value })}
               >
                 <option value="">
-                  {state.start === 'webhook' ? 'Pick a profile' : 'Project default'}
+                  {state.start === 'webhook' || state.start === 'email'
+                    ? 'Pick a profile'
+                    : 'Project default'}
                 </option>
                 {lookups.profiles.map((profile) => (
                   <option key={profile.id} value={profile.id}>
@@ -320,6 +327,8 @@ export function whenSentence(state: EditorState): string {
       });
     case 'webhook':
       return webhookTriggerWhen(state.webhook.sourceLabel);
+    case 'email':
+      return emailTriggerWhen(null);
     case 'event':
       return `When ${describeEventFilter(watchFilter(state)).clause}`;
     case 'incident':

@@ -20,6 +20,7 @@ import { describeCron } from '../../components/triggers/schedule-cron';
 import type { AutomationKind } from '../../lib/automation-routes';
 import {
   describeEventFilter,
+  emailTriggerWhen,
   githubTriggerWhen,
   INCIDENT_TRIGGER_WHEN,
   webhookTriggerWhen,
@@ -27,7 +28,7 @@ import {
 import { dateTimeLabel, viewerZone } from './time';
 
 /** What starts an automation, which is also how the overview groups it. */
-export type StartKind = 'schedule' | 'once' | 'github' | 'webhook' | 'event' | 'incident';
+export type StartKind = 'schedule' | 'once' | 'github' | 'webhook' | 'email' | 'event' | 'incident';
 
 /**
  * - `on` / `paused` / `off`: recurring and reacting automations.
@@ -82,6 +83,7 @@ export const isStopped = (item: AutomationItem) => item.state === 'paused' || it
 export const isReaction = (item: AutomationItem) =>
   item.start === 'github' ||
   item.start === 'webhook' ||
+  item.start === 'email' ||
   item.start === 'event' ||
   item.start === 'incident';
 
@@ -179,6 +181,8 @@ export function triggerWhen(trigger: TriggerResponse): { when: string; whenNote?
       };
     case 'webhook':
       return { when: webhookTriggerWhen(trigger.webhookConfig?.sourceLabel) };
+    case 'email':
+      return { when: emailTriggerWhen(trigger.emailConfig?.address) };
     case 'incident':
       return { when: INCIDENT_TRIGGER_WHEN };
     default: {

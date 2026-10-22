@@ -11,21 +11,26 @@ import {
   AlarmClock,
   Ban,
   CalendarClock,
+  Check,
   ChevronDown,
   ChevronRight,
   CircleAlert,
   CircleCheck,
   CircleX,
+  Copy,
   Github,
   LoaderCircle,
+  Mail,
   Radio,
   ShieldAlert,
   SkipForward,
   Webhook,
 } from 'lucide-react';
 import type { ComponentType, ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 
+import { useToast } from '../../hooks/useToast';
 import type { Outcome } from './describe';
 import type { AutomationItem, StartKind } from './model';
 import { useRadioKeys } from './radio-keys';
@@ -39,11 +44,16 @@ type IconType = ComponentType<{ size?: number; className?: string; 'aria-hidden'
 const tint = (color: string, percent = 14) =>
   `color-mix(in srgb, ${color} ${percent}%, transparent)`;
 
+// The palette has six swatch-safe tokens and five are already claimed below; email gets a
+// deliberate blend of two (not a new raw color) so it still reads as its own kind at a glance.
+const EMAIL_COLOR = 'color-mix(in srgb, var(--sam-color-purple) 55%, var(--sam-color-info-fg) 45%)';
+
 export const START_META: Record<StartKind, { label: string; Icon: IconType; color: string }> = {
   schedule: { label: 'Schedule', Icon: CalendarClock, color: 'var(--sam-color-success-fg)' },
   once: { label: 'One time', Icon: AlarmClock, color: 'var(--sam-color-info-fg)' },
   github: { label: 'GitHub', Icon: Github, color: 'var(--sam-color-fg-primary)' },
   webhook: { label: 'Webhook', Icon: Webhook, color: 'var(--sam-color-purple)' },
+  email: { label: 'Email', Icon: Mail, color: EMAIL_COLOR },
   event: { label: 'Event watch', Icon: Radio, color: 'var(--sam-color-warning-fg)' },
   incident: { label: 'Admin', Icon: ShieldAlert, color: 'var(--sam-color-fg-muted)' },
 };
@@ -393,5 +403,34 @@ export function Chips<T extends string>({
         );
       })}
     </div>
+  );
+}
+
+/** How long the copy button shows its check mark (as the shared log CopyButton does). */
+const COPIED_FEEDBACK_MS = 1500;
+
+/** A labelled copy-to-clipboard button for a short value shown in a `<code>` chip. */
+export function CopyButton({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  const toast = useToast();
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  return (
+    <button
+      type="button"
+      aria-label={`Copy ${label}`}
+      onClick={() => {
+        navigator.clipboard.writeText(value).then(
+          () => setCopied(true),
+          () => toast.error('Copy failed. Select the text and copy it instead.')
+        );
+      }}
+      className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border-default bg-transparent text-fg-primary hover:bg-surface-hover"
+    >
+      {copied ? <Check size={16} aria-hidden /> : <Copy size={16} aria-hidden />}
+    </button>
   );
 }

@@ -12,13 +12,12 @@ import {
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { Check, Copy, RotateCw } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { RotateCw } from 'lucide-react';
+import { useState } from 'react';
 
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { WebhookCredentialDialog } from '../../components/triggers/WebhookCredentialDialog';
 import { useQueryScope } from '../../hooks/useQueryScope';
-import { useToast } from '../../hooks/useToast';
 import { previewWebhookTrigger, rotateWebhookTriggerToken } from '../../lib/api';
 import { API_URL } from '../../lib/api/client';
 import { webhookDeliveriesQueryOptions } from '../../lib/query-options';
@@ -29,40 +28,12 @@ import { useAutomationAction } from './detail-parts';
 import { errorText } from './errors';
 import { LoadError, Loading } from './page';
 import { fullDate } from './time';
-import { OutcomeIcon, Panel, SectionTitle } from './ui';
+import { CopyButton, OutcomeIcon, Panel, SectionTitle } from './ui';
 
 /** The ingest endpoint is the same for every webhook: the API origin plus a fixed path. */
 export const WEBHOOK_INGEST_URL = `${API_URL.replace(/\/$/, '')}/api/webhooks/ingest`;
 
 const DEFAULT_SAMPLE = '{\n  "event": { "action": "created" }\n}';
-
-/** How long the copy button shows its check mark (as the shared log CopyButton does). */
-const COPIED_FEEDBACK_MS = 1500;
-
-function CopyButton({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
-  const toast = useToast();
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
-    return () => clearTimeout(timer);
-  }, [copied]);
-  return (
-    <button
-      type="button"
-      aria-label={`Copy ${label}`}
-      onClick={() => {
-        navigator.clipboard.writeText(value).then(
-          () => setCopied(true),
-          () => toast.error('Copy failed. Select the text and copy it instead.')
-        );
-      }}
-      className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border-default bg-transparent text-fg-primary hover:bg-surface-hover"
-    >
-      {copied ? <Check size={16} aria-hidden /> : <Copy size={16} aria-hidden />}
-    </button>
-  );
-}
 
 export function ConnectWebhook({
   trigger,

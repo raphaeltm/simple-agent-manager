@@ -23,7 +23,7 @@ import {
   type ResourceRequirementsFormState,
 } from '../../../components/resource-requirements';
 import { parseCronToMode } from '../../../components/triggers/schedule-cron';
-import { joinList } from '../../../components/triggers/trigger-form-support';
+import { joinEmailList, joinList } from '../../../components/triggers/trigger-form-support';
 import type { AutomationStart } from '../../../lib/automation-routes';
 import { type OnceTime, onceTimeFrom } from '../schedule-time';
 import { viewerZone } from '../time';
@@ -45,6 +45,11 @@ export interface WebhookState {
   includedHeaders: string;
   filterMode: 'all' | 'any';
   filters: WebhookTriggerFilter[];
+}
+
+export interface EmailState {
+  /** One address per line (or comma-separated); becomes `emailConfig.allowedSenders`. */
+  allowedSenders: string;
 }
 
 /** Real, expressible event filters; anything else is "custom". */
@@ -132,6 +137,7 @@ export interface EditorState {
   once: OnceTime;
   github: GitHubState;
   webhook: WebhookState;
+  email: EmailState;
   watch: WatchState;
   action: ActionState;
   trigger: TriggerOptions;
@@ -178,6 +184,7 @@ export function newEditorState(
     once: onceTimeFrom(defaultOnceDue(now), zone),
     github: { ...DEFAULT_GITHUB },
     webhook: { sourceLabel: '', includedHeaders: '', filterMode: 'all', filters: [] },
+    email: { allowedSenders: '' },
     watch: {
       preset: 'issue-opened',
       channel: '',
@@ -275,6 +282,9 @@ export function editorStateFromTrigger(trigger: TriggerResponse): EditorState {
           filters: trigger.webhookConfig.filters,
         }
       : base.webhook,
+    email: trigger.emailConfig
+      ? { allowedSenders: joinEmailList(trigger.emailConfig.allowedSenders) }
+      : base.email,
     action: {
       kind: 'start',
       prompt: trigger.promptTemplate,
@@ -362,6 +372,38 @@ export function editorStateFromWatch(watch: ProjectStandingWatch): EditorState {
 /** Starts that may message an existing chat; triggers can only start new chats. */
 export const canMessageChat = (start: EditorStart | null) => start === 'once' || start === 'event';
 
-/** Starts stored as triggers (recurring, GitHub, webhook, incident). */
+/** Starts stored as triggers (recurring, GitHub, webhook, email, incident). */
 export const isTriggerStart = (start: EditorStart | null) =>
-  start === 'schedule' || start === 'github' || start === 'webhook' || start === 'incident';
+  start === 'schedule' ||
+  start === 'github' ||
+  start === 'webhook' ||
+  start === 'email' ||
+  start === 'incident';
+
+/** The prompt an email automation opens with, until the person types their own. */
+export const DEFAULT_EMAIL_PROMPT_TEMPLATE = `You received an email at your SAM address.
+
+From: {{email.fromName}} <{{email.from}}>
+Subject: {{email.subject}}
+
+{{email.text}}
+
+Do what the email asks. When you are done, reply to the sender with the reply_to_email tool.`;
+
+/**
+ * Seeds the allowed-senders field and the starting prompt the moment someone picks "Email",
+ * without clobbering anything they already typed (e.g. after picking Email, going Back, and
+ * picking it again). A pure function — called from the Step 1 handler, never from an effect, so
+ * it can only ever run once per selection (`.claude/rules/06`).
+ */
+export function withEmailDefaults(state: EditorState, viewerEmail?: string | null): EditorState {
+  if (state.start !== 'email') return state;
+  const email =
+    !state.email.allowedSenders.trim() && viewerEmail
+      ? { ...state.email, allowedSenders: viewerEmail }
+      : state.email;
+  const action = !state.action.prompt.trim()
+    ? { ...state.action, prompt: DEFAULT_EMAIL_PROMPT_TEMPLATE }
+    : state.action;
+  return email === state.email && action === state.action ? state : { ...state, email, action };
+}

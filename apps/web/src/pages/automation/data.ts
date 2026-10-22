@@ -18,6 +18,7 @@ import {
 } from '../../lib/automation-config';
 import { AUTOMATION_POLL_MS } from '../../lib/poll-intervals';
 import {
+  agentEmailConfigQueryOptions,
   agentProfilesQueryOptions,
   automationQueryKeys,
   projectChatSessionsQueryOptions,
@@ -164,9 +165,12 @@ export function useAutomationLookups(projectId: string) {
   });
   const profiles = useQuery({ ...agentProfilesQueryOptions(queryScope, projectId), enabled });
   const skills = useQuery({ ...projectSkillsQueryOptions(queryScope, projectId), enabled });
+  // Public config: whether this deployment can offer the "Email" automation start.
+  const agentEmail = useQuery(agentEmailConfigQueryOptions(queryScope));
   const chatList = chats.data;
   const profileList = profiles.data;
   const skillList = skills.data;
+  const agentEmailData = agentEmail.data;
   return useMemo(() => {
     const chatTitle = (sessionId: string) => {
       const chat = chatList?.find((item) => item.id === sessionId);
@@ -185,8 +189,12 @@ export function useAutomationLookups(projectId: string) {
       chatTitle,
       profileName,
       skillName,
+      agentEmail: {
+        enabled: Boolean(agentEmailData?.enabled),
+        domain: agentEmailData?.domain ?? null,
+      },
     };
-  }, [chatList, profileList, skillList]);
+  }, [chatList, profileList, skillList, agentEmailData]);
 }
 
 export type AutomationLookups = ReturnType<typeof useAutomationLookups>;

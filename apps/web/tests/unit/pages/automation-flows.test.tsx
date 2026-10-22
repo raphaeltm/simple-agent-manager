@@ -32,6 +32,7 @@ const api = vi.hoisted(() => ({
   listSkills: vi.fn(),
   cleanupStuckExecutions: vi.fn(),
   deleteExecution: vi.fn(),
+  getAgentEmailConfig: vi.fn(),
 }));
 const events = vi.hoisted(() => ({
   listSchedules: vi.fn(),
@@ -63,11 +64,22 @@ vi.mock('../../../src/lib/api/triggers', async (importOriginal) => ({
   cleanupStuckExecutions: api.cleanupStuckExecutions,
   deleteExecution: api.deleteExecution,
 }));
+// `agentEmailConfigQueryOptions` imports from this submodule directly (not the barrel above).
+vi.mock('../../../src/lib/api/agent-email', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getAgentEmailConfig: api.getAgentEmailConfig,
+}));
 vi.mock('../../../src/lib/project-events-api', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ...events,
 }));
 vi.mock('../../../src/hooks/useQueryScope', () => ({ useQueryScope: () => scope.userId }));
+// `CreateAutomation` reads the viewer's email directly from AuthProvider to default the
+// allowed-senders field of a new Email automation; every other identity need in this file
+// already goes through the mocked useQueryScope above.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: scope.userId, email: 'owner@example.com', name: 'Owner User' } }),
+}));
 
 import { QueryClientProvider } from '@tanstack/react-query';
 
@@ -292,6 +304,7 @@ beforeEach(() => {
   events.listSchedules.mockResolvedValue({ schedules: [], nextCursor: null });
   events.listStandingWatches.mockResolvedValue({ watches: [], nextCursor: null });
   events.listEventSubscriptions.mockResolvedValue({ subscriptions: [], hasMore: false });
+  api.getAgentEmailConfig.mockResolvedValue({ enabled: true, domain: 'mail.example.com' });
 });
 
 afterEach(() => {
@@ -449,6 +462,73 @@ describe('create flow', () => {
         '/projects/p1/automation/trigger/trg-new'
       )
     );
+  });
+
+  it('creates an email automation with its allowed senders and agent profile', async () => {
+    const user = userEvent.setup();
+    api.createTrigger.mockResolvedValue(
+      trigger({
+        id: 'trg-email',
+        sourceType: 'email',
+        status: 'active',
+        cronExpression: null,
+        emailConfig: {
+          address: 'agent+k3j2h7m9q2xw4n8p@mail.example.com',
+          allowedSenders: ['me@example.com'],
+        },
+      })
+    );
+    api.getTrigger.mockResolvedValue(
+      trigger({
+        id: 'trg-email',
+        sourceType: 'email',
+        status: 'active',
+        cronExpression: null,
+        emailConfig: {
+          address: 'agent+k3j2h7m9q2xw4n8p@mail.example.com',
+          allowedSenders: ['me@example.com'],
+        },
+      })
+    );
+    renderAt('/projects/p1/automation/new');
+    await user.click(await screen.findByRole('radio', { name: /By email/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    // Picking "By email" defaults the allowed senders to the signed-in user's own address, and
+    // seeds the starting prompt — both only when the field was still empty.
+    expect(screen.getByLabelText('Allowed senders')).toHaveValue('owner@example.com');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(await screen.findByText('Email automations need an agent profile.')).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Agent'), 'prof-1');
+    expect((screen.getByLabelText('What should it do?') as HTMLTextAreaElement).value).toContain(
+      'reply_to_email'
+    );
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Create automation' }));
+    await waitFor(() =>
+      expect(api.createTrigger).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({
+          sourceType: 'email',
+          agentProfileId: 'prof-1',
+          emailConfig: expect.objectContaining({ allowedSenders: ['owner@example.com'] }),
+        })
+      )
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(
+        '/projects/p1/automation/trigger/trg-email'
+      )
+    );
+  });
+
+  it('does not offer the Email start on a deployment that has not configured it', async () => {
+    api.getAgentEmailConfig.mockResolvedValue({ enabled: false, domain: null });
+    renderAt('/projects/p1/automation/new');
+    // Liveness first: the start cards rendered, so the absence below is not an empty page.
+    expect(await screen.findByRole('radio', { name: /On a schedule/ })).toBeInTheDocument();
+    await waitFor(() => expect(api.getAgentEmailConfig).toHaveBeenCalled());
+    expect(screen.queryByRole('radio', { name: /By email/ })).not.toBeInTheDocument();
   });
 
   it('creates a GitHub automation through its own fields', async () => {
@@ -845,6 +925,53 @@ describe('trigger page', () => {
     expect(await screen.findByText(/cannot be run by hand/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Edit/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Run now/ })).not.toBeInTheDocument();
+  });
+
+  it('never offers run now for an email trigger, and explains why', async () => {
+    api.getTrigger.mockResolvedValue(
+      trigger({
+        id: 'trg-email',
+        status: 'active',
+        sourceType: 'email',
+        cronExpression: null,
+        emailConfig: { address: 'agent+abc123@mail.example.com', allowedSenders: ['a@x.test'] },
+      })
+    );
+    renderAt('/projects/p1/automation/trigger/trg-email');
+    expect(
+      await screen.findByText(/Email triggers run when an email arrives at their address/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Edit/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Run now/ })).not.toBeInTheDocument();
+  });
+
+  it("shows an email trigger's address with a copy button, and its allowed senders", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    api.getTrigger.mockResolvedValue(
+      trigger({
+        id: 'trg-email',
+        status: 'active',
+        sourceType: 'email',
+        cronExpression: null,
+        emailConfig: {
+          address: 'agent+k3j2h7m9q2xw4n8p@mail.example.com',
+          allowedSenders: ['a@x.test', 'b@x.test'],
+        },
+      })
+    );
+    renderAt('/projects/p1/automation/trigger/trg-email');
+    const address = await screen.findByTestId('email-trigger-address');
+    expect(address).toHaveTextContent('agent+k3j2h7m9q2xw4n8p@mail.example.com');
+    const senders = screen.getByTestId('email-allowed-senders');
+    expect(within(senders).getByText('a@x.test')).toBeInTheDocument();
+    expect(within(senders).getByText('b@x.test')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Copy email address' }));
+    expect(writeText).toHaveBeenCalledWith('agent+k3j2h7m9q2xw4n8p@mail.example.com');
   });
 });
 

@@ -17,7 +17,7 @@ export function isAutomationKind(value: string | undefined): value is Automation
 }
 
 /** What starts a new automation; chosen on the first step of the create flow. */
-export const AUTOMATION_STARTS = ['schedule', 'once', 'github', 'webhook', 'event'] as const;
+export const AUTOMATION_STARTS = ['schedule', 'once', 'github', 'webhook', 'email', 'event'] as const;
 export type AutomationStart = (typeof AUTOMATION_STARTS)[number];
 
 export function isAutomationStart(value: string | null | undefined): value is AutomationStart {

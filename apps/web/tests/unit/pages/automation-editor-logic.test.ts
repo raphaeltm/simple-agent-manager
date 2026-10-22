@@ -1,4 +1,8 @@
-import type { ProjectStandingWatch, TriggerResponse } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
+  type ProjectStandingWatch,
+  type TriggerResponse,
+} from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -25,11 +29,13 @@ import {
   watchUpdateRequest,
 } from '../../../src/pages/automation/editor/requests';
 import {
+  DEFAULT_EMAIL_PROMPT_TEMPLATE,
   type EditorState,
   editorStateFromTrigger,
   editorStateFromWatch,
   newEditorState,
   scheduleFromCron,
+  withEmailDefaults,
 } from '../../../src/pages/automation/editor/state';
 import { templateById } from '../../../src/pages/automation/editor/templates';
 import { GIVE_UP_OPTIONS } from '../../../src/pages/automation/schedule-time';
@@ -178,6 +184,44 @@ describe('creating triggers', () => {
   it('refuses to build a trigger for one-time or event starts', () => {
     expect(() => triggerCreateRequest(newEditorState({ start: 'once' }, NOW))).toThrow();
   });
+
+  it('sends sourceType, emailConfig.allowedSenders and the agent profile for an email automation', () => {
+    const email = withPrompt(
+      {
+        ...newEditorState({ start: 'email' }, NOW),
+        name: 'Support inbox',
+        email: { allowedSenders: 'a@example.com\nB@EXAMPLE.com, c@example.com' },
+        action: {
+          ...newEditorState().action,
+          agentProfileId: 'prof-support',
+        },
+      },
+      'Reply to the sender.'
+    );
+    expect(triggerCreateRequest(email)).toMatchObject({
+      sourceType: 'email',
+      agentProfileId: 'prof-support',
+      promptTemplate: 'Reply to the sender.',
+      emailConfig: { allowedSenders: ['a@example.com', 'B@EXAMPLE.com', 'c@example.com'] },
+    });
+    // One per line or comma-separated both split into the same list — the field accepts either.
+    expect(
+      triggerCreateRequest({
+        ...email,
+        email: { allowedSenders: 'a@example.com, b@example.com' },
+      }).emailConfig
+    ).toEqual({ allowedSenders: ['a@example.com', 'b@example.com'] });
+  });
+
+  it('omits allowedSenders when empty, letting the API default to the creator', () => {
+    const email = withPrompt({
+      ...newEditorState({ start: 'email' }, NOW),
+      name: 'Support inbox',
+      email: { allowedSenders: '   ' },
+      action: { ...newEditorState().action, agentProfileId: 'prof-support' },
+    });
+    expect(triggerCreateRequest(email).emailConfig).toEqual({});
+  });
 });
 
 describe('editing triggers', () => {
@@ -236,6 +280,23 @@ describe('editing triggers', () => {
   it('opens incident triggers for editing without a schedule', () => {
     const state = editorStateFromTrigger(trigger({ sourceType: 'incident', cronExpression: null }));
     expect(state.start).toBe('incident');
+  });
+
+  it('opens an email trigger with its stored senders, one per line, and saves changes to them', () => {
+    const original = trigger({
+      sourceType: 'email',
+      cronExpression: null,
+      agentProfileId: 'prof-support',
+      emailConfig: { address: 'agent+abc123@mail.example.com', allowedSenders: ['a@x.test', 'b@x.test'] },
+    });
+    const state = editorStateFromTrigger(original);
+    expect(state.start).toBe('email');
+    expect(state.email.allowedSenders).toBe('a@x.test\nb@x.test');
+    const request = triggerUpdateRequest(
+      { ...state, email: { allowedSenders: 'a@x.test\nc@x.test' } },
+      original
+    );
+    expect(request.emailConfig).toEqual({ allowedSenders: ['a@x.test', 'c@x.test'] });
   });
 });
 
@@ -424,6 +485,27 @@ describe('validation', () => {
     ).toBe('Give it a name.');
   });
 
+  it('requires at least one plausible allowed sender and an agent profile for email', () => {
+    const email = newEditorState({ start: 'email' }, NOW);
+    expect(validateStep({ ...email, email: { allowedSenders: '' } }, 'when', CAN).email).toBe(
+      'Add at least one allowed sender.'
+    );
+    expect(
+      validateStep({ ...email, email: { allowedSenders: 'not-an-email' } }, 'when', CAN).email
+    ).toMatch(/look like an email/);
+    expect(
+      validateStep({ ...email, email: { allowedSenders: 'a@x.test' } }, 'when', CAN).email
+    ).toBeUndefined();
+    expect(validateStep(withPrompt(email), 'what', CAN)).toMatchObject({
+      agentProfileId: 'Email automations need an agent profile.',
+    });
+    // Email is a trigger-stored prompt, so it is checked against the character limit, not bytes.
+    expect(
+      validateStep(withPrompt(email, 'x'.repeat(DEFAULT_CRON_TEMPLATE_MAX_LENGTH + 1)), 'what', CAN)
+        .prompt
+    ).toBe(`Keep it under ${DEFAULT_CRON_TEMPLATE_MAX_LENGTH} characters.`);
+  });
+
   it('rejects GitHub actions that do not exist for the event', () => {
     const state = newEditorState({ start: 'github' }, NOW);
     expect(
@@ -574,5 +656,32 @@ describe('templates and save errors', () => {
     expect(friendlySaveError(new Error('Schedule version or state conflict')).message).toMatch(
       /Someone changed this automation/
     );
+  });
+});
+
+describe('email start defaults (picked on Step 1, never from an effect)', () => {
+  it('seeds the viewer’s email and the default prompt the moment Email is picked', () => {
+    const base = newEditorState({ start: 'github' }, NOW);
+    const picked = withEmailDefaults({ ...base, start: 'email' }, 'me@example.com');
+    expect(picked.email.allowedSenders).toBe('me@example.com');
+    expect(picked.action.prompt).toBe(DEFAULT_EMAIL_PROMPT_TEMPLATE);
+  });
+
+  it('does not clobber senders or a prompt the person already typed', () => {
+    const base = newEditorState({ start: 'email' }, NOW);
+    const edited = {
+      ...base,
+      email: { allowedSenders: 'already@typed.test' },
+      action: { ...base.action, prompt: 'Already written.' },
+    };
+    const picked = withEmailDefaults(edited, 'me@example.com');
+    expect(picked).toBe(edited); // no-op: identical object, not just equal values
+  });
+
+  it('does nothing when there is no viewer email, and nothing for a non-email start', () => {
+    const base = newEditorState({ start: 'github' }, NOW);
+    expect(withEmailDefaults({ ...base, start: 'email' }, null).email.allowedSenders).toBe('');
+    const githubState = { ...base, start: 'github' as const };
+    expect(withEmailDefaults(githubState, 'me@example.com')).toBe(githubState);
   });
 });

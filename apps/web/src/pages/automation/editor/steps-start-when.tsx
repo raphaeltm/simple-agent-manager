@@ -2,6 +2,7 @@
 import { GITHUB_TRIGGER_DEFAULT_ACTIONS } from '@simple-agent-manager/shared';
 import { StatusBadge } from '@simple-agent-manager/ui';
 
+import { EmailTriggerFields } from '../../../components/triggers/EmailTriggerFields';
 import { GitHubTriggerFields } from '../../../components/triggers/GitHubTriggerFields';
 import { WebhookTriggerFields } from '../../../components/triggers/WebhookTriggerFields';
 import type { AutomationStart } from '../../../lib/automation-routes';
@@ -36,6 +37,11 @@ const STARTS: Array<{ id: AutomationStart; title: string; text: string; advanced
     text: 'Your CI, monitoring or app sends a request.',
   },
   {
+    id: 'email',
+    title: 'By email',
+    text: 'SAM gives it its own address. An email from an allowed sender starts it, and the agent can reply.',
+  },
+  {
     id: 'event',
     title: 'When SAM sees an event',
     text: 'A task or release fails, a review arrives, an agent posts on a channel.',
@@ -46,9 +52,15 @@ const STARTS: Array<{ id: AutomationStart; title: string; text: string; advanced
 export function StepStart({
   value,
   onChange,
+  emailAvailable,
 }: {
   value: EditorState['start'];
   onChange: (start: AutomationStart) => void;
+  /**
+   * Whether this deployment configured agent email. The Email start is hidden until it has:
+   * production does not offer the preview at all, so a disabled card would only add noise.
+   */
+  emailAvailable: boolean;
 }) {
   return (
     <ChoiceCards
@@ -56,7 +68,7 @@ export function StepStart({
       value={value === 'incident' ? null : value}
       onChange={onChange}
       columns={1}
-      options={STARTS.map((start) => ({
+      options={STARTS.filter((start) => start.id !== 'email' || emailAvailable).map((start) => ({
         id: start.id,
         title: start.title,
         text: start.text,
@@ -165,6 +177,29 @@ export function StepWhen({
           {errors.webhook && (
             <p role="alert" className="m-0 text-[13px] font-medium text-danger-fg">
               {errors.webhook}
+            </p>
+          )}
+        </div>
+      );
+    }
+    case 'email': {
+      const email = state.email;
+      return (
+        <div className="flex flex-col gap-3">
+          <Notice>
+            {creating
+              ? 'SAM gives this automation its own email address once you save it. Only the senders below can start it, and the agent can reply to them by email.'
+              : 'Its address stays the same — see it on this automation’s page. Saving changes who may use it.'}
+          </Notice>
+          <EmailTriggerFields
+            allowedSenders={email.allowedSenders}
+            onAllowedSendersChange={(allowedSenders) =>
+              onChange({ ...state, email: { ...email, allowedSenders } })
+            }
+          />
+          {errors.email && (
+            <p role="alert" className="m-0 text-[13px] font-medium text-danger-fg">
+              {errors.email}
             </p>
           )}
         </div>

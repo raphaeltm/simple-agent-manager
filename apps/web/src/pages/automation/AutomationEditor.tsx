@@ -13,6 +13,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 
+import { useAuth } from '../../components/AuthProvider';
 import { WebhookCredentialDialog } from '../../components/triggers/WebhookCredentialDialog';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { useToast } from '../../hooks/useToast';
@@ -83,6 +84,7 @@ const CREATE_STEPS: StepId[] = ['start', 'when', 'what', 'review'];
 
 function CreateAutomation() {
   const { projectId } = useProjectContext();
+  const { user } = useAuth();
   const [params] = useSearchParams();
   const lookups = useAutomationLookups(projectId);
   const [initial] = useState(() => {
@@ -121,6 +123,7 @@ function CreateAutomation() {
         saving={mutation.isPending}
         saveError={error}
         onSave={(state) => mutation.mutate(state)}
+        viewerEmail={user?.email ?? null}
       />
       {dialog}
     </>

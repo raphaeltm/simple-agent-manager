@@ -1,6 +1,7 @@
 import { Alert, Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 
+import { AdminAgentEmailPanel } from '../components/AdminAgentEmailPanel';
 import { AdminConnectorPanel } from '../components/AdminConnectorPanel';
 import { PlatformIntegrationConfigForm } from '../components/PlatformIntegrationConfigForm';
 import type { PlatformConfigStatus, PlatformIntegrationConfigInput } from '../lib/api';
@@ -110,6 +111,7 @@ export function AdminPlatformConfig() {
         />
       )}
       <AdminConnectorPanel />
+      <AdminAgentEmailPanel />
     </div>
   );
 }

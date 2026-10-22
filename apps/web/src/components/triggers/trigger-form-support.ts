@@ -85,6 +85,23 @@ export const WEBHOOK_TEMPLATE_VARIABLES = [
   ...COMMON_TEMPLATE_VARIABLES,
 ];
 
+export const EMAIL_TEMPLATE_VARIABLES = [
+  {
+    group: 'email',
+    vars: [
+      'email.from',
+      'email.fromName',
+      'email.to',
+      'email.subject',
+      'email.text',
+      'email.receivedAt',
+      'email.messageId',
+      'email.attachments',
+    ],
+  },
+  ...COMMON_TEMPLATE_VARIABLES,
+];
+
 export const INCIDENT_TEMPLATE_VARIABLES = [
   {
     group: 'incident',
@@ -109,6 +126,27 @@ export function splitList(value: string): string[] | undefined {
 
 export function joinList(value?: string[]): string {
   return value?.join(', ') ?? '';
+}
+
+/**
+ * Allowed senders are long (full email addresses), so the field reads one per line rather than
+ * comma-separated like {@link splitList}. Commas are accepted too, for a pasted inline list.
+ */
+export function splitEmailList(value: string): string[] | undefined {
+  const items = value
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return items.length > 0 ? items : undefined;
+}
+
+export function joinEmailList(value?: string[]): string {
+  return value?.join('\n') ?? '';
+}
+
+/** A light client-side shape check; the server normalizes and validates the real address. */
+export function looksLikeEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 export function buildGitHubFilters(input: {

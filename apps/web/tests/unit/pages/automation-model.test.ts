@@ -7,10 +7,12 @@ import type {
 } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
+import { AUTOMATION_STARTS } from '../../../src/lib/automation-routes';
 import { buildActivity, scheduleEntry } from '../../../src/pages/automation/activity';
 import { triggersNeedingRuns } from '../../../src/pages/automation/data';
 import {
   describeEventFilter,
+  emailTriggerWhen,
   executionText,
   githubTriggerWhen,
   isSamRelay,
@@ -23,10 +25,12 @@ import {
   fromSchedule,
   fromTrigger,
   fromWatch,
+  isReaction,
   titleFromPrompt,
   WATCH_CREATOR_ACCESS_REVOKED,
   WATCH_TARGET_NOT_OWNED,
 } from '../../../src/pages/automation/model';
+import { START_META } from '../../../src/pages/automation/ui';
 
 const NOW = Date.parse('2026-10-20T12:00:00Z');
 const HOUR = 3_600_000;
@@ -208,6 +212,65 @@ describe('trigger presentation', () => {
     expect(githubTriggerWhen('issues', { actions: ['opened'], labels: ['bug'] })).toBe(
       'When an issue labeled bug is opened'
     );
+  });
+
+  it('maps an email trigger to the email start kind, its real address, and the reacting group', () => {
+    const item = fromTrigger(
+      trigger({
+        sourceType: 'email',
+        cronExpression: null,
+        emailConfig: {
+          address: 'agent+k3j2h7m9q2xw4n8p@mail.example.com',
+          allowedSenders: ['a@x.test'],
+        },
+      })
+    );
+    // Before this fix, a trigger without a `case 'email'` fell through `triggerWhen`'s cron
+    // `default:` branch and misread as "No schedule" (rule 79 — a denylist default silently
+    // reclassifies a new enum member).
+    expect(item.start).toBe('email');
+    expect(item.when).toBe('When an email arrives at agent+k3j2h7m9q2xw4n8p@mail.example.com');
+    expect(item.whenNote).toBeUndefined();
+    expect(item.nextAt).toBeNull();
+    expect(isReaction(item)).toBe(true);
+  });
+
+  it('reads an email trigger missing its config as "No schedule" only through explicit absence, not the cron default', () => {
+    // No emailConfig at all (e.g. a load race) still reads as an email automation, never as cron.
+    const item = fromTrigger(trigger({ sourceType: 'email', cronExpression: null }));
+    expect(item.start).toBe('email');
+    expect(item.when).toBe('When someone emails this automation’s address');
+  });
+
+  it('describes an email trigger before and after it has an address', () => {
+    expect(emailTriggerWhen(null)).toBe('When someone emails this automation’s address');
+    expect(emailTriggerWhen('agent+abc@mail.example.com')).toBe(
+      'When an email arrives at agent+abc@mail.example.com'
+    );
+  });
+});
+
+describe('every start kind has presentation metadata', () => {
+  it('gives START_META an entry for every automation start plus the admin-only incident kind', () => {
+    // A `Record<StartKind, …>` is compiler-enforced, but this guards the invariant even if
+    // `START_META`'s type is ever loosened to a `Partial`.
+    for (const start of [...AUTOMATION_STARTS, 'incident']) {
+      expect(START_META, `missing START_META entry for "${start}"`).toHaveProperty(start);
+    }
+    expect(Object.keys(START_META).sort()).toEqual(
+      [...AUTOMATION_STARTS, 'incident'].slice().sort()
+    );
+  });
+
+  it('groups email with webhook and GitHub as a reaction, not a schedule', () => {
+    const base = trigger();
+    expect(isReaction(fromTrigger({ ...base, sourceType: 'email', cronExpression: null }))).toBe(
+      true
+    );
+    expect(isReaction(fromTrigger({ ...base, sourceType: 'webhook', cronExpression: null }))).toBe(
+      true
+    );
+    expect(isReaction(fromTrigger(base))).toBe(false); // cron stays "scheduled"
   });
 });
 

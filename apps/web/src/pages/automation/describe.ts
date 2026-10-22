@@ -68,6 +68,13 @@ export function webhookTriggerWhen(sourceLabel: string | null | undefined): stri
   return sourceLabel ? `When ${sourceLabel} calls its webhook` : 'When its webhook is called';
 }
 
+/** Before save there is no address yet; after save, name it so the automation reads concretely. */
+export function emailTriggerWhen(address: string | null | undefined): string {
+  return address
+    ? `When an email arrives at ${address}`
+    : 'When someone emails this automation’s address';
+}
+
 export const INCIDENT_TRIGGER_WHEN = 'When new private incidents arrive';
 
 // ---------------------------------------------------------------------------

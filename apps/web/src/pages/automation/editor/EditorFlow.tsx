@@ -15,7 +15,7 @@ import { titleFromPrompt } from '../model';
 import { Page } from '../page';
 import { KindIcon, Panel } from '../ui';
 import { type Errors, type StepId, validateStep } from './requests';
-import { type EditorState, isTriggerStart } from './state';
+import { type EditorState, isTriggerStart, withEmailDefaults } from './state';
 import { StepStart, StepWhen } from './steps-start-when';
 import { StepReview, StepWhat, whenSentence } from './steps-what-review';
 
@@ -45,6 +45,7 @@ const STEP_TEXT: Record<StepId, { label: string; title: string; hint: string }> 
 const WHEN_TITLES: Partial<Record<NonNullable<EditorState['start']>, string>> = {
   github: 'Which GitHub activity?',
   webhook: 'Which calls should start it?',
+  email: 'Who can start it?',
   event: 'What should it wait for?',
 };
 
@@ -60,6 +61,8 @@ export function EditorFlow({
   saving,
   saveError,
   onSave,
+  /** The signed-in user's email, used to default Email automations' allowed senders. */
+  viewerEmail = null,
 }: {
   initial: EditorState;
   steps: StepId[];
@@ -73,6 +76,7 @@ export function EditorFlow({
   saving: boolean;
   saveError: { field?: string; message: string } | null;
   onSave: (state: EditorState) => void;
+  viewerEmail?: string | null;
 }) {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -167,7 +171,10 @@ export function EditorFlow({
     step === 'start' ? (
       <StepStart
         value={state.start}
-        onChange={(start) => setState((current) => ({ ...current, start }))}
+        onChange={(start) =>
+          setState((current) => withEmailDefaults({ ...current, start }, viewerEmail))
+        }
+        emailAvailable={lookups.agentEmail.enabled}
       />
     ) : step === 'when' ? (
       <StepWhen

@@ -29,6 +29,7 @@ import {
 } from './detail-parts';
 import { fromTrigger } from './model';
 import { Loading, Notice } from './page';
+import { ConnectEmail } from './trigger-email';
 import { TriggerRuns, useTriggerRuns } from './trigger-runs';
 import { ConnectWebhook, TryWebhook, WebhookDeliveries } from './trigger-webhook';
 import { ButtonLink, Disclosure, KeyValues } from './ui';
@@ -92,7 +93,10 @@ export function TriggerDetail({
   const firstRuns = runs.data?.pages[0]?.executions;
   const item = fromTrigger(trigger, firstRuns);
   const incident = trigger.sourceType === 'incident';
-  const canRun = access.canWrite && !incident && trigger.status !== 'disabled';
+  const isEmail = trigger.sourceType === 'email';
+  // Email triggers only ever start when mail arrives (the API returns 409 for "run now"), so
+  // the control is withheld the same way it already is for incident triggers.
+  const canRun = access.canWrite && !incident && !isEmail && trigger.status !== 'disabled';
   const busy = setStatus.isPending || runNow.isPending;
 
   const toggle =
@@ -174,6 +178,12 @@ export function TriggerDetail({
           can still change its prompt, pause it or delete it.
         </Notice>
       )}
+      {isEmail && (
+        <Notice tone="info">
+          Email triggers run when an email arrives at their address, so there is nothing to run by
+          hand. You can still change who may use it, pause it or delete it.
+        </Notice>
+      )}
       <WhenAndThen item={item} lookups={lookups} />
       <TriggerRuns trigger={trigger} canWrite={access.canWrite} runs={runs} />
       {trigger.sourceType === 'webhook' && (
@@ -190,6 +200,7 @@ export function TriggerDetail({
       {trigger.sourceType === 'webhook' && (
         <ConnectWebhook trigger={trigger} canWrite={access.canWrite} />
       )}
+      {isEmail && <ConnectEmail trigger={trigger} />}
       <Disclosure
         title="Advanced"
         hint="Exact schedule, filters, limits and IDs"

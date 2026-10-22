@@ -80,6 +80,13 @@ function sourceRows(trigger: TriggerResponse): Rows {
         ['Token created', fullDate(Date.parse(config.tokenRotatedAt ?? config.tokenCreatedAt))],
       ];
     }
+    case 'email': {
+      const config = trigger.emailConfig;
+      return [
+        ['Address', config ? mono(config.address) : 'Not available'],
+        ['Allowed senders', listOr(config?.allowedSenders, 'None')],
+      ];
+    }
     case 'incident':
       return [
         ['Backlog', 'Private platform feedback incidents'],

@@ -14,6 +14,7 @@ import {
   DEFAULT_PROJECT_EVENT_WATCH_MAX_EXECUTIONS,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
+  type EmailTriggerConfigInput,
   PROJECT_EVENT_CHANNEL_SOURCE,
   PROJECT_EVENT_CHANNEL_TYPE,
   PROJECT_EVENT_SEVERITIES,
@@ -35,6 +36,8 @@ import {
 import {
   buildGitHubConfigForForm,
   buildGitHubFilters,
+  looksLikeEmail,
+  splitEmailList,
   splitList,
 } from '../../../components/triggers/trigger-form-support';
 import { isVersionConflict } from '../errors';
@@ -45,7 +48,12 @@ import { type EditorState, WATCH_PRESETS } from './state';
 export type StepId = 'start' | 'when' | 'what' | 'review';
 export type Errors = Partial<Record<string, string>>;
 
-const SOURCE_TYPES = { schedule: 'cron', github: 'github', webhook: 'webhook' } as const;
+const SOURCE_TYPES = {
+  schedule: 'cron',
+  github: 'github',
+  webhook: 'webhook',
+  email: 'email',
+} as const;
 
 const trimmed = (value: string) => value.trim();
 const optional = (value: string) => value.trim() || undefined;
@@ -57,6 +65,11 @@ function webhookConfig(state: EditorState): WebhookTriggerConfigInput {
     filterMode: state.webhook.filterMode,
     filters: state.webhook.filters,
   };
+}
+
+function emailConfig(state: EditorState): EmailTriggerConfigInput {
+  const allowedSenders = splitEmailList(state.email.allowedSenders);
+  return allowedSenders ? { allowedSenders } : {};
 }
 
 function githubInput(state: EditorState) {
@@ -73,8 +86,13 @@ function githubInput(state: EditorState) {
 }
 
 export function triggerCreateRequest(state: EditorState): CreateTriggerRequest {
-  if (state.start !== 'schedule' && state.start !== 'github' && state.start !== 'webhook')
-    throw new Error('Only schedules, GitHub events and webhooks are created as triggers');
+  if (
+    state.start !== 'schedule' &&
+    state.start !== 'github' &&
+    state.start !== 'webhook' &&
+    state.start !== 'email'
+  )
+    throw new Error('Only schedules, GitHub events, webhooks and email are created as triggers');
   const sourceType = SOURCE_TYPES[state.start];
   return {
     name: trimmed(state.name),
@@ -87,6 +105,7 @@ export function triggerCreateRequest(state: EditorState): CreateTriggerRequest {
       ? { githubConfig: buildGitHubConfigForForm(githubInput(state)) }
       : {}),
     ...(sourceType === 'webhook' ? { webhookConfig: webhookConfig(state) } : {}),
+    ...(sourceType === 'email' ? { emailConfig: emailConfig(state) } : {}),
     promptTemplate: state.action.prompt,
     agentProfileId: optional(state.action.agentProfileId),
     skillId: optional(state.action.skillId),
@@ -129,6 +148,7 @@ export function triggerUpdateRequest(
     if (githubConfig) request.githubConfig = githubConfig;
   }
   if (original.sourceType === 'webhook') request.webhookConfig = webhookConfig(state);
+  if (original.sourceType === 'email') request.emailConfig = emailConfig(state);
   return request;
 }
 
@@ -263,6 +283,12 @@ export function validateStep(
     }
     if (state.start === 'webhook' && state.webhook.filters.some((filter) => !filter.path.trim()))
       errors.webhook = 'Every filter needs a path, like event.action.';
+    if (state.start === 'email') {
+      const senders = splitEmailList(state.email.allowedSenders);
+      if (!senders) errors.email = 'Add at least one allowed sender.';
+      else if (senders.some((sender) => !looksLikeEmail(sender)))
+        errors.email = 'Each allowed sender must look like an email address.';
+    }
     if (state.start === 'event') {
       const { watch } = state;
       if (watch.preset === 'channel-post' && !watch.channel.trim().replace(/^#/, ''))
@@ -299,6 +325,7 @@ export function validateStep(
       state.start === 'schedule' ||
       state.start === 'github' ||
       state.start === 'webhook' ||
+      state.start === 'email' ||
       state.start === 'incident';
     if (triggerPrompt && action.prompt.length > DEFAULT_CRON_TEMPLATE_MAX_LENGTH)
       errors.prompt = `Keep it under ${DEFAULT_CRON_TEMPLATE_MAX_LENGTH} characters.`;
@@ -309,14 +336,15 @@ export function validateStep(
       errors.prompt = 'This prompt is too long.';
     if (action.kind === 'message' && !action.sessionId)
       errors.sessionId = 'Pick the chat to message.';
-    if (state.start === 'webhook' && !action.agentProfileId)
-      errors.agentProfileId = 'Webhook automations need an agent profile.';
+    if ((state.start === 'webhook' || state.start === 'email') && !action.agentProfileId)
+      errors.agentProfileId = `${state.start === 'webhook' ? 'Webhook' : 'Email'} automations need an agent profile.`;
   }
   if (step === 'review') {
     const isTrigger =
       state.start === 'schedule' ||
       state.start === 'github' ||
       state.start === 'webhook' ||
+      state.start === 'email' ||
       state.start === 'incident';
     if (isTrigger && !state.name.trim()) errors.name = 'Give it a name.';
     if (state.name.trim().length > DEFAULT_TRIGGER_NAME_MAX_LENGTH)
