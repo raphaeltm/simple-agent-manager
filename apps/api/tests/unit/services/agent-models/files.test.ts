@@ -39,6 +39,9 @@ function createSaver(): OutputSaver {
   };
 }
 
+/** The production defaults for the file-reference cap, with a per-test byte cap. */
+const limits = (maxTotalBytes: number) => ({ maxTotalBytes, maxFileReferences: 16 });
+
 describe('resolveFileReferences', () => {
   it('replaces a $file ref with a base64-encoded string by default', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
@@ -49,7 +52,7 @@ describe('resolveFileReferences', () => {
     const { input, fileCount } = await resolveFileReferences(
       { image: { $file: 'photo.bin' } },
       files,
-      1_000_000
+      limits(1_000_000)
     );
 
     expect(input).toEqual({ image: Buffer.from(bytes).toString('base64') });
@@ -66,7 +69,7 @@ describe('resolveFileReferences', () => {
     const { input } = await resolveFileReferences(
       { audio: { $file: 'a.raw', encoding: 'bytes' } },
       files,
-      1_000_000
+      limits(1_000_000)
     );
 
     expect(input).toEqual({ audio: [10, 20, 30] });
@@ -81,7 +84,7 @@ describe('resolveFileReferences', () => {
     const { input } = await resolveFileReferences(
       { image: { $file: 'p.png', encoding: 'data-url' } },
       files,
-      1_000_000
+      limits(1_000_000)
     );
 
     expect(input).toEqual({
@@ -102,7 +105,7 @@ describe('resolveFileReferences', () => {
     const { input, fileCount } = await resolveFileReferences(
       { items: [{ $file: 'a.bin' }, { nested: { $file: 'b.bin' } }] },
       files,
-      1_000_000
+      limits(1_000_000)
     );
 
     expect(input).toEqual({
@@ -118,7 +121,7 @@ describe('resolveFileReferences', () => {
     const files = createFiles();
 
     await expect(
-      resolveFileReferences({ x: { $file: 'a.bin', encoding: 'base64url' } }, files, 1000)
+      resolveFileReferences({ x: { $file: 'a.bin', encoding: 'base64url' } }, files, limits(1000))
     ).rejects.toMatchObject({ code: 'invalid_input' });
     expect(files.read).not.toHaveBeenCalled();
   });
@@ -127,7 +130,7 @@ describe('resolveFileReferences', () => {
     const files = createFiles();
 
     await expect(
-      resolveFileReferences({ x: { $file: '/etc/passwd' } }, files, 1000)
+      resolveFileReferences({ x: { $file: '/etc/passwd' } }, files, limits(1000))
     ).rejects.toMatchObject({ code: 'invalid_input' });
   });
 
@@ -135,7 +138,7 @@ describe('resolveFileReferences', () => {
     const files = createFiles();
 
     await expect(
-      resolveFileReferences({ x: { $file: '../secret.txt' } }, files, 1000)
+      resolveFileReferences({ x: { $file: '../secret.txt' } }, files, limits(1000))
     ).rejects.toMatchObject({ code: 'invalid_input' });
   });
 
@@ -150,9 +153,23 @@ describe('resolveFileReferences', () => {
       Array.from({ length: 16 }, (_, index) => [`f${index}`, { $file: `file-${index}.bin` }])
     );
 
-    const { fileCount } = await resolveFileReferences(refs, files, 1_000_000);
+    const { fileCount } = await resolveFileReferences(refs, files, limits(1_000_000));
 
     expect(fileCount).toBe(16);
+  });
+
+  it('refuses any $file reference when the administrator sets the cap to 0', async () => {
+    const files = createFiles();
+    await expect(
+      resolveFileReferences({ x: { $file: 'a.bin' } }, files, {
+        maxTotalBytes: 1000,
+        maxFileReferences: 0,
+      })
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: expect.stringContaining('turned off'),
+    });
+    expect(files.read).not.toHaveBeenCalled();
   });
 
   it('rejects more than 16 $file references in one call', async () => {
@@ -166,7 +183,7 @@ describe('resolveFileReferences', () => {
       Array.from({ length: 17 }, (_, index) => [`f${index}`, { $file: `file-${index}.bin` }])
     );
 
-    await expect(resolveFileReferences(refs, files, 1_000_000)).rejects.toMatchObject({
+    await expect(resolveFileReferences(refs, files, limits(1_000_000))).rejects.toMatchObject({
       code: 'invalid_input',
     });
   });
@@ -179,7 +196,7 @@ describe('resolveFileReferences', () => {
       })),
     });
 
-    const { fileCount } = await resolveFileReferences({ x: { $file: 'a.bin' } }, files, 10);
+    const { fileCount } = await resolveFileReferences({ x: { $file: 'a.bin' } }, files, limits(10));
 
     expect(fileCount).toBe(1);
   });
@@ -192,16 +209,16 @@ describe('resolveFileReferences', () => {
       })),
     });
 
-    await expect(resolveFileReferences({ x: { $file: 'a.bin' } }, files, 10)).rejects.toMatchObject(
-      { code: 'input_too_large' }
-    );
+    await expect(
+      resolveFileReferences({ x: { $file: 'a.bin' } }, files, limits(10))
+    ).rejects.toMatchObject({ code: 'input_too_large' });
   });
 
   it('leaves plain values and objects without a $file key untouched', async () => {
     const files = createFiles();
     const input = { a: 1, b: 'hello', c: { d: true, e: null } };
 
-    const { input: resolved, fileCount } = await resolveFileReferences(input, files, 1000);
+    const { input: resolved, fileCount } = await resolveFileReferences(input, files, limits(1000));
 
     expect(resolved).toEqual(input);
     expect(fileCount).toBe(0);

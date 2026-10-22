@@ -212,11 +212,10 @@ export async function runAgentModelForAgent(
     );
   }
   const files = workspaceFiles(env, context);
-  const { input } = await resolveFileReferences(
-    args.input,
-    files,
-    Math.floor((settings.maxInputBytes * 3) / 4)
-  );
+  const { input } = await resolveFileReferences(args.input, files, {
+    maxTotalBytes: Math.floor((settings.maxInputBytes * 3) / 4),
+    maxFileReferences: settings.maxFileReferences,
+  });
   if (JSON.stringify(input).length > settings.maxInputBytes) {
     throw new AgentModelCallError(
       'input_too_large',

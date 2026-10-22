@@ -22,8 +22,6 @@ import { AgentModelCallError } from './errors';
 
 /** Workspace directory for saved outputs when the agent does not name one. */
 export const DEFAULT_AGENT_MODEL_OUTPUT_DIR = '.ai-outputs';
-/** Upper bound on `$file` references in one call. */
-const MAX_FILE_REFERENCES = 16;
 /** A JSON string this long that is pure base64 is saved as a file even if its type is unknown. */
 const UNKNOWN_BASE64_SAVE_MIN_CHARS = 64 * 1024;
 /** Shortest base64 string checked for a known media signature. */
@@ -124,18 +122,21 @@ function fileReference(value: unknown): { path: string; encoding: FileEncoding }
 export async function resolveFileReferences(
   input: Record<string, unknown>,
   files: WorkspaceFiles,
-  maxTotalBytes: number
+  limits: { maxTotalBytes: number; maxFileReferences: number }
 ): Promise<{ input: Record<string, unknown>; fileCount: number }> {
+  const { maxTotalBytes, maxFileReferences } = limits;
   let fileCount = 0;
   let totalBytes = 0;
   const visit = async (value: unknown): Promise<unknown> => {
     const reference = fileReference(value);
     if (reference) {
       fileCount += 1;
-      if (fileCount > MAX_FILE_REFERENCES) {
+      if (fileCount > maxFileReferences) {
         throw new AgentModelCallError(
           'invalid_input',
-          `At most ${MAX_FILE_REFERENCES} $file references per call.`
+          maxFileReferences === 0
+            ? 'File inputs ($file) are turned off by your SAM administrator.'
+            : `At most ${maxFileReferences} $file references per call.`
         );
       }
       const { data, contentType } = await files.read(reference.path, maxTotalBytes - totalBytes);

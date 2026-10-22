@@ -20,9 +20,6 @@ import type { AgentModelCaller } from './run';
 import { effectiveMonthlyBudgetMicroUsd, getAgentModelSettings } from './settings';
 import { getModelSchema, modelDocsUrl } from './workers-ai';
 
-/** Schema lookups are interactive; keep them short. */
-const SCHEMA_TIMEOUT_MS = 10_000;
-
 const ListArgsSchema = v.object({
   model: v.optional(
     v.pipe(
@@ -89,7 +86,7 @@ export async function listAgentModelsForAgent(
     }
     const schema = await getModelSchema(env, model.id, {
       cacheSeconds: settings.catalogCacheSeconds,
-      timeoutMs: SCHEMA_TIMEOUT_MS,
+      timeoutMs: settings.schemaTimeoutMs,
     });
     return {
       id: model.id,

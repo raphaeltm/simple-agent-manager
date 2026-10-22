@@ -19,6 +19,8 @@ export const AGENT_MODEL_SETTING_DEFAULTS = Object.freeze({
   // Below the 60 s default MCP tool timeout of common agent harnesses (Codex), so the agent
   // sees SAM's timeout message rather than its harness giving up while the call still runs.
   callTimeoutSeconds: 55,
+  schemaTimeoutSeconds: 10,
+  maxFileReferences: 16,
   maxInputBytes: 10 * 1024 * 1024,
   maxInlineOutputBytes: 32 * 1024,
   unpricedCallEstimateMicroUsd: 10_000,
@@ -33,6 +35,8 @@ const RANGES: Readonly<Record<IntegerKey, { min: number; max: number }>> = {
   defaultMonthlyBudgetCents: { min: 0, max: 10_000_000 },
   maxMonthlyBudgetCents: { min: 0, max: 100_000_000 },
   callTimeoutSeconds: { min: 5, max: 900 },
+  schemaTimeoutSeconds: { min: 1, max: 60 },
+  maxFileReferences: { min: 0, max: 100 },
   maxInputBytes: { min: 1_024, max: 50 * 1024 * 1024 },
   maxInlineOutputBytes: { min: 1_024, max: 1024 * 1024 },
   unpricedCallEstimateMicroUsd: { min: 0, max: 10_000_000 },
@@ -50,6 +54,10 @@ const DESCRIPTIONS: Readonly<Record<AgentModelSettingKey, string>> = {
   maxMonthlyBudgetCents:
     'Highest monthly spending limit, in US cents, that a project owner or admin can set.',
   callTimeoutSeconds: 'Seconds one model call may run before it is stopped.',
+  schemaTimeoutSeconds:
+    "Seconds to wait for Cloudflare when list_ai_models fetches a model's input schema.",
+  maxFileReferences:
+    'Workspace files ({"$file": path}) one model call may include. 0 turns file inputs off.',
   maxInputBytes: 'Largest request one model call may send to Cloudflare, in bytes.',
   maxInlineOutputBytes:
     'Largest model output returned inline to the agent; bigger or binary outputs are saved as workspace files.',

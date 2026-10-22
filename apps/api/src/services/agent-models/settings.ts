@@ -10,6 +10,8 @@ export interface AgentModelSettings {
   defaultMonthlyBudgetMicroUsd: number;
   maxMonthlyBudgetMicroUsd: number;
   callTimeoutMs: number;
+  schemaTimeoutMs: number;
+  maxFileReferences: number;
   maxInputBytes: number;
   maxInlineOutputBytes: number;
   unpricedCallEstimateMicroUsd: number;
@@ -44,6 +46,8 @@ export async function getAgentModelSettings(env: Env): Promise<AgentModelSetting
     defaultBudgetCents,
     maxBudgetCents,
     timeoutSeconds,
+    schemaTimeoutSeconds,
+    maxFileReferences,
     maxInputBytes,
     maxInlineOutputBytes,
     unpricedCallEstimateMicroUsd,
@@ -55,6 +59,8 @@ export async function getAgentModelSettings(env: Env): Promise<AgentModelSetting
     integerSetting(env, 'defaultMonthlyBudgetCents'),
     integerSetting(env, 'maxMonthlyBudgetCents'),
     integerSetting(env, 'callTimeoutSeconds'),
+    integerSetting(env, 'schemaTimeoutSeconds'),
+    integerSetting(env, 'maxFileReferences'),
     integerSetting(env, 'maxInputBytes'),
     integerSetting(env, 'maxInlineOutputBytes'),
     integerSetting(env, 'unpricedCallEstimateMicroUsd'),
@@ -67,6 +73,8 @@ export async function getAgentModelSettings(env: Env): Promise<AgentModelSetting
     defaultMonthlyBudgetMicroUsd: defaultBudgetCents * MICRO_USD_PER_CENT,
     maxMonthlyBudgetMicroUsd: maxBudgetCents * MICRO_USD_PER_CENT,
     callTimeoutMs: timeoutSeconds * 1000,
+    schemaTimeoutMs: schemaTimeoutSeconds * 1000,
+    maxFileReferences,
     maxInputBytes,
     maxInlineOutputBytes,
     unpricedCallEstimateMicroUsd,
