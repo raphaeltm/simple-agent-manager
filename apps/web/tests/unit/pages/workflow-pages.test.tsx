@@ -388,6 +388,19 @@ describe('Workflow run page on a phone', () => {
     expect(screen.getByTestId('workflow-steps')).toBeInTheDocument();
   });
 
+  it('returns to the list from a step reached through another step', async () => {
+    renderAt('/projects/p1/automation/workflows/run-flaky');
+    const cards = await screen.findAllByTestId('workflow-step-card');
+    await userEvent.click(cards.find((card) => card.dataset.step === 'ship')!);
+    expect(location()).toBe('/projects/p1/automation/workflows/run-flaky?step=ship');
+    await userEvent.click(await screen.findByRole('button', { name: 'See the step that failed' }));
+    expect(location()).toBe('/projects/p1/automation/workflows/run-flaky?step=fix');
+    // One step back is the list, not the step this one was opened from.
+    await userEvent.click(screen.getByRole('button', { name: 'All steps' }));
+    await waitFor(() => expect(location()).toBe('/projects/p1/automation/workflows/run-flaky'));
+    expect(screen.getByTestId('workflow-steps')).toBeInTheDocument();
+  });
+
   it('leaves a deep-linked step for the list without leaving the run', async () => {
     renderAt('/projects/p1/automation/workflows/run-flaky?step=ship');
     expect(await screen.findByTestId('workflow-step-explanation')).toHaveTextContent(
@@ -396,9 +409,8 @@ describe('Workflow run page on a phone', () => {
     await userEvent.click(screen.getByRole('button', { name: 'See the step that failed' }));
     expect(location()).toBe('/projects/p1/automation/workflows/run-flaky?step=fix');
     await userEvent.click(screen.getByRole('button', { name: 'All steps' }));
-    await waitFor(() =>
-      expect(location()).toBe('/projects/p1/automation/workflows/run-flaky?step=ship')
-    );
+    await waitFor(() => expect(location()).toBe('/projects/p1/automation/workflows/run-flaky'));
+    expect(screen.getByTestId('workflow-steps')).toBeInTheDocument();
   });
 
   it('shows the failure honestly and only offers real next steps', async () => {

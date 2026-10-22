@@ -20,8 +20,8 @@ on a wide screen):
 - **Needs your attention** lists anything that stopped, failed or could not be confirmed, with
   the usual fix as one button: **Resume**, **See what went wrong**, **Give it more runs**, or
   **Check the result**. A one-time run that failed stays here for three days, then only on its
-  own page and in History. A [workflow](/docs/guides/workflows/) with a failed step appears here
-  the same way, with **See what went wrong**.
+  own page and in History. A [workflow](/docs/guides/workflows/) that stopped and needs attention
+  appears here the same way, with **See what went wrong**.
 - **Coming up** shows the next things that start on their own, and when.
 - **Your automations** lists every automation in words: what starts it and what it does.
   **Scheduled**, **Reactions**, **One time** and **Paused or off** narrow the list. Finished

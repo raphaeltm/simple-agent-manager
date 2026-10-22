@@ -128,8 +128,9 @@ export function WorkflowRunPage() {
   );
   const location = useLocation();
   const navigate = useNavigate();
-  // On phones the step replaces the list, so it gets its own history entry: the browser's Back
-  // and "All steps" both return to the list.
+  // On phones the step replaces the list, so opening one from the list adds a history entry: the
+  // browser's Back and "All steps" both return to the list. Moving from one step's details to
+  // another replaces that entry and keeps its state, so the list stays one step back.
   const select = useCallback(
     (key: string) =>
       setParams(
@@ -138,9 +139,13 @@ export function WorkflowRunPage() {
           next.set('step', key);
           return next;
         },
-        { replace: wide, state: wide ? undefined : { [FROM_LIST]: true } }
+        wide
+          ? { replace: true }
+          : selectedKey
+            ? { replace: true, state: location.state }
+            : { replace: false, state: { [FROM_LIST]: true } }
       ),
-    [setParams, wide]
+    [location.state, selectedKey, setParams, wide]
   );
   const openedFromList = Boolean(
     location.state && typeof location.state === 'object' && FROM_LIST in location.state
