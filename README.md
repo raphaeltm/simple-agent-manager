@@ -36,7 +36,7 @@ Running a few agents in terminal tabs works until your laptop becomes the bottle
 
 SAM moves the fleet off your laptop.
 
-- **A workspace for every task.** On VMs in your cloud account, each agent gets its own dev container, built from your repo's `.devcontainer` by default, with Docker, git, and its own branch. Several agents share a VM when they fit, and idle VMs shut down. For quick jobs, Instant sessions start in seconds on Cloudflare Containers, with no VM provider needed.
+- **A workspace for every task.** On VMs in your cloud account, each agent gets its own dev container, built from your repo's `.devcontainer` by default, with Docker, git, and its own branch. Several agents share a VM when they fit, and VMs that SAM manages are removed after sitting idle for a while. For quick jobs, Instant sessions start in seconds on Cloudflare Containers, with no VM provider needed.
 - **Agents that run agents.** An agent can start helpers, send them instructions, wait for them, and stop them. Ask a lead agent to split a job, hand out the pieces, and review what comes back.
 - **The agents you already use.** Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, and Amp, side by side in one project. Save an agent, model, and effort level as a profile and pick one per task, so Claude Code can plan while Codex writes the code. Use API keys or your Claude and ChatGPT subscriptions.
 - **Everything visible, from anywhere.** Every message and tool call streams into the project chat and stays there. The chat list shows which agents are working, finished, or waiting on you. Turn on push notifications to hear when a task finishes or an agent asks for your input.
@@ -109,7 +109,7 @@ The control plane runs on Cloudflare Workers, so there is no control-plane VM to
 
 You need:
 
-- A [Cloudflare account](https://dash.cloudflare.com/sign-up) on the Workers Paid plan ($5 a month), with a domain on Cloudflare
+- A [Cloudflare account](https://dash.cloudflare.com/sign-up) on the Workers Paid plan ($5 a month minimum), with a domain on Cloudflare
 - A [GitHub App](https://simple-agent-manager.org/docs/guides/self-hosting/#step-4-create-github-app) for sign-in and repository access
 - A cloud provider account for VMs (optional if you only use Instant sessions)
 
