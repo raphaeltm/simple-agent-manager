@@ -32,3 +32,6 @@ Deployment [39776858617](https://github.com/raphaeltm/simple-agent-manager/actio
 
 ## Post-mortem
 Wizard introduced in `0b81beb30` (#1233) created profiles without writing the project default consumed by unprofiled task admission. Tests previously asserted only profile creation. New wizard and placement regressions cover that persistence boundary and retries. The original production prompt error remains separate; sanitized logs did not retain its underlying provider failure.
+
+## Release gate repair
+CI marketing job timed out twice at 15 minutes while browser tests were progressing without failures (run39779448324 attempts1–2). Attempt2 needed about11 minutes before its358 browser scenarios began. Raised the job timeout to25 minutes to retain the complete required suite. No product runtime change after staging verification.
