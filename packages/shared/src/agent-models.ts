@@ -57,8 +57,12 @@ export const DEFAULT_AGENT_MODEL_DEFAULT_CATEGORIES: readonly AgentModelCategory
   'classification',
 ];
 
-/** Cloudflare-hosted Workers AI model id: `@cf/<author>/<name>` (legacy `@hf/` too). */
-export const AGENT_MODEL_ID_PATTERN = /^@(?:cf|hf)\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+/**
+ * Cloudflare-hosted Workers AI model id: `@cf/<author>/<name>` (legacy `@hf/` too). Each segment
+ * starts with a letter or digit, so a dot-only segment such as `..` can never pass.
+ */
+export const AGENT_MODEL_ID_PATTERN =
+  /^@(?:cf|hf)\/[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /** Upper bound on ids in one stored selection; the catalog holds well under this. */
 export const AGENT_MODEL_SELECTION_MAX = 300;
