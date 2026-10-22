@@ -496,6 +496,10 @@ describe('create flow', () => {
     // Picking "By email" defaults the allowed senders to the signed-in user's own address, and
     // seeds the starting prompt — both only when the field was still empty.
     expect(screen.getByLabelText('Allowed senders')).toHaveValue('owner@example.com');
+    expect(
+      screen.getByText('Only mail from the senders you list here starts it.')
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Times use your time zone/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     expect(await screen.findByText('Email automations need an agent profile.')).toBeInTheDocument();

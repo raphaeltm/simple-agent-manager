@@ -50,6 +50,11 @@ const WHEN_TITLES: Partial<Record<NonNullable<EditorState['start']>, string>> = 
   event: 'What should it wait for?',
 };
 
+/** Email runs when mail arrives, so the default note about time zones does not apply. */
+const WHEN_HINTS: Partial<Record<NonNullable<EditorState['start']>, string>> = {
+  email: 'Only mail from the senders you list here starts it.',
+};
+
 export function EditorFlow({
   initial,
   steps,
@@ -205,6 +210,8 @@ export function EditorFlow({
   const text = STEP_TEXT[step];
   const stepTitle =
     step === 'when' && state.start ? (WHEN_TITLES[state.start] ?? text.title) : text.title;
+  const stepHint =
+    step === 'when' && state.start ? (WHEN_HINTS[state.start] ?? text.hint) : text.hint;
   const footer = (
     <div
       className={
@@ -258,7 +265,7 @@ export function EditorFlow({
       )}
       <div className="flex flex-col gap-1">
         <h2 className="m-0 text-[18px] font-semibold text-fg-primary">{stepTitle}</h2>
-        <p className="m-0 text-sm text-fg-muted">{text.hint}</p>
+        <p className="m-0 text-sm text-fg-muted">{stepHint}</p>
       </div>
     </div>
   );
