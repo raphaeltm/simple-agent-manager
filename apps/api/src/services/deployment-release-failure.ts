@@ -146,8 +146,9 @@ const STRANDED_PLACEMENT_ENVIRONMENT_SQL = `de.status IN ('active', 'error')
  * environment 01M5HCF0X7Y2S9V74NV0AV3K99, 2026-10-22). Mark it failed and show
  * why, so the next deploy is an informed retry.
  *
- * Both writes repeat every condition, so a supersession or Stop that lands
- * between them turns the environment write into a no-op.
+ * Both writes run in one D1 batch (a single transaction). The environment
+ * write only applies when the release write marked this release in the same
+ * batch, so the two rows always agree.
  *
  * Never throws: callers are already handling `error` and rethrow it, so a D1
  * failure here is logged instead of replacing the original error.
@@ -160,7 +161,9 @@ export async function recordStrandedDeploymentReleasePlacement(
   releaseId: string,
   error: unknown
 ): Promise<boolean> {
-  if (typeof env.DATABASE.prepare !== 'function') return false;
+  if (typeof env.DATABASE.prepare !== 'function' || typeof env.DATABASE.batch !== 'function') {
+    return false;
+  }
   const reason = (error instanceof Error ? error.message : String(error)).replace(/[.\s]+$/, '');
   try {
     const marked = await markStrandedPlacementFailed(
@@ -203,39 +206,43 @@ async function markStrandedPlacementFailed(
   reason: string
 ): Promise<boolean> {
   const now = new Date().toISOString();
-  const releaseResult = await database
-    .prepare(
-      `UPDATE deployment_releases
-          SET status = 'failed', status_updated_at = ?
-        WHERE id = ?
-          AND environment_id = ?
-          AND status = 'created'
-          AND EXISTS (
-            SELECT 1 FROM deployment_environments de
-            WHERE de.id = deployment_releases.environment_id
-              AND ${STRANDED_PLACEMENT_ENVIRONMENT_SQL}
-          )`
-    )
-    .bind(now, releaseId, environmentId, releaseId)
-    .run();
-  if ((releaseResult.meta?.changes ?? 0) === 0) return false;
-
-  await database
-    .prepare(
-      `UPDATE deployment_environments AS de
-          SET status = 'error',
-              observed_status = 'failed',
-              observed_error_message = ?,
-              updated_at = ?
-        WHERE de.id = ?
-          AND ${STRANDED_PLACEMENT_ENVIRONMENT_SQL}`
-    )
-    .bind(
-      `Deployment node placement stopped before a server was created: ${reason}. Deploy again to retry.`,
-      now,
-      environmentId,
-      releaseId
-    )
-    .run();
-  return true;
+  const [releaseResult] = await database.batch([
+    database
+      .prepare(
+        `UPDATE deployment_releases
+            SET status = 'failed', status_updated_at = ?
+          WHERE id = ?
+            AND environment_id = ?
+            AND status = 'created'
+            AND EXISTS (
+              SELECT 1 FROM deployment_environments de
+              WHERE de.id = deployment_releases.environment_id
+                AND ${STRANDED_PLACEMENT_ENVIRONMENT_SQL}
+            )`
+      )
+      .bind(now, releaseId, environmentId, releaseId),
+    database
+      .prepare(
+        `UPDATE deployment_environments AS de
+            SET status = 'error',
+                observed_status = 'failed',
+                observed_error_message = ?,
+                updated_at = ?
+          WHERE de.id = ?
+            AND ${STRANDED_PLACEMENT_ENVIRONMENT_SQL}
+            AND EXISTS (
+              SELECT 1 FROM deployment_releases marked
+              WHERE marked.id = ? AND marked.status = 'failed' AND marked.status_updated_at = ?
+            )`
+      )
+      .bind(
+        `Deployment node placement stopped before a server was created: ${reason}. Deploy again to retry.`,
+        now,
+        environmentId,
+        releaseId,
+        releaseId,
+        now
+      ),
+  ]);
+  return (releaseResult?.meta?.changes ?? 0) > 0;
 }

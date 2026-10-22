@@ -51,6 +51,12 @@ class RelocationClaimLostError extends Error {}
 
 export class DeploymentPlacementCancelledError extends Error {}
 
+/**
+ * A cancelled placement is not recorded as a release failure. Only the fresh-node sites
+ * (`observeProvisioningResult`, `provisionNodeForRelease`) can strand a release, so only they
+ * call `recordStrandedDeploymentReleasePlacement`; the other sites run with a node still linked,
+ * which that recorder treats as owned and skips.
+ */
 export function isPlacementCancellation(error: unknown): boolean {
   return (
     error instanceof DeploymentPlacementCancelledError ||

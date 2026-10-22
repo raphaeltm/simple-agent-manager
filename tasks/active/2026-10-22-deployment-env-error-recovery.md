@@ -120,7 +120,7 @@ Raphaël: "Fix it and ship it."
 
 - `apps/api/src/services/provisioning-authority.ts` (`assertDeploymentProvisioningAuthority`)
 - `apps/api/src/services/deployment-node-admission.ts` (`linkEnvironmentToNode`)
-- `apps/api/src/services/deployment-legacy-node-admission.ts` (precedent `error` → `starting`)
+- `apps/api/src/services/deployment-legacy-node-admission.ts` (legacy admission; shares `RECOVER_ERRORED_ENVIRONMENT_SET_SQL`)
 - `apps/api/src/routes/deployment-release-placement.ts` (`observeProvisioningResult`,
   `isPlacementCancellation`)
 - `apps/api/src/services/deployment-release-failure.ts`
