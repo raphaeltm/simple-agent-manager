@@ -38,8 +38,8 @@ export function EmailTriggerFields({
       />
       <p id={HINT_ID} className="text-xs text-fg-muted mt-1 mb-0">
         One address per line. Mail whose From address is on this list starts this automation, and
-        the agent can reply to it. From addresses are not verified yet, so keep the automation&rsquo;s
-        address private.
+        the agent can reply to it. From addresses are not verified yet, so keep the
+        automation&rsquo;s address private.
       </p>
       {error && (
         <p id={ERROR_ID} role="alert" className="mt-2 mb-0 text-[13px] font-medium text-danger-fg">
