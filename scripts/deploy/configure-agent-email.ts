@@ -151,7 +151,7 @@ async function listMailRecords(api: Api, zoneId: string, name: string): Promise<
 function mailSignature(records: DnsRecord[]): string {
   return records
     .map((record) => `${record.type}:${record.priority ?? ''}:${normalizeContent(record.content)}`)
-    .sort()
+    .sort((a, b) => a.localeCompare(b))
     .join(',');
 }
 
