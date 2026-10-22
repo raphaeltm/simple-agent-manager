@@ -237,6 +237,73 @@ test.describe('Project onboarding wizard', () => {
     await assertNoOverflow(page);
   });
 
+  test('persists setup defaults with visible save failure and retry', async ({ page }) => {
+    test.setTimeout(60_000);
+    await setupMocks(page);
+    const defaults: string[] = [];
+    let failSave = true;
+    let profilesCreated = 0;
+    await page.route('**/api/projects/proj-audit-1', (route) => {
+      const body = route.request().postDataJSON();
+      if (failSave)
+        return route.fulfill({
+          status: 503,
+          json: {
+            error: 'UNAVAILABLE',
+            message: 'Could not save the project default. Please retry.',
+          },
+        });
+      defaults.push(body.defaultAgentType);
+      return route.fulfill({ status: 200, json: { ...CREATED_PROJECT, ...body } });
+    });
+    await page.route('**/api/projects/proj-audit-1/agent-profiles', (route) => {
+      profilesCreated += 1;
+      return route.fulfill({
+        status: 201,
+        json: {
+          id: `profile-${profilesCreated}`,
+          ...route.request().postDataJSON(),
+        },
+      });
+    });
+    await gotoWizard(page);
+    await page.getByRole('button', { name: /Get started/ }).click();
+    await page.getByRole('button', { name: /Continue/ }).click();
+    await page.getByText('Let SAM host the repository').click();
+    await page.getByRole('button', { name: /Continue/ }).click();
+    await page.getByPlaceholder('Project name').fill('greenfield');
+    await page.getByRole('button', { name: /Create project/ }).click();
+    await expect(page.getByRole('heading', { name: 'Set up a conversation agent' })).toBeVisible();
+    await page.getByLabel('Name', { exact: true }).fill('Research <agent> & café 🚀 '.repeat(10));
+    await screenshot(page, 'setup-default-conversation');
+    await assertNoOverflow(page);
+    await page.locator('.sam-main-content').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await screenshot(page, 'setup-default-conversation-controls');
+    await assertNoOverflow(page);
+    await page.getByRole('button', { name: /Create profile/ }).click();
+    await expect(page.getByText('Could not save the project default. Please retry.')).toBeVisible();
+    expect(profilesCreated).toBe(0);
+    await screenshot(page, 'setup-default-save-error');
+    await assertNoOverflow(page);
+    failSave = false;
+    await page.getByRole('button', { name: /Create profile/ }).click();
+    await expect(page.getByRole('heading', { name: 'Set up a task agent' })).toBeVisible();
+    await page.getByRole('combobox', { name: 'Agent', exact: true }).selectOption('openai-codex');
+    await screenshot(page, 'setup-default-task');
+    await assertNoOverflow(page);
+    await page.locator('.sam-main-content').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await screenshot(page, 'setup-default-task-controls');
+    await assertNoOverflow(page);
+    await page.getByRole('button', { name: /Create profile/ }).click();
+    await expect(page.getByRole('heading', { name: /Schedule automation/ })).toBeVisible();
+    expect(defaults).toEqual(['claude-code', 'openai-codex']);
+    expect(profilesCreated).toBe(2);
+  });
+
   test('hides the SAM option when Artifacts is disabled', async ({ page }) => {
     await setupMocks(page, { artifactsEnabled: false });
     await gotoWizard(page);

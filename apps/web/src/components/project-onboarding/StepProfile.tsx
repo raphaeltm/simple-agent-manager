@@ -96,6 +96,12 @@ export function StepProfile({
     <div className="grid gap-4">
       <StepHeader id={kind} title={copy.title} lead={copy.lead} />
       <Callout variant="info">{copy.callout}</Callout>
+      <p className="text-sm text-fg-muted">
+        {kind === 'conversation'
+          ? 'This agent becomes your project default unless you set up a task agent next.'
+          : 'This agent becomes your project default for tasks and automations without a selected profile.'}{' '}
+        You can change the default in Project Settings.
+      </p>
 
       {agentsError && (
         <Alert variant="error">

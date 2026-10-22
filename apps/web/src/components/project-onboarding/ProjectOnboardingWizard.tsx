@@ -20,6 +20,7 @@ import {
   listBranches,
   listGitLabBranches,
   submitTask,
+  updateProject,
 } from '../../lib/api';
 import {
   MobileProgress,
@@ -386,6 +387,15 @@ export function ProjectOnboardingWizard({
     setSetupError(null);
     setSavingSetup(kind);
     try {
+      // The task agent wins when both setup profiles exist. Revisiting an earlier
+      // skipped conversation step must not replace that choice.
+      if (
+        (kind === 'task' || !createdProfiles.task) &&
+        project.defaultAgentType !== draft.agentType
+      ) {
+        const updated = await updateProject(project.id, { defaultAgentType: draft.agentType });
+        setProject(updated);
+      }
       const created: AgentProfile = await createAgentProfile(
         project.id,
         profilePayload(draft, kind)

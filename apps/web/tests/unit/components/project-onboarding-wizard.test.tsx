@@ -11,6 +11,7 @@ vi.mock('react-router', async (importOriginal) => ({
 }));
 
 const mockCreateProject = vi.fn();
+const mockUpdateProject = vi.fn();
 const mockCreateAgentProfile = vi.fn();
 const mockCreateTrigger = vi.fn();
 const mockListAgents = vi.fn().mockResolvedValue({ agents: [] });
@@ -21,6 +22,7 @@ const mockSubmitTask = vi.fn();
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   createProject: (...args: unknown[]) => mockCreateProject(...args),
+  updateProject: (...args: unknown[]) => mockUpdateProject(...args),
   createAgentProfile: (...args: unknown[]) => mockCreateAgentProfile(...args),
   createTrigger: (...args: unknown[]) => mockCreateTrigger(...args),
   listAgents: (...args: unknown[]) => mockListAgents(...args),
@@ -165,6 +167,9 @@ describe('ProjectOnboardingWizard', () => {
     vi.clearAllMocks();
     mockNavigate.mockReset();
     mockCreateProject.mockReset();
+    mockUpdateProject
+      .mockReset()
+      .mockImplementation(async (_id, update) => ({ ...MOCK_PROJECT, ...update }));
     mockCreateAgentProfile.mockReset();
     mockCreateTrigger.mockReset();
     mockListAgents.mockReset().mockResolvedValue({ agents: MOCK_AGENTS });
@@ -369,6 +374,119 @@ describe('ProjectOnboardingWizard', () => {
       );
     });
     await screen.findByRole('heading', { name: 'Set up a task agent' });
+    expect(mockUpdateProject).toHaveBeenCalledWith('proj-1', { defaultAgentType: 'claude-code' });
+  });
+
+  it('uses the task agent as default and does not overwrite it when revisiting conversation setup', async () => {
+    mockListAgents.mockResolvedValue({
+      agents: [
+        ...MOCK_AGENTS,
+        {
+          id: 'openai-codex',
+          name: 'Codex',
+          configured: true,
+          models: ['gpt-5'],
+        },
+      ],
+    });
+    mockCreateAgentProfile.mockImplementation(async (_id, body) => ({
+      id: body.taskMode,
+      ...body,
+    }));
+    await advanceToSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/ }));
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
+    fireEvent.change(screen.getByLabelText('Agent'), { target: { value: 'openai-codex' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/ }));
+    await screen.findByRole('heading', { name: /Schedule automation/ });
+    expect(mockUpdateProject.mock.calls).toEqual([
+      ['proj-1', { defaultAgentType: 'claude-code' }],
+      ['proj-1', { defaultAgentType: 'openai-codex' }],
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: /Back/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Back/ }));
+    await screen.findByRole('heading', { name: 'Set up a conversation agent' });
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/ }));
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
+    expect(mockUpdateProject).toHaveBeenCalledTimes(2);
+    expect(mockCreateAgentProfile).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the task default when a previously skipped conversation profile is created later', async () => {
+    mockListAgents.mockResolvedValue({
+      agents: [
+        ...MOCK_AGENTS,
+        {
+          id: 'openai-codex',
+          name: 'Codex',
+          configured: true,
+          models: ['gpt-5'],
+        },
+      ],
+    });
+    mockCreateAgentProfile.mockImplementation(async (_id, body) => ({
+      id: body.taskMode,
+      ...body,
+    }));
+    await advanceToSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
+    fireEvent.change(screen.getByLabelText('Agent'), { target: { value: 'openai-codex' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/ }));
+    await screen.findByRole('heading', { name: /Schedule automation/ });
+    fireEvent.click(screen.getByRole('button', { name: /Back/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Back/ }));
+    await screen.findByRole('heading', { name: 'Set up a conversation agent' });
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/ }));
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
+    expect(mockUpdateProject).toHaveBeenCalledExactlyOnceWith('proj-1', {
+      defaultAgentType: 'openai-codex',
+    });
+    expect(mockCreateAgentProfile).toHaveBeenCalledTimes(2);
+  });
+
+  it('retains the conversation default when task setup is skipped', async () => {
+    mockCreateAgentProfile.mockResolvedValue({ id: 'conversation', agentType: 'claude-code' });
+    await advanceToSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/ }));
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
+    await screen.findByRole('heading', { name: /Schedule automation/ });
+    expect(mockUpdateProject).toHaveBeenCalledExactlyOnceWith('proj-1', {
+      defaultAgentType: 'claude-code',
+    });
+  });
+
+  it('blocks profile creation on default-save failure and retries without duplicating a profile', async () => {
+    mockUpdateProject.mockRejectedValueOnce(new Error('Could not save project default'));
+    mockCreateAgentProfile.mockResolvedValue({ id: 'conversation', agentType: 'claude-code' });
+    await advanceToSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/ }));
+    expect(await screen.findByText('Could not save project default')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Set up a conversation agent' })
+    ).toBeInTheDocument();
+    expect(mockCreateAgentProfile).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/ }));
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
+    expect(mockUpdateProject).toHaveBeenCalledTimes(2);
+    expect(mockCreateAgentProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains a saved default and retries only profile creation after a profile-save failure', async () => {
+    mockCreateAgentProfile
+      .mockRejectedValueOnce(new Error('Could not create profile'))
+      .mockResolvedValueOnce({ id: 'conversation', agentType: 'claude-code' });
+    await advanceToSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/ }));
+    expect(await screen.findByText('Could not create profile')).toBeInTheDocument();
+    expect(mockUpdateProject).toHaveBeenCalledExactlyOnceWith('proj-1', {
+      defaultAgentType: 'claude-code',
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/ }));
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
+    expect(mockUpdateProject).toHaveBeenCalledTimes(1);
+    expect(mockCreateAgentProfile).toHaveBeenCalledTimes(2);
   });
 
   it('disables Create profile when no agents are configured but Skip still advances', async () => {
@@ -455,6 +573,7 @@ describe('ProjectOnboardingWizard', () => {
     // No profile/trigger was created when skipping.
     expect(mockCreateAgentProfile).not.toHaveBeenCalled();
     expect(mockCreateTrigger).not.toHaveBeenCalled();
+    expect(mockUpdateProject).not.toHaveBeenCalled();
   });
 
   /* ─── Kickoff ─── */

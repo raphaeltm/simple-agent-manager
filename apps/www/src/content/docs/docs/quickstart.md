@@ -27,7 +27,7 @@ Go to **Settings → GitHub** and click **Install GitHub App** on the repositori
 
 ### 4. Import a Project
 
-From the **Dashboard**, click **Import Project** and pick a repository that has the GitHub App installed. A project links that repo to its chats, agents, and activity.
+From the **Dashboard**, click **Import Project** and pick a repository that has the GitHub App installed. A project links that repo to its chats, agents, and activity. During setup, your conversation agent becomes the project default. If you also configure a task agent, that agent becomes the default instead. Tasks and automations without a selected profile use this default; change it later in **Project Settings**.
 
 ### 5. Chat
 

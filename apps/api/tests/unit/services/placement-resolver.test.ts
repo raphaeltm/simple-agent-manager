@@ -177,6 +177,25 @@ describe('placement resolver parity', () => {
     ).toEqual(['candidate-larger-cheap', 'candidate-larger-expensive']);
   });
 
+  it.each(['task-submit', 'trigger-submit'] as const)(
+    '%s inherits the project setup agent unless an explicit profile is selected',
+    (entryPoint) => {
+      const input = {
+        entryPoint,
+        taskId: 'task-project-agent',
+        projectId: PROJECT.id,
+        userId: 'submit-user',
+        project: PROJECT,
+        credentialProjectPolicy: 'current-project' as const,
+        taskModeDefault: 'workspace-profile' as const,
+      };
+      expect(resolveTaskStartPlacement(input).agentType).toBe('openai-codex');
+      expect(resolveTaskStartPlacement({ ...input, profile: PROFILE }).agentType).toBe(
+        'claude-code'
+      );
+    }
+  );
+
   it('matches task submit precedence and inherited parent credential attribution', () => {
     const placement = resolveTaskStartPlacement({
       entryPoint: 'task-submit',
