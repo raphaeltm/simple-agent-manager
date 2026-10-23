@@ -300,7 +300,7 @@ main domain.
 - [x] Shared types for the setup plan and status
 - [x] Deploy step prepares only, writes the marker while sending verifies; tests prove it never calls a routing endpoint
 - [x] `sync-wrangler-config.ts` adds `AGENT_EMAIL_WORKER_NAME` with the binding; tests
-- [x] Setup row store and the on-switch (uncached since Astra's review); every caller of `isAgentEmailAvailable` and the senders moved to it
+- [x] Setup row store and the on-switch `isAgentEmailOn` (uncached since Astra's review); every former caller of the removed `isAgentEmailAvailable`, and the senders, now call it
 - [x] Setup service and admin routes; tests against a strict fake Cloudflare (consent, refusal, unexpected apex change, pending MX, idempotent re-run, sending still verifying)
 - [x] Vertical slice: binding present but not set up refuses inbound mail, replies and email automations
 - [x] Admin panel: plan, consent and result states; component tests; Playwright audit at 375 and 1280
@@ -320,8 +320,9 @@ main domain.
   nothing new). A failed check leaves agent email off and names what changed; Cloudflare has made
   the change by then, so running the setup again turns agent email on with the records as they are.
 - **Cache (superseded).** This first version cached a present record for 60 s. Astra's admin-setup
-  review (item A3) removed the cache: every check reads the D1 row, so an outage or a missing row
-  turns agent email off at once.
+  review (item A3) removed the cache: every check reads the D1 row. A missing or unreadable row
+  turns agent email off at once. If D1 cannot be read, the read throws: the gates fail rather than
+  proceed, and `GET /api/config/agent-email` reports agent email as off.
 - **Errors.** Refusals and an unexpected main-domain change are `409`; a failed Cloudflare call is
   `502 CLOUDFLARE_ERROR` with Cloudflare's code and message.
 - **Request budget.** A setup run in a zone new to Email Routing makes about 15 round trips (one D1
