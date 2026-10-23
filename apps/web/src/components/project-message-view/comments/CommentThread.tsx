@@ -19,6 +19,8 @@ interface CommentThreadProps {
   scrollIntoViewWhenFocused?: boolean;
   /** The surface has no agent at all (library files): hides every agent affordance. */
   hideSendToAgent?: boolean;
+  /** Open with the reply composer showing, for a surface the person opened in order to reply. */
+  startReplying?: boolean;
   /** Project whose active members can be @mentioned in replies. Omit where unsupported. */
   mentionProjectId?: string;
   onReply: (
@@ -42,6 +44,7 @@ export function CommentThread({
   focused = false,
   scrollIntoViewWhenFocused = false,
   hideSendToAgent = false,
+  startReplying = false,
   mentionProjectId,
   onReply,
   onResolve,
@@ -49,8 +52,8 @@ export function CommentThread({
   onSendToAgent,
 }: CommentThreadProps) {
   const isResolved = comment.status === 'resolved';
-  const [expanded, setExpanded] = useState(!isResolved || focused);
-  const [replying, setReplying] = useState(false);
+  const [expanded, setExpanded] = useState(!isResolved || focused || startReplying);
+  const [replying, setReplying] = useState(startReplying);
   const previousResolved = useRef(isResolved);
   const articleRef = useRef<HTMLElement>(null);
   const sendToAgent = hideSendToAgent ? undefined : onSendToAgent;

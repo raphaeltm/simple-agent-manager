@@ -46,8 +46,11 @@ export function Project() {
           : null
       : null;
 
-  // Chat routes get a full-bleed layout (no PageLayout wrapper)
-  const isChatRoute = /\/(chat|agent)(\/|$)/.test(location.pathname);
+  // Chat routes, and the comment reader (a conversation with its own scroller), get a
+  // full-bleed layout (no PageLayout wrapper)
+  const isChatRoute =
+    /\/(chat|agent)(\/|$)/.test(location.pathname) ||
+    /\/comments\/[^/]+\/[^/]+\/?$/.test(location.pathname);
 
   const loadProject = useCallback(async () => {
     await Promise.all([

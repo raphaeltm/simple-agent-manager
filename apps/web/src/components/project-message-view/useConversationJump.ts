@@ -39,6 +39,11 @@ interface UseConversationJumpInput {
   /** Pages older history in until the target message (or time) is loaded. */
   loadUntil: (target: TimelineJumpTarget) => Promise<void>;
   loadingMore: boolean;
+  /**
+   * Stored row id → id of the rendered item it was merged into (`mergedRowAliases`). A
+   * comment can be anchored to any streamed chunk of an agent reply, not only the first.
+   */
+  messageAliases?: ReadonlyMap<string, string>;
   /** Message id requested by a route-level deep link, such as Project → Comments. */
   targetMessageId?: string | null;
   /** Timestamp used to load older history before resolving a route-level target. */
@@ -68,6 +73,7 @@ export function useConversationJump({
   listReady,
   loadUntil,
   loadingMore,
+  messageAliases,
   targetMessageId,
   targetMessageTimestamp,
   onTargetMessageConsumed,
@@ -115,8 +121,13 @@ export function useConversationJump({
     for (const [alias, index] of aliases) {
       if (!map.has(alias)) map.set(alias, index);
     }
+    // Merged streamed chunks answer to the item that absorbed them.
+    for (const [rowId, itemId] of messageAliases ?? []) {
+      const index = map.get(itemId);
+      if (index !== undefined && !map.has(rowId)) map.set(rowId, index);
+    }
     return map;
-  }, [displayItems]);
+  }, [displayItems, messageAliases]);
 
   // A jump targets either an exact message (user message, comment anchor) or the
   // nearest message to a timestamp (status/activity entries). A chat opens on its

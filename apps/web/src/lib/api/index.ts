@@ -213,6 +213,7 @@ export type {
   MessageCommentAction,
   MessageCommentAnchor,
   MessageCommentAuthor,
+  MessageCommentContext,
   MessageCommentRealtimeEvent,
   MessageCommentReply,
   MessageCommentStatus,
@@ -223,6 +224,7 @@ export type {
 export {
   createMessageCommentReply,
   createMessageCommentThread,
+  getMessageCommentContext,
   listMessageComments,
   reopenMessageCommentThread,
   resolveMessageCommentThread,

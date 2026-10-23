@@ -39,19 +39,24 @@
     cursor: pointer;
   }
 
-  html, body, #root {
+  html,
+  body,
+  #root {
     height: var(--sam-app-height);
     max-width: 100vw;
   }
 
   @media (min-width: 768px) {
-    html, body, #root {
+    html,
+    body,
+    #root {
       overflow: hidden;
     }
   }
 
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-family:
+      -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background:
@@ -63,10 +68,10 @@
   }
 
   /* ── Form elements (glass-themed) ── */
-  input[type="text"],
-  input[type="url"],
-  input[type="password"],
-  input[type="date"],
+  input[type='text'],
+  input[type='url'],
+  input[type='password'],
+  input[type='date'],
   textarea,
   select {
     display: block;
@@ -79,7 +84,10 @@
     color: var(--sam-color-fg-primary);
     font-size: 0.875rem;
     font-family: inherit;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease,
+      background-color 0.15s ease;
   }
 
   input::placeholder,
@@ -93,7 +101,9 @@
   select:focus {
     outline: none;
     border-color: var(--sam-form-border-focus);
-    box-shadow: 0 0 0 3px var(--sam-form-focus-ring), inset 0 0 8px var(--sam-form-focus-inset);
+    box-shadow:
+      0 0 0 3px var(--sam-form-focus-ring),
+      inset 0 0 8px var(--sam-form-focus-inset);
     background-color: var(--sam-form-bg-focus);
   }
 
@@ -144,11 +154,14 @@
 
 /* ── SAM-specific utility (not replaceable by Tailwind) ── */
 @layer utilities {
-  .min-h-screen { min-height: var(--sam-app-height); }
+  .min-h-screen {
+    min-height: var(--sam-app-height);
+  }
 }
 
 @keyframes task-running-glow {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 0.92;
   }
 
@@ -174,7 +187,9 @@
 
 /* ── Divide utility (uses SAM border color) ── */
 @layer utilities {
-  .divide-y > * + * { border-top: 1px solid var(--sam-color-border-default); }
+  .divide-y > * + * {
+    border-top: 1px solid var(--sam-color-border-default);
+  }
 }
 
 /* ── Glass utilities (opt-in foundation for the glassomorphism migration) ── */
@@ -192,26 +207,34 @@
 
   .glass-chrome {
     background-color: var(--sam-glass-bg-chrome);
-    -webkit-backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-chrome))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
-    backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-chrome))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
+    -webkit-backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-chrome)))
+      saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
+    backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-chrome)))
+      saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
   }
 
   .glass-surface {
     background-color: var(--sam-glass-bg-surface);
-    -webkit-backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-surface))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
-    backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-surface))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
+    -webkit-backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-surface)))
+      saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
+    backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-surface)))
+      saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
   }
 
   .glass-modal {
     background-color: var(--sam-glass-bg-modal);
-    -webkit-backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-modal))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
-    backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-modal))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
+    -webkit-backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-modal)))
+      saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
+    backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-blur-modal)))
+      saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
   }
 
   .glass-backdrop-dim {
     background-color: var(--sam-glass-backdrop-dim);
-    -webkit-backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-backdrop-blur))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
-    backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-backdrop-blur))) saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
+    -webkit-backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-backdrop-blur)))
+      saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
+    backdrop-filter: blur(calc(var(--sam-enable-blur) * var(--sam-glass-backdrop-blur)))
+      saturate(calc(100% + var(--sam-enable-blur) * var(--sam-glass-saturate-boost)));
   }
 
   .glass-chrome .glass-surface,
@@ -271,25 +294,38 @@
     }
   }
 
+  /*
+   * Comment reader (CSS Custom Highlight API ranges, registered in
+   * pages/comment-reader/quote-highlight.ts): the open comment's quoted words,
+   * and fainter, the words other comments in view are about.
+   */
+  ::highlight(sam-comment-quote) {
+    background-color: color-mix(in srgb, var(--sam-color-warning) 40%, transparent);
+    color: var(--sam-color-fg-primary);
+  }
+
+  ::highlight(sam-comment-quote-other) {
+    background-color: color-mix(in srgb, var(--sam-color-info) 22%, transparent);
+  }
+
   .glass-card-glow {
     position: relative;
   }
 
   .glass-card-glow::before {
-    content: "";
+    content: '';
     position: absolute;
     inset: 0;
     pointer-events: none;
     border-radius: inherit;
     padding: var(--sam-glass-glow-width);
-    background:
-      linear-gradient(
-        135deg,
-        var(--sam-glass-glow-color),
-        transparent 35%,
-        transparent 65%,
-        var(--sam-glass-glow-color)
-      );
+    background: linear-gradient(
+      135deg,
+      var(--sam-glass-glow-color),
+      transparent 35%,
+      transparent 65%,
+      var(--sam-glass-glow-color)
+    );
     filter: blur(var(--sam-glass-glow-blur));
     opacity: 0.7;
     -webkit-mask:
@@ -404,12 +440,10 @@
     box-shadow:
       /* tight green rim */
       0 0 0 1px rgba(34, 197, 94, 0.08),
-      /* depth */
-      0 2px 14px rgba(0, 0, 0, 0.22),
-      /* soft outer green glow */
-      0 0 20px rgba(34, 197, 94, 0.14),
-      /* inner glow pooling toward the bottom edge */
-      inset 0 -22px 28px -22px rgba(34, 197, 94, 0.55) !important;
+      /* depth */ 0 2px 14px rgba(0, 0, 0, 0.22),
+      /* soft outer green glow */ 0 0 20px rgba(34, 197, 94, 0.14),
+      /* inner glow pooling toward the bottom edge */ inset 0 -22px 28px -22px
+        rgba(34, 197, 94, 0.55) !important;
     color: var(--sam-color-fg-primary) !important;
   }
 

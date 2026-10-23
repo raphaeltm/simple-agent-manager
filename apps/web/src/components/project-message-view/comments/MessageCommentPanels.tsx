@@ -51,7 +51,7 @@ export interface CommentActions {
 }
 
 /** Thread-list callbacks for a surface, with Send to agent only when `actions` allows it. */
-function threadCallbacks(actions: CommentActions, canSendToAgent = true) {
+export function threadCallbacks(actions: CommentActions, canSendToAgent = true) {
   const { sendToAgent } = actions;
   return {
     onReply: (

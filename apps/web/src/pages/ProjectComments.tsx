@@ -15,6 +15,7 @@ import {
 import { CommentInboxFilters } from '../components/project-message-view/comments/CommentInboxFilters';
 import { CommentInboxRow } from '../components/project-message-view/comments/CommentInboxRow';
 import { useProjectCommentInbox } from '../components/project-message-view/comments/useProjectCommentInbox';
+import { commentReaderPath } from './comment-reader/reader-model';
 import { useProjectContext } from './ProjectContext';
 
 /**
@@ -26,8 +27,9 @@ import { useProjectContext } from './ProjectContext';
  * attached to. This is that missing surface: every unresolved thread in the
  * project, from chat and from the library, in triage order.
  *
- * Selecting a thread navigates to where it lives rather than opening it here,
- * so a comment is always read in the context that gives it meaning.
+ * Selecting a chat thread opens the comment reader: the conversation around the
+ * comment, landed on the quoted words, with the thread beside it. A library
+ * thread opens its file.
  */
 export function ProjectComments() {
   const { projectId } = useProjectContext();
@@ -54,11 +56,8 @@ export function ProjectComments() {
 
   const open = (item: (typeof inbox.items)[number]) => {
     if (item.source.kind === 'session') {
-      const params = new URLSearchParams({
-        commentMessage: item.source.messageId,
-        commentAt: String(item.thread.createdAt),
-      });
-      navigate(`/projects/${projectId}/chat/${item.source.sessionId}?${params.toString()}`);
+      // The reader opens the conversation on the commented words, with the thread beside it.
+      navigate(commentReaderPath(projectId, item.source.sessionId, item.thread.id));
     } else {
       const params = new URLSearchParams({ preview: item.source.fileId });
       navigate(`/projects/${projectId}/library?${params.toString()}`);

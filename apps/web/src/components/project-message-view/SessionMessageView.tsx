@@ -1,12 +1,10 @@
 import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
-import { mapToolCallContent } from '@simple-agent-manager/acp-client';
 import { Spinner } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useMemo, useRef, useState } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
 
 import { useAcpPermissionInteractions } from '../../hooks/useAcpPermissionInteractions';
 import { useIsMobile } from '../../hooks/useIsMobile';
-import { getMessageToolContent } from '../../lib/api/sessions';
 import { useAuth } from '../AuthProvider';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { type CommentInboxItem, countBuckets, toInboxItem } from './comments/comment-inbox';
@@ -17,6 +15,8 @@ import { useMessageComments } from './comments/useMessageComments';
 import { useProjectMessageCommentUi } from './comments/useProjectMessageCommentUi';
 import { ConversationPane } from './ConversationPane';
 import { FloatingHeader } from './FloatingHeader';
+import { loadToolCallContent } from './load-tool-content';
+import { mergedRowAliases } from './message-aliases';
 import { type ChatListContext, useFloatingHeaderHeight } from './MessageListScaffold';
 import { ProjectMessageViewDrawers } from './ProjectMessageViewDrawers';
 import { useSessionFocusHandoff } from './session-focus-handoff';
@@ -114,6 +114,10 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   const displayItems = useMemo<DisplayItem[]>(() => {
     return groupToolCallItems(chatMessagesToConversationItems(lc.messages, undeliveredList));
   }, [lc.messages, undeliveredList]);
+  const messageAliases = useMemo(
+    () => mergedRowAliases(lc.messages, displayItems),
+    [lc.messages, displayItems]
+  );
   // Owner and grantees drive the agent; every member can comment; the server enforces both.
   const viewer = resolveSessionViewerCapabilities(lc.session);
   const accessNoticeRef = useRef<HTMLDivElement>(null);
@@ -170,6 +174,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     listReady: Boolean(lc.session) && displayItems.length > 0,
     loadUntil: lc.loadUntil,
     loadingMore: lc.loadingMore,
+    messageAliases,
     targetMessageId,
     targetMessageTimestamp,
     onTargetMessageConsumed,
@@ -180,12 +185,8 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
 
   /** Lazy-load tool content for a compact-mode tool call card. */
   const handleLoadToolContent = useCallback(
-    async (messageId: string): Promise<ToolCallContentItem[]> => {
-      const { content } = await getMessageToolContent(projectId, sessionId, messageId);
-      return (content as Array<{ type: string } & Record<string, unknown>>).map((c) =>
-        mapToolCallContent(c)
-      );
-    },
+    (messageId: string): Promise<ToolCallContentItem[]> =>
+      loadToolCallContent(projectId, sessionId, messageId),
     [projectId, sessionId]
   );
 

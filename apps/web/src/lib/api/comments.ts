@@ -1,4 +1,9 @@
-import type { CommentMention, CommentMentionInput } from '@simple-agent-manager/shared';
+import type {
+  CommentMention,
+  CommentMentionInput,
+  MessageCommentContextResponse as WireCommentContextResponse,
+  SessionViewerAccess,
+} from '@simple-agent-manager/shared';
 
 import { request } from './client';
 import { type BackendAuthor, type BackendReply, mapAuthor } from './comment-wire';
@@ -7,6 +12,7 @@ import {
   type LibraryFileCommentThread,
   mapBackendFileThread,
 } from './library-file-comments';
+import type { ChatMessageResponse } from './sessions';
 
 // Library-file comments live in their own module; re-exported so every importer of
 // `lib/api/comments` keeps one entry point for both anchor kinds.
@@ -220,6 +226,34 @@ function getBackendThread(
     throw new Error('Comment response did not include a thread');
   }
   return mapBackendMessageCommentThread(projectId, thread);
+}
+
+/** One chat comment with the conversation around the message it is on (Comments page reader). */
+export interface MessageCommentContext {
+  thread: MessageCommentThread;
+  session: { id: string; topic: string | null };
+  viewerAccess: SessionViewerAccess;
+  /** `found` is false when the commented message is no longer in the chat. */
+  anchor: { messageId: string; found: boolean };
+  /** Stored rows in transcript order; page on with `listChatMessages` cursors. */
+  messages: ChatMessageResponse[];
+  hasMoreBefore: boolean;
+  hasMoreAfter: boolean;
+}
+
+export async function getMessageCommentContext(
+  projectId: string,
+  sessionId: string,
+  threadId: string,
+  params: { signal?: AbortSignal } = {}
+): Promise<MessageCommentContext> {
+  const response = await request<
+    Omit<WireCommentContextResponse<ChatMessageResponse>, 'thread'> & { thread: BackendThread }
+  >(
+    `${sessionCommentsEndpoint(projectId, sessionId)}/${encodeURIComponent(threadId)}/context`,
+    params.signal ? { signal: params.signal } : {}
+  );
+  return { ...response, thread: mapBackendMessageCommentThread(projectId, response.thread) };
 }
 
 export async function listMessageComments(
