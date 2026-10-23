@@ -49,9 +49,20 @@ test.beforeAll(async ({ request }) => {
 });
 
 test.afterAll(async ({ request }) => {
-  if (projectId && envId) {
-    await request.delete(`${STAGING_API}/api/projects/${projectId}/environments/${envId}`);
-  }
+  if (!projectId || !envId) return;
+  // Each hook gets its own request context, so sign in again: without it the delete is
+  // refused and the throwaway environment is left behind on staging.
+  const token = process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
+  if (!token) throw new Error('SAM_PLAYWRIGHT_PRIMARY_USER env var not set');
+  const login = await request.post(`${STAGING_API}/api/auth/token-login`, {
+    data: { token },
+    headers: { 'Content-Type': 'application/json' },
+  });
+  expect(login.status()).toBe(200);
+  const deleted = await request.delete(
+    `${STAGING_API}/api/projects/${projectId}/environments/${envId}`
+  );
+  expect(deleted.status(), `cleanup of ${ENV_NAME} failed`).toBeLessThan(300);
 });
 
 test('manage settings and secrets from the environment page', async ({ page }) => {
