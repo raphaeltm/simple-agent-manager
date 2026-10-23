@@ -5,7 +5,12 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { AGENT_EMAIL_SUBDOMAIN_LABEL as SHARED_SUBDOMAIN_LABEL } from '../../packages/shared/src/constants/agent-email';
-import type { CloudflareRequest, CloudflareResponse, HttpMethod } from '../deploy/cloudflare-rest';
+import {
+  type CloudflareRequest,
+  type CloudflareResponse,
+  type HttpMethod,
+  toEnvelope,
+} from '../deploy/cloudflare-rest';
 import {
   AGENT_EMAIL_SUBDOMAIN_LABEL,
   configureAgentEmail,
@@ -82,9 +87,12 @@ class FakeCloudflare {
     }));
   }
 
+  // Every answer goes through the same parsing a real response does, so a field the parser
+  // drops is dropped here too.
   request: CloudflareRequest = async (method, path, body) => {
     this.calls.push({ method, path });
-    return this.handle(method, path, body);
+    const response = this.handle(method, path, body);
+    return { status: response.status, body: toEnvelope(JSON.parse(JSON.stringify(response.body))) };
   };
 
   private ok(result: unknown): CloudflareResponse {

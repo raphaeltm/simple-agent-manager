@@ -228,6 +228,28 @@ describe('agent email admin setup', () => {
       expect((failure as Error).message).toBe(`Cloudflare listed 1 of 2 TXT records for ${MAIN}`);
     });
 
+    it('judges only DNS lists by their counts, whatever other endpoints report', async () => {
+      const fake = cloudflare({
+        ...STAGING_LIKE,
+        respond: (call) => {
+          const odd =
+            call.path === '/email/sending/subdomains'
+              ? {
+                  result: [{ tag: 'sending-1', name: DOMAIN, enabled: true }],
+                  result_info: { page: 1 },
+                }
+              : call.path === '/email/routing/rules' && call.method === 'GET'
+                ? { result: [], result_info: null }
+                : null;
+          return odd
+            ? new Response(JSON.stringify({ success: true, errors: [], ...odd }), { status: 200 })
+            : undefined;
+        },
+      });
+      expect((await run()).state).toBe('on');
+      expect(fake.writes().map((call) => call.path)).toEqual(['/email/routing/rules']);
+    });
+
     it('waits while Cloudflare verifies the sending records, and refuses to run meanwhile', async () => {
       for (const options of [STAGING_LIKE, NEW_ZONE]) {
         const fake = cloudflare({ ...options, sending: [{ name: DOMAIN, enabled: false }] });

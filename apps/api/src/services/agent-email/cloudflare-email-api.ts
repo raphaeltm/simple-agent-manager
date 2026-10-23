@@ -69,7 +69,8 @@ export interface RoutingRuleInput {
   actions: Array<{ type: 'worker'; value: string[] }>;
 }
 
-const resultInfoSchema = v.object({ count: v.number(), total_count: v.number() });
+// Only DNS lists are judged by their counts; other endpoints' result_info is not read.
+const dnsResultInfoSchema = v.object({ count: v.number(), total_count: v.number() });
 
 /** Cloudflare's `per_page` maximum for listing DNS records, so one page holds every match. */
 const DNS_RECORDS_PER_PAGE = 5_000_000;
@@ -90,10 +91,7 @@ async function callWithInfo<TSchema extends v.GenericSchema>(
   path: string,
   resultSchema: TSchema,
   body?: unknown
-): Promise<{
-  result: v.InferOutput<TSchema>;
-  resultInfo: v.InferOutput<typeof resultInfoSchema> | undefined;
-}> {
+): Promise<{ result: v.InferOutput<TSchema>; resultInfo: unknown }> {
   const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}${path}`,
     {
@@ -119,7 +117,7 @@ async function callWithInfo<TSchema extends v.GenericSchema>(
   }
   const parsed = await readResponseJson(
     response,
-    v.object({ result: resultSchema, result_info: v.optional(resultInfoSchema) }),
+    v.object({ result: resultSchema, result_info: v.optional(v.unknown()) }),
     `cloudflare.agent_email.${method.toLowerCase()}`
   );
   return { result: parsed.result, resultInfo: parsed.result_info };
@@ -145,11 +143,12 @@ export async function listDnsRecords(
     `/dns_records?${query}`,
     dnsRecordsSchema
   );
-  if (!resultInfo || resultInfo.total_count > result.length) {
+  const info = v.safeParse(dnsResultInfoSchema, resultInfo);
+  if (!info.success || info.output.total_count > result.length) {
     throw new CloudflareEmailApiError(
       200,
       null,
-      `Cloudflare listed ${result.length} of ${resultInfo?.total_count ?? 'an unknown number of'} ${type} records for ${name}`
+      `Cloudflare listed ${result.length} of ${info.success ? info.output.total_count : 'an unknown number of'} ${type} records for ${name}`
     );
   }
   return result;

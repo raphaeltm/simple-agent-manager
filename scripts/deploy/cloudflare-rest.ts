@@ -101,9 +101,22 @@ export function toEnvelope(value: unknown): CloudflareEnvelope {
         };
       })
     : undefined;
+  const info =
+    record.result_info && typeof record.result_info === 'object'
+      ? (record.result_info as Record<string, unknown>)
+      : null;
   return {
     success: typeof record.success === 'boolean' ? record.success : undefined,
     errors,
     result: record.result,
+    // List endpoints report their counts here; callers that compare lists need them.
+    ...(info
+      ? {
+          result_info: {
+            count: typeof info.count === 'number' ? info.count : undefined,
+            total_count: typeof info.total_count === 'number' ? info.total_count : undefined,
+          },
+        }
+      : {}),
   };
 }
