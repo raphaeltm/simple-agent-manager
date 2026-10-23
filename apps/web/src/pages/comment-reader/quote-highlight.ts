@@ -13,10 +13,12 @@ export const ACTIVE_QUOTE_HIGHLIGHT = 'sam-comment-quote';
 export const OTHER_QUOTE_HIGHLIGHT = 'sam-comment-quote-other';
 
 /**
- * Words of the quote used when the whole quote cannot be matched (a long quote truncated with
- * "…" on capture, or redacted on save): enough to find where the passage starts.
+ * When the whole quote cannot be matched (redacted on save, or the message changed), the
+ * longest leading run of its words that still matches, from this many words…
  */
 const QUOTE_LEAD_WORDS = 8;
+/** …down to this many: fewer words find too many places to say where the passage starts. */
+const QUOTE_MIN_LEAD_WORDS = 3;
 
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -50,7 +52,7 @@ function rangeOver(nodes: Text[], starts: number[], index: number, length: numbe
 /**
  * A Range over `quote` in `root`'s text. Whitespace may differ (a selection reads paragraph
  * breaks as newlines the DOM text does not have), so words are matched with any whitespace
- * between them. Falls back to the quote's first words.
+ * between them. Falls back to the longest leading run of the quote's words that matches.
  */
 export function findTextRange(root: Node, quote: string): Range | null {
   const needle = matchableQuote(quote);
@@ -69,13 +71,17 @@ export function findTextRange(root: Node, quote: string): Range | null {
   if (exact !== -1) return rangeOver(nodes, starts, exact, needle.length);
 
   const words = needle.split(/\s+/).filter(Boolean);
-  for (const count of [words.length, Math.min(words.length, QUOTE_LEAD_WORDS)]) {
-    if (count === 0) continue;
-    const pattern = words.slice(0, count).map(escapeRegExp).join('\\s*');
-    const match = new RegExp(pattern, 'u').exec(text);
-    if (match) return rangeOver(nodes, starts, match.index, match[0].length);
+  const leading = (count: number) =>
+    new RegExp(words.slice(0, count).map(escapeRegExp).join('\\s*'), 'u').exec(text);
+  let match = leading(words.length);
+  for (
+    let count = Math.min(words.length - 1, QUOTE_LEAD_WORDS);
+    !match && count >= QUOTE_MIN_LEAD_WORDS;
+    count -= 1
+  ) {
+    match = leading(count);
   }
-  return null;
+  return match ? rangeOver(nodes, starts, match.index, match[0].length) : null;
 }
 
 export interface QuoteTarget {
@@ -130,6 +136,16 @@ export function useQuoteHighlights(
       CSS.highlights.delete(OTHER_QUOTE_HIGHLIGHT);
     };
   }, [containerRef, active, others, renderKey]);
+}
+
+/**
+ * Where `target` is on screen. A range without layout support (some test DOMs) measures by
+ * the element that holds its first word.
+ */
+export function targetBox(target: Range | HTMLElement): DOMRect {
+  if (typeof target.getBoundingClientRect === 'function') return target.getBoundingClientRect();
+  const holder = 'startContainer' in target ? target.startContainer.parentElement : null;
+  return holder?.getBoundingClientRect() ?? new DOMRect();
 }
 
 /**

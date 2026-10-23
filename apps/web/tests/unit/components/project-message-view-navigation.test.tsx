@@ -236,6 +236,42 @@ describe('ProjectMessageView — history arrives newest first', () => {
     );
   });
 
+  it('lands on an agent reply when the comment is anchored to a later streamed chunk of it', async () => {
+    // One reply stored as three streamed chunks. The chat renders it as one row whose id is
+    // the FIRST chunk's, so an anchor on the third chunk matches no rendered row by id.
+    const chunk = (n: number, text: string): Row => ({
+      ...row(n),
+      id: `a${n}`,
+      role: 'assistant',
+      content: text,
+    });
+    serveTranscript(
+      [
+        row(1),
+        chunk(2, 'It retries because '),
+        chunk(3, 'the handler '),
+        chunk(4, 'returns 500.'),
+        row(5),
+      ],
+      10
+    );
+
+    // A comment notification link carries the message id and no time (`commentThread` +
+    // `commentMessage`), so nothing but the id can find the message.
+    renderView(
+      <ProjectMessageView projectId="proj-1" sessionId={SESSION_ID} targetMessageId="a4" />
+    );
+
+    expect(
+      await screen.findByText('It retries because the handler returns 500.')
+    ).toBeInTheDocument();
+    // The merged reply is the second rendered row (0-based index 1). Unresolved, the jump
+    // falls back to the row nearest "now": the newest row, at index 2.
+    await waitFor(() =>
+      expect(scrollToIndexCalls.at(-1)).toMatchObject({ index: 1, align: 'center' })
+    );
+  });
+
   it('scrolls again until a row that arrived with older history stays on screen', async () => {
     serveTranscript([row(1), row(2), row(3), row(4), row(5), row(6)], 2);
     mocks.listMessageComments.mockResolvedValue({ comments: [commentOn('m2')] });

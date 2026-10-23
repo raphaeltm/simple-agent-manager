@@ -21,6 +21,7 @@ import {
   quoteRange,
   type QuoteTarget,
   scrollBoxIntoView,
+  targetBox,
   useQuoteHighlights,
 } from './quote-highlight';
 
@@ -222,7 +223,7 @@ export function ReaderConversation({
     pendingLanding.current = false;
     scrollBoxIntoView(
       scroller,
-      target.current.getBoundingClientRect(),
+      targetBox(target.current),
       range ? quoteRatio : MESSAGE_TOP_RATIO,
       bottomInset
     );
@@ -237,7 +238,7 @@ export function ReaderConversation({
     if (!scroller || !target.current || userScrolled.current || pendingLanding.current) return;
     scrollBoxIntoView(
       scroller,
-      target.current.getBoundingClientRect(),
+      targetBox(target.current),
       targetIsWords.current ? quoteRatio : MESSAGE_TOP_RATIO,
       bottomInset
     );
@@ -257,7 +258,7 @@ export function ReaderConversation({
     const scroller = scrollerRef.current;
     if (!scroller) return;
     if (target.current) {
-      setPlacement(boxPlacement(scroller, target.current.getBoundingClientRect(), bottomInset));
+      setPlacement(boxPlacement(scroller, targetBox(target.current), bottomInset));
     }
     // Only a person's scroll loads more; the programmatic landing does not.
     if (!userScrolled.current) return;
@@ -287,7 +288,7 @@ export function ReaderConversation({
     if (!scroller || !target.current) return;
     scrollBoxIntoView(
       scroller,
-      target.current.getBoundingClientRect(),
+      targetBox(target.current),
       targetIsWords.current ? quoteRatio : MESSAGE_TOP_RATIO,
       bottomInset
     );
