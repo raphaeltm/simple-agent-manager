@@ -404,6 +404,7 @@ describe('App routes', () => {
       '/__test/error-boundary',
       '/ui-standards',
       '/prototype/comments-inbox',
+      '/prototype/comment-context',
     ]);
     expect(devOnlyRoutesEnabled()).toBe(false);
 
@@ -416,6 +417,7 @@ describe('App routes', () => {
       expect(screen.queryByTestId('trial-chat-gate-harness-page')).not.toBeInTheDocument();
       expect(screen.queryByTestId('ui-standards-page')).not.toBeInTheDocument();
       expect(screen.queryByTestId('comments-inbox-prototype-page')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('comment-context-prototype-page')).not.toBeInTheDocument();
     }
   });
 });

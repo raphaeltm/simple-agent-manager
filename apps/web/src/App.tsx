@@ -102,6 +102,11 @@ const CommentsInboxPrototype = lazyNamed(
   () => import('./pages/comments-inbox-prototype'),
   'CommentsInboxPrototype'
 );
+// PROTOTYPE (dev-only) — comment in its conversation context. Remove before merging to main.
+const CommentContextPrototype = lazyNamed(
+  () => import('./pages/comment-context-prototype'),
+  'CommentContextPrototype'
+);
 const ProjectFiles = lazyNamed(() => import('./pages/ProjectFiles'), 'ProjectFiles');
 const ProjectInvite = lazyNamed(() => import('./pages/ProjectInvite'), 'ProjectInvite');
 const ProjectLibrary = lazyNamed(() => import('./pages/ProjectLibrary'), 'ProjectLibrary');
@@ -272,6 +277,7 @@ export const DEV_ONLY_ROUTE_PATHS = [
   '/__test/error-boundary',
   '/ui-standards',
   '/prototype/comments-inbox',
+  '/prototype/comment-context',
 ] as const;
 
 /** TEMP audit-only harness — forces ErrorBoundary crash screen for Playwright review. Reverted after use. */
@@ -312,6 +318,11 @@ export default function App() {
                         <Route
                           path="/prototype/comments-inbox"
                           element={page(<CommentsInboxPrototype />)}
+                        />
+                        {/* Comment-in-context prototypes (A/B/C) — local/test only, mock data */}
+                        <Route
+                          path="/prototype/comment-context"
+                          element={page(<CommentContextPrototype />)}
                         />
                         {/* Harness for Playwright audits — mounts trial components with mock data */}
                         <Route
