@@ -9,11 +9,18 @@ import {
   type DeploymentEnvironment,
   listDeploymentEnvironments,
 } from '../lib/api';
+import { DeploymentsPrototypeList, useTake } from './deployments-prototype';
 import { useProjectContext } from './ProjectContext';
 
 const DEPLOYMENT_ENVIRONMENT_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
+/** PROTOTYPE switch (dev builds only, never merge): `?take=a|b` renders a redesign take. */
 export function ProjectDeployments() {
+  const take = useTake();
+  return take ? <DeploymentsPrototypeList take={take} /> : <CurrentProjectDeployments />;
+}
+
+function CurrentProjectDeployments() {
   const { projectId } = useProjectContext();
   const toast = useToast();
 

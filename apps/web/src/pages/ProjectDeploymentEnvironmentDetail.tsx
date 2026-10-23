@@ -46,6 +46,7 @@ import {
   stopDeploymentEnvironment,
   updateDeploymentEnvironmentPolicy,
 } from '../lib/api';
+import { DeploymentsPrototypeDetail, useTake } from './deployments-prototype';
 import { useProjectContext } from './ProjectContext';
 
 type TabKey = 'overview' | 'domains' | 'volumes' | 'logs' | 'config' | 'policy' | 'node';
@@ -100,7 +101,13 @@ function stopNodeLifecycleMessage(env: DeploymentEnvironment, siblingCount: numb
   return 'Destroys the deployment node because no other environment is using it';
 }
 
+/** PROTOTYPE switch (dev builds only, never merge): `?take=a|b` renders a redesign take. */
 export function ProjectDeploymentEnvironmentDetail() {
+  const take = useTake();
+  return take ? <DeploymentsPrototypeDetail take={take} /> : <CurrentEnvironmentDetail />;
+}
+
+function CurrentEnvironmentDetail() {
   const { projectId } = useProjectContext();
   const { envId } = useParams<{ envId: string }>();
   const navigate = useNavigate();
