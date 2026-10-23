@@ -16,12 +16,13 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
 import type { DeploymentCustomDomain, DeploymentEnvironment } from '../../../lib/api';
-import { Loading, PageHeader } from '../../automation/page';
+import { LoadError, Loading, PageHeader } from '../../automation/page';
 import { Panel, SectionTitle } from '../../automation/ui';
 import { useProjectContext } from '../../ProjectContext';
 import { useAllDomains, useEnvironments, useProfiles } from '../data';
 import {
   ago,
+  canAskAgent,
   describeHealth,
   describeProblems,
   type Health,
@@ -48,7 +49,7 @@ function groupOf(health: Health): Group {
 const GROUPS: Array<{ id: Group; title: string; hint?: string }> = [
   { id: 'attention', title: 'Needs your attention' },
   { id: 'running', title: 'Running' },
-  { id: 'idle', title: 'Not running', hint: 'Paused, or waiting for a first deploy. They cost nothing.' },
+  { id: 'idle', title: 'Not running', hint: 'Paused, or waiting for a first deploy.' },
 ];
 
 function shippedLine(env: DeploymentEnvironment, profileName: string | null): string | null {
@@ -116,11 +117,15 @@ function EnvRow({
         />
       </Link>
       {attention ? (
-        <div className="flex pb-3 pl-[68px] sm:pb-0 sm:pl-0 sm:pr-4">
-          <Button variant="secondary" onClick={() => askAgent(problem?.title ?? info.sentence)}>
-            <Sparkles size={16} aria-hidden /> Ask an agent
-          </Button>
-        </div>
+        // "Ask an agent" only where an agent may deploy and the problem is the app's to fix;
+        // a silent server or a closed environment needs a look, not a deploy.
+        canAskAgent(env) && problem?.fixes.includes('ask-agent') ? (
+          <div className="flex pb-3 pl-[68px] sm:pb-0 sm:pl-0 sm:pr-4">
+            <Button variant="secondary" onClick={() => askAgent(problem.title)}>
+              <Sparkles size={16} aria-hidden /> Ask an agent
+            </Button>
+          </div>
+        ) : null
       ) : (
         answering &&
         address && (
@@ -193,7 +198,9 @@ export function DeploymentsListA() {
           ) : undefined
         }
       />
-      {environments.isPending ? (
+      {environments.isError ? (
+        <LoadError what="deployments" error={environments.error} onRetry={() => void environments.refetch()} />
+      ) : environments.isPending ? (
         <Loading label="Loading deployments…" />
       ) : envs.length === 0 ? (
         <EmptyA onCreate={() => setCreating(true)} />

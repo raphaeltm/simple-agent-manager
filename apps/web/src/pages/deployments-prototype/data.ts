@@ -9,6 +9,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 
 import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useQueryScope } from '../../hooks/useQueryScope';
+import { useToast } from '../../hooks/useToast';
 import {
   attachDeploymentEnvironmentVolumes,
   createDeploymentCustomDomain,
@@ -62,6 +63,11 @@ function listReleases(projectId: string, envId: string) {
 
 const root = (scope: string, projectId: string) => ['auth', scope, 'deploy-proto', projectId];
 
+/** Poll fast while something is changing, slowly otherwise. TanStack pauses in hidden tabs. */
+const FAST_POLL_MS = 5_000;
+const SLOW_POLL_MS = 30_000;
+const CHANGING = new Set(['starting', 'stopping']);
+
 export function useEnvironments(projectId: string) {
   const scope = useQueryScope();
   return useQuery({
@@ -69,6 +75,15 @@ export function useEnvironments(projectId: string) {
     queryFn: () => listDeploymentEnvironments(projectId),
     enabled: Boolean(scope),
     select: (result) => result.environments,
+    refetchInterval: (query) =>
+      query.state.data?.environments.some(
+        (env) =>
+          CHANGING.has(env.status) ||
+          env.observedDeployment.status === 'applying' ||
+          ['created', 'applying'].includes(env.latestRelease?.status ?? '')
+      )
+        ? FAST_POLL_MS
+        : SLOW_POLL_MS,
   });
 }
 
@@ -248,7 +263,12 @@ function useInvalidate(projectId: string) {
 
 export function useEnvironmentActions(projectId: string, envId: string) {
   const invalidate = useInvalidate(projectId);
-  const options = { onSuccess: () => void invalidate() };
+  const toast = useToast();
+  // Every action reports its failure in words; none fails silently.
+  const options = {
+    onSuccess: () => void invalidate(),
+    onError: (error: Error) => toast.error(error.message || 'That did not work. Try again.'),
+  };
   return {
     setAgentsEnabled: useMutation({
       mutationFn: (enabled: boolean) =>
@@ -260,9 +280,15 @@ export function useEnvironmentActions(projectId: string, envId: string) {
         updateDeploymentEnvironmentPolicy(projectId, envId, { allowedDeployProfileIds: ids }),
       ...options,
     }),
+    /** Turning deploys on always names who: an empty list means any agent. */
+    allowAgents: useMutation({
+      mutationFn: (ids: string[]) =>
+        updateDeploymentEnvironmentPolicy(projectId, envId, { agentDeployEnabled: true, allowedDeployProfileIds: ids }),
+      ...options,
+    }),
     pause: useMutation({ mutationFn: () => stopDeploymentEnvironment(projectId, envId), ...options }),
     start: useMutation({ mutationFn: () => startDeploymentEnvironment(projectId, envId), ...options }),
-    remove: useMutation({ mutationFn: () => deleteDeploymentEnvironment(projectId, envId) }),
+    remove: useMutation({ mutationFn: () => deleteDeploymentEnvironment(projectId, envId), onError: options.onError }),
     saveSetting: useMutation({
       mutationFn: (input: { key: string; value: string; isSecret: boolean }) =>
         upsertDeploymentEnvironmentConfigVar(projectId, envId, input),
@@ -272,9 +298,12 @@ export function useEnvironmentActions(projectId: string, envId: string) {
       mutationFn: (key: string) => deleteDeploymentEnvironmentConfigVar(projectId, envId, key),
       ...options,
     }),
+    /** Creating a domain only records it as pending; check DNS straight away. */
     addDomain: useMutation({
-      mutationFn: (input: { service: string; port: number; hostname: string }) =>
-        createDeploymentCustomDomain(projectId, envId, input),
+      mutationFn: async (input: { service: string; port: number; hostname: string }) => {
+        const created = await createDeploymentCustomDomain(projectId, envId, input);
+        return verifyDeploymentCustomDomain(projectId, envId, created.id);
+      },
       ...options,
     }),
     verifyDomain: useMutation({

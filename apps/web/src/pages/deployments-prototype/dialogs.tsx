@@ -11,6 +11,22 @@ import { Chips } from '../automation/ui';
 import { type LogFilter, useEnvironmentActions, useLogs } from './data';
 import { CopyIcon, LogList } from './shared';
 
+/**
+ * Keeps a sheet's buttons on screen while its body scrolls: phones are shorter than the
+ * create and add-domain sheets, and the button that finishes them must not hide below.
+ */
+export const STICKY_FOOTER =
+  'sticky bottom-[-24px] z-[1] -mx-6 -mb-6 flex flex-wrap justify-end gap-3 border-0 border-t border-solid border-border-default bg-[var(--sam-color-bg-surface)] px-6 pb-6 pt-4';
+
+/** Why there are no log lines, from the reasons the logs route returns. */
+export function unavailableLogs(reason: string | undefined): string {
+  if (reason === 'no_deployment_node') return 'No server is running this app, so there are no logs.';
+  if (reason === 'node_not_running') return "The server isn't running, so there are no fresh logs.";
+  if (reason === 'node_not_found') return 'The server is gone, so its logs are too.';
+  if (reason === 'node_agent_unreachable') return "SAM can't reach the server right now, so no fresh logs.";
+  return 'Nothing logged for this filter yet.';
+}
+
 const LOG_FILTERS: Array<{ id: LogFilter; label: string }> = [
   { id: 'all', label: 'Everything' },
   { id: 'errors', label: 'Errors' },
@@ -46,7 +62,7 @@ export function LogsDialog({
             The newest lines from {env.name}. Your app's own output, plus what SAM did on the server.
           </p>
         </div>
-        <Chips options={LOG_FILTERS} value={filter} onChange={setFilter} label="Show" />
+        <Chips options={LOG_FILTERS} value={filter} onChange={setFilter} label="Show" wrap />
         <form
           className="flex items-center gap-2"
           onSubmit={(event) => {
@@ -71,11 +87,7 @@ export function LogsDialog({
         ) : (
           <LogList
             entries={entries}
-            empty={
-              logs.data?.unavailableReason === 'node_stale'
-                ? "The server hasn't checked in recently, so there are no fresh logs."
-                : 'Nothing logged for this filter yet.'
-            }
+            empty={unavailableLogs(logs.data?.unavailableReason)}
           />
         )}
       </div>
@@ -153,7 +165,7 @@ export function AddDomainDialog({
         <div className="flex flex-col gap-1">
           <h2 className="m-0 text-[19px] font-semibold text-fg-primary">Use your own domain</h2>
           <p className="m-0 text-sm text-fg-muted">
-            Point a subdomain you own at this app. SAM sets up HTTPS for it. No redeploy needed.
+            Point a subdomain you own at this app. SAM sets up HTTPS for it, with no redeploy.
           </p>
         </div>
 
@@ -194,16 +206,16 @@ export function AddDomainDialog({
           </div>
           <span className="text-[13px] text-fg-muted">
             On Cloudflare, switch the orange cloud off for this record (DNS only). SAM checks the
-            record, then turns the domain on.
+            record when you add the domain. If DNS hasn't caught up yet, use Check again later.
           </span>
         </div>
 
-        <div className="flex flex-wrap justify-end gap-3">
+        <div className={STICKY_FOOTER}>
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
           <Button type="submit" disabled={!valid} loading={actions.addDomain.isPending}>
-            I've added it, check now
+            Add domain and check DNS
           </Button>
         </div>
       </form>
@@ -218,14 +230,12 @@ function volumeSummary(volumes: DeploymentVolume[]): string {
 
 export function PauseDialog({
   env,
-  siblings,
   open,
   busy,
   onClose,
   onConfirm,
 }: {
   env: DeploymentEnvironment;
-  siblings: number;
   open: boolean;
   busy: boolean;
   onClose: () => void;
@@ -237,14 +247,12 @@ export function PauseDialog({
         <h2 className="m-0 text-[19px] font-semibold text-fg-primary">Pause {env.name}?</h2>
         <ul className="m-0 flex list-disc flex-col gap-2 pl-5 text-[15px] text-fg-primary marker:text-fg-muted">
           <li>The app stops and its addresses stop answering.</li>
-          <li>
-            {siblings > 1
-              ? 'The server keeps running for the other apps on it.'
-              : 'Its server is deleted, so it stops costing money.'}
-          </li>
-          <li>Settings, domains and saved data are kept.</li>
+          <li>Its server is removed if no other app is using it.</li>
+          <li>Settings, domains and disks are kept. Your cloud still bills for the disks.</li>
         </ul>
-        <p className="m-0 text-sm text-fg-muted">Start it again any time. It comes back where it left off.</p>
+        <p className="m-0 text-sm text-fg-muted">
+          Start it again any time: SAM puts the latest version back on a server, with your saved data.
+        </p>
         <div className="flex flex-wrap justify-end gap-3">
           <Button variant="ghost" onClick={onClose}>
             Keep it running
@@ -299,7 +307,7 @@ export function DeleteDialog({
             {siblings > 1
               ? 'Not the server: other apps still use it'
               : env.node
-                ? 'Its server'
+                ? 'Its server, unless another app is using it'
                 : 'Nothing else: no server is running'}
           </li>
         </ul>

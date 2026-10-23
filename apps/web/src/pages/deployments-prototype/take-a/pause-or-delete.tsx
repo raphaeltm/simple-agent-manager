@@ -8,13 +8,11 @@ import { Panel, SectionTitle } from '../../automation/ui';
 
 export function PauseOrDelete({
   env,
-  siblings,
   onPause,
   onStart,
   onDelete,
 }: {
   env: DeploymentEnvironment;
-  siblings: number;
   onPause: () => void;
   onStart: () => void;
   onDelete: () => void;
@@ -22,7 +20,7 @@ export function PauseOrDelete({
   const paused = env.status === 'stopped';
   const changing = env.status === 'starting' || env.status === 'stopping';
   return (
-    <section className="flex flex-col gap-3" aria-label="Pause or delete">
+    <section id="pause" className="flex scroll-mt-4 flex-col gap-3" aria-label="Pause or delete">
       <SectionTitle title={paused ? 'Start or delete' : 'Pause or delete'} />
       <Panel className="overflow-hidden">
         <div className="flex flex-col gap-3 border-0 border-b border-solid border-border-default p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -30,13 +28,18 @@ export function PauseOrDelete({
             <span className="text-[15px] font-semibold text-fg-primary">{paused ? 'Start again' : 'Pause'}</span>
             <span className="text-[13px] text-fg-muted">
               {paused
-                ? 'Brings back the last version with its data. Takes a few minutes.'
-                : siblings > 1
-                  ? 'Stops the app. Settings, domains and data are kept.'
-                  : 'Stops the app and its server, so it stops costing money. Everything else is kept.'}
+                ? env.latestRelease
+                  ? `Puts version ${env.latestRelease.version} back on a server with its saved data. Takes a few minutes.`
+                  : 'Nothing to start yet: no version has been deployed here.'
+                : 'Stops the app. Its server is removed when nothing else runs on it. Settings, domains and disks are kept.'}
             </span>
           </div>
-          <Button variant="secondary" className="shrink-0" disabled={changing} onClick={paused ? onStart : onPause}>
+          <Button
+            variant="secondary"
+            className="shrink-0"
+            disabled={changing || (paused && !env.latestRelease)}
+            onClick={paused ? onStart : onPause}
+          >
             {paused ? 'Start' : 'Pause'}
           </Button>
         </div>

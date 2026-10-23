@@ -49,6 +49,25 @@ export function HealthMark({ info, size = 40 }: { info: HealthInfo; size?: numbe
   );
 }
 
+/**
+ * The environment's name as the page title. Branch-named previews can be 60+ characters,
+ * so long names step down a size and stop at two lines (full name on hover) instead of
+ * pushing the status below the fold on a phone.
+ */
+export function EnvTitle({ name }: { name: string }) {
+  const long = name.length > 28;
+  return (
+    <h1
+      title={name}
+      className={`m-0 line-clamp-2 break-words font-bold leading-tight tracking-[-0.01em] text-fg-primary [overflow-wrap:anywhere] ${
+        long ? 'text-[18px] sm:text-[22px]' : 'text-[22px] sm:text-[26px]'
+      }`}
+    >
+      {name}
+    </h1>
+  );
+}
+
 /** A quiet copy button: a 44 px target without a box around it. */
 export function CopyIcon({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);

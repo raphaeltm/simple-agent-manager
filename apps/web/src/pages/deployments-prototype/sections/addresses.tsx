@@ -83,7 +83,7 @@ export function Addresses({
   const orphans = domains.filter((domain) => !routes.some((route) => reaches(domain, route)));
   const paused = env.status === 'stopped';
   return (
-    <section id="addresses" className="flex flex-col gap-3" aria-label="Addresses">
+    <section id="addresses" className="flex scroll-mt-4 flex-col gap-3" aria-label="Addresses">
       <SectionTitle
         title="Addresses"
         hint={paused ? 'Kept while paused. They answer again when you start the app.' : 'Where people reach this app.'}

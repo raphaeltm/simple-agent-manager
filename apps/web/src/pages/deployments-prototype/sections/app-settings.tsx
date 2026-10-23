@@ -50,7 +50,7 @@ function SettingForm({
         <input
           value={draft.key}
           readOnly={draft.editing}
-          onChange={(event) => onChange({ ...draft, key: event.currentTarget.value.toUpperCase() })}
+          onChange={(event) => onChange({ ...draft, key: event.currentTarget.value })}
           placeholder="NAME"
           aria-label="Name"
           spellCheck={false}
@@ -100,7 +100,7 @@ export function AppSettings({
   const actions = useEnvironmentActions(projectId, envId);
   const [draft, setDraft] = useState<Draft | null>(null);
   return (
-    <section className="flex flex-col gap-3" aria-label="Settings your app reads">
+    <section id="settings" className="flex scroll-mt-4 flex-col gap-3" aria-label="Settings your app reads">
       <SectionTitle
         title="Settings your app reads"
         hint="Your Compose file reads these as ${NAME}. Changes apply on the next deploy."
@@ -148,7 +148,7 @@ export function AppSettings({
                     row.value || '(empty)'
                   )}
                 </span>
-                <span className="col-start-2 row-span-2 row-start-1 flex items-center sm:col-start-3 sm:row-span-1">
+                <span className="col-start-2 row-span-2 row-start-1 flex items-center gap-1 sm:col-start-3 sm:row-span-1">
                   <button
                     type="button"
                     aria-label={row.isSecret ? `Replace ${row.key}` : `Change ${row.key}`}

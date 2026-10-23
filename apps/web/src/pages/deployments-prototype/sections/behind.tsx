@@ -86,7 +86,7 @@ export function BehindTheScenes({
                 .join(' · ')}
             </span>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <Meter label="CPU" percent={info ? (info.cpu.loadAvg1 / Math.max(1, info.cpu.numCpu)) * 100 : (fallback?.cpuLoadAvg1 ?? null)} />
+              <Meter label="CPU" percent={info ? (info.cpu.loadAvg1 / Math.max(1, info.cpu.numCpu)) * 100 : null} />
               <Meter label="Memory" percent={info?.memory.usedPercent ?? fallback?.memoryPercent ?? null} />
               <Meter label="Disk" percent={info?.disk.usedPercent ?? fallback?.diskPercent ?? null} />
             </div>

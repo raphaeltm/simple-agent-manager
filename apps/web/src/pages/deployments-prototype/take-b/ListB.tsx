@@ -11,7 +11,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
 import type { DeploymentCustomDomain, DeploymentEnvironment } from '../../../lib/api';
-import { Loading, PageHeader } from '../../automation/page';
+import { LoadError, Loading, PageHeader } from '../../automation/page';
 import { Chips, Panel, SectionTitle } from '../../automation/ui';
 import { useProjectContext } from '../../ProjectContext';
 import { type ReleaseRecord, useAllDomains, useAllReleases, useEnvironments, useProfiles } from '../data';
@@ -21,7 +21,7 @@ import {
   ago,
   describeHealth,
   describeProblems,
-  liveVersionOf,
+  canAskAgent,
   primaryAddress,
   profileNameOf,
   releaseOutcome,
@@ -32,13 +32,47 @@ import { NewEnvironmentDialog } from '../new-environment';
 import { AgentAvatar, ChatLink, TonePill, useAskAgent } from '../shared';
 import { withTake } from '../take';
 
-function versionLine(env: DeploymentEnvironment): string {
+/** The version that runs (or comes back on start); null when nothing has ever run here. */
+function versionLine(env: DeploymentEnvironment): string | null {
   const info = describeHealth(env);
   const latest = env.latestRelease?.version;
   if (info.health === 'deploying' && latest) return info.liveVersion ? `v${info.liveVersion} → v${latest}` : `→ v${latest}`;
   if (info.liveVersion) return `v${info.liveVersion}`;
   if (info.health === 'paused' && latest) return `v${latest}`;
-  return '—';
+  return null;
+}
+
+function VersionTag({ env }: { env: DeploymentEnvironment }) {
+  const version = versionLine(env);
+  return version ? (
+    <span className="shrink-0 font-mono text-[13px] font-semibold text-fg-primary">{version}</span>
+  ) : (
+    <span className="shrink-0 text-[12px] text-fg-muted">nothing live</span>
+  );
+}
+
+/** Phones: one compact row per environment, so every problem is visible without swiping. */
+function EnvRowCompact({ env, projectId }: { env: DeploymentEnvironment; projectId: string }) {
+  const info = describeHealth(env);
+  const color = TONE_COLOR[info.tone];
+  const problem = describeProblems(env)[0];
+  return (
+    <Link
+      to={withTake(`/projects/${projectId}/deployments/${env.id}`, 'b')}
+      className="flex min-h-14 items-center gap-3 border-0 border-b border-solid border-border-default px-4 py-2.5 no-underline last:border-b-0 hover:bg-surface-hover"
+    >
+      <span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: color }} />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="line-clamp-2 break-words text-[15px] font-semibold leading-snug text-fg-primary [overflow-wrap:anywhere]">
+          {env.name}
+        </span>
+        <span className="line-clamp-2 text-[13px]" style={{ color: info.health === 'live' ? 'var(--sam-color-fg-muted)' : color }}>
+          {problem?.title ?? info.label}
+        </span>
+      </span>
+      <VersionTag env={env} />
+    </Link>
+  );
 }
 
 function EnvCard({
@@ -59,14 +93,14 @@ function EnvCard({
   return (
     <Link
       to={withTake(`/projects/${projectId}/deployments/${env.id}`, 'b')}
-      className="group relative flex min-h-[148px] w-[264px] shrink-0 snap-start flex-col gap-2 overflow-hidden rounded-xl border border-border-default p-4 no-underline glass-surface hover:border-[var(--sam-color-fg-muted)] sm:w-auto"
+      className="group relative flex min-h-[148px] flex-col gap-2 overflow-hidden rounded-xl border border-border-default p-4 no-underline glass-surface hover:border-[var(--sam-color-fg-muted)]"
     >
       <span aria-hidden className="absolute inset-y-0 left-0 w-1" style={{ background: color }} />
       <span className="flex items-start justify-between gap-3">
         <span className="line-clamp-2 min-w-0 break-words text-[15px] font-semibold leading-snug text-fg-primary [overflow-wrap:anywhere]">
           {env.name}
         </span>
-        <span className="shrink-0 font-mono text-[13px] font-semibold text-fg-primary">{versionLine(env)}</span>
+        <VersionTag env={env} />
       </span>
       <span className="flex items-start gap-1.5 text-[13px] font-semibold" style={{ color }}>
         <span aria-hidden className="mt-[5px] h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
@@ -116,8 +150,7 @@ function FeedEntry({
 }) {
   const { release, env } = item;
   const askAgent = useAskAgent(projectId);
-  const live = liveVersionOf(env);
-  const outcome = releaseOutcome(release, live, env.status === 'stopped' ? release.version : null);
+  const outcome = releaseOutcome(release, env);
   const failed = outcome.label === "Didn't start";
   const verb = outcome.label === 'Deploying' ? 'is deploying' : failed ? 'tried to ship' : 'shipped';
   return (
@@ -144,7 +177,7 @@ function FeedEntry({
             </span>
           )}
         </span>
-        {failed && release.id === env.latestRelease?.id && (
+        {failed && release.id === env.latestRelease?.id && canAskAgent(env) && (
           <div className="mt-1 flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => askAgent(`v${release.version} didn't start`)}>
               <Sparkles size={16} aria-hidden /> Ask an agent to fix it
@@ -221,7 +254,7 @@ export function DeploymentsListB() {
     )
     .sort((a, b) => b.release.createdAt.localeCompare(a.release.createdAt))
     .filter(({ release, env }) => {
-      const outcome = releaseOutcome(release, liveVersionOf(env));
+      const outcome = releaseOutcome(release, env);
       if (filter === 'problems') return outcome.label === "Didn't start";
       if (filter === 'live') return outcome.label === 'Live';
       return true;
@@ -242,7 +275,9 @@ export function DeploymentsListB() {
             ) : undefined
           }
         />
-        {environments.isPending ? (
+        {environments.isError ? (
+          <LoadError what="deployments" error={environments.error} onRetry={() => void environments.refetch()} />
+        ) : environments.isPending ? (
           <Loading label="Loading deployments…" />
         ) : envs.length === 0 ? (
           <EmptyB onCreate={() => setCreating(true)} />
@@ -250,10 +285,12 @@ export function DeploymentsListB() {
           <>
             <section className="flex flex-col gap-3" aria-label="Where it runs">
               <SectionTitle title="Where it runs" count={envs.length} />
-              <div
-                data-intentional-clip
-                className="-mx-3 flex snap-x snap-mandatory gap-3 overflow-x-auto px-3 pb-2 sm:mx-0 sm:grid sm:snap-none sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-3"
-              >
+              <Panel className="overflow-hidden sm:hidden">
+                {envs.map((env) => (
+                  <EnvRowCompact key={env.id} env={env} projectId={projectId} />
+                ))}
+              </Panel>
+              <div className="hidden gap-3 sm:grid sm:grid-cols-2 lg:grid-cols-3">
                 {envs.map((env, index) => {
                   const access = agentAccess(env, profiles);
                   return (

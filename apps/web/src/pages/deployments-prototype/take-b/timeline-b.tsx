@@ -8,59 +8,69 @@
  */
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Button, buttonClassName, Dialog } from '@simple-agent-manager/ui';
-import { Check, ChevronDown, ExternalLink, LoaderCircle, RotateCcw, ScrollText, Sparkles, X } from 'lucide-react';
+import { Check, ChevronDown, ExternalLink, LoaderCircle, Play, RotateCcw, ScrollText, Sparkles, X } from 'lucide-react';
 import { useState } from 'react';
+
+import { useToast } from '../../../hooks/useToast';
 
 import { serviceRecords } from '../../../components/deployments/deployment-status';
 import type { DeploymentEnvironment } from '../../../lib/api';
 import { type ReleaseEvent, type ReleaseRecord, useReleaseEvents } from '../data';
-import { ago, profileNameOf, releaseOutcome, type Tone, TONE_COLOR, tint } from '../model';
+import { ago, liveVersionOf, profileNameOf, releaseOutcome, type Tone, TONE_COLOR, tint, versionOnStart } from '../model';
 import { AgentAvatar, ChatLink, TonePill, useAskAgent } from '../shared';
 
 /** Older versions shown as one-liners under the live one before "N older versions". */
 const RECENT_ROWS = 4;
 
-/** Each step in words: [done, in progress, failed]. */
+/**
+ * The steps a deployment server reports while applying a release, in words:
+ * [done, in progress, failed]. Keys are the `step` field of the node's apply events
+ * (`packages/vm-agent/internal/deploy/engine.go`); each step sends `<step>_started` and
+ * `<step>_completed`, and a failure arrives as one `deployment.apply.failed` event, so the
+ * failed step is the last one that started but never completed.
+ */
 const STEP_NAMES: Record<string, [string, string, string]> = {
-  fetch: ['Got the new version', 'Getting the new version…', "Couldn't get the new version"],
-  'compose-config': ['Checked the Compose file', 'Checking the Compose file…', 'The Compose file has a problem'],
-  'artifact-load': ['Loaded the images', 'Loading the images…', "Couldn't load the images"],
-  'compose-up': ['Started the containers', 'Starting the containers…', "Couldn't start the containers"],
-  'health-check': ['Passed the health check', 'Checking the app answers…', 'Failed the health check'],
-  'caddy-reload': ['Switched visitors over', 'Switching visitors over…', "Couldn't switch visitors over"],
+  fetch_release: ['Got the new version', 'Getting the new version…', "Couldn't get the new version"],
+  previous_down: ['Stopped the old version', 'Stopping the old version…', "Couldn't stop the old version"],
+  load_artifacts: ['Loaded the images', 'Loading the images…', "Couldn't load the images"],
+  compose_pull: ['Pulled the images', 'Pulling the images…', "Couldn't pull the images"],
+  compose_up: ['Started the app', 'Starting the app…', "The app didn't start"],
+  health_check: ['Passed its health check', 'Checking the app answers…', 'Failed its health check'],
+  caddy_reload: ['Pointed the addresses at it', 'Pointing the addresses at it…', "Couldn't point the addresses at it"],
   revert: ['Put the previous version back', 'Putting the previous version back…', "Couldn't put the previous version back"],
 };
 
-function stepState(event: ReleaseEvent): 'done' | 'running' | 'failed' {
-  if (event.level === 'error') return 'failed';
-  if (event.eventType.endsWith('started')) return 'running';
-  return 'done';
+type StepState = 'done' | 'running' | 'failed';
+
+/** One row per step, in the order the server reported them. */
+export function collapseSteps(events: ReleaseEvent[]): Array<{ step: string; state: StepState }> {
+  const order: string[] = [];
+  const done = new Set<string>();
+  for (const event of events) {
+    if (!event.step || !STEP_NAMES[event.step]) continue;
+    if (!order.includes(event.step)) order.push(event.step);
+    if (event.eventType.endsWith('_completed')) done.add(event.step);
+  }
+  const failed = events.some((event) => event.level === 'error' && (event.step === 'failed' || event.step === 'failed_initial'));
+  return order.map((step) => ({ step, state: done.has(step) ? 'done' : failed ? 'failed' : 'running' }));
 }
 
 function Steps({ events }: { events: ReleaseEvent[] }) {
-  const steps = events.filter((event) => event.step && STEP_NAMES[event.step]);
+  const steps = collapseSteps(events);
   if (steps.length === 0) return null;
   return (
     <ol className="m-0 flex list-none flex-col gap-1.5 p-0">
-      {steps.map((event) => {
-        const state = stepState(event);
+      {steps.map(({ step, state }) => {
         const color =
-          state === 'failed'
-            ? 'var(--sam-color-danger-fg)'
-            : state === 'running'
-              ? 'var(--sam-color-info-fg)'
-              : 'var(--sam-color-success-fg)';
+          state === 'failed' ? 'var(--sam-color-danger-fg)' : state === 'running' ? 'var(--sam-color-info-fg)' : 'var(--sam-color-success-fg)';
         const Icon = state === 'failed' ? X : state === 'running' ? LoaderCircle : Check;
         return (
-          <li key={event.seq} className="flex items-center gap-2 text-[13px]">
-            <span
-              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-              style={{ background: tint(color, 18), color }}
-            >
+          <li key={step} className="flex items-center gap-2 text-[13px]">
+            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full" style={{ background: tint(color, 18), color }}>
               <Icon size={12} aria-hidden className={state === 'running' ? 'animate-spin' : ''} />
             </span>
             <span className={state === 'done' ? 'text-fg-muted' : 'font-medium text-fg-primary'}>
-              {STEP_NAMES[event.step ?? '']?.[state === 'done' ? 0 : state === 'running' ? 1 : 2]}
+              {STEP_NAMES[step]?.[state === 'done' ? 0 : state === 'running' ? 1 : 2]}
             </span>
           </li>
         );
@@ -142,27 +152,36 @@ export function ReleaseTimeline({
   projectId,
   env,
   releases,
-  liveVersion,
-  pausedVersion,
   profiles,
   liveAddress,
+  agentsOn,
   onLogs,
+  onStart,
+  onAsk,
+  onAllowAgents,
 }: {
   projectId: string;
   env: DeploymentEnvironment;
   releases: ReleaseRecord[];
-  liveVersion: number | null;
-  pausedVersion: number | null;
   profiles: AgentProfile[];
   liveAddress: string | null;
+  agentsOn: boolean;
   onLogs: (filter: 'all' | 'errors') => void;
+  onStart: () => void;
+  onAsk: () => void;
+  onAllowAgents: () => void;
 }) {
   const askAgent = useAskAgent(projectId);
+  const toast = useToast();
+  const liveVersion = liveVersionOf(env);
+  const onStartAgain = versionOnStart(env);
   const [older, setOlder] = useState(false);
   const [rollback, setRollback] = useState<ReleaseRecord | null>(null);
   const newest = releases[0];
   const events = useReleaseEvents(projectId, env.id, newest?.id, Boolean(newest) && newest?.version !== liveVersion);
-  const liveIndex = releases.findIndex((release) => release.version === (liveVersion ?? pausedVersion));
+  const liveIndex = releases.findIndex((release) =>
+    ['Live', 'Comes back on start'].includes(releaseOutcome(release, env).label)
+  );
   // Everything down to the live version is expanded, then a few older versions as one-liners;
   // the rest of the history folds away.
   const headCount = Math.max(liveIndex + 1, 1);
@@ -172,14 +191,28 @@ export function ReleaseTimeline({
 
   if (releases.length === 0) {
     return (
-      <p className="m-0 rounded-xl bg-surface-hover px-4 py-6 text-center text-sm text-fg-muted">
-        No versions yet. When an agent deploys here, every version it ships shows up on this timeline.
-      </p>
+      <div className="flex flex-col items-start gap-4 rounded-xl border border-dashed border-border-default p-5">
+        <div className="flex flex-col gap-1">
+          <span className="text-[15px] font-semibold text-fg-primary">Nothing shipped here yet</span>
+          <span className="text-sm text-fg-muted">
+            {agentsOn
+              ? 'Ask an agent in any chat: “deploy this to ' + env.name + '”. Every version it ships lands on this timeline.'
+              : 'First let agents deploy here, then ask one in any chat: “deploy this to ' + env.name + '”.'}
+          </span>
+        </div>
+        {agentsOn ? (
+          <Button onClick={onAsk}>
+            <Sparkles size={16} aria-hidden /> Ask an agent to deploy
+          </Button>
+        ) : (
+          <Button onClick={onAllowAgents}>Let agents deploy here</Button>
+        )}
+      </div>
     );
   }
 
   const renderCompact = (release: ReleaseRecord) => {
-    const outcome = releaseOutcome(release, liveVersion, pausedVersion);
+    const outcome = releaseOutcome(release, env);
     return (
       <Node key={release.id} tone={outcome.tone === 'danger' ? 'danger' : 'muted'}>
         <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
@@ -190,7 +223,7 @@ export function ReleaseTimeline({
             </span>
             <Who projectId={projectId} release={release} profiles={profiles} />
           </div>
-          {release.status === 'applied' && liveVersion !== null && (
+          {release.status === 'applied' && liveVersion !== null && release.version !== liveVersion && (
             <button
               type="button"
               onClick={() => setRollback(release)}
@@ -209,8 +242,8 @@ export function ReleaseTimeline({
       <span aria-hidden className="absolute bottom-3 left-3 top-3 w-px -translate-x-1/2 bg-border-default" />
       <ol className="m-0 list-none p-0">
         {head.map((release) => {
-          const outcome = releaseOutcome(release, liveVersion, pausedVersion);
-          if (outcome.label === 'Live' || outcome.label === 'Paused') {
+          const outcome = releaseOutcome(release, env);
+          if (outcome.label === 'Live' || outcome.label === 'Comes back on start') {
             return (
               <Node key={release.id} tone={outcome.tone} big>
                 <div
@@ -224,6 +257,18 @@ export function ReleaseTimeline({
                     <span className="font-mono text-[18px] font-bold text-fg-primary">v{release.version}</span>
                   </span>
                   <Who projectId={projectId} release={release} profiles={profiles} />
+                  {outcome.label === 'Comes back on start' && (
+                    <div className="flex flex-col items-start gap-3">
+                      <span className="text-[13px] text-fg-muted">
+                        {onStartAgain?.failedBefore
+                          ? "Starting tries this version again on a new server. It didn't start last time."
+                          : 'Starting gets a server ready, attaches the saved data and brings this version back. It takes a few minutes.'}
+                      </span>
+                      <Button onClick={onStart}>
+                        <Play size={16} aria-hidden /> Start again
+                      </Button>
+                    </div>
+                  )}
                   {outcome.label === 'Live' && <ServiceChips env={env} />}
                   {outcome.label === 'Live' && (
                     <div className="flex flex-wrap gap-2">
@@ -250,14 +295,14 @@ export function ReleaseTimeline({
             const detail = release.id === env.latestRelease?.id ? env.observedDeployment.errorMessage : null;
             return (
               <Node key={release.id} tone="danger">
-                <div className="flex flex-col gap-2 rounded-xl border border-danger/35 bg-danger-tint p-4">
+                <div className="flex flex-col gap-2 rounded-xl border border-danger/40 bg-inset p-4">
                   <span className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-[15px] font-bold text-fg-primary">v{release.version}</span>
                     <TonePill tone="danger" label="Didn't start" />
                   </span>
                   <Who projectId={projectId} release={release} profiles={profiles} />
                   <p className="m-0 text-sm text-fg-primary">
-                    {liveVersion ? `Visitors still get v${liveVersion}. ` : 'Nothing is live yet. '}
+                    {liveVersion ? `v${liveVersion} came back and is serving visitors. ` : 'Nothing is running. '}
                     Fix the problem and deploy again.
                   </p>
                   {release.id === newest?.id && <Steps events={events.data?.events ?? []} />}
@@ -296,9 +341,9 @@ export function ReleaseTimeline({
                   </span>
                   <Who projectId={projectId} release={release} profiles={profiles} />
                   <Steps events={events.data?.events ?? []} />
-                  {liveVersion && (
-                    <p className="m-0 text-[13px] text-fg-muted">v{liveVersion} stays live until this one is ready.</p>
-                  )}
+                  <p className="m-0 text-[13px] text-fg-muted">
+                    The old version stops before this one starts, so the app is offline for a moment.
+                  </p>
                 </div>
               </Node>
             );
@@ -325,7 +370,12 @@ export function ReleaseTimeline({
               <Button variant="ghost" onClick={() => setRollback(null)}>
                 Cancel
               </Button>
-              <Button onClick={() => setRollback(null)}>
+              <Button
+                onClick={() => {
+                  setRollback(null);
+                  toast.info("Prototype: rolling back needs a server route that isn't built yet.");
+                }}
+              >
                 <RotateCcw size={16} aria-hidden /> Roll back
               </Button>
             </div>

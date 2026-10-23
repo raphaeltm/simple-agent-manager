@@ -13,7 +13,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
 import { useToast } from '../../../hooks/useToast';
-import { Loading } from '../../automation/page';
+import { LoadError, Loading } from '../../automation/page';
 import { Panel, SectionTitle } from '../../automation/ui';
 import { useProjectContext } from '../../ProjectContext';
 import {
@@ -28,14 +28,17 @@ import {
 } from '../data';
 import { AddDomainDialog, DeleteDialog, LogsDialog, PauseDialog } from '../dialogs';
 import {
+  agentAccess,
   describeHealth,
+  describeProblems,
+  domainProblems,
   isAnswering,
-  lastGoodVersion,
   primaryAddress,
-  TONE_COLOR,
+  versionOnStart,
 } from '../model';
-import { AddressLine, LogList, TonePill } from '../shared';
+import { AddressLine, EnvTitle, LogList, TonePill, useAskAgent } from '../shared';
 import { withTake } from '../take';
+import { unavailableLogs } from '../dialogs';
 import { HealthList, SettingsRows, SettingsSheet, type SheetKey } from './side-b';
 import { ReleaseTimeline } from './timeline-b';
 
@@ -47,7 +50,16 @@ const PANES: Array<{ id: Pane; label: string }> = [
   { id: 'health', label: 'Health' },
 ];
 
-function Segmented({ value, onChange }: { value: Pane; onChange: (pane: Pane) => void }) {
+function Segmented({
+  value,
+  onChange,
+  healthIssues,
+}: {
+  value: Pane;
+  onChange: (pane: Pane) => void;
+  /** Problems the Health pane explains; shown as a badge so they are not missed on phones. */
+  healthIssues: number;
+}) {
   return (
     <div role="tablist" aria-label="Environment sections" className="flex rounded-xl border border-border-default bg-inset p-1 lg:hidden">
       {PANES.map((pane) => (
@@ -62,6 +74,11 @@ function Segmented({ value, onChange }: { value: Pane; onChange: (pane: Pane) =>
           }`}
         >
           {pane.label}
+          {pane.id === 'health' && healthIssues > 0 && (
+            <span className="ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-warning-tint px-1.5 text-[12px] font-bold text-warning-fg">
+              {healthIssues}
+            </span>
+          )}
         </button>
       ))}
     </div>
@@ -85,7 +102,7 @@ function RecentLogs({ projectId, envId, onOpen }: { projectId: string; envId: st
       </div>
       <LogList
         entries={entries}
-        empty={logs.data?.unavailableReason === 'node_stale' ? "The server hasn't checked in, so no fresh logs." : 'No log lines yet.'}
+        empty={unavailableLogs(logs.data?.unavailableReason)}
       />
     </div>
   );
@@ -103,8 +120,10 @@ export function EnvironmentDetailB() {
   const domains = useDomains(projectId, envId);
   const volumes = useVolumes(projectId, envId);
   const actions = useEnvironmentActions(projectId, envId ?? '');
+  const askAgent = useAskAgent(projectId);
   const [pane, setPane] = useState<Pane>('releases');
   const [sheet, setSheet] = useState<SheetKey | null>(null);
+  const [choosingAccess, setChoosingAccess] = useState(false);
   const [logs, setLogs] = useState<'all' | 'errors' | null>(null);
   const [addingDomain, setAddingDomain] = useState(false);
   const [pausing, setPausing] = useState(false);
@@ -124,6 +143,13 @@ export function EnvironmentDetailB() {
     </div>
   );
 
+  if (environments.isError)
+    return frame(
+      <>
+        {back}
+        <LoadError what="this environment" error={environments.error} onRetry={() => void environments.refetch()} />
+      </>
+    );
   if (environments.isPending) return frame(<>{back}<Loading label="Loading…" /></>);
   if (!env) return frame(<>{back}<p className="m-0 text-[15px] text-fg-muted">This environment no longer exists.</p></>);
 
@@ -133,10 +159,14 @@ export function EnvironmentDetailB() {
   const address = primaryAddress(env, customDomains);
   const answering = isAnswering(info.health);
   const releaseList = releases.data?.releases ?? [];
-  const pausedVersion = info.health === 'paused' ? lastGoodVersion(env, releaseList) : null;
   const configRows = config.data?.envVars ?? [];
   const volumeList = volumes.data?.volumes ?? [];
   const show = (target: Pane) => (pane === target ? 'flex' : 'hidden lg:flex');
+  const problems = [...describeProblems(env), ...domainProblems(customDomains)];
+  // The timeline card already says "v2 stays live until this one is ready", so the header
+  // only names what is happening.
+  const headerSentence =
+    info.health === 'deploying' ? `Deploying version ${env.latestRelease?.version}.` : info.sentence;
 
   return frame(
     <>
@@ -144,17 +174,24 @@ export function EnvironmentDetailB() {
       <header className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1.5">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-            <h1 className="m-0 break-words text-[22px] font-bold leading-tight tracking-[-0.01em] text-fg-primary [overflow-wrap:anywhere] sm:text-[26px]">
-              {env.name}
-            </h1>
+            <EnvTitle name={env.name} />
             <TonePill tone={info.tone} label={info.label} />
           </div>
           {address && <AddressLine hostname={address.hostname} answering={answering} />}
           <p className="m-0 text-sm text-fg-muted">
-            <span style={{ color: TONE_COLOR[info.tone] }} aria-hidden>
-              ●{' '}
-            </span>
-            {info.sentence}
+            {headerSentence}
+            {problems.length > 1 && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  onClick={() => setPane('health')}
+                  className="cursor-pointer border-0 bg-transparent p-0 text-sm font-semibold text-warning-fg underline decoration-dotted underline-offset-4 lg:cursor-default lg:no-underline"
+                >
+                  +{problems.length - 1} more {problems.length === 2 ? 'problem' : 'problems'}
+                </button>
+              </>
+            )}
           </p>
         </div>
         <DropdownMenu
@@ -162,7 +199,14 @@ export function EnvironmentDetailB() {
           trigger={<MoreHorizontal size={20} aria-hidden />}
           items={[
             env.status === 'stopped'
-              ? { id: 'start', label: 'Start again', icon: <Play size={15} />, onClick: () => actions.start.mutate() }
+              ? {
+                  id: 'start',
+                  label: 'Start again',
+                  icon: <Play size={15} />,
+                  disabled: !versionOnStart(env),
+                  disabledReason: 'Nothing has been deployed here yet',
+                  onClick: () => actions.start.mutate(),
+                }
               : {
                   id: 'pause',
                   label: 'Pause',
@@ -175,7 +219,7 @@ export function EnvironmentDetailB() {
         />
       </header>
 
-      <Segmented value={pane} onChange={setPane} />
+      <Segmented value={pane} onChange={setPane} healthIssues={problems.length} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
         <section className={`${show('releases')} min-w-0 flex-col gap-3`} aria-label="Releases">
@@ -186,11 +230,16 @@ export function EnvironmentDetailB() {
             projectId={projectId}
             env={env}
             releases={releaseList}
-            liveVersion={info.liveVersion}
-            pausedVersion={pausedVersion}
             profiles={profiles}
             liveAddress={answering ? (address?.hostname ?? null) : null}
+            agentsOn={agentAccess(env, profiles).on}
             onLogs={setLogs}
+            onStart={() => actions.start.mutate()}
+            onAsk={() => askAgent('Deploy this project here')}
+            onAllowAgents={() => {
+              setChoosingAccess(true);
+              setSheet('access');
+            }}
           />
         </section>
 
@@ -200,7 +249,7 @@ export function EnvironmentDetailB() {
               <SectionTitle title="Health" />
             </div>
             <Panel className="flex flex-col gap-4 p-4">
-              <HealthList env={env} />
+              <HealthList projectId={projectId} env={env} domains={customDomains} />
               {env.latestRelease && env.status !== 'stopped' && (
                 <RecentLogs projectId={projectId} envId={env.id} onOpen={() => setLogs('all')} />
               )}
@@ -232,11 +281,15 @@ export function EnvironmentDetailB() {
         domains={customDomains}
         volumes={volumeList}
         answering={answering}
+        choosingAccess={choosingAccess}
         onAddDomain={() => {
           setSheet(null);
           setAddingDomain(true);
         }}
-        onClose={() => setSheet(null)}
+        onClose={() => {
+          setSheet(null);
+          setChoosingAccess(false);
+        }}
       />
       {logs && <LogsDialog projectId={projectId} env={env} open initialFilter={logs} onClose={() => setLogs(null)} />}
       {addingDomain && (
@@ -244,7 +297,6 @@ export function EnvironmentDetailB() {
       )}
       <PauseDialog
         env={env}
-        siblings={siblings}
         open={pausing}
         busy={actions.pause.isPending}
         onClose={() => setPausing(false)}

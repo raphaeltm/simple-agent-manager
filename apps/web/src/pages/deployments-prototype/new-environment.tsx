@@ -11,6 +11,7 @@ import { Button, Dialog } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
 import { useCreateEnvironment } from './data';
+import { STICKY_FOOTER } from './dialogs';
 import { ProfileToggles } from './shared';
 
 const NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -146,7 +147,7 @@ export function NewEnvironmentDialog({
           )}
         </fieldset>
 
-        <div className="flex flex-wrap justify-end gap-3">
+        <div className={STICKY_FOOTER}>
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>

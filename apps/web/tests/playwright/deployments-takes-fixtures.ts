@@ -6,6 +6,11 @@
  * on the same data: live, a failed deploy with the previous version still live, deploying,
  * paused, a silent server, a first deploy that never got a server, and never deployed.
  * Times are relative to now so "3 h ago" reads the same in every run.
+ *
+ * Shapes follow what production sends today: the node reports its apply status
+ * (applied / applying / reverted / failed / failed-initial), the applied version, an error
+ * and per-service state. `deployStatus` and `diskTelemetry` stay null because no agent
+ * sets them yet (packages/vm-agent/internal/deploy/types.go).
  */
 import { makeMockUser } from './audit-helpers';
 
@@ -114,23 +119,22 @@ function node(id: string, name: string, overrides: Record<string, unknown> = {})
   };
 }
 
-const HEALTHY = {
-  appHealth: 'healthy',
-  nodeHealth: 'healthy',
-  providerManageability: 'managed',
-  routeCertState: 'issued',
-  diskPressure: 'normal',
-  configDrift: 'none',
-};
+
+const SERVICES = [
+  { name: 'web', status: 'running', health: 'healthy' },
+  { name: 'api', status: 'running', health: 'healthy' },
+  { name: 'worker', status: 'running', health: 'none' },
+  { name: 'db', status: 'running', health: 'healthy' },
+];
 
 function observed(appliedSeq: number | null, status: string | null, extra: Record<string, unknown> = {}) {
   return {
     appliedSeq,
     status,
     errorMessage: null,
-    services: null,
-    deployStatus: status ? HEALTHY : null,
-    diskTelemetry: { rootDisk: { usedPercent: 48 } },
+    services: status === 'applied' || status === 'reverted' ? SERVICES : null,
+    deployStatus: null,
+    diskTelemetry: null,
     observedAt: minsAgo(1),
     ...extra,
   };
@@ -195,14 +199,7 @@ export const ENVIRONMENTS = [
     createdAt: daysAgo(60),
     updatedAt: hoursAgo(3),
     secretsUpdatedAt: daysAgo(4),
-    observedDeployment: observed(42, 'applied', {
-      services: [
-        { name: 'web', status: 'running', health: 'healthy' },
-        { name: 'api', status: 'running', health: 'healthy' },
-        { name: 'worker', status: 'running', health: 'none' },
-        { name: 'db', status: 'running', health: 'healthy' },
-      ],
-    }),
+    observedDeployment: observed(42, 'applied'),
     agentPolicy: policy(true, ['p-captain', 'p-opus']),
     latestRelease: latest('env-prod'),
     routeHostnames: hosts('01m5prod', ['web', 3000], ['api', 8080]),
@@ -219,7 +216,8 @@ export const ENVIRONMENTS = [
     createdAt: daysAgo(60),
     updatedAt: minsAgo(25),
     secretsUpdatedAt: daysAgo(4),
-    observedDeployment: observed(42, 'failed', {
+    // v43 failed and the node put v42 back: `reverted` with appliedSeq 42.
+    observedDeployment: observed(42, 'reverted', {
       errorMessage:
         'compose up failed: service "api" exited with code 1 — Error: connect ECONNREFUSED 10.0.0.12:5432 (postgres:17 was still starting; api gave up after 3 retries)',
     }),
@@ -239,7 +237,8 @@ export const ENVIRONMENTS = [
     createdAt: hoursAgo(2),
     updatedAt: minsAgo(1),
     secretsUpdatedAt: null,
-    observedDeployment: observed(2, 'applying'),
+    // Mid-apply the node already reports the new version, and v2's containers are stopped.
+    observedDeployment: observed(3, 'applying'),
     agentPolicy: policy(true),
     latestRelease: latest('env-preview'),
     routeHostnames: hosts('01m5prev', ['web', 3000]),
@@ -273,11 +272,7 @@ export const ENVIRONMENTS = [
     createdAt: daysAgo(20),
     updatedAt: daysAgo(2),
     secretsUpdatedAt: null,
-    observedDeployment: observed(40, 'applied', {
-      deployStatus: { ...HEALTHY, nodeHealth: 'stale', diskPressure: 'high' },
-      diskTelemetry: { rootDisk: { usedPercent: 91.4 } },
-      observedAt: hoursAgo(3),
-    }),
+    observedDeployment: observed(40, 'applied', { observedAt: hoursAgo(3) }),
     agentPolicy: policy(true, ['p-sol']),
     latestRelease: latest('env-eu'),
     routeHostnames: hosts('01m5euro', ['web', 3000]),
@@ -301,7 +296,7 @@ export const ENVIRONMENTS = [
     secretsUpdatedAt: null,
     observedDeployment: {
       appliedSeq: null,
-      status: 'failed-initial',
+      status: null,
       errorMessage:
         'Deployment node placement stopped before a server was created: hetzner has no cx32 capacity in nbg1 right now',
       services: null,
@@ -495,28 +490,48 @@ export const SYSTEM_INFO = {
   agent: { version: 'prototype', status: 'running' },
 };
 
-const event = (seq: number, step: string, state: 'started' | 'succeeded' | 'failed', minutes: number, message = '') => ({
+const event = (seq: number, step: string, kind: 'started' | 'completed', minutes: number) => ({
   seq,
-  level: state === 'failed' ? 'error' : 'info',
+  level: 'info',
   step,
-  eventType: `step.${state}`,
+  eventType: `deployment.apply.${step === 'fetch_release' ? 'fetch' : step}_${kind}`,
+  message: `${step} ${kind}`,
+  createdAt: minsAgo(minutes),
+});
+
+const failed = (seq: number, minutes: number, message: string) => ({
+  seq,
+  level: 'error',
+  step: 'failed',
+  eventType: 'deployment.apply.failed',
   message,
   createdAt: minsAgo(minutes),
 });
 
-/** Steps nodes report while applying a release (`deployment_release_events`; no read route yet). */
+/**
+ * Steps nodes report while applying a release (`deployment_release_events`, written by
+ * packages/vm-agent/internal/deploy/engine.go; no read route yet).
+ */
 export const RELEASE_EVENTS: Record<string, unknown[]> = {
   'rel-env-staging-43': [
-    event(1, 'fetch', 'succeeded', 25),
-    event(2, 'compose-config', 'succeeded', 25),
-    event(3, 'artifact-load', 'succeeded', 25),
-    event(4, 'compose-up', 'failed', 24, 'service "api" exited with code 1'),
-    event(5, 'revert', 'succeeded', 24),
+    event(1, 'fetch_release', 'started', 25),
+    event(2, 'fetch_release', 'completed', 25),
+    event(3, 'previous_down', 'started', 25),
+    event(4, 'previous_down', 'completed', 25),
+    event(5, 'load_artifacts', 'started', 25),
+    event(6, 'load_artifacts', 'completed', 25),
+    event(7, 'compose_up', 'started', 25),
+    failed(8, 24, 'service "api" exited with code 1'),
+    event(9, 'revert', 'started', 24),
+    event(10, 'revert', 'completed', 24),
   ],
   'rel-env-preview-3': [
-    event(1, 'fetch', 'succeeded', 1),
-    event(2, 'compose-config', 'succeeded', 1),
-    event(3, 'artifact-load', 'succeeded', 1),
-    event(4, 'compose-up', 'started', 0),
+    event(1, 'fetch_release', 'started', 1),
+    event(2, 'fetch_release', 'completed', 1),
+    event(3, 'previous_down', 'started', 1),
+    event(4, 'previous_down', 'completed', 1),
+    event(5, 'load_artifacts', 'started', 1),
+    event(6, 'load_artifacts', 'completed', 1),
+    event(7, 'compose_up', 'started', 0),
   ],
 };

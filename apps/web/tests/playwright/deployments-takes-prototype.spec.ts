@@ -153,7 +153,7 @@ for (const take of TAKES) {
         await mockApi(page);
         await page.goto(listUrl(take));
         await expect(page.getByRole('heading', { name: 'Deployments', level: 1 })).toBeVisible();
-        await expect(page.getByText('production').first()).toBeVisible();
+        await expect(page.getByText('production').filter({ visible: true }).first()).toBeVisible();
         await assertNoOverflow(page);
         await capture(page, `${take}-list`);
         await capture(page, `${take}-list`, { full: true });
@@ -253,9 +253,10 @@ for (const vp of VIEWPORTS) {
       test('A — behind the scenes', async ({ page }) => {
         await mockApi(page);
         await page.goto(envUrl('a', 'env-prod'));
-        await page.getByText('Behind the scenes').click();
+        const summary = page.locator('summary', { hasText: 'Behind the scenes' });
+        await summary.click();
         await expect(page.getByText('deploy-prod-01')).toBeVisible();
-        await page.getByText('Behind the scenes').scrollIntoViewIfNeeded();
+        await summary.scrollIntoViewIfNeeded();
         await capture(page, 'a-behind-the-scenes');
       });
     }
@@ -286,7 +287,7 @@ for (const vp of VIEWPORTS) {
         await mockApi(page);
         await page.goto(envUrl('b', 'env-eu'));
         if (vp.isMobile) await page.getByRole('tab', { name: 'Health' }).click();
-        await expect(page.getByText('Disk', { exact: true })).toBeVisible();
+        await expect(page.getByText('Server', { exact: true }).filter({ visible: true }).first()).toBeVisible();
         await capture(page, 'b-pane-health');
       });
 
@@ -307,4 +308,48 @@ for (const vp of VIEWPORTS) {
       });
     }
   });
+}
+
+// ─── Today's pages, same data: the "before" for every comparison ─────────────
+
+if (process.env.BEFORE === '1') {
+  for (const vp of VIEWPORTS) {
+    test.describe(`Before — ${vp.label}`, () => {
+      test.use({ viewport: vp.viewport, isMobile: vp.isMobile, hasTouch: vp.isMobile });
+
+      test('list', async ({ page }) => {
+        await mockApi(page);
+        await page.goto(`/projects/${PROJECT_ID}/deployments`);
+        await expect(page.getByRole('heading', { name: 'Deployments' })).toBeVisible();
+        await page.waitForTimeout(600);
+        await capture(page, 'now-list');
+        await capture(page, 'now-list', { full: true });
+      });
+
+      for (const [envId, label] of [
+        ['env-prod', 'live'],
+        ['env-staging', 'failed-deploy'],
+        ['env-eu', 'server-silent'],
+      ] as const) {
+        test(`detail — ${label}`, async ({ page }) => {
+          await mockApi(page);
+          await page.goto(`/projects/${PROJECT_ID}/deployments/${envId}`);
+          await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+          await page.waitForTimeout(600);
+          await capture(page, `now-detail-${label}`);
+          await capture(page, `now-detail-${label}`, { full: true });
+        });
+      }
+
+      for (const tab of ['domains', 'volumes', 'config', 'policy', 'logs', 'node']) {
+        test(`production tab — ${tab}`, async ({ page }) => {
+          await mockApi(page);
+          await page.goto(`/projects/${PROJECT_ID}/deployments/env-prod?tab=${tab}`);
+          await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+          await page.waitForTimeout(900);
+          await capture(page, `now-tab-${tab}`, { full: true });
+        });
+      }
+    });
+  }
 }

@@ -13,12 +13,13 @@ import { useEnvironmentActions } from '../data';
 import { TwoStepRemove } from '../shared';
 
 const NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
-const SIZES = [5, 10, 20, 50, 100];
+/** 10 GB is the smallest block volume Hetzner and Vultr sell. */
+const SIZES = [10, 20, 50, 100, 200];
 
 function AddDisk({ projectId, env, onDone }: { projectId: string; env: DeploymentEnvironment; onDone: () => void }) {
   const actions = useEnvironmentActions(projectId, env.id);
   const [name, setName] = useState('');
-  const [size, setSize] = useState(10);
+  const [size, setSize] = useState(SIZES[0] ?? 10);
   const ok = NAME_RE.test(name.trim());
   return (
     <form
@@ -85,7 +86,7 @@ export function SavedData({
   const [adding, setAdding] = useState(false);
   const total = volumes.reduce((sum, volume) => sum + volume.sizeGb, 0);
   return (
-    <section className="flex flex-col gap-3" aria-label="Saved data">
+    <section id="data" className="flex scroll-mt-4 flex-col gap-3" aria-label="Saved data">
       <SectionTitle
         title="Saved data"
         hint={

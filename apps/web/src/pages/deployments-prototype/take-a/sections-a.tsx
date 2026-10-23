@@ -6,6 +6,8 @@ import { Button } from '@simple-agent-manager/ui';
 import { ChevronDown, CircleAlert, Sparkles, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 
+import type { DeploymentEnvironment } from '../../../lib/api';
+
 import { Panel, SectionTitle } from '../../automation/ui';
 import type { ReleaseRecord } from '../data';
 import { type Fix, type Problem, ago, profileNameOf, releaseOutcome } from '../model';
@@ -17,19 +19,22 @@ const FIX_LABEL: Record<Fix, string> = {
   server: 'See the server',
   domains: 'Check domains',
   start: 'Start again',
-  access: 'Change who can deploy',
+  access: 'Let agents deploy here…',
 };
 
 export function ProblemList({
   problems,
+  canAskAgent,
   onFix,
 }: {
   problems: Problem[];
+  /** False while agents may not deploy here: the fix becomes "let agents deploy" first. */
+  canAskAgent: boolean;
   onFix: (fix: Fix, problem: Problem) => void;
 }) {
   if (problems.length === 0) return null;
   return (
-    <section className="flex flex-col gap-3" aria-label="Needs your attention">
+    <section id="problems" className="flex scroll-mt-4 flex-col gap-3" aria-label="Needs your attention">
       <SectionTitle title="Needs your attention" count={problems.length} />
       {problems.map((problem) => {
         const Icon = problem.tone === 'danger' ? TriangleAlert : CircleAlert;
@@ -57,7 +62,7 @@ export function ProblemList({
                   </details>
                 )}
                 <div className="mt-2 flex flex-wrap gap-3">
-                  {problem.fixes.map((fix) => (
+                  {problem.fixes.map((fix) => (canAskAgent || fix !== 'ask-agent' ? fix : 'access')).map((fix) => (
                     <Button key={fix} variant="secondary" onClick={() => onFix(fix, problem)}>
                       {fix === 'ask-agent' && <Sparkles size={16} aria-hidden />}
                       {FIX_LABEL[fix]}
@@ -77,27 +82,25 @@ const SHOWN = 4;
 
 export function RecentDeploys({
   projectId,
+  env,
   releases,
-  liveVersion,
-  pausedVersion,
   profiles,
 }: {
   projectId: string;
+  env: DeploymentEnvironment;
   releases: ReleaseRecord[];
-  liveVersion: number | null;
-  pausedVersion: number | null;
   profiles: AgentProfile[];
 }) {
   const [all, setAll] = useState(false);
   if (releases.length === 0) return null;
   const visible = all ? releases : releases.slice(0, SHOWN);
   return (
-    <section className="flex flex-col gap-3" aria-label="Recent deploys">
+    <section id="deploys" className="flex scroll-mt-4 flex-col gap-3" aria-label="Recent deploys">
       <SectionTitle title="Recent deploys" hint="Every version agents shipped here, newest first." />
       <Panel className="overflow-hidden">
         <ol className="m-0 list-none p-0">
           {visible.map((release) => {
-            const outcome = releaseOutcome(release, liveVersion, pausedVersion);
+            const outcome = releaseOutcome(release, env);
             const who = profileNameOf(release.submittedBy?.agentProfileId, profiles) ?? 'Someone';
             return (
               <li

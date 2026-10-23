@@ -16,7 +16,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 
 import { useToast } from '../../../hooks/useToast';
 import type { DeploymentEnvironment } from '../../../lib/api';
-import { Loading } from '../../automation/page';
+import { LoadError, Loading } from '../../automation/page';
 import { Panel } from '../../automation/ui';
 import { useProjectContext } from '../../ProjectContext';
 import {
@@ -37,16 +37,17 @@ import {
   domainProblems,
   type Fix,
   type HealthInfo,
+  canAskAgent,
   isAnswering,
-  lastGoodVersion,
   primaryAddress,
   profileNameOf,
   TONE_COLOR,
   tint,
+  versionOnStart,
 } from '../model';
-import { AddressLine, AgentAvatar, ChatLink, HealthMark, useAskAgent } from '../shared';
+import { AddressLine, AgentAvatar, ChatLink, EnvTitle, HealthMark, useAskAgent } from '../shared';
 import { withTake } from '../take';
-import { Column } from './column';
+import { Column, type IndexEntry, OnThisPage } from './column';
 import { Addresses } from '../sections/addresses';
 import { AppSettings } from '../sections/app-settings';
 import { BehindTheScenes } from '../sections/behind';
@@ -60,6 +61,8 @@ function HeroAction({
   info,
   hostname,
   agentsOn,
+  hasProblems,
+  canStart,
   onStart,
   onAsk,
   onAllowAgents,
@@ -67,14 +70,20 @@ function HeroAction({
   info: HealthInfo;
   hostname: string | null;
   agentsOn: boolean;
+  /** When a problem card below already offers the fix, the hero does not repeat it. */
+  hasProblems: boolean;
+  /** Start needs a release to bring back. */
+  canStart: boolean;
   onStart: () => void;
   onAsk: () => void;
   onAllowAgents: () => void;
 }) {
-  if (info.health === 'paused') return <Button onClick={onStart}>Start again</Button>;
+  if (info.health === 'paused') return canStart ? <Button onClick={onStart}>Start again</Button> : null;
+  if (info.health === 'down' && hasProblems && agentsOn) return null;
   if (info.health === 'new' || info.health === 'down') {
     // Asking an agent is pointless while agents may not deploy here: offer the switch first.
-    if (!agentsOn) return <Button onClick={onAllowAgents}>Let agents deploy here</Button>;
+    // Opens the "who can deploy" choice; it never grants access by itself.
+    if (!agentsOn) return <Button onClick={onAllowAgents}>Let agents deploy here…</Button>;
     return (
       <Button onClick={onAsk}>
         <Sparkles size={16} aria-hidden />
@@ -103,6 +112,7 @@ function Hero({
   projectId,
   profileName,
   agentsOn,
+  hasProblems,
   onLogs,
   onStart,
   onAsk,
@@ -115,6 +125,7 @@ function Hero({
   projectId: string;
   profileName: string | null;
   agentsOn: boolean;
+  hasProblems: boolean;
   onLogs: () => void;
   onStart: () => void;
   onAsk: () => void;
@@ -135,9 +146,7 @@ function Hero({
         <div className="flex items-start gap-3">
           <HealthMark info={info} size={48} />
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <h1 className="m-0 break-words text-[22px] font-bold leading-tight tracking-[-0.01em] text-fg-primary [overflow-wrap:anywhere] sm:text-[26px]">
-              {env.name}
-            </h1>
+            <EnvTitle name={env.name} />
             <p className="m-0 text-[15px] text-fg-primary">
               <span className="font-semibold" style={{ color }}>
                 {info.label}.
@@ -188,6 +197,8 @@ function Hero({
             info={info}
             hostname={hostname}
             agentsOn={agentsOn}
+            hasProblems={hasProblems}
+            canStart={Boolean(versionOnStart(env))}
             onStart={onStart}
             onAsk={onAsk}
             onAllowAgents={onAllowAgents}
@@ -221,6 +232,7 @@ export function EnvironmentDetailA() {
   const [pausing, setPausing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [behindOpen, setBehindOpen] = useState(false);
+  const [choosingAccess, setChoosingAccess] = useState(false);
 
   const back = (
     <Link
@@ -231,6 +243,14 @@ export function EnvironmentDetailA() {
     </Link>
   );
 
+  if (environments.isError) {
+    return (
+      <Column>
+        {back}
+        <LoadError what="this environment" error={environments.error} onRetry={() => void environments.refetch()} />
+      </Column>
+    );
+  }
   if (environments.isPending) {
     return (
       <Column>
@@ -257,9 +277,13 @@ export function EnvironmentDetailA() {
   const profileName = profileNameOf(env.latestRelease?.submittedBy?.agentProfileId, profiles);
   const volumeList = volumes.data?.volumes ?? [];
   const releaseList = releases.data?.releases ?? [];
-  const pausedVersion = info.health === 'paused' ? lastGoodVersion(env, releaseList) : null;
 
+  const openAccessChoice = () => {
+    setChoosingAccess(true);
+    document.getElementById('access')?.scrollIntoView({ behavior: 'smooth' });
+  };
   const onFix = (fix: Fix, problem: { title: string }) => {
+    if (fix === 'access') openAccessChoice();
     if (fix === 'ask-agent') askAgent(problem.title);
     if (fix === 'logs') setLogs('errors');
     if (fix === 'domains') document.getElementById('addresses')?.scrollIntoView({ behavior: 'smooth' });
@@ -270,8 +294,28 @@ export function EnvironmentDetailA() {
     if (fix === 'start') actions.start.mutate();
   };
 
+  const access = agentAccess(env, profiles);
+  const settingsCount = config.data?.envVars.length ?? 0;
+  const diskSize = volumeList.reduce((sum, volume) => sum + volume.sizeGb, 0);
+  const index: IndexEntry[] = [
+    ...(problems.length > 0
+      ? [{ id: 'problems', label: 'Needs your attention', value: String(problems.length), tone: info.tone }]
+      : []),
+    ...(releaseList.length > 0 ? [{ id: 'deploys', label: 'Recent deploys', value: String(releaseList.length) }] : []),
+    {
+      id: 'access',
+      label: 'Who can deploy',
+      value: !access.on ? 'Off' : access.mode === 'any' ? 'Any agent' : `${access.names.length} only`,
+    },
+    { id: 'settings', label: 'Settings', value: String(settingsCount) },
+    { id: 'addresses', label: 'Addresses', value: String(addressCount) },
+    { id: 'data', label: 'Saved data', value: diskSize ? `${diskSize} GB` : 'None' },
+    { id: 'behind-the-scenes', label: 'Behind the scenes' },
+    { id: 'pause', label: env.status === 'stopped' ? 'Start or delete' : 'Pause or delete' },
+  ];
+
   return (
-    <Column>
+    <Column aside={<OnThisPage entries={index} />}>
       {back}
       <Hero
         env={env}
@@ -281,20 +325,21 @@ export function EnvironmentDetailA() {
         projectId={projectId}
         profileName={profileName}
         agentsOn={agentAccess(env, profiles).on}
+        hasProblems={problems.length > 0}
         onLogs={() => setLogs('all')}
         onStart={() => actions.start.mutate()}
         onAsk={() => askAgent(info.sentence)}
-        onAllowAgents={() => actions.setAgentsEnabled.mutate(true)}
+        onAllowAgents={openAccessChoice}
       />
-      <ProblemList problems={problems} onFix={onFix} />
-      <RecentDeploys
+      <ProblemList problems={problems} canAskAgent={canAskAgent(env)} onFix={onFix} />
+      <RecentDeploys projectId={projectId} env={env} releases={releaseList} profiles={profiles} />
+      <WhoCanDeploy
         projectId={projectId}
-        releases={releaseList}
-        liveVersion={info.liveVersion}
-        pausedVersion={pausedVersion}
+        env={env}
         profiles={profiles}
+        choosing={choosingAccess}
+        onChoosingChange={setChoosingAccess}
       />
-      <WhoCanDeploy projectId={projectId} env={env} profiles={profiles} />
       <AppSettings projectId={projectId} envId={env.id} rows={config.data?.envVars ?? []} />
       <Addresses
         projectId={projectId}
@@ -314,7 +359,6 @@ export function EnvironmentDetailA() {
       />
       <PauseOrDelete
         env={env}
-        siblings={siblings}
         onPause={() => setPausing(true)}
         onStart={() => actions.start.mutate()}
         onDelete={() => setDeleting(true)}
@@ -328,7 +372,6 @@ export function EnvironmentDetailA() {
       )}
       <PauseDialog
         env={env}
-        siblings={siblings}
         open={pausing}
         busy={actions.pause.isPending}
         onClose={() => setPausing(false)}
