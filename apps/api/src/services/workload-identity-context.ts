@@ -51,6 +51,27 @@ function assertExecutionIdentity(
   }
 }
 
+async function getRunningWorkloadRuntime(
+  env: Env,
+  projectId: string,
+  chatSessionId: string,
+  workspaceId: string,
+  expected?: McpTokenData
+) {
+  const runtime = expected?.agentSessionId
+    ? await getAcpSession(env, projectId, expected.agentSessionId)
+    : (await listAcpSessions(env, projectId, { chatSessionId, status: 'running', limit: 1 }))
+        .sessions[0];
+  if (
+    runtime?.chatSessionId !== chatSessionId ||
+    runtime.workspaceId !== workspaceId ||
+    runtime.status !== 'running'
+  ) {
+    throw errors.conflict('This chat has no matching running agent identity');
+  }
+  return runtime;
+}
+
 /** Shared metadata resolver. Only the MCP execution adapter may mint a token. */
 export async function getWorkloadIdentityMetadata(
   env: Env,
@@ -64,17 +85,13 @@ export async function getWorkloadIdentityMetadata(
   const chat = v.parse(ChatSchema, raw);
   if (chat.id !== chatSessionId || !chat.workspaceId)
     throw errors.conflict('This chat has no live workspace identity');
-  const runtime = expected?.agentSessionId
-    ? await getAcpSession(env, projectId, expected.agentSessionId)
-    : (await listAcpSessions(env, projectId, { chatSessionId, status: 'running', limit: 1 }))
-        .sessions[0];
-  if (
-    runtime?.chatSessionId !== chatSessionId ||
-    runtime.workspaceId !== chat.workspaceId ||
-    runtime.status !== 'running'
-  ) {
-    throw errors.conflict('This chat has no matching running agent identity');
-  }
+  const runtime = await getRunningWorkloadRuntime(
+    env,
+    projectId,
+    chatSessionId,
+    chat.workspaceId,
+    expected
+  );
   const runtimeId = runtime.id;
   const context = await resolveWorkspaceRuntimeAssetContext(db, {
     workspaceId: chat.workspaceId,
