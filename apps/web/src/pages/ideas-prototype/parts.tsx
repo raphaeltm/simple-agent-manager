@@ -194,18 +194,21 @@ export function AttentionCard({ idea }: { idea: IdeaRowData & { attention: Atten
     >
       <a
         href="#idea"
-        className="-ml-1 inline-flex min-h-11 w-fit max-w-full items-center gap-2 rounded-md px-1 text-[13px] font-medium text-fg-muted no-underline hover:text-fg-primary"
+        className="-ml-1 inline-flex min-h-11 w-fit max-w-full items-center gap-2 rounded-md px-1 text-[13px] font-semibold text-fg-primary no-underline hover:underline"
       >
         <span className={`shrink-0 ${tone.fg}`}>
           <meta.Icon size={17} aria-hidden />
         </span>
         <span className="truncate">{idea.title}</span>
-        <ChevronRight size={14} aria-hidden className="shrink-0" />
+        <ChevronRight size={15} aria-hidden className="shrink-0 text-accent" />
       </a>
-      <p className="m-0 -mt-1 text-[15px] font-semibold leading-snug text-fg-primary">
+      <p className="m-0 -mt-1 line-clamp-2 break-words text-[15px] font-semibold leading-snug text-fg-primary">
         {idea.attention.title}
       </p>
-      <p className="m-0 text-sm text-fg-muted [overflow-wrap:anywhere]">{idea.attention.body}</p>
+      {/* Clamped: the full story is one tap away, and a verbose failure must not bury the list. */}
+      <p className="m-0 line-clamp-3 break-words text-sm text-fg-muted [overflow-wrap:anywhere]">
+        {idea.attention.body}
+      </p>
       <div className="mt-2 flex flex-wrap gap-3">
         <Button>{idea.attention.primary}</Button>
         {idea.attention.secondary && <Button variant="ghost">{idea.attention.secondary}</Button>}

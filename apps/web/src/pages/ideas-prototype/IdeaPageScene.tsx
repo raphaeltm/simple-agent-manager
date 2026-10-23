@@ -125,7 +125,7 @@ function Related({ data }: { data: IdeaPageData }) {
   );
 }
 
-export function IdeaPageScene({ data, sheet }: { data: IdeaPageData; sheet?: 'work' | 'chat' }) {
+export function IdeaPageScene({ data, sheet }: { data: IdeaPageData; sheet?: 'work' | 'chat' | 'pick' }) {
   const isMobile = useIsMobile();
   const header = (
     <header className="flex flex-col gap-2">

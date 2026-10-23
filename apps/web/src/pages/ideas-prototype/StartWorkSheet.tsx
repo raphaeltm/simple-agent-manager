@@ -10,7 +10,16 @@ import { Check, ChevronDown, CircleAlert, Sparkles, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
-import { BRAINSTORMER, CONTEXT_ITEMS, DO_SKILL, OPUS, START_NOTE, STORY_IDEA_TITLE } from './mock-data';
+import {
+  BRAINSTORMER,
+  CODEX,
+  CONTEXT_ITEMS,
+  DO_SKILL,
+  OPUS,
+  type ProfileChoice,
+  START_NOTE,
+  STORY_IDEA_TITLE,
+} from './mock-data';
 import { AuthorAvatar, tint } from './parts';
 
 function Field({ label, optional, children }: { label: string; optional?: boolean; children: ReactNode }) {
@@ -67,10 +76,56 @@ function Pill({ tone, children }: { tone: 'ok' | 'warn'; children: ReactNode }) 
   );
 }
 
-export function StartWorkSheet({ variant }: { variant: 'work' | 'chat' }) {
+function CapabilityPill({ profile }: { profile: ProfileChoice }) {
+  return profile.canChangeCode ? <Pill tone="ok">Can change code</Pill> : <Pill tone="warn">Chat only</Pill>;
+}
+
+/** The picker opened in place: recent profiles first, each saying what it can do. */
+function ProfileList({ selected }: { selected: ProfileChoice }) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Who works on it"
+      className="flex flex-col overflow-hidden rounded-lg border border-accent/50 bg-inset"
+    >
+      {[OPUS, CODEX, BRAINSTORMER].map((choice) => {
+        const isSelected = choice.id === selected.id;
+        return (
+          <button
+            key={choice.id}
+            type="button"
+            role="radio"
+            aria-checked={isSelected}
+            className={`flex min-h-[52px] w-full min-w-0 cursor-pointer items-center gap-3 border-0 border-b border-solid border-border-default px-3 py-1.5 text-left ${
+              isSelected ? 'bg-accent-tint' : 'bg-transparent hover:bg-surface-hover'
+            }`}
+          >
+            <AuthorAvatar name={choice.name} kind="agent" size="lg" />
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-[15px] font-semibold text-fg-primary">{choice.name}</span>
+                <CapabilityPill profile={choice} />
+              </span>
+              <span className="truncate text-[13px] text-fg-muted">{choice.description}</span>
+            </span>
+            {isSelected && <Check size={18} aria-hidden className="shrink-0 text-accent" />}
+          </button>
+        );
+      })}
+      <a
+        href="#profiles"
+        className="flex min-h-11 items-center justify-center text-sm font-semibold text-accent no-underline hover:bg-surface-hover"
+      >
+        All 7 profiles
+      </a>
+    </div>
+  );
+}
+
+export function StartWorkSheet({ variant }: { variant: 'work' | 'chat' | 'pick' }) {
   const isMobile = useIsMobile();
-  const profile = variant === 'work' ? OPUS : BRAINSTORMER;
-  const skill = variant === 'work' ? DO_SKILL : null;
+  const profile = variant === 'chat' ? BRAINSTORMER : OPUS;
+  const skill = variant === 'chat' ? null : DO_SKILL;
   const canChangeCode = profile.canChangeCode;
 
   const outcome = canChangeCode ? (
@@ -126,12 +181,16 @@ export function StartWorkSheet({ variant }: { variant: 'work' | 'chat' }) {
 
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-5 pb-3">
           <Field label="Who works on it">
-            <Choice
-              icon={<AuthorAvatar name={profile.name} kind="agent" size="lg" />}
-              title={profile.name}
-              detail={profile.description}
-              badge={canChangeCode ? <Pill tone="ok">Can change code</Pill> : <Pill tone="warn">Chat only</Pill>}
-            />
+            {variant === 'pick' ? (
+              <ProfileList selected={profile} />
+            ) : (
+              <Choice
+                icon={<AuthorAvatar name={profile.name} kind="agent" size="lg" />}
+                title={profile.name}
+                detail={profile.description}
+                badge={<CapabilityPill profile={profile} />}
+              />
+            )}
           </Field>
 
           {canChangeCode && (

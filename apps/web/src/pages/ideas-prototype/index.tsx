@@ -24,6 +24,8 @@ export function IdeasPrototype() {
       return <IdeaPageScene data={STORY_IDEA['not-started']} />;
     case 'start':
       return <IdeaPageScene data={STORY_IDEA['not-started']} sheet="work" />;
+    case 'start-pick':
+      return <IdeaPageScene data={STORY_IDEA['not-started']} sheet="pick" />;
     case 'start-chat':
       return <IdeaPageScene data={STORY_IDEA['not-started']} sheet="chat" />;
     case 'idea-working':

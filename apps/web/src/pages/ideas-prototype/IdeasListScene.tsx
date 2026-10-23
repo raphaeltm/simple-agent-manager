@@ -37,7 +37,7 @@ function Header({ isMobile }: { isMobile: boolean }) {
         />
         <input
           type="search"
-          placeholder="Search ideas, updates and linked chats"
+          placeholder="Search ideas"
           className="min-h-11 w-full rounded-lg border border-[var(--sam-form-border)] bg-inset py-2 pl-9 pr-3 text-sm text-fg-primary placeholder:text-fg-muted focus:border-accent focus:outline-none"
         />
       </label>
@@ -45,15 +45,28 @@ function Header({ isMobile }: { isMobile: boolean }) {
   );
 }
 
+/** Shown before folding the rest, so a bad day cannot push the whole list off a phone screen. */
+const NEEDS_YOU_VISIBLE = 3;
+
 function NeedsYou({ ideas }: { ideas: IdeaRowData[] }) {
   const cards = ideas.filter(hasAttention);
   if (cards.length === 0) return null;
+  const hidden = cards.length - NEEDS_YOU_VISIBLE;
   return (
     <div className="flex flex-col gap-3">
       <SectionHeading title="Needs you" count={cards.length} />
-      {cards.map((idea) => (
+      {cards.slice(0, NEEDS_YOU_VISIBLE).map((idea) => (
         <AttentionCard key={idea.id} idea={idea} />
       ))}
+      {hidden > 0 && (
+        <a
+          href="#more"
+          className="flex min-h-11 items-center justify-center gap-1 rounded-xl border border-dashed border-border-default text-sm font-semibold text-accent no-underline hover:bg-surface-hover"
+        >
+          {hidden} more need you
+          <ChevronDown size={16} aria-hidden />
+        </a>
+      )}
     </div>
   );
 }

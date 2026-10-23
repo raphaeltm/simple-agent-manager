@@ -321,7 +321,7 @@ const STRIPE_ATTENTION: Attention = {
   title: 'Work stopped: 3 tests failed in refunds.test.ts',
   body: 'Codex 5.5 High could not make v15’s new refund types pass. Its chat has the details.',
   primary: 'See what happened',
-  secondary: 'Try again',
+  secondary: 'Try again…',
 };
 
 const STRIPE_STUCK: IdeaRowData = {
@@ -332,17 +332,19 @@ const STRIPE_STUCK: IdeaRowData = {
   attention: STRIPE_ATTENTION,
 };
 
+const INVOICE_ATTENTION: Attention = {
+  tone: 'warning',
+  title: 'Codex 5.5 High is asking you something',
+  body: '“For partial refunds across two currencies, should I round half-up or to even?”',
+  primary: 'Answer',
+};
+
 const INVOICE_QUESTION: IdeaRowData = {
   id: 'i-invoices',
   title: 'Split invoices by currency',
   state: 'question',
   line: 'Codex 5.5 High is waiting for your answer',
-  attention: {
-    tone: 'warning',
-    title: 'Codex 5.5 High is asking you something',
-    body: '“For partial refunds across two currencies, should I round half-up or to even?”',
-    primary: 'Answer',
-  },
+  attention: INVOICE_ATTENTION,
 };
 
 const STORY_MERGED: IdeaRowData = {
@@ -502,6 +504,13 @@ export const OPUS: ProfileChoice = {
   canChangeCode: true,
 };
 
+export const CODEX: ProfileChoice = {
+  id: 'codex',
+  name: 'Codex 5.5 High',
+  description: 'Fast builder for well-scoped changes',
+  canChangeCode: true,
+};
+
 export const BRAINSTORMER: ProfileChoice = {
   id: 'brainstormer',
   name: 'Brainstormer',
@@ -556,6 +565,13 @@ const STRESS_ROWS: IdeaRowData[] = [
 
 export const LIST_STRESS: ListScene = {
   needsYou: [
+    RATE_LIMIT_MERGED,
+    {
+      ...INVOICE_QUESTION,
+      id: 'i-question-2',
+      title: 'Explain declined cards to customers in plain words',
+      attention: { ...INVOICE_ATTENTION, body: '“Should insufficient-funds declines suggest a retry date?”' },
+    },
     {
       ...STRIPE_STUCK,
       title: `${'Upgrade the Stripe SDK '.repeat(8)}to v15`,
