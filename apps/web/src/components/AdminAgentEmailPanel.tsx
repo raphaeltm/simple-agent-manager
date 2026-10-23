@@ -1,7 +1,8 @@
 /**
- * Superadmin status and loopback self-test for agent email (preview). Mirrors the shape of
- * `AdminConnectorPanel`: a status line, then a form, then recent evidence — all through
- * TanStack Query so a background refresh never hides what is already on screen (rule 48).
+ * Superadmin status, setup and loopback self-test for agent email (preview). Mirrors the shape
+ * of `AdminConnectorPanel`: a status line, then the setup while agent email is off or the
+ * self-test once it is on — all through TanStack Query so a background refresh never hides
+ * what is already on screen (rule 48).
  */
 import { Alert, Button, Input, Spinner } from '@simple-agent-manager/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,6 +11,7 @@ import { useState } from 'react';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { sendAgentEmailLoopback } from '../lib/api/agent-email';
 import { adminAgentEmailQueryOptions, agentEmailQueryKeys } from '../lib/query-options/agent-email';
+import { AdminAgentEmailSetup } from './AdminAgentEmailSetup';
 
 function when(iso: string): string {
   const parsed = new Date(iso);
@@ -45,8 +47,8 @@ export function AdminAgentEmailPanel() {
       <div>
         <h2 className="text-xl font-semibold">Agent email</h2>
         <p className="text-sm text-fg-muted">
-          Lets automations receive and send email. Configured at deploy time; this panel shows
-          status and a self-test only.
+          Lets automations receive and send email. A deploy prepares it; turn it on here, then
+          send a self-test.
         </p>
       </div>
       {error && <Alert variant="error">{error}</Alert>}
@@ -61,9 +63,18 @@ export function AdminAgentEmailPanel() {
                 On — <span className="font-mono">{status.domain}</span>
               </>
             ) : (
-              'Off — not configured on this deployment'
+              'Off'
             )}
           </p>
+          {!status.enabled && (
+            <AdminAgentEmailSetup
+              onTurnedOn={(turnedOn) =>
+                setMessage(
+                  `Agent email is on${turnedOn ? ` for ${turnedOn}` : ''}. Send a loopback test to check it end to end.`
+                )
+              }
+            />
+          )}
           {status.enabled && (
             <>
               <form

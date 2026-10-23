@@ -41,6 +41,7 @@ export {
 } from './admin-project-events';
 export {
   adminAgentEmailQueryOptions,
+  adminAgentEmailSetupQueryOptions,
   agentEmailConfigQueryOptions,
   agentEmailQueryKeys,
 } from './agent-email';

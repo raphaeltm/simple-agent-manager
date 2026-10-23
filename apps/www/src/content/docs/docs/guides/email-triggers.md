@@ -4,7 +4,7 @@ description: Give an automation its own email address. Mail from people you allo
 ---
 
 :::caution[Preview]
-Email triggers are a preview. They run only on deployments where agent email is configured (today:
+Email triggers are a preview. They run only on deployments where agent email is turned on (today:
 staging). The address is the main protection, so treat it like a password. See
 [Security](#security) for the details and what is still missing.
 :::
@@ -112,8 +112,8 @@ The sender's mail server sees a temporary failure only if SAM could not store th
 
 ## Check that it works (admins)
 
-**Admin → Integrations → Agent email** shows whether agent email is on and its domain. It can send
-a fixed loopback test: add `agent+loopback@agents.<your-domain>` to an automation's
+**Admin → Integrations → Agent email** shows whether agent email is on and its domain. Once it is
+on, it can send a fixed loopback test: add `agent+loopback@agents.<your-domain>` to an automation's
 **Allowed senders**, then send the test to that automation's address. Its agent starts, and when it
 replies, the reply comes back to SAM and appears under **Last reply received**. The same is
 available through [`/api/admin/agent-email`](/docs/reference/api/#agent-email-preview).
@@ -125,16 +125,27 @@ delivered. Check Email Sending's metrics and logs for replies instead.
 
 Agent email needs Cloudflare Email Routing and Email Sending (Workers Paid) on your zone, and three
 more permissions on the deploy token. See the agent email note in
-[Self-Hosting](/docs/guides/self-hosting/). The deploy turns Email Routing on for
-`agents.<your-domain>` itself. It writes DNS records only under `agents.<your-domain>`, fails if your
-main domain's mail records change, and the production deploy does not turn the preview on.
+[Self-Hosting](/docs/guides/self-hosting/). Setup has two steps, and neither needs the Cloudflare
+dashboard:
 
-The first time Email Routing is turned on in a zone, Cloudflare also adds its own SPF record and
-DKIM key to your main domain. In a zone new to Email Routing, the first agent email deploy therefore
-stops at the main-domain check, and the next deploy completes. If your main domain already has an
-SPF record, don't turn the preview on yet: Cloudflare may add a second one, which breaks SPF for
-your main domain's mail.
+1. **A staging deploy with the agent_email input prepares it.** It sets up Email Sending for
+   `agents.<your-domain>`, writes DNS records only under that subdomain, and fails if your main
+   domain's mail records change. It does not touch Email Routing. The production deploy never
+   prepares agent email.
+2. **A superadmin turns it on in Admin → Integrations → Agent email.** This turns Email Routing on
+   for `agents.<your-domain>`, turns on subaddressing, and routes `agent@agents.<your-domain>` to
+   SAM. The panel says first what it will do:
+   - In a zone that already uses Email Routing, nothing changes on your main domain.
+   - In a zone that has never used it, Cloudflare adds an SPF record and a DKIM key to your main
+     domain. The panel lists both and turns agent email on only after you allow them.
+   - If your main domain has its own MX or SPF records, the panel refuses. Cloudflare may add a
+     second SPF record, which breaks SPF for your main domain's mail.
 
-Agent email stays off until Cloudflare has verified the new sending records, usually 5 to 15
-minutes after the first deploy creates them. The deploy log says when verification is still
-pending; the next deploy after that turns it on.
+   After turning Email Routing on, SAM checks your main domain again. If it gained anything other
+   than the SPF record it showed, or lost a record, agent email stays off and the panel lists what
+   changed. Cloudflare has made that change by then, so check those records before you run the
+   setup again.
+
+The panel can turn agent email on once Cloudflare has verified the new sending records, usually 5
+to 15 minutes after the deploy creates them; until then it says it is still verifying. A later
+deploy without the agent_email input turns agent email off again.

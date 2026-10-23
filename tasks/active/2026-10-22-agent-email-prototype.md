@@ -296,15 +296,42 @@ main domain.
 
 ### Checklist
 
-- [ ] Shared types for the setup plan and status
-- [ ] Deploy step prepares only, writes the marker while sending verifies; tests prove it never calls a routing endpoint
-- [ ] `sync-wrangler-config.ts` adds `AGENT_EMAIL_WORKER_NAME` with the binding; tests
-- [ ] Setup row store and the cached on-switch; every caller of `isAgentEmailAvailable` and the senders moved to it
-- [ ] Setup service and admin routes; tests against a strict fake Cloudflare (consent, refusal, unexpected apex change, pending MX, idempotent re-run, sending still verifying)
-- [ ] Vertical slice: binding present but not set up refuses inbound mail, replies and email automations
-- [ ] Admin panel: plan, consent and result states; component tests; Playwright audit at 375 and 1280
-- [ ] Docs: self-hosting, email triggers, API reference
+- [x] Shared types for the setup plan and status
+- [x] Deploy step prepares only, writes the marker while sending verifies; tests prove it never calls a routing endpoint
+- [x] `sync-wrangler-config.ts` adds `AGENT_EMAIL_WORKER_NAME` with the binding; tests
+- [x] Setup row store and the cached on-switch; every caller of `isAgentEmailAvailable` and the senders moved to it
+- [x] Setup service and admin routes; tests against a strict fake Cloudflare (consent, refusal, unexpected apex change, pending MX, idempotent re-run, sending still verifying)
+- [x] Vertical slice: binding present but not set up refuses inbound mail, replies and email automations
+- [x] Admin panel: plan, consent and result states; component tests; Playwright audit at 375 and 1280
+- [x] Docs: self-hosting, email triggers, API reference
 - [ ] Staging: deploy, admin Enable, loopback end to end, cleanup
+
+### Implementation notes (2026-10-23)
+
+- **Staging's zone flag.** With routing on for `agents.sammy.party` only, `GET /email/routing` reads
+  `enabled: true, status: misconfigured` (no apex MX); the apex holds only Cloudflare's SPF record
+  and the locked `cf2024-1._domainkey` key. So "the zone uses Email Routing" is read from that flag,
+  and a re-run after `pending` plans `ready` without asking for consent again.
+- **Main-domain check after enabling.** The apex may gain the disclosed SPF record and nothing else,
+  and lose nothing. Gaining less than disclosed is accepted (a zone that used routing before gets
+  nothing new). A failed check leaves agent email off and names what changed; Cloudflare has made
+  the change by then, so running the setup again turns agent email on with the records as they are.
+- **Cache.** Only a present record is cached (60 s, the admin settings ceiling), so turning agent
+  email on takes effect on every isolate at once. Nothing turns it off except a deploy without the
+  binding or a new `BASE_DOMAIN`, and both are checked on every call.
+- **Errors.** Refusals and an unexpected main-domain change are `409`; a failed Cloudflare call is
+  `502 CLOUDFLARE_ERROR` with Cloudflare's code and message.
+- **Request budget.** A setup run in a zone new to Email Routing makes about 15 round trips (one D1
+  read and write, the rest Cloudflare reads and writes, each a precondition the safety check
+  needs). It is a one-time superadmin action, not a request path; the plan reuses what it read so
+  the run does not read it again.
+- **Runtime tunables.** `AGENT_EMAIL_WORKER_NAME` is a bootstrap exception: the deploy generates it
+  with the binding, and an admin-editable value would route agent mail to another Worker.
+- **Discrimination.** Each guard was reverted on its own and exactly its test went red: consent,
+  the main-domain check (added and removed sides separately), refusal, rule matching, rule
+  pagination, subaddressing, the zone-uses-routing branch, pending, binding, domain match, cache,
+  outage handling, and in the panel the consent gate, the consent flag, the config write, the
+  re-read after an error, and not reading the plan once on.
 
 ## Open questions for review
 

@@ -4,8 +4,9 @@
 // An email trigger's address is
 //   `${AGENT_EMAIL_LOCAL_PART}+<key>@${AGENT_EMAIL_SUBDOMAIN_LABEL}.<BASE_DOMAIN>`.
 // One Email Routing rule routes `agent@` to the API Worker; subaddressing maps each
-// `agent+<key>@` address onto it. scripts/deploy/configure-agent-email.ts mirrors the
-// two naming constants (a quality test asserts they match).
+// `agent+<key>@` address onto it. The admin setup (apps/api/src/services/agent-email/setup.ts)
+// creates that rule. scripts/deploy/configure-agent-email.ts mirrors the subdomain label (a
+// quality test asserts it matches).
 // The limits below are defaults for the admin settings `agentEmail.*`.
 // =============================================================================
 

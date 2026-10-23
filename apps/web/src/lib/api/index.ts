@@ -114,7 +114,13 @@ export type {
   AgentEmailLoopbackReceived,
   AgentEmailLoopbackSent,
 } from './agent-email';
-export { fetchAdminAgentEmail, getAgentEmailConfig, sendAgentEmailLoopback } from './agent-email';
+export {
+  fetchAdminAgentEmail,
+  fetchAgentEmailSetupPlan,
+  getAgentEmailConfig,
+  runAgentEmailSetup,
+  sendAgentEmailLoopback,
+} from './agent-email';
 export {
   getAgentModelCatalog,
   getProjectAgentModelSettings,

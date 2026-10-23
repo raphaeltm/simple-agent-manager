@@ -1,9 +1,9 @@
 /**
  * Agent email (prototype): whether this deployment can receive and send agent email, and the
- * admin status/loopback self-test. See `packages/shared/src/types/agent-email.ts` for the wire
- * types and `apps/api/src/routes/admin-agent-email.ts` for the admin endpoints.
+ * admin status, setup and loopback self-test. See `packages/shared/src/types/agent-email.ts`
+ * for the wire types and `apps/api/src/routes/admin-agent-email.ts` for the admin endpoints.
  */
-import type { AgentEmailConfigResponse } from '@simple-agent-manager/shared';
+import type { AgentEmailConfigResponse, AgentEmailSetupPlan } from '@simple-agent-manager/shared';
 
 import { request } from './client';
 
@@ -47,6 +47,24 @@ export async function getAgentEmailConfig(): Promise<AgentEmailConfigResponse> {
 /** Superadmin only. */
 export async function fetchAdminAgentEmail(): Promise<AdminAgentEmailStatus> {
   return request<AdminAgentEmailStatus>('/api/admin/agent-email');
+}
+
+/** Superadmin only. What turning agent email on would do now; reads Cloudflare. */
+export async function fetchAgentEmailSetupPlan(): Promise<AgentEmailSetupPlan> {
+  return request<AgentEmailSetupPlan>('/api/admin/agent-email/setup');
+}
+
+/**
+ * Superadmin only. Turns agent email on. In a zone new to Email Routing the server refuses
+ * unless `allowMainDomainChanges` is set, because Cloudflare adds records to the main domain.
+ */
+export async function runAgentEmailSetup(
+  allowMainDomainChanges: boolean
+): Promise<AgentEmailSetupPlan> {
+  return request<AgentEmailSetupPlan>('/api/admin/agent-email/setup', {
+    method: 'POST',
+    body: JSON.stringify({ allowMainDomainChanges }),
+  });
 }
 
 /** Superadmin only. `to` must be an existing email trigger's address. */

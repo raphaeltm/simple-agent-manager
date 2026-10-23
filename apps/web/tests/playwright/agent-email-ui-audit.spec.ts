@@ -1,8 +1,9 @@
 /**
  * Visual and layout audit for the agent email (preview) feature: the "Email" automation start,
  * an email trigger's detail page (address, copy button, allowed senders, no Run now), and the
- * admin "Agent email" status/loopback panel. Runs at 375x667 and 1280x800 with stress data: a
- * very long trigger name, a long address, 15+ allowed senders, and empty-state fallbacks.
+ * admin "Agent email" status, setup and loopback panel. Runs at 375x667 and 1280x800 with stress
+ * data: a very long trigger name, a long address, 15+ allowed senders, long domains and DNS
+ * record values in the setup, and empty-state fallbacks.
  */
 import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
 
@@ -12,6 +13,7 @@ import {
   jsonResponse,
   makeMockUser,
   screenshot,
+  screenshotSectionNearHeading,
 } from './audit-helpers';
 
 const PROJECT_ID = 'proj-agent-email';
@@ -365,9 +367,22 @@ const PLATFORM_STATUS = {
   },
 };
 
+interface SetupPlanMock {
+  state: string;
+  domain: string | null;
+  mainDomain: string | null;
+  mainDomainChanges: Array<{ type: string; name: string; content: string | null }>;
+  reason: string | null;
+}
+
 interface AdminMockOptions {
   enabled?: boolean;
   domain?: string | null;
+  /** `GET /api/admin/agent-email/setup`: a plan, or an error response. */
+  setupPlan?: SetupPlanMock | { status: number; body: unknown };
+  /** `POST /api/admin/agent-email/setup`; every request body is pushed to `setupRequests`. */
+  setupResult?: SetupPlanMock;
+  setupRequests?: unknown[];
   lastSent?: { to: string; sentAt: string; providerMessageId: string } | null;
   lastReceived?: {
     from: string;
@@ -378,8 +393,8 @@ interface AdminMockOptions {
 }
 
 async function setupAdminAgentEmailMocks(page: Page, options: AdminMockOptions = {}) {
-  const enabled = options.enabled ?? true;
-  const domain = options.domain ?? (enabled ? 'agents.example.com' : null);
+  let enabled = options.enabled ?? true;
+  let domain = options.domain ?? (enabled ? 'agents.example.com' : null);
   await page.addInitScript(() =>
     localStorage.setItem('sam-onboarding-wizard-dismissed-admin-agent-email', 'true')
   );
@@ -396,6 +411,21 @@ async function setupAdminAgentEmailMocks(page: Page, options: AdminMockOptions =
     if (path === '/api/admin/connector/settings') return respond(200, { settings: {} });
     if (path === '/api/admin/connector/clients')
       return respond(200, { clients: [], nextCursor: null });
+    if (path === '/api/admin/agent-email/setup') {
+      if (route.request().method() === 'POST') {
+        options.setupRequests?.push(route.request().postDataJSON());
+        const result = options.setupResult ?? { ...READY_PLAN, state: 'on' };
+        if (result.state === 'on') {
+          enabled = true;
+          domain = result.domain;
+        }
+        return respond(200, result);
+      }
+      const planOrError = options.setupPlan ?? READY_PLAN;
+      return 'status' in planOrError
+        ? respond(planOrError.status, planOrError.body)
+        : respond(200, planOrError);
+    }
     if (path === '/api/admin/agent-email') {
       return respond(200, {
         enabled,
@@ -431,18 +461,162 @@ async function auditAdminPanel(page: Page, name: string, focus?: string) {
   await audit(page, name);
 }
 
+const LONG_MAIN_DOMAIN = 'a-really-long-self-hosted-staging-domain-for-a-regional-team.example';
+
+const READY_PLAN: SetupPlanMock = {
+  state: 'ready',
+  domain: `agents.${LONG_MAIN_DOMAIN}`,
+  mainDomain: LONG_MAIN_DOMAIN,
+  mainDomainChanges: [],
+  reason: null,
+};
+
+const CONSENT_PLAN: SetupPlanMock = {
+  ...READY_PLAN,
+  state: 'needs_consent',
+  mainDomainChanges: [
+    { type: 'TXT', name: LONG_MAIN_DOMAIN, content: 'v=spf1 include:_spf.mx.cloudflare.net ~all' },
+    { type: 'TXT', name: `cf2024-1._domainkey.${LONG_MAIN_DOMAIN}`, content: null },
+  ],
+  reason: `${LONG_MAIN_DOMAIN} has never used Email Routing, so turning it on lets Cloudflare add an SPF record and a DKIM key to ${LONG_MAIN_DOMAIN}.`,
+};
+
+/** The admin panel as a section image: on mobile it is taller than one screen. */
+async function auditSetup(page: Page, name: string) {
+  await expect(page.getByText('Something went wrong')).toHaveCount(0);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+  await screenshotSectionNearHeading(page, 'Agent email', `agent-email/${name}`);
+}
+
 test.describe('Agent email — admin panel', () => {
-  test('shows "Off" and hides the loopback form when this deployment has not configured it', async ({
+  test('shows "Off", why, and hides the loopback form when the deploy has not prepared it', async ({
     page,
   }) => {
-    await setupAdminAgentEmailMocks(page, { enabled: false, domain: null });
+    await setupAdminAgentEmailMocks(page, {
+      enabled: false,
+      domain: null,
+      setupPlan: {
+        ...READY_PLAN,
+        state: 'unavailable',
+        domain: null,
+        mainDomain: null,
+        reason:
+          'This deployment has not prepared agent email. A staging deploy started with the agent_email input prepares it, once the deploy token has the Email Routing and Email Sending permissions.',
+      },
+    });
     await page.goto('/admin/integrations');
     const status = page.getByTestId('agent-email-status');
-    await expect(status).toContainText('Off — not configured on this deployment');
+    await expect(status).toHaveText('Off');
+    await expect(
+      page.getByText('This deployment has not prepared agent email.', { exact: false })
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Turn on agent email' })).toHaveCount(0);
     await expect(page.getByLabel('Send loopback test to')).toHaveCount(0);
     // Liveness: the rest of the Integrations tab still rendered around it.
     await expect(page.getByRole('heading', { name: 'Connector' })).toBeVisible();
-    await auditAdminPanel(page, 'agent-email-admin-off');
+    await auditSetup(page, 'agent-email-admin-off');
+  });
+
+  test('turns agent email on after the admin allows the main-domain records', async ({ page }) => {
+    const setupRequests: unknown[] = [];
+    await setupAdminAgentEmailMocks(page, {
+      enabled: false,
+      domain: null,
+      setupPlan: CONSENT_PLAN,
+      setupResult: { ...CONSENT_PLAN, state: 'on', reason: null },
+      setupRequests,
+    });
+    await page.goto('/admin/integrations');
+    const changes = page.getByTestId('agent-email-main-domain-changes');
+    await expect(changes).toContainText('v=spf1 include:_spf.mx.cloudflare.net ~all');
+    await expect(changes).toContainText('a DKIM key Cloudflare generates');
+    const turnOn = page.getByRole('button', { name: 'Turn on agent email' });
+    await expect(turnOn).toBeDisabled();
+    await auditSetup(page, 'agent-email-admin-needs-consent');
+
+    await page.getByLabel(`Allow Cloudflare to add these records to ${LONG_MAIN_DOMAIN}`).check();
+    await expect(turnOn).toBeEnabled();
+    await turnOn.click();
+
+    await expect(page.getByTestId('agent-email-status')).toContainText(
+      `agents.${LONG_MAIN_DOMAIN}`
+    );
+    await expect(page.getByText(/Agent email is on for/)).toBeVisible();
+    await expect(page.getByLabel('Send loopback test to')).toBeVisible();
+    expect(setupRequests).toEqual([{ allowMainDomainChanges: true }]);
+    await auditSetup(page, 'agent-email-admin-turned-on');
+  });
+
+  test('turns agent email on with one click where nothing changes on the main domain', async ({
+    page,
+  }) => {
+    const setupRequests: unknown[] = [];
+    await setupAdminAgentEmailMocks(page, {
+      enabled: false,
+      domain: null,
+      setupPlan: READY_PLAN,
+      setupRequests,
+    });
+    await page.goto('/admin/integrations');
+    await expect(
+      page.getByText(`Nothing changes on ${LONG_MAIN_DOMAIN}.`, { exact: false })
+    ).toBeVisible();
+    await auditSetup(page, 'agent-email-admin-ready');
+    await page.getByRole('button', { name: 'Turn on agent email' }).click();
+    await expect(page.getByLabel('Send loopback test to')).toBeVisible();
+    expect(setupRequests).toEqual([{ allowMainDomainChanges: false }]);
+  });
+
+  test('explains a refusal with the records that caused it', async ({ page }) => {
+    await setupAdminAgentEmailMocks(page, {
+      enabled: false,
+      domain: null,
+      setupPlan: {
+        ...READY_PLAN,
+        state: 'refused',
+        reason: `${LONG_MAIN_DOMAIN} has its own mail records (MX aspmx.l.google.com, MX alt1.aspmx.l.google.com, TXT v=spf1 include:_spf.google.com include:mailgun.org include:servers.mcsv.net ~all). Turning Email Routing on would add Cloudflare's SPF record beside them, and SAM cannot do that safely yet.`,
+      },
+    });
+    await page.goto('/admin/integrations');
+    await expect(page.getByText('has its own mail records', { exact: false })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Turn on agent email' })).toHaveCount(0);
+    await auditSetup(page, 'agent-email-admin-refused');
+  });
+
+  test('waits while Cloudflare verifies the sending records', async ({ page }) => {
+    await setupAdminAgentEmailMocks(page, {
+      enabled: false,
+      domain: null,
+      setupPlan: {
+        ...READY_PLAN,
+        state: 'verifying',
+        reason: `Cloudflare is still verifying the sending records for agents.${LONG_MAIN_DOMAIN}, usually 5 to 15 minutes after the deploy created them. Try again then.`,
+      },
+    });
+    await page.goto('/admin/integrations');
+    await expect(page.getByRole('button', { name: 'Check again' })).toBeVisible();
+    await auditSetup(page, 'agent-email-admin-verifying');
+  });
+
+  test('shows a failed Cloudflare check without hiding the panel', async ({ page }) => {
+    await setupAdminAgentEmailMocks(page, {
+      enabled: false,
+      domain: null,
+      setupPlan: {
+        status: 502,
+        body: {
+          error: 'CLOUDFLARE_ERROR',
+          message:
+            'Cloudflare GET /email/sending/subdomains failed with HTTP 403: 10000 Authentication error',
+        },
+      },
+    });
+    await page.goto('/admin/integrations');
+    await expect(page.getByText('10000 Authentication error', { exact: false })).toBeVisible();
+    await expect(page.getByTestId('agent-email-status')).toHaveText('Off');
+    await expect(page.getByRole('button', { name: 'Check again' })).toBeVisible();
+    await auditSetup(page, 'agent-email-admin-setup-error');
   });
 
   test('shows the domain and the loopback form with nothing sent yet', async ({ page }) => {

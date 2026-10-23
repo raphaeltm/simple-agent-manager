@@ -46,7 +46,7 @@ on:
         required: false
         type: string
       agent_email:
-        description: 'Preview: configure agent email (Email Routing + Sending on agents.BASE_DOMAIN) for this staging deploy'
+        description: 'Preview: prepare agent email (Email Sending on agents.BASE_DOMAIN); a superadmin turns it on in Admin > Integrations'
         required: false
         type: boolean
         default: false

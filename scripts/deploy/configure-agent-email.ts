@@ -47,8 +47,6 @@ import {
 
 /** Subdomain label under BASE_DOMAIN. Mirrors AGENT_EMAIL_SUBDOMAIN_LABEL in packages/shared. */
 export const AGENT_EMAIL_SUBDOMAIN_LABEL = 'agents';
-/** Routed local part. Mirrors AGENT_EMAIL_LOCAL_PART in packages/shared. */
-export const AGENT_EMAIL_LOCAL_PART = 'agent';
 export const AGENT_EMAIL_MARKER_FILE = 'agent-email-domain';
 
 /**

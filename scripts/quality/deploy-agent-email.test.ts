@@ -4,13 +4,9 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import {
-  AGENT_EMAIL_LOCAL_PART as SHARED_LOCAL_PART,
-  AGENT_EMAIL_SUBDOMAIN_LABEL as SHARED_SUBDOMAIN_LABEL,
-} from '../../packages/shared/src/constants/agent-email';
+import { AGENT_EMAIL_SUBDOMAIN_LABEL as SHARED_SUBDOMAIN_LABEL } from '../../packages/shared/src/constants/agent-email';
 import type { CloudflareRequest, CloudflareResponse, HttpMethod } from '../deploy/cloudflare-rest';
 import {
-  AGENT_EMAIL_LOCAL_PART,
   AGENT_EMAIL_SUBDOMAIN_LABEL,
   configureAgentEmail,
   type DnsRecord,
@@ -462,8 +458,7 @@ describe('agent email marker', () => {
 });
 
 describe('agent email address contract', () => {
-  it('uses the same subdomain label and local part as the API Worker', () => {
+  it('uses the same subdomain label as the API Worker', () => {
     expect(AGENT_EMAIL_SUBDOMAIN_LABEL).toBe(SHARED_SUBDOMAIN_LABEL);
-    expect(AGENT_EMAIL_LOCAL_PART).toBe(SHARED_LOCAL_PART);
   });
 });

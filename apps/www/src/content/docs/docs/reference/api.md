@@ -732,8 +732,8 @@ the switch is enabled again.
 
 ## Agent Email (preview)
 
-Agent email is off unless the deployment configured Cloudflare Email Routing and Email Sending
-for `agents.<BASE_DOMAIN>` (see [Email Triggers](/docs/guides/email-triggers/)).
+Agent email is on when the deploy prepared Email Sending for `agents.<BASE_DOMAIN>` and a
+superadmin then ran the setup below (see [Email Triggers](/docs/guides/email-triggers/)).
 
 ### `GET /api/config/agent-email`
 
@@ -745,6 +745,33 @@ addresses live on, for example `agents.example.com`, and is `null` when agent em
 Superadmin only. Returns the same `enabled` and `domain`, plus `loopback`:
 `{ lastSent: { to, sentAt, providerMessageId } | null, lastReceived: { from, subject, autoSubmitted, receivedAt } | null }`.
 Loopback status expires after seven days.
+
+### `GET /api/admin/agent-email/setup`
+
+Superadmin only. Reads Cloudflare and returns what turning agent email on would do now:
+`{ state, domain, mainDomain, mainDomainChanges, reason }`. `state` is one of:
+
+| `state`         | Meaning                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------ |
+| `unavailable`   | The deploy has not prepared agent email; `reason` says what is missing                           |
+| `verifying`     | Cloudflare is still verifying the sending records                                                |
+| `refused`       | The zone has never used Email Routing and the main domain has its own MX or SPF records          |
+| `needs_consent` | The zone has never used Email Routing; `mainDomainChanges` lists the records Cloudflare will add |
+| `ready`         | Setup can run and changes nothing on the main domain                                             |
+| `on`            | Agent email is on                                                                                |
+
+Each `mainDomainChanges` entry is `{ type, name, content }`; `content` is `null` for the DKIM key,
+which Cloudflare generates. Returns `502` with Cloudflare's error when a Cloudflare call fails.
+
+### `POST /api/admin/agent-email/setup`
+
+Superadmin only. Body `{ "allowMainDomainChanges"?: boolean }`. Turns Email Routing on for
+`agents.<BASE_DOMAIN>`, turns on subaddressing, routes `agent@agents.<BASE_DOMAIN>` to this Worker,
+and records that agent email is on. Returns the resulting plan: `on`, or `pending` when Email
+Routing is on but its records are not visible yet (run it again). Returns `409` when the plan is
+not `ready`, when it is `needs_consent` and `allowMainDomainChanges` is not `true`, and when the
+main domain's mail records changed beyond what was listed (agent email stays off). Returns `502`
+with Cloudflare's error when a Cloudflare call fails. Running it again once on changes nothing.
 
 ### `POST /api/admin/agent-email/loopback`
 
