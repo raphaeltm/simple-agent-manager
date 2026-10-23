@@ -367,6 +367,8 @@ Astra's recommendation for question 5: an explicit admin opt-in before the first
 
 ## Notes / log
 
+Commit hashes written before 2026-10-23 04:30Z are from before the rebase onto `main`; the PR description maps them to the rebased commits.
+
 - 2026-10-22: Research complete. Astra plan review: approve-with-changes (above). Building with those changes.
 - 2026-10-22: API, deploy and docs built and pushed (commits b04d612d8, 3aeacb6e5, 874bd6f96, ed1eddcfb, ee02e4134).
 - 2026-10-22: Security review (0 critical, 1 high, 2 medium, 2 low) fixed in 46a6b900b and e73f6a4e3: delivery lease and takeover that never starts an email twice; a submitted email whose bookkeeping fails reports success; unparseable mail rejected; loopback sender check and rate limit; linear-time HTML to text (the regex version went quadratic on hostile markup, and bounding its input dropped the text of mail with long styles); DMARC advice in the docs.
@@ -401,3 +403,9 @@ Astra's recommendation for question 5: an explicit admin opt-in before the first
   - Conflicts resolved during the rebase: `reply_to_email` now registers in `main`'s new `MCP_TOOL_HANDLERS` table instead of the `index.ts` switch.
   - The admin settings categories keep both `AI models` and `Email`. The registry has 68 settings: 44 at the merge base, 12 from #2414 and 12 for agent email.
   - The self-hosting and admin settings guides keep both new paragraphs and sections.
+- 2026-10-23: The vertical slice's happy path now sends `reply_to_email` as a JSON-RPC `tools/call` to the real MCP route, covering the registration the rebase moved into `MCP_TOOL_HANDLERS`. Removing the table entry turns exactly that test red. `createMemoryKv` now takes the value type as a string or as `{ type }`, as KV does.
+- 2026-10-23: Staging after the rebase. Deploy run 39900785297 at `549bfd28f`:
+  - The step logged `Agent email configured for agents.sammy.party (0 Cloudflare write(s))`, and the zone's DNS was unchanged.
+  - Both databases logged `No migrations to apply!`.
+  - The end-to-end test passed again on that deploy. Automation `01M5KHQNWV71DVSNR5H0FQ3KGT` started task `01M5KHRA4KQ3MQ4QB9EQYNN6PJ`, and the reply came back at 05:06:37Z, `Auto-Submitted`, with `In-Reply-To` equal to the sent Message-ID.
+  - The automation, workspace `01M5KJ32S1PN0QJZTWKBK485BM` and VM node `01M5KHRXXDF2F8V6CAPF2CFSZK` were deleted afterwards.
