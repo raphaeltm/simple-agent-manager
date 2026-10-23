@@ -47,7 +47,7 @@ const internalAudiences = new Set([
 ]);
 export function validateWorkloadAudience(audience: string): void {
   if (
-    !audience ||
+    !audience?.length ||
     audience !== audience.trim() ||
     audience.length > WORKLOAD_IDENTITY_AUDIENCE_MAX_LENGTH ||
     /[\p{Cc}\s]/u.test(audience) ||

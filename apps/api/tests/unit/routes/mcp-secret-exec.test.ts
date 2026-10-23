@@ -182,6 +182,22 @@ describe('OIDC execution injection', () => {
     expect(response.error).toBeDefined();
     expect(mocks.proxy).not.toHaveBeenCalled();
   });
+  it.each(['workspace-terminal', 'vault audience', ' vault'])(
+    'reports invalid OIDC audience %s as invalid params before secret resolution',
+    async (audience) => {
+      const response = await handleSecretExec(
+        1,
+        { argv: ['true'], secretNames: [], oidc: { audience } },
+        token,
+        env,
+        'start'
+      );
+      expect(response.error?.code).toBe(-32602);
+      expect(mocks.secrets).not.toHaveBeenCalled();
+      expect(mocks.sign).not.toHaveBeenCalled();
+      expect(mocks.proxy).not.toHaveBeenCalled();
+    }
+  );
   it('rejects a managed-env collision before signing', async () => {
     mocks.sign.mockClear();
     mocks.secrets.mockResolvedValueOnce({

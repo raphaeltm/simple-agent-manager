@@ -33,6 +33,24 @@ function label(value: string | null | undefined): string | undefined {
   return value?.replace(/\p{Cc}/gu, ' ').slice(0, WORKLOAD_IDENTITY_LABEL_MAX_LENGTH) || undefined;
 }
 
+function assertExecutionIdentity(
+  expected: McpTokenData,
+  actual: Pick<
+    McpTokenData,
+    'projectId' | 'userId' | 'workspaceId' | 'agentSessionId' | 'chatSessionId'
+  >
+): void {
+  if (
+    expected.projectId !== actual.projectId ||
+    expected.userId !== actual.userId ||
+    expected.workspaceId !== actual.workspaceId ||
+    expected.agentSessionId !== actual.agentSessionId ||
+    expected.chatSessionId !== actual.chatSessionId
+  ) {
+    throw errors.forbidden('Execution identity does not match the active chat');
+  }
+}
+
 /** Shared metadata resolver. Only the MCP execution adapter may mint a token. */
 export async function getWorkloadIdentityMetadata(
   env: Env,
@@ -51,8 +69,7 @@ export async function getWorkloadIdentityMetadata(
     : (await listAcpSessions(env, projectId, { chatSessionId, status: 'running', limit: 1 }))
         .sessions[0];
   if (
-    !runtime ||
-    runtime.chatSessionId !== chatSessionId ||
+    runtime?.chatSessionId !== chatSessionId ||
     runtime.workspaceId !== chat.workspaceId ||
     runtime.status !== 'running'
   ) {
@@ -65,15 +82,14 @@ export async function getWorkloadIdentityMetadata(
   });
   if (context.projectId !== projectId || context.userId !== chat.createdByUserId)
     throw errors.forbidden('Chat identity does not match workspace');
-  if (
-    expected &&
-    (expected.projectId !== projectId ||
-      expected.userId !== context.userId ||
-      expected.workspaceId !== chat.workspaceId ||
-      expected.agentSessionId !== runtimeId ||
-      expected.chatSessionId !== chatSessionId)
-  ) {
-    throw errors.forbidden('Execution identity does not match the active chat');
+  if (expected) {
+    assertExecutionIdentity(expected, {
+      projectId,
+      userId: context.userId,
+      workspaceId: chat.workspaceId,
+      agentSessionId: runtimeId,
+      chatSessionId,
+    });
   }
   // Membership is checked again at issuance, rather than relying on an old MCP token.
   if (expected) await requireProjectCapability(db, projectId, context.userId, 'task:write');
@@ -140,7 +156,7 @@ export async function getWorkloadIdentityMetadata(
         )
       )
       .limit(1);
-    if (!task || task.chatSessionId !== chatSessionId)
+    if (task?.chatSessionId !== chatSessionId)
       throw errors.forbidden('Task identity does not match chat');
     claims.task_id = task.id;
     claims.task_name = label(task.title);

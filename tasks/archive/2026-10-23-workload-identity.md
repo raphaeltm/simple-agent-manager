@@ -55,3 +55,9 @@ No GCP setup required. Claims derive only from trusted stored context. IDs are i
 - Test workspace `01M5MFX8ZEH0ZZ3VMQJDC9DPM0` and node `01M5MFQJ513V9G49JHK59YQKY0` deleted through normal APIs; Cloudflare D1 readback confirmed both absent. No staging compute remains from this test.
 - Staging completion event processed/acked; subscription `0101c8ee-4c9d-4d19-92c7-a2ff706a10a7` and fallback `5de1c406-003a-4256-9019-c9848c02986c` cancelled. Repeated lookup after cancellation correctly lacked visibility.
 - Implementation and staging complete. Release gates remain tracked in the PR: exact-head CI, CodeRabbit request/wait, merge and minimal production smoke. Human authorization for full release is confirmed in the saved transcript.
+
+## Review cleanup
+
+CodeRabbit found invalid audiences returned a generic execution failure. Added three regression cases (reserved audience, inner whitespace, leading whitespace), observed them fail, and mapped only audience validation to INVALID_PARAMS before secret resolution. Existing generic redaction-safe handling remains unchanged. Extracted the unchanged execution-identity predicate to reduce complexity, simplified null guards, and used readonly props/native output elements for status feedback. These address all eight reported Sonar findings; final CI analysis will confirm.
+
+Focused API: 79 tests across four files passed. Four mobile/desktop OIDC Playwright tests passed; all six regenerated screenshots reviewed without overflow/clipping. UI variants for this semantic cleanup: retain ARIA spans, use native output with existing styling, or add a shared status wrapper. Selected native output as the smallest accessible solution. Rubric: hierarchy4, interaction4, mobile4, accessibility5, consistency4. No effect/click behavior changes. Independent cleanup reviewer PASS: authorization/claims preserved; no missing tests or blockers. Final-head CI/staging and incremental review remain pending.

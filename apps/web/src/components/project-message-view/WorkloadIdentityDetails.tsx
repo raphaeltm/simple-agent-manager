@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import * as v from 'valibot';
 
 import { request } from '../../lib/api/client';
-function IdentityCopy({ label, value }: { label: string; value: string }) {
+function IdentityCopy({ label, value }: Readonly<{ label: string; value: string }>) {
   const [feedback, setFeedback] = useState('');
   return (
     <span className="inline-flex flex-wrap items-center gap-1 min-w-0">
@@ -24,9 +24,7 @@ function IdentityCopy({ label, value }: { label: string; value: string }) {
       >
         Copy
       </button>
-      <span role="status" className="text-xs text-fg-muted">
-        {feedback}
-      </span>
+      <output className="text-xs text-fg-muted">{feedback}</output>
     </span>
   );
 }
@@ -35,10 +33,10 @@ function IdentityCopy({ label, value }: { label: string; value: string }) {
 export function WorkloadIdentityDetails({
   projectId,
   sessionId,
-}: {
+}: Readonly<{
   projectId: string;
   sessionId: string;
-}) {
+}>) {
   const [open, setOpen] = useState(false);
   const [identity, setIdentity] = useState<WorkloadIdentityMetadata | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,9 +80,7 @@ export function WorkloadIdentityDetails({
           </p>
         )}
         {!identity && !error && (
-          <p role="status" className="m-0 text-fg-muted">
-            Loading identity details…
-          </p>
+          <output className="m-0 text-fg-muted">Loading identity details…</output>
         )}
         {identity && (
           <>

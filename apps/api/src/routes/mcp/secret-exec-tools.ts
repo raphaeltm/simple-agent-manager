@@ -161,7 +161,17 @@ export async function handleSecretExec(
           'Invalid execution request: use exactly argv or command with explicit bash/sh; names, cwd, env and timeout must be valid'
         );
       const request = parsed.output;
-      if (request.oidc) validateWorkloadAudience(request.oidc.audience);
+      if (request.oidc) {
+        try {
+          validateWorkloadAudience(request.oidc.audience);
+        } catch {
+          return jsonRpcError(
+            requestId,
+            INVALID_PARAMS,
+            'OIDC audience must be a nonempty external audience without whitespace'
+          );
+        }
+      }
       const fingerprint = await hash(stableRequest(request));
       const jobId = `sx-${await hash(`${token.workspaceId}\0${token.agentSessionId}\0${request.idempotencyKey ?? crypto.randomUUID()}`)}`;
       const { envVars } = await getSecretExecutionEnv(
