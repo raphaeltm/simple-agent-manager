@@ -61,6 +61,18 @@ test.describe('AI Models settings on staging', () => {
   test('turns on extra models and sets a monthly limit that survive a reload', async ({ page }) => {
     test.setTimeout(180_000);
     await openAiModels(page);
+    // Setup, not assertions: if an earlier run left a selection or limit, reset both so this
+    // run still has something to save. The checks below run unconditionally.
+    const useRecommended = page.getByRole('button', { name: 'Use recommended', exact: true });
+    if (await useRecommended.isVisible()) {
+      await useRecommended.click();
+      await expect(page.getByText(/^Recommended · /)).toBeVisible({ timeout: 15_000 });
+    }
+    const useDefault = page.getByRole('button', { name: /^Use default \(/ });
+    if (await useDefault.isVisible()) {
+      await useDefault.click();
+      await expect(useDefault).toBeHidden({ timeout: 15_000 });
+    }
     await stagingShot(page, 'agent-models-section-before');
     await expectNoHorizontalOverflow(page);
 
