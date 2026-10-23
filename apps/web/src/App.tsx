@@ -61,6 +61,8 @@ const CreateWorkspace = lazyNamed(() => import('./pages/CreateWorkspace'), 'Crea
 const DeviceAuth = lazyNamed(() => import('./pages/DeviceAuth'), 'DeviceAuth');
 const IdeaDetailPage = lazyNamed(() => import('./pages/IdeaDetailPage'), 'IdeaDetailPage');
 const IdeasPage = lazyNamed(() => import('./pages/IdeasPage'), 'IdeasPage');
+// PROTOTYPE ONLY (Ideas redesign, task 01M5N1E7R68NYPRNGQ4F861QKE) — remove before any merge to main.
+const IdeasPrototype = lazyNamed(() => import('./pages/ideas-prototype'), 'IdeasPrototype');
 const Node = lazyNamed(() => import('./pages/Node'), 'Node');
 const Nodes = lazyNamed(() => import('./pages/Nodes'), 'Nodes');
 /**
@@ -342,6 +344,8 @@ export default function App() {
                           path="knowledge"
                           element={<Navigate to="../agent-context" replace />}
                         />
+                        {/* PROTOTYPE ONLY — remove before any merge to main. */}
+                        <Route path="ideas/prototype" element={page(<IdeasPrototype />)} />
                         <Route path="ideas/:taskId" element={page(<IdeaDetailPage />)} />
                         <Route path="tasks" element={<Navigate to="../ideas" replace />} />
                         <Route path="tasks/:taskId" element={page(<TaskRedirect />)} />
