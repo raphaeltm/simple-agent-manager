@@ -178,9 +178,9 @@ test.describe('AI models off for one skill on staging', () => {
     await stagingShot(page, 'agent-models-skill-picker-none');
     await picker.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(picker).toBeHidden({ timeout: 10_000 });
-    await expect(
-      form.getByText("No models. Agents using this skill can't call any.")
-    ).toBeVisible();
+    const noModels = form.getByText("No models. Agents using this skill can't call any.");
+    await expect(noModels).toBeVisible();
+    await noModels.scrollIntoViewIfNeeded();
     await stagingShot(page, 'agent-models-skill-form-none');
 
     await form.getByRole('button', { name: 'Create Skill' }).click();
