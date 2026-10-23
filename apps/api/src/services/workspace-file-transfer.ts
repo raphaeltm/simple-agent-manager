@@ -166,7 +166,7 @@ export async function downloadFromWorkspace(
   }
 
   // Guard against oversized responses to avoid OOM in Workers (128 MB heap)
-  const contentLength = parseInt(res.headers.get('Content-Length') ?? '0', 10);
+  const contentLength = Number.parseInt(res.headers.get('Content-Length') ?? '0', 10);
   const maxBytes =
     maxBytesOverride ??
     parsePositiveInt(env.LIBRARY_UPLOAD_MAX_BYTES, DEFAULT_LIBRARY_UPLOAD_MAX_BYTES);

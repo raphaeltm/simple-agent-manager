@@ -1,9 +1,13 @@
-import type { AgentModelCatalogResponse, AgentProfile } from '@simple-agent-manager/shared';
+import type { AgentProfile } from '@simple-agent-manager/shared';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SkillFormDialog } from '../../../../src/components/skills/SkillFormDialog';
 import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
+import {
+  makeTestProjectModelSettings,
+  TEST_MODEL_CATALOG,
+} from '../agent-models/agent-model-test-fixtures';
 
 const mocks = vi.hoisted(() => ({
   getAgentModelCatalog: vi.fn(),
@@ -19,44 +23,6 @@ vi.mock('../../../../src/lib/api/agent-models', () => ({
 vi.mock('../../../../src/components/skills/SkillRuntimeSection', () => ({
   SkillRuntimeSection: () => <div data-testid="skill-runtime-section" />,
 }));
-
-const CATALOG: AgentModelCatalogResponse = {
-  models: [
-    {
-      id: 'm-decision-1',
-      name: 'clef-flash',
-      author: 'cloudflare',
-      description: 'Fast yes/no decisions.',
-      category: 'decision',
-      task: 'Text Generation',
-      prices: [{ unit: 'per M input tokens', usd: 0.023 }],
-      contextWindow: null,
-      capabilities: [],
-      beta: false,
-      partner: false,
-      infoUrl: null,
-      termsUrl: null,
-    },
-    {
-      id: 'm-decision-2',
-      name: 'clef-omni',
-      author: 'cloudflare',
-      description: 'Broader decisions.',
-      category: 'decision',
-      task: 'Text Generation',
-      prices: [{ unit: 'per M input tokens', usd: 0.04 }],
-      contextWindow: null,
-      capabilities: [],
-      beta: false,
-      partner: false,
-      infoUrl: null,
-      termsUrl: null,
-    },
-  ],
-  defaultModelIds: ['m-decision-1'],
-  defaultCategories: ['decision'],
-  fetchedAt: '2026-10-01T00:00:00Z',
-};
 
 function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
   return {
@@ -91,26 +57,10 @@ function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
 
 describe('SkillFormDialog — AI model calls field', () => {
   beforeEach(() => {
-    mocks.getAgentModelCatalog.mockReset().mockResolvedValue(CATALOG);
-    mocks.getProjectAgentModelSettings.mockReset().mockResolvedValue({
-      featureEnabled: true,
-      models: null,
-      effectiveModelIds: ['m-decision-1'],
-      effectiveSource: 'default',
-      monthlyBudgetUsd: null,
-      effectiveMonthlyBudgetUsd: 20,
-      defaultMonthlyBudgetUsd: 20,
-      maxMonthlyBudgetUsd: 100,
-      usage: {
-        month: '2026-10',
-        spentUsd: 0,
-        reservedUsd: 0,
-        callCount: 0,
-        resetsAt: '2026-11-01T00:00:00Z',
-        byModel: [],
-      },
-      canEdit: true,
-    });
+    mocks.getAgentModelCatalog.mockReset().mockResolvedValue(TEST_MODEL_CATALOG);
+    mocks.getProjectAgentModelSettings
+      .mockReset()
+      .mockResolvedValue(makeTestProjectModelSettings());
   });
 
   it('create mode: submits agentModels: null by default (inherit)', async () => {

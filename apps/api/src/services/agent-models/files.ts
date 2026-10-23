@@ -234,16 +234,20 @@ export function outputSaver(
   modelName: string,
   now: Date
 ): OutputSaver {
-  const stamp = now.toISOString().replace(/[-:]/g, '').replace(/\..+$/, '');
+  // 2026-10-23T00:18:47.123Z -> 20261023T001847
+  const stamp = now.toISOString().slice(0, 19).replace(/[-:]/g, '');
   const saved: SavedFile[] = [];
   return {
     saved,
     async save(data, contentType, hint) {
       const type = contentType.split(';')[0]?.trim().toLowerCase() || 'application/octet-stream';
       const ext = EXTENSION_BY_TYPE[type] ?? 'bin';
+      // Split and rejoin rather than trim with a regex: linear on any hint length.
       const safeHint = hint
         .replace(/[^A-Za-z0-9_-]+/g, '-')
-        .replace(/^-+|-+$/g, '')
+        .split('-')
+        .filter(Boolean)
+        .join('-')
         .slice(0, 40);
       const filename = `${modelName}-${stamp}${safeHint ? `-${safeHint}` : ''}-${saved.length + 1}.${ext}`;
       const buffer = data instanceof Uint8Array ? data.slice().buffer : data;

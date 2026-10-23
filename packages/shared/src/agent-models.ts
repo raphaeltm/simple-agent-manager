@@ -164,7 +164,8 @@ export function formatAgentModelPrice(price: AgentModelPrice): string {
 export function formatUsd(usd: number): string {
   if (usd === 0) return '$0';
   if (Math.abs(usd) >= 1) return `$${usd.toFixed(2)}`;
-  if (Math.abs(usd) >= 0.01) return `$${usd.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
+  // Number() drops trailing zeros: 0.30 -> 0.3, 1.00 -> 1.
+  if (Math.abs(usd) >= 0.01) return `$${Number(usd.toFixed(2))}`;
   return `$${Number(usd.toPrecision(2))}`;
 }
 

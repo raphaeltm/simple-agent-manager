@@ -9,6 +9,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentModelAccessField } from '../../../../src/components/agent-models/AgentModelAccessField';
 import { createTestQueryClient } from '../../../test-utils/query-test-utils';
+import {
+  makeTestProjectModelSettings as makeProjectSettings,
+  TEST_MODEL_CATALOG as CATALOG,
+} from './agent-model-test-fixtures';
 
 const mocks = vi.hoisted(() => ({
   getAgentModelCatalog: vi.fn(),
@@ -21,88 +25,6 @@ vi.mock('../../../../src/lib/api/agent-models', () => ({
   getProjectAgentModelSettings: mocks.getProjectAgentModelSettings,
   updateProjectAgentModelSettings: vi.fn(),
 }));
-
-// Two "decision" models plus one "embeddings" model: a one-model selection
-// always summarizes to "1 model (Decision 1)" by category regardless of
-// *which* decision model it is, so distinguishing scenarios by their
-// displayed text requires at least one model in a different category.
-const CATALOG: AgentModelCatalogResponse = {
-  models: [
-    {
-      id: 'm-decision-1',
-      name: 'clef-flash',
-      author: 'cloudflare',
-      description: 'Fast yes/no decisions.',
-      category: 'decision',
-      task: 'Text Generation',
-      prices: [{ unit: 'per M input tokens', usd: 0.023 }],
-      contextWindow: null,
-      capabilities: [],
-      beta: false,
-      partner: false,
-      infoUrl: null,
-      termsUrl: null,
-    },
-    {
-      id: 'm-decision-2',
-      name: 'clef-omni',
-      author: 'cloudflare',
-      description: 'Broader decisions.',
-      category: 'decision',
-      task: 'Text Generation',
-      prices: [{ unit: 'per M input tokens', usd: 0.04 }],
-      contextWindow: null,
-      capabilities: [],
-      beta: false,
-      partner: false,
-      infoUrl: null,
-      termsUrl: null,
-    },
-    {
-      id: 'm-embed-1',
-      name: 'bge-base',
-      author: 'baai',
-      description: 'Turn text into vectors.',
-      category: 'embeddings',
-      task: 'Text Embeddings',
-      prices: [{ unit: 'per M input tokens', usd: 0.01 }],
-      contextWindow: null,
-      capabilities: [],
-      beta: false,
-      partner: false,
-      infoUrl: null,
-      termsUrl: null,
-    },
-  ],
-  defaultModelIds: ['m-decision-1'],
-  defaultCategories: ['decision'],
-  fetchedAt: '2026-10-01T00:00:00Z',
-};
-
-function makeProjectSettings(
-  overrides: Partial<ProjectAgentModelSettingsResponse> = {}
-): ProjectAgentModelSettingsResponse {
-  return {
-    featureEnabled: true,
-    models: null,
-    effectiveModelIds: ['m-decision-1'],
-    effectiveSource: 'default',
-    monthlyBudgetUsd: null,
-    effectiveMonthlyBudgetUsd: 20,
-    defaultMonthlyBudgetUsd: 20,
-    maxMonthlyBudgetUsd: 100,
-    usage: {
-      month: '2026-10',
-      spentUsd: 0,
-      reservedUsd: 0,
-      callCount: 0,
-      resetsAt: '2026-11-01T00:00:00Z',
-      byModel: [],
-    },
-    canEdit: true,
-    ...overrides,
-  };
-}
 
 /** A thin controlled-field harness so tests can assert what `onChange` received without reimplementing state. */
 function Harness({

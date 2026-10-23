@@ -37,7 +37,7 @@ export function parseStoredAgentModelSelection(
 /** Serialize a validated selection for storage; null keeps the inherit meaning. */
 export function serializeAgentModelSelection(selection: readonly string[] | null): string | null {
   if (selection === null) return null;
-  return JSON.stringify([...new Set(selection)].sort());
+  return JSON.stringify([...new Set(selection)].sort((a, b) => a.localeCompare(b)));
 }
 
 /** API shape of a stored layer: a fresh mutable array or null. */
