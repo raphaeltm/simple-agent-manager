@@ -9,12 +9,13 @@ import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { log } from '../../src/lib/logger';
-import { handleReplyToEmail } from '../../src/routes/mcp/agent-email-tools';
+import { mcpRoutes } from '../../src/routes/mcp';
 import { updateAdminSettings } from '../../src/services/admin-settings';
 import {
   handleInboundAgentEmail,
@@ -27,7 +28,7 @@ import { agentEmailSenderFor } from '../../src/services/agent-email/provider';
 import { runAgentEmailRecovery } from '../../src/services/agent-email/recovery';
 import { AgentEmailReplyError, replyToTriggerEmail } from '../../src/services/agent-email/reply';
 import { getAgentEmailLimits } from '../../src/services/agent-email/settings';
-import type { McpTokenData } from '../../src/services/mcp-token';
+import { type McpTokenData, storeMcpToken } from '../../src/services/mcp-token';
 import type { TriggerTaskSubmitter } from '../../src/services/trigger-admission';
 import { createAgentEmailTables } from '../helpers/agent-email-tables';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
@@ -350,6 +351,29 @@ describe('agent email vertical slice', () => {
     createdAt: new Date().toISOString(),
   });
 
+  /** Calls a tool the way the agent does: a JSON-RPC `tools/call` to the real MCP route. */
+  async function callMcpTool(tokenData: McpTokenData, name: string, args: Record<string, unknown>) {
+    const app = new Hono<{ Bindings: Env }>();
+    app.route('/mcp', mcpRoutes);
+    const bearer = `mcp-token-${tokenData.taskId}`;
+    await storeMcpToken(env.KV, bearer, tokenData, env);
+    const response = await app.request(
+      '/mcp',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bearer}` },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name, arguments: args },
+        }),
+      },
+      env
+    );
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  }
+
   it('starts one task from an allowed sender and replies to that sender, threaded', async () => {
     const message = inbound(rawEmail({ references: '<root@example.com> <m0@example.com>' }), {
       from: 'alice@example.com',
@@ -376,14 +400,12 @@ describe('agent email vertical slice', () => {
         .all()
     ).toEqual([{ status: 'accepted', executionId, messageId: '<m1@example.com>' }]);
 
-    const reply = await handleReplyToEmail(
-      1,
-      { body: 'Fixed: the session cookie domain was wrong. Deployed.' },
-      token(executionId),
-      env
-    );
+    const reply = await callMcpTool(token(executionId), 'reply_to_email', {
+      body: 'Fixed: the session cookie domain was wrong. Deployed.',
+    });
 
-    expect(reply).toMatchObject({ result: { content: [{ type: 'text' }] } });
+    expect(reply.status).toBe(200);
+    expect(reply.body).toMatchObject({ result: { content: [{ type: 'text' }] } });
     expect(mail.sent).toHaveLength(1);
     expect(mail.sent[0]).toEqual({
       from: { email: ADDRESS, name: 'Support inbox' },

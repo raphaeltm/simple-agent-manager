@@ -183,16 +183,23 @@ export function createSqliteD1WithBindLimit(
   } as unknown as D1Database;
 }
 
-/** Small stateful KV boundary fake that preserves JSON get/put semantics. */
+/**
+ * Small stateful KV boundary fake that preserves JSON get/put semantics. Like KV, `get` takes
+ * the value type either as a string or as `{ type }`.
+ */
 export function createMemoryKv(): KVNamespace {
   const values = new Map<string, string>();
   return {
-    get: async (key: string, type?: string) => {
+    get: async (key: string, options?: string | { type?: string }) => {
+      const type = typeof options === 'string' ? options : options?.type;
       const value = values.get(key) ?? null;
       return type === 'json' && value !== null ? JSON.parse(value) : value;
     },
     put: async (key: string, value: string) => {
       values.set(key, value);
+    },
+    delete: async (key: string) => {
+      values.delete(key);
     },
   } as unknown as KVNamespace;
 }
