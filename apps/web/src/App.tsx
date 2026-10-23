@@ -97,6 +97,11 @@ const ProjectDeployments = lazyNamed(
   'ProjectDeployments'
 );
 const ProjectComments = lazyNamed(() => import('./pages/ProjectComments'), 'ProjectComments');
+// PROTOTYPE (dev-only) — comments inbox redesign. Remove with its directory before merging to main.
+const CommentsInboxPrototype = lazyNamed(
+  () => import('./pages/comments-inbox-prototype'),
+  'CommentsInboxPrototype'
+);
 const ProjectFiles = lazyNamed(() => import('./pages/ProjectFiles'), 'ProjectFiles');
 const ProjectInvite = lazyNamed(() => import('./pages/ProjectInvite'), 'ProjectInvite');
 const ProjectLibrary = lazyNamed(() => import('./pages/ProjectLibrary'), 'ProjectLibrary');
@@ -266,6 +271,7 @@ export const DEV_ONLY_ROUTE_PATHS = [
   '/__test/trial-chat-gate',
   '/__test/error-boundary',
   '/ui-standards',
+  '/prototype/comments-inbox',
 ] as const;
 
 /** TEMP audit-only harness — forces ErrorBoundary crash screen for Playwright review. Reverted after use. */
@@ -302,6 +308,11 @@ export default function App() {
                     <Route path="/setup" element={page(<Setup />)} />
                     {showDevOnlyRoutes && (
                       <>
+                        {/* Comments inbox redesign prototype — local/test only, mock data, no auth */}
+                        <Route
+                          path="/prototype/comments-inbox"
+                          element={page(<CommentsInboxPrototype />)}
+                        />
                         {/* Harness for Playwright audits — mounts trial components with mock data */}
                         <Route
                           path="/__test/trial-chat-gate"

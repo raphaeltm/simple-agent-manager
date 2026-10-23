@@ -403,6 +403,7 @@ describe('App routes', () => {
       '/__test/trial-chat-gate',
       '/__test/error-boundary',
       '/ui-standards',
+      '/prototype/comments-inbox',
     ]);
     expect(devOnlyRoutesEnabled()).toBe(false);
 
@@ -414,6 +415,7 @@ describe('App routes', () => {
       expect(screen.queryByTestId('sam-page')).not.toBeInTheDocument();
       expect(screen.queryByTestId('trial-chat-gate-harness-page')).not.toBeInTheDocument();
       expect(screen.queryByTestId('ui-standards-page')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('comments-inbox-prototype-page')).not.toBeInTheDocument();
     }
   });
 });
