@@ -3,6 +3,7 @@
  * health signals and IDs, collapsed by default.
  */
 import { Button } from '@simple-agent-manager/ui';
+import { useState } from 'react';
 import { Link } from 'react-router';
 
 import { objectRecord } from '../../../components/deployments/deployment-status';
@@ -57,6 +58,8 @@ export function BehindTheScenes({
   onToggle: (open: boolean) => void;
 }) {
   const actions = useEnvironmentActions(projectId, env.id);
+  // Detaching under a running app pulls its data away mid-write: ask once before doing it.
+  const [confirmDetach, setConfirmDetach] = useState(false);
   const running = env.node?.status === 'running';
   const metrics = useMetrics(projectId, env.id, open && running);
   const containers = useContainers(projectId, env.id, open && running);
@@ -113,14 +116,35 @@ export function BehindTheScenes({
               SAM attaches the disks when the app starts and detaches them when it pauses. Do it by hand only to
               recover from a stuck server.
             </span>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" loading={actions.attachDisks.isPending} disabled={!env.nodeId} onClick={() => actions.attachDisks.mutate()}>
-                Attach disks
-              </Button>
-              <Button variant="secondary" loading={actions.detachDisks.isPending} disabled={!env.nodeId} onClick={() => actions.detachDisks.mutate()}>
-                Detach disks
-              </Button>
-            </div>
+            {confirmDetach ? (
+              <div role="alert" className="flex flex-col gap-3 rounded-lg bg-warning-tint p-3">
+                <span className="text-[13px] font-medium text-warning-fg">
+                  The app loses its saved data until the disks are attached again, and anything it is writing
+                  right now may be lost. Pausing is the safe way to stop it.
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="danger"
+                    loading={actions.detachDisks.isPending}
+                    onClick={() => actions.detachDisks.mutate(undefined, { onSettled: () => setConfirmDetach(false) })}
+                  >
+                    Detach anyway
+                  </Button>
+                  <Button variant="ghost" onClick={() => setConfirmDetach(false)}>
+                    Keep them attached
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" loading={actions.attachDisks.isPending} disabled={!env.nodeId} onClick={() => actions.attachDisks.mutate()}>
+                  Attach disks
+                </Button>
+                <Button variant="secondary" disabled={!env.nodeId} onClick={() => setConfirmDetach(true)}>
+                  Detach disks…
+                </Button>
+              </div>
+            )}
           </div>
         )}
         <KeyValues

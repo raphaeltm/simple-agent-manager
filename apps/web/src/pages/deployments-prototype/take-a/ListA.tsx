@@ -22,6 +22,7 @@ import { useProjectContext } from '../../ProjectContext';
 import { useAllDomains, useEnvironments, useProfiles } from '../data';
 import {
   ago,
+  ASKS_AGENT,
   canAskAgent,
   describeHealth,
   describeProblems,
@@ -30,8 +31,8 @@ import {
   primaryAddress,
   profileNameOf,
   sortForAttention,
-  TONE_COLOR,
   tint,
+  TONE_COLOR,
 } from '../model';
 import { NewEnvironmentDialog } from '../new-environment';
 import { HealthMark, TonePill, useAskAgent } from '../shared';
@@ -119,7 +120,7 @@ function EnvRow({
       {attention ? (
         // "Ask an agent" only where an agent may deploy and the problem is the app's to fix;
         // a silent server or a closed environment needs a look, not a deploy.
-        canAskAgent(env) && problem?.fixes.includes('ask-agent') ? (
+        canAskAgent(env) && problem?.fixes.some((fix) => ASKS_AGENT.has(fix)) ? (
           <div className="flex pb-3 pl-[68px] sm:pb-0 sm:pl-0 sm:pr-4">
             <Button variant="secondary" onClick={() => askAgent(problem.title)}>
               <Sparkles size={16} aria-hidden /> Ask an agent
@@ -211,7 +212,16 @@ export function DeploymentsListA() {
             if (members.length === 0) return null;
             return (
               <section key={group.id} className="flex flex-col gap-3" aria-label={group.title}>
-                <SectionTitle title={group.title} count={members.length} hint={group.hint} />
+                <SectionTitle
+                  title={group.title}
+                  count={members.length}
+                  hint={
+                    group.id === 'running' &&
+                    members.some((env) => ['deploying', 'starting'].includes(describeHealth(env).health))
+                      ? 'Ones starting or deploying are offline until they’re up.'
+                      : group.hint
+                  }
+                />
                 <Panel className="overflow-hidden">
                   {members.map((env) => (
                     <EnvRow

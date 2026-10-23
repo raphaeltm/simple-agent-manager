@@ -83,6 +83,8 @@ export const TASK_TITLES: Record<string, string> = {
   't-qa': 'Spin up a QA copy for the checkout tests',
   't-search': 'Faster product search',
   't-images': 'Serve product images as WebP',
+  't-docs': 'Publish the docs site',
+  't-load': 'Load-test checkout at 10x traffic',
 };
 
 const by = (agentProfileId: string, taskId: string) => ({
@@ -163,7 +165,9 @@ export const RELEASES: Record<string, ReturnType<typeof release>[]> = {
     release('env-prod', 41, 'applied', daysAgo(1), by('p-sol', 't-tax')),
     release('env-prod', 40, 'failed', daysAgo(2), by('p-astra', 't-node24')),
     release('env-prod', 39, 'applied', daysAgo(3), by('p-opus', 't-search')),
-    release('env-prod', 38, 'applied', daysAgo(5), by('p-captain', 't-images')),
+    // Superseded by v39 two minutes later, before the server picked it up: the heartbeat only
+    // offers the newest release, and nothing marks the older one, so it stays `created`.
+    release('env-prod', 38, 'created', minsAgo(3 * 24 * 60 + 2), by('p-captain', 't-images')),
     release('env-prod', 37, 'applied', daysAgo(8), by('p-sol', 't-search')),
   ],
   'env-staging': [
@@ -183,6 +187,12 @@ export const RELEASES: Record<string, ReturnType<typeof release>[]> = {
   ],
   'env-qa': [release('env-qa', 1, 'failed', minsAgo(40), by('p-astra', 't-qa'))],
   'env-sandbox': [],
+  // Start resets the newest release to `created` while a server is found (markEnvironmentStarting).
+  'env-docs': [
+    release('env-docs', 7, 'created', daysAgo(9), by('p-fable', 't-docs')),
+    release('env-docs', 6, 'applied', daysAgo(12), by('p-fable', 't-docs')),
+  ],
+  'env-load': [release('env-load', 5, 'applied', daysAgo(2), by('p-captain', 't-load'))],
 };
 
 const latest = (envId: string) => RELEASES[envId]?.[0] ?? null;
@@ -326,6 +336,58 @@ export const ENVIRONMENTS = [
     routeHostnames: [],
     node: null,
   },
+  {
+    // Start was pressed a minute ago: a server is being created for the newest version.
+    id: 'env-docs',
+    projectId: PROJECT_ID,
+    name: 'docs',
+    status: 'starting',
+    nodeId: 'node-docs',
+    provider: 'hetzner',
+    location: 'fsn1',
+    createdAt: daysAgo(30),
+    updatedAt: minsAgo(1),
+    secretsUpdatedAt: null,
+    observedDeployment: { appliedSeq: null, status: null, errorMessage: null, services: null, deployStatus: null, diskTelemetry: null, observedAt: null },
+    agentPolicy: policy(true),
+    latestRelease: latest('env-docs'),
+    routeHostnames: hosts('01m5docs', ['web', 4000]),
+    node: node('node-docs', 'deploy-docs-01', {
+      status: 'creating',
+      healthStatus: 'stale',
+      vmLocation: 'fsn1',
+      lastHeartbeatAt: null,
+      createdAt: minsAgo(1),
+    }),
+  },
+  {
+    // Pause failed halfway: the server teardown errored and it has not checked in since.
+    // `markEnvironmentStopFailed` writes the reason onto the observed fields.
+    id: 'env-load',
+    projectId: PROJECT_ID,
+    name: 'load-test',
+    status: 'error',
+    nodeId: 'node-load',
+    provider: 'hetzner',
+    location: 'nbg1',
+    createdAt: daysAgo(3),
+    updatedAt: minsAgo(12),
+    secretsUpdatedAt: null,
+    observedDeployment: observed(5, 'failed', {
+      errorMessage: 'Stop failed while tearing down the deployment node: hetzner API timed out after 120s',
+      services: null,
+      observedAt: minsAgo(12),
+    }),
+    agentPolicy: policy(true, ['p-captain']),
+    latestRelease: latest('env-load'),
+    routeHostnames: hosts('01m5load', ['web', 3000]),
+    node: node('node-load', 'deploy-load-01', {
+      status: 'error',
+      healthStatus: 'stale',
+      lastHeartbeatAt: minsAgo(14),
+      errorMessage: 'Delete server request timed out',
+    }),
+  },
 ];
 
 function route(envKey: string, service: string, port: number, index: number) {
@@ -347,6 +409,8 @@ export const PUBLIC_ROUTES: Record<string, unknown[]> = {
   'env-eu': [route('01m5euro', 'web', 3000, 0)],
   'env-qa': [route('01m5qa', 'web', 3000, 0)],
   'env-sandbox': [],
+  'env-docs': [route('01m5docs', 'web', 4000, 0)],
+  'env-load': [route('01m5load', 'web', 3000, 0)],
 };
 
 function domain(envId: string, hostname: string, service: string, overrides: Record<string, unknown> = {}) {
@@ -387,11 +451,20 @@ export const CUSTOM_DOMAINS: Record<string, unknown[]> = {
   'env-prod': [domain('env-prod', 'shop.northwind.dev', 'web'), domain('env-prod', 'api.northwind.dev', 'api')],
   'env-staging': [
     domain('env-staging', 'staging.northwind.dev', 'web'),
+    // Worked last week; its record was changed since, so it is a problem now.
     domain('env-staging', 'beta.northwind.dev', 'web', {
       verificationStatus: 'failed',
       verificationError: 'beta.northwind.dev resolves to 104.21.4.19 (a Cloudflare proxy), not the SAM route target.',
-      servingStatus: 'dns_failed',
+      servingStatus: 'failed',
       routingStatus: 'failed',
+      verifiedAt: daysAgo(6),
+    }),
+    // Added minutes ago and checked straight away, before the record existed: still waiting.
+    domain('env-staging', 'status.northwind.dev', 'web', {
+      verificationStatus: 'failed',
+      verificationError: 'No CNAME record found for status.northwind.dev yet.',
+      servingStatus: 'pending_dns',
+      routingStatus: 'pending_dns',
       verifiedAt: null,
     }),
   ],
@@ -490,11 +563,18 @@ export const SYSTEM_INFO = {
   agent: { version: 'prototype', status: 'running' },
 };
 
+/** Event names exactly as `packages/vm-agent/internal/deploy/engine.go` reports them. */
+const EVENT_PREFIX: Record<string, string> = {
+  fetch_release: 'fetch',
+  load_artifacts: 'artifacts_load',
+  volume_mounts: 'volume_mount',
+};
+
 const event = (seq: number, step: string, kind: 'started' | 'completed', minutes: number) => ({
   seq,
   level: 'info',
   step,
-  eventType: `deployment.apply.${step === 'fetch_release' ? 'fetch' : step}_${kind}`,
+  eventType: `deployment.apply.${EVENT_PREFIX[step] ?? step}_${kind}`,
   message: `${step} ${kind}`,
   createdAt: minsAgo(minutes),
 });
@@ -505,6 +585,16 @@ const failed = (seq: number, minutes: number, message: string) => ({
   step: 'failed',
   eventType: 'deployment.apply.failed',
   message,
+  createdAt: minsAgo(minutes),
+});
+
+/** A successful revert ends with this one event; a failed revert sends nothing more. */
+const reverted = (seq: number, minutes: number) => ({
+  seq,
+  level: 'warn',
+  step: 'revert',
+  eventType: 'deployment.apply.reverted',
+  message: 'deployment reverted to previous release',
   createdAt: minsAgo(minutes),
 });
 
@@ -520,10 +610,12 @@ export const RELEASE_EVENTS: Record<string, unknown[]> = {
     event(4, 'previous_down', 'completed', 25),
     event(5, 'load_artifacts', 'started', 25),
     event(6, 'load_artifacts', 'completed', 25),
-    event(7, 'compose_up', 'started', 25),
-    failed(8, 24, 'service "api" exited with code 1'),
-    event(9, 'revert', 'started', 24),
-    event(10, 'revert', 'completed', 24),
+    event(7, 'compose_config', 'started', 25),
+    event(8, 'compose_config', 'completed', 25),
+    event(9, 'compose_up', 'started', 25),
+    failed(10, 24, 'service "api" exited with code 1'),
+    event(11, 'revert', 'started', 24),
+    reverted(12, 24),
   ],
   'rel-env-preview-3': [
     event(1, 'fetch_release', 'started', 1),
@@ -532,6 +624,8 @@ export const RELEASE_EVENTS: Record<string, unknown[]> = {
     event(4, 'previous_down', 'completed', 1),
     event(5, 'load_artifacts', 'started', 1),
     event(6, 'load_artifacts', 'completed', 1),
-    event(7, 'compose_up', 'started', 0),
+    event(7, 'compose_config', 'started', 1),
+    event(8, 'compose_config', 'completed', 1),
+    event(9, 'compose_up', 'started', 0),
   ],
 };

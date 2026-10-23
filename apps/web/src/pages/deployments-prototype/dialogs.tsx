@@ -2,11 +2,12 @@
  * PROTOTYPE dialogs both takes open: logs, add a domain, pause, delete.
  */
 import { Button, Dialog } from '@simple-agent-manager/ui';
-import { Check, Copy, Search } from 'lucide-react';
-import { useState } from 'react';
+import { Check, Copy, Search, X } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
 
 import { useToast } from '../../hooks/useToast';
 import type { DeploymentEnvironment, DeploymentPublicRoute, DeploymentVolume } from '../../lib/api';
+import { LoadError } from '../automation/page';
 import { Chips } from '../automation/ui';
 import { type LogFilter, useEnvironmentActions, useLogs } from './data';
 import { CopyIcon, LogList } from './shared';
@@ -18,13 +19,33 @@ import { CopyIcon, LogList } from './shared';
 export const STICKY_FOOTER =
   'sticky bottom-[-24px] z-[1] -mx-6 -mb-6 flex flex-wrap justify-end gap-3 border-0 border-t border-solid border-border-default bg-[var(--sam-color-bg-surface)] px-6 pb-6 pt-4';
 
+/** A sheet's title with a close button, for sheets that have no Cancel button. */
+export function SheetHeader({ title, onClose, children }: { title: ReactNode; onClose: () => void; children?: ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex min-w-0 flex-col gap-1">
+        {title}
+        {children}
+      </div>
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className="-mr-3 -mt-3 inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-fg-muted hover:bg-surface-hover hover:text-fg-primary"
+      >
+        <X size={18} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
 /** Why there are no log lines, from the reasons the logs route returns. */
-export function unavailableLogs(reason: string | undefined): string {
+export function unavailableLogs(reason: string | undefined, filtered = false): string {
   if (reason === 'no_deployment_node') return 'No server is running this app, so there are no logs.';
   if (reason === 'node_not_running') return "The server isn't running, so there are no fresh logs.";
   if (reason === 'node_not_found') return 'The server is gone, so its logs are too.';
   if (reason === 'node_agent_unreachable') return "SAM can't reach the server right now, so no fresh logs.";
-  return 'Nothing logged for this filter yet.';
+  return filtered ? 'Nothing matches this yet.' : 'Nothing logged yet.';
 }
 
 const LOG_FILTERS: Array<{ id: LogFilter; label: string }> = [
@@ -56,12 +77,11 @@ export function LogsDialog({
   return (
     <Dialog isOpen={open} onClose={onClose} maxWidth="lg" aria-label={`Logs for ${env.name}`}>
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <h2 className="m-0 text-[19px] font-semibold text-fg-primary">Logs</h2>
+        <SheetHeader title={<h2 className="m-0 text-[19px] font-semibold text-fg-primary">Logs</h2>} onClose={onClose}>
           <p className="m-0 text-sm text-fg-muted">
-            The newest lines from {env.name}. Your app's own output, plus what SAM did on the server.
+            The newest lines from {env.name}. Your app’s own output, plus what SAM did on the server.
           </p>
-        </div>
+        </SheetHeader>
         <Chips options={LOG_FILTERS} value={filter} onChange={setFilter} label="Show" wrap />
         <form
           className="flex items-center gap-2"
@@ -84,10 +104,12 @@ export function LogsDialog({
         </form>
         {logs.isPending ? (
           <p className="m-0 text-sm text-fg-muted">Loading logs…</p>
+        ) : logs.isError && !logs.data ? (
+          <LoadError what="the logs" error={logs.error} onRetry={() => void logs.refetch()} />
         ) : (
           <LogList
             entries={entries}
-            empty={unavailableLogs(logs.data?.unavailableReason)}
+            empty={unavailableLogs(logs.data?.unavailableReason, filter !== 'all' || search !== '')}
           />
         )}
       </div>
@@ -191,7 +213,7 @@ export function AddDomainDialog({
             className="min-h-11 rounded-md border border-border-default bg-surface px-3 text-[15px] text-fg-primary"
           />
           <span className="text-[13px] text-fg-muted">
-            A subdomain such as shop.example.com. Bare domains (example.com) aren't supported yet.
+            A subdomain such as shop.example.com. Bare domains (example.com) aren’t supported yet.
           </span>
         </label>
 
@@ -206,7 +228,7 @@ export function AddDomainDialog({
           </div>
           <span className="text-[13px] text-fg-muted">
             On Cloudflare, switch the orange cloud off for this record (DNS only). SAM checks the
-            record when you add the domain. If DNS hasn't caught up yet, use Check again later.
+            record when you add the domain. If DNS hasn’t caught up yet, use Check again later.
           </span>
         </div>
 

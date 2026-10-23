@@ -5,7 +5,7 @@
  */
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Dialog } from '@simple-agent-manager/ui';
-import { Check, ChevronRight, CircleAlert, HardDrive, KeyRound, Globe, Server, Users, X } from 'lucide-react';
+import { Check, ChevronRight, CircleAlert, Globe, HardDrive, KeyRound, Server, Users, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { objectRecord, serviceRecords } from '../../../components/deployments/deployment-status';
@@ -18,7 +18,19 @@ import type {
 } from '../../../lib/api';
 import { Panel } from '../../automation/ui';
 import { useMetrics } from '../data';
-import { agentAccess, ago, domainState, liveVersionOf, releaseOutcome, since, type Tone, TONE_COLOR, tint } from '../model';
+import { SheetHeader } from '../dialogs';
+import {
+  agentAccess,
+  ago,
+  domainState,
+  liveVersionOf,
+  releaseOutcome,
+  serverSilent,
+  since,
+  tint,
+  type Tone,
+  TONE_COLOR,
+} from '../model';
 import { Addresses } from '../sections/addresses';
 import { AppSettings } from '../sections/app-settings';
 import { BehindTheScenes } from '../sections/behind';
@@ -45,7 +57,6 @@ export function healthChecks(
   const live = liveVersionOf(env);
   const release = env.latestRelease;
   const services = serviceRecords(env.observedDeployment.services);
-  const node = env.node?.healthStatus;
 
   if (services.length > 0 && live) {
     const down = services.filter((service) => service.status !== 'running' || service.health === 'unhealthy');
@@ -67,12 +78,14 @@ export function healthChecks(
             : { label: 'Version', detail: 'Nothing running', tone: 'danger' }
     );
   }
+  const silent = serverSilent(env);
   if (env.node) {
+    const creating = env.node.status === 'pending' || env.node.status === 'creating';
     checks.push(
-      node === 'stale'
-        ? { label: 'Server', detail: `No check-in for ${since(env.node.lastHeartbeatAt)}`, tone: 'danger' }
-        : node === 'unhealthy'
-          ? { label: 'Server', detail: 'Short on memory or CPU', tone: 'warning' }
+      creating
+        ? { label: 'Server', detail: 'Being created', tone: 'info' }
+        : silent
+          ? { label: 'Server', detail: `No check-in for ${since(env.node.lastHeartbeatAt)}`, tone: 'danger' }
           : { label: 'Server', detail: `Checked in ${ago(env.node.lastHeartbeatAt)}`, tone: 'success' }
     );
   }
@@ -102,7 +115,7 @@ export function healthChecks(
   }
   // A silent server means every other reading is as old as its last check-in: say so
   // instead of showing stale green ticks.
-  if (node === 'stale') {
+  if (silent) {
     return checks.map((check) =>
       check.label === 'Server' || check.tone !== 'success'
         ? check
@@ -258,6 +271,7 @@ export function SettingsSheet({
   volumes,
   answering,
   choosingAccess,
+  onChoosingChange,
   onAddDomain,
   onClose,
 }: {
@@ -272,14 +286,25 @@ export function SettingsSheet({
   answering: boolean;
   /** Opened from "Let agents deploy here": show the who-can-deploy choice straight away. */
   choosingAccess?: boolean;
+  onChoosingChange: (choosing: boolean) => void;
   onAddDomain: () => void;
   onClose: () => void;
 }) {
   return (
     <Dialog isOpen={sheet !== null} onClose={onClose} maxWidth="lg" aria-label="Environment settings">
       <div className="flex flex-col gap-4">
+        <SheetHeader
+          title={<span className="text-[13px] font-semibold uppercase tracking-wide text-fg-muted">Settings</span>}
+          onClose={onClose}
+        />
         {sheet === 'access' && (
-          <WhoCanDeploy projectId={projectId} env={env} profiles={profiles} choosing={choosingAccess} />
+          <WhoCanDeploy
+            projectId={projectId}
+            env={env}
+            profiles={profiles}
+            choosing={choosingAccess}
+            onChoosingChange={onChoosingChange}
+          />
         )}
         {sheet === 'settings' && <AppSettings projectId={projectId} envId={env.id} rows={config} />}
         {sheet === 'domains' && (

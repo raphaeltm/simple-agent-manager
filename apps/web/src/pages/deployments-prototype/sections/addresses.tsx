@@ -57,6 +57,9 @@ function DomainRow({
           >
             <RefreshCw size={15} aria-hidden /> Check again
           </Button>
+          {domain.verificationError && (
+            <span className="text-[13px] text-fg-muted [overflow-wrap:anywhere]">Last check: {domain.verificationError}</span>
+          )}
         </div>
       )}
     </div>

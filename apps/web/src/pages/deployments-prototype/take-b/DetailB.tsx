@@ -7,7 +7,7 @@
  * desktop shows the timeline beside a side panel, so nothing hides behind a tab.
  * Pause and Delete live in the ⋯ menu, away from everyday controls.
  */
-import { DropdownMenu } from '@simple-agent-manager/ui';
+import { Button, DropdownMenu } from '@simple-agent-manager/ui';
 import { ChevronLeft, MoreHorizontal, Pause, Play, ScrollText, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
@@ -27,18 +27,19 @@ import {
   useVolumes,
 } from '../data';
 import { AddDomainDialog, DeleteDialog, LogsDialog, PauseDialog } from '../dialogs';
+import { unavailableLogs } from '../dialogs';
 import {
   agentAccess,
   describeHealth,
   describeProblems,
   domainProblems,
+  failureKind,
   isAnswering,
   primaryAddress,
   versionOnStart,
 } from '../model';
 import { AddressLine, EnvTitle, LogList, TonePill, useAskAgent } from '../shared';
 import { withTake } from '../take';
-import { unavailableLogs } from '../dialogs';
 import { HealthList, SettingsRows, SettingsSheet, type SheetKey } from './side-b';
 import { ReleaseTimeline } from './timeline-b';
 
@@ -100,10 +101,11 @@ function RecentLogs({ projectId, envId, onOpen }: { projectId: string; envId: st
           <ScrollText size={14} aria-hidden /> All logs
         </button>
       </div>
-      <LogList
-        entries={entries}
-        empty={unavailableLogs(logs.data?.unavailableReason)}
-      />
+      {logs.isError && !logs.data ? (
+        <LoadError what="the logs" error={logs.error} onRetry={() => void logs.refetch()} />
+      ) : (
+        <LogList entries={entries} empty={unavailableLogs(logs.data?.unavailableReason)} />
+      )}
     </div>
   );
 }
@@ -163,8 +165,11 @@ export function EnvironmentDetailB() {
   const volumeList = volumes.data?.volumes ?? [];
   const show = (target: Pane) => (pane === target ? 'flex' : 'hidden lg:flex');
   const problems = [...describeProblems(env), ...domainProblems(customDomains)];
-  // The timeline card already says "v2 stays live until this one is ready", so the header
-  // only names what is happening.
+  // Summaries like "None yet" would be wrong if a part failed to load: say it failed instead.
+  const settingsFailed =
+    (config.isError && !config.data) || (domains.isError && !domains.data) || (volumes.isError && !volumes.data);
+  // The timeline card shows the steps and says the app is offline until the new version is
+  // up, so the header only names what is happening.
   const headerSentence =
     info.health === 'deploying' ? `Deploying version ${env.latestRelease?.version}.` : info.sentence;
 
@@ -189,10 +194,21 @@ export function EnvironmentDetailB() {
                   className="cursor-pointer border-0 bg-transparent p-0 text-sm font-semibold text-warning-fg underline decoration-dotted underline-offset-4 lg:cursor-default lg:no-underline"
                 >
                   +{problems.length - 1} more {problems.length === 2 ? 'problem' : 'problems'}
-                </button>
+              </button>
               </>
             )}
           </p>
+          {/* A failed pause or start belongs to no release, so its fix sits with the status. */}
+          {failureKind(env) === 'pause' && (
+            <Button variant="secondary" className="mt-1 self-start" onClick={() => setPausing(true)}>
+              <Pause size={16} aria-hidden /> Pause again
+            </Button>
+          )}
+          {failureKind(env) === 'start' && (
+            <Button variant="secondary" className="mt-1 self-start" loading={actions.start.isPending} onClick={() => actions.start.mutate()}>
+              <Play size={16} aria-hidden /> Start again
+            </Button>
+          )}
         </div>
         <DropdownMenu
           aria-label="More actions"
@@ -209,9 +225,11 @@ export function EnvironmentDetailB() {
                 }
               : {
                   id: 'pause',
-                  label: 'Pause',
+                  label: failureKind(env) === 'pause' ? 'Pause again' : 'Pause',
                   icon: <Pause size={15} />,
-                  disabled: env.status !== 'active' && env.status !== 'error',
+                  // Nothing was ever deployed: there is nothing to pause.
+                  disabled: (env.status !== 'active' && env.status !== 'error') || !env.latestRelease,
+                  disabledReason: !env.latestRelease ? 'Nothing has been deployed here yet' : undefined,
                   onClick: () => setPausing(true),
                 },
             { id: 'delete', label: 'Delete environment…', icon: <Trash2 size={15} />, variant: 'danger', onClick: () => setDeleting(true) },
@@ -226,21 +244,25 @@ export function EnvironmentDetailB() {
           <div className="hidden lg:block">
             <SectionTitle title="Releases" hint="What agents shipped here, newest first." />
           </div>
-          <ReleaseTimeline
-            projectId={projectId}
-            env={env}
-            releases={releaseList}
-            profiles={profiles}
-            liveAddress={answering ? (address?.hostname ?? null) : null}
-            agentsOn={agentAccess(env, profiles).on}
-            onLogs={setLogs}
-            onStart={() => actions.start.mutate()}
-            onAsk={() => askAgent('Deploy this project here')}
-            onAllowAgents={() => {
-              setChoosingAccess(true);
-              setSheet('access');
-            }}
-          />
+          {releases.isError && !releases.data ? (
+            <LoadError what="the releases" error={releases.error} onRetry={() => void releases.refetch()} />
+          ) : (
+            <ReleaseTimeline
+              projectId={projectId}
+              env={env}
+              releases={releaseList}
+              profiles={profiles}
+              liveAddress={answering ? (address?.hostname ?? null) : null}
+              agentsOn={agentAccess(env, profiles).on}
+              onLogs={setLogs}
+              onStart={() => actions.start.mutate()}
+              onAsk={() => askAgent('Deploy this project here')}
+              onAllowAgents={() => {
+                setChoosingAccess(true);
+                setSheet('access');
+              }}
+            />
+          )}
         </section>
 
         <div className="flex min-w-0 flex-col gap-6 lg:sticky lg:top-4">
@@ -259,14 +281,25 @@ export function EnvironmentDetailB() {
             <div className="hidden lg:block">
               <SectionTitle title="Settings" />
             </div>
-            <SettingsRows
-              env={env}
-              profiles={profiles}
-              config={configRows}
-              domains={customDomains}
-              volumes={volumeList}
-              onOpen={setSheet}
-            />
+            {settingsFailed ? (
+              <LoadError
+                what="the settings"
+                onRetry={() => {
+                  void config.refetch();
+                  void domains.refetch();
+                  void volumes.refetch();
+                }}
+              />
+            ) : (
+              <SettingsRows
+                env={env}
+                profiles={profiles}
+                config={configRows}
+                domains={customDomains}
+                volumes={volumeList}
+                onOpen={setSheet}
+              />
+            )}
           </section>
         </div>
       </div>
@@ -282,6 +315,7 @@ export function EnvironmentDetailB() {
         volumes={volumeList}
         answering={answering}
         choosingAccess={choosingAccess}
+        onChoosingChange={setChoosingAccess}
         onAddDomain={() => {
           setSheet(null);
           setAddingDomain(true);

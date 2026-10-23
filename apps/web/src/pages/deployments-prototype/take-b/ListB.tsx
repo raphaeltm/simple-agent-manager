@@ -19,9 +19,11 @@ import { LogsDialog } from '../dialogs';
 import {
   agentAccess,
   ago,
+  canAskAgent,
   describeHealth,
   describeProblems,
-  canAskAgent,
+  liveVersionOf,
+  placementFailed,
   primaryAddress,
   profileNameOf,
   releaseOutcome,
@@ -144,15 +146,28 @@ function FeedEntry({
   item: FeedItem;
   projectId: string;
   profileName: string;
-  /** The version that stayed live when this one failed: the newest earlier success. */
-  keptVersion: number | null;
+  /**
+   * What runs now, for an environment's newest release (null: nothing). Undefined for older
+   * releases: release rows keep `applied` even after a failed revert took that version down,
+   * so history alone cannot say what kept running.
+   */
+  keptVersion: number | null | undefined;
   onLogs: () => void;
 }) {
   const { release, env } = item;
   const askAgent = useAskAgent(projectId);
   const outcome = releaseOutcome(release, env);
   const failed = outcome.label === "Didn't start";
-  const verb = outcome.label === 'Deploying' ? 'is deploying' : failed ? 'tried to ship' : 'shipped';
+  const noServer = failed && release.id === env.latestRelease?.id && placementFailed(env);
+  // Start re-deploys an old release, so "is deploying" would credit the agent with today's restart.
+  const verb =
+    outcome.label === 'Deploying' && env.status !== 'starting'
+      ? 'is deploying'
+      : failed
+        ? 'tried to ship'
+        : outcome.label === 'Skipped'
+          ? 'sent'
+          : 'shipped';
   return (
     <li className="flex gap-3 border-0 border-b border-solid border-border-default px-4 py-3 last:border-b-0">
       <AgentAvatar name={profileName} size={36} />
@@ -169,7 +184,9 @@ function FeedEntry({
         </p>
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-fg-muted">
           {outcome.label !== 'Replaced' && <TonePill tone={outcome.tone} label={outcome.label} />}
-          {failed && <span>{keptVersion ? `v${keptVersion} kept running` : 'nothing was live yet'}</span>}
+          {failed && keptVersion !== undefined && (
+            <span>{keptVersion ? `v${keptVersion} is still running` : 'nothing is running'}</span>
+          )}
           <span>{ago(release.createdAt)}</span>
           {release.submittedBy?.taskId && (
             <span className="min-w-0">
@@ -180,11 +197,13 @@ function FeedEntry({
         {failed && release.id === env.latestRelease?.id && canAskAgent(env) && (
           <div className="mt-1 flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => askAgent(`v${release.version} didn't start`)}>
-              <Sparkles size={16} aria-hidden /> Ask an agent to fix it
+              <Sparkles size={16} aria-hidden /> {noServer ? 'Ask an agent to deploy again' : 'Ask an agent to fix it'}
             </Button>
-            <Button variant="ghost" onClick={onLogs}>
-              <ScrollText size={16} aria-hidden /> Logs
-            </Button>
+            {!noServer && (
+              <Button variant="ghost" onClick={onLogs}>
+                <ScrollText size={16} aria-hidden /> Logs
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -247,7 +266,6 @@ export function DeploymentsListB() {
   const [creating, setCreating] = useState(false);
   const [logsFor, setLogsFor] = useState<DeploymentEnvironment | null>(null);
 
-  const releasesByEnv = new Map(envs.map((env, index) => [env.id, releaseResults[index]?.data?.releases ?? []]));
   const feed: FeedItem[] = envs
     .flatMap((env, index) =>
       (releaseResults[index]?.data?.releases ?? []).map((release) => ({ release, env }))
@@ -335,9 +353,7 @@ export function DeploymentsListB() {
                               projectId={projectId}
                               profileName={profileNameOf(item.release.submittedBy?.agentProfileId, profiles) ?? 'Someone'}
                               keptVersion={
-                                (releasesByEnv.get(item.env.id) ?? []).find(
-                                  (other) => other.version < item.release.version && other.status === 'applied'
-                                )?.version ?? null
+                                item.release.id === item.env.latestRelease?.id ? liveVersionOf(item.env) : undefined
                               }
                               onLogs={() => setLogsFor(item.env)}
                             />

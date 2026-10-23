@@ -122,7 +122,13 @@ export function SavedData({
                   label={`Delete ${volume.name}`}
                   confirm={`Delete ${volume.sizeGb} GB`}
                   busy={actions.removeDisk.isPending}
-                  disabledReason={volume.attachedServerId ? 'Pause the app first: a disk in use cannot be deleted' : undefined}
+                  // The API also refuses a disk the newest version declares, attached or not
+                  // (deployment-volumes.ts); its error toast says so. NEEDS API: say which up front.
+                  disabledReason={
+                    volume.attachedServerId
+                      ? 'The app uses this disk. To delete it, ship a version without it, or delete the environment.'
+                      : undefined
+                  }
                   onConfirm={() => actions.removeDisk.mutate(volume.id)}
                 />
               </li>

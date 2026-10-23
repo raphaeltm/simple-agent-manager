@@ -101,18 +101,26 @@ function useEnvQuery<T>(
   envId: string | undefined,
   part: string,
   fn: (envId: string) => Promise<T>,
-  enabled = true
+  enabled = true,
+  refetchInterval: number | false | ((data: T | undefined) => number | false) = false
 ) {
   const scope = useQueryScope();
   return useQuery({
     queryKey: [...root(scope, projectId), envId, part],
     queryFn: () => fn(envId ?? ''),
     enabled: Boolean(scope && envId && enabled),
+    refetchInterval:
+      typeof refetchInterval === 'function' ? (query) => refetchInterval(query.state.data) : refetchInterval,
   });
 }
 
+const IN_FLIGHT = new Set(['created', 'applying']);
+
+/** New releases show up without a reload; fast while one is on its way. */
 export function useReleases(projectId: string, envId: string | undefined) {
-  return useEnvQuery(projectId, envId, 'releases', (id) => listReleases(projectId, id));
+  return useEnvQuery(projectId, envId, 'releases', (id) => listReleases(projectId, id), true, (data) =>
+    data?.releases.some((release) => IN_FLIGHT.has(release.status)) ? FAST_POLL_MS : SLOW_POLL_MS
+  );
 }
 
 export interface ReleaseEvent {
@@ -133,7 +141,9 @@ export function useReleaseEvents(
   projectId: string,
   envId: string | undefined,
   releaseId: string | undefined,
-  enabled = true
+  enabled = true,
+  /** Follow the steps live while the release is being applied. */
+  live = false
 ) {
   return useEnvQuery(
     projectId,
@@ -143,7 +153,8 @@ export function useReleaseEvents(
       request<{ events: ReleaseEvent[] }>(
         `/api/projects/${projectId}/environments/${id}/releases/${releaseId}/events`
       ),
-    Boolean(releaseId) && enabled
+    Boolean(releaseId) && enabled,
+    live ? FAST_POLL_MS : false
   );
 }
 
@@ -155,6 +166,7 @@ export function useAllReleases(projectId: string, envs: DeploymentEnvironment[])
       queryKey: [...root(scope, projectId), env.id, 'releases'],
       queryFn: () => listReleases(projectId, env.id),
       enabled: Boolean(scope),
+      refetchInterval: SLOW_POLL_MS,
     })),
   });
 }
@@ -165,14 +177,27 @@ export function useConfig(projectId: string, envId: string | undefined) {
   );
 }
 
+/** Domains change on their own while DNS and routing catch up, so keep them fresh. */
 export function useDomains(projectId: string, envId: string | undefined) {
-  return useEnvQuery(projectId, envId, 'domains', async (id) => {
-    const [routes, domains] = await Promise.all([
-      listDeploymentPublicRoutes(projectId, id),
-      listDeploymentCustomDomains(projectId, id),
-    ]);
-    return { routes: routes.publicRoutes, domains: domains.customDomains };
-  });
+  return useEnvQuery(
+    projectId,
+    envId,
+    'domains',
+    async (id) => {
+      const [routes, domains] = await Promise.all([
+        listDeploymentPublicRoutes(projectId, id),
+        listDeploymentCustomDomains(projectId, id),
+      ]);
+      return { routes: routes.publicRoutes, domains: domains.customDomains };
+    },
+    true,
+    (data) =>
+      data?.domains.some(
+        (domain) => domain.servingStatus === 'activating' || domain.desiredState === 'deactivating'
+      )
+        ? FAST_POLL_MS
+        : SLOW_POLL_MS
+  );
 }
 
 /** Custom domains for every environment, so a list can show `shop.example.com` instead of the generated hostname. */
@@ -330,6 +355,7 @@ export function useEnvironmentActions(projectId: string, envId: string) {
 
 export function useCreateEnvironment(projectId: string) {
   const invalidate = useInvalidate(projectId);
+  const toast = useToast();
   return useMutation({
     mutationFn: async (input: { name: string; agents: 'off' | 'any' | string[] }) => {
       const created = await createDeploymentEnvironment(projectId, input.name);
@@ -340,5 +366,6 @@ export function useCreateEnvironment(projectId: string) {
       });
     },
     onSuccess: () => void invalidate(),
+    onError: (error: Error) => toast.error(error.message || "Couldn't create the environment. Try again."),
   });
 }

@@ -7,18 +7,19 @@ import { ChevronDown, CircleAlert, Sparkles, TriangleAlert } from 'lucide-react'
 import { useState } from 'react';
 
 import type { DeploymentEnvironment } from '../../../lib/api';
-
 import { Panel, SectionTitle } from '../../automation/ui';
 import type { ReleaseRecord } from '../data';
-import { type Fix, type Problem, ago, profileNameOf, releaseOutcome } from '../model';
+import { ago, ASKS_AGENT, type Fix, type Problem, profileNameOf, releaseOutcome } from '../model';
 import { AgentAvatar, ChatLink, TonePill } from '../shared';
 
 const FIX_LABEL: Record<Fix, string> = {
   'ask-agent': 'Ask an agent to fix it',
+  redeploy: 'Ask an agent to deploy again',
   logs: 'See logs',
   server: 'See the server',
   domains: 'Check domains',
   start: 'Start again',
+  pause: 'Pause again',
   access: 'Let agents deploy here…',
 };
 
@@ -62,9 +63,9 @@ export function ProblemList({
                   </details>
                 )}
                 <div className="mt-2 flex flex-wrap gap-3">
-                  {problem.fixes.map((fix) => (canAskAgent || fix !== 'ask-agent' ? fix : 'access')).map((fix) => (
+                  {problem.fixes.map((fix) => (canAskAgent || !ASKS_AGENT.has(fix) ? fix : 'access')).map((fix) => (
                     <Button key={fix} variant="secondary" onClick={() => onFix(fix, problem)}>
-                      {fix === 'ask-agent' && <Sparkles size={16} aria-hidden />}
+                      {ASKS_AGENT.has(fix) && <Sparkles size={16} aria-hidden />}
                       {FIX_LABEL[fix]}
                     </Button>
                   ))}
@@ -127,6 +128,11 @@ export function RecentDeploys({
                       </>
                     )}
                   </span>
+                  {outcome.label === 'Skipped' && (
+                    <span className="text-[13px] text-fg-muted">
+                      A newer version arrived before a server picked this one up.
+                    </span>
+                  )}
                 </div>
               </li>
             );

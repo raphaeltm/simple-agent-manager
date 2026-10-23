@@ -14,7 +14,7 @@ import { ModelToggleSwitch } from '../../../components/agent-models/ModelToggleS
 import type { DeploymentEnvironment } from '../../../lib/api';
 import { Panel, SectionTitle } from '../../automation/ui';
 import { useEnvironmentActions } from '../data';
-import { agentAccess } from '../model';
+import { agentAccess, liveVersionOf } from '../model';
 import { ProfileToggles } from '../shared';
 
 type Mode = 'any' | 'some';
@@ -94,9 +94,11 @@ export function WhoCanDeploy({
                 ? 'New versions go live as soon as an agent ships them.'
                 : choosing
                   ? 'Choose who first. Nothing changes until you do.'
-                  : env.latestRelease
+                  : liveVersionOf(env) !== null
                     ? "Off: no new versions. What's running keeps running."
-                    : "Off: agents can't deploy here yet."}
+                    : env.latestRelease
+                      ? "Off: agents can't deploy here."
+                      : "Off: agents can't deploy here yet."}
             </span>
           </div>
           <ModelToggleSwitch

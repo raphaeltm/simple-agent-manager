@@ -20,6 +20,7 @@ import { LoadError, Loading } from '../../automation/page';
 import { Panel } from '../../automation/ui';
 import { useProjectContext } from '../../ProjectContext';
 import {
+  type ReleaseRecord,
   useConfig,
   useDomains,
   useEnvironment,
@@ -32,27 +33,28 @@ import { AddDomainDialog, DeleteDialog, LogsDialog, PauseDialog } from '../dialo
 import {
   agentAccess,
   ago,
+  ASKS_AGENT,
+  canAskAgent,
   describeHealth,
   describeProblems,
   domainProblems,
   type Fix,
   type HealthInfo,
-  canAskAgent,
   isAnswering,
   primaryAddress,
   profileNameOf,
-  TONE_COLOR,
   tint,
+  TONE_COLOR,
   versionOnStart,
 } from '../model';
-import { AddressLine, AgentAvatar, ChatLink, EnvTitle, HealthMark, useAskAgent } from '../shared';
-import { withTake } from '../take';
-import { Column, type IndexEntry, OnThisPage } from './column';
 import { Addresses } from '../sections/addresses';
 import { AppSettings } from '../sections/app-settings';
 import { BehindTheScenes } from '../sections/behind';
 import { SavedData } from '../sections/saved-data';
 import { WhoCanDeploy } from '../sections/who-can-deploy';
+import { AddressLine, AgentAvatar, ChatLink, EnvTitle, HealthMark, useAskAgent } from '../shared';
+import { withTake } from '../take';
+import { Column, type IndexEntry, OnThisPage } from './column';
 import { PauseOrDelete } from './pause-or-delete';
 import { ProblemList, RecentDeploys } from './sections-a';
 
@@ -79,7 +81,8 @@ function HeroAction({
   onAllowAgents: () => void;
 }) {
   if (info.health === 'paused') return canStart ? <Button onClick={onStart}>Start again</Button> : null;
-  if (info.health === 'down' && hasProblems && agentsOn) return null;
+  // A problem card below already offers the fix (or "Let agents deploy here…"); don't repeat it.
+  if (info.health === 'down' && hasProblems) return null;
   if (info.health === 'new' || info.health === 'down') {
     // Asking an agent is pointless while agents may not deploy here: offer the switch first.
     // Opens the "who can deploy" choice; it never grants access by itself.
@@ -110,6 +113,7 @@ function Hero({
   hostname,
   extraAddresses,
   projectId,
+  credit,
   profileName,
   agentsOn,
   hasProblems,
@@ -123,6 +127,8 @@ function Hero({
   hostname: string | null;
   extraAddresses: number;
   projectId: string;
+  /** The release the status sentence is about: the live one, else the newest. */
+  credit: ReleaseRecord | null;
   profileName: string | null;
   agentsOn: boolean;
   hasProblems: boolean;
@@ -132,9 +138,10 @@ function Hero({
   onAllowAgents: () => void;
 }) {
   const color = TONE_COLOR[info.tone];
-  const release = env.latestRelease;
+  const release = credit;
   const answering = isAnswering(info.health);
-  const showLogs = Boolean(release) && env.status !== 'stopped';
+  // Logs come from a running server; without one there are none to show.
+  const showLogs = Boolean(env.latestRelease) && env.node?.status === 'running';
   return (
     <Panel className="relative overflow-hidden p-5 sm:p-6" label={env.name}>
       <div
@@ -274,9 +281,16 @@ export function EnvironmentDetailA() {
   const address = primaryAddress(env, customDomains);
   const addressCount = customDomains.length + routes.length;
   const problems = [...describeProblems(env), ...domainProblems(customDomains)];
-  const profileName = profileNameOf(env.latestRelease?.submittedBy?.agentProfileId, profiles);
   const volumeList = volumes.data?.volumes ?? [];
   const releaseList = releases.data?.releases ?? [];
+  // Credit the version the sentence names: "Running version 42" is about v42, not the v43
+  // that failed after it (that one has its own problem card).
+  const credit =
+    info.liveVersion !== null
+      ? (releaseList.find((release) => release.version === info.liveVersion) ??
+        (env.latestRelease?.version === info.liveVersion ? env.latestRelease : null))
+      : (releaseList[0] ?? env.latestRelease ?? null);
+  const profileName = profileNameOf(credit?.submittedBy?.agentProfileId, profiles);
 
   const openAccessChoice = () => {
     setChoosingAccess(true);
@@ -284,7 +298,7 @@ export function EnvironmentDetailA() {
   };
   const onFix = (fix: Fix, problem: { title: string }) => {
     if (fix === 'access') openAccessChoice();
-    if (fix === 'ask-agent') askAgent(problem.title);
+    if (ASKS_AGENT.has(fix)) askAgent(problem.title);
     if (fix === 'logs') setLogs('errors');
     if (fix === 'domains') document.getElementById('addresses')?.scrollIntoView({ behavior: 'smooth' });
     if (fix === 'server') {
@@ -292,6 +306,7 @@ export function EnvironmentDetailA() {
       document.getElementById('behind-the-scenes')?.scrollIntoView({ behavior: 'smooth' });
     }
     if (fix === 'start') actions.start.mutate();
+    if (fix === 'pause') setPausing(true);
   };
 
   const access = agentAccess(env, profiles);
@@ -323,6 +338,7 @@ export function EnvironmentDetailA() {
         hostname={address?.hostname ?? null}
         extraAddresses={Math.max(0, addressCount - 1)}
         projectId={projectId}
+        credit={credit}
         profileName={profileName}
         agentsOn={agentAccess(env, profiles).on}
         hasProblems={problems.length > 0}
@@ -332,7 +348,11 @@ export function EnvironmentDetailA() {
         onAllowAgents={openAccessChoice}
       />
       <ProblemList problems={problems} canAskAgent={canAskAgent(env)} onFix={onFix} />
-      <RecentDeploys projectId={projectId} env={env} releases={releaseList} profiles={profiles} />
+      {releases.isError && !releases.data ? (
+        <LoadError what="recent deploys" error={releases.error} onRetry={() => void releases.refetch()} />
+      ) : (
+        <RecentDeploys projectId={projectId} env={env} releases={releaseList} profiles={profiles} />
+      )}
       <WhoCanDeploy
         projectId={projectId}
         env={env}
@@ -340,16 +360,28 @@ export function EnvironmentDetailA() {
         choosing={choosingAccess}
         onChoosingChange={setChoosingAccess}
       />
-      <AppSettings projectId={projectId} envId={env.id} rows={config.data?.envVars ?? []} />
-      <Addresses
-        projectId={projectId}
-        env={env}
-        answering={isAnswering(info.health)}
-        routes={routes}
-        domains={customDomains}
-        onAddDomain={() => setAddingDomain(true)}
-      />
-      <SavedData projectId={projectId} env={env} volumes={volumeList} />
+      {config.isError && !config.data ? (
+        <LoadError what="the settings" error={config.error} onRetry={() => void config.refetch()} />
+      ) : (
+        <AppSettings projectId={projectId} envId={env.id} rows={config.data?.envVars ?? []} />
+      )}
+      {domains.isError && !domains.data ? (
+        <LoadError what="the addresses" error={domains.error} onRetry={() => void domains.refetch()} />
+      ) : (
+        <Addresses
+          projectId={projectId}
+          env={env}
+          answering={isAnswering(info.health)}
+          routes={routes}
+          domains={customDomains}
+          onAddDomain={() => setAddingDomain(true)}
+        />
+      )}
+      {volumes.isError && !volumes.data ? (
+        <LoadError what="the disks" error={volumes.error} onRetry={() => void volumes.refetch()} />
+      ) : (
+        <SavedData projectId={projectId} env={env} volumes={volumeList} />
+      )}
       <BehindTheScenes
         projectId={projectId}
         env={env}

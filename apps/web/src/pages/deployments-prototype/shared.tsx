@@ -10,7 +10,7 @@ import { Link, useNavigate } from 'react-router';
 
 import { useToast } from '../../hooks/useToast';
 import { useTaskTitle } from './data';
-import { type Health, type HealthInfo, type Tone, TONE_COLOR, tint } from './model';
+import { type Health, type HealthInfo, tint,type Tone, TONE_COLOR } from './model';
 
 const TONE_BADGE: Record<Tone, string> = {
   success: 'running',

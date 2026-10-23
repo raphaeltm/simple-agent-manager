@@ -37,7 +37,10 @@ export interface HealthInfo {
   liveVersion: number | null;
 }
 
-export type Fix = 'ask-agent' | 'logs' | 'server' | 'domains' | 'start' | 'access';
+export type Fix = 'ask-agent' | 'redeploy' | 'logs' | 'server' | 'domains' | 'start' | 'pause' | 'access';
+
+/** Fixes that hand the problem to an agent; pointless while agents may not deploy here. */
+export const ASKS_AGENT: ReadonlySet<Fix> = new Set<Fix>(['ask-agent', 'redeploy']);
 
 export interface Problem {
   id: string;
@@ -76,11 +79,49 @@ export function since(iso: string | null | undefined): string {
 }
 
 const FAILED_RELEASE = new Set(['failed', 'reverted']);
+
+/** Placement errors can be capacity, a server limit, quota or a credential, so stay neutral. */
+export const PLACEMENT_BODY =
+  "No server was created, so nothing ran. The reason is below. If the cloud was out of room, deploying again usually works; a limit or a credential needs fixing first.";
 const IN_FLIGHT_RELEASE = new Set(['created', 'applying']);
 
-/** Placement failures are the cloud's doing, not the app's (`deployment-release-failure.ts`). */
-function isPlacementFailure(error: string | null | undefined): boolean {
-  return Boolean(error && /placement|no capacity|server limit|could not create (a )?server/i.test(error));
+/**
+ * What went wrong when the failure did not come from the app itself. The API records these
+ * as free text on `observedErrorMessage`, so they are told apart by their fixed prefixes:
+ * - placement: `Deployment node placement failed: …` / `… stopped before a server was created: …`
+ *   (`markDeploymentReleasePlacementFailed`, `recordStrandedDeploymentReleasePlacement`);
+ * - pause: `Stop failed …` (`markEnvironmentStopFailed`, deployment-environment-lifecycle.ts);
+ * - start: anything else on an `error` environment with no server linked
+ *   (`markEnvironmentStartFailed` clears the node). A deploy failure leaves the server linked.
+ * NEEDS API: a typed failure kind instead of matching text.
+ */
+export type FailureKind = 'placement' | 'pause' | 'start';
+
+export function failureKind(env: DeploymentEnvironment): FailureKind | null {
+  const error = env.observedDeployment.errorMessage;
+  if (!error) return null;
+  if (/^Deployment node placement/i.test(error)) return 'placement';
+  if (/^Stop failed/i.test(error)) return 'pause';
+  if (env.status === 'error' && !env.nodeId && env.observedDeployment.status === 'failed') return 'start';
+  return null;
+}
+
+/** The newest version never reached a server: there are no steps or logs, only a retry. */
+export function placementFailed(env: DeploymentEnvironment): boolean {
+  return Boolean(env.latestRelease) && failureKind(env) === 'placement';
+}
+
+/**
+ * The server's heartbeat state as one of three facts. `stale` and `unhealthy` both mean
+ * "no check-in": `unhealthy` is the longer silence, past twice the stale window
+ * (`deriveNodeHealth`, apps/api/src/services/node-health.ts). Neither says anything about
+ * memory or CPU.
+ */
+export function serverSilent(env: DeploymentEnvironment): boolean {
+  const node = env.node;
+  // A server still being created has not had a chance to check in yet.
+  if (!node || node.status === 'pending' || node.status === 'creating') return false;
+  return node.healthStatus === 'stale' || node.healthStatus === 'unhealthy';
 }
 
 /**
@@ -90,7 +131,9 @@ function isPlacementFailure(error: string | null | undefined): boolean {
  * `failed` after a revert attempt means the previous version did not come back either.
  */
 export function liveVersionOf(env: DeploymentEnvironment): number | null {
-  if (env.status !== 'active') return null;
+  // `error` with a linked server that reports a running version still serves: a failed
+  // pause, for one, leaves the app up. Stopped environments keep stale observed fields.
+  if (env.status !== 'active' && !(env.status === 'error' && env.nodeId)) return null;
   const observed = env.observedDeployment;
   const applied = typeof observed.appliedSeq === 'number' && observed.appliedSeq > 0 ? observed.appliedSeq : null;
   if (observed.status === 'applied' || observed.status === 'reverted') return applied;
@@ -98,8 +141,15 @@ export function liveVersionOf(env: DeploymentEnvironment): number | null {
   return null;
 }
 
+/**
+ * Start resets the latest release to `created` and keeps the environment `starting` until the
+ * server applies it (`markEnvironmentStarting`), and an agent can deploy into an `error`
+ * environment, so a deploy can be under way in all three statuses.
+ */
+const DEPLOYABLE = new Set(['active', 'starting', 'error']);
+
 function isDeploying(env: DeploymentEnvironment): boolean {
-  if (env.status !== 'active') return false;
+  if (!DEPLOYABLE.has(env.status)) return false;
   return env.observedDeployment.status === 'applying' || IN_FLIGHT_RELEASE.has(env.latestRelease?.status ?? '');
 }
 
@@ -113,7 +163,6 @@ export function describeHealth(env: DeploymentEnvironment): HealthInfo {
   const live = liveVersionOf(env);
   const release = env.latestRelease;
   const base = { liveVersion: live };
-  const error = env.observedDeployment.errorMessage;
 
   if (env.status === 'stopped') {
     const next = versionOnStart(env);
@@ -157,20 +206,32 @@ export function describeHealth(env: DeploymentEnvironment): HealthInfo {
     };
   }
   if (!live) {
-    const placement = isPlacementFailure(error);
+    const kind = failureKind(env);
     const observed = env.observedDeployment.status;
+    if (kind === 'pause') {
+      return {
+        ...base,
+        health: 'down',
+        label: "Pause didn't finish",
+        tone: 'danger',
+        sentence: 'SAM stopped partway, so the app may still be running.',
+      };
+    }
     return {
       ...base,
       health: 'down',
       label: 'Down',
       tone: 'danger',
-      sentence: placement
-        ? `SAM couldn't get a server for version ${release.version}, so nothing is running.`
-        : observed === 'failed' && env.observedDeployment.appliedSeq
-          ? `Version ${release.version} didn't start, and the previous version didn't come back.`
-          : FAILED_RELEASE.has(release.status) || observed === 'failed-initial'
-            ? `Version ${release.version} didn't start, and nothing else is running.`
-            : "The app isn't running.",
+      sentence:
+        kind === 'placement'
+          ? `SAM couldn't get a server for version ${release.version}, so nothing is running.`
+          : kind === 'start'
+            ? `Starting didn't finish, so nothing is running.`
+            : observed === 'failed' && env.observedDeployment.appliedSeq
+              ? `Version ${release.version} didn't start, and the previous version didn't come back.`
+              : FAILED_RELEASE.has(release.status) || observed === 'failed-initial'
+                ? `Version ${release.version} didn't start, and nothing else is running.`
+                : "The app isn't running.",
     };
   }
   const first = describeProblems(env)[0];
@@ -188,16 +249,34 @@ export function describeProblems(env: DeploymentEnvironment): Problem[] {
   const observed = env.observedDeployment;
   const error = observed.errorMessage ?? undefined;
   const status = objectRecord(observed.deployStatus) ?? {};
-  const nodeHealth = env.node?.healthStatus;
+  const kind = failureKind(env);
 
-  if (release && isPlacementFailure(error)) {
+  if (release && kind === 'placement') {
     problems.push({
       id: 'placement',
       tone: 'danger',
       title: `SAM couldn't get a server for version ${release.version}`,
-      body: 'The cloud provider had no room for this server size just then. Deploying again usually works.',
+      body: PLACEMENT_BODY,
       detail: error,
-      fixes: ['ask-agent'],
+      fixes: ['redeploy'],
+    });
+  } else if (kind === 'pause') {
+    problems.push({
+      id: 'pause-failed',
+      tone: 'danger',
+      title: "Pausing didn't finish",
+      body: 'The app may still be running, and its disks may still be attached. Pause again to finish.',
+      detail: error,
+      fixes: ['pause', 'server'],
+    });
+  } else if (release && kind === 'start') {
+    problems.push({
+      id: 'start-failed',
+      tone: 'danger',
+      title: "Starting didn't finish",
+      body: `SAM couldn't put version ${release.version} back on a server. Starting again usually works.`,
+      detail: error,
+      fixes: ['start'],
     });
   } else if (release && FAILED_RELEASE.has(release.status) && !isDeploying(env)) {
     problems.push({
@@ -211,7 +290,7 @@ export function describeProblems(env: DeploymentEnvironment): Problem[] {
       fixes: ['ask-agent', 'logs'],
     });
   }
-  if (nodeHealth === 'stale') {
+  if (serverSilent(env)) {
     problems.push({
       id: 'server-silent',
       tone: 'danger',
@@ -220,8 +299,6 @@ export function describeProblems(env: DeploymentEnvironment): Problem[] {
       detail: env.node?.errorMessage ?? undefined,
       fixes: ['server'],
     });
-  } else if (nodeHealth === 'unhealthy') {
-    problems.push({ id: 'server-struggling', tone: 'warning', title: 'The server is struggling', body: 'It is short on memory or CPU, so the app may be slow.', fixes: ['server'] });
   }
   if (live) {
     const down = serviceRecords(observed.services).filter(
@@ -252,12 +329,21 @@ export function describeProblems(env: DeploymentEnvironment): Problem[] {
   return problems;
 }
 
+/**
+ * A domain that has never passed a DNS check is still being set up: the record usually
+ * takes a while to appear, so a failed first check is "waiting", not a problem.
+ */
+function neverVerified(domain: DeploymentCustomDomain): boolean {
+  return domain.verifiedAt === null && domain.verificationStatus !== 'verified';
+}
+
 export function domainProblems(domains: DeploymentCustomDomain[]): Problem[] {
   return domains
     .filter(
       (domain) =>
         domain.desiredState !== 'deactivating' &&
-        (domain.verificationStatus === 'failed' || domain.routeTargetChanged || domain.cnameTarget === null)
+        (domain.cnameTarget === null ||
+          (!neverVerified(domain) && (domain.verificationStatus === 'failed' || domain.routeTargetChanged)))
     )
     .map((domain) => ({
       id: `domain-${domain.id}`,
@@ -278,6 +364,7 @@ export function domainState(domain: DeploymentCustomDomain): { label: string; to
   if (domain.servingStatus === 'inactive_environment_stopped') return { label: 'Paused', tone: 'muted' };
   if (domain.servingStatus === 'activating' || domain.routingStatus === 'activating') return { label: 'Turning on', tone: 'info' };
   if (domain.cnameTarget === null) return { label: 'Not attached', tone: 'warning' };
+  if (neverVerified(domain)) return { label: 'Waiting for DNS', tone: 'info' };
   if (domain.verificationStatus === 'failed' || domain.routeTargetChanged) return { label: 'Points elsewhere', tone: 'warning' };
   return { label: 'Waiting for DNS', tone: 'info' };
 }
@@ -326,6 +413,9 @@ export function releaseOutcome(
   if (newest && isDeploying(env)) return { label: 'Deploying', tone: 'info' };
   if (FAILED_RELEASE.has(release.status)) return { label: "Didn't start", tone: 'danger' };
   if (IN_FLIGHT_RELEASE.has(release.status)) return { label: 'Skipped', tone: 'muted' };
+  // The newest version ran, but the server can't confirm it still does (a pause that
+  // stopped partway, for one).
+  if (newest && release.status === 'applied') return { label: 'May still be running', tone: 'muted' };
   return { label: 'Replaced', tone: 'muted' };
 }
 

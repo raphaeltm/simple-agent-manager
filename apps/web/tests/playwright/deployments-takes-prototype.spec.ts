@@ -89,7 +89,9 @@ async function mockApi(page: Page, opts: { environments?: unknown[] } = {}) {
         if (rest === '/containers') return json(route, CONTAINERS);
         if (rest === '/metrics') return json(route, { systemInfo: SYSTEM_INFO, nodeId: 'node-prod', fallbackMetrics: null });
         if (rest === '/logs') {
-          if (envId === 'env-eu') return json(route, { entries: [], nextCursor: null, unavailableReason: 'node_stale' });
+          if (envId === 'env-eu') return json(route, { entries: [], nextCursor: null, unavailableReason: 'node_agent_unreachable' });
+          if (envId === 'env-docs' || envId === 'env-load')
+            return json(route, { entries: [], nextCursor: null, unavailableReason: 'node_not_running' });
           const level = url.searchParams.get('level');
           const entries = (LOGS[envId] ?? []) as Array<{ level: string }>;
           return json(route, { entries: level ? entries.filter((e) => e.level === level) : entries, nextCursor: null });
@@ -168,19 +170,31 @@ for (const take of TAKES) {
         await capture(page, `${take}-list-empty`);
       });
 
-      for (const [envId, label] of [
-        ['env-prod', 'live'],
-        ['env-staging', 'failed-deploy'],
-        ['env-preview', 'deploying'],
-        ['env-eu', 'server-silent'],
-        ['env-qa', 'down'],
-        ['env-demo', 'paused'],
-        ['env-sandbox', 'never-deployed'],
+      // Each state names the sentence it must say, so a state that renders the wrong words fails.
+      for (const [envId, label, says] of [
+        ['env-prod', 'live', 'Running version 42.'],
+        ['env-staging', 'failed-deploy', "Version 43 didn't start"],
+        ['env-preview', 'deploying', take === 'a' ? 'Version 3 is starting' : 'Deploying version 3.'],
+        ['env-eu', 'server-silent', "The server hasn't checked in for 3 hours"],
+        ['env-qa', 'down', "SAM couldn't get a server for version 1"],
+        ['env-demo', 'paused', 'Starting brings version 12 back'],
+        ['env-sandbox', 'never-deployed', 'Nothing runs here until an agent deploys to it.'],
+        ['env-docs', 'starting', 'Getting a server ready for version 7.'],
+        ['env-load', 'pause-failed', 'SAM stopped partway, so the app may still be running.'],
       ] as const) {
         test(`detail — ${label}`, async ({ page }) => {
           await mockApi(page);
           await page.goto(envUrl(take, envId));
           await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+          await expect(page.getByText(says).filter({ visible: true }).first()).toBeVisible();
+          if (label === 'live' && take === 'b') {
+            // A release superseded before any server ran it says so, and offers no roll back.
+            await expect(page.getByText('A newer version arrived before a server picked this one up.')).toBeVisible();
+          }
+          if (label === 'starting') {
+            // Start resets the newest release to `created`; it is on its way, not skipped.
+            await expect(page.getByText('Skipped', { exact: true })).toHaveCount(0);
+          }
           await page.waitForTimeout(600);
           await assertNoOverflow(page);
           await capture(page, `${take}-detail-${label}`);
@@ -209,6 +223,7 @@ for (const vp of VIEWPORTS) {
         await dialog.getByRole('button', { name: 'Sol' }).click();
         await expect(dialog.getByRole('button', { name: 'Create environment' })).toBeEnabled();
         await dialog.getByRole('heading', { name: 'New environment' }).scrollIntoViewIfNeeded();
+        await assertNoOverflow(page);
         await capture(page, 'x-create-environment');
       });
 
@@ -219,6 +234,10 @@ for (const vp of VIEWPORTS) {
         const dialog = page.getByRole('dialog');
         await dialog.getByPlaceholder('shop.example.com').fill('eu.northwind.dev');
         await expect(dialog.getByText('eu.northwind.dev')).toBeVisible();
+        // The sheet ends in the exact DNS record; show all of it, above the sticky buttons.
+        await dialog.getByText('Points to').evaluate((el) => el.closest('div')?.scrollIntoView({ block: 'center' }));
+        await expect(dialog.getByText('r1-web-3000-env-01m5prod.apps.sammy.party')).toBeInViewport();
+        await assertNoOverflow(page);
         await capture(page, 'a-add-domain');
       });
 
@@ -229,6 +248,7 @@ for (const vp of VIEWPORTS) {
         const dialog = page.getByRole('dialog');
         await dialog.getByRole('textbox').fill('produc');
         await expect(dialog.getByRole('button', { name: 'Delete forever' })).toBeDisabled();
+        await assertNoOverflow(page);
         await capture(page, 'a-delete');
       });
 
@@ -237,6 +257,7 @@ for (const vp of VIEWPORTS) {
         await page.goto(envUrl('a', 'env-staging'));
         await page.getByRole('button', { name: 'See logs' }).first().click();
         await expect(page.getByRole('dialog').getByText(/ECONNREFUSED/)).toBeVisible();
+        await assertNoOverflow(page);
         await capture(page, 'a-logs');
       });
 
@@ -247,6 +268,7 @@ for (const vp of VIEWPORTS) {
         const section = page.getByRole('region', { name: 'Who can deploy' });
         await expect(section.getByText('Pick at least one profile')).toBeVisible();
         await section.scrollIntoViewIfNeeded();
+        await assertNoOverflow(page);
         await capture(page, 'a-who-can-deploy');
       });
 
@@ -257,6 +279,7 @@ for (const vp of VIEWPORTS) {
         await summary.click();
         await expect(page.getByText('deploy-prod-01')).toBeVisible();
         await summary.scrollIntoViewIfNeeded();
+        await assertNoOverflow(page);
         await capture(page, 'a-behind-the-scenes');
       });
     }
@@ -267,10 +290,12 @@ for (const vp of VIEWPORTS) {
         await page.goto(envUrl('b', 'env-prod'));
         if (vp.isMobile) {
           await page.getByRole('tab', { name: 'Settings' }).click();
+          await assertNoOverflow(page);
           await capture(page, 'b-pane-settings');
         }
         await page.getByRole('button', { name: /Who can deploy/ }).click();
         await expect(page.getByRole('dialog').getByText('Agents can deploy here')).toBeVisible();
+        await assertNoOverflow(page);
         await capture(page, 'b-sheet-who-can-deploy');
       });
 
@@ -280,6 +305,7 @@ for (const vp of VIEWPORTS) {
         if (vp.isMobile) await page.getByRole('tab', { name: 'Settings' }).click();
         await page.getByRole('button', { name: /Settings and secrets/ }).click();
         await expect(page.getByRole('dialog').getByText('STRIPE_SECRET_KEY')).toBeVisible();
+        await assertNoOverflow(page);
         await capture(page, 'b-sheet-settings');
       });
 
@@ -288,6 +314,7 @@ for (const vp of VIEWPORTS) {
         await page.goto(envUrl('b', 'env-eu'));
         if (vp.isMobile) await page.getByRole('tab', { name: 'Health' }).click();
         await expect(page.getByText('Server', { exact: true }).filter({ visible: true }).first()).toBeVisible();
+        await assertNoOverflow(page);
         await capture(page, 'b-pane-health');
       });
 
@@ -296,6 +323,7 @@ for (const vp of VIEWPORTS) {
         await page.goto(envUrl('b', 'env-prod'));
         await page.getByRole('button', { name: 'More actions' }).click();
         await expect(page.getByRole('menuitem', { name: /Delete environment/ })).toBeVisible();
+        await assertNoOverflow(page);
         await capture(page, 'b-menu');
       });
 
@@ -304,6 +332,7 @@ for (const vp of VIEWPORTS) {
         await page.goto(envUrl('b', 'env-prod'));
         await page.getByRole('button', { name: 'Roll back to this' }).first().click();
         await expect(page.getByRole('dialog').getByText('Roll back to v41?')).toBeVisible();
+        await assertNoOverflow(page);
         await capture(page, 'b-rollback');
       });
     }
