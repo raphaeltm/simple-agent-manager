@@ -23,6 +23,12 @@ export interface ModelPickerProps {
   onClose: () => void;
   /** Seeded into the draft every time the picker transitions from closed to open. */
   initialSelection: readonly string[];
+  /**
+   * Whether `initialSelection` is final yet. While false the picker shows its loading state and
+   * seeds once this turns true, so a selection still being worked out (an inherited one waiting
+   * on the catalog or project settings) never opens as "no models". Defaults to true.
+   */
+  selectionReady?: boolean;
   onSave: (modelIds: string[]) => Promise<void> | void;
   saving?: boolean;
   title?: string;
@@ -53,6 +59,7 @@ export function ModelPicker({
   isOpen,
   onClose,
   initialSelection,
+  selectionReady = true,
   onSave,
   saving = false,
   title = 'Choose AI models',
@@ -81,28 +88,38 @@ export function ModelPicker({
   const [collapsed, setCollapsed] = useState<ReadonlySet<AgentModelCategory>>(new Set());
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Whether this opening has seeded `draft`. Reset on close so the next open seeds again.
+  const [seeded, setSeeded] = useState(false);
 
-  // Reseed only on the closed -> open transition. `initialSelection` is read
-  // through a ref so a background refetch of the settings query that seeded
-  // it (while the picker is open) cannot silently revert in-progress edits —
-  // the same hazard `ProfileFormDialog` documents for its populate effect.
+  // Seed once per opening, as soon as the selection is ready. `initialSelection`
+  // is read through a ref so a background refetch of the settings query that
+  // seeded it (while the picker is open) cannot silently revert in-progress
+  // edits — the same hazard `ProfileFormDialog` documents for its populate
+  // effect.
   const initialSelectionRef = useRef(initialSelection);
   useEffect(() => {
     initialSelectionRef.current = initialSelection;
   }, [initialSelection]);
   useEffect(() => {
-    if (!isOpen) return;
-    const seed = new Set(initialSelectionRef.current);
-    setDraft(seed);
-    setBaseline(seed);
+    if (!isOpen) {
+      setSeeded(false);
+      return;
+    }
     setQuery('');
     setOnlyOn(false);
     setCollapsed(new Set());
     setConfirmingDiscard(false);
     setSaveError(null);
   }, [isOpen]);
+  useEffect(() => {
+    if (!isOpen || seeded || !selectionReady) return;
+    const seed = new Set(initialSelectionRef.current);
+    setDraft(seed);
+    setBaseline(seed);
+    setSeeded(true);
+  }, [isOpen, seeded, selectionReady]);
 
-  const isDirty = !setsHaveSameMembers(draft, baseline);
+  const isDirty = seeded && !setsHaveSameMembers(draft, baseline);
 
   function requestClose() {
     if (confirmingDiscard) {
@@ -144,11 +161,13 @@ export function ModelPicker({
     [models, draft, query, onlyOn]
   );
   const renderableGroups = groups.filter((group) => group.visibleModels.length > 0);
-  const footerText = catalogLoaded
-    ? staleIds.length > 0
-      ? `${summarizeModelsByCategory([...draft], catalogById)} · ${staleIds.length} no longer available`
-      : summarizeModelsByCategory([...draft], catalogById)
-    : summarizeRawSelectionCount([...draft]);
+  const footerText = !seeded
+    ? 'Loading…'
+    : catalogLoaded
+      ? staleIds.length > 0
+        ? `${summarizeModelsByCategory([...draft], catalogById)} · ${staleIds.length} no longer available`
+        : summarizeModelsByCategory([...draft], catalogById)
+      : summarizeRawSelectionCount([...draft]);
 
   // Stable across renders (`.claude/rules/64` siblings): `ModelPickerRow` and
   // `ModelPickerCategorySection` are memoized, so passing a fresh closure
@@ -291,7 +310,7 @@ export function ModelPicker({
             </Alert>
           )}
 
-          {catalogQuery.isLoading && !catalogQuery.data ? (
+          {(catalogQuery.isLoading && !catalogQuery.data) || (!seeded && !catalogQuery.isError) ? (
             <div className="grid gap-2" role="status" aria-label="Loading models">
               {Array.from({ length: 5 }, (_, index) => (
                 <Skeleton key={index} height="4.5rem" borderRadius="var(--sam-radius-md)" />
@@ -381,7 +400,7 @@ export function ModelPicker({
                 size="sm"
                 onClick={() => void handleSave()}
                 loading={saving}
-                disabled={saving || !isDirty || confirmingDiscard}
+                disabled={saving || !seeded || !isDirty || confirmingDiscard}
               >
                 Save
               </Button>

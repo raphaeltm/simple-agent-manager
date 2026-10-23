@@ -54,6 +54,10 @@ export function AgentModelAccessField({
   const catalogById = indexCatalog(catalogQuery.data?.models ?? []);
   const defaultModelIds = catalogQuery.data?.defaultModelIds ?? [];
   const resolving = catalogQuery.isLoading || projectSettingsQuery.isLoading;
+  // An inherited selection is only known once the catalog's defaults and the project's own
+  // choice have loaded; until then the picker waits instead of opening with nothing turned on.
+  // A project-settings error falls back to the defaults rather than waiting forever.
+  const inheritedReady = catalogQuery.isSuccess && !projectSettingsQuery.isLoading;
   const isSkillContext = fallbackProfile !== undefined;
 
   // What this profile/skill would actually get right now if left on
@@ -133,6 +137,7 @@ export function AgentModelAccessField({
         isOpen={pickerOpen}
         onClose={() => setPickerOpen(false)}
         initialSelection={value ?? inherited.modelIds}
+        selectionReady={value !== null || inheritedReady}
         onSave={(ids) => onChange(ids)}
       />
     </div>

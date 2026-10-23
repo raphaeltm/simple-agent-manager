@@ -217,10 +217,11 @@ describe('SkillFormDialog — AI model calls field', () => {
     fireEvent.change(screen.getByRole('combobox', { name: /AI models this skill can call/i }), {
       target: { value: 'custom' },
     });
-    await screen.findByText('clef-flash');
-    fireEvent.click(screen.getByRole('switch', { name: /turn on clef-flash/i }));
+    // The picker seeds from the inherited defaults (clef-flash on) once they load.
+    await screen.findByRole('switch', { name: /turn off clef-flash/i });
+    fireEvent.click(screen.getByRole('switch', { name: /turn on clef-omni/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await screen.findByText('1 model (Decision 1)');
+    await screen.findByText('2 models (Decision 2)');
 
     expect(screen.getByLabelText('Name')).toHaveValue('Renamed by user');
 
@@ -243,6 +244,6 @@ describe('SkillFormDialog — AI model calls field', () => {
     );
 
     expect(screen.getByLabelText('Name')).toHaveValue('Renamed by user');
-    expect(screen.getByText('1 model (Decision 1)')).toBeInTheDocument();
+    expect(screen.getByText('2 models (Decision 2)')).toBeInTheDocument();
   });
 });

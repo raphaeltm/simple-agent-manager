@@ -211,7 +211,7 @@ export async function runAgentModelForAgent(
     throw new AgentModelCallError(
       'not_enabled',
       `${entry.id} is not turned on for this agent (${describeSource(access.source)}). ` +
-        'A project owner or admin can turn it on in Project settings → Agents → AI models, or in this profile or skill. ' +
+        'A project owner or admin can turn it on in Project settings → Agents → AI Models, or in this profile or skill. ' +
         'Call list_ai_models to see the models you can use.'
     );
   }
@@ -262,7 +262,7 @@ export async function runAgentModelForAgent(
       'budget_exhausted',
       `This project's monthly AI model budget is used up: $${usage.spentUsd.toFixed(2)} of $${microUsdToUsd(limitMicroUsd).toFixed(2)} spent ` +
         `(this call needs about $${microUsdToUsd(reservation).toFixed(4)}). It resets on ${usage.resetsAt.slice(0, 10)}. ` +
-        'A project owner or admin can raise it in Project settings → Agents → AI models.'
+        'A project owner or admin can raise it in Project settings → Agents → AI Models.'
     );
   }
 

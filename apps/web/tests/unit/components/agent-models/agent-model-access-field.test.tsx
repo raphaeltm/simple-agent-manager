@@ -315,4 +315,49 @@ describe('AgentModelAccessField', () => {
       'true'
     );
   });
+
+  it('choosing models before the inherited selection loads waits for it, never starting from "no models"', async () => {
+    // Staging found this: a fast pick of "Choose models" in a fresh skill form opened the
+    // picker with nothing on, because the inherited selection was still loading.
+    let resolveCatalog: (value: AgentModelCatalogResponse) => void = () => undefined;
+    let resolveSettings: (value: ProjectAgentModelSettingsResponse) => void = () => undefined;
+    mocks.getAgentModelCatalog.mockReturnValue(
+      new Promise<AgentModelCatalogResponse>((resolve) => {
+        resolveCatalog = resolve;
+      })
+    );
+    mocks.getProjectAgentModelSettings.mockReturnValue(
+      new Promise<ProjectAgentModelSettingsResponse>((resolve) => {
+        resolveSettings = resolve;
+      })
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <Harness initialValue={null} fallbackProfile={{ name: 'Builder', agentModels: null }} />
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
+    expect(await screen.findByRole('status', { name: 'Loading models' })).toBeInTheDocument();
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    // The catalog alone is not enough: the project's own choice decides what is inherited.
+    resolveCatalog(CATALOG);
+    await waitFor(() => expect(mocks.getAgentModelCatalog).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByRole('status', { name: 'Loading models' })).toBeInTheDocument();
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+
+    resolveSettings(
+      makeProjectSettings({ models: ['m-embed-1'], effectiveModelIds: ['m-embed-1'] })
+    );
+    expect(await screen.findByRole('switch', { name: /turn off bge-base/i })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
+    expect(screen.getByRole('switch', { name: /turn on clef-flash/i })).toBeInTheDocument();
+    // Seeding is not an edit.
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
 });
