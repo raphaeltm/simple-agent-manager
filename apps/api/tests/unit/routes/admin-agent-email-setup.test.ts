@@ -3,6 +3,8 @@
  * database and a fake Cloudflare zone. Only the session lookup is pre-set: `requireAuth` skips
  * it when the request already carries an auth context.
  */
+import { readFileSync } from 'node:fs';
+
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +13,7 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { adminAgentEmailRoutes } from '../../../src/routes/admin-agent-email';
+import { updateAdminSettings } from '../../../src/services/admin-settings';
 import {
   cloudflareError,
   cloudflareRoutingFirstUse,
@@ -33,6 +36,12 @@ describe('admin agent email setup route', () => {
   beforeEach(() => {
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
+    sqlite.exec(
+      readFileSync(
+        new URL('../../../src/db/migrations/0196_admin_settings.sql', import.meta.url),
+        'utf8'
+      )
+    );
     env = {
       DATABASE: createSqliteD1(sqlite),
       KV: createMemoryKv(),
@@ -143,6 +152,23 @@ describe('admin agent email setup route', () => {
     ).toEqual({ updated_by: 'superadmin-1' });
 
     expect(await (await postSetup(app, {})).json()).toMatchObject({ state: 'on' });
+  });
+
+  it('bounds setup runs per superadmin per hour, refused runs included', async () => {
+    await updateAdminSettings(env, {
+      changes: [{ name: 'agentEmail.setupRunsPerHour', value: 1 }],
+      actorUserId: 'superadmin-1',
+    });
+    const fake = cloudflare(NEW_ZONE);
+    const app = appAs('superadmin');
+
+    expect((await postSetup(app, {})).status).toBe(409);
+    const callsAfterFirst = fake.calls.length;
+    const limited = await postSetup(app, { allowMainDomainChanges: true });
+    expect(limited.status).toBe(429);
+    expect(fake.calls).toHaveLength(callsAfterFirst);
+    // Reading the plan is not limited.
+    expect((await getPlan(app)).status).toBe(200);
   });
 
   it('rejects a malformed body before calling Cloudflare', async () => {

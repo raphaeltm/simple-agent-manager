@@ -58,9 +58,14 @@ import { hasAgentEmailBinding, isAgentEmailOn, recordAgentEmailSetup } from './s
 export const CLOUDFLARE_ROUTING_SPF = 'v=spf1 include:_spf.mx.cloudflare.net ~all';
 /** The DKIM selector Cloudflare adds under the root domain at the same time. */
 export const CLOUDFLARE_ROUTING_DKIM_SELECTOR = 'cf2024-1._domainkey';
+/** The rule's display name only: the rule is found by the address it matches. */
 export const AGENT_EMAIL_RULE_NAME = 'SAM agent email';
+/** Cloudflare's `per_page` maximum for listing Email Routing rules. */
 const RULES_PAGE_SIZE = 50;
-const MAX_RULE_PAGES = 20;
+/** Cloudflare's limit on Email Routing rules per domain. */
+const CLOUDFLARE_ROUTING_RULE_LIMIT = 200;
+/** Enough pages for a zone at the limit, plus one that shows the list has ended. */
+const MAX_RULE_PAGES = Math.ceil(CLOUDFLARE_ROUTING_RULE_LIMIT / RULES_PAGE_SIZE) + 1;
 
 /** Setup cannot run in the plan's current state; the message says why. */
 export class AgentEmailSetupRefusedError extends Error {
@@ -247,7 +252,11 @@ async function findRule(env: Env, address: string): Promise<RoutingRuleView | nu
     if (match) return match;
     if (rules.length < RULES_PAGE_SIZE) return null;
   }
-  throw new Error(`More than ${MAX_RULE_PAGES * RULES_PAGE_SIZE} routing rules; refusing to guess`);
+  throw new AgentEmailSetupRefusedError(
+    plan('refused', {
+      reason: `This zone lists more than ${MAX_RULE_PAGES * RULES_PAGE_SIZE} Email Routing rules, past Cloudflare's limit of ${CLOUDFLARE_ROUTING_RULE_LIMIT}, so SAM cannot tell whether the agent email rule exists.`,
+    })
+  );
 }
 
 // Managed through this REST call. Do not also add a top-level `addresses` field to

@@ -7,7 +7,7 @@
 import type { AgentEmailMainDomainRecord, AgentEmailSetupPlan } from '@simple-agent-manager/shared';
 import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 
 import { useQueryScope } from '../hooks/useQueryScope';
 import { runAgentEmailSetup } from '../lib/api/agent-email';
@@ -30,6 +30,7 @@ export function AdminAgentEmailSetup({ onTurnedOn }: Props) {
   const queryClient = useQueryClient();
   const query = useQuery(adminAgentEmailSetupQueryOptions(scope, true));
   const [allowMainDomainChanges, setAllowMainDomainChanges] = useState(false);
+  const consentLabelId = useId();
   const [pending, setPending] = useState<AgentEmailSetupPlan | null>(null);
   const setup = useMutation({
     mutationFn: (allow: boolean) => runAgentEmailSetup(allow),
@@ -78,6 +79,10 @@ export function AdminAgentEmailSetup({ onTurnedOn }: Props) {
         <>
           {plan.state === 'refused' ? (
             <Alert variant="warning">{plan.reason}</Alert>
+          ) : plan.state === 'unavailable' || plan.state === 'verifying' ? (
+            // Blocked until something outside this panel changes: say so as a notice, not as
+            // the neutral copy the ready state uses.
+            plan.reason && <Alert variant="info">{plan.reason}</Alert>
           ) : plan.state === 'ready' ? (
             <p className="text-sm text-fg-secondary break-words">
               Turning it on sets up Email Routing for{' '}
@@ -110,7 +115,7 @@ export function AdminAgentEmailSetup({ onTurnedOn }: Props) {
                   onChange={(event) => setAllowMainDomainChanges(event.target.checked)}
                   className="mt-0.5 h-4 w-4 shrink-0 rounded border-border-default accent-accent-primary"
                 />
-                <span className="text-sm text-fg-secondary break-words">
+                <span id={consentLabelId} className="text-sm text-fg-secondary break-words">
                   Allow Cloudflare to add these records to {plan.mainDomain}
                 </span>
               </label>
@@ -120,6 +125,7 @@ export function AdminAgentEmailSetup({ onTurnedOn }: Props) {
             {canRun && (
               <Button
                 disabled={busy || (needsConsent && !allowMainDomainChanges)}
+                aria-describedby={needsConsent ? consentLabelId : undefined}
                 onClick={() => setup.mutate(needsConsent && allowMainDomainChanges)}
               >
                 {setup.isPending ? 'Turning on…' : 'Turn on agent email'}

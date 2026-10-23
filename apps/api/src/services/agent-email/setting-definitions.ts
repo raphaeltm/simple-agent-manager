@@ -16,6 +16,8 @@ export const DEFAULT_AGENT_EMAIL_INBOUND_PER_TRIGGER_PER_HOUR = 20;
 export const DEFAULT_AGENT_EMAIL_PROCESSING_LEASE_SECONDS = 120;
 /** Loopback self-test emails one superadmin may send per hour. */
 export const DEFAULT_AGENT_EMAIL_LOOPBACK_PER_HOUR = 10;
+/** Agent email setup runs one superadmin may start per hour; each run calls Cloudflare. */
+export const DEFAULT_AGENT_EMAIL_SETUP_RUNS_PER_HOUR = 10;
 /** Attempts SAM makes to start an agent from one accepted email before giving up on it. */
 export const DEFAULT_AGENT_EMAIL_MAX_DELIVERY_ATTEMPTS = 5;
 /** Seconds before an accepted email's first retry; each later retry waits twice as long. */
@@ -75,6 +77,13 @@ export const AGENT_EMAIL_SETTINGS = [
     name: 'agentEmail.loopbackPerHour',
     defaultValue: DEFAULT_AGENT_EMAIL_LOOPBACK_PER_HOUR,
     description: 'Loopback test emails one superadmin may send per hour.',
+    range: { min: 1, max: 100 },
+  },
+  {
+    name: 'agentEmail.setupRunsPerHour',
+    defaultValue: DEFAULT_AGENT_EMAIL_SETUP_RUNS_PER_HOUR,
+    description:
+      'Times one superadmin may run the agent email setup per hour. Each run calls Cloudflare.',
     range: { min: 1, max: 100 },
   },
   {

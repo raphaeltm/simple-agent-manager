@@ -743,7 +743,8 @@ addresses live on, for example `agents.example.com`, and is `null` when agent em
 ### `GET /api/admin/agent-email`
 
 Superadmin only. Returns the same `enabled` and `domain`, plus `loopback`:
-`{ lastSent: { to, sentAt, providerMessageId } | null, lastReceived: { from, subject, autoSubmitted, receivedAt } | null }`.
+`{ lastSent: { to, sentAt, providerMessageId } | null, lastReceived: { from, subject, autoSubmitted, inReplyTo, receivedAt } | null }`.
+`inReplyTo` is the Message-ID the reply answers, which ties it to one loopback test.
 Loopback status expires after seven days.
 
 ### `GET /api/admin/agent-email/setup`
@@ -771,7 +772,8 @@ and records that agent email is on. Returns the resulting plan: `on`, or `pendin
 Routing is on but its records are not visible yet (run it again). Returns `409` when the plan is
 not `ready`, when it is `needs_consent` and `allowMainDomainChanges` is not `true`, and when the
 main domain's mail records changed beyond what was listed (agent email stays off). Returns `502`
-with Cloudflare's error when a Cloudflare call fails. Running it again once on changes nothing.
+with Cloudflare's error when a Cloudflare call fails, and `429` past the
+`agentEmail.setupRunsPerHour` limit. Running it again once on changes nothing.
 
 ### `POST /api/admin/agent-email/loopback`
 

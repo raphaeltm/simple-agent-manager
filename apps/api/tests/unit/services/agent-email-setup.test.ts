@@ -111,6 +111,9 @@ describe('agent email admin setup', () => {
       });
       expect(withoutWorkerName).toMatchObject({ state: 'unavailable', domain: DOMAIN });
       expect(withoutWorkerName.reason).toContain('Deploy again');
+
+      const withoutBaseDomain = await planAgentEmailSetup({ ...env, BASE_DOMAIN: ' ' });
+      expect(withoutBaseDomain.state).toBe('unavailable');
       expect(fake.calls).toEqual([]);
     });
 
@@ -365,6 +368,15 @@ describe('agent email admin setup', () => {
         { enabled: true, actions: [{ type: 'worker', value: ['old-worker'] }] },
         { enabled: false, actions: [{ type: 'worker', value: [WORKER] }] },
         { enabled: true, actions: [{ type: 'forward', value: ['ops@example.com'] }] },
+        // Also copies mail elsewhere.
+        {
+          enabled: true,
+          actions: [
+            { type: 'worker', value: [WORKER] },
+            { type: 'forward', value: ['ops@example.com'] },
+          ],
+        },
+        { enabled: true, actions: [{ type: 'worker', value: [WORKER, 'other-worker'] }] },
       ]) {
         const fake = cloudflare({
           ...STAGING_LIKE,
@@ -388,10 +400,71 @@ describe('agent email admin setup', () => {
       }
     });
 
+    it('turns subaddressing back on where the subdomain routes but subaddressing is off', async () => {
+      const fake = cloudflare({
+        ...STAGING_LIKE,
+        routing: { enabled: true, support_subaddress: false },
+      });
+      expect((await run()).state).toBe('on');
+      expect(fake.writes()).toEqual([
+        { method: 'PATCH', path: '/email/routing', body: { support_subaddress: true } },
+        { method: 'POST', path: '/email/routing/rules', body: DESIRED_RULE },
+      ]);
+    });
+
+    it('finishes on a second run after a Cloudflare call fails once routing is on', async () => {
+      for (const failing of [
+        { method: 'PATCH', path: '/email/routing' },
+        { method: 'POST', path: '/email/routing/rules' },
+      ]) {
+        sqlite.prepare('DELETE FROM platform_settings').run();
+        env = { ...env, DATABASE: createSqliteD1(sqlite) };
+        let failed = false;
+        const fake = cloudflare({
+          ...NEW_ZONE,
+          respond: (call) => {
+            if (failed || call.method !== failing.method || call.path !== failing.path) {
+              return undefined;
+            }
+            failed = true;
+            return cloudflareError(500, 1001, 'Internal error');
+          },
+        });
+
+        await expect(run(true), failing.path).rejects.toBeInstanceOf(CloudflareEmailApiError);
+        expect(storedRecord(), failing.path).toBeNull();
+        expect(await isAgentEmailOn(env), failing.path).toBe(false);
+
+        // Routing is already on, so the second run asks for no consent and does not turn
+        // routing on again.
+        expect((await planAgentEmailSetup(env)).state, failing.path).toBe('ready');
+        expect((await run()).state, failing.path).toBe('on');
+        expect(
+          fake.writes().filter((call) => call.path === '/email/routing/dns'),
+          failing.path
+        ).toHaveLength(1);
+        expect(fake.state.rules, failing.path).toHaveLength(1);
+      }
+    });
+
     it('leaves a correct agent@ rule alone', async () => {
       const fake = cloudflare({
         ...STAGING_LIKE,
         rules: [{ id: 'rule-agent', ...DESIRED_RULE }],
+      });
+      expect((await run()).state).toBe('on');
+      expect(fake.writes()).toEqual([]);
+    });
+
+    it('finds the agent@ rule on the last page a zone at the 200-rule limit can have', async () => {
+      const fake = cloudflare({
+        ...STAGING_LIKE,
+        rules: [
+          ...Array.from({ length: 199 }, (_, index) => ({
+            matchers: [{ type: 'literal', field: 'to', value: `person${index}@${MAIN}` }],
+          })),
+          { id: 'rule-agent', ...DESIRED_RULE },
+        ],
       });
       expect((await run()).state).toBe('on');
       expect(fake.writes()).toEqual([]);
@@ -417,13 +490,16 @@ describe('agent email admin setup', () => {
     });
 
     it('refuses to guess past the routing rule page limit', async () => {
+      // Cloudflare allows 200 rules; a zone with more than the pages read cannot be judged.
       const fake = cloudflare({
         ...STAGING_LIKE,
-        rules: Array.from({ length: 1000 }, (_, index) => ({
+        rules: Array.from({ length: 250 }, (_, index) => ({
           matchers: [{ type: 'literal', field: 'to', value: `person${index}@${MAIN}` }],
         })),
       });
-      await expect(run()).rejects.toThrow('More than 1000 routing rules');
+      const refusal = await run().catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(AgentEmailSetupRefusedError);
+      expect((refusal as Error).message).toContain('more than 250 Email Routing rules');
       expect(fake.writes()).toEqual([]);
       expect(storedRecord()).toBeNull();
     });

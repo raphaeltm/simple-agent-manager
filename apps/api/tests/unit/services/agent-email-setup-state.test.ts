@@ -7,8 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { withRequestScopedD1Bindings } from '../../../src/lib/d1-session';
 import { log } from '../../../src/lib/logger';
 import { ADMIN_SETTINGS_CACHE_MAX_MS } from '../../../src/services/admin-settings-cache';
+import { findAdminSetting } from '../../../src/services/admin-settings-registry';
 import {
   activeAgentEmailSender,
   AGENT_EMAIL_SETUP_KEY,
@@ -120,6 +122,25 @@ describe('agent email on-switch', () => {
     await recordAgentEmailSetup(env, record(), 'admin-1');
     sqlite.prepare('DELETE FROM platform_settings').run();
     expect(await isAgentEmailOn(env)).toBe(true);
+  });
+
+  it('shares the cached record across request-scoped D1 session facades', async () => {
+    type SessionEnv = Parameters<typeof withRequestScopedD1Bindings>[0];
+    const first = withRequestScopedD1Bindings(env as unknown as SessionEnv) as unknown as Env;
+    const second = withRequestScopedD1Bindings(env as unknown as SessionEnv) as unknown as Env;
+    // Liveness: these are distinct facades, as each Worker request gets.
+    expect(first.DATABASE).not.toBe(second.DATABASE);
+    expect(first.DATABASE).not.toBe(env.DATABASE);
+
+    await recordAgentEmailSetup(first, record(), 'admin-1');
+    // With the row gone, only the cache entry the first request wrote can say "on".
+    sqlite.prepare('DELETE FROM platform_settings').run();
+    expect(await isAgentEmailOn(second)).toBe(true);
+    expect(await isAgentEmailOn(env)).toBe(true);
+  });
+
+  it('keeps its record out of the admin settings registry, which writes the same table', () => {
+    expect(findAdminSetting(AGENT_EMAIL_SETUP_KEY)).toBeUndefined();
   });
 
   it('reports agent email off while the store cannot be read', async () => {

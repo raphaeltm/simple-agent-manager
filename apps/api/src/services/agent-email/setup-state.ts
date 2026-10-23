@@ -47,7 +47,8 @@ function parseSetupRecord(raw: string | null): AgentEmailSetupRecord | null {
 }
 
 // Per-isolate cache of a present record, which only the setup writes and the inbound, config
-// and trigger paths all read. An absent record is not cached, so turning agent email on takes
+// and trigger paths all read. It is held for the admin settings cache ceiling, the bound every
+// other admin-written platform setting already uses. An absent record is not cached, so turning agent email on takes
 // effect on every isolate at once; nothing turns it off except a deploy without the binding or
 // a new BASE_DOMAIN, both checked on every call.
 let cache = new WeakMap<D1Database, { record: AgentEmailSetupRecord; expiresAt: number }>();

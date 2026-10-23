@@ -71,6 +71,19 @@ adminAgentEmailRoutes.get('/setup', async (c) => {
 });
 
 adminAgentEmailRoutes.post('/setup', jsonValidator(SetupSchema), async (c) => {
+  // One-hour window, matching the agentEmail.setupRunsPerHour setting.
+  const { setupRunsPerHour } = await getAgentEmailLimits(c.env);
+  const rate = await checkRateLimit(
+    c.env.KV,
+    createRateLimitKey(
+      'agent-email-setup',
+      getAuth(c).user.id,
+      getCurrentWindowStart(DEFAULT_WINDOW_SECONDS)
+    ),
+    setupRunsPerHour,
+    DEFAULT_WINDOW_SECONDS
+  );
+  if (!rate.allowed) throw errors.tooManyRequests('Setup run limit reached; try again later');
   try {
     const plan = await runAgentEmailSetup(c.env, {
       allowMainDomainChanges: c.req.valid('json').allowMainDomainChanges === true,

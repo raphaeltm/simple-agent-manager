@@ -134,6 +134,10 @@ describe('AdminAgentEmailPanel', () => {
     );
     const turnOn = screen.getByRole('button', { name: 'Turn on agent email' });
     expect(turnOn).toBeDisabled();
+    // Assistive tech hears why the button is disabled.
+    expect(turnOn).toHaveAccessibleDescription(
+      'Allow Cloudflare to add these records to example.com'
+    );
 
     await user.click(screen.getByLabelText('Allow Cloudflare to add these records to example.com'));
     expect(turnOn).toBeEnabled();
@@ -168,7 +172,8 @@ describe('AdminAgentEmailPanel', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Check again' }));
     expect(await screen.findByRole('button', { name: 'Checking…' })).toBeDisabled();
-    expect(screen.getByText('Cloudflare is still verifying.')).toBeInTheDocument();
+    // A blocked state is a notice, not the neutral copy of the ready state.
+    expect(screen.getByRole('alert')).toHaveTextContent('Cloudflare is still verifying.');
 
     release(plan({}));
     expect(await screen.findByRole('button', { name: 'Turn on agent email' })).toBeEnabled();

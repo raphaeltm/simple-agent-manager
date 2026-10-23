@@ -10,6 +10,7 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { updateAdminSettings } from '../../../src/services/admin-settings';
+import { __resetAgentEmailSetupCacheForTest } from '../../../src/services/agent-email/setup-state';
 import { markAgentEmailSetUp } from '../../helpers/agent-email-tables';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -169,6 +170,19 @@ describe('email trigger routes', () => {
       address: created.emailConfig.address,
       allowedSenders: ['carol@example.net'],
     });
+  });
+
+  it('refuses email triggers while the binding exists but no admin has turned agent email on', async () => {
+    sqlite.prepare("DELETE FROM platform_settings WHERE key = 'agent_email.setup'").run();
+    __resetAgentEmailSetupCacheForTest();
+
+    const response = await call('POST', '', emailTrigger());
+
+    expect(response.status).toBe(409);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM triggers').get()).toEqual({ n: 0 });
+    // Control: the same request succeeds once the setup has run.
+    await markAgentEmailSetUp(env);
+    expect((await call('POST', '', emailTrigger())).status).toBe(201);
   });
 
   it('refuses email triggers when this deployment has no agent email binding', async () => {

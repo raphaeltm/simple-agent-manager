@@ -285,7 +285,7 @@ main domain.
   `CF_API_TOKEN` (the same token as the deploy):
   - **Plan:** whether the zone already uses Email Routing, whether the subdomain's routing is on,
     whether sending is verified, and the main-domain records Cloudflare will add.
-  - **Refuse** a zone new to Email Routing whose main domain already has MX or SPF records (untested).
+  - **Refuse** a zone new to Email Routing whose main domain already has MX or SPF records (what Cloudflare does to them is untested live).
   - **Consent:** in a zone new to Email Routing with a clean main domain, the admin must confirm the
     SPF record and DKIM key Cloudflare will add.
   - **Run:** turn routing on for the subdomain by name, check the main domain changed exactly as

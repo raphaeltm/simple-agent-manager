@@ -12,6 +12,7 @@ export interface AgentEmailLimits {
   inboundPerTriggerPerHour: number;
   processingLeaseSeconds: number;
   loopbackPerHour: number;
+  setupRunsPerHour: number;
   maxDeliveryAttempts: number;
   retryBaseSeconds: number;
   retryMaxSeconds: number;
@@ -27,6 +28,7 @@ const FIELD_BY_SETTING: Record<AgentEmailSettingName, keyof AgentEmailLimits> = 
   'agentEmail.inboundPerTriggerPerHour': 'inboundPerTriggerPerHour',
   'agentEmail.processingLeaseSeconds': 'processingLeaseSeconds',
   'agentEmail.loopbackPerHour': 'loopbackPerHour',
+  'agentEmail.setupRunsPerHour': 'setupRunsPerHour',
   'agentEmail.maxDeliveryAttempts': 'maxDeliveryAttempts',
   'agentEmail.retryBaseSeconds': 'retryBaseSeconds',
   'agentEmail.retryMaxSeconds': 'retryMaxSeconds',

@@ -80,6 +80,7 @@ These limit [email triggers](/docs/guides/email-triggers/) (preview). Every valu
 | `agentEmail.inboundPerTriggerPerHour` | 20        | 1–10,000         | Emails one email trigger accepts per hour                                                                                          |
 | `agentEmail.processingLeaseSeconds`   | 120       | 10–3,600         | Seconds one attempt to start the agent owns an email before a retry may take over; the retry sweep waits no longer for one attempt |
 | `agentEmail.loopbackPerHour`          | 10        | 1–100            | Loopback test emails one superadmin can send per hour                                                                              |
+| `agentEmail.setupRunsPerHour`         | 10        | 1–100            | Times one superadmin can run the agent email setup per hour; each run calls Cloudflare                                             |
 | `agentEmail.maxDeliveryAttempts`      | 5         | 1–20             | Attempts to start the agent for one accepted email before SAM gives up on it                                                       |
 | `agentEmail.retryBaseSeconds`         | 60        | 10–3,600         | Seconds before the first retry; each later retry waits twice as long                                                               |
 | `agentEmail.retryMaxSeconds`          | 900       | 60–86,400        | Longest wait between two retries of one email                                                                                      |
