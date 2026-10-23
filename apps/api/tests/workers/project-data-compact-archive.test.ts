@@ -180,6 +180,25 @@ describe('compact R2 archive rollout', () => {
       return JSON.parse(body.result.content[0]!.text);
     };
     let originalMcp: unknown;
+    let originalContext: unknown;
+    /**
+     * The Comments page reader's window around one message, identical whether the transcript
+     * is in the root object, a compact R2 archive, or copied back. Roles alternate, so every
+     * row is one displayed message: two each side of row 100.
+     */
+    const verifyCommentContext = async () => {
+      const ids = seedMessages(201).map((message) => message.messageId);
+      const context = await projectDataService.getMessageContextWindow(
+        testEnv,
+        projectId,
+        sessionId,
+        { messageId: String(ids[100]), messagesEachSide: 2, maxRows: 50, compact: false }
+      );
+      expect(context).toMatchObject({ found: true, hasMoreBefore: true, hasMoreAfter: true });
+      expect(context.messages.map((message) => message.id)).toEqual(ids.slice(98, 103));
+      if (originalContext === undefined) originalContext = context;
+      else expect(context).toEqual(originalContext);
+    };
     const verifyMcpReads = async () => {
       const history = await mcpRead('get_session_messages', { projectId, sessionId, limit: 300 });
       const scoped = await mcpRead('search_messages', { sessionId, query: 'payload', limit: 20 });
@@ -195,6 +214,7 @@ describe('compact R2 archive rollout', () => {
     };
     const verifyToolsAndSearch = async () => {
       await verifyMcpReads();
+      await verifyCommentContext();
       expect(
         await projectDataService.getMessageCount(testEnv, projectId, sessionId, ['tool'])
       ).toBe(2);

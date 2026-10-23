@@ -7,6 +7,7 @@
  * reactions are outside this slice. Message comments carry structured
  * @mentions of project members (`CommentMention`); library-file comments do not.
  */
+import type { SessionViewerAccess } from './session-access';
 
 export const COMMENT_STATUSES = ['open', 'sent', 'resolved'] as const;
 export type CommentStatus = (typeof COMMENT_STATUSES)[number];
@@ -150,6 +151,29 @@ export type MessageCommentListResponse = {
 export type MessageCommentMutationResponse = {
   thread: MessageCommentThread;
   idempotent: boolean;
+};
+
+/**
+ * A comment thread with the stored chat messages around the message it is anchored to, for
+ * reading the comment in its conversation from the Comments page
+ * (`GET /api/projects/:projectId/sessions/:sessionId/comments/:threadId/context`).
+ *
+ * The window is counted in displayed messages: a run of streamed agent (or thinking) rows is
+ * one message. It always holds the whole anchored message, then a few messages each side.
+ * Further pages come from `GET .../sessions/:sessionId/messages` with `before`/`after`
+ * cursors taken from the first and last rows.
+ */
+export type MessageCommentContextResponse<TMessage = Record<string, unknown>> = {
+  thread: MessageCommentThread;
+  session: { id: string; topic: string | null };
+  /** The viewer's access to the session: only an owner or grantee can send to the agent. */
+  viewerAccess: SessionViewerAccess;
+  /** `found` is false when the anchored message is no longer in the transcript. */
+  anchor: { messageId: string; found: boolean };
+  /** Stored rows in transcript order. Empty when the anchored message is gone. */
+  messages: TMessage[];
+  hasMoreBefore: boolean;
+  hasMoreAfter: boolean;
 };
 
 export type MessageCommentReplyMutationResponse = {

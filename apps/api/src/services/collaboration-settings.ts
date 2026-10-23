@@ -8,6 +8,8 @@ import type { Env } from '../env';
 import { resolveAdminSetting } from './admin-settings';
 import {
   type AdminSettingName,
+  DEFAULT_COMMENT_CONTEXT_MAX_ROWS,
+  DEFAULT_COMMENT_CONTEXT_MESSAGES,
   DEFAULT_COMMENT_MENTIONS_MAX,
   DEFAULT_SESSION_ACCESS_MAX_GRANTS,
 } from './admin-settings-registry';
@@ -38,4 +40,15 @@ export async function getCommentNotificationWindowMs(env: Env): Promise<number> 
     DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS / 1000
   );
   return seconds * 1000;
+}
+
+/** How much of the conversation a comment opened from the Comments page shows around it. */
+export async function getCommentContextLimits(
+  env: Env
+): Promise<{ messages: number; maxRows: number }> {
+  const [messages, maxRows] = await Promise.all([
+    integerSetting(env, 'collaboration.commentContextMessages', DEFAULT_COMMENT_CONTEXT_MESSAGES),
+    integerSetting(env, 'collaboration.commentContextMaxRows', DEFAULT_COMMENT_CONTEXT_MAX_ROWS),
+  ]);
+  return { messages, maxRows };
 }

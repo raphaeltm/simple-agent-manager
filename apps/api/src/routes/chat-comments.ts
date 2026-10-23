@@ -1,4 +1,8 @@
-import type { CommentStatus, MessageCommentThread } from '@simple-agent-manager/shared';
+import type {
+  CommentStatus,
+  MessageCommentContextResponse,
+  MessageCommentThread,
+} from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context, Hono } from 'hono';
 
@@ -25,6 +29,7 @@ import {
   SendCommentDirectiveSchema,
 } from '../schemas/comments';
 import { notifyCommentActivity } from '../services/collaboration-notifications';
+import { getCommentContextLimits } from '../services/collaboration-settings';
 import { resolveCommentMentions } from '../services/comment-mentions';
 import {
   createProjectDataMessageCommentAdapter,
@@ -32,7 +37,8 @@ import {
   sendMessageCommentDirective,
 } from '../services/message-comments';
 import * as projectDataService from '../services/project-data';
-import { requireSessionWriter } from '../services/session-access';
+import { requireSessionWriter, toSessionViewerAccess } from '../services/session-access';
+import { getDefaultCompactMode } from './chat-message-query';
 
 export const chatCommentRoutes = new Hono<{ Bindings: Env }>();
 
@@ -118,6 +124,74 @@ chatCommentRoutes.get('/:sessionId/comments', async (c) => {
   } catch (err) {
     rethrowCommentError(err);
   }
+});
+
+/**
+ * GET /api/projects/:projectId/sessions/:sessionId/comments/:threadId/context
+ * One thread with the conversation around the message it is anchored to, so the Comments
+ * page can show the comment where it was made: the whole anchored message (an agent reply is
+ * many streamed rows) plus `collaboration.commentContextMessages` messages each side. Earlier
+ * and later pages come from `GET .../messages` with cursors from the first and last rows.
+ *
+ * Round trips: membership (D1), session access + thread (one ProjectData RPC each, in
+ * parallel), the two cached settings, and one RPC to the object that owns the transcript.
+ */
+chatCommentRoutes.get('/:sessionId/comments/:threadId/context', async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const sessionId = requireRouteParam(c, 'sessionId');
+  const threadId = requireRouteParam(c, 'threadId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireProjectCapability(db, projectId, userId, 'task:read');
+
+  let loaded: [
+    Awaited<ReturnType<typeof projectDataService.getSessionAccess>>,
+    MessageCommentThread | null,
+  ];
+  try {
+    loaded = await Promise.all([
+      projectDataService.getSessionAccess(c.env, projectId, sessionId, userId),
+      projectDataService.getCommentThread(c.env, projectId, sessionId, threadId),
+    ]);
+  } catch (err) {
+    rethrowCommentError(err);
+  }
+  const [{ session, access }, thread] = loaded;
+  if (!session) throw errors.notFound('Chat session');
+  // The lookup is already scoped to the session in SQL; refuse a row from another session
+  // anyway, so a broken predicate cannot hand one session's thread to another's reader.
+  if (!thread || thread.sessionId !== sessionId) {
+    if (thread) {
+      log.error('comments.context_thread_session_mismatch', {
+        projectId,
+        threadId,
+        requestedSessionId: sessionId,
+        threadSessionId: thread.sessionId,
+        action: 'rejected',
+      });
+    }
+    throw errors.notFound('Comment thread');
+  }
+
+  const limits = await getCommentContextLimits(c.env);
+  const window = await projectDataService.getMessageContextWindow(c.env, projectId, sessionId, {
+    messageId: thread.anchor.messageId,
+    messagesEachSide: limits.messages,
+    maxRows: limits.maxRows,
+    compact: getDefaultCompactMode(c.env),
+  });
+
+  const response: MessageCommentContextResponse = {
+    thread,
+    session: { id: sessionId, topic: typeof session.topic === 'string' ? session.topic : null },
+    viewerAccess: toSessionViewerAccess(access),
+    anchor: { messageId: thread.anchor.messageId, found: window.found },
+    messages: window.messages,
+    hasMoreBefore: window.hasMoreBefore,
+    hasMoreAfter: window.hasMoreAfter,
+  };
+  return c.json(response);
 });
 
 /**

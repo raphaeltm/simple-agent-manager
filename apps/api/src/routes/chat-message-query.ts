@@ -3,6 +3,7 @@
  * size, exact `before`/`after` cursors, role filter, compact mode, and order.
  */
 import {
+  DEFAULT_CHAT_COMPACT_MODE,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
   DEFAULT_CHAT_SESSION_MESSAGE_MAX,
   type MessageCursor,
@@ -69,6 +70,15 @@ export function getRequestedRoles(rawRoles?: string): string[] | undefined {
     .map((role) => role.trim())
     .filter(Boolean);
   return roles && roles.length > 0 ? roles : undefined;
+}
+
+/**
+ * Whether transcript reads strip tool output by default (`CHAT_COMPACT_MODE_DEFAULT`); the
+ * chat loads stripped tool output on demand from `/messages/:messageId/tool-content`.
+ */
+export function getDefaultCompactMode(env: Env): boolean {
+  const compactDefault = (env.CHAT_COMPACT_MODE_DEFAULT ?? '').toLowerCase();
+  return compactDefault === 'false' ? false : DEFAULT_CHAT_COMPACT_MODE;
 }
 
 export function getCompactMode(rawCompact: string | undefined, defaultValue: boolean): boolean {

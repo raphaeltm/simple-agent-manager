@@ -6,7 +6,6 @@
  */
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
 import {
-  DEFAULT_CHAT_COMPACT_MODE,
   DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
   isTaskExecutionStep,
   isTaskMode,
@@ -28,7 +27,12 @@ import { isTaskStatus } from '../services/task-status';
 import { attachWakeState } from './chat/wake-state';
 import { resolveChatAgentState } from './chat-agent-state';
 import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
-import { getMessageCursor, getMessageOrder, getSessionMessageLimit } from './chat-message-query';
+import {
+  getDefaultCompactMode,
+  getMessageCursor,
+  getMessageOrder,
+  getSessionMessageLimit,
+} from './chat-message-query';
 import { getChatSessionRouteContext } from './chat-route-context';
 import { enrichSessionWithAccess } from './chat-session-ownership';
 
@@ -75,8 +79,7 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
     const effectiveLimit =
       after !== null && c.req.query('limit') === undefined ? deltaLimit : limit;
 
-    const compactDefault = (c.env.CHAT_COMPACT_MODE_DEFAULT ?? '').toLowerCase();
-    const compact = compactDefault === 'false' ? false : DEFAULT_CHAT_COMPACT_MODE;
+    const compact = getDefaultCompactMode(c.env);
 
     let messagesResult: Awaited<ReturnType<typeof projectDataService.getMessages>>;
     try {

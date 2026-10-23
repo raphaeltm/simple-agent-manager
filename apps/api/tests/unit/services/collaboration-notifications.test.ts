@@ -11,8 +11,8 @@ import type { Env } from '../../../src/env';
  * Mocks sit at the notification-sending boundary (`src/services/notification.ts`) and the
  * settings boundary (`collaboration-settings.ts`), per the mocking pattern used elsewhere for
  * this feature (idea 01M59MYE4GY91BWTE8TZF1ZB5D). `buildActionUrl` is kept as a faithful
- * reimplementation (not a stub returning a constant) since `buildCommentActionUrl` depends on
- * its exact output shape.
+ * reimplementation (not a stub returning a constant) since the session-access notification
+ * link depends on its exact output shape.
  */
 const mocks = vi.hoisted(() => ({
   getProjectName: vi.fn(),
@@ -277,7 +277,7 @@ describe('notifyCommentActivity', () => {
     );
   });
 
-  it('builds the action URL with commentThread and commentMessage query params', async () => {
+  it('links the notification to the thread in the Comments page reader', async () => {
     await notifyCommentActivity(
       env,
       makeInput({
@@ -291,9 +291,7 @@ describe('notifyCommentActivity', () => {
     );
 
     const notification = mocks.sendNotificationOnce.mock.calls[0]?.[4];
-    expect(notification.actionUrl).toBe(
-      '/projects/project-1/chat/session-1?commentThread=thread-42&commentMessage=message-99'
-    );
+    expect(notification.actionUrl).toBe('/projects/project-1/comments/session-1/thread-42');
   });
 
   it('does nothing and makes no external calls when there are no recipients', async () => {

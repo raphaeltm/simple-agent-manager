@@ -6,7 +6,6 @@
  *
  * See: specs/018-project-first-architecture/tasks.md (T027)
  */
-import { DEFAULT_CHAT_COMPACT_MODE } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -29,6 +28,7 @@ import { chatCommentRoutes } from './chat-comments';
 import { chatIdeaRoutes } from './chat-ideas';
 import {
   getCompactMode,
+  getDefaultCompactMode,
   getMessageCursor,
   getMessageOrder,
   getRequestedRoles,
@@ -156,9 +156,7 @@ chatRoutes.get('/:sessionId/messages', async (c) => {
   const roles = getRequestedRoles(c.req.query('roles') ?? c.req.query('role'));
   const order = getMessageOrder(c.req.query('order'), { before, after });
 
-  const compactDefault = (c.env.CHAT_COMPACT_MODE_DEFAULT ?? '').toLowerCase();
-  const defaultCompact = compactDefault === 'false' ? false : DEFAULT_CHAT_COMPACT_MODE;
-  const compact = getCompactMode(c.req.query('compact'), defaultCompact);
+  const compact = getCompactMode(c.req.query('compact'), getDefaultCompactMode(c.env));
 
   const messagesResult = await projectDataService.getMessages(
     c.env,

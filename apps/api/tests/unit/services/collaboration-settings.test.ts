@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import {
+  getCommentContextLimits,
   getCommentMentionsMax,
   getCommentNotificationWindowMs,
   getSessionAccessMaxGrants,
@@ -113,5 +114,31 @@ describe('getCommentNotificationWindowMs', () => {
     breakAdminSettingsRead();
 
     expect(await getCommentNotificationWindowMs(env)).toBe(DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS);
+  });
+});
+
+describe('getCommentContextLimits', () => {
+  it('returns the code defaults when nothing is configured', async () => {
+    expect(await getCommentContextLimits(env)).toEqual({ messages: 6, maxRows: 1_000 });
+  });
+
+  it('returns admin-configured overrides for both limits', async () => {
+    setOverride('collaboration.commentContextMessages', 3);
+    setOverride('collaboration.commentContextMaxRows', 200);
+
+    expect(await getCommentContextLimits(env)).toEqual({ messages: 3, maxRows: 200 });
+  });
+
+  it('falls back per limit when one stored override is outside its range', async () => {
+    setOverride('collaboration.commentContextMessages', 4);
+    setOverride('collaboration.commentContextMaxRows', 10); // below the registry's min:50
+
+    expect(await getCommentContextLimits(env)).toEqual({ messages: 4, maxRows: 1_000 });
+  });
+
+  it('falls back to the defaults when the admin settings read fails', async () => {
+    breakAdminSettingsRead();
+
+    expect(await getCommentContextLimits(env)).toEqual({ messages: 6, maxRows: 1_000 });
   });
 });

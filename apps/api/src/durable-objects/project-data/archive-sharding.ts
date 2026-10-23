@@ -3722,7 +3722,7 @@ export function archiveSourceReadMessageCount(
   return messages.getMessageCount(sql, input.sessionId, roles);
 }
 
-function assertSourceExactReadAvailable(
+export function assertSourceExactReadAvailable(
   sql: SqlStorage,
   input: ProjectDataArchiveExactReadInput,
   operation: string
@@ -3783,6 +3783,27 @@ export function archiveSourceSearchMessagesWithCoverage(
 ): messages.MessageSearchWithCoverage {
   assertSourceExactReadAvailable(sql, input, 'search read');
   return messages.searchMessagesWithCoverage(sql, query, input.sessionId, roles, limit, bounds);
+}
+
+/** Fails closed unless this object owns a sealed or published copy of the session. */
+export function assertTargetExactReadAvailable(
+  sql: SqlStorage,
+  input: ProjectDataArchiveExactReadInput,
+  operation: string
+): void {
+  const state = validateTargetOwner(readTargetSession(sql, input.sessionId), {
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    migrationId: input.migrationId,
+    targetOwnerName: input.ownerName,
+    targetGeneration: input.generation,
+  });
+  if (state !== 'sealed' && state !== 'published') {
+    throw new ProjectDataArchiveInvariantError(
+      'target_not_published',
+      `ProjectData archive target ${operation} is not sealed`
+    );
+  }
 }
 
 export async function archiveTargetReadMessages(
@@ -3974,7 +3995,9 @@ function searchArchiveProjection(
       .toArray();
   } else {
     const likePatterns = messages.getSearchQueryLikePatterns(query);
-    const likeConditions = likePatterns.map(() => String.raw`d.content LIKE ? ESCAPE '\'`).join(' AND ');
+    const likeConditions = likePatterns
+      .map(() => String.raw`d.content LIKE ? ESCAPE '\'`)
+      .join(' AND ');
     const querySql = [
       'SELECT d.document_id AS id, d.session_id, d.role, d.content, d.created_at,',
       '       s.topic AS session_topic, s.task_id AS session_task_id',

@@ -67,6 +67,7 @@ import * as libraryFileComments from './library-file-comments';
 import * as links from './links';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
+import * as messageContext from './message-context';
 import * as messagePersistence from './message-persistence';
 import * as messages from './messages';
 import * as missionState from './missions';
@@ -1118,6 +1119,14 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
+  /** The stored messages around one message, for reading a comment in its conversation. */
+  archiveSourceGetMessageContext(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    request: messageContext.MessageContextRequest
+  ): Promise<messageContext.MessageContextResult> {
+    return messageContext.readSourceMessageContext(this.sql, this.env, input, request);
+  }
+
   archiveSourceGetMessageCount(
     input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
     roles?: string[]
@@ -1276,6 +1285,14 @@ export class ProjectData extends DurableObject<Env> {
     messageId: string;
   }): Promise<toolPayloadArchive.MessageToolContentResult | null> {
     return archiveSharding.archiveTargetReadMessageToolContent(this.sql, this.env, input);
+  }
+
+  /** The stored messages around one message, from an archive shard's sealed copy. */
+  archiveTargetGetMessageContext(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    request: messageContext.MessageContextRequest
+  ): Promise<messageContext.MessageContextResult> {
+    return messageContext.readTargetMessageContext(this.sql, this.env, input, request);
   }
 
   archiveTargetGetMessageCount(

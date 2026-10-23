@@ -46,17 +46,19 @@ function preview(env: Env, body: string): string {
     : normalized;
 }
 
-/** Deep link that opens the session and focuses one comment thread. */
+/**
+ * Deep link that opens one comment thread in the Comments page reader: the conversation
+ * around the commented message, opened on the quoted words, with the thread beside it.
+ * The reader links on to the chat itself. Relative, like `buildActionUrl`.
+ */
 export function buildCommentActionUrl(
   projectId: string,
   sessionId: string,
-  thread: Pick<MessageCommentThread, 'id' | 'anchor'>
+  thread: Pick<MessageCommentThread, 'id'>
 ): string {
-  const params = new URLSearchParams({
-    commentThread: thread.id,
-    commentMessage: thread.anchor.messageId,
-  });
-  return `${buildActionUrl(projectId, sessionId)}?${params.toString()}`;
+  return `/projects/${encodeURIComponent(projectId)}/comments/${encodeURIComponent(
+    sessionId
+  )}/${encodeURIComponent(thread.id)}`;
 }
 
 export interface CommentActivityInput {

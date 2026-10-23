@@ -92,6 +92,10 @@ import type {
   GroupedFtsWallRecoveryRequest,
   GroupedFtsWallRecoveryResult,
 } from '../durable-objects/project-data/grouped-fts-wall-recovery';
+import type {
+  MessageContextRequest,
+  MessageContextResult,
+} from '../durable-objects/project-data/message-context';
 import type { SearchResult } from '../durable-objects/project-data/message-search';
 import {
   AgentMessageRecipientUnavailableError,
@@ -998,6 +1002,31 @@ export async function getMessages(
       }
       return stub.archiveTargetGetMessages(owner, limit, before, after, roles, compact, order);
     },
+    'idempotent_read'
+  );
+}
+
+/**
+ * The stored messages around one message, read from whichever object owns the transcript
+ * (the project root, or an archive shard after the session was archived). For reading a
+ * comment in its conversation; see `durable-objects/project-data/message-context.ts`.
+ */
+export async function getMessageContextWindow(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  request: MessageContextRequest
+): Promise<MessageContextResult> {
+  const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
+  return callProjectDataOwnerWithRetry(
+    env,
+    projectId,
+    owner.ownerName,
+    'getMessageContextWindow',
+    (stub) =>
+      owner.kind === 'root'
+        ? stub.archiveSourceGetMessageContext(owner, request)
+        : stub.archiveTargetGetMessageContext(owner, request),
     'idempotent_read'
   );
 }

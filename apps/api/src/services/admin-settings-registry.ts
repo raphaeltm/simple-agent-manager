@@ -35,6 +35,8 @@ export type AdminSettingName =
   | 'collaboration.ideaUpdateQuoteMaxLength'
   | 'collaboration.ideaUpdatePageSize'
   | 'collaboration.ideaAgentNoteMinIntervalSeconds'
+  | 'collaboration.commentContextMaxRows'
+  | 'collaboration.commentContextMessages'
   | 'collaboration.commentMentionsMax'
   | 'collaboration.commentNotificationWindowSeconds'
   | 'collaboration.sessionAccessMaxGrants'
@@ -110,6 +112,16 @@ export const IDEA_UPDATE_DEFAULTS = Object.freeze({
   pageSize: 30,
   agentMinIntervalSeconds: 60,
 });
+/**
+ * Messages shown each side of a commented message when a comment is read from the Comments
+ * page. A message is what the chat displays: a run of streamed agent rows counts once.
+ */
+export const DEFAULT_COMMENT_CONTEXT_MESSAGES = 6;
+/**
+ * Stored rows read each side of a commented message for that view. An agent reply is stored as
+ * one row per streamed chunk, so this bounds the read when messages are long.
+ */
+export const DEFAULT_COMMENT_CONTEXT_MAX_ROWS = 1_000;
 // A fresh watch performs up to 13 D1 reads and 3 cold ProjectData RPCs.
 // Keep one refresh at most 400 caller I/O operations, plus fixed alarm setup.
 export const MAX_SAM_OPERATOR_EVENT_PAGE_SIZE = 25;
@@ -447,6 +459,20 @@ const definitions: AdminSettingDefinition[] = [
     'Collaboration',
     'Minimum seconds between notes from one agent session on one idea.',
     { min: 1, max: 86_400 }
+  ),
+  integerDefinition(
+    'collaboration.commentContextMessages',
+    DEFAULT_COMMENT_CONTEXT_MESSAGES,
+    'Collaboration',
+    'Messages shown before and after a commented message when a comment is opened from the Comments page.',
+    { min: 1, max: 50 }
+  ),
+  integerDefinition(
+    'collaboration.commentContextMaxRows',
+    DEFAULT_COMMENT_CONTEXT_MAX_ROWS,
+    'Collaboration',
+    'Most stored rows read before and after a commented message for that view. Agent replies are stored as many streamed rows.',
+    { min: 50, max: 5_000 }
   ),
   ...AGENT_EMAIL_SETTINGS.map((setting) =>
     integerDefinition(

@@ -360,6 +360,7 @@ export type {
   MessageCommentAnchor,
   MessageCommentAuthor,
   MessageCommentAuthorKind,
+  MessageCommentContextResponse,
   MessageCommentDirectiveState,
   MessageCommentListRequest,
   MessageCommentListResponse,
