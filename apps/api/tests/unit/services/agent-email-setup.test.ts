@@ -597,12 +597,49 @@ describe('agent email admin setup', () => {
       expect((await runAgentEmailSetup(env, { consentToken: null, userId: 'admin-2' })).state).toBe(
         'on'
       );
+      const writesAfterTakeover = fake.writes().length;
       release();
 
       const failure = await first;
       expect(failure).toBeInstanceOf(AgentEmailSetupRefusedError);
       expect((failure as Error).message).toContain('took over before this one finished');
+      // It stopped at its next renewal, before sending anything else to Cloudflare.
+      expect(fake.writes()).toHaveLength(writesAfterTakeover);
       expect(stored(AGENT_EMAIL_SETUP_KEY)).toMatchObject({ updatedBy: 'admin-2' });
+    });
+
+    it('stops a run that outlasted its lease even when no other run took over', async () => {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const fake = cloudflare({
+        ...NEW_ZONE,
+        hold: (call) => (call.path === '/email/routing/dns' ? held : undefined),
+      });
+      const shown = await planAgentEmailSetup(env);
+      const run = runAgentEmailSetup(env, {
+        consentToken: shown.consentToken,
+        userId: 'admin-1',
+      }).catch((error: unknown) => error);
+      await vi.waitFor(() =>
+        expect(fake.calls.some((call) => call.path === '/email/routing/dns')).toBe(true)
+      );
+      const writesBefore = fake.writes().length;
+      // The enable takes longer than the whole lease.
+      vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 24 * 60 * 60 * 1000 });
+      try {
+        release();
+        const failure = await run;
+        expect(failure).toBeInstanceOf(AgentEmailSetupRefusedError);
+        expect((failure as Error).message).toContain('outlasted its lease');
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(fake.writes()).toHaveLength(writesBefore);
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toBeNull();
+      // Its baseline stays, so the next run still checks against it.
+      expect(stored(ATTEMPT_KEY)).toMatchObject({ startedBy: 'admin-1', baseline: [] });
     });
 
     it('refuses a run that loses the start to a concurrent one', async () => {

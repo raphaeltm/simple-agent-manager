@@ -71,7 +71,7 @@ describe('agent email on-switch and setup attempt', () => {
     allowed: [{ type: 'TXT', content: 'v=spf1 include:_spf.mx.cloudflare.net ~all' }],
     zoneChanges: ['subaddressing'],
     owner: 'run-1',
-    leaseUntil: '2026-10-23T08:10:00.000Z',
+    leaseUntil: '2999-01-01T00:00:00.000Z',
     ...overrides,
   });
 
@@ -184,6 +184,32 @@ describe('agent email on-switch and setup attempt', () => {
       await completeFromAttempt();
       expect(await isAgentEmailOn(env)).toBe(true);
       expect(await readSetupAttempt(env, DOMAIN)).toBeNull();
+    });
+
+    it('lets no run complete once its lease has lapsed', async () => {
+      const lapsed = await claimSetupAttempt(
+        env,
+        attempt({ leaseUntil: '2000-01-01T00:00:00.000Z' })
+      );
+      expect(await completeAgentEmailSetup(env, record(), 'admin-1', lapsed)).toBe(false);
+      expect(await isAgentEmailOn(env)).toBe(false);
+      expect(await readSetupAttempt(env, DOMAIN)).toEqual(lapsed);
+    });
+
+    it('reads an attempt stored before the lease existed as unleased', async () => {
+      const legacy: Record<string, unknown> = { ...attempt() };
+      delete legacy.owner;
+      delete legacy.leaseUntil;
+      writeRow(ATTEMPT_KEY, JSON.stringify(legacy));
+      const read = await readSetupAttempt(env, DOMAIN);
+      expect(read?.attempt).toMatchObject({
+        baseline: legacy.baseline,
+        owner: null,
+        leaseUntil: null,
+      });
+      // The exact stored text is kept, so a compare-and-set on it still works.
+      expect(read?.stored).toBe(JSON.stringify(legacy));
+      expect(await replaceSetupAttempt(env, read!, attempt({ owner: 'run-2' }))).toBe(true);
     });
 
     it('lets only the run that still owns the attempt complete', async () => {

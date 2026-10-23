@@ -59,9 +59,9 @@ const setupAttemptSchema = v.object({
   allowed: v.array(mailRecordSchema),
   /** Zone settings the admin allowed the setup to change. */
   zoneChanges: v.array(v.picklist(['subaddressing'])),
-  /** The run that holds the lease, and when the lease lapses (a run that died held it). */
-  owner: v.nullable(v.string()),
-  leaseUntil: v.nullable(v.string()),
+  /** The run that holds the lease, and when it lapses. Absent in rows older than the lease. */
+  owner: v.optional(v.nullable(v.string()), null),
+  leaseUntil: v.optional(v.nullable(v.string()), null),
 });
 
 export type AgentEmailSetupRecord = v.InferOutput<typeof setupRecordSchema>;
@@ -193,7 +193,8 @@ export async function replaceSetupAttempt(
 
 /**
  * Turns agent email on and drops the attempt, in one transaction, only while `owned` is still
- * the stored attempt: a run whose lease another run took over cannot finish. False if it lost.
+ * the stored attempt and its lease has not lapsed: a run whose lease lapsed or was taken over
+ * cannot finish. False if it could not.
  */
 export async function completeAgentEmailSetup(
   env: Env,
@@ -202,10 +203,12 @@ export async function completeAgentEmailSetup(
   owned: StoredSetupAttempt
 ): Promise<boolean> {
   const attemptKey = setupAttemptKey(record.domain);
+  const owns = `key = ? AND value = ? AND json_extract(value, '$.leaseUntil') > ?`;
+  const now = new Date().toISOString();
   const [, dropped] = await env.DATABASE.batch([
     env.DATABASE.prepare(
       `INSERT INTO platform_settings (key, value, updated_at, updated_by)
-       SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM platform_settings WHERE key = ? AND value = ?)
+       SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM platform_settings WHERE ${owns})
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at,
          updated_by = excluded.updated_by`
     ).bind(
@@ -214,11 +217,13 @@ export async function completeAgentEmailSetup(
       record.enabledAt,
       updatedBy,
       attemptKey,
-      owned.stored
+      owned.stored,
+      now
     ),
-    env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ? AND value = ?').bind(
+    env.DATABASE.prepare(`DELETE FROM platform_settings WHERE ${owns}`).bind(
       attemptKey,
-      owned.stored
+      owned.stored,
+      now
     ),
   ]);
   return dropped?.meta.changes === 1;

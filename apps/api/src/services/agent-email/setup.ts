@@ -40,8 +40,6 @@ import {
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { DEFAULT_CF_API_TIMEOUT_MS } from '../dns-core';
-import { getTimeoutMs } from '../fetch-timeout';
 import { agentEmailDomain } from './address';
 import {
   type DnsRecordView,
@@ -53,24 +51,20 @@ import {
   listSendingSubdomains,
 } from './cloudflare-email-api';
 import {
-  allowedAdditions,
   consentTokenFor,
   describeChanges,
   differencesFromBaseline,
   firstRoutingRecords,
   subaddressingChange,
-  toMailRecord,
 } from './setup-changes';
 import { AgentEmailMainDomainChangedError, AgentEmailSetupRefusedError } from './setup-errors';
+import { SetupLease } from './setup-lease';
 import { ensureRoutingRule } from './setup-routing-rule';
 import {
-  type AgentEmailSetupAttempt,
-  claimSetupAttempt,
   completeAgentEmailSetup,
   hasAgentEmailBinding,
   isAgentEmailOn,
   readSetupAttempt,
-  replaceSetupAttempt,
   type StoredSetupAttempt,
 } from './setup-state';
 
@@ -117,11 +111,11 @@ async function listMailRecords(env: Env, name: string): Promise<DnsRecordView[]>
     listDnsRecords(env, 'MX', name),
     listDnsRecords(env, 'TXT', name),
   ]);
-  return [...mx, ...txt.filter(isSpfRecord)];
+  return [...mx, ...txt.filter((record) => isSpfRecord(record))];
 }
 
 async function subdomainRoutingOn(env: Env, domain: string): Promise<boolean> {
-  return (await listDnsRecords(env, 'MX', domain)).some(isCloudflareRoutingMx);
+  return (await listDnsRecords(env, 'MX', domain)).some((record) => isCloudflareRoutingMx(record));
 }
 
 /** What the setup would do now. Reads Cloudflare only when the deploy prepared agent email. */
@@ -164,7 +158,7 @@ async function inspect(env: Env): Promise<Inspection> {
   }
   const facts: SetupFacts = {
     mainDomain,
-    subdomainRouting: subdomainMx.some(isCloudflareRoutingMx),
+    subdomainRouting: subdomainMx.some((record) => isCloudflareRoutingMx(record)),
     mainDomainMail,
     subaddressing: settings.support_subaddress === true,
     attempt,
@@ -256,88 +250,6 @@ async function consentPlan(
 }
 
 /**
- * How long a run holds the setup lease: longer than the Cloudflare calls a run waits for one
- * after another (about ten), each bounded by the Cloudflare API timeout. Every exit releases it,
- * so the lease only lapses on its own if the Worker died mid-run.
- */
-function setupLeaseMs(env: Env): number {
-  return 20 * getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
-}
-
-function leaseHeld(attempt: AgentEmailSetupAttempt, now: number): boolean {
-  return attempt.owner !== null && Date.parse(attempt.leaseUntil ?? '') > now;
-}
-
-/**
- * Stores the attempt and takes its lease before anything changes Cloudflare. A new attempt keeps
- * the baseline this run read; one left by an earlier run keeps its own, unless the admin allowed
- * the records as they are now (`changed`). Refuses while another run holds the lease.
- */
-async function claimAttempt(
-  env: Env,
-  current: AgentEmailSetupPlan,
-  facts: SetupFacts,
-  userId: string
-): Promise<StoredSetupAttempt> {
-  const now = Date.now();
-  const lease = {
-    owner: crypto.randomUUID(),
-    leaseUntil: new Date(now + setupLeaseMs(env)).toISOString(),
-  };
-  const acceptedZoneChanges = current.zoneChanges.map((change) => change.setting);
-  if (!facts.attempt) {
-    const attempt: AgentEmailSetupAttempt = {
-      domain: current.domain ?? '',
-      startedAt: new Date(now).toISOString(),
-      startedBy: userId,
-      baseline: facts.mainDomainMail.map(toMailRecord),
-      allowed: allowedAdditions(current.mainDomainChanges, facts.mainDomain),
-      zoneChanges: acceptedZoneChanges,
-      ...lease,
-    };
-    const stored = await claimSetupAttempt(env, attempt);
-    if (stored.attempt.owner !== lease.owner) {
-      throw new AgentEmailSetupRefusedError(
-        'Another agent email setup run started at the same time. Check again.'
-      );
-    }
-    return stored;
-  }
-  const previous = facts.attempt.attempt;
-  if (leaseHeld(previous, now)) {
-    throw new AgentEmailSetupRefusedError(
-      'Another agent email setup run is in progress. Check again in a few minutes.'
-    );
-  }
-  const next: AgentEmailSetupAttempt = {
-    ...previous,
-    ...(current.state === 'changed'
-      ? { baseline: facts.mainDomainMail.map(toMailRecord), allowed: [] }
-      : {}),
-    zoneChanges: [...new Set([...previous.zoneChanges, ...acceptedZoneChanges])],
-    ...lease,
-  };
-  if (!(await replaceSetupAttempt(env, facts.attempt, next))) {
-    throw new AgentEmailSetupRefusedError(
-      'Another agent email setup run changed the setup at the same time. Check again.'
-    );
-  }
-  return { attempt: next, stored: JSON.stringify(next) };
-}
-
-/** Gives the lease back, keeping the baseline. A run that lost the lease has nothing to give. */
-async function releaseAttempt(env: Env, owned: StoredSetupAttempt): Promise<void> {
-  try {
-    await replaceSetupAttempt(env, owned, { ...owned.attempt, owner: null, leaseUntil: null });
-  } catch (error) {
-    log.error('agent_email.setup_lease_release_failed', {
-      domain: owned.attempt.domain,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-/**
  * Runs the setup. Refuses (AgentEmailSetupRefusedError) unless the plan is `ready`, or lists
  * changes and `consentToken` is that plan's token. Returns `on`, or `pending` when routing was
  * turned on but its records are not visible yet.
@@ -363,21 +275,30 @@ export async function runAgentEmailSetup(
         : `Allow the changes to ${facts.mainDomain} to turn agent email on.`
     );
   }
-  const owned = await claimAttempt(env, current, facts, options.userId);
+  const lease = await SetupLease.claim(env, {
+    domain: current.domain,
+    mainDomain: facts.mainDomain,
+    state: current.state,
+    mainDomainChanges: current.mainDomainChanges,
+    zoneChanges: current.zoneChanges,
+    mainDomainMail: facts.mainDomainMail,
+    existing: facts.attempt,
+    userId: options.userId,
+  });
   let completed = false;
   try {
     const result = await setUpWhileHoldingLease(
       env,
       current,
       facts,
-      owned,
+      lease,
       workerName,
       options.userId
     );
     completed = result.state === 'on';
     return result;
   } finally {
-    if (!completed) await releaseAttempt(env, owned);
+    if (!completed) await lease.release();
   }
 }
 
@@ -385,15 +306,18 @@ async function setUpWhileHoldingLease(
   env: Env,
   current: AgentEmailSetupPlan,
   facts: SetupFacts,
-  owned: StoredSetupAttempt,
+  lease: SetupLease,
   workerName: string,
   userId: string
 ): Promise<AgentEmailSetupPlan> {
   const domain = current.domain ?? '';
   const { mainDomain } = facts;
-  const { attempt } = owned;
+  const { attempt } = lease;
 
-  if (!facts.subdomainRouting) await enableSubdomainRouting(env, domain);
+  if (!facts.subdomainRouting) {
+    await lease.renew();
+    await enableSubdomainRouting(env, domain);
+  }
   const differences = differencesFromBaseline(
     attempt,
     mainDomain,
@@ -416,7 +340,11 @@ async function setUpWhileHoldingLease(
     });
   }
   // Allowed by this run's consent or an earlier one: the plan listed it otherwise.
-  if (!facts.subaddressing) await enableSubaddressing(env);
+  if (!facts.subaddressing) {
+    await lease.renew();
+    await enableSubaddressing(env);
+  }
+  await lease.renew();
   await ensureRoutingRule(env, `${AGENT_EMAIL_LOCAL_PART}@${domain}`, workerName);
 
   const finished = await completeAgentEmailSetup(
@@ -428,11 +356,11 @@ async function setUpWhileHoldingLease(
       zoneChanges: attempt.zoneChanges,
     },
     userId,
-    owned
+    lease.stored
   );
   if (!finished) {
     throw new AgentEmailSetupRefusedError(
-      'Another agent email setup run took over before this one finished. Check again.'
+      'Another agent email setup run took over, or this one outlasted its lease, before it finished. Check again.'
     );
   }
   log.info('agent_email.setup_completed', {
