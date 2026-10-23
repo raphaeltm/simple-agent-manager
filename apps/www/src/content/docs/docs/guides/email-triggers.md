@@ -152,8 +152,8 @@ dashboard:
    Email Routing on, it compares the main domain with them. If the main domain gained anything
    other than the SPF record it showed, or lost a record, agent email stays off and the panel
    lists what changed. Cloudflare has made that change by then. Fix the records in Cloudflare and
-   check again, or allow them as they are. Every later run, including two run at once, compares
-   against the same stored records.
+   check again, or allow them as they are. Every later run compares against the same stored
+   records, and only one run at a time changes Cloudflare.
 
 The panel can turn agent email on once Cloudflare has verified the new sending records, usually 5
 to 15 minutes after the deploy creates them; until then it says it is still verifying. A later

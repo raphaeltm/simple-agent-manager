@@ -150,7 +150,7 @@ describe('agent email admin setup', () => {
       expect(plan).toMatchObject({
         state: 'needs_consent',
         mainDomainChanges: [],
-        zoneChanges: [SUBADDRESSING],
+        zoneChanges: [{ setting: 'subaddressing', allowed: false }],
         consentToken: expect.stringMatching(/^[0-9a-f]{64}$/),
       });
       expect(plan.zoneChanges[0]!.description).toContain(`name+anything@${MAIN}`);
@@ -382,11 +382,11 @@ describe('agent email admin setup', () => {
       const failure = await run(true).catch((caught: unknown) => caught);
 
       expect(failure).toBeInstanceOf(AgentEmailMainDomainChangedError);
-      expect((failure as Error).message).toContain('added MX route1.mx.cloudflare.net');
+      expect((failure as Error).message).toContain('added MX 10 route1.mx.cloudflare.net');
       expect((failure as Error).message).toContain('Agent email is still off');
       expect(error).toHaveBeenCalledWith('agent_email.setup_main_domain_changed', {
         mainDomain: MAIN,
-        differences: 'added MX route1.mx.cloudflare.net',
+        differences: 'added MX 10 route1.mx.cloudflare.net',
       });
       expect(fake.writes().map((call) => call.path)).toEqual(['/email/routing/dns']);
       expect(stored(AGENT_EMAIL_SETUP_KEY)).toBeNull();
@@ -397,7 +397,13 @@ describe('agent email admin setup', () => {
       expect(changed).toMatchObject({
         state: 'changed',
         mainDomainChanges: [
-          { type: 'MX', name: MAIN, content: 'route1.mx.cloudflare.net', change: 'add' },
+          {
+            type: 'MX',
+            name: MAIN,
+            content: 'route1.mx.cloudflare.net',
+            priority: 10,
+            change: 'add',
+          },
         ],
         consentToken: expect.stringMatching(/^[0-9a-f]{64}$/),
       });
@@ -410,6 +416,39 @@ describe('agent email admin setup', () => {
       expect(stored(AGENT_EMAIL_SETUP_KEY)).toMatchObject({
         mainDomainChanges: [expect.objectContaining({ content: 'route1.mx.cloudflare.net' })],
       });
+    });
+
+    it('binds consent to the priority of an unlisted MX record as well', async () => {
+      const fake = cloudflare({
+        ...NEW_ZONE,
+        firstUseAdds: (zone) => [
+          ...cloudflareRoutingFirstUse(zone),
+          { type: 'MX', name: zone, content: 'route1.mx.cloudflare.net', priority: 10 },
+        ],
+      });
+      await expect(run(true)).rejects.toBeInstanceOf(AgentEmailMainDomainChangedError);
+      const shown = await planAgentEmailSetup(env);
+      expect(shown.mainDomainChanges).toEqual([
+        {
+          type: 'MX',
+          name: MAIN,
+          content: 'route1.mx.cloudflare.net',
+          priority: 10,
+          change: 'add',
+        },
+      ]);
+      expect(shown.reason).toContain('added MX 10 route1.mx.cloudflare.net');
+
+      // The record moves to another priority after the admin read the plan.
+      const mx = fake.state.dns.find((record) => record.type === 'MX' && record.name === MAIN)!;
+      mx.priority = 90;
+      const stale = await runAgentEmailSetup(env, {
+        consentToken: shown.consentToken,
+        userId: 'admin-1',
+      }).catch((error: unknown) => error);
+      expect(stale).toBeInstanceOf(AgentEmailSetupRefusedError);
+      expect((stale as Error).message).toContain('different from what you allowed');
+      expect(await isAgentEmailOn(env)).toBe(false);
     });
 
     it('lets a fixed main domain pass the check again without new consent', async () => {
@@ -488,7 +527,7 @@ describe('agent email admin setup', () => {
       expect(stored(ATTEMPT_KEY)).toMatchObject({ startedBy: 'admin-1', baseline: [] });
     });
 
-    it('two runs at once, with Cloudflare adding only the listed records, both end on', async () => {
+    it('lets one run change Cloudflare at a time', async () => {
       let release!: () => void;
       const held = new Promise<void>((resolve) => {
         release = resolve;
@@ -505,17 +544,65 @@ describe('agent email admin setup', () => {
       await vi.waitFor(() =>
         expect(fake.calls.some((call) => call.path === '/email/routing/dns')).toBe(true)
       );
-      // The second run's plan already reflects the first run's attempt: nothing left to allow
-      // but subaddressing, which the first run's consent covers.
+      // The second run's plan reflects the first run's attempt: nothing new to allow.
       const midway = await planAgentEmailSetup(env);
       expect(midway).toMatchObject({ state: 'ready', consentToken: null });
-      const second = await runAgentEmailSetup(env, { consentToken: null, userId: 'admin-2' });
+      const writesBefore = fake.writes().length;
+      const second = await runAgentEmailSetup(env, { consentToken: null, userId: 'admin-2' }).catch(
+        (error: unknown) => error
+      );
+      expect(second).toBeInstanceOf(AgentEmailSetupRefusedError);
+      expect((second as Error).message).toContain('Another agent email setup run is in progress');
+      expect(fake.writes()).toHaveLength(writesBefore);
       release();
 
-      expect(second.state).toBe('on');
       expect((await first).state).toBe('on');
       expect(await isAgentEmailOn(env)).toBe(true);
       expect(stored(ATTEMPT_KEY)).toBeNull();
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toMatchObject({ updatedBy: 'admin-1' });
+    });
+
+    it('stops a run whose lease another run took over from turning agent email on', async () => {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let holdNext = true;
+      const fake = cloudflare({
+        ...NEW_ZONE,
+        hold: (call) => {
+          if (!holdNext || call.path !== '/email/routing/dns') return undefined;
+          holdNext = false;
+          return held;
+        },
+      });
+      const shown = await planAgentEmailSetup(env);
+      const first = runAgentEmailSetup(env, {
+        consentToken: shown.consentToken,
+        userId: 'admin-1',
+      }).catch((error: unknown) => error);
+      await vi.waitFor(() =>
+        expect(fake.calls.some((call) => call.path === '/email/routing/dns')).toBe(true)
+      );
+      // The first run's lease lapses, as if its Worker had died.
+      const attemptRow = stored(ATTEMPT_KEY)!;
+      delete attemptRow.updatedBy;
+      sqlite
+        .prepare('UPDATE platform_settings SET value = ? WHERE key = ?')
+        .run(
+          JSON.stringify({ ...attemptRow, leaseUntil: '2000-01-01T00:00:00.000Z' }),
+          ATTEMPT_KEY
+        );
+
+      expect((await runAgentEmailSetup(env, { consentToken: null, userId: 'admin-2' })).state).toBe(
+        'on'
+      );
+      release();
+
+      const failure = await first;
+      expect(failure).toBeInstanceOf(AgentEmailSetupRefusedError);
+      expect((failure as Error).message).toContain('took over before this one finished');
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toMatchObject({ updatedBy: 'admin-2' });
     });
 
     it('refuses a run that loses the start to a concurrent one', async () => {
@@ -527,6 +614,8 @@ describe('agent email admin setup', () => {
         baseline: [],
         allowed: [{ type: 'TXT', content: CLOUDFLARE_ROUTING_SPF }],
         zoneChanges: ['subaddressing'],
+        owner: 'run-2',
+        leaseUntil: '2999-01-01T00:00:00.000Z',
       };
       const fake = cloudflare({
         ...NEW_ZONE,
@@ -567,8 +656,14 @@ describe('agent email admin setup', () => {
       expect(stored(AGENT_EMAIL_SETUP_KEY)).toBeNull();
       expect(stored(ATTEMPT_KEY)).toMatchObject({ zoneChanges: ['subaddressing'] });
 
-      // Still not visible: the consent given holds, and the SPF record is not a surprise.
-      expect(await planAgentEmailSetup(env)).toMatchObject({ state: 'ready', consentToken: null });
+      // Still not visible: the consent given holds, and the SPF record is not a surprise. The
+      // subaddressing change is still to be made, so it is still shown, as allowed.
+      expect(await planAgentEmailSetup(env)).toMatchObject({
+        state: 'ready',
+        consentToken: null,
+        zoneChanges: [{ setting: 'subaddressing', allowed: true }],
+      });
+      expect(stored(ATTEMPT_KEY)).toMatchObject({ owner: null, leaseUntil: null });
       expect((await run()).state).toBe('pending');
 
       fake.state.dns.push(

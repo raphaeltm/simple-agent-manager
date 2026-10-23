@@ -48,6 +48,7 @@ function plan(overrides: Partial<AgentEmailSetupPlan>): AgentEmailSetupPlan {
 const SUBADDRESSING = {
   setting: 'subaddressing' as const,
   description: 'Turns on subaddressing for the whole zone.',
+  allowed: false,
 };
 
 let queryClient: QueryClient;
@@ -168,7 +169,13 @@ describe('AdminAgentEmailPanel', () => {
         plan({
           state: 'changed',
           mainDomainChanges: [
-            { type: 'MX', name: 'example.com', content: 'mx1.example.net', change: 'add' },
+            {
+              type: 'MX',
+              name: 'example.com',
+              content: 'mx1.example.net',
+              priority: 10,
+              change: 'add',
+            },
           ],
           consentToken: 'token-1',
           reason: 'The mail records of example.com now differ.',
@@ -178,7 +185,13 @@ describe('AdminAgentEmailPanel', () => {
         plan({
           state: 'changed',
           mainDomainChanges: [
-            { type: 'MX', name: 'example.com', content: 'mx1.example.net', change: 'add' },
+            {
+              type: 'MX',
+              name: 'example.com',
+              content: 'mx1.example.net',
+              priority: 10,
+              change: 'add',
+            },
             { type: 'MX', name: 'example.com', content: 'mx2.example.net', change: 'add' },
           ],
           consentToken: 'token-2',
@@ -190,7 +203,7 @@ describe('AdminAgentEmailPanel', () => {
     const label = 'Turn agent email on with the records of example.com as they are now';
     expect(await screen.findByRole('alert')).toHaveTextContent('now differ');
     expect(screen.getByTestId('agent-email-setup-changes')).toHaveTextContent(
-      'Added MX example.com — mx1.example.net'
+      'Added MX example.com — 10 mx1.example.net'
     );
     await user.click(screen.getByLabelText(label));
     expect(screen.getByRole('button', { name: 'Turn on agent email' })).toBeEnabled();
@@ -200,6 +213,20 @@ describe('AdminAgentEmailPanel', () => {
     expect(screen.getByLabelText(label)).not.toBeChecked();
     expect(screen.getByRole('button', { name: 'Turn on agent email' })).toBeDisabled();
     expect(mocks.runAgentEmailSetup).not.toHaveBeenCalled();
+  });
+
+  it('still shows a change allowed for an earlier run that has not been made yet', async () => {
+    mocks.fetchAdminAgentEmail.mockResolvedValue(OFF);
+    mocks.fetchAgentEmailSetupPlan.mockResolvedValue(
+      plan({ zoneChanges: [{ ...SUBADDRESSING, allowed: true }] })
+    );
+    render(<AdminAgentEmailPanel />);
+    expect(await screen.findByTestId('agent-email-allowed-changes')).toHaveTextContent(
+      'Turns on subaddressing for the whole zone.'
+    );
+    expect(screen.queryByText(/Nothing changes on/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Turn on agent email' })).toBeEnabled();
   });
 
   it('explains a refusal and offers no way to turn it on', async () => {

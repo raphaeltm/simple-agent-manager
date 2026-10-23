@@ -377,7 +377,7 @@ interface SetupPlanMock {
     content: string | null;
     change: 'add' | 'remove';
   }>;
-  zoneChanges: Array<{ setting: 'subaddressing'; description: string }>;
+  zoneChanges: Array<{ setting: 'subaddressing'; description: string; allowed: boolean }>;
   consentToken: string | null;
   reason: string | null;
 }
@@ -503,6 +503,7 @@ const CONSENT_PLAN: SetupPlanMock = {
     {
       setting: 'subaddressing',
       description: `Turns on subaddressing for the whole zone: mail to name+anything@${LONG_MAIN_DOMAIN}, or to any other address in the zone with a +, then goes where mail to the address without the + goes.`,
+      allowed: false,
     },
   ],
   consentToken: CONSENT_TOKEN,
@@ -625,6 +626,7 @@ test.describe('Agent email — admin panel', () => {
             type: 'MX',
             name: LONG_MAIN_DOMAIN,
             content: 'route1.mx.cloudflare.net',
+            priority: 10,
             change: 'add',
           },
           {

@@ -34,11 +34,15 @@ export function firstRoutingRecords(mainDomain: string): AgentEmailMainDomainRec
   ];
 }
 
-/** Subaddressing is a zone setting: it changes how every address in the zone is matched. */
-export function subaddressingChange(mainDomain: string): AgentEmailZoneChange {
+/**
+ * Subaddressing is a zone setting: it changes how every address in the zone is matched.
+ * `allowed` when the admin allowed it for an earlier run that stopped before making it.
+ */
+export function subaddressingChange(mainDomain: string, allowed: boolean): AgentEmailZoneChange {
   return {
     setting: 'subaddressing',
     description: `Turns on subaddressing for the whole zone: mail to name+anything@${mainDomain}, or to any other address in the zone with a +, then goes where mail to the address without the + goes.`,
+    allowed,
   };
 }
 
@@ -85,6 +89,7 @@ export function differencesFromBaseline(
     type: record.type,
     name: mainDomain,
     content: comparableDnsContent(record),
+    ...(record.priority === undefined ? {} : { priority: record.priority }),
     change,
   });
   return [
@@ -93,11 +98,15 @@ export function differencesFromBaseline(
   ];
 }
 
+/** A record as the admin reads it: `MX 10 mx.example.net`, `TXT v=spf1 ...`. */
+export function describeChange(change: AgentEmailMainDomainRecord): string {
+  const priority = change.priority === undefined ? '' : ` ${change.priority}`;
+  return `${change.type}${priority} ${change.content ?? ''}`.trim();
+}
+
 export function describeChanges(changes: AgentEmailMainDomainRecord[]): string {
   return changes
-    .map((change) =>
-      `${change.change === 'add' ? 'added' : 'removed'} ${change.type} ${change.content ?? ''}`.trim()
-    )
+    .map((change) => `${change.change === 'add' ? 'added' : 'removed'} ${describeChange(change)}`)
     .join(', ');
 }
 
@@ -113,10 +122,13 @@ export async function consentTokenFor(
     domain: plan.domain,
     mainDomain: plan.mainDomain,
     mainDomainChanges: plan.mainDomainChanges
-      .map((change) => `${change.change} ${change.type} ${change.name} ${change.content ?? ''}`)
+      .map(
+        (change) =>
+          `${change.change} ${change.type} ${change.name} ${change.priority ?? ''} ${change.content ?? ''}`
+      )
       .sort((a, b) => a.localeCompare(b)),
     zoneChanges: plan.zoneChanges
-      .map((change) => change.setting)
+      .map((change) => `${change.setting} ${change.allowed ? 'allowed' : 'new'}`)
       .sort((a, b) => a.localeCompare(b)),
   });
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));

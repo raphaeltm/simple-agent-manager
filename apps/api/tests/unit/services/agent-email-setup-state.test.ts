@@ -70,8 +70,16 @@ describe('agent email on-switch and setup attempt', () => {
     baseline: [{ type: 'MX', content: 'mx.example.net', priority: 10 }],
     allowed: [{ type: 'TXT', content: 'v=spf1 include:_spf.mx.cloudflare.net ~all' }],
     zoneChanges: ['subaddressing'],
+    owner: 'run-1',
+    leaseUntil: '2026-10-23T08:10:00.000Z',
     ...overrides,
   });
+
+  /** Turns agent email on as a setup run does: from an attempt it owns. */
+  async function completeFromAttempt(updatedBy = 'admin-1') {
+    const owned = await claimSetupAttempt(env, attempt());
+    expect(await completeAgentEmailSetup(env, record(), updatedBy, owned)).toBe(true);
+  }
 
   describe('on-switch', () => {
     it('is off with the binding alone, and on once the setup completed for this domain', async () => {
@@ -79,7 +87,7 @@ describe('agent email on-switch and setup attempt', () => {
       expect(await agentEmailConfig(env)).toEqual({ enabled: false, domain: null });
       expect(await activeAgentEmailSender(env)).toBeNull();
 
-      await completeAgentEmailSetup(env, record(), 'admin-1');
+      await completeFromAttempt();
 
       expect(await isAgentEmailOn(env)).toBe(true);
       expect(await agentEmailConfig(env)).toEqual({ enabled: true, domain: DOMAIN });
@@ -173,10 +181,25 @@ describe('agent email on-switch and setup attempt', () => {
     });
 
     it('completes by turning agent email on and dropping the attempt together', async () => {
-      await claimSetupAttempt(env, attempt());
-      await completeAgentEmailSetup(env, record(), 'admin-1');
+      await completeFromAttempt();
       expect(await isAgentEmailOn(env)).toBe(true);
       expect(await readSetupAttempt(env, DOMAIN)).toBeNull();
+    });
+
+    it('lets only the run that still owns the attempt complete', async () => {
+      const owned = await claimSetupAttempt(env, attempt());
+      // Another run took the lease over after this one's lapsed.
+      const takeover = attempt({ owner: 'run-2', startedBy: 'admin-2' });
+      expect(await replaceSetupAttempt(env, owned, takeover)).toBe(true);
+
+      expect(await completeAgentEmailSetup(env, record(), 'admin-1', owned)).toBe(false);
+      expect(await isAgentEmailOn(env)).toBe(false);
+      expect((await readSetupAttempt(env, DOMAIN))?.attempt).toEqual(takeover);
+
+      // Control: the run that owns it now completes.
+      const current = await readSetupAttempt(env, DOMAIN);
+      expect(await completeAgentEmailSetup(env, record(), 'admin-2', current!)).toBe(true);
+      expect(await isAgentEmailOn(env)).toBe(true);
     });
 
     it('refuses an unreadable attempt rather than starting over without its baseline', async () => {

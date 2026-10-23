@@ -359,6 +359,28 @@ Review of `f830eeedc..0e64f921d` ([PR comment](https://github.com/raphaeltm/simp
 5. **SHOULD-FIX, fixed.** Subaddressing is zone-wide, so when it is off the plan lists it as a
    `zoneChanges` entry that needs consent; the panel no longer says nothing changes.
 
+### Astra's re-review — task `01M5KYCPB2CXM6SKTHKNSC1G0E`, 2026-10-23
+
+Review of `0e64f921d..f33329d45` ([PR comment](https://github.com/raphaeltm/simple-agent-manager/pull/2413#issuecomment-6360985212)); Astra's runs passed 91/91 (API) and 21/21 (deploy), and its two extra checks reproduced items 1 and 2.
+
+1. **BLOCKER, fixed.** Runs sharing an attempt could still interleave: B passed its check, a
+   delayed A then enabled routing and rejected an unlisted MX, and B finished and deleted the
+   baseline. The attempt now carries a lease (`owner`, `leaseUntil`): a run takes it before
+   changing Cloudflare and releases it on every exit except success, so one run at a time changes
+   Cloudflare. Completing is conditioned on still owning the stored attempt, in one D1 batch
+   (`INSERT ... SELECT ... WHERE EXISTS` plus a conditional `DELETE`), so a run whose lease lapsed
+   and was taken over cannot turn agent email on. The lease is 20 Cloudflare API timeouts (10 min
+   by default) and only lapses on its own if a Worker died mid-run.
+2. **SHOULD-FIX, fixed.** Listed MX records keep their priority, which the panel shows and the
+   consent token covers.
+3. **OK** (cache removal). 4. **OK** (complete-or-fail DNS listing).
+4. **SHOULD-FIX, fixed.** A zone change allowed for a run that stopped before making it stays
+   listed (`allowed: true`), in the ready state too, without asking for consent again.
+
+- Also fixed after staging deploy 39925606556 failed with "Cloudflare listed 0 of an unknown
+  number of MX records": the deploy's `toEnvelope` dropped `result_info`. It keeps the counts now,
+  and the deploy test's fake passes every answer through `toEnvelope`.
+
 ## Open questions for review
 
 1. Is the capability address plus allowlist acceptable for a staging-only prototype, with DKIM verification as the production gate? Or must DKIM land in the prototype?

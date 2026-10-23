@@ -763,26 +763,30 @@ one of:
 | `ready`         | Setup can run and changes nothing on the main domain or in the zone's Email Routing settings            |
 | `on`            | Agent email is on                                                                                       |
 
-Each `mainDomainChanges` entry is `{ type, name, content, change }`. In `needs_consent` they are
-the records Cloudflare adds the first time a zone uses Email Routing (`content` is `null` for the
-DKIM key, which Cloudflare generates). In `changed` they are the differences from the records the
-earlier run started from, `change: "add"` or `"remove"`. `zoneChanges` lists zone settings the
-setup changes, today only `{ setting: "subaddressing", description }` when subaddressing is off.
-`consentToken` is set when the plan lists changes: it identifies exactly those changes. Returns
-`502` with Cloudflare's error when a Cloudflare call fails, or when Cloudflare lists only part of
-a name's records.
+Each `mainDomainChanges` entry is `{ type, name, content, priority?, change }`; `priority` is set
+for MX records. In `needs_consent` they are the records Cloudflare adds the first time a zone uses
+Email Routing (`content` is `null` for the DKIM key, which Cloudflare generates). In `changed` they
+are the differences from the records the earlier run started from, `change: "add"` or
+`"remove"`. `zoneChanges` lists zone settings the setup changes, today only
+`{ setting: "subaddressing", description, allowed }` while subaddressing is off; `allowed` is true
+when the admin allowed it for an earlier run that stopped before making it, which needs no new
+consent. `consentToken` is set when the plan lists changes the admin has not allowed yet: it
+identifies exactly the listed changes. Returns `502` with Cloudflare's error when a Cloudflare
+call fails, or when Cloudflare lists only part of a name's records.
 
 ### `POST /api/admin/agent-email/setup`
 
 Superadmin only. Body `{ "consentToken"?: string }`. Turns Email Routing on for
 `agents.<BASE_DOMAIN>`, turns on subaddressing, routes `agent@agents.<BASE_DOMAIN>` to this Worker,
 and records that agent email is on. When the plan lists changes, the body must carry that plan's
-`consentToken`. Before it changes anything, the run stores the main domain's MX and SPF records;
-this run, any concurrent run, and every later run compare the main domain against them. Returns
+`consentToken`. Before it changes anything, the run stores the main domain's MX and SPF records
+and takes a lease on the setup: one run at a time changes Cloudflare, and only the run holding the
+lease can turn agent email on. Every later run compares the main domain against the stored
+records. Returns
 the resulting plan: `on`, or `pending` when Email Routing is on but its records are not visible
 yet (run it again). Returns `409` when the plan is not `ready`, `needs_consent` or `changed`; when
-the token is missing or belongs to a plan with other changes; when another run starts at the same
-moment; and when the main domain's records changed beyond what was listed (agent email stays off,
+the token is missing or belongs to a plan with other changes; when another run holds the lease or
+starts at the same moment; and when the main domain's records changed beyond what was listed (agent email stays off,
 and the plan becomes `changed`). Returns `502` with Cloudflare's error when a Cloudflare call
 fails, and `429` past the `agentEmail.setupRunsPerHour` limit. Running it again once on changes
 nothing.

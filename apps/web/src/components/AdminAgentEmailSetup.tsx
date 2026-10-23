@@ -26,7 +26,8 @@ const CHECK_AGAIN_STATES = new Set<AgentEmailSetupPlan['state']>([
 ]);
 
 function recordContent(record: AgentEmailMainDomainRecord): string {
-  return record.content ?? 'a DKIM key Cloudflare generates';
+  const content = record.content ?? 'a DKIM key Cloudflare generates';
+  return record.priority === undefined ? content : `${record.priority} ${content}`;
 }
 
 function recordVerb(plan: AgentEmailSetupPlan, record: AgentEmailMainDomainRecord): string {
@@ -102,12 +103,30 @@ export function AdminAgentEmailSetup({ onTurnedOn }: Props) {
             // the neutral copy the ready state uses.
             plan.reason && <Alert variant="info">{plan.reason}</Alert>
           ) : plan.state === 'ready' ? (
-            <p className="text-sm text-fg-secondary break-words">
-              Turning it on sets up Email Routing for{' '}
-              <span className="font-mono">{plan.domain}</span> and sends its mail to this
-              deployment. Nothing changes on <span className="font-mono">{plan.mainDomain}</span> or
-              in the zone&rsquo;s Email Routing settings.
-            </p>
+            <div className="space-y-2 min-w-0">
+              <p className="text-sm text-fg-secondary break-words">
+                Turning it on sets up Email Routing for{' '}
+                <span className="font-mono">{plan.domain}</span> and sends its mail to this
+                deployment.{' '}
+                {plan.zoneChanges.length === 0 ? (
+                  <>
+                    Nothing changes on <span className="font-mono">{plan.mainDomain}</span> or in
+                    the zone&rsquo;s Email Routing settings.
+                  </>
+                ) : (
+                  'It also makes this change, which was allowed for an earlier run:'
+                )}
+              </p>
+              {plan.zoneChanges.length > 0 && (
+                <ul className="space-y-1" data-testid="agent-email-allowed-changes">
+                  {plan.zoneChanges.map((change) => (
+                    <li key={change.setting} className="text-xs text-fg-muted break-words">
+                      {change.description}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           ) : plan.state === 'on' ? (
             <p className="text-sm text-fg-secondary">Agent email is on.</p>
           ) : (
@@ -134,6 +153,7 @@ export function AdminAgentEmailSetup({ onTurnedOn }: Props) {
                 {plan.zoneChanges.map((change) => (
                   <li key={change.setting} className="text-xs text-fg-muted break-words">
                     {change.description}
+                    {change.allowed ? ' Allowed for an earlier run.' : ''}
                   </li>
                 ))}
               </ul>

@@ -68,6 +68,8 @@ export interface AgentEmailMainDomainRecord {
   name: string;
   /** Exact content when Cloudflare's value is known in advance; null for a key it generates. */
   content: string | null;
+  /** An MX record's priority; part of what the admin allows. */
+  priority?: number;
   /** `add`: Cloudflare adds it, or added it unexpectedly. `remove`: it disappeared. */
   change: 'add' | 'remove';
 }
@@ -76,6 +78,8 @@ export interface AgentEmailMainDomainRecord {
 export interface AgentEmailZoneChange {
   setting: 'subaddressing';
   description: string;
+  /** Allowed for an earlier run that stopped before making it; needs no new consent. */
+  allowed: boolean;
 }
 
 /**

@@ -14,8 +14,10 @@
  *
  * While a setup runs, and after one stops part-way, the attempt record holds the main domain's
  * MX and SPF records as they were before the setup first changed anything, and the changes the
- * admin allowed. Every later run, concurrent or not, checks the main domain against that
- * baseline, so no run can skip the check because an earlier one already turned routing on.
+ * admin allowed. Every later run checks the main domain against that baseline, so no run can
+ * skip the check because an earlier one already turned routing on. The record also carries the
+ * running setup's lease: one run at a time changes Cloudflare, and only the run holding the
+ * lease can turn agent email on and drop the record.
  */
 import type { AgentEmailConfigResponse } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
@@ -57,6 +59,9 @@ const setupAttemptSchema = v.object({
   allowed: v.array(mailRecordSchema),
   /** Zone settings the admin allowed the setup to change. */
   zoneChanges: v.array(v.picklist(['subaddressing'])),
+  /** The run that holds the lease, and when the lease lapses (a run that died held it). */
+  owner: v.nullable(v.string()),
+  leaseUntil: v.nullable(v.string()),
 });
 
 export type AgentEmailSetupRecord = v.InferOutput<typeof setupRecordSchema>;
@@ -186,20 +191,35 @@ export async function replaceSetupAttempt(
   return result.meta.changes === 1;
 }
 
-/** Turns agent email on and drops the attempt, in one transaction. */
+/**
+ * Turns agent email on and drops the attempt, in one transaction, only while `owned` is still
+ * the stored attempt: a run whose lease another run took over cannot finish. False if it lost.
+ */
 export async function completeAgentEmailSetup(
   env: Env,
   record: AgentEmailSetupRecord,
-  updatedBy: string
-): Promise<void> {
-  await env.DATABASE.batch([
+  updatedBy: string,
+  owned: StoredSetupAttempt
+): Promise<boolean> {
+  const attemptKey = setupAttemptKey(record.domain);
+  const [, dropped] = await env.DATABASE.batch([
     env.DATABASE.prepare(
-      `INSERT INTO platform_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)
+      `INSERT INTO platform_settings (key, value, updated_at, updated_by)
+       SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM platform_settings WHERE key = ? AND value = ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at,
          updated_by = excluded.updated_by`
-    ).bind(AGENT_EMAIL_SETUP_KEY, JSON.stringify(record), record.enabledAt, updatedBy),
-    env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(
-      setupAttemptKey(record.domain)
+    ).bind(
+      AGENT_EMAIL_SETUP_KEY,
+      JSON.stringify(record),
+      record.enabledAt,
+      updatedBy,
+      attemptKey,
+      owned.stored
+    ),
+    env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ? AND value = ?').bind(
+      attemptKey,
+      owned.stored
     ),
   ]);
+  return dropped?.meta.changes === 1;
 }
