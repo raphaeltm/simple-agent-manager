@@ -7,7 +7,7 @@ import type {
 import { DEFAULT_WORKSPACE_PROFILE, hasByocComputeCredential } from '@simple-agent-manager/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 
 import { selectProfileId } from '../../components/project-chat/profile-picker/model';
 import {
@@ -56,11 +56,11 @@ import type { ProvisioningState } from './types';
 import {
   CHAT_SESSION_LIST_LIMIT,
   CHAT_TASK_LIST_LIMIT,
-  EXECUTE_IDEA_PROMPT_TEMPLATE,
   SESSION_RECONCILE_INTERVAL_MS,
   SESSION_SYNC_INTERVAL_MS,
 } from './types';
 import { DEFAULT_ATTACHMENT_MESSAGE, useAttachments } from './useAttachments';
+import { useComposerPrefill } from './useComposerPrefill';
 import { useProfileChoice } from './useProfileChoice';
 import { useProjectSkills } from './useProjectSkills';
 import { useProvisioningTracker } from './useProvisioningTracker';
@@ -88,14 +88,9 @@ const EMPTY_PROVIDER_CATALOGS: ProviderCatalog[] = [];
 export function useProjectChatState() {
   const navigate = useNavigate();
   const { sessionId } = useParams<{ sessionId: string }>();
-  const [searchParams, setSearchParams] = useSearchParams();
   const { projectId, project } = useProjectContext();
   const queryScope = useQueryScope();
   const queryClient = useQueryClient();
-
-  // Execute-idea flow: pre-fill message and track ideaId for auto-linking
-  const executeIdeaId = searchParams.get('executeIdea');
-  const executeIdeaIdRef = useRef<string | null>(null);
 
   const { sessions, dispatchEvent, resetSessions } = useSessionReducer();
   const [loading, setLoading] = useState(true);
@@ -268,20 +263,9 @@ export function useProjectChatState() {
     }
   }, [multiplayerActive]);
 
-  useEffect(() => {
-    if (executeIdeaId && !sessionId) {
-      executeIdeaIdRef.current = executeIdeaId;
-      setMessage(EXECUTE_IDEA_PROMPT_TEMPLATE.replace('{ideaId}', executeIdeaId));
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          next.delete('executeIdea');
-          return next;
-        },
-        { replace: true }
-      );
-    }
-  }, [executeIdeaId, sessionId, setSearchParams]);
+  // Execute-idea and Deployments "Ask an agent" links pre-fill the composer; the idea ID is
+  // kept to link the chat that gets sent.
+  const executeIdeaIdRef = useComposerPrefill(sessionId, setMessage);
 
   const loadSessions = useCallback(async () => {
     if (hasLoadedRef.current) setIsRefreshing(true);
