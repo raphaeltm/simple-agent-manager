@@ -25,13 +25,14 @@ import {
   DEFAULT_WINDOW_SECONDS,
   getCurrentWindowStart,
 } from '../../middleware/rate-limit';
-import { agentEmailAddress, isAgentEmailAvailable, parseAgentEmailRecipient } from './address';
+import { agentEmailAddress, parseAgentEmailRecipient } from './address';
 import { sanitizeHeaderText } from './headers';
 import { recordIntake } from './inbound-delivery';
 import { type InboundAgentEmail, parseInboundEmail } from './inbound-message';
 import { attemptDelivery, type AttemptOptions } from './inbound-process';
 import { recordLoopbackReceipt } from './loopback';
 import { type AgentEmailLimits, getAgentEmailLimits } from './settings';
+import { isAgentEmailOn } from './setup-state';
 import { parseAllowedSenders } from './trigger-config';
 
 /** The parts of Cloudflare's ForwardableEmailMessage this handler uses. */
@@ -150,7 +151,7 @@ export async function handleInboundAgentEmail(
   deps: InboundDeps = {}
 ): Promise<InboundOutcome> {
   const now = deps.now?.() ?? new Date();
-  if (!isAgentEmailAvailable(env)) return reject(message, 'Agent email is not enabled here');
+  if (!(await isAgentEmailOn(env))) return reject(message, 'Agent email is not enabled here');
   const recipient = parseAgentEmailRecipient(message.to, env.BASE_DOMAIN);
   if (!recipient) return reject(message, 'Unknown address');
 

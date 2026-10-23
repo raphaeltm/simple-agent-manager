@@ -178,8 +178,8 @@ import {
   workspacePortsStateForStatus,
 } from './routes/workspaces/ports-readiness';
 import { scheduled } from './scheduled/handler';
-import { agentEmailConfig } from './services/agent-email/address';
 import { handleInboundAgentEmail } from './services/agent-email/inbound';
+import { agentEmailConfig } from './services/agent-email/setup-state';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
 import { assertSessionUserApproved } from './services/signup-approval';
 import { recordNodeRoutingMetric } from './services/telemetry';
@@ -728,9 +728,9 @@ app.get('/api/config/artifacts-enabled', (c) => {
 });
 
 // Public config — whether this deployment can receive and send agent email (preview).
-app.get('/api/config/agent-email', (c) => {
+app.get('/api/config/agent-email', async (c) => {
   applyCacheHeaders(c, 'public-config');
-  return c.json(agentEmailConfig(c.env));
+  return c.json(await agentEmailConfig(c.env));
 });
 
 // The VAPID public key is runtime configuration: deploy-generated keys do not

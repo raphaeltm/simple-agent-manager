@@ -19,6 +19,9 @@ export * from './agent-models';
 // Constants
 export * from './constants';
 
+// Mail DNS record comparison (agent email deploy step and admin setup)
+export * from './dns-mail-records';
+
 // VM Agent Contract (Zod schemas + types)
 export * from './vm-agent-contract';
 

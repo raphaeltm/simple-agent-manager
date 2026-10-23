@@ -15,6 +15,7 @@ import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { adminAgentEmailRoutes } from '../../../src/routes/admin-agent-email';
 import { updateAdminSettings } from '../../../src/services/admin-settings';
 import { LOOPBACK_SUBJECT } from '../../../src/services/agent-email/loopback';
+import { markAgentEmailSetUp } from '../../helpers/agent-email-tables';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const BASE_DOMAIN = 'fixture.example';
@@ -29,7 +30,7 @@ describe('admin agent email routes', () => {
   let send: ReturnType<typeof vi.fn>;
   let env: Env;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
     sqlite.exec(
@@ -71,6 +72,7 @@ describe('admin agent email routes', () => {
       BASE_DOMAIN,
       AGENT_EMAIL: { send } as unknown as SendEmail,
     } as Env;
+    await markAgentEmailSetUp(env);
   });
 
   afterEach(() => sqlite.close());

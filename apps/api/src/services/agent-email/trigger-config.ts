@@ -7,8 +7,9 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { errors } from '../../middleware/error';
-import { agentEmailAddress, isAgentEmailAvailable, normalizeMailbox } from './address';
+import { agentEmailAddress, normalizeMailbox } from './address';
 import { getAgentEmailLimits } from './settings';
+import { isAgentEmailOn } from './setup-state';
 
 type Database = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -32,8 +33,8 @@ export function toEmailTriggerConfig(
   };
 }
 
-export function requireAgentEmailAvailable(env: Env): void {
-  if (!isAgentEmailAvailable(env)) {
+export async function requireAgentEmailOn(env: Env): Promise<void> {
+  if (!(await isAgentEmailOn(env))) {
     throw errors.conflict('Email triggers are not available on this deployment');
   }
 }

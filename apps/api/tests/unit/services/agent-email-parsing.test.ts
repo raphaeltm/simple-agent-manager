@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   agentEmailAddress,
-  agentEmailConfig,
   generateAddressKey,
   normalizeMailbox,
   parseAgentEmailRecipient,
@@ -56,16 +55,6 @@ describe('agent email addresses', () => {
     ]) {
       expect(parseAgentEmailRecipient(rejected, BASE)).toBeNull();
     }
-  });
-
-  it('reports availability from the binding, not from configuration alone', () => {
-    expect(agentEmailConfig({ BASE_DOMAIN: 'fixture.example' })).toEqual({
-      enabled: false,
-      domain: null,
-    });
-    expect(
-      agentEmailConfig({ BASE_DOMAIN: 'fixture.example', AGENT_EMAIL: {} as SendEmail })
-    ).toEqual({ enabled: true, domain: 'agents.fixture.example' });
   });
 
   it('normalizes mailboxes and refuses anything that is not one', () => {

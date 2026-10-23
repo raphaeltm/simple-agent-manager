@@ -57,6 +57,8 @@ const TAIL_WORKER_WRANGLER_TOML_PATH = resolve(
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
 /** send_email binding for agent email; mirrors Env.AGENT_EMAIL in apps/api. */
 export const AGENT_EMAIL_BINDING_NAME = 'AGENT_EMAIL';
+/** The API Worker's own script name, shipped with the binding; mirrors Env in apps/api. */
+export const AGENT_EMAIL_WORKER_NAME_VAR = 'AGENT_EMAIL_WORKER_NAME';
 const SETUP_TOKEN_BYTES = 24;
 const DEFAULT_SANDBOX_CONTAINER_MAX_INSTANCES = 6;
 const DEFAULT_VM_AGENT_CONTAINER_MAX_INSTANCES = 3;
@@ -1156,8 +1158,13 @@ export function generateApiWorkerEnv(
       },
     },
 
-    // Vars: merge top-level defaults with dynamic overrides
-    vars: getApiWorkerVars(topLevel, outputs, stack, analyticsDataset, includeArtifactsBinding),
+    // Vars: merge top-level defaults with dynamic overrides. With the agent email binding, the
+    // Worker also learns its own script name: the admin setup points the `agent@` routing rule
+    // at it (apps/api/src/services/agent-email/setup.ts).
+    vars: {
+      ...getApiWorkerVars(topLevel, outputs, stack, analyticsDataset, includeArtifactsBinding),
+      ...(agentEmailBindingEnabled ? { [AGENT_EMAIL_WORKER_NAME_VAR]: workerName } : {}),
+    },
 
     // Dynamic bindings from Pulumi outputs
     d1_databases: [
@@ -1192,8 +1199,8 @@ export function generateApiWorkerEnv(
     ),
 
     // Agent email (preview). Generated here rather than declared at the top level of
-    // wrangler.toml: it exists only after configure-agent-email.ts verified routing and
-    // sending for this deploy, and its presence is the Worker's "email is available" signal.
+    // wrangler.toml: it exists only after configure-agent-email.ts prepared Email Sending for
+    // this deploy. It does not turn agent email on: an admin does that from the admin panel.
     ...(agentEmailBindingEnabled ? { send_email: [{ name: AGENT_EMAIL_BINDING_NAME }] } : {}),
 
     // Tail consumers (conditional — omitted on first deploy when tail worker doesn't exist)
@@ -1303,9 +1310,9 @@ async function main(): Promise<void> {
     artifactsNamespace
   );
 
-  // Agent email binding ships only when configure-agent-email.ts verified this deploy.
+  // Agent email binding ships only when configure-agent-email.ts prepared this deploy.
   const agentEmailDomain = readAgentEmailMarker();
-  console.log(`  Agent email: ${agentEmailDomain ? `configured for ${agentEmailDomain}` : 'off'}`);
+  console.log(`  Agent email: ${agentEmailDomain ? `prepared for ${agentEmailDomain}` : 'off'}`);
 
   // Generate complete env section for API worker
   if (!config.env) {

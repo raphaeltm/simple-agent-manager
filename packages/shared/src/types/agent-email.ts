@@ -61,3 +61,40 @@ export interface AgentEmailConfigResponse {
   /** Domain agent addresses live on, e.g. `agents.example.com`, when enabled. */
   domain: string | null;
 }
+
+/** A DNS record Cloudflare adds to the main domain when a zone first turns on Email Routing. */
+export interface AgentEmailMainDomainRecord {
+  type: string;
+  name: string;
+  /** Exact content when Cloudflare's value is known in advance; null for a key it generates. */
+  content: string | null;
+}
+
+/**
+ * Where the admin setup stands (`/api/admin/agent-email/setup`):
+ * - `unavailable`: this deployment has not prepared agent email; `reason` says what is missing
+ * - `verifying`: Cloudflare is still verifying the sending records
+ * - `refused`: setup would change mail records the main domain already has
+ * - `needs_consent`: the zone is new to Email Routing, so Cloudflare will add `mainDomainChanges`
+ * - `ready`: setup changes nothing on the main domain
+ * - `pending`: routing was turned on but its records are not visible yet; run setup again
+ * - `on`: agent email is on
+ */
+export type AgentEmailSetupState =
+  'unavailable' | 'verifying' | 'refused' | 'needs_consent' | 'ready' | 'pending' | 'on';
+
+export interface AgentEmailSetupPlan {
+  state: AgentEmailSetupState;
+  /** Domain agent addresses live on, e.g. `agents.example.com`. */
+  domain: string | null;
+  /** The zone's root domain, which `mainDomainChanges` apply to. */
+  mainDomain: string | null;
+  mainDomainChanges: AgentEmailMainDomainRecord[];
+  reason: string | null;
+}
+
+/** `POST /api/admin/agent-email/setup`. */
+export interface AgentEmailSetupRequest {
+  /** Required when the plan lists main-domain changes: the admin allows exactly those. */
+  allowMainDomainChanges?: boolean;
+}

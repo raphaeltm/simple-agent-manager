@@ -17,7 +17,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { notifyFailedSweeps } from '../../scheduled/failed-sweep-notifications';
-import { agentEmailAddress, isAgentEmailAvailable } from './address';
+import { agentEmailAddress } from './address';
 import {
   type ClaimedDelivery,
   claimForRetry,
@@ -28,6 +28,7 @@ import {
 } from './inbound-delivery';
 import { attemptDelivery, type AttemptOptions, type DeliveryContext } from './inbound-process';
 import { type AgentEmailLimits, getAgentEmailLimits } from './settings';
+import { isAgentEmailOn } from './setup-state';
 
 type Database = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -153,7 +154,7 @@ export async function runAgentEmailRecovery(
   waitUntil?: (work: Promise<unknown>) => void,
   options: Omit<AttemptOptions, 'refuseBusy'> = {}
 ): Promise<AgentEmailRecoveryStats | { skipped: 'agent_email_off' }> {
-  if (!isAgentEmailAvailable(env)) return { skipped: 'agent_email_off' };
+  if (!(await isAgentEmailOn(env))) return { skipped: 'agent_email_off' };
   const clock = options.now ?? (() => new Date());
   const db = drizzle(env.DATABASE, { schema });
   const limits = await getAgentEmailLimits(env);

@@ -621,6 +621,10 @@ export {
 // Agent email (prototype)
 export type {
   AgentEmailConfigResponse,
+  AgentEmailMainDomainRecord,
+  AgentEmailSetupPlan,
+  AgentEmailSetupRequest,
+  AgentEmailSetupState,
   EmailTemplateContext,
   EmailTriggerConfig,
   EmailTriggerConfigInput,

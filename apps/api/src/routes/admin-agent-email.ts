@@ -1,7 +1,11 @@
 /**
- * Superadmin agent email status and loopback self-test (preview). The loopback sends one
- * fixed message from `agent+loopback@agents.<BASE_DOMAIN>` to an existing email trigger, so an
- * operator can prove routing and sending end to end without a personal mailbox.
+ * Superadmin agent email status, setup and loopback self-test (preview).
+ *
+ * - The setup (`/setup`) turns agent email on after the deploy prepared it; see
+ *   `services/agent-email/setup.ts`.
+ * - The loopback sends one fixed message from `agent+loopback@agents.<BASE_DOMAIN>` to an
+ *   existing email trigger, so an operator can prove routing and sending end to end without a
+ *   personal mailbox.
  */
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -11,7 +15,7 @@ import * as v from 'valibot';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getAuth, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
-import { errors } from '../middleware/error';
+import { AppError, errors } from '../middleware/error';
 import {
   checkRateLimit,
   createRateLimitKey,
@@ -19,17 +23,24 @@ import {
   getCurrentWindowStart,
 } from '../middleware/rate-limit';
 import { jsonValidator } from '../schemas';
-import {
-  agentEmailAddress,
-  agentEmailConfig,
-  parseAgentEmailRecipient,
-} from '../services/agent-email/address';
+import { agentEmailAddress, parseAgentEmailRecipient } from '../services/agent-email/address';
+import { CloudflareEmailApiError } from '../services/agent-email/cloudflare-email-api';
 import { readLoopbackStatus, sendLoopbackTest } from '../services/agent-email/loopback';
-import { agentEmailSenderFor } from '../services/agent-email/provider';
 import { getAgentEmailLimits } from '../services/agent-email/settings';
+import {
+  AgentEmailMainDomainChangedError,
+  AgentEmailSetupRefusedError,
+  planAgentEmailSetup,
+  runAgentEmailSetup,
+} from '../services/agent-email/setup';
+import { activeAgentEmailSender, agentEmailConfig } from '../services/agent-email/setup-state';
 
 const LoopbackSchema = v.object({
   to: v.pipe(v.string(), v.trim(), v.toLowerCase(), v.maxLength(254)),
+});
+
+const SetupSchema = v.object({
+  allowMainDomainChanges: v.optional(v.boolean()),
 });
 
 const adminAgentEmailRoutes = new Hono<{ Bindings: Env }>();
@@ -37,11 +48,42 @@ const adminAgentEmailRoutes = new Hono<{ Bindings: Env }>();
 adminAgentEmailRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
 
 adminAgentEmailRoutes.get('/', async (c) =>
-  c.json({ ...agentEmailConfig(c.env), loopback: await readLoopbackStatus(c.env) })
+  c.json({ ...(await agentEmailConfig(c.env)), loopback: await readLoopbackStatus(c.env) })
 );
 
+/** The setup's own refusals are conflicts; a failed Cloudflare call is an upstream error. */
+function setupError(error: unknown): unknown {
+  if (error instanceof AgentEmailSetupRefusedError) return errors.conflict(error.message);
+  if (error instanceof AgentEmailMainDomainChangedError) return errors.conflict(error.message);
+  if (error instanceof CloudflareEmailApiError) {
+    return new AppError(502, 'CLOUDFLARE_ERROR', error.message);
+  }
+  return error;
+}
+
+/** What the setup would do now, including the main-domain records it would let Cloudflare add. */
+adminAgentEmailRoutes.get('/setup', async (c) => {
+  try {
+    return c.json(await planAgentEmailSetup(c.env));
+  } catch (error) {
+    throw setupError(error);
+  }
+});
+
+adminAgentEmailRoutes.post('/setup', jsonValidator(SetupSchema), async (c) => {
+  try {
+    const plan = await runAgentEmailSetup(c.env, {
+      allowMainDomainChanges: c.req.valid('json').allowMainDomainChanges === true,
+      userId: getAuth(c).user.id,
+    });
+    return c.json(plan);
+  } catch (error) {
+    throw setupError(error);
+  }
+});
+
 adminAgentEmailRoutes.post('/loopback', jsonValidator(LoopbackSchema), async (c) => {
-  const sender = agentEmailSenderFor(c.env);
+  const sender = await activeAgentEmailSender(c.env);
   if (!sender) throw errors.conflict('Agent email is not enabled on this deployment');
   const recipient = parseAgentEmailRecipient(c.req.valid('json').to, c.env.BASE_DOMAIN);
   if (recipient?.kind !== 'trigger') {

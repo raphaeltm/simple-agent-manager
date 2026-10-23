@@ -405,7 +405,7 @@ describe('sync wrangler config', () => {
     expect(existsSync(summaryPath)).toBe(false);
   });
 
-  it('ships the agent email send binding only when this deploy configured agent email', () => {
+  it('ships the agent email send binding and Worker name only when this deploy prepared agent email', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     const checkedIn = TOML.parse(
       readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
@@ -415,7 +415,11 @@ describe('sync wrangler config', () => {
     const on = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null, true);
 
     expect(off.send_email).toBeUndefined();
+    expect(off.vars?.AGENT_EMAIL_WORKER_NAME).toBeUndefined();
     expect(on.send_email).toEqual([{ name: 'AGENT_EMAIL' }]);
+    // The admin setup points the agent@ routing rule at this exact script.
+    expect(on.vars?.AGENT_EMAIL_WORKER_NAME).toBe(on.name);
+    expect(on.name).toBe('s123abc-api-staging');
     // Never declared at the top level, so Wrangler cannot warn about a top-level binding
     // that a generated environment omits.
     expect(checkedIn.send_email).toBeUndefined();

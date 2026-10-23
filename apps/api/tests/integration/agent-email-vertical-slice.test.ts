@@ -28,9 +28,14 @@ import { agentEmailSenderFor } from '../../src/services/agent-email/provider';
 import { runAgentEmailRecovery } from '../../src/services/agent-email/recovery';
 import { AgentEmailReplyError, replyToTriggerEmail } from '../../src/services/agent-email/reply';
 import { getAgentEmailLimits } from '../../src/services/agent-email/settings';
+import {
+  __resetAgentEmailSetupCacheForTest,
+  AGENT_EMAIL_SETUP_KEY,
+  agentEmailConfig,
+} from '../../src/services/agent-email/setup-state';
 import { type McpTokenData, storeMcpToken } from '../../src/services/mcp-token';
 import type { TriggerTaskSubmitter } from '../../src/services/trigger-admission';
-import { createAgentEmailTables } from '../helpers/agent-email-tables';
+import { createAgentEmailTables, markAgentEmailSetUp } from '../helpers/agent-email-tables';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
 
 // The Worker entry imports Cloudflare runtime modules that cannot load in Node. Stub only those,
@@ -247,7 +252,7 @@ describe('agent email vertical slice', () => {
   let mail: ReturnType<typeof contractSendBinding>;
   let submitter: ReturnType<typeof vi.fn<TriggerTaskSubmitter>>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sqlite = new Database(':memory:');
     const emailTables = new Set(['triggerEmailConfigs', 'triggerEmailMessages']);
     createAllSchemaTables(
@@ -334,6 +339,8 @@ describe('agent email vertical slice', () => {
         branchName: 'sam/email-task',
       };
     });
+    // An admin has run the setup; the "not set up yet" tests start from a fresh database.
+    await markAgentEmailSetUp(env);
   });
 
   afterEach(() => {
@@ -434,6 +441,26 @@ describe('agent email vertical slice', () => {
     ]);
   });
 
+  it('refuses an agent reply while agent email is not set up, and sends it once it is', async () => {
+    const message = inbound(rawEmail(), { from: 'alice@example.com' });
+    await handleInboundAgentEmail(message, env, { submitter });
+    const executionId = submitter.mock.calls[0]![1].triggerExecutionId;
+    sqlite.prepare('DELETE FROM platform_settings WHERE key = ?').run(AGENT_EMAIL_SETUP_KEY);
+    __resetAgentEmailSetupCacheForTest();
+
+    const refused = await callMcpTool(token(executionId), 'reply_to_email', { body: 'Done.' });
+
+    expect(refused.body).toMatchObject({
+      error: { message: 'Agent email is not enabled on this deployment' },
+    });
+    expect(mail.sent).toHaveLength(0);
+
+    await markAgentEmailSetUp(env);
+    const sent = await callMcpTool(token(executionId), 'reply_to_email', { body: 'Done.' });
+    expect(sent.body).toMatchObject({ result: { content: [{ type: 'text' }] } });
+    expect(mail.sent).toHaveLength(1);
+  });
+
   describe('inbound refusals (each paired with the accepted path above)', () => {
     const cases: Array<{
       name: string;
@@ -526,6 +553,31 @@ describe('agent email vertical slice', () => {
       expect(outcome).toMatchObject({ kind: 'rejected' });
       expect(delivery.setReject).toHaveBeenCalledWith(expect.stringMatching(/not enabled/));
       expect(submitter).not.toHaveBeenCalled();
+    });
+
+    it('refuses mail while the binding exists but no admin has run the setup', async () => {
+      // The state a fresh deploy leaves: binding present, no setup record.
+      sqlite.prepare('DELETE FROM platform_settings WHERE key = ?').run(AGENT_EMAIL_SETUP_KEY);
+      __resetAgentEmailSetupCacheForTest();
+
+      const refused = inbound(rawEmail());
+      await expect(handleInboundAgentEmail(refused, env, { submitter })).resolves.toMatchObject({
+        kind: 'rejected',
+      });
+      expect(refused.setReject).toHaveBeenCalledWith(expect.stringMatching(/not enabled/));
+      await expect(agentEmailConfig(env)).resolves.toEqual({ enabled: false, domain: null });
+      await expect(runAgentEmailRecovery(env)).resolves.toEqual({ skipped: 'agent_email_off' });
+      expect(submitter).not.toHaveBeenCalled();
+
+      // The same deployment once an admin has run the setup.
+      await markAgentEmailSetUp(env);
+      await expect(
+        handleInboundAgentEmail(inbound(rawEmail()), env, { submitter })
+      ).resolves.toMatchObject({ kind: 'accepted' });
+      await expect(agentEmailConfig(env)).resolves.toEqual({
+        enabled: true,
+        domain: `agents.${BASE_DOMAIN}`,
+      });
     });
 
     it('rejects a burst above the per-trigger hourly limit', async () => {

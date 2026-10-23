@@ -17,7 +17,7 @@ import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import type { CreateTriggerSchema } from '../schemas/triggers';
 import { generateAddressKey } from './agent-email/address';
-import { requireAgentEmailAvailable, resolveAllowedSenders } from './agent-email/trigger-config';
+import { requireAgentEmailOn, resolveAllowedSenders } from './agent-email/trigger-config';
 import { cronToNextFire, validateCronExpression } from './cron-utils';
 import type { McpTokenData } from './mcp-token';
 import {
@@ -181,7 +181,7 @@ export async function createTrigger(
 ) {
   const projectId = project.id;
   const { name, promptTemplate } = validateTriggerCreation(env, body);
-  if (body.sourceType === 'email') requireAgentEmailAvailable(env);
+  if (body.sourceType === 'email') await requireAgentEmailOn(env);
   await validateReferences(db, projectId, body.agentProfileId, body.skillId);
   const allowedSenders =
     body.sourceType === 'email'

@@ -1,7 +1,7 @@
 /** MCP adapter for agent email replies. The operation lives in services/agent-email/reply. */
 import type { Env } from '../../env';
-import { agentEmailSenderFor } from '../../services/agent-email/provider';
 import { AgentEmailReplyError, replyToTriggerEmail } from '../../services/agent-email/reply';
+import { activeAgentEmailSender } from '../../services/agent-email/setup-state';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -27,7 +27,7 @@ export async function handleReplyToEmail(
     const result = await replyToTriggerEmail(
       env,
       { projectId: tokenData.projectId, taskId: tokenData.taskId, body: params.body },
-      agentEmailSenderFor(env)
+      await activeAgentEmailSender(env)
     );
     return jsonRpcSuccess(requestId, {
       content: [{ type: 'text', text: JSON.stringify({ sent: true, ...result }, null, 2) }],

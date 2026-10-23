@@ -253,6 +253,59 @@ It is idempotent, runs before `sync-wrangler-config.ts`, and is unit-tested agai
   5. The reply is delivered back through routing, and the loopback status records it as `Auto-Submitted`.
 - [ ] The PR is a draft and CI is green. Astra has reviewed the plan and the PR.
 
+## Admin-run setup (2026-10-23, Raphaël: "Do it")
+
+Answers open question 5. The deploy prepares everything that stays under `agents.<BASE_DOMAIN>`;
+an admin turns agent email on from the admin panel, after seeing what Cloudflare will add to the
+main domain.
+
+### Checks done first
+
+- **Send binding before the sending domain verifies.** The Workers send API defines send-time
+  errors `E_SENDER_NOT_VERIFIED` and `E_SENDER_DOMAIN_NOT_AVAILABLE`, so the sender is checked when
+  mail is sent, not at deploy. The deploy may add the binding while Cloudflare verifies.
+- **Email Sending and the main domain.** Cloudflare's domain configuration page: Email Sending
+  "creates DNS records on a `cf-bounce.` subdomain ... separate from the records used by Email
+  Routing", and "Email Routing DNS records are configured on the root domain". Staging agrees:
+  onboarding sending for `agents.sammy.party` left `sammy.party` unchanged. A live second-subdomain
+  test was skipped: `sammy.party` already uses Email Routing, so it cannot show a zone new to it,
+  and Cloudflare keeps sending records locked for the life of the configuration.
+
+### Design
+
+- **Deploy** (`configure-agent-email.ts`), only when the preview input is on and the token has the
+  three permissions: onboard Email Sending for `agents.<BASE_DOMAIN>`, create its records (all under
+  the subdomain), check the apex is unchanged, and write the marker. It never calls an Email
+  Routing endpoint. `sync-wrangler-config.ts` then adds the `AGENT_EMAIL` send binding and an
+  `AGENT_EMAIL_WORKER_NAME` var (the routing rule's target), even while sending still verifies.
+- **On-switch:** a `platform_settings` row (`agent_email.setup`) that only the admin setup writes.
+  Agent email is on only when the binding exists and that row names the current domain. Every
+  check that read "binding present" reads this instead, cached per isolate.
+- **Admin setup** (`GET`/`POST /api/admin/agent-email/setup`, superadmin), run by the Worker with its
+  `CF_API_TOKEN` (the same token as the deploy):
+  - **Plan:** whether the zone already uses Email Routing, whether the subdomain's routing is on,
+    whether sending is verified, and the main-domain records Cloudflare will add.
+  - **Refuse** a zone new to Email Routing whose main domain already has MX or SPF records (untested).
+  - **Consent:** in a zone new to Email Routing with a clean main domain, the admin must confirm the
+    SPF record and DKIM key Cloudflare will add.
+  - **Run:** turn routing on for the subdomain by name, check the main domain changed exactly as
+    disclosed, turn on subaddressing, point the `agent@` rule at this Worker, then write the row.
+- **Existing deployments:** staging already has routing configured by older deploys. After this
+  change it stays off until an admin presses Enable once; the plan then needs no consent.
+- **Production** stays off: its deploy never prepares agent email, so it has no binding.
+
+### Checklist
+
+- [ ] Shared types for the setup plan and status
+- [ ] Deploy step prepares only, writes the marker while sending verifies; tests prove it never calls a routing endpoint
+- [ ] `sync-wrangler-config.ts` adds `AGENT_EMAIL_WORKER_NAME` with the binding; tests
+- [ ] Setup row store and the cached on-switch; every caller of `isAgentEmailAvailable` and the senders moved to it
+- [ ] Setup service and admin routes; tests against a strict fake Cloudflare (consent, refusal, unexpected apex change, pending MX, idempotent re-run, sending still verifying)
+- [ ] Vertical slice: binding present but not set up refuses inbound mail, replies and email automations
+- [ ] Admin panel: plan, consent and result states; component tests; Playwright audit at 375 and 1280
+- [ ] Docs: self-hosting, email triggers, API reference
+- [ ] Staging: deploy, admin Enable, loopback end to end, cleanup
+
 ## Open questions for review
 
 1. Is the capability address plus allowlist acceptable for a staging-only prototype, with DKIM verification as the production gate? Or must DKIM land in the prototype?

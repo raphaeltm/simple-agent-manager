@@ -10,6 +10,7 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { updateAdminSettings } from '../../../src/services/admin-settings';
+import { markAgentEmailSetUp } from '../../helpers/agent-email-tables';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 vi.mock('../../../src/middleware/auth', () => ({
@@ -57,7 +58,7 @@ describe('email trigger routes', () => {
   let env: Env;
   let app: Hono<{ Bindings: Env }>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
     sqlite.exec(
@@ -92,6 +93,7 @@ describe('email trigger routes', () => {
     app = new Hono<{ Bindings: Env }>();
     app.onError(handleAppError);
     app.route('/api/projects/:projectId/triggers', triggersRoutes);
+    await markAgentEmailSetUp(env);
   });
 
   afterEach(() => sqlite.close());

@@ -7,10 +7,7 @@ import {
   AGENT_EMAIL_ADDRESS_KEY_LENGTH,
   AGENT_EMAIL_LOCAL_PART,
   AGENT_EMAIL_SUBDOMAIN_LABEL,
-  type AgentEmailConfigResponse,
 } from '@simple-agent-manager/shared';
-
-import type { Env } from '../../env';
 
 /** Crockford base32, lower-cased: no i, l, o or u. 32 symbols, so a byte maps without bias. */
 const ADDRESS_ALPHABET = '0123456789abcdefghjkmnpqrstvwxyz';
@@ -23,18 +20,6 @@ export type AgentEmailRecipient = { kind: 'trigger'; key: string } | { kind: 'lo
 
 export function agentEmailDomain(baseDomain: string): string {
   return `${AGENT_EMAIL_SUBDOMAIN_LABEL}.${baseDomain.trim().toLowerCase()}`;
-}
-
-/** Agent email is available only when the deploy verified routing and sending. */
-export function isAgentEmailAvailable(env: Pick<Env, 'AGENT_EMAIL' | 'BASE_DOMAIN'>): boolean {
-  return Boolean(env.AGENT_EMAIL && env.BASE_DOMAIN?.trim());
-}
-
-export function agentEmailConfig(
-  env: Pick<Env, 'AGENT_EMAIL' | 'BASE_DOMAIN'>
-): AgentEmailConfigResponse {
-  const enabled = isAgentEmailAvailable(env);
-  return { enabled, domain: enabled ? agentEmailDomain(env.BASE_DOMAIN) : null };
 }
 
 export function generateAddressKey(): string {

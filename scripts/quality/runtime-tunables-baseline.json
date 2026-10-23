@@ -1355,5 +1355,7 @@
     "WORKSPACE_TOOL_TIMEOUT_MS",
     "WWW_PAGES_PROJECT_NAME"
   ],
-  "bootstrapExceptions": {}
+  "bootstrapExceptions": {
+    "AGENT_EMAIL_WORKER_NAME": "Deploy-generated name of this Worker's own script, emitted by scripts/deploy/sync-wrangler-config.ts only together with the AGENT_EMAIL send binding. The agent email admin setup points the Email Routing rule at it, so it must not be admin-editable: another value would route agent mail to a different Worker."
+  }
 }
