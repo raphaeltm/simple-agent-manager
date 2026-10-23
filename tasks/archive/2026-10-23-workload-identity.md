@@ -25,7 +25,7 @@ Implement and release short-lived OIDC tokens through exec_with_secrets. Include
 - [x] Unit/integration tests for issuance, auth, provenance, redaction, retries, UI behavior
 - [x] Local lint/typecheck/test/build and visual audit
 - [x] Independent local security/domain/completion reviews
-- [ ] Staging end-to-end token injection/signature verification and UI verification
+- [x] Staging end-to-end token injection/signature verification and UI verification
 - [ ] PR green, CodeRabbit requested/waited/addressed, merge and production smoke
 
 ## Acceptance
@@ -47,11 +47,11 @@ No GCP setup required. Claims derive only from trusted stored context. IDs are i
 - Final completion/doc review passed; stale admin-setting count corrected.
 - Staging deployment: run 39960270167, runtime commit 6fd025cceb78aae339b35e4d9a9d4c1f12797c0e. Live verification pending.
 
-## Durable release continuation (2026-10-23 13:35 UTC)
+## Staging result and release continuation (2026-10-23 13:52 UTC)
 
-- Staging run [39960270167](https://github.com/raphaeltm/simple-agent-manager/actions/runs/39960270167) is still in progress at Deploy API Worker. Health and new discovery endpoint return 200. Do not dispatch a duplicate.
-- Runtime SHA: `6fd025cceb78aae339b35e4d9a9d4c1f12797c0e`. Subsequent commits contain evidence/task notes only. No PR exists yet.
-- Completion subscription: `0101c8ee-4c9d-4d19-92c7-a2ff706a10a7`; expires 2026-10-23 21:34:43 UTC; commit-scoped GitHub completion events, same-session delivery.
-- Accepted one-shot fallback: `5de1c406-003a-4256-9019-c9848c02986c`, due 2026-10-23 13:40 UTC, expiry 14:10 UTC. Target chat `f7c065ab-39ae-40eb-ae70-178bb7c539a7`. Inspect/cancel obsolete own waits after reconciliation; do not blindly renew.
-- No staging test task/workspace has been created. Prepared prompt is committed at `tasks/evidence/2026-10-23-workload-identity/staging-probe.md`; local scripts and PR draft are in `.codex/tmp/oidc-*`. Managed secret variables are placeholders in ordinary shells; use `exec_with_secrets` for `SAM_PLAYWRIGHT_PRIMARY_USER` and `CF_TOKEN`.
-- Remaining: live token/metadata verification, cleanup, PR with linked screenshots, exact-head CI, CodeRabbit request/wait, merge and minimal production smoke. Human authorization for the full release is confirmed in the saved transcript.
+- Deployment 39960270167 succeeded, including smoke tests, on runtime SHA `6fd025cceb78aae339b35e4d9a9d4c1f12797c0e`. Later commits are documentation/evidence only.
+- Real VM `exec_with_secrets` with empty secretNames and OIDC audience verified public JWKS signature, issuer, audience, actual runtime/profile/session/task claims and 300-second TTL. Captured stdout/stderr both contain `[REDACTED]`, exit 0; safe result is in the evidence directory.
+- Live mobile Playwright verified metadata and profile-ID clipboard copying with no page errors. Desktop verified unavailable identity after runtime deletion. All six local stress screenshots had already passed review on both viewports. Initial desktop multi-page navigation stayed on the loading spinner; direct navigation subsequently loaded normally with no page errors. No product change was required.
+- Test workspace `01M5MFX8ZEH0ZZ3VMQJDC9DPM0` and node `01M5MFQJ513V9G49JHK59YQKY0` deleted through normal APIs; Cloudflare D1 readback confirmed both absent. No staging compute remains from this test.
+- Staging completion event processed/acked; subscription `0101c8ee-4c9d-4d19-92c7-a2ff706a10a7` and fallback `5de1c406-003a-4256-9019-c9848c02986c` cancelled. Repeated lookup after cancellation correctly lacked visibility.
+- Implementation and staging complete. Release gates remain tracked in the PR: exact-head CI, CodeRabbit request/wait, merge and minimal production smoke. Human authorization for full release is confirmed in the saved transcript.

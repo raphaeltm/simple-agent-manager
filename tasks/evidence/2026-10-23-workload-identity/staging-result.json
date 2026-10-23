@@ -1,0 +1,10 @@
+{
+  "jobId": "sx-7172a19247755c481e739e68b0924ce46d85e0b7647b6c09f6a100d36c49a22b",
+  "status": "completed",
+  "stdout": "{\"signatureVerified\":true,\"audienceVerified\":true,\"issuerVerified\":true,\"profileVerified\":true,\"identityFieldsPresent\":true,\"ttlSeconds\":300,\"chatSessionId\":\"1f2dd4a7-a4fb-4632-bdc9-7e90656f2a3a\",\"agentSessionId\":\"01M5MFYFF0E81XWMHH2XPJ5GDX\",\"taskId\":\"01M5MFQ7MPDCXQY8XDC9G7F2P3\"}\n[REDACTED]\n",
+  "stderr": "[REDACTED]\n",
+  "exitCode": 0,
+  "timedOut": false,
+  "redacted": true,
+  "truncated": false
+}
