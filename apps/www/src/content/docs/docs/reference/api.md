@@ -786,8 +786,9 @@ records. Returns
 the resulting plan: `on`, or `pending` when Email Routing is on but its records are not visible
 yet (run it again). Returns `409` when the plan is not `ready`, `needs_consent` or `changed`; when
 the token is missing or belongs to a plan with other changes; when another run holds the lease or
-starts at the same moment; and when the main domain's records changed beyond what was listed (agent email stays off,
-and the plan becomes `changed`). Returns `502` with Cloudflare's error when a Cloudflare call
+starts at the same moment; when this run's lease lapses, stalls or is taken over before it finishes
+(it stops before its next Cloudflare change, and agent email stays off); and when the main domain's
+records changed beyond what was listed (agent email stays off, and the plan becomes `changed`). Returns `502` with Cloudflare's error when a Cloudflare call
 fails, and `429` past the `agentEmail.setupRunsPerHour` limit. Running it again once on changes
 nothing.
 

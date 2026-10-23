@@ -734,6 +734,58 @@ describe('agent email admin setup', () => {
       expect(stored(ATTEMPT_KEY)).toBeNull();
     });
 
+    it('stops before its next Cloudflare change when renewing the lease stalled', async () => {
+      const fake = cloudflare(NEW_ZONE);
+      const shown = await planAgentEmailSetup(env);
+      // The first renewal's D1 write returns six minutes later, past half the ten-minute lease.
+      const database = env.DATABASE;
+      let stall = true;
+      env.DATABASE = {
+        ...database,
+        prepare: (sql: string) => {
+          const statement = database.prepare(sql);
+          if (!stall || !sql.startsWith('UPDATE platform_settings SET value = ?, updated_at')) {
+            return statement;
+          }
+          return {
+            ...statement,
+            bind: (...values: unknown[]) => {
+              const bound = statement.bind(...values);
+              return {
+                ...bound,
+                run: async () => {
+                  const result = await bound.run();
+                  stall = false;
+                  vi.setSystemTime(Date.now() + 6 * 60 * 1000);
+                  return result;
+                },
+              };
+            },
+          };
+        },
+      } as unknown as D1Database;
+      vi.useFakeTimers({ toFake: ['Date'] });
+      let failure: unknown;
+      try {
+        failure = await runAgentEmailSetup(env, {
+          consentToken: shown.consentToken,
+          userId: 'admin-1',
+        }).catch((error: unknown) => error);
+      } finally {
+        vi.useRealTimers();
+        env.DATABASE = database;
+      }
+
+      expect(stall).toBe(false);
+      expect(failure).toBeInstanceOf(AgentEmailSetupRefusedError);
+      expect((failure as Error).message).toContain('stalled while renewing its lease');
+      expect(fake.writes()).toEqual([]);
+      expect(await isAgentEmailOn(env)).toBe(false);
+      // It gave the lease back with the baseline, so the next run goes ahead.
+      expect(stored(ATTEMPT_KEY)).toMatchObject({ startedBy: 'admin-1', owner: null });
+      expect((await run(true)).state).toBe('on');
+    });
+
     it('refuses a run that loses the start to a concurrent one', async () => {
       let armed = false;
       const competitor = {

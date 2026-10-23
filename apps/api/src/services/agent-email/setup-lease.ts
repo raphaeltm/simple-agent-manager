@@ -1,12 +1,13 @@
 /**
  * The lease an agent email setup run holds on its attempt record (`./setup-state.ts`) while it
- * changes Cloudflare. One run at a time holds it. The run renews it before every Cloudflare
- * write and stops if it lapsed or was taken over, so a stalled run sends nothing more once
- * another run may have started. Only a run whose lease is still live can turn agent email on.
+ * changes Cloudflare. One run at a time holds it. The run renews it right before every
+ * Cloudflare write and stops if it lapsed, was taken over, or the renewal itself stalled, so a
+ * stalled run sends nothing more once another run may have started. Only a run whose lease is
+ * still live by the database's clock can turn agent email on.
  *
- * A write already sent cannot be called back. Because the lease is renewed right before each
- * write and outlasts the Cloudflare API timeout many times over, another run can start before
- * such a write lands only if Cloudflare applied it minutes after it was sent.
+ * A write already sent cannot be called back. Each write goes out with at least half the lease
+ * left, ten Cloudflare API timeouts, so another run can start before such a write lands only if
+ * Cloudflare applied it minutes after it was sent.
  */
 import type {
   AgentEmailMainDomainRecord,
@@ -129,16 +130,21 @@ export class SetupLease {
         'This agent email setup run outlasted its lease, so another run may have started. Check again.'
       );
     }
-    const next = {
-      ...this.owned.attempt,
-      leaseUntil: new Date(now + setupLeaseMs(this.env)).toISOString(),
-    };
+    const leaseMs = setupLeaseMs(this.env);
+    const next = { ...this.owned.attempt, leaseUntil: new Date(now + leaseMs).toISOString() };
     if (!(await replaceSetupAttempt(this.env, this.owned, next))) {
       throw new AgentEmailSetupRefusedError(
         'Another agent email setup run took over before this one finished. Check again.'
       );
     }
     this.owned = { attempt: next, stored: JSON.stringify(next) };
+    // The new lease counts from before the write that stored it. If that write was slow, the
+    // Cloudflare change that follows would go out with little of the lease left.
+    if (Date.parse(next.leaseUntil) - Date.now() < leaseMs / 2) {
+      throw new AgentEmailSetupRefusedError(
+        'This agent email setup run stalled while renewing its lease, so it stopped before its next Cloudflare change. Check again.'
+      );
+    }
   }
 
   /** Gives the lease back, keeping the baseline. A run that lost the lease has nothing to give. */

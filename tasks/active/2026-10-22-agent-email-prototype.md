@@ -413,6 +413,12 @@ Review of `4257c67da..c7df05425` ([PR comment](https://github.com/raphaeltm/simp
   "lets no attempt complete without a lease owner…". Each fix reverted on its own reddens exactly
   its tests: the renewal (the two rule-write cases), the D1 clock (the clock case), and the owner
   guard (the owner case).
+- Also fixed, same class (found while checking the fixes, before Astra's next verification):
+  `renew()` stamped the new lease from the Worker's clock before its own D1 write, so a renewal
+  whose write returned late could leave the next Cloudflare write with little or none of the
+  lease left. It now refuses unless at least half the new lease remains when the write returns.
+  Test: "stops before its next Cloudflare change when renewing the lease stalled" (the first
+  renewal's write returns six minutes late); removing the check reddens exactly that test.
 - Also fixed: the Validate Deploy Scripts CI job had failed since `87c336d7c`. `configure-agent-email.ts`
   imports `packages/shared/src/dns-mail-records.ts`, outside the deploy tsconfig's `rootDir`
   (TS6059). That config does not emit, so its `rootDir` is now the repository root (`a7c83f31e`).
