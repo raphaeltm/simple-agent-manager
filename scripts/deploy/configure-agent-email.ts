@@ -37,7 +37,13 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { Api, type CloudflareRequest, fetchRequest, isAuthFailure } from './cloudflare-rest.js';
+import {
+  Api,
+  CloudflareApiError,
+  type CloudflareRequest,
+  fetchRequest,
+  isAuthFailure,
+} from './cloudflare-rest.js';
 import { DEPLOYMENT_CONFIG } from './config.js';
 
 /** Subdomain label under BASE_DOMAIN. Mirrors AGENT_EMAIL_SUBDOMAIN_LABEL in packages/shared. */
@@ -48,6 +54,12 @@ export const AGENT_EMAIL_RULE_NAME = 'SAM agent email';
 export const AGENT_EMAIL_MARKER_FILE = 'agent-email-domain';
 
 const CLOUDFLARE_MX_PATTERN = /\.mx\.cloudflare\.net\.?$/i;
+/**
+ * Cloudflare's "An identical record already exists" (dns_records create). The record this step
+ * wanted is there, so the write converged. Its neighbour 81053 (a different record type already
+ * holds the name) is a real conflict and still fails the deploy.
+ */
+const CF_DNS_IDENTICAL_RECORD_CODE = 81058;
 const RULES_PAGE_SIZE = 50;
 const MAX_RULE_PAGES = 20;
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
@@ -125,12 +137,14 @@ function normalizeName(name: string): string {
   return name.toLowerCase().replace(/\.$/, '');
 }
 
+/**
+ * Comparable record content. A TXT value can be stored as several quoted strings, which Cloudflare
+ * does for long values such as DKIM keys; its meaning is the strings joined.
+ */
 function normalizeContent(content: string): string {
-  return content
-    .trim()
-    .replace(/^"(.*)"$/s, '$1')
-    .replace(/\.$/, '')
-    .toLowerCase();
+  const quoted = content.trim().match(/"(?:[^"\\]|\\.)*"/g);
+  const value = quoted ? quoted.map((chunk) => chunk.slice(1, -1)).join('') : content.trim();
+  return value.replace(/\.$/, '').toLowerCase();
 }
 
 async function listDnsRecords(api: Api, zoneId: string, type: string, name: string) {
@@ -268,14 +282,23 @@ async function ensureDnsRecord(
   const existing = await listDnsRecords(api, zoneId, record.type, record.name);
   const wanted = normalizeContent(record.content);
   if (existing.some((candidate) => normalizeContent(candidate.content) === wanted)) return;
-  await api.call('POST', `/zones/${zoneId}/dns_records`, {
-    type: record.type,
-    name: record.name,
-    content: record.content,
-    ttl: 1,
-    proxied: false,
-    ...(record.priority === undefined ? {} : { priority: record.priority }),
-  });
+  try {
+    await api.call('POST', `/zones/${zoneId}/dns_records`, {
+      type: record.type,
+      name: record.name,
+      content: record.content,
+      ttl: 1,
+      proxied: false,
+      ...(record.priority === undefined ? {} : { priority: record.priority }),
+    });
+  } catch (error) {
+    const identical =
+      error instanceof CloudflareApiError &&
+      (error.response.body.errors ?? []).some(
+        (entry) => entry.code === CF_DNS_IDENTICAL_RECORD_CODE
+      );
+    if (!identical) throw error;
+  }
 }
 
 async function findSendingSubdomain(

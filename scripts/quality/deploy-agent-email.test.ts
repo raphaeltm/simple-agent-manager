@@ -52,6 +52,8 @@ class FakeCloudflare {
   onSubdomainRoutingEnabled: ((fake: FakeCloudflare) => void) | null = null;
   /** Whether the routing records show up as soon as routing is turned on for a subdomain. */
   routingRecordsAppear = true;
+  /** Test hook: creating a DNS record at this name fails with this Cloudflare error. */
+  dnsCreateConflict: { name: string; code: number; message: string } | null = null;
   calls: Array<{ method: HttpMethod; path: string }> = [];
 
   /** What turning routing on for subdomain `name` leaves behind (dashboard or API). */
@@ -65,6 +67,12 @@ class FakeCloudflare {
     }
     this.dns.push({ type: 'TXT', name, content: '"v=spf1 include:_spf.mx.cloudflare.net ~all"' });
     return this;
+  }
+
+  /** How Cloudflare compares record content: quoting and spacing do not change a value. */
+  static sameContent(a: string, b: string): boolean {
+    const canonical = (value: string) => value.replace(/["\s]/g, '').toLowerCase();
+    return canonical(a) === canonical(b);
   }
 
   apexMailRecords(): DnsRecord[] {
@@ -87,7 +95,7 @@ class FakeCloudflare {
               (record) =>
                 record.type === wanted.type &&
                 record.name === wanted.name &&
-                record.content === wanted.content
+                FakeCloudflare.sameContent(record.content, wanted.content)
             )
           )),
     }));
@@ -131,6 +139,28 @@ class FakeCloudflare {
         ttl: 1,
         proxied: false,
       });
+      const conflict = this.dnsCreateConflict;
+      if (conflict && conflict.name === record.name) {
+        return {
+          status: 400,
+          body: { success: false, errors: [{ code: conflict.code, message: conflict.message }] },
+        };
+      }
+      const identical = this.dns.some(
+        (existing) =>
+          existing.type === record.type &&
+          existing.name === record.name &&
+          FakeCloudflare.sameContent(existing.content, record.content)
+      );
+      if (identical) {
+        return {
+          status: 400,
+          body: {
+            success: false,
+            errors: [{ code: 81058, message: 'An identical record already exists.' }],
+          },
+        };
+      }
       this.dns.push({
         type: record.type,
         name: record.name,
@@ -484,6 +514,55 @@ describe('configureAgentEmail', () => {
 
     await expect(run(fake)).rejects.toThrow(/outside agents\.fixture\.example/);
     expect(fake.dns.some((r) => r.name === '_dmarc.fixture.example')).toBe(false);
+  });
+
+  it('recognises sending records Cloudflare created itself, even long TXT values split into strings', async () => {
+    const fake = new FakeCloudflare();
+    fake.onSendingSubdomainCreated = (cloudflare) => {
+      for (const records of Object.values(cloudflare.sendingDns)) {
+        for (const record of records) {
+          // Cloudflare stores a long TXT value as several quoted strings.
+          const content =
+            record.type === 'TXT'
+              ? `"${record.content.slice(0, 12)}" "${record.content.slice(12)}"`
+              : record.content;
+          cloudflare.dns.push({ ...record, content });
+        }
+      }
+    };
+
+    await expect(run(fake)).resolves.toMatchObject({ status: 'configured' });
+
+    expect(
+      fake.calls.filter((call) => call.method === 'POST' && call.path.endsWith('/dns_records'))
+    ).toEqual([]);
+  });
+
+  it('carries on when Cloudflare says a sending record it holds is identical', async () => {
+    const fake = new FakeCloudflare();
+    fake.onSendingSubdomainCreated = (cloudflare) => {
+      // Spaced differently from the sending API's copy, so the step cannot tell it is the same.
+      cloudflare.dns.push({
+        type: 'TXT',
+        name: '_dmarc.agents.fixture.example',
+        content: '"v=DMARC1;  p=none"',
+      });
+    };
+
+    await expect(run(fake)).resolves.toMatchObject({ status: 'configured' });
+
+    expect(fake.dns.filter((record) => record.name === '_dmarc.agents.fixture.example')).toHaveLength(1);
+  });
+
+  it('still fails the deploy when another record already holds a sending record name', async () => {
+    const fake = new FakeCloudflare();
+    fake.dnsCreateConflict = {
+      name: '_dmarc.agents.fixture.example',
+      code: 81053,
+      message: 'An A, AAAA, or CNAME record with that host already exists.',
+    };
+
+    await expect(run(fake)).rejects.toThrow(/81053/);
   });
 
   it('stays pending, with sending set up, while Cloudflare is still verifying it', async () => {
