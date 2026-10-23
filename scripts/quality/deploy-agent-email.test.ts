@@ -551,7 +551,9 @@ describe('configureAgentEmail', () => {
 
     await expect(run(fake)).resolves.toMatchObject({ status: 'configured' });
 
-    expect(fake.dns.filter((record) => record.name === '_dmarc.agents.fixture.example')).toHaveLength(1);
+    expect(
+      fake.dns.filter((record) => record.name === '_dmarc.agents.fixture.example')
+    ).toHaveLength(1);
   });
 
   it('still fails the deploy when another record already holds a sending record name', async () => {
