@@ -84,6 +84,10 @@ export function ProjectSettingsAgents() {
         )}
       </section>
 
+      {/* Above the long per-agent overrides list so it is found without scrolling past
+          every agent's credential card. */}
+      {projectId && <ProjectAgentModelsSection projectId={projectId} />}
+
       <section className="glass-surface rounded-lg p-4 grid gap-3">
         <div>
           <h2 className="sam-type-section-heading m-0 text-fg-primary">Agent Overrides</h2>
@@ -102,8 +106,6 @@ export function ProjectSettingsAgents() {
           />
         )}
       </section>
-
-      {projectId && <ProjectAgentModelsSection projectId={projectId} />}
     </div>
   );
 }
