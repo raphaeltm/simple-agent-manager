@@ -259,7 +259,7 @@ It is idempotent, runs before `sync-wrangler-config.ts`, and is unit-tested agai
 2. Should we widen `triggered_by` with the 0202 table swap, or reuse `'webhook'` for the prototype to avoid the migration?
 3. Is the superadmin "Send test email" acceptable as a lasting diagnostic, or should it be avoided?
 4. Is subaddressing (`agent+key@`) acceptable, versus a literal routing rule per address created at runtime (`key@`)? The latter needs a runtime token with Email Routing write, and is capped at 200 rules per domain.
-5. **Open, for Raphaël (asked 2026-10-22).** The first time Email Routing is turned on in a zone, Cloudflare adds its SPF record (an ordinary, editable record) and a locked DKIM key (`cf2024-1._domainkey`) to the main domain, whichever subdomain is named. The deploy's apex check refuses that, so today a zone new to Email Routing fails its first agent email deploy and completes on the next. What it does to a main domain that already has an SPF record (production's Google Workspace) is unverified; a second SPF record would break SPF there. Options: (a) the deploy accepts exactly Cloudflare's records on a main domain without mail, and merges Cloudflare's `include:` into an existing SPF record; or (b) agent email stays off until an admin opts in with a deploy setting. The fresh-zone test in `scripts/quality/deploy-agent-email.test.ts` and the docs' "known preview limitation" change with the answer.
+5. **Open, for Raphaël (asked 2026-10-22).** The first time Email Routing is turned on in a zone, Cloudflare adds its SPF record (an ordinary, editable record) and a locked DKIM key (`cf2024-1._domainkey`) to the main domain, whichever subdomain is named. The deploy's apex check refuses that, so today a zone new to Email Routing fails its first agent email deploy and completes on the next. What it does to a main domain that already has an SPF record (production's Google Workspace) is unverified; a second SPF record would break SPF there. Options: (a) the deploy accepts exactly Cloudflare's records on a main domain without mail, and merges Cloudflare's `include:` into an existing SPF record; or (b) agent email stays off until an admin opts in with a deploy setting. The fresh-zone test in `scripts/quality/deploy-agent-email.test.ts` and the docs' "known preview limitation" change with the answer. Astra's final review rates today's behaviour a blocker and recommends (b), with automatic SPF merging left until a zone with its own SPF record has been tested.
 
 ## Plan review outcome — Astra High, task `01M5J9WS98ZJ4P7RTPJWYGCH2S`, 2026-10-22
 
@@ -349,6 +349,22 @@ Review of `4e4bca278` ([PR comment](https://github.com/raphaeltm/simple-agent-ma
 
 The reviewer's session went to sleep after posting instead of completing its task, so the durable wait never fired; the result was found on the PR.
 
+### Final review — Astra High, task `01M5K7GQY79T253AVX9QWJ1WHN`, 2026-10-23
+
+Review of `ace021f86..a95d42851` and the staging end-to-end evidence ([PR comment](https://github.com/raphaeltm/simple-agent-manager/pull/2413#issuecomment-6355578077)). Astra's run of the deploy suite passed 22/22.
+
+1. **BLOCKER: the deploy cannot promise apex isolation in a zone new to Email Routing.** The named enable still turns zone-wide routing on and adds Cloudflare's SPF and DKIM at the apex. The checks stop that run but cannot undo the change, and a retry accepts the changed baseline. Astra's fix: gate that first enable, before the call, on an explicit opt-in. **Open:** this is open question 5, for Raphaël.
+2. **OK:** the 81058 tolerance covers only DNS record creation and that one code; 81053 and other errors still fail, with no retry loop.
+3. **NIT (fixed):** the staging workflow's `agent_email` input still said `mail.BASE_DOMAIN`.
+4. **SHOULD-FIX (fixed): the 81058 test leaned on the fake folding whitespace and case,** which no staging evidence supports.
+   - The fake now equates only a TXT value stored as quoted strings with the joined value, which is what deploy run 39882259188 showed.
+   - The 81058 test now has the identical record appear between the step's lookup and its create.
+   - An unrelated create error (403, code 10000) still fails the deploy, beside the 81053 control.
+   - The deploy step itself lowercased TXT payloads before comparing, so a DKIM key differing only in case counted as present. TXT payloads now compare byte for byte once joined, and a test covers the case-only difference.
+   - Each guard was removed once and turned exactly its own tests red.
+
+Astra's recommendation for question 5: an explicit admin opt-in before the first enable in a zone new to Email Routing, with no dashboard step. Automatic SPF merging should wait until a zone with its own SPF record has been tested.
+
 ## Notes / log
 
 - 2026-10-22: Research complete. Astra plan review: approve-with-changes (above). Building with those changes.
@@ -380,3 +396,8 @@ The reviewer's session went to sleep after posting instead of completing its tas
   - Finding: the profile is Instant (`cf-container`), but the run provisioned a Hetzner VM. Every trigger type does this; it predates this PR. Filed `tasks/backlog/2026-10-23-automations-ignore-instant-profile-runtime.md`.
   - Finding: the automation page's personal-key banner repeated one sentence for two credentials. Unrelated; filed `tasks/backlog/2026-10-23-credential-warning-lines-indistinguishable.md`.
 - 2026-10-23: The deploy tests' fake Cloudflare left a zone's routing off and its apex untouched when a subdomain was enabled, which staging disproved. It now turns the zone on and adds Cloudflare's apex SPF and DKIM on the first enable; 10 tests that started from a fresh zone failed against it, and now start from a zone already using Email Routing. A new test records today's fresh-zone behavior (first deploy fails the apex check, the next completes). The self-hosting and email trigger docs no longer say the main domain's routing stays off, and describe the limitation.
+- 2026-10-23: Astra's final review (above): the blocker is open question 5; the nit and the should-fix are fixed.
+- 2026-10-23: `main` gained `0204_agent_model_access.sql` (#2414), so the branch was rebased. This branch's `0204_agent_email_triggers.sql` keeps its name: staging applied it as `d1_migrations` id 233 (and `0205_agent_email_durable_intake.sql` as 234) before #2414's 0204 (id 235). Renaming it would replay its `CREATE TABLE` statements on staging. The pair is allowlisted in `scripts/quality/check-migration-ordering.ts`, as earlier PRs did. The two 0204 migrations touch different tables.
+  - Conflicts resolved during the rebase: `reply_to_email` now registers in `main`'s new `MCP_TOOL_HANDLERS` table instead of the `index.ts` switch.
+  - The admin settings categories keep both `AI models` and `Email`. The registry has 68 settings: 44 at the merge base, 12 from #2414 and 12 for agent email.
+  - The self-hosting and admin settings guides keep both new paragraphs and sections.

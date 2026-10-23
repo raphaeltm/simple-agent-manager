@@ -55,7 +55,14 @@ export interface AdminSettingDefinition {
   readonly type: AdminSettingType;
   readonly defaultValue: AdminSettingValue;
   readonly category:
-    'OAuth' | 'Connector' | 'Operations' | 'Trials' | 'Collaboration' | 'Chat' | 'AI models' | 'Email';
+    | 'OAuth'
+    | 'Connector'
+    | 'Operations'
+    | 'Trials'
+    | 'Collaboration'
+    | 'Chat'
+    | 'AI models'
+    | 'Email';
   readonly description: string;
   readonly secret: boolean;
   readonly risky: boolean;

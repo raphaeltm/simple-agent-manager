@@ -10,7 +10,7 @@
  */
 
 import { readdirSync, statSync } from 'node:fs';
-import { join, resolve, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 
 const DEFAULT_MIGRATION_DIRS = [
   resolve(import.meta.dirname, '../../apps/api/src/db/migrations'),
@@ -102,6 +102,12 @@ const LEGACY_ALLOWED_DUPLICATE_FILES = new Map<string, Map<string, Set<string>>>
           '0130_task_supersession_marker.sql',
         ]),
       ],
+      // PR #2413's agent email migration was applied to staging on 2026-10-22 as
+      // d1_migrations id 233 (with 0205_agent_email_durable_intake.sql as id 234),
+      // before #2414 claimed prefix 0204 on main; staging applied that one as id 235.
+      // Wrangler keys applied migrations by exact filename, so renumbering this file
+      // would replay its CREATE TABLE statements against staging.
+      ['0204', new Set(['0204_agent_email_triggers.sql', '0204_agent_model_access.sql'])],
     ]),
   ],
 ]);
