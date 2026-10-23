@@ -12,12 +12,41 @@ function cleanOptionalString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
 }
 
-function releaseSubmittedBy(manifestJson: string): {
+export interface DeploymentReleaseSubmittedBy {
   userId: string | null;
   workspaceId: string | null;
   taskId: string | null;
   agentProfileId: string | null;
-} | null {
+}
+
+/** Normalizes a release manifest's `submittedBy` object. Anything that isn't an object is null. */
+export function toReleaseSubmittedBy(value: unknown): DeploymentReleaseSubmittedBy | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const rec = value as Record<string, unknown>;
+  return {
+    userId: cleanOptionalString(rec.userId),
+    workspaceId: cleanOptionalString(rec.workspaceId),
+    taskId: cleanOptionalString(rec.taskId),
+    agentProfileId: cleanOptionalString(rec.agentProfileId),
+  };
+}
+
+/**
+ * Parses the `submittedBy` JSON text that `json_extract(manifest, '$.submittedBy')` returns.
+ * A malformed value is null, never an error, so one bad row cannot fail a list.
+ */
+export function parseReleaseSubmittedByJson(raw: unknown): DeploymentReleaseSubmittedBy | null {
+  if (typeof raw !== 'string') return null;
+  try {
+    return toReleaseSubmittedBy(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function releaseSubmittedBy(manifestJson: string): DeploymentReleaseSubmittedBy | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(manifestJson);
@@ -27,17 +56,7 @@ function releaseSubmittedBy(manifestJson: string): {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return null;
   }
-  const submittedBy = (parsed as Record<string, unknown>).submittedBy;
-  if (typeof submittedBy !== 'object' || submittedBy === null || Array.isArray(submittedBy)) {
-    return null;
-  }
-  const rec = submittedBy as Record<string, unknown>;
-  return {
-    userId: cleanOptionalString(rec.userId),
-    workspaceId: cleanOptionalString(rec.workspaceId),
-    taskId: cleanOptionalString(rec.taskId),
-    agentProfileId: cleanOptionalString(rec.agentProfileId),
-  };
+  return toReleaseSubmittedBy((parsed as Record<string, unknown>).submittedBy);
 }
 
 export async function buildDeploymentEnvironmentResponse(

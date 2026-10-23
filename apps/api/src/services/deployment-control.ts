@@ -1,3 +1,4 @@
+import { DEPLOYMENT_ENVIRONMENT_NAME_RE } from '@simple-agent-manager/shared';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
@@ -13,7 +14,7 @@ const TERMINAL_FAILURE_STATUSES = new Set(['failed', 'failed-initial', 'reverted
 const APPLY_SUCCESS_STATUSES = new Set(['applied', 'reverted', 'failed']);
 const AGENT_CREATED_ENVIRONMENT_SOURCE = 'agent-mcp';
 const DEFAULT_RESERVED_AGENT_ENVIRONMENT_NAMES = ['prod', 'production'];
-export const DEPLOYMENT_ENVIRONMENT_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+export { DEPLOYMENT_ENVIRONMENT_NAME_RE };
 
 export interface DeploymentHeartbeatState {
   appliedSeq?: number;

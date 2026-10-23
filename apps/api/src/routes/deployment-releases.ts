@@ -6,7 +6,7 @@
  */
 
 import { parseCompose, resolveManifest, validateManifest } from '@simple-agent-manager/shared';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -16,6 +16,8 @@ import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { collectSecretNames, renderCompose } from '../services/compose-renderer';
+import { parseReleaseSubmittedByJson } from '../services/deployment-environment-summary';
+import { listDeploymentReleaseEvents } from '../services/deployment-release-events';
 import { buildDeploymentRouteTargets } from '../services/deployment-routing';
 import { decrypt } from '../services/encryption';
 import {
@@ -126,6 +128,16 @@ export async function loadResolvedSecrets(
 // =============================================================================
 
 const deploymentReleaseRoutes = new Hono<{ Bindings: Env }>();
+
+/** Apply events returned per request: enough for several re-applies of one release. */
+const DEFAULT_RELEASE_EVENTS_LIMIT = 200;
+const MAX_RELEASE_EVENTS_LIMIT = 500;
+
+function parseReleaseEventsLimit(raw: string | undefined): number {
+  const parsed = Number.parseInt(raw ?? '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_RELEASE_EVENTS_LIMIT;
+  return Math.min(parsed, MAX_RELEASE_EVENTS_LIMIT);
+}
 
 /**
  * POST /api/projects/:projectId/environments/:envId/releases
@@ -268,7 +280,11 @@ export { buildProjectImageResolver, resolveManifestImageTags };
 
 /**
  * GET /api/projects/:projectId/environments/:envId/releases
- * List releases for an environment (newest first).
+ * List releases for an environment (newest first), each with who submitted it.
+ *
+ * `submittedBy` lives in the manifest JSON. Reading it with `json_extract` keeps the large
+ * manifests out of the response path; `json_valid` turns a malformed manifest into a null
+ * instead of an SQL error, so one bad row cannot fail the list.
  */
 deploymentReleaseRoutes.get(
   '/:projectId/environments/:envId/releases',
@@ -290,12 +306,20 @@ deploymentReleaseRoutes.get(
         status: schema.deploymentReleases.status,
         createdBy: schema.deploymentReleases.createdBy,
         createdAt: schema.deploymentReleases.createdAt,
+        submittedByJson: sql<
+          string | null
+        >`CASE WHEN json_valid(${schema.deploymentReleases.manifest}) THEN json_extract(${schema.deploymentReleases.manifest}, '$.submittedBy') END`,
       })
       .from(schema.deploymentReleases)
       .where(eq(schema.deploymentReleases.environmentId, envId))
       .orderBy(desc(schema.deploymentReleases.version));
 
-    return c.json({ releases: rows });
+    return c.json({
+      releases: rows.map(({ submittedByJson, ...row }) => ({
+        ...row,
+        submittedBy: parseReleaseSubmittedByJson(submittedByJson),
+      })),
+    });
   }
 );
 
@@ -321,6 +345,49 @@ deploymentReleaseRoutes.get(
       ...row,
       manifest: JSON.parse(row.manifest),
     });
+  }
+);
+
+/**
+ * GET /api/projects/:projectId/environments/:envId/releases/:releaseId/events
+ * The steps the deployment server reported while applying a release, oldest first
+ * (`deployment_release_events`, written by the node's apply-event callback).
+ */
+deploymentReleaseRoutes.get(
+  '/:projectId/environments/:envId/releases/:releaseId/events',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
+    const projectId = c.req.param('projectId');
+    const envId = c.req.param('envId');
+    const releaseId = c.req.param('releaseId');
+    const userId = getUserId(c);
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireProjectAccess(db, projectId, userId);
+    await requireOwnedEnvironment(db, envId, projectId);
+    // Only the version is needed: don't load the manifest.
+    const [release] = await db
+      .select({ id: schema.deploymentReleases.id, version: schema.deploymentReleases.version })
+      .from(schema.deploymentReleases)
+      .where(
+        and(
+          eq(schema.deploymentReleases.id, releaseId),
+          eq(schema.deploymentReleases.environmentId, envId)
+        )
+      )
+      .limit(1);
+    if (!release) {
+      throw errors.notFound('Deployment release');
+    }
+
+    const events = await listDeploymentReleaseEvents(db, {
+      projectId,
+      environmentId: envId,
+      releaseId: release.id,
+      releaseVersion: release.version,
+      limit: parseReleaseEventsLimit(c.req.query('limit')),
+    });
+    return c.json({ events });
   }
 );
 

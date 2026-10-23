@@ -1,3 +1,4 @@
+export { DEPLOYMENT_ENVIRONMENT_NAME_RE } from './environment-name';
 export type { DeploymentReservationDefaults, DeploymentReservationManifest } from './resources';
 export {
   DEFAULT_DEPLOYMENT_SERVICE_CPU_MILLIS,

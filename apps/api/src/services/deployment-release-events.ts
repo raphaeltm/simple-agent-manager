@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -81,4 +81,61 @@ export async function appendDeploymentReleaseEvent(
     detailJson: detailJson(input.detail),
     createdAt: new Date().toISOString(),
   });
+}
+
+/** One apply step as the environment page reads it. `detail_json` stays server-side. */
+export interface DeploymentReleaseEventView {
+  seq: number;
+  level: string;
+  eventType: string;
+  step: string | null;
+  message: string;
+  createdAt: string;
+}
+
+export interface ListDeploymentReleaseEventsInput {
+  projectId: string;
+  environmentId: string;
+  releaseId: string;
+  releaseVersion: number;
+  limit: number;
+}
+
+/**
+ * The newest apply events for one release, returned oldest first.
+ *
+ * Project and environment are part of the predicate, not just the release ID, so an ID from
+ * another project reads nothing. Events written before the release ID was resolved carry
+ * only the version (`appendDeploymentReleaseEvent`), so those match on environment + version.
+ * Re-applies of the same release (Start, agent restart) append to the same history; the
+ * newest window is what callers need.
+ */
+export async function listDeploymentReleaseEvents(
+  db: Db,
+  input: ListDeploymentReleaseEventsInput
+): Promise<DeploymentReleaseEventView[]> {
+  const events = schema.deploymentReleaseEvents;
+  const rows = await db
+    .select({
+      seq: events.seq,
+      level: events.level,
+      eventType: events.eventType,
+      step: events.step,
+      message: events.message,
+      createdAt: events.createdAt,
+    })
+    .from(events)
+    .where(
+      and(
+        eq(events.projectId, input.projectId),
+        eq(events.environmentId, input.environmentId),
+        or(
+          eq(events.releaseId, input.releaseId),
+          and(isNull(events.releaseId), eq(events.releaseVersion, input.releaseVersion))
+        )
+      )
+    )
+    .orderBy(desc(events.createdAt), desc(events.seq))
+    .limit(input.limit);
+  return rows.reverse();
 }
