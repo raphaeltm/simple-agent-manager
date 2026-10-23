@@ -41,6 +41,12 @@ export interface ChatSessionTaskEmbed {
   errorMessage: string | null;
   outputBranch: string | null;
   outputPrUrl: string | null;
+  /** Current GitHub PR state when known. */
+  pr?: {
+    number: number;
+    state: 'open' | 'closed' | 'merged' | null;
+    checks: 'pending' | 'success' | 'failure' | 'neutral' | null;
+  } | null;
   outputSummary: string | null;
   finalizedAt: string | null;
   /** Task execution mode: 'task' (autonomous) or 'conversation' (interactive). */
@@ -133,10 +139,7 @@ export interface PersistMessageBatchResponse {
 // =============================================================================
 
 export type ProjectWebSocketEventType =
-  | 'message.new'
-  | 'session.created'
-  | 'session.stopped'
-  | 'activity.new';
+  'message.new' | 'session.created' | 'session.stopped' | 'activity.new';
 
 export interface ProjectWebSocketEvent {
   type: ProjectWebSocketEventType;
@@ -148,12 +151,7 @@ export interface ProjectWebSocketEvent {
 // =============================================================================
 
 export type AgentSessionStatus =
-  | 'running'
-  | 'recovery'
-  | 'sleeping'
-  | 'suspended'
-  | 'stopped'
-  | 'error';
+  'running' | 'recovery' | 'sleeping' | 'suspended' | 'stopped' | 'error';
 
 /** Live host status from the VM Agent's SessionHost (more granular than AgentSessionStatus). */
 export type AgentHostStatus = 'idle' | 'starting' | 'ready' | 'prompting' | 'error' | 'stopped';
@@ -251,12 +249,7 @@ export interface WorkspaceTab {
 // =============================================================================
 
 export type AcpSessionStatus =
-  | 'pending'
-  | 'assigned'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'interrupted';
+  'pending' | 'assigned' | 'running' | 'completed' | 'failed' | 'interrupted';
 
 export const ACP_SESSION_TERMINAL_STATUSES: readonly AcpSessionStatus[] = [
   'completed',
@@ -386,12 +379,7 @@ export type SessionActivitySource = 'vm_report' | 'control_plane' | 'probe';
  * of the transition so divergence stays diagnosable after the fact.
  */
 export type SessionActivityTerminalReason =
-  | 'completed'
-  | 'cancelled'
-  | 'force_stopped'
-  | 'dead'
-  | 'probe_reconciled'
-  | 'stale_no_evidence';
+  'completed' | 'cancelled' | 'force_stopped' | 'dead' | 'probe_reconciled' | 'stale_no_evidence';
 
 export interface AcpSessionForkRequest {
   contextSummary: string;

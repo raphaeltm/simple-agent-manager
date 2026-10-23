@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   handleGitHubProjectEventAdmission: vi.fn(),
   persistGitHubTriggerIntake: vi.fn(),
   recoverGitHubTriggerDelivery: vi.fn(),
+  ingestPullRequestWebhook: vi.fn(),
   log: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -31,6 +32,9 @@ vi.mock('../../../src/services/github-trigger-recovery', () => ({
   persistGitHubTriggerIntake: mocks.persistGitHubTriggerIntake,
   recoverGitHubTriggerDelivery: mocks.recoverGitHubTriggerDelivery,
 }));
+vi.mock('../../../src/services/github-pull-request-events', () => ({
+  ingestPullRequestWebhook: mocks.ingestPullRequestWebhook,
+}));
 
 import { handleGitHubWebhook } from '../../../src/routes/github-webhook';
 
@@ -47,6 +51,7 @@ describe('GitHub webhook ProjectData event admission ingress', () => {
     mocks.handleGitHubProjectEventAdmission.mockResolvedValue(undefined);
     mocks.persistGitHubTriggerIntake.mockResolvedValue(true);
     mocks.recoverGitHubTriggerDelivery.mockResolvedValue(undefined);
+    mocks.ingestPullRequestWebhook.mockResolvedValue(undefined);
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) =>
@@ -85,8 +90,13 @@ describe('GitHub webhook ProjectData event admission ingress', () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ received: true });
-    expect(waitUntilPromises).toHaveLength(2);
-    await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined, undefined]);
+    expect(waitUntilPromises).toHaveLength(3);
+    await expect(Promise.all(waitUntilPromises)).resolves.toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(mocks.ingestPullRequestWebhook).toHaveBeenCalledWith(env, 'pull_request', payload);
     expect(mocks.handleGitHubProjectEventAdmission).toHaveBeenCalledWith(env, {
       deliveryId: 'delivery-1',
       eventType: 'pull_request',

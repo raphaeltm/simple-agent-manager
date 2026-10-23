@@ -977,3 +977,4 @@ export type {
   ProjectEventDeliveryOutcome,
   ProjectEventDeliveryOutcomeList,
 } from './project-events';
+export type { PullRequestRef, PullRequestState } from './pull-requests';

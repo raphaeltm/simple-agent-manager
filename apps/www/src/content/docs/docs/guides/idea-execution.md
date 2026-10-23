@@ -94,6 +94,8 @@ Every **submitted task** gets its own **output branch** — a prefixed name deri
 
 The output branch provides a place for the agent to commit and publish when instructed. SAM does not publish whatever the agent leaves behind.
 
+When a task reports a pull request in the project's GitHub repository, SAM keeps its number, open or closed state, merge status, and latest reported checks with the task. GitHub events update that record as the pull request changes. A pull request in another repository is not added to the project's tracked work.
+
 If you pass an explicit `branch` when starting work (via the API or `dispatch_task`), that branch is used instead — the meaning is "continue the work already on this branch."
 
 ### Publication and sleep recovery

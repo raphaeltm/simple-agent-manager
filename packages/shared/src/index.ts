@@ -65,3 +65,4 @@ export { extractMentions, formatMentionName, getMentionQuery } from './mentions'
 export * from './message-cursor';
 export * from './secret-exec';
 export * from './workload-identity';
+export { canonicalProjectPullRequestUrl } from './pull-requests';

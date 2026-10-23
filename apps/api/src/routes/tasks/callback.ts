@@ -10,6 +10,7 @@ import { log } from '../../lib/logger';
 import { toTaskResponse } from '../../lib/mappers';
 import { requireRouteParam } from '../../lib/route-helpers';
 import { errors } from '../../middleware/error';
+import { ensurePullRequest } from '../../operations/pull-request-core';
 import { jsonValidator, UpdateTaskStatusSchema } from '../../schemas';
 import { verifyCallbackToken } from '../../services/jwt';
 import * as notificationService from '../../services/notification';
@@ -137,6 +138,12 @@ taskCallbackRoute.post(
         if (body.gitPushResult.prUrl) {
           stepUpdate.outputPrUrl = body.gitPushResult.prUrl;
         }
+        if (body.gitPushResult.prNumber != null) {
+          stepUpdate.outputPrNumber = body.gitPushResult.prNumber;
+        }
+        if (body.gitPushResult.commitSha) {
+          stepUpdate.outputCommitSha = body.gitPushResult.commitSha;
+        }
       }
 
       if (body.outputBranch !== undefined) {
@@ -150,6 +157,24 @@ taskCallbackRoute.post(
         env: c.env,
         expected: workspaceSnapshot,
       });
+
+      if (body.gitPushResult?.prUrl) {
+        const [project] = await db
+          .select({ repository: schema.projects.repository })
+          .from(schema.projects)
+          .where(eq(schema.projects.id, projectId))
+          .limit(1);
+        if (project) {
+          await revalidateWorkspace();
+          const stored = await ensurePullRequest(
+            c.env,
+            projectId,
+            project.repository,
+            body.gitPushResult.prUrl
+          );
+          if (!stored) log.warn('task.callback.pr_repository_mismatch', { taskId, projectId });
+        }
+      }
 
       // Record activity event for execution step update
       c.executionCtx.waitUntil(

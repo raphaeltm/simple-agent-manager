@@ -17,6 +17,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
+import { ensurePullRequest } from '../../operations/pull-request-core';
 import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import * as notificationService from '../../services/notification';
 import * as orchestratorService from '../../services/project-orchestrator';
@@ -184,6 +185,15 @@ export async function handleCompleteTask(
   const evidenceJson = evidenceValidation?.ok ? JSON.stringify(evidenceValidation.value) : null;
   const completionPrUrl = evidenceValidation?.ok ? (evidenceValidation.value.prUrl ?? null) : null;
 
+  const rememberCompletionPr = async () => {
+    if (!completionPrUrl) return;
+    const project = await env.DATABASE.prepare('SELECT repository FROM projects WHERE id = ?')
+      .bind(tokenData.projectId)
+      .first<{ repository: string }>();
+    if (project)
+      await ensurePullRequest(env, tokenData.projectId, project.repository, completionPrUrl);
+  };
+
   const now = new Date().toISOString();
 
   // Check task mode — in conversation mode, complete_task silently remaps to awaiting_followup
@@ -233,6 +243,8 @@ export async function handleCompleteTask(
         'Task cannot be updated — it may not exist or is not in an active status'
       );
     }
+
+    await rememberCompletionPr();
 
     log.info('mcp.complete_task.conversation_remapped', {
       taskId: tokenData.taskId,
@@ -308,6 +320,8 @@ export async function handleCompleteTask(
       'Task cannot be completed — it may not exist or is not in a completable status'
     );
   }
+
+  await rememberCompletionPr();
 
   const completedEvent: TaskTerminalTransitionEvent = {
     transitionId: ulid(),

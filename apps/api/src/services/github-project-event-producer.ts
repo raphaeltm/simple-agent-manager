@@ -32,6 +32,7 @@ const SUPPORTED_GITHUB_PROJECT_EVENT_TYPES = new Set([
 type ProjectCandidate = {
   id: string;
   name: string;
+  repository: string;
 };
 
 export type GitHubProjectEventAdmission = {
@@ -128,7 +129,7 @@ export async function admitGitHubWebhookProjectEvents(
   };
 }
 
-async function findProjectsForGitHubRepository(
+export async function findProjectsForGitHubRepository(
   env: Env,
   input: { repositoryFullName: string | null; repositoryId: number | null }
 ): Promise<ProjectCandidate[]> {
@@ -147,6 +148,7 @@ async function findProjectsForGitHubRepository(
     .select({
       id: schema.projects.id,
       name: schema.projects.name,
+      repository: schema.projects.repository,
     })
     .from(schema.projects)
     .where(where);

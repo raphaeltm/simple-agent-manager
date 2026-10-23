@@ -6,6 +6,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { AppError, errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
+import { ensurePullRequest } from '../../operations/pull-request-core';
 import { AGENT_ACTIVITY_ACTIVE_TASK_STATUSES } from '../../services/agent-activity';
 import { resolveProjectPullRequestHeadBranch } from '../../services/github-pull-request-branch';
 import {
@@ -51,16 +52,11 @@ function argumentSchemas(env: Env) {
 }
 
 function canonicalPrUrl(value: string, repository: string): string {
-  const match = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/([1-9][0-9]*)\/?$/.exec(value);
-  const [, matchedRepository, number] = match ?? [];
-  if (
-    !matchedRepository ||
-    !number ||
-    matchedRepository.toLowerCase() !== repository.toLowerCase()
-  ) {
+  const canonical = canonicalProjectPullRequestUrl(value, repository);
+  if (!canonical) {
     throw errors.badRequest('prUrl must be an exact GitHub PR URL in this project repository');
   }
-  return `https://github.com/${repository.toLowerCase()}/pull/${number}`;
+  return canonical;
 }
 
 /** Identity and current authority are always server-derived, never supplied in args. */
@@ -124,6 +120,7 @@ export async function handleTaskPullRequestAssociation(
         prHeadBranch: currentBranch,
         prUrl: canonicalPrUrl(args.prUrl, project.repository),
       });
+      await ensurePullRequest(env, token.projectId, project.repository, args.prUrl);
     }
     const page = tool === 'list_pull_request_associations' ? v.parse(schemas.list, params) : {};
     const limit = page.limit ?? schemas.defaultLimit;
@@ -308,3 +305,4 @@ async function recordAssociation(
     'Association refused: existing ownership, competing verified branch ownership, a hold, task state, or continuation evidence'
   );
 }
+import { canonicalProjectPullRequestUrl } from '@simple-agent-manager/shared';

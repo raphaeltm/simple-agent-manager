@@ -18,6 +18,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
+import { getPullRequestStates, parseProjectPullRequestUrl } from '../operations/pull-request-core';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as projectDataService from '../services/project-data';
 import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
@@ -114,6 +115,7 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
             placementExplanationJson: schema.tasks.placementExplanationJson,
             outputBranch: schema.tasks.outputBranch,
             outputPrUrl: schema.tasks.outputPrUrl,
+            outputPrNumber: schema.tasks.outputPrNumber,
             outputSummary: schema.tasks.outputSummary,
             finalizedAt: schema.tasks.finalizedAt,
             taskMode: schema.tasks.taskMode,
@@ -124,6 +126,25 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
           .limit(1);
 
         if (taskRow) {
+          const [project] = taskRow.outputPrUrl
+            ? await db
+                .select({ repository: schema.projects.repository })
+                .from(schema.projects)
+                .where(eq(schema.projects.id, projectId))
+                .limit(1)
+            : [];
+          const parsedPr =
+            taskRow.outputPrUrl && project
+              ? parseProjectPullRequestUrl(taskRow.outputPrUrl, project.repository)
+              : null;
+          const prState = parsedPr
+            ? (
+                await getPullRequestStates(c.env, projectId, [{ url: parsedPr.url }], {
+                  refresh: 'single',
+                  waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+                })
+              )[parsedPr.url]
+            : null;
           const agentProfileHint = await resolveTaskAgentProfileHint(db, {
             hint: taskRow.agentProfileHint,
             projectId,
@@ -143,6 +164,13 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
             ),
             outputBranch: taskRow.outputBranch,
             outputPrUrl: taskRow.outputPrUrl,
+            pr: parsedPr
+              ? {
+                  number: taskRow.outputPrNumber ?? parsedPr.number,
+                  state: prState?.state ?? null,
+                  checks: prState?.checksState ?? null,
+                }
+              : null,
             outputSummary: taskRow.outputSummary ?? null,
             finalizedAt: taskRow.finalizedAt ?? null,
             taskMode: isTaskMode(taskRow.taskMode) ? taskRow.taskMode : null,

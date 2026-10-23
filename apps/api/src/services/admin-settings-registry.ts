@@ -67,6 +67,12 @@ export type AdminSettingName =
   | 'operations.samOperatorStreamFlushMs'
   | 'operations.samOperatorStreamHeartbeatMs'
   | 'operations.samOperatorStreamMaxSubscribers'
+  | 'operations.pullRequestRefreshCap'
+  | 'operations.pullRequestRefreshTtlSeconds'
+  | 'operations.pullRequestRefreshBudgetPerHour'
+  | 'operations.pullRequestRefreshBackoffSeconds'
+  | 'operations.pullRequestRefreshTimeoutMs'
+  | 'operations.pullRequestCheckUpdateCap'
   | 'trials.enabled';
 export interface AdminSettingDefinition {
   readonly name: AdminSettingName;
@@ -463,6 +469,48 @@ const definitions: AdminSettingDefinition[] = [
     'Collaboration',
     'Seconds in which repeated comments on one session send one notification per person. Mentions always notify.',
     { min: 60, max: 86_400 }
+  ),
+  integerDefinition(
+    'operations.pullRequestRefreshCap',
+    3,
+    'Operations',
+    'Maximum pull requests scheduled for GitHub refresh on one detail read.',
+    { min: 1, max: 20 }
+  ),
+  integerDefinition(
+    'operations.pullRequestRefreshTtlSeconds',
+    300,
+    'Operations',
+    'Age after which a pull request detail is refreshed from GitHub.',
+    { min: 30, max: 86400 }
+  ),
+  integerDefinition(
+    'operations.pullRequestRefreshBudgetPerHour',
+    120,
+    'Operations',
+    'Shared GitHub pull request refresh limit per installation each hour.',
+    { min: 1, max: 5000 }
+  ),
+  integerDefinition(
+    'operations.pullRequestRefreshBackoffSeconds',
+    3600,
+    'Operations',
+    'Default pause after a GitHub pull request rate limit response.',
+    { min: 60, max: 86400 }
+  ),
+  integerDefinition(
+    'operations.pullRequestRefreshTimeoutMs',
+    10000,
+    'Operations',
+    'Timeout for one GitHub pull request refresh request.',
+    { min: 1000, max: 30000 }
+  ),
+  integerDefinition(
+    'operations.pullRequestCheckUpdateCap',
+    100,
+    'Operations',
+    'Maximum pull request rows updated by one GitHub check event per project.',
+    { min: 1, max: 500 }
   ),
   switchDefinition(
     'operations.stalledTaskClassifierEnabled',

@@ -17,6 +17,7 @@ import {
 } from '../services/github-installation-accounts';
 import { getStoredInstallationId } from '../services/github-installation-ids';
 import { handleGitHubProjectEventAdmission } from '../services/github-project-event-producer';
+import { ingestPullRequestWebhook } from '../services/github-pull-request-events';
 import {
   persistGitHubTriggerIntake,
   recoverGitHubTriggerDelivery,
@@ -72,6 +73,11 @@ export async function handleGitHubWebhook(c: GitHubContext): Promise<Response> {
       deliveryId,
       eventType: event,
       payload: data,
+    })
+  );
+  c.executionCtx.waitUntil(
+    ingestPullRequestWebhook(c.env, event, data).catch((error) => {
+      log.error('github.webhook.pr_ingestion_failed', { error: String(error) });
     })
   );
   const triggerIntake = await persistGitHubTriggerIntake(c.env, {
