@@ -251,7 +251,7 @@ It is idempotent, runs before `sync-wrangler-config.ts`, and is unit-tested agai
   3. A session starts.
   4. The agent replies with the tool.
   5. The reply is delivered back through routing, and the loopback status records it as `Auto-Submitted`.
-- [ ] The PR is a draft and CI is green. Astra has reviewed the plan and the PR.
+- [x] CI is green, and Astra has reviewed the plan and the PR. (The PR stayed a draft until Raphaël approved merging on 2026-10-23.)
 
 ## Admin-run setup (2026-10-23, Raphaël: "Do it")
 
@@ -280,7 +280,8 @@ main domain.
   `AGENT_EMAIL_WORKER_NAME` var (the routing rule's target), even while sending still verifies.
 - **On-switch:** a `platform_settings` row (`agent_email.setup`) that only the admin setup writes.
   Agent email is on only when the binding exists and that row names the current domain. Every
-  check that read "binding present" reads this instead, cached per isolate.
+  check that read "binding present" reads this instead. (The per-isolate cache planned here was
+  removed in Astra's admin-setup review, item A3: every check reads the D1 row.)
 - **Admin setup** (`GET`/`POST /api/admin/agent-email/setup`, superadmin), run by the Worker with its
   `CF_API_TOKEN` (the same token as the deploy):
   - **Plan:** whether the zone already uses Email Routing, whether the subdomain's routing is on,
@@ -299,12 +300,14 @@ main domain.
 - [x] Shared types for the setup plan and status
 - [x] Deploy step prepares only, writes the marker while sending verifies; tests prove it never calls a routing endpoint
 - [x] `sync-wrangler-config.ts` adds `AGENT_EMAIL_WORKER_NAME` with the binding; tests
-- [x] Setup row store and the cached on-switch; every caller of `isAgentEmailAvailable` and the senders moved to it
+- [x] Setup row store and the on-switch (uncached since Astra's review); every caller of `isAgentEmailAvailable` and the senders moved to it
 - [x] Setup service and admin routes; tests against a strict fake Cloudflare (consent, refusal, unexpected apex change, pending MX, idempotent re-run, sending still verifying)
 - [x] Vertical slice: binding present but not set up refuses inbound mail, replies and email automations
 - [x] Admin panel: plan, consent and result states; component tests; Playwright audit at 375 and 1280
 - [x] Docs: self-hosting, email triggers, API reference
-- [ ] Staging: deploy, admin Enable, loopback end to end, cleanup
+- [x] Staging: deploy, admin Enable, loopback end to end, cleanup (at `4257c67da`; see the notes log.
+      Later heads were deployed and checked, but their setup-run changes cannot be re-run once a
+      zone is on)
 
 ### Implementation notes (2026-10-23)
 
@@ -316,9 +319,9 @@ main domain.
   and lose nothing. Gaining less than disclosed is accepted (a zone that used routing before gets
   nothing new). A failed check leaves agent email off and names what changed; Cloudflare has made
   the change by then, so running the setup again turns agent email on with the records as they are.
-- **Cache.** Only a present record is cached (60 s, the admin settings ceiling), so turning agent
-  email on takes effect on every isolate at once. Nothing turns it off except a deploy without the
-  binding or a new `BASE_DOMAIN`, and both are checked on every call.
+- **Cache (superseded).** This first version cached a present record for 60 s. Astra's admin-setup
+  review (item A3) removed the cache: every check reads the D1 row, so an outage or a missing row
+  turns agent email off at once.
 - **Errors.** Refusals and an unexpected main-domain change are `409`; a failed Cloudflare call is
   `502 CLOUDFLARE_ERROR` with Cloudflare's code and message.
 - **Request budget.** A setup run in a zone new to Email Routing makes about 15 round trips (one D1
@@ -408,6 +411,7 @@ Review of `4257c67da..c7df05425` ([PR comment](https://github.com/raphaeltm/simp
    (`julianday('now')`) and marks the attempt as finishing; the on-switch insert and the attempt
    delete key on that mark, so one decision governs both. The mark contains the run's lease owner,
    and an attempt without an owner cannot complete.
+
 - Tests: "renews after listing the rules…" (create and repoint), "decides the lease by the
   database clock…" (the run's clock an hour behind D1's), and in `agent-email-setup-state.test.ts`
   "lets no attempt complete without a lease owner…". Each fix reverted on its own reddens exactly
@@ -588,3 +592,7 @@ Commit hashes written before 2026-10-23 04:30Z are from before the rebase onto `
     - Reply `sent` at 09:31:14Z; **Last reply received** at 09:31:16Z from the automation's address, `Auto-Submitted: auto-replied`, `In-Reply-To` = `<0aVz2oBrxy8Us4KihGcro9afDfK7WwL9QoaA@agents.sammy.party>`. Task `completed`.
     - Cleanup: automation, workspace `01M5M1C6MACTDQHR0NQ7XC95X6` and node `01M5M16SHXJ63HJ8EQQR6Z6KDF` deleted.
   - `c7df05425` (lease renewal, live-lease completion, legacy attempt rows) only changes the setup run. Staging is already on and there is no off switch, so its setup run was not repeated live; it is covered by the unit tests and their discrimination checks.
+- 2026-10-23: Staging on the later heads. [39934960292](https://github.com/raphaeltm/simple-agent-manager/actions/runs/39934960292) at `07992163f` and [39937575731](https://github.com/raphaeltm/simple-agent-manager/actions/runs/39937575731) at `799a8b704`: both prepared agent email with 0 Cloudflare writes, applied no migrations, and passed the smoke tests. After each, as the smoke user: `GET /api/config/agent-email` returned `{"enabled":true,"domain":"agents.sammy.party"}`, the admin status was on with the loopback record kept, and the setup plan was `on`. On `799a8b704`, Admin → Integrations → Agent email read `On — agents.sammy.party` in the browser, with 0 dialogs, 0 console errors and 0 failed requests. The setup run itself was not repeated, for the reason above.
+- 2026-10-23: Astra's verifications `01M5M2R2EABJZDF8NQ4JGYG9W1` (`c7df05425..07992163f`) and `01M5M37JZF488MPXECZE7R2NSW` (`07992163f..799a8b704`) found nothing. CI on `799a8b704`: 25 checks passed and 8 were skipped by path.
+- 2026-10-23: Raphaël asked whether SPF/DKIM are checked. Cloudflare rejects mail that fails both SPF and DKIM, fails the sender's DMARC policy, or comes from a sender on a block list. It does not pass the verdicts to the Worker (cloudflare/workerd#6740), so SAM matches only the `From:` address. He chose to rely on Cloudflare's checks for now and approved merging.
+- 2026-10-23: Production stays off after the merge. Production deploys never prepare agent email: `deploy.yml` passes no `agent_email`. Public DNS for `simple-agent-manager.org` shows MX `1 smtp.google.com` (Google Workspace), no SPF record, no DMARC record, and a `cf2024-1._domainkey` key. The setup refuses a main domain with its own mail unless the zone already uses Email Routing (`inspect` in `setup.ts`), so turning it on in production needs a decision from Raphaël first.
