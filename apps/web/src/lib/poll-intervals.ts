@@ -61,6 +61,23 @@ export const WORKFLOW_RUN_POLL_MS = resolveIntervalMs(
   DEFAULT_WORKFLOW_RUN_POLL_MS
 );
 
+/**
+ * Deployments refresh while something is changing on its own: a deploy or Start in progress,
+ * a pause, or a new domain waiting for DNS. Steps and statuses move without a reload.
+ */
+export const DEFAULT_DEPLOYMENTS_ACTIVE_POLL_MS = 5_000;
+export const DEPLOYMENTS_ACTIVE_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_DEPLOYMENTS_ACTIVE_POLL_MS,
+  DEFAULT_DEPLOYMENTS_ACTIVE_POLL_MS
+);
+
+/** Deployments refresh when nothing is changing: catches agent deploys and server check-ins. */
+export const DEFAULT_DEPLOYMENTS_IDLE_POLL_MS = 30_000;
+export const DEPLOYMENTS_IDLE_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_DEPLOYMENTS_IDLE_POLL_MS,
+  DEFAULT_DEPLOYMENTS_IDLE_POLL_MS
+);
+
 /** Private SAM preference/availability refresh, including changes from another tab. */
 export const DEFAULT_SAM_SETTINGS_POLL_MS = 10_000;
 export const SAM_SETTINGS_POLL_MS = resolveIntervalMs(

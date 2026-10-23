@@ -223,12 +223,39 @@ test('a real release applies end to end, exercising both DNS create paths and th
       : [];
   expect(publicRoutes.length, `no public routes returned: ${routesBody}`).toBeGreaterThan(0);
 
+  // --- The release history and its recorded apply steps read back, as the page reads them. ---
+  const releasesResp = await api.get(
+    `${STAGING_API}/api/projects/${projectId}/environments/${envId}/releases`
+  );
+  const releasesBody = await releasesResp.text();
+  expect(releasesResp.status(), `release list failed: ${releasesBody}`).toBe(200);
+  const { releases } = JSON.parse(releasesBody) as {
+    releases: Array<{ id: string; version: number; status: string }>;
+  };
+  const applied = releases[0];
+  expect(applied, `no release listed: ${releasesBody}`).toMatchObject({
+    version: 1,
+    status: 'applied',
+  });
+  expect(applied).toHaveProperty('submittedBy');
+  const eventsResp = await api.get(
+    `${STAGING_API}/api/projects/${projectId}/environments/${envId}/releases/${applied?.id}/events`
+  );
+  const eventsBody = await eventsResp.text();
+  expect(eventsResp.status(), `release events failed: ${eventsBody}`).toBe(200);
+  const { events } = JSON.parse(eventsBody) as { events: Array<{ eventType: string }> };
+  expect(events.map((event) => event.eventType)).toContain('deployment.apply.succeeded');
+
   // --- And the UI shows the applied environment, as a user would see it. ---
   await page.goto(`${STAGING_APP}/projects/${projectId}/deployments/${envId}`, {
     waitUntil: 'domcontentloaded',
   });
   await expect(page.getByRole('heading', { name: ENV_NAME })).toBeVisible();
-  await expect(page.getByText('Public Routes')).toBeVisible();
+  await expect(page.getByText('Running version 1.')).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Recent deploys' }).getByText('v1', { exact: true })
+  ).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Addresses' })).toBeVisible();
   await page.screenshot({
     path: `${SCREENSHOT_DIR}/staging-app-deployment-applied.png`,
     fullPage: true,

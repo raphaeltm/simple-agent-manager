@@ -7,7 +7,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 
-import { formatBytes } from '../components/deployments/deployment-card-format';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
 import { closeAdminProjectDataArchiveCircuitBreaker } from '../lib/api';
@@ -17,6 +16,19 @@ import {
   adminProjectDataStorageTelemetryQueryOptions,
 } from '../lib/query-options';
 import { ProblemMigrations } from './admin-storage/ProblemMigrations';
+
+/** Binary units (KiB, MiB, …), one decimal; a dash for a missing value. */
+function formatBytes(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return '-';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let next = value;
+  let idx = 0;
+  while (next >= 1024 && idx < units.length - 1) {
+    next /= 1024;
+    idx += 1;
+  }
+  return `${next.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
 
 const DEFAULT_CLOSE_REASON = 'Closed from admin UI';
 

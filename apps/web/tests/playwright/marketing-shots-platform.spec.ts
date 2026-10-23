@@ -17,7 +17,7 @@
  *      sam-session-waking         — same session mid-wake, phase progress banner
  *   C. sam-agents-orchestration   — task hierarchy modal (parent + dispatched subtasks)
  *   D. sam-app-deployments        — deployment environments list
- *      sam-app-deployment-detail  — staging environment overview
+ *      sam-app-deployment-detail  — the staging environment page
  */
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -1308,6 +1308,20 @@ const DEPLOY_NODE_PROD = {
   deploymentEnvironments: [{ id: 'env-production', projectId: PROJECT_ID, name: 'production' }],
 };
 
+const DEPLOY_TASK_ID = 'task-ship-refund-idempotency';
+const DEPLOY_SUBMITTED_BY = {
+  userId: NORTHWIND.owner.id,
+  workspaceId: 'ws-ship-refund-idempotency',
+  taskId: DEPLOY_TASK_ID,
+  agentProfileId: 'profile-opus',
+};
+
+const STAGING_RELEASES = [
+  { id: 'release-14', environmentId: 'env-staging', version: 14, status: 'applied', createdBy: NORTHWIND.owner.id, createdAt: agoIso(42), submittedBy: DEPLOY_SUBMITTED_BY },
+  { id: 'release-13', environmentId: 'env-staging', version: 13, status: 'applied', createdBy: NORTHWIND.owner.id, createdAt: agoIso(5 * 60), submittedBy: { ...DEPLOY_SUBMITTED_BY, agentProfileId: 'profile-codex' } },
+  { id: 'release-12', environmentId: 'env-staging', version: 12, status: 'applied', createdBy: NORTHWIND.owner.id, createdAt: agoIso(26 * 60), submittedBy: DEPLOY_SUBMITTED_BY },
+];
+
 const STAGING_ENV = {
   id: 'env-staging',
   projectId: PROJECT_ID,
@@ -1348,7 +1362,8 @@ const STAGING_ENV = {
     version: 14,
     status: 'applied',
     createdBy: 'Claude Code — Opus 5 / task-ship-refund-idempotency',
-    createdAt: '2026-09-14T09:58:00.000Z',
+    createdAt: agoIso(42),
+    submittedBy: DEPLOY_SUBMITTED_BY,
   },
   routeHostnames: ['staging.payments.northwindlabs.dev'],
   node: DEPLOY_NODE,
@@ -1483,6 +1498,16 @@ async function setupDeploymentMocks(page: Page) {
     if (path === `/api/projects/${PROJECT_ID}/environments/env-staging/custom-domains`) {
       return respond(route, 200, { customDomains: [] });
     }
+    if (path === `/api/projects/${PROJECT_ID}/environments/env-staging/releases`) {
+      return respond(route, 200, { releases: STAGING_RELEASES });
+    }
+    if (path.match(/\/environments\/[^/]+\/(releases|custom-domains|public-routes)$/)) {
+      return respond(route, 200, { releases: [], customDomains: [], publicRoutes: [] });
+    }
+    if (path.match(/\/environments\/[^/]+\/volumes$/)) return respond(route, 200, { volumes: [] });
+    if (path === `/api/projects/${PROJECT_ID}/tasks/${DEPLOY_TASK_ID}`) {
+      return respond(route, 200, { id: DEPLOY_TASK_ID, projectId: PROJECT_ID, title: 'Make refunds idempotent', status: 'completed' });
+    }
     if (path.match(/\/environments\/[^/]+\/(logs|containers|metrics)$/)) {
       return respond(route, 200, { entries: [], containers: [], systemInfo: null, fallbackMetrics: null });
     }
@@ -1500,17 +1525,13 @@ test('deployments list renders the environment lifecycle', async ({ page }) => {
   await setupDeploymentMocks(page);
   await page.goto(`/projects/${PROJECT_ID}/deployments`);
 
-  await expect(page.getByRole('heading', { name: 'staging', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'production', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'preview-pr-482', exact: true })).toBeVisible();
-  await expect(page.getByText('v14 · applied')).toBeVisible();
-  await expect(page.getByText('v13 · applied')).toBeVisible();
-  // The preview card reads as still coming up, not a third "done" clone —
-  // pending release, "starting" env status, and an Unknown service state
-  // (deriveServiceState() returns 'unknown' for a starting environment).
-  await expect(page.getByText('v1 · created')).toBeVisible();
-  await expect(page.getByText('starting', { exact: true })).toBeVisible();
-  await expect(page.getByText('Unknown', { exact: true })).toBeVisible();
+  const running = page.getByRole('region', { name: 'Running' });
+  await expect(running.getByText('staging', { exact: true })).toBeVisible();
+  await expect(running.getByText('production', { exact: true })).toBeVisible();
+  // The preview reads as still coming up, not a third "done" clone.
+  await expect(running.getByText('preview-pr-482', { exact: true })).toBeVisible();
+  await expect(running.getByText('Starting', { exact: true })).toBeVisible();
+  await expect(page.getByText('staging.payments.northwindlabs.dev')).toBeVisible();
   await expect(page.locator('body')).not.toContainText('Something went wrong');
 
   await assertNoOverflow(page);
@@ -1521,9 +1542,10 @@ test('sam-app-deployment-detail', async ({ page }) => {
   await page.goto(`/projects/${PROJECT_ID}/deployments/env-staging`);
 
   await expect(page.getByRole('heading', { name: 'staging', exact: true })).toBeVisible();
-  await expect(page.getByText('Release v14').first()).toBeVisible();
-  await expect(page.getByText('staging.payments.northwindlabs.dev')).toBeVisible();
-  await expect(page.getByText('Serving', { exact: true })).toBeVisible();
+  await expect(page.getByText('Running version 14.').first()).toBeVisible();
+  await expect(page.getByText('staging.payments.northwindlabs.dev').first()).toBeVisible();
+  // Who shipped it, from which chat: the release the agent submitted.
+  await expect(page.getByRole('region', { name: 'Recent deploys' }).getByText('“Make refunds idempotent”').first()).toBeVisible();
   await expect(page.locator('body')).not.toContainText('Something went wrong');
 
   await assertNoOverflow(page);

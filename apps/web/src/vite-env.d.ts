@@ -42,6 +42,10 @@ interface ImportMetaEnv {
   readonly VITE_CREDENTIAL_LIMITS_STALE_TIME_MS?: string;
   readonly VITE_CREDENTIAL_LIMITS_REFETCH_INTERVAL_MS?: string;
   readonly VITE_AUTOMATION_POLL_MS?: string;
+  readonly VITE_DEPLOYMENTS_ACTIVE_POLL_MS?: string;
+  readonly VITE_DEPLOYMENTS_IDLE_POLL_MS?: string;
+  readonly VITE_DEPLOY_HELP_FIX_PROMPT_TEMPLATE?: string;
+  readonly VITE_DEPLOY_HELP_DEPLOY_PROMPT_TEMPLATE?: string;
   readonly VITE_AUTOMATION_ATTENTION_WINDOW_MS?: string;
   readonly VITE_AUTOMATION_RECENT_RUNS_PER_TRIGGER?: string;
   readonly VITE_AUTOMATION_MAX_RUN_READS?: string;

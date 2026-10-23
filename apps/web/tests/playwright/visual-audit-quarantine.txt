@@ -38,10 +38,7 @@ compute-usage-audit.spec.ts
 connections-ui-audit.spec.ts
 credential-health-audit.spec.ts
 debug-diagnosis-audit.spec.ts
-deployment-control-surface-audit.spec.ts
 deployment-settings-audit.spec.ts
-deployment-volumes-audit.spec.ts
-deployments-empty-state-audit.spec.ts
 file-preview-modal-audit.spec.ts
 focus-mode-audit.spec.ts
 frontend-cache-audit.spec.ts

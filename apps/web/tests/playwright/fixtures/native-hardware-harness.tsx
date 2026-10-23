@@ -15,9 +15,9 @@ import { SessionHeaderInfrastructure } from '../../../src/components/project-mes
 import { WorkspaceCard } from '../../../src/components/WorkspaceCard';
 import { WorkspaceSidebar } from '../../../src/components/WorkspaceSidebar';
 import type { ChatSessionResponse } from '../../../src/lib/api';
-import type { DeploymentEnvironment } from '../../../src/lib/api/deployment';
+import type { DeploymentEnvironmentNodeSummary } from '../../../src/lib/api/deployment';
 import { UserDetail } from '../../../src/pages/AdminComputeUsage';
-import { NodeSection } from '../../../src/pages/ProjectDeploymentEnvironmentDetail';
+import { ServerSummary } from '../../../src/pages/deployments/sections/behind';
 import { SettingsComputeUsage } from '../../../src/pages/SettingsComputeUsage';
 
 const params = new URLSearchParams(location.search);
@@ -151,7 +151,7 @@ function Surface() {
       />
     );
   if (surface === 'deployment')
-    return <NodeSection env={{ node } as unknown as DeploymentEnvironment} />;
+    return <ServerSummary node={node as unknown as DeploymentEnvironmentNodeSummary} />;
   if (surface === 'admin-usage') return <UserDetail userId="native-user" onBack={noop} />;
   if (surface === 'usage') return <SettingsComputeUsage />;
   return (

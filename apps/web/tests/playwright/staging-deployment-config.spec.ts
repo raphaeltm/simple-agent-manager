@@ -1,9 +1,8 @@
 /**
- * Staging verification for the unified deployment Variables/Secrets config
- * panel (combined PR #1381). Creates a throwaway deployment environment via
- * the API, then drives the Configuration subpage UI to add a non-secret
- * Variable (plaintext value shown) and a Secret (hidden after save), and
- * verifies the row states. Cleans up the environment afterward.
+ * Staging verification for an environment's settings (variables and secrets). Creates a
+ * throwaway deployment environment via the API, then drives the environment page's
+ * "Settings your app reads" section to add a plain setting (value shown) and a secret
+ * (hidden after save), and verifies the rows. Cleans up the environment afterward.
  */
 import { expect, test } from '@playwright/test';
 
@@ -55,7 +54,7 @@ test.afterAll(async ({ request }) => {
   }
 });
 
-test('manage Variables and Secrets from the Configuration tab', async ({ page }) => {
+test('manage settings and secrets from the environment page', async ({ page }) => {
   const token = process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
   if (!token) throw new Error('SAM_PLAYWRIGHT_PRIMARY_USER env var not set');
   await page.request.post(`${STAGING_API}/api/auth/token-login`, {
@@ -69,30 +68,29 @@ test('manage Variables and Secrets from the Configuration tab', async ({ page })
     window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${uid}`, 'true');
   }, userId);
 
-  await page.goto(`${STAGING_APP}/projects/${projectId}/deployments/${envId}?tab=config`, {
+  await page.goto(`${STAGING_APP}/projects/${projectId}/deployments/${envId}`, {
     waitUntil: 'networkidle',
   });
-  await page.waitForTimeout(1200);
 
-  const panel = page.locator(`#deployment-config-${envId}`);
-  await expect(panel).toBeVisible();
-  await expect(panel.getByText('Configuration', { exact: true })).toBeVisible();
+  const section = page.getByRole('region', { name: 'Settings your app reads' });
+  await expect(section).toBeVisible();
 
-  // Add a non-secret Variable — value should be visible after save.
-  await panel.getByPlaceholder('DATABASE_URL').fill('PUBLIC_APP_DOMAIN');
-  await panel.getByPlaceholder('Value').fill('app.example.com');
-  await panel.getByRole('button', { name: /Add|Update/ }).click();
-  await expect(panel.getByText('PUBLIC_APP_DOMAIN')).toBeVisible({ timeout: 10000 });
-  await expect(panel.getByText('app.example.com')).toBeVisible();
-  await expect(panel.locator('span').filter({ hasText: /^Variable$/ })).toBeVisible();
+  // Add a plain setting — its value is shown after saving.
+  await section.getByRole('button', { name: 'Add' }).click();
+  await section.getByLabel('Name').fill('PUBLIC_APP_DOMAIN');
+  await section.getByLabel('Value').fill('app.example.com');
+  await section.getByRole('button', { name: 'Add setting' }).click();
+  await expect(section.getByText('PUBLIC_APP_DOMAIN')).toBeVisible({ timeout: 10000 });
+  await expect(section.getByText('app.example.com')).toBeVisible();
 
-  // Add a Secret — value should be hidden after save.
-  await panel.getByPlaceholder('DATABASE_URL').fill('DATABASE_URL');
-  await panel.getByText('Secret').click(); // toggle the Secret checkbox label
-  await panel.getByPlaceholder('Hidden after save').fill('postgres://secret');
-  await panel.getByRole('button', { name: /Add|Update/ }).click();
-  await expect(panel.getByText('DATABASE_URL')).toBeVisible({ timeout: 10000 });
-  await expect(panel.getByText('Hidden after save')).toBeVisible();
+  // Add a secret — its value is hidden after saving.
+  await section.getByRole('button', { name: 'Add' }).click();
+  await section.getByLabel('Name').fill('DATABASE_URL');
+  await section.getByRole('switch', { name: 'Keep it secret' }).click();
+  await section.getByLabel('Value').fill('postgres://secret');
+  await section.getByRole('button', { name: 'Add setting' }).click();
+  await expect(section.getByText('DATABASE_URL')).toBeVisible({ timeout: 10000 });
+  await expect(section.getByText('Secret, hidden')).toBeVisible();
   // Secret plaintext must NOT be rendered anywhere.
   await expect(page.getByText('postgres://secret')).toHaveCount(0);
 

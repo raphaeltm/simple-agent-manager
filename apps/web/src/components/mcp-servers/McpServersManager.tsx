@@ -89,7 +89,7 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
 
   // Deliberately the app's ConfirmDialog rather than window.confirm: this is a destructive
   // action on a stored credential, and the shared dialog is the pattern the sibling settings
-  // lists already use (ApiTokens, EnvironmentSecretsSection). It also traps and restores focus,
+  // lists already use (ApiTokens). It also traps and restores focus,
   // which the native dialog does not.
   const handleDelete = async () => {
     const connection = pendingDelete;

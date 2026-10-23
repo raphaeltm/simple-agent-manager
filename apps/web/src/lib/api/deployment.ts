@@ -29,6 +29,14 @@ export interface DeploymentAgentPolicy {
   allowedDeployProfileIds: string[];
 }
 
+/** Who sent a release: the chat (task) and agent profile behind it, when an agent did. */
+export interface DeploymentReleaseSubmittedBy {
+  userId: string | null;
+  workspaceId: string | null;
+  taskId: string | null;
+  agentProfileId: string | null;
+}
+
 export interface DeploymentReleaseSummary {
   id: string;
   environmentId: string;
@@ -36,12 +44,17 @@ export interface DeploymentReleaseSummary {
   status: string;
   createdBy: string;
   createdAt: string;
-  submittedBy?: {
-    userId: string | null;
-    workspaceId: string | null;
-    taskId: string | null;
-    agentProfileId: string | null;
-  } | null;
+  submittedBy?: DeploymentReleaseSubmittedBy | null;
+}
+
+/** One step the deployment server reported while applying a release. */
+export interface DeploymentReleaseEvent {
+  seq: number;
+  level: string;
+  eventType: string;
+  step: string | null;
+  message: string;
+  createdAt: string;
 }
 
 export interface DeploymentEnvironmentNodeSummary extends Pick<
@@ -467,43 +480,26 @@ export async function deleteDeploymentEnvironmentConfigVar(
   );
 }
 
-// ─── Environment Secrets (write-only) ──────────────────────────────────────
+// ─── Release history ──────────────────────────────────────────────────────
 
-export interface DeploymentSecretEntry {
-  name: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export async function listDeploymentSecrets(
+/** Every release of an environment, newest first, with who sent each one. */
+export async function listDeploymentReleases(
   projectId: string,
   envId: string
-): Promise<{ secrets: DeploymentSecretEntry[] }> {
-  return request<{ secrets: DeploymentSecretEntry[] }>(
-    `/api/projects/${projectId}/environments/${envId}/secrets`
+): Promise<{ releases: DeploymentReleaseSummary[] }> {
+  return request<{ releases: DeploymentReleaseSummary[] }>(
+    `/api/projects/${projectId}/environments/${envId}/releases`
   );
 }
 
-export async function setDeploymentSecret(
+/** The steps the deployment server reported for one release, oldest first. */
+export async function listDeploymentReleaseEvents(
   projectId: string,
   envId: string,
-  name: string,
-  value: string
-): Promise<{ name: string; created: boolean; updatedAt: string }> {
-  return request<{ name: string; created: boolean; updatedAt: string }>(
-    `/api/projects/${projectId}/environments/${envId}/secrets/${encodeURIComponent(name)}`,
-    { method: 'PUT', body: JSON.stringify({ value }) }
-  );
-}
-
-export async function deleteDeploymentSecret(
-  projectId: string,
-  envId: string,
-  name: string
-): Promise<{ deleted: boolean }> {
-  return request<{ deleted: boolean }>(
-    `/api/projects/${projectId}/environments/${envId}/secrets/${encodeURIComponent(name)}`,
-    { method: 'DELETE' }
+  releaseId: string
+): Promise<{ events: DeploymentReleaseEvent[] }> {
+  return request<{ events: DeploymentReleaseEvent[] }>(
+    `/api/projects/${projectId}/environments/${envId}/releases/${encodeURIComponent(releaseId)}/events`
   );
 }
 
