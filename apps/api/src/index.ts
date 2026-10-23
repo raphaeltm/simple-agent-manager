@@ -775,6 +775,20 @@ app.get('/.well-known/openid-configuration', async (c) => {
   return c.json(discovery);
 });
 
+// External workload identities have their own issuer; internal SAM JWTs keep theirs.
+app.get('/oidc/.well-known/openid-configuration', async (c) => {
+  const { getWorkloadDiscovery } = await import('./services/workload-identity-token');
+  c.header('Cache-Control', 'public, max-age=3600');
+  c.header('X-Content-Type-Options', 'nosniff');
+  return c.json(getWorkloadDiscovery(c.env));
+});
+app.get('/oidc/.well-known/jwks.json', async (c) => {
+  const { getWorkloadJWKS } = await import('./services/workload-identity-token');
+  c.header('Cache-Control', 'public, max-age=3600');
+  c.header('X-Content-Type-Options', 'nosniff');
+  return c.json(await getWorkloadJWKS(c.env));
+});
+
 // API routes — codex refresh and smoke test routes registered before BetterAuth catch-all.
 // codexRefreshRoutes uses workspace callback token auth (query param), not session auth.
 // apiTokenRoutes uses dedicated API token auth, not session auth.

@@ -45,13 +45,20 @@ function rows(enabled: boolean): AdminSettingOverrideRow[] {
 
 describe('Phase 1 settings registry', () => {
   it('covers bounded Phase 1 controls and reuses Connector defaults', () => {
-    expect(new Set(ADMIN_SETTINGS_REGISTRY.map((setting) => setting.name)).size).toBe(69);
-    expect(ADMIN_SETTINGS_REGISTRY).toHaveLength(69);
+    expect(new Set(ADMIN_SETTINGS_REGISTRY.map((setting) => setting.name)).size).toBe(70);
+    expect(ADMIN_SETTINGS_REGISTRY).toHaveLength(70);
     for (const [key, value] of Object.entries(CONNECTOR_DEFAULTS)) {
       const definition = findAdminSetting(`connector.${key}`)!;
       expect(definition.defaultValue).toEqual(value);
       expect(definition.validate(value)).toBe(true);
     }
+    const workloadLifetime = findAdminSetting('operations.workloadIdentityTokenTtlSeconds')!;
+    expect(workloadLifetime).toMatchObject({ defaultValue: 300, range: { min: 1, max: 600 } });
+    expect(workloadLifetime.validate(1)).toBe(true);
+    expect(workloadLifetime.validate(600)).toBe(true);
+    expect(workloadLifetime.validate(0)).toBe(false);
+    expect(workloadLifetime.validate(601)).toBe(false);
+    expect(workloadLifetime.validate(1.5)).toBe(false);
     expect(findAdminSetting('trials.enabled')?.defaultValue).toBe(false);
     expect(findAdminSetting('operations.cronSweepsEnabled')?.defaultValue).toBe(true);
     expect(findAdminSetting('operations.doAlarmsEnabled')?.defaultValue).toBe(true);

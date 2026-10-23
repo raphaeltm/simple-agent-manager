@@ -1,5 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ context: vi.fn(), secrets: vi.fn(), proxy: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  context: vi.fn(),
+  secrets: vi.fn(),
+  proxy: vi.fn(),
+  identity: vi.fn(),
+  sign: vi.fn(),
+}));
+vi.mock('../../../src/services/workload-identity-context', () => ({
+  getWorkloadIdentityMetadata: mocks.identity,
+}));
+vi.mock('../../../src/services/workload-identity-token', async () => ({
+  ...(await vi.importActual<typeof import('../../../src/services/workload-identity-token')>(
+    '../../../src/services/workload-identity-token'
+  )),
+  signWorkloadIdentityToken: mocks.sign,
+}));
 vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn(() => ({})) }));
 vi.mock('../../../src/services/workspace-runtime-assets', () => ({
   resolveWorkspaceRuntimeAssetContext: mocks.context,
@@ -11,6 +26,7 @@ import { handleSecretExec } from '../../../src/routes/mcp/secret-exec-tools';
 import type { McpTokenData } from '../../../src/services/mcp-token';
 
 const token: McpTokenData = {
+  chatSessionId: 'chat',
   taskId: 'task',
   workspaceId: 'ws',
   agentSessionId: 'session',
@@ -19,30 +35,32 @@ const token: McpTokenData = {
   createdAt: 'now',
 };
 const env = { DATABASE: {}, ENCRYPTION_KEY: 'key' } as unknown as Env;
-describe('secret execution MCP authorization and contract', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.context.mockResolvedValue({ userId: 'user', projectId: 'project' });
-    mocks.secrets.mockResolvedValue({
-      envVars: [{ key: 'SENTINEL', value: 'synthetic', isSecret: true }],
-    });
-    mocks.proxy.mockResolvedValue({
-      jobId: 'job',
-      status: 'running',
-      stdout: '',
-      stderr: '',
-      exitCode: -1,
-      timedOut: false,
-      redacted: false,
-      truncated: false,
-      execution: {
-        containerId: 'container',
-        user: 'node',
-        cwd: '/workspaces/repo',
-        environmentMode: 'placeholder',
-      },
-    });
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.identity.mockResolvedValue({ claims: { project_id: 'project' } });
+  mocks.sign.mockResolvedValue('private-oidc-canary');
+  mocks.context.mockResolvedValue({ userId: 'user', projectId: 'project' });
+  mocks.secrets.mockResolvedValue({
+    envVars: [{ key: 'SENTINEL', value: 'synthetic', isSecret: true }],
   });
+  mocks.proxy.mockResolvedValue({
+    jobId: 'job',
+    status: 'running',
+    stdout: '',
+    stderr: '',
+    exitCode: -1,
+    timedOut: false,
+    redacted: false,
+    truncated: false,
+    execution: {
+      containerId: 'container',
+      user: 'node',
+      cwd: '/workspaces/repo',
+      environmentMode: 'placeholder',
+    },
+  });
+});
+describe('secret execution MCP authorization and contract', () => {
   it('forwards selected env privately with a stable idempotent job identity', async () => {
     const args = {
       argv: ['printf', '%s', 'literal $HOME'],
@@ -122,5 +140,61 @@ describe('secret execution MCP authorization and contract', () => {
     await handleSecretExec(2, { jobId }, token, env, 'cancel');
     expect(mocks.secrets).not.toHaveBeenCalled();
     expect(mocks.proxy).toHaveBeenCalledWith(env, token, 'cancel', jobId);
+  });
+});
+
+describe('OIDC execution injection', () => {
+  it('injects privately, permits no stored secrets and keeps retries stable while audience changes conflict', async () => {
+    mocks.secrets.mockImplementation(async () => ({ envVars: [] }));
+    const args = {
+      argv: ['true'],
+      secretNames: [],
+      oidc: { audience: 'vault' },
+      idempotencyKey: 'oidc-retry',
+    };
+    await handleSecretExec(1, args, token, env, 'start');
+    mocks.sign.mockResolvedValueOnce('different-fresh-jwt');
+    await handleSecretExec(2, args, token, env, 'start');
+    await handleSecretExec(3, { ...args, oidc: { audience: 'other' } }, token, env, 'start');
+    const calls = mocks.proxy.mock.calls.slice(-3);
+    expect(calls[0]![4]).toMatchObject({
+      secretNames: ['SAM_OIDC_TOKEN'],
+      managedEnv: [{ key: 'SAM_OIDC_TOKEN', value: 'private-oidc-canary', isSecret: true }],
+    });
+    expect(calls[0]![4].fingerprint).toBe(calls[1]![4].fingerprint);
+    expect(calls[0]![4].fingerprint).not.toBe(calls[2]![4].fingerprint);
+    expect(calls[0]![3]).toBe(calls[2]![3]);
+  });
+  it.each([
+    { env: { SAM_OIDC_TOKEN: 'override' } },
+    { secretNames: ['SAM_OIDC_TOKEN'] },
+    { oidc: { audience: 'workspace-terminal' } },
+    { oidc: { audience: 'vault', user_id: 'other' } },
+  ])('rejects reserved token overrides and caller claims', async (extra) => {
+    mocks.proxy.mockClear();
+    const response = await handleSecretExec(
+      1,
+      { argv: ['true'], secretNames: [], ...extra },
+      token,
+      env,
+      'start'
+    );
+    expect(response.error).toBeDefined();
+    expect(mocks.proxy).not.toHaveBeenCalled();
+  });
+  it('rejects a managed-env collision before signing', async () => {
+    mocks.sign.mockClear();
+    mocks.secrets.mockResolvedValueOnce({
+      envVars: [{ key: 'SAM_OIDC_TOKEN', value: 'stored', isSecret: true }],
+    });
+    const response = await handleSecretExec(
+      1,
+      { argv: ['true'], secretNames: [], oidc: { audience: 'vault' } },
+      token,
+      env,
+      'start'
+    );
+    expect(response.error).toBeDefined();
+    expect(mocks.sign).not.toHaveBeenCalled();
   });
 });

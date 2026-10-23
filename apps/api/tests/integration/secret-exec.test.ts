@@ -29,11 +29,11 @@ async function fixture() {
   sqlite.exec(`
     CREATE TABLE workspaces(id TEXT PRIMARY KEY,user_id TEXT,project_id TEXT,agent_profile_hint TEXT,status TEXT,node_id TEXT);
     CREATE TABLE agent_sessions(id TEXT PRIMARY KEY,workspace_id TEXT,user_id TEXT,agent_profile_id TEXT,skill_id TEXT);
-    CREATE TABLE agent_profiles(id TEXT PRIMARY KEY,project_id TEXT);
+    CREATE TABLE agent_profiles(id TEXT PRIMARY KEY,project_id TEXT,user_id TEXT);
     CREATE TABLE skills(id TEXT PRIMARY KEY,project_id TEXT);
     INSERT INTO workspaces VALUES('ws','user','project',NULL,'running','node-1'),('other-ws','other-user','other-project',NULL,'running','node-2');
     INSERT INTO agent_sessions VALUES('session','ws','user','profile','skill'),('other-session','other-ws','other-user',NULL,NULL);
-    INSERT INTO agent_profiles VALUES('profile','project');
+    INSERT INTO agent_profiles VALUES('profile','project','user');
     INSERT INTO skills VALUES('skill','project');
   `);
   for (const scope of ['project', 'profile', 'skill']) {

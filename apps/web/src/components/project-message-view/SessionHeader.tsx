@@ -44,6 +44,7 @@ import { SessionTriggerOrigin } from './SessionTriggerOrigin';
 import type { SessionState } from './types';
 import { formatCountdown } from './types';
 import { usePublicPortsToggle } from './usePublicPortsToggle';
+import { WorkloadIdentityDetails } from './WorkloadIdentityDetails';
 
 const SESSION_STATE_LABELS: Partial<Record<SessionState, string>> = {
   active: 'Active',
@@ -419,6 +420,8 @@ export function SessionHeader({
               {session.agentSessionId && <CopyableId label="ACP" value={session.agentSessionId} />}
             </div>
           </div>
+
+          <WorkloadIdentityDetails key={session.id} projectId={projectId} sessionId={session.id} />
 
           {(session.agentType || taskEmbed?.taskMode || taskEmbed?.agentProfileHint) && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted min-w-0">

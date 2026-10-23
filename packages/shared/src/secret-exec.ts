@@ -4,6 +4,8 @@ export interface SecretExecRequest {
   command?: string;
   shell?: 'bash' | 'sh';
   secretNames: string[];
+  /** Mint a provider-neutral identity only for this execution. */
+  oidc?: { audience: string };
   cwd?: string;
   env?: Record<string, string>;
   timeoutMs?: number;

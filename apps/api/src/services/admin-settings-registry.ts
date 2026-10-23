@@ -1,5 +1,9 @@
 /** Phase 1 only. Existing readers are wired here after the recovery wave releases integration. */
-import { DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS,
+  DEFAULT_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
+  MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
+} from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import {
@@ -38,6 +42,7 @@ export type AdminSettingName =
   | 'integration.gitlab.host'
   | 'integration.gitlab.clientId'
   | 'integration.gitlab.clientSecret'
+  | 'operations.workloadIdentityTokenTtlSeconds'
   | 'operations.cronSweepsEnabled'
   | 'operations.doAlarmsEnabled'
   | 'operations.stalledTaskClassifierEnabled'
@@ -228,6 +233,13 @@ function validGitLabHost(value: unknown): boolean {
 }
 
 const definitions: AdminSettingDefinition[] = [
+  integerDefinition(
+    'operations.workloadIdentityTokenTtlSeconds',
+    DEFAULT_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
+    'Operations',
+    'External workload identity token lifetime in seconds. Changes apply to newly issued tokens.',
+    { min: 1, max: MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS }
+  ),
   ...Object.keys(CONNECTOR_DEFAULTS).map((key) => connectorDefinition(key as ConnectorSettingKey)),
   ...agentModelSettingDefinitions(),
   oauthDefinition(

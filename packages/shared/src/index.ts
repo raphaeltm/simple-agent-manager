@@ -63,3 +63,4 @@ export type { MentionMatch } from './mentions';
 export { extractMentions, formatMentionName, getMentionQuery } from './mentions';
 export * from './message-cursor';
 export * from './secret-exec';
+export * from './workload-identity';

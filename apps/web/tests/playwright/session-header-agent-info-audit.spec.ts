@@ -688,3 +688,104 @@ test.describe('SessionHeader Public Ports', () => {
     await assertNoOverflow(page);
   });
 });
+
+test.describe('workload identity details', () => {
+  test('shows copyable authoritative IDs, safe labels and automation on mobile and desktop', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await setupApiMocks(page);
+    await page.route('**/api/projects/*/sessions/*/workload-identity', (route) =>
+      respondJson(route, {
+        issuer: 'https://api.example.test/oidc',
+        jwks_uri: 'https://api.example.test/oidc/.well-known/jwks.json',
+        subject: 'project:proj-agent-1:user:user-1:profile:01JPROFILE12345678901234567',
+        ttl_seconds: 300,
+        claims: {
+          project_id: 'proj-agent-1',
+          project_name: 'A project with a descriptive name',
+          user_id: 'user-1',
+          user_name: 'Test User',
+          chat_session_id: 'chat-session-1',
+          session_name: STRESS_TITLE,
+          agent_session_id: 'acp-session-1',
+          workspace_id: 'ws-1',
+          agent_profile_id: '01JPROFILE12345678901234567',
+          agent_profile_name:
+            'Profile Ω <script>alert(1)</script> ' + 'Long profile name '.repeat(12),
+          automation_type: 'trigger',
+          automation_id: '01JTRIGGER12345678901234567',
+          automation_execution_id: '01JEXECUTION123456789012345',
+          automation_name: 'Release automation',
+          trigger_id: '01JTRIGGER12345678901234567',
+        },
+      })
+    );
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+    await page.getByText('Workload identity (OIDC)', { exact: true }).click();
+    await expect(page.getByText('agent_profile_id', { exact: true })).toBeVisible();
+    await page.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/workload-identity-top-${page.viewportSize()!.width}.png`,
+      fullPage: true,
+    });
+    const row = page
+      .locator('dl > div')
+      .filter({ has: page.getByText('agent_profile_id', { exact: true }) });
+    await row.getByRole('button', { name: 'Copy agent_profile_id', exact: true }).click();
+    await expect(row.getByRole('status')).toHaveText('agent_profile_id copied');
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe('01JPROFILE12345678901234567');
+    await page.getByText(/Tokens last 300 seconds/).scrollIntoViewIfNeeded();
+    await expect(page.getByText(/Tokens last 300 seconds/)).toBeInViewport();
+    await page
+      .getByRole('button', { name: 'Copy automation_execution_id', exact: true })
+      .scrollIntoViewIfNeeded();
+    await expect(
+      page.getByRole('button', { name: 'Copy automation_execution_id', exact: true })
+    ).toBeInViewport();
+    await assertNoOverflow(page);
+    await page.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/workload-identity-${page.viewportSize()!.width}.png`,
+      fullPage: true,
+    });
+    await page.evaluate(() => {
+      Object.defineProperty(navigator.clipboard, 'writeText', {
+        configurable: true,
+        value: () => Promise.reject(new Error('Permission denied')),
+      });
+    });
+    await row.getByRole('button', { name: 'Copy agent_profile_id', exact: true }).click();
+    await expect(row.getByRole('status')).toHaveText(
+      'Could not copy agent_profile_id. Select and copy the value manually.'
+    );
+    await assertNoOverflow(page);
+  });
+  test('shows an honest unavailable state and reloads when reopened', async ({ page }) => {
+    await setupApiMocks(page);
+    let attempts = 0;
+    await page.route('**/api/projects/*/sessions/*/workload-identity', (route) => {
+      attempts++;
+      return respondJson(route, { error: 'CONFLICT', message: 'No runtime' }, 409);
+    });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+    await page.getByText('Workload identity (OIDC)', { exact: true }).click();
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'Identity details are unavailable' })
+    ).toBeVisible();
+    await page.getByText('Workload identity (OIDC)', { exact: true }).click();
+    await page.getByText('Workload identity (OIDC)', { exact: true }).click();
+    await expect.poll(() => attempts).toBe(2);
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'Reopen this section to retry' })
+    ).toBeVisible();
+    await assertNoOverflow(page);
+    await page.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/workload-identity-unavailable-${page.viewportSize()!.width}.png`,
+      fullPage: true,
+    });
+  });
+});

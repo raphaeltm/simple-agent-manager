@@ -755,3 +755,7 @@ Responses: 200 `{status:"cancelled"|"idle"}`, 412 `{status:"turn_changed"}`, or 
 `{status:"unconfirmed"}` when termination cannot be confirmed. Invalid input is 400;
 missing/invalid management authorization is 401/403. Older agents return 404 and
 remain unsupported. No raw runtime error body is returned through the Connector.
+
+## Workload identity
+
+`GET /api/projects/:projectId/sessions/:sessionId/workload-identity` requires authenticated project membership and returns `{ issuer, jwks_uri, subject, ttl_seconds, claims }` for the current chat runtime, without signing a token. Missing chat is 404; missing workspace/runtime is 409. Claims are documented in the workload identity guide. Public discovery/JWKS live under `/oidc/.well-known/`. `exec_with_secrets` optionally accepts `oidc: { audience }` and injects `SAM_OIDC_TOKEN` only into its command.

@@ -60,6 +60,7 @@ export default defineConfig({
             { slug: 'docs/guides/workflows' },
             { slug: 'docs/guides/mcp-servers' },
             { slug: 'docs/guides/secret-execution' },
+            { slug: 'docs/guides/workload-identity' },
             { slug: 'docs/guides/ai-models-for-agents' },
             { slug: 'docs/guides/sam-connector' },
             { slug: 'docs/guides/cli' },

@@ -1,5 +1,5 @@
 import type { WorkspaceRuntimeAssetsResponse } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -128,7 +128,13 @@ async function validateProfileId(
     .where(
       and(
         eq(schema.agentProfiles.id, profileId),
-        eq(schema.agentProfiles.projectId, workspace.projectId)
+        or(
+          eq(schema.agentProfiles.projectId, workspace.projectId),
+          and(
+            isNull(schema.agentProfiles.projectId),
+            eq(schema.agentProfiles.userId, workspace.userId)
+          )
+        )
       )
     )
     .limit(1);

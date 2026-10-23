@@ -980,3 +980,7 @@ Payload expiry and tombstone purge run in bounded batches on enabled cron ticks;
 Recovery submissions run in one serial `waitUntil` loop so other operational sweeps are not delayed. Exhausted attempts/expired payloads use the existing throttled superadmin notification path with safe generic metadata.
 
 Archived chat Fork context: `ARCHIVED_FORK_HISTORY_MAX_CHARS` bounds retained human/assistant historical text (default `24000`), and `SAM_SESSION_MESSAGES_MAX_LIMIT` bounds the newest transcript page (default `200`). History is redacted before truncation; omitted text is disclosed.
+
+### External workload identity
+
+- `operations.workloadIdentityTokenTtlSeconds` — runtime Admin Settings → Operations control (not an environment variable) for exec_with_secrets OIDC lifetime; default `300`, allowed integer range `1`–`600`. Invalid values reject issuance. No additional keys; uses the installation RSA key under the distinct `/oidc` issuer.

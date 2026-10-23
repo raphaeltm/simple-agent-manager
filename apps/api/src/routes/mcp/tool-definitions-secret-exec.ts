@@ -22,6 +22,18 @@ export const SECRET_EXEC_TOOLS = [
           items: { type: 'string' },
           description: 'Managed project/profile/skill secret environment names.',
         },
+        oidc: {
+          type: 'object',
+          properties: {
+            audience: {
+              type: 'string',
+              description:
+                'Exact external service audience. Injects a short-lived SAM_OIDC_TOKEN into this command only; no stored secrets or GCP setup required.',
+            },
+          },
+          required: ['audience'],
+          additionalProperties: false,
+        },
         cwd: { type: 'string' },
         env: { type: 'object', additionalProperties: { type: 'string' } },
         timeoutMs: { type: 'integer', minimum: 1 },
