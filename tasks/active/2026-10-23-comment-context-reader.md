@@ -88,17 +88,17 @@ chat rows open it. Notifications open it too. The reader:
 
 ### Server
 
-- [ ] Shared type `MessageCommentContextResponse` (`packages/shared/src/types/comments.ts`)
-- [ ] Admin settings `collaboration.commentContextMessages` (default 6, 1–50) and
+- [x] Shared type `MessageCommentContextResponse` (`packages/shared/src/types/comments.ts`)
+- [x] Admin settings `collaboration.commentContextMessages` (default 6, 1–50) and
       `collaboration.commentContextMaxRows` (default 1,000, 50–5,000) + getters
-- [ ] DO module `project-data/message-context.ts`: run-aware window over an owner reader;
+- [x] DO module `project-data/message-context.ts`: run-aware window over an owner reader;
       source + target (incl. compact) locate; exported guards in archive-sharding
-- [ ] DO RPCs `archiveSourceGetMessageContext` / `archiveTargetGetMessageContext`
-- [ ] Service `getMessageContextWindow` (owner resolved once)
-- [ ] Route `GET /:sessionId/comments/:threadId/context` (task:read, session + thread in
+- [x] DO RPCs `archiveSourceGetMessageContext` / `archiveTargetGetMessageContext`
+- [x] Service `getMessageContextWindow` (owner resolved once)
+- [x] Route `GET /:sessionId/comments/:threadId/context` (task:read, session + thread in
       parallel, thread/session cross-check, 404s, response)
-- [ ] Notification action URL opens the reader
-- [ ] Tests: window algorithm on real SQLite (mid-run anchor, run start, units each side,
+- [x] Notification action URL opens the reader
+- [x] Tests: window algorithm on real SQLite (mid-run anchor, run start, units each side,
       row cap, missing anchor, cursor ties); target + compact archive path (workers);
       route vertical slice with cross-session and cross-project attacks + owner controls
 
@@ -134,6 +134,19 @@ chat rows open it. Notifications open it too. The reader:
 - [ ] A comment whose message is gone shows the stored quote and a clear message, no error
 - [ ] Cross-session and cross-project thread ids return 404 with no data
 - [ ] Works for archived (sharded) sessions
+
+## Implementation notes
+
+- 2026-10-23: direct push of the task file to `main` is rejected by repository rules; the task
+  file lives on the feature branch.
+- Sessions with message comments are never archived (`archive-sharding.ts` refuses them with
+  `message_comments_present` to avoid cascade deletion), so the reader normally reads the root
+  object. The owner-aware read is kept so it matches `getMessages` and survives a policy change.
+- `comment_threads.message_id` cascades on message delete, so "anchored message gone" needs a
+  row removed without foreign keys; the endpoint still answers it with `anchor.found = false`.
+- Compact-mode default consolidated into `getDefaultCompactMode` (three call sites).
+- Discrimination checks: emptying `MERGED_ROLES` reddens 4 window tests; dropping the session
+  predicate from the anchor lookup reddens exactly the cross-session test.
 
 ## References
 
