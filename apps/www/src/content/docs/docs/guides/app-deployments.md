@@ -5,6 +5,19 @@ description: Author and submit SAM app deployment releases with Docker Compose.
 
 SAM app deployments are agent-first. A user creates a deployment environment and enables agent deployment for that environment. An agent then targets that named environment when it publishes a release.
 
+## The Deployments page
+
+A project's **Deployments** page lists its environments grouped by what they need from you: **Needs your attention**, **Running**, and **Not running**. Each row shows the address people visit (your own domain when one is working) and who shipped the running version. **New** creates an environment and asks which agents may deploy there; there is no default answer.
+
+Opening an environment shows one page, top to bottom:
+
+- **Status in one sentence**, the address with **Open app** and **Logs**, and who shipped the running version from which chat. A deploy in progress says the app is offline until the new version is up, because the server stops the old version before starting the new one.
+- **Needs your attention**: each problem in plain words, the raw error under **Show the error**, and its fix. **Ask an agent** opens a new chat with a request about this environment already written; you choose the agent and send it.
+- **Recent deploys**: every version, who sent it, and the chat it came from. While the newest version deploys, or after it fails, it lists the steps the server reported, including which step broke and whether the previous version came back.
+- **Who can deploy**: turning agent deploys on asks you to choose **Any agent in this project** or named agent profiles. Nothing changes until you choose, and an **Only these** list with nobody picked shows a warning, because an empty list means any agent may deploy.
+- **Settings your app reads** (variables and secrets), **Addresses** (public routes and your own domains), **Saved data** (volumes), and **Behind the scenes** (the server, its hardware, containers and raw signals).
+- **Pause or delete** at the bottom. Delete lists what it removes and asks you to type the environment name.
+
 Agents can discover this whole flow at runtime by calling the `get_deployment_guide` MCP tool, which returns a briefing on the agent-first model and the order in which to call the deployment tools. It takes no arguments and is the recommended starting point whenever a user asks to deploy, launch, publish, ship, or release an app.
 
 Publishing is a two-step, asynchronous flow:
@@ -61,7 +74,7 @@ Content-Type: text/yaml
 
 SAM accepts `application/yaml`, `text/yaml`, `application/x-yaml`, and `text/x-yaml`. Raw manifest JSON is still accepted for older callers, but Compose YAML is the authoring format.
 
-Configure values on each deployment environment from the Deployments page:
+Configure values on each deployment environment in its **Settings your app reads** section. Use **Add**, and turn on **Keep it secret** for a secret:
 
 - **Variables** are visible after save. SAM supplies them to `build_and_publish` and to deployment-node Compose apply commands, so they can be used for image tags, build args, domains, and runtime environment values.
 - **Secrets** are hidden after save. SAM supplies them only to deployment-node Compose apply commands as process environment for Compose interpolation. Secrets are not sent to build nodes and should not be used in build args, image tags, route fields, or other build/publish-control fields.
@@ -99,7 +112,7 @@ If an app needs to know its public hostname before it starts, agents should prev
 
 Provider-backed block volumes give a deployment environment durable storage that survives container restarts and the stop/start lifecycle. They are real cloud block volumes created through the deployment environment's provider and attached to the deployment node.
 
-- Volumes are created automatically from safe Compose named volume declarations during `build_and_publish`, and can also be created, viewed, attached, detached, and deleted from the deployment environment's **Volumes** tab.
+- Volumes are created automatically from safe Compose named volume declarations during `build_and_publish`. They can also be created, viewed, and deleted in the environment's **Saved data** section, and attached or detached by hand under **Behind the scenes**.
 - Each volume is mounted at a SAM-managed path derived from the environment id, and the deployment apply payload tells the node which provider volume to mount where.
 - All volumes in one environment must share the same provider **and** the same location. A single VM can only attach volumes that live in its own provider/location, so an environment that mixes providers or regions is rejected before a node is provisioned.
 - When an environment has volumes (or is marked as requiring volumes), provisioning is pinned to the volumes' provider and location so the node lands where the volumes can attach.
@@ -107,20 +120,20 @@ Provider-backed block volumes give a deployment environment durable storage that
 
 ## Stop and start lifecycle
 
-A deployment environment can be stopped to release its compute while preserving its volumes and release history, then started again later.
+A deployment environment can be stopped to release its compute while preserving its volumes and release history, then started again later. In the app this is **Pause** and **Start** at the bottom of the environment page.
 
 - **Stop** tears down the running Compose stack on the node, detaches the environment's provider volumes (the volume data is preserved), clears the node placement, and deletes the node if no other environment is using it. Stop fails with a `409` if the environment is already stopping or if the live teardown on the node fails, so a stop never silently strands a half-torn-down environment.
 - **Start** re-provisions or selects a deployment node, reattaches the environment's volumes, and lets the node's heartbeat reapply the latest release. If the environment requires volumes but no volume records exist, start fails with a `409` rather than booting against empty storage.
 - Volume-requiring environments only receive a deployment payload once the node has reported its provider instance id. Until then the deploy-release callback returns `422` and the node retries, which prevents a volume-backed app from ever starting against ephemeral container storage.
 
-From the user's perspective, **Stop** is the safe way to tear down compute without deleting the deployment environment. Use it when a preview app is idle but you may need its latest release, variables, secrets, domains, or volumes again. Use destructive delete controls only when the environment and its managed resources are no longer needed.
+From the user's perspective, **Pause** (stop) is the safe way to tear down compute without deleting the deployment environment. Use it when a preview app is idle but you may need its latest release, variables, secrets, domains, or volumes again. Use destructive delete controls only when the environment and its managed resources are no longer needed.
 
 ## Recovering from a failed release
 
-If a release cannot be placed (for example, the cloud provider has no room for that server type in that region right now), the environment shows **error** with the reason. Either of these recovers it:
+If a release cannot be placed (for example, the cloud provider has no room for that server type in that region right now), the environment page says SAM couldn't get a server for that version, with the reason under **Show the error**. Either of these recovers it:
 
 - **Deploy again.** The new release places a node for the environment and moves it back to **active**, clearing the old error. The node then applies the release and reports its progress like any other deploy. If the placement fails again, the environment returns to **error** with the new reason.
-- **Stop, then Start.** Start places a node for the latest release and shows **starting** until the node reports it applied.
+- **Pause, then Start.** Start places a node for the latest release and shows **Starting** until the node reports it applied.
 
 If SAM has to abandon a placement before any server is created, for example because the deploying user lost access to the project, the release is marked **failed** and the environment shows `Deployment node placement stopped before a server was created: <reason>`. A placement replaced by a newer release, or by a Stop or delete of the environment, is left to that newer release or action instead.
 
@@ -128,7 +141,7 @@ If SAM has to abandon a placement before any server is created, for example beca
 
 Each public route gets a SAM-owned hostname such as
 `r1-web-3000-env.apps.example.com`. You can attach your own subdomain to that
-route from the deployment environment's **Domains** tab. SAM shows the exact
+route from the **Addresses** section of the environment page. SAM shows the exact
 CNAME target to create, verifies the hostname through DNS-over-HTTPS, and — once
 verified — activates the custom hostname on the running app **without a full
 redeploy**.
@@ -136,38 +149,39 @@ redeploy**.
 Custom domains attach to an already-published public route, so publish a release
 with at least one public route first. Then:
 
-1. Open the deployment environment and go to the **Domains** tab.
-2. Pick the public route you want to expose and add a concrete subdomain such as
-   `app.example.com` (apex/root domains are not supported in this version).
-3. Create a **CNAME** record from your subdomain to the SAM route hostname shown
-   in the panel. If your DNS provider puts a proxy or CDN in front of records
-   (for example Cloudflare's orange-cloud toggle), turn it off for this record so
+1. Open the deployment environment and choose **Your domain** under **Addresses**.
+2. Pick the part of the app (public route) you want to expose and enter a
+   concrete subdomain such as `app.example.com` (apex/root domains are not
+   supported in this version).
+3. Create the **CNAME** record shown, from your subdomain to the SAM route
+   hostname. If your DNS provider puts a proxy or CDN in front of records (for
+   example Cloudflare's orange-cloud toggle), turn it off for this record so
    verification can see the real target.
-4. Click **Verify** after the DNS record propagates. Verification succeeds when
-   the custom hostname resolves to the SAM route hostname, or to the deployment
-   node IP for DNS providers that flatten CNAMEs to A records.
+4. Select **Add domain and check DNS**. If the record hasn't propagated yet, the
+   domain waits for DNS; use **Check again** once it has. Verification succeeds
+   when the custom hostname resolves to the SAM route hostname, or to the
+   deployment node IP for DNS providers that flatten CNAMEs to A records.
 
 That's it — you do not need to republish the release. A successful verification
 queues a **route-only** activation to the deployment node, which reloads its
 router and provisions TLS for the new hostname automatically.
 
-![The deployment Domains tab: an Add domain form showing the exact CNAME record to create (type CNAME, the subdomain as the name, the SAM route hostname as the value, proxy set to DNS only) with a Copy CNAME value button, the environment's public routes, and a saved custom domain in the Pending DNS state.](/images/docs/deployment-custom-domains.png)
+![The "Use your own domain" sheet: step 1 picks the part of the app, step 2 is the subdomain, and step 3 shows the exact DNS record to add (type CNAME, the subdomain as the name, the SAM route hostname it points to) with Copy buttons, a note to turn off Cloudflare's proxy for the record, and an "Add domain and check DNS" button.](/images/docs/deployment-custom-domains.png)
 
 ### Domain states
 
-The Domains tab shows a live status badge for each domain so you can tell where
-it is in the lifecycle:
+The **Addresses** section shows each domain's state in words, and shows nothing
+extra while a domain works:
 
-| State                    | Meaning                                                                |
-| ------------------------ | ---------------------------------------------------------------------- |
-| **Pending DNS**          | Waiting for DNS to resolve to the route target before activation.      |
-| **Activating**           | DNS is verified and route activation is queued to the node.            |
-| **Active**               | The node is serving the hostname with TLS.                             |
-| **DNS recheck required** | The underlying route target changed; re-verify the record.             |
-| **Route missing**        | The route this domain was attached to no longer exists in the release. |
-| **DNS mismatch**         | The record does not point at the expected route target.                |
-| **Inactive**             | The environment is stopped; the saved domain is preserved.             |
-| **Deactivating**         | The domain is being removed and the node is dropping the route.        |
+| State                | Meaning                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------- |
+| **Waiting for DNS**  | The record isn't there yet, or has never resolved to the route target. Use **Check again**. |
+| **Turning on**       | DNS is verified and route activation is queued to the node.                                 |
+| _(no label)_         | The node is serving the hostname with TLS.                                                  |
+| **Points elsewhere** | The domain worked before, but its record or the route target changed. Re-check the record.  |
+| **Not attached**     | The route this domain was attached to no longer exists in the latest release.               |
+| **Paused**           | The environment is paused; the saved domain is preserved.                                   |
+| **Removing**         | The domain is being removed and the node is dropping the route.                             |
 
 Saved domains stay visible even when the environment is **stopped** or in an
 error state, so a stop/start cycle does not lose your DNS setup. Removing a

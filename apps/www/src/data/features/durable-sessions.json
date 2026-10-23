@@ -48,8 +48,8 @@
       "body": "App deployments turn a Compose release into a running app. Each environment has its own deployment node, public routes, configuration, logs, and volumes, managed from the same project — and a release can be submitted by an agent task. No separate deployment pipeline to wire up.",
       "screenshot": {
         "src": "/images/features/sam-app-deployment-detail.png",
-        "alt": "Deployment environment detail for staging showing release v14 applied and submitted by an agent task, health checks for app, node, provider, routes, disk, and config, and a public route",
-        "caption": "A release the agent submitted, serving on its own node with health checks and a public route"
+        "alt": "The staging deployment environment page: Live, running version 14 at staging.payments.northwindlabs.dev with Open app and Logs, credited to the Claude Code agent and the chat it came from; recent deploys v14, v13 and v12 with the agent and chat behind each; and who can deploy next to the settings the app reads",
+        "caption": "One page per environment: what's running, which agent shipped it from which chat, and who may deploy next"
       }
     }
   ]

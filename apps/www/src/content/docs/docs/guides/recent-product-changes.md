@@ -19,6 +19,11 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
   transcribing a recording. Cheap decision, extraction and classifier models are on by default.
   Choose others, and set a monthly limit, in project settings. A profile or skill can choose its own.
   → [AI models for agents](/docs/guides/ai-models-for-agents/)
+- **A clearer Deployments page.** Each environment is one page instead of seven tabs: what's
+  running in one sentence, problems with their fixes, recent deploys with who shipped them and the
+  steps the server reported, then settings, addresses, saved data, and Pause or Delete at the
+  bottom. Turning agent deploys on now asks which agents may deploy, and **Ask an agent** opens a
+  chat with the request already written. → [The Deployments page](/docs/guides/app-deployments/#the-deployments-page)
 
 ## Earlier: 6 – 13 October 2026
 
