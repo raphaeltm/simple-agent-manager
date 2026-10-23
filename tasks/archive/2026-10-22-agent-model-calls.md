@@ -150,28 +150,28 @@ selection UIs.
 - [x] Skill form: AI models field (inherit / custom)
 - [x] Behavioral tests (picker toggling/search, inherit/custom switch sends payload, save flows)
 - [x] Playwright visual audits (normal, long text, many, empty, error; mobile + desktop)
-- [ ] UI/UX iteration rounds with agent reviews (≥2 rounds) before staging — round 1 (2 reviewers), round 2 fixes done, round 3 polish in progress, final review pending
+- [x] UI/UX iteration rounds with agent reviews (≥2 rounds) before staging: round 1 (2 reviewers), round 2 fixes, round 3 polish, final round-4 review (SHIP) plus follow-ups (Enter saves the limit, "N more models")
 
 ### Docs
 - [x] New guide `guides/ai-models-for-agents.md` + sidebar entry
 - [x] Update `guides/agents.md` (MCP tools table, profiles), `concepts.mdx`, `guides/admin-settings.md`, `reference/configuration.md`, `guides/recent-product-changes.md`
 
 ### Staging
-- [ ] Deploy branch, configure project models + budget via UI as smoke user
-- [ ] Real agent session calls `list_ai_models` + `run_ai_model` (Clef-flash decision, a text model); disabled model rejected; usage updates in UI
-- [ ] Clean up staging resources
+- [x] Deploy branch, configure project models + budget via UI as smoke user (runs 39872920686, 39879400025; `staging-agent-models.spec.ts` configure mode)
+- [x] Real agent session calls `list_ai_models` + `run_ai_model` (Clef-flash decision, a text model); disabled model rejected; usage updates in UI. Session `160d9aed…` covered Clef-flash, gpt-oss-20b, FLUX (saved file), ResNet-50 via `$file`, and a refusal; D1 accounting was exact; the skill cascade was checked in session `2119d4a1…`.
+- [x] Clean up staging resources (3 workspaces deleted, sessions stopped, skill deleted, project settings reset)
 
 ## Acceptance criteria
-- [ ] Agents can list enabled models and call them through MCP; output returned; cost recorded
-- [ ] A model not enabled for the effective layer is refused with a message naming where to enable it
-- [ ] Project/profile/skill cascade: most specific non-null layer wins; NULL inherits; [] disables all
-- [ ] Defaults (no setting anywhere): Clef family, Clairic and classification models enabled
-- [ ] Budget: calls refused once the monthly project budget is used; concurrent calls cannot overspend past the cap (real DB race test)
-- [ ] Only Cloudflare-hosted `@cf/`/`@hf/` catalog models can be enabled or called
-- [ ] Project settings UI: budget + usage + model picker, solid on 375px and 1280px, reviewed by UI/UX agents in ≥2 iterations
-- [ ] Profile and skill editors: inherit/custom model access, saved and read back
-- [ ] Binary inputs via workspace `$file` and binary outputs saved to the workspace
-- [ ] Docs updated; staging end-to-end verified with a real agent session
+- [x] Agents can list enabled models and call them through MCP; output returned; cost recorded
+- [x] A model not enabled for the effective layer is refused with a message naming where to enable it
+- [x] Project/profile/skill cascade: most specific non-null layer wins; NULL inherits; [] disables all
+- [x] Defaults (no setting anywhere): Clef family, Clairic and classification models enabled
+- [x] Budget: calls refused once the monthly project budget is used; concurrent calls cannot overspend past the cap (real DB race test)
+- [x] Only Cloudflare-hosted `@cf/`/`@hf/` catalog models can be enabled or called
+- [x] Project settings UI: budget + usage + model picker, solid on 375px and 1280px, reviewed by UI/UX agents in ≥2 iterations (3 iterations + final review, SHIP)
+- [x] Profile and skill editors: inherit/custom model access, saved and read back
+- [x] Binary inputs via workspace `$file` and binary outputs saved to the workspace
+- [x] Docs updated; staging end-to-end verified with a real agent session
 
 ## References
 - Idea `01M5JBWGEP7MBHNXZ19450MV4B` (design), idea `01M2TSPBDV1GDVRN9CS5A89EMH` (Jev research)
@@ -186,3 +186,10 @@ selection UIs.
 - **Stale model ids are kept, not stripped.** Access intersects the live catalog at call time. The UI shows "No longer available" with a Remove button.
 - **Model id pattern tightened.** Each segment now has to start with an alphanumeric, so `@cf/../x` is rejected. The unit-test agent found this.
 - **Test fixtures updated.** The webhook-trigger test's hand-written projects table gained the 2 new columns. The cf-container contract test now reads `services/workspace-file-transfer.ts`. The project-agent-defaults test now reads `ProjectSettingsAgentsTab.tsx`.
+
+## Staging findings (2026-10-23)
+- **Fixed: the picker could start empty.** Choosing "Choose models" in a fresh skill form before the catalog and project settings had loaded opened the picker with nothing turned on. The picker now waits for the inherited selection (`selectionReady`), in 3f1743634, with a regression test that controls both loads.
+- **Fixed: the section was buried.** AI Models sat below the long per-agent overrides list; it now comes second on the Agents tab (141259365).
+- **Not this PR: rollout interruption.** A deploy's vm-agent container rollout (v1325) interrupted an Instant session mid-prompt. This is known (`tasks/backlog/2026-07-20-instant-ping-container-died-midsession.md`); the retry after the rollout passed.
+- **Upstream behaviour, surfaced correctly.** FLUX sometimes rejects harmless prompts with `400 NSFW content detected`. The error is returned to the agent and not charged.
+
