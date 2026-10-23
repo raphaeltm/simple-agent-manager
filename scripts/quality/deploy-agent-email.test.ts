@@ -56,8 +56,24 @@ class FakeCloudflare {
   dnsCreateConflict: { name: string; code: number; message: string } | null = null;
   calls: Array<{ method: HttpMethod; path: string }> = [];
 
+  /**
+   * Email Routing was turned on in this zone before. The apex keeps whatever records the test
+   * gives it: the SPF record Cloudflare adds there is an ordinary record an admin can remove.
+   */
+  useEmailRouting(): this {
+    this.routing.enabled = true;
+    return this;
+  }
+
   /** What turning routing on for subdomain `name` leaves behind (dashboard or API). */
   enableSubdomainRouting(name = 'agents.fixture.example'): this {
+    this.routing.enabled = true;
+    this.addRoutingMx(name);
+    this.dns.push({ type: 'TXT', name, content: '"v=spf1 include:_spf.mx.cloudflare.net ~all"' });
+    return this;
+  }
+
+  private addRoutingMx(name: string): void {
     for (const [priority, host] of [
       [13, 'route1'],
       [86, 'route2'],
@@ -65,8 +81,27 @@ class FakeCloudflare {
     ] as const) {
       this.dns.push({ type: 'MX', name, content: `${host}.mx.cloudflare.net`, priority });
     }
-    this.dns.push({ type: 'TXT', name, content: '"v=spf1 include:_spf.mx.cloudflare.net ~all"' });
-    return this;
+  }
+
+  /**
+   * The first time Email Routing is turned on in a zone, whichever name the request gives,
+   * Cloudflare turns it on for the whole zone and adds its SPF record and a locked DKIM key at
+   * the apex (seen on staging, deploy run 39866499256). What it does to an apex that already
+   * has an SPF record is unverified; this fake adds a second one.
+   */
+  private enableZone(): void {
+    if (this.routing.enabled) return;
+    this.routing.enabled = true;
+    this.dns.push({
+      type: 'TXT',
+      name: this.zoneName,
+      content: '"v=spf1 include:_spf.mx.cloudflare.net ~all"',
+    });
+    this.dns.push({
+      type: 'TXT',
+      name: `cf2024-1._domainkey.${this.zoneName}`,
+      content: '"v=DKIM1; h=sha256; k=rsa; p=MIIB"',
+    });
   }
 
   /** How Cloudflare compares record content: quoting and spacing do not change a value. */
@@ -188,8 +223,9 @@ class FakeCloudflare {
       // rejected with 2007.
       const name = (body as { name?: string } | undefined)?.name;
       if (!name) {
-        this.routing.enabled = true;
-        return this.ok(this.enableSubdomainRouting(this.zoneName).apexMailRecords());
+        this.enableZone();
+        this.addRoutingMx(this.zoneName);
+        return this.ok(this.apexMailRecords());
       }
       if (!name.endsWith(`.${this.zoneName}`)) {
         return {
@@ -202,6 +238,7 @@ class FakeCloudflare {
           },
         };
       }
+      this.enableZone();
       if (this.routingRecordsAppear) this.enableSubdomainRouting(name);
       this.onSubdomainRoutingEnabled?.(this);
       return this.ok(this.dns.filter((record) => record.name === name));
@@ -294,14 +331,13 @@ describe('configureAgentEmail', () => {
   });
 
   it('turns Email Routing on for the subdomain by name, never for the zone apex', async () => {
-    const fake = new FakeCloudflare();
+    const fake = new FakeCloudflare().useEmailRouting();
 
     await expect(run(fake)).resolves.toMatchObject({ status: 'configured' });
 
     expect(fake.calls.filter((call) => call.path.endsWith('/email/routing/dns'))).toEqual([
       { method: 'POST', path: `/zones/${ZONE}/email/routing/dns` },
     ]);
-    expect(fake.routing.enabled).toBe(false);
     expect(fake.dns).toContainEqual(
       expect.objectContaining({
         type: 'MX',
@@ -312,8 +348,31 @@ describe('configureAgentEmail', () => {
     expect(fake.apexMailRecords()).toEqual([]);
   });
 
-  it('fails the deploy before configuring anything else if turning routing on changed the apex', async () => {
+  // Known preview limitation, pending the decision recorded as open question 5 in
+  // tasks/active/2026-10-22-agent-email-prototype.md: accept or merge the records Cloudflare adds
+  // to the apex, or keep agent email off until an admin opts in. Until then the apex check stops
+  // the first deploy in a zone new to Email Routing, after Cloudflare has added them.
+  it('for now, fails the first deploy in a zone new to Email Routing, then completes on the next', async () => {
     const fake = new FakeCloudflare();
+
+    await expect(run(fake)).rejects.toThrow(/MX\/SPF records of fixture\.example changed/);
+
+    expect(fake.apexMailRecords()).toEqual([
+      {
+        type: 'TXT',
+        name: 'fixture.example',
+        content: '"v=spf1 include:_spf.mx.cloudflare.net ~all"',
+      },
+    ]);
+    expect(fake.rules).toEqual([]);
+    expect(fake.sending).toEqual([]);
+
+    await expect(run(fake)).resolves.toMatchObject({ status: 'configured' });
+    expect(fake.apexMailRecords()).toHaveLength(1);
+  });
+
+  it('fails the deploy before configuring anything else if turning routing on changed the apex', async () => {
+    const fake = new FakeCloudflare().useEmailRouting();
     fake.dns.push({ type: 'MX', name: 'fixture.example', content: 'smtp.google.com', priority: 1 });
     fake.onSubdomainRoutingEnabled = (cloudflare) => {
       cloudflare.dns.push({
@@ -332,7 +391,7 @@ describe('configureAgentEmail', () => {
   });
 
   it('stays pending, writing no marker, until the routing records are visible', async () => {
-    const fake = new FakeCloudflare();
+    const fake = new FakeCloudflare().useEmailRouting();
     fake.routingRecordsAppear = false;
 
     const outcome = await run(fake);
@@ -345,7 +404,7 @@ describe('configureAgentEmail', () => {
   });
 
   it('configures subaddressing, the worker rule and sending, then is idempotent', async () => {
-    const fake = new FakeCloudflare();
+    const fake = new FakeCloudflare().useEmailRouting();
 
     const first = await run(fake);
 
@@ -402,9 +461,9 @@ describe('configureAgentEmail', () => {
       ],
     ],
   ] as Array<[string, DnsRecord[]]>)(
-    'leaves an apex with %s exactly as it was',
+    'leaves an apex with %s exactly as it was, in a zone already using Email Routing',
     async (_case, apexRecords) => {
-      const fake = new FakeCloudflare();
+      const fake = new FakeCloudflare().useEmailRouting();
       fake.dns.push(...apexRecords.map((record) => ({ ...record })));
 
       await expect(run(fake)).resolves.toMatchObject({ status: 'configured' });
@@ -517,7 +576,7 @@ describe('configureAgentEmail', () => {
   });
 
   it('recognises sending records Cloudflare created itself, even long TXT values split into strings', async () => {
-    const fake = new FakeCloudflare();
+    const fake = new FakeCloudflare().useEmailRouting();
     fake.onSendingSubdomainCreated = (cloudflare) => {
       for (const records of Object.values(cloudflare.sendingDns)) {
         for (const record of records) {
@@ -539,7 +598,7 @@ describe('configureAgentEmail', () => {
   });
 
   it('carries on when Cloudflare says a sending record it holds is identical', async () => {
-    const fake = new FakeCloudflare();
+    const fake = new FakeCloudflare().useEmailRouting();
     fake.onSendingSubdomainCreated = (cloudflare) => {
       // Spaced differently from the sending API's copy, so the step cannot tell it is the same.
       cloudflare.dns.push({
@@ -557,7 +616,7 @@ describe('configureAgentEmail', () => {
   });
 
   it('still fails the deploy when another record already holds a sending record name', async () => {
-    const fake = new FakeCloudflare();
+    const fake = new FakeCloudflare().useEmailRouting();
     fake.dnsCreateConflict = {
       name: '_dmarc.agents.fixture.example',
       code: 81053,

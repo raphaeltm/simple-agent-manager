@@ -1,6 +1,6 @@
 # Agent email addresses — first prototype
 
-**Task:** 01M5J8R9VN49FEN19WCE16VZHN · **Branch:** `sam/giving-agents-email-addresses-16vzhn` · **Status:** draft PR [#2413](https://github.com/raphaeltm/simple-agent-manager/pull/2413); Astra's PR review addressed; staging end-to-end test pending (see Notes)
+**Task:** 01M5J8R9VN49FEN19WCE16VZHN · **Branch:** `sam/giving-agents-email-addresses-16vzhn` · **Status:** draft PR [#2413](https://github.com/raphaeltm/simple-agent-manager/pull/2413); Astra's PR review addressed; staging end-to-end test passed on 2026-10-23 (see Notes); open question 5 waits on Raphaël
 
 **Raphaël's constraints (2026-10-22):** plan first, get Astra High (profile `01M1P6Y4T0NANW8XGMHJHBS7AA`) to review the plan, build, ship to staging, test end to end, get Astra to review the PR. **The PR stays a draft. Do not merge it or mark it ready.** CI must be green.
 
@@ -47,13 +47,13 @@ Decisions Raphaël made explicitly (verbatim intent, from knowledge entity `Arch
 ```mermaid
 sequenceDiagram
   participant S as Allowed sender
-  participant MX as Cloudflare Email Routing (mail.BASE_DOMAIN)
+  participant MX as Cloudflare Email Routing (agents.BASE_DOMAIN)
   participant W as API Worker email()
   participant D1 as D1
   participant TR as Trigger pipeline / TaskRunner
   participant A as Agent session
   participant ES as Cloudflare Email Sending
-  S->>MX: mail to agent+KEY@mail.BASE_DOMAIN
+  S->>MX: mail to agent+KEY@agents.BASE_DOMAIN
   MX->>MX: SPF or DKIM must pass, sender DMARC policy applied
   MX->>W: rule agent@ (subaddressing) → Worker
   W->>W: size cap, loop guards, parse MIME (postal-mime)
@@ -83,7 +83,7 @@ sequenceDiagram
   - At most 50 recipients and 5 MiB per message.
   - The sending domain or subdomain must be onboarded: `POST /zones/{id}/email/sending/subdomains`, then `GET .../{sid}/dns` lists the `cf-bounce` MX/SPF/DKIM and DMARC records to create.
 - **Token permissions the deploy token needs** (none are in the self-host token list today): Zone → Email Routing Rules → Edit; Zone → Zone Settings → Edit (the zone's routing settings, including subaddressing); Email Sending → Edit. Zone DNS Edit is already present. Raphaël added all three to the staging deploy token on 2026-10-22.
-- **Enabling routing is not something the deploy may do** (found in Astra's PR review): `POST /zones/{zone}/email/routing/dns` is documented as "Enable your Email Routing zone. Add and lock the necessary MX and SPF records", which writes and locks apex records. The only documented subdomain-only path is the dashboard (Email Routing → Settings → Subdomains), so an operator turns routing on for `mail.<BASE_DOMAIN>` once, by hand.
+- **(Superseded 2026-10-22: the deploy now turns routing on by naming the subdomain; see Notes.)** **Enabling routing is not something the deploy may do** (found in Astra's PR review): `POST /zones/{zone}/email/routing/dns` is documented as "Enable your Email Routing zone. Add and lock the necessary MX and SPF records", which writes and locks apex records. The only documented subdomain-only path is the dashboard (Email Routing → Settings → Subdomains), so an operator turns routing on for `mail.<BASE_DOMAIN>` once, by hand.
 - **Workers do NOT see SPF/DKIM/DMARC results.** The Worker gets no `Authentication-Results`, and `ARC-Authentication-Results` has no verdicts. This is the open issue [cloudflare/workerd#6740](https://github.com/cloudflare/workerd/issues/6740), from May 2026. What we do know: Email Routing **rejects mail that fails both SPF and DKIM**, and mail that fails the sender domain's DMARC policy. A forged `From:` at a `p=none` domain therefore still gets through.
 
 ### Live infrastructure (read-only probes, 2026-10-22)
@@ -187,6 +187,7 @@ It is idempotent, runs before `sync-wrangler-config.ts`, and is unit-tested agai
 
 - **Probe.** If the token lacks routing or sending access, emit a `::notice` and do nothing.
 - **(Superseded 2026-10-22, see Notes.)** **Routing must already be on for the subdomain.** The step never enables Email Routing. It checks that `agents.<BASE_DOMAIN>` has Cloudflare MX records (an operator enabled it in the dashboard) and otherwise skips with instructions.
+- **Routing on by name (current).** When `agents.<BASE_DOMAIN>` has no Cloudflare MX records, the step calls `POST /email/routing/dns` with `{ name: "agents.<BASE_DOMAIN>" }`, never without a name (that enables the apex). The apex check runs straight after. In a zone new to Email Routing, Cloudflare also adds its SPF record and DKIM key at the apex, so that first deploy fails the check and the next completes (open question 5).
 - **Configure:**
   - `PATCH /email/routing` to set `support_subaddress: true` when it is off;
   - upsert the literal rule `agent@agents.<BASE_DOMAIN>` → API Worker;
@@ -242,14 +243,14 @@ It is idempotent, runs before `sync-wrangler-config.ts`, and is unit-tested agai
 - [x] Mail from a sender not on the list, to an unknown or deleted key, auto-generated, list mail, or oversized mail is rejected, and no task is created. Each case is tested, and each test also asserts that the allowed path still works.
 - [x] `reply_to_email` sends exactly one recipient (the original `From`) from the trigger address, with `In-Reply-To`/`References`/`Auto-Submitted`. It refuses non-email tasks, tasks from another project and deleted triggers. It enforces the per-run cap atomically. Tested against real SQLite, with a fake send binding that enforces the Cloudflare contract.
 - [x] With no binding, or a token that lacks permissions, the deploy leaves email off, and the UI hides the Email option.
-- [x] With the permissions, and routing already on for `mail.<BASE_DOMAIN>`, the deploy sets subaddressing, the rule and the sending subdomain. It never enables routing, and any change to the apex MX/SPF records (including an addition) fails the deploy. The send binding ships only once sending is verified. Tested against a strict fake of the CF API, including Google-MX, SPF-only and empty apexes.
+- [x] With the permissions, the deploy turns routing on for `agents.<BASE_DOMAIN>` by name, never for the apex, then sets subaddressing, the rule and the sending subdomain. Any change to the apex MX/SPF records (including an addition) fails the deploy. The send binding ships only once sending is verified. Tested against a strict fake of the CF API, including Google-MX, SPF-only and empty apexes. The fake models what staging showed: the first enable in a zone adds Cloudflare's SPF and DKIM at the apex, so a zone new to Email Routing fails its first deploy (open question 5).
 - [x] An email that passes the checks is stored before SMTP is answered. A failed or crashed start is retried by SAM from storage, on the same trigger execution, with a fenced lease, exponential backoff and a give-up alert. Tested through the real handler and the real recovery sweep against SQLite.
-- [ ] Staging, end to end:
+- [x] Staging, end to end (2026-10-23, see Notes):
   1. Create an email trigger in the UI.
   2. Send a test email to it.
   3. A session starts.
   4. The agent replies with the tool.
-  5. The reply is delivered back through routing, and the loop guard records it.
+  5. The reply is delivered back through routing, and the loopback status records it as `Auto-Submitted`.
 - [ ] The PR is a draft and CI is green. Astra has reviewed the plan and the PR.
 
 ## Open questions for review
@@ -258,6 +259,7 @@ It is idempotent, runs before `sync-wrangler-config.ts`, and is unit-tested agai
 2. Should we widen `triggered_by` with the 0202 table swap, or reuse `'webhook'` for the prototype to avoid the migration?
 3. Is the superadmin "Send test email" acceptable as a lasting diagnostic, or should it be avoided?
 4. Is subaddressing (`agent+key@`) acceptable, versus a literal routing rule per address created at runtime (`key@`)? The latter needs a runtime token with Email Routing write, and is capped at 200 rules per domain.
+5. **Open, for Raphaël (asked 2026-10-22).** The first time Email Routing is turned on in a zone, Cloudflare adds its SPF record (an ordinary, editable record) and a locked DKIM key (`cf2024-1._domainkey`) to the main domain, whichever subdomain is named. The deploy's apex check refuses that, so today a zone new to Email Routing fails its first agent email deploy and completes on the next. What it does to a main domain that already has an SPF record (production's Google Workspace) is unverified; a second SPF record would break SPF there. Options: (a) the deploy accepts exactly Cloudflare's records on a main domain without mail, and merges Cloudflare's `include:` into an existing SPF record; or (b) agent email stays off until an admin opts in with a deploy setting. The fresh-zone test in `scripts/quality/deploy-agent-email.test.ts` and the docs' "known preview limitation" change with the answer.
 
 ## Plan review outcome — Astra High, task `01M5J9WS98ZJ4P7RTPJWYGCH2S`, 2026-10-22
 
@@ -367,4 +369,14 @@ The reviewer's session went to sleep after posting instead of completing its tas
   - Cloudflare's domain-configuration docs say Email Routing records live on the root domain, and an existing SPF must be merged rather than duplicated.
   - The agents' Cloudflare token cannot remove these records.
 - 2026-10-22: Raphaël: agent email always lives on a dedicated `agents.<BASE_DOMAIN>` subdomain. Renamed from `mail.` (shared and deploy constants, tests, docs, UI evidence).
-- Open question to Raphaël: for a main domain that has its own mail (production's Google Workspace), should the deploy merge Cloudflare's SPF entry into the existing SPF record, or leave agent email off there until an admin opts in?
+- Open question to Raphaël: for a main domain that has its own mail (production's Google Workspace), should the deploy merge Cloudflare's SPF entry into the existing SPF record, or leave agent email off there until an admin opts in? Now open question 5, which also covers zones new to Email Routing.
+- 2026-10-23: Deploy run 39882794526 (`a75043bcc`, `agent_email=true`) configured `agents.sammy.party`: routing turned on by name (3 locked MX records and an SPF record), subaddressing, the `agent@` rule, and Email Sending (`cf-bounce` MX/SPF/DKIM and `_dmarc` records). The apex was unchanged during the run, because the earlier `mail.` attempt had already turned routing on for the zone.
+- 2026-10-23: Staging end-to-end test passed, as the smoke user in Test Project 1 (`.tmp/staging-agent-email-e2e.cjs`, not committed):
+  - Created an email automation through the UI with the Claude MCP Test profile (trigger `01M5K6CHHAFVKJYFSMBK5F1CVZ`, address `agent+er78z8jx245bfdtt@agents.sammy.party`, allowed senders `agent+loopback@agents.sammy.party` and the smoke user), with no console errors.
+  - Sent the admin loopback test at 01:38:13Z. The inbound row was stored and `accepted` at 01:38:14Z; execution `01M5K6H7AFBTVTNEPTN6JH1W75` (`eventType: email`) started task `01M5K6H7AFBTVTNEPTN6JH1W75` with `triggered_by = 'email'` and the rendered email prompt.
+  - The agent called `reply_to_email`: the outbound row is `sent` to `agent+loopback@agents.sammy.party`, subject `Re: SAM agent email loopback test …`, `References` = the inbound Message-ID, provider Message-ID `<j8L0f2bHXvgUaqwzMByAbJ3xzhrr2se8Yi5I@agents.sammy.party>`, at 01:45:18Z. The task completed.
+  - The reply came back through Email Routing: Admin → Integrations → Agent email shows **Last reply received** at 01:45:18Z from the automation's address, `Auto-Submitted: auto-replied`, `In-Reply-To` = the inbound Message-ID.
+  - Cleanup: deleted the automation (its config and message rows went with it), the workspace and the node. No VM nodes are live on staging.
+  - Finding: the profile is Instant (`cf-container`), but the run provisioned a Hetzner VM. Every trigger type does this; it predates this PR. Filed `tasks/backlog/2026-10-23-automations-ignore-instant-profile-runtime.md`.
+  - Finding: the automation page's personal-key banner repeated one sentence for two credentials. Unrelated; filed `tasks/backlog/2026-10-23-credential-warning-lines-indistinguishable.md`.
+- 2026-10-23: The deploy tests' fake Cloudflare left a zone's routing off and its apex untouched when a subdomain was enabled, which staging disproved. It now turns the zone on and adds Cloudflare's apex SPF and DKIM on the first enable; 10 tests that started from a fresh zone failed against it, and now start from a zone already using Email Routing. A new test records today's fresh-zone behavior (first deploy fails the apex check, the next completes). The self-hosting and email trigger docs no longer say the main domain's routing stays off, and describe the limitation.

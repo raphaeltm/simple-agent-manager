@@ -129,6 +129,12 @@ more permissions on the deploy token. See the agent email note in
 `agents.<your-domain>` itself. It writes DNS records only under `agents.<your-domain>`, fails if your
 main domain's mail records change, and the production deploy does not turn the preview on.
 
+The first time Email Routing is turned on in a zone, Cloudflare also adds its own SPF record and
+DKIM key to your main domain. In a zone new to Email Routing, the first agent email deploy therefore
+stops at the main-domain check, and the next deploy completes. If your main domain already has an
+SPF record, don't turn the preview on yet: Cloudflare may add a second one, which breaks SPF for
+your main domain's mail.
+
 Agent email stays off until Cloudflare has verified the new sending records, usually 5 to 15
 minutes after the first deploy creates them. The deploy log says when verification is still
 pending; the next deploy after that turns it on.

@@ -4,7 +4,7 @@
  *
  * An email trigger's address is `agent+<key>@agents.<BASE_DOMAIN>`. This deploy step
  * makes that address real, idempotently:
- *   1. Email Routing is on for `agents.<BASE_DOMAIN>` (turned on for that subdomain only; see
+ *   1. Email Routing is on for `agents.<BASE_DOMAIN>` (turned on by naming that subdomain; see
  *      below);
  *   2. subaddressing is honored, so `agent+<key>@` matches the `agent@` rule;
  *   3. one literal rule routes `agent@agents.<BASE_DOMAIN>` to the API Worker's
@@ -23,7 +23,11 @@
  * cloudflare/terraform-provider-cloudflare#5890; the public reference only says "Enable your
  * Email Routing zone"). So the call always names the subdomain, and the apex's mail records
  * are compared straight after it: the deploy fails before configuring anything else if the
- * call touched them.
+ * call touched them. The first such call in a zone does touch them: Cloudflare turns routing
+ * on for the whole zone and adds its SPF record and a DKIM key at the apex (seen on staging,
+ * deploy run 39866499256), so in a zone new to Email Routing the first deploy fails here and
+ * the next completes. Whether to accept or merge those records instead is an open decision
+ * (task 2026-10-22-agent-email-prototype, open question 5).
  *
  * Preview: it runs only when AGENT_EMAIL_ENABLED=true, which only the staging dispatch
  * input `agent_email` sets. Production cannot activate it until inbound sender
@@ -191,8 +195,9 @@ async function subdomainRoutingEnabled(api: Api, zoneId: string, domain: string)
 }
 
 /**
- * Turn Email Routing on for the subdomain only. The body must name the subdomain: without it
- * the same call enables the zone apex. Callers compare the apex's mail records right after.
+ * Turn Email Routing on for the subdomain. The body must name the subdomain: without it the
+ * same call enables the zone apex. In a zone new to Email Routing it still adds Cloudflare's
+ * SPF and DKIM records at the apex, so callers compare the apex's mail records right after.
  */
 async function enableSubdomainRouting(api: Api, zoneId: string, domain: string): Promise<void> {
   await api.call('POST', `/zones/${zoneId}/email/routing/dns`, { name: domain });
