@@ -381,6 +381,42 @@ Review of `0e64f921d..f33329d45` ([PR comment](https://github.com/raphaeltm/simp
   number of MX records": the deploy's `toEnvelope` dropped `result_info`. It keeps the counts now,
   and the deploy test's fake passes every answer through `toEnvelope`.
 
+### Astra's verification — task `01M5M028GMDN071B6PMWJS9Q53`, 2026-10-23
+
+Review of `f33329d45..4257c67da` ([PR comment](https://github.com/raphaeltm/simple-agent-manager/pull/2413#issuecomment-6361491393)).
+
+1. **BLOCKER, fixed in `c7df05425`.** The lease's expiry was enforced only when a run started. The
+   lease moved to `setup-lease.ts` (`SetupLease`). It is renewed by compare-and-set right before
+   every Cloudflare write, and a renewal refuses once the lease lapsed or another run changed it.
+   Completing also requires a live lease.
+2. **SHOULD-FIX, fixed in `c7df05425`.** Attempt rows stored before the lease existed were
+   unreadable. `owner` and `leaseUntil` now read as null when absent, and the exact stored text is
+   kept for compare-and-set.
+
+### Astra's verification — task `01M5M1Q7XVQD62XR8KJ1F6S42S`, 2026-10-23
+
+Review of `4257c67da..c7df05425` ([PR comment](https://github.com/raphaeltm/simple-agent-manager/pull/2413#issuecomment-6361954833)); Astra's runs passed 98/98, and its two extra checks reproduced items 1 and 3.
+
+1. **BLOCKER, fixed.** The run renewed its lease before listing the routing rules, so a run whose
+   listing stalled past its lease could still create or repoint the rule after another run
+   finished. `ensureRoutingRule` now takes a `beforeWrite` callback and calls it after the listing,
+   right before its one write; the run passes `lease.renew()`.
+2. **OK** (legacy attempt rows).
+3. **BLOCKER, fixed.** Completion compared the lease against the Worker's clock, read before the D1
+   batch, so a batch that reached D1 after the lease lapsed still turned agent email on and dropped
+   the baseline. The batch's first statement now decides with D1's own clock
+   (`julianday('now')`) and marks the attempt as finishing; the on-switch insert and the attempt
+   delete key on that mark, so one decision governs both. The mark contains the run's lease owner,
+   and an attempt without an owner cannot complete.
+- Tests: "renews after listing the rules…" (create and repoint), "decides the lease by the
+  database clock…" (the run's clock an hour behind D1's), and in `agent-email-setup-state.test.ts`
+  "lets no attempt complete without a lease owner…". Each fix reverted on its own reddens exactly
+  its tests: the renewal (the two rule-write cases), the D1 clock (the clock case), and the owner
+  guard (the owner case).
+- Also fixed: the Validate Deploy Scripts CI job had failed since `87c336d7c`. `configure-agent-email.ts`
+  imports `packages/shared/src/dns-mail-records.ts`, outside the deploy tsconfig's `rootDir`
+  (TS6059). That config does not emit, so its `rootDir` is now the repository root (`a7c83f31e`).
+
 ## Open questions for review
 
 1. Is the capability address plus allowlist acceptable for a staging-only prototype, with DKIM verification as the production gate? Or must DKIM land in the prototype?

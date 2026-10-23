@@ -60,11 +60,16 @@ async function findRule(env: Env, address: string): Promise<RoutingRuleView | nu
   );
 }
 
-/** Points the rule for `address` at `workerName`, creating it if there is none. */
+/**
+ * Points the rule for `address` at `workerName`, creating it if there is none. `beforeWrite` runs
+ * after the rules are listed and right before the one write, so it can stop a run whose listing
+ * stalled.
+ */
 export async function ensureRoutingRule(
   env: Env,
   address: string,
-  workerName: string
+  workerName: string,
+  beforeWrite: () => Promise<void>
 ): Promise<void> {
   const desired: RoutingRuleInput = {
     name: AGENT_EMAIL_RULE_NAME,
@@ -74,6 +79,7 @@ export async function ensureRoutingRule(
   };
   const existing = await findRule(env, address);
   if (existing && ruleRoutesToWorker(existing, workerName)) return;
+  await beforeWrite();
   if (existing) await updateRoutingRule(env, existing.id, desired);
   else await createRoutingRule(env, desired);
 }

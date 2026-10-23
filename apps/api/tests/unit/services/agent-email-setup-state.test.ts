@@ -196,6 +196,13 @@ describe('agent email on-switch and setup attempt', () => {
       expect(await readSetupAttempt(env, DOMAIN)).toEqual(lapsed);
     });
 
+    it('lets no attempt complete without a lease owner, since its finishing mark names the owner', async () => {
+      const unowned = await claimSetupAttempt(env, attempt({ owner: null }));
+      expect(await completeAgentEmailSetup(env, record(), 'admin-1', unowned)).toBe(false);
+      expect(await isAgentEmailOn(env)).toBe(false);
+      expect(await readSetupAttempt(env, DOMAIN)).toEqual(unowned);
+    });
+
     it('reads an attempt stored before the lease existed as unleased', async () => {
       const legacy: Record<string, unknown> = { ...attempt() };
       delete legacy.owner;

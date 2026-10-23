@@ -344,8 +344,9 @@ async function setUpWhileHoldingLease(
     await lease.renew();
     await enableSubaddressing(env);
   }
-  await lease.renew();
-  await ensureRoutingRule(env, `${AGENT_EMAIL_LOCAL_PART}@${domain}`, workerName);
+  await ensureRoutingRule(env, `${AGENT_EMAIL_LOCAL_PART}@${domain}`, workerName, () =>
+    lease.renew()
+  );
 
   const finished = await completeAgentEmailSetup(
     env,

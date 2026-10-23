@@ -96,6 +96,15 @@ describe('agent email admin setup', () => {
     return row ? { ...JSON.parse(row.value), updatedBy: row.updatedBy } : null;
   }
 
+  /** Lets the stored attempt's lease lapse, as if the Worker of the run holding it had died. */
+  function lapseLease() {
+    const attempt = stored(ATTEMPT_KEY)!;
+    delete attempt.updatedBy;
+    sqlite
+      .prepare('UPDATE platform_settings SET value = ? WHERE key = ?')
+      .run(JSON.stringify({ ...attempt, leaseUntil: '2000-01-01T00:00:00.000Z' }), ATTEMPT_KEY);
+  }
+
   /** Runs the setup as the panel does: with the token of the plan it showed, when allowed. */
   async function run(consent = false) {
     const shown = await planAgentEmailSetup(env);
@@ -584,15 +593,7 @@ describe('agent email admin setup', () => {
       await vi.waitFor(() =>
         expect(fake.calls.some((call) => call.path === '/email/routing/dns')).toBe(true)
       );
-      // The first run's lease lapses, as if its Worker had died.
-      const attemptRow = stored(ATTEMPT_KEY)!;
-      delete attemptRow.updatedBy;
-      sqlite
-        .prepare('UPDATE platform_settings SET value = ? WHERE key = ?')
-        .run(
-          JSON.stringify({ ...attemptRow, leaseUntil: '2000-01-01T00:00:00.000Z' }),
-          ATTEMPT_KEY
-        );
+      lapseLease();
 
       expect((await runAgentEmailSetup(env, { consentToken: null, userId: 'admin-2' })).state).toBe(
         'on'
@@ -640,6 +641,97 @@ describe('agent email admin setup', () => {
       expect(stored(AGENT_EMAIL_SETUP_KEY)).toBeNull();
       // Its baseline stays, so the next run still checks against it.
       expect(stored(ATTEMPT_KEY)).toMatchObject({ startedBy: 'admin-1', baseline: [] });
+    });
+
+    it.each([
+      { write: 'POST /email/routing/rules', rules: [] },
+      {
+        write: 'PUT /email/routing/rules/rule-elsewhere',
+        rules: [
+          {
+            ...DESIRED_RULE,
+            id: 'rule-elsewhere',
+            actions: [{ type: 'worker', value: ['another-worker'] }],
+          },
+        ],
+      },
+    ])(
+      'renews after listing the rules, so a run whose listing stalled sends no $write once another run took over',
+      async ({ write, rules }) => {
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        let holdNext = true;
+        const fake = cloudflare({
+          ...STAGING_LIKE,
+          rules,
+          // Cloudflare answered the first run's listing; the answer is slow to arrive.
+          hold: (call) => {
+            if (!holdNext || call.method !== 'GET' || call.path !== '/email/routing/rules') {
+              return undefined;
+            }
+            holdNext = false;
+            return held;
+          },
+        });
+        const first = run().catch((error: unknown) => error);
+        await vi.waitFor(() =>
+          expect(fake.calls.some((call) => call.path === '/email/routing/rules')).toBe(true)
+        );
+        lapseLease();
+        expect(
+          (await runAgentEmailSetup(env, { consentToken: null, userId: 'admin-2' })).state
+        ).toBe('on');
+        expect(fake.writes().map((call) => `${call.method} ${call.path}`)).toEqual([write]);
+        release();
+
+        const failure = await first;
+        expect(failure).toBeInstanceOf(AgentEmailSetupRefusedError);
+        expect((failure as Error).message).toContain('took over before this one finished');
+        // The stale listing showed the rule as missing or misdirected; the run wrote nothing.
+        expect(fake.writes().map((call) => `${call.method} ${call.path}`)).toEqual([write]);
+        expect(fake.state.rules).toEqual([expect.objectContaining(DESIRED_RULE)]);
+        expect(stored(AGENT_EMAIL_SETUP_KEY)).toMatchObject({ updatedBy: 'admin-2' });
+      }
+    );
+
+    it('decides the lease by the database clock, so a completion that lands after it lapsed leaves agent email off', async () => {
+      const fake = cloudflare(NEW_ZONE);
+      const shown = await planAgentEmailSetup(env);
+      // The run's clock reads an hour behind the database's. Each check the run makes finds its
+      // lease live, but by the database's clock it has lapsed when the completion runs, as if that
+      // transaction reached the database long after the run sent it.
+      vi.useFakeTimers({ toFake: ['Date'], now: Date.now() - 60 * 60 * 1000 });
+      let failure: unknown;
+      try {
+        failure = await runAgentEmailSetup(env, {
+          consentToken: shown.consentToken,
+          userId: 'admin-1',
+        }).catch((error: unknown) => error);
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(failure).toBeInstanceOf(AgentEmailSetupRefusedError);
+      expect((failure as Error).message).toContain('outlasted its lease');
+      expect(fake.writes().map((call) => `${call.method} ${call.path}`)).toEqual([
+        'POST /email/routing/dns',
+        'PATCH /email/routing',
+        'POST /email/routing/rules',
+      ]);
+      expect(await isAgentEmailOn(env)).toBe(false);
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toBeNull();
+      // The attempt keeps its baseline and consent, so a run on time finishes without asking again.
+      expect(stored(ATTEMPT_KEY)).toMatchObject({
+        startedBy: 'admin-1',
+        baseline: [],
+        zoneChanges: ['subaddressing'],
+        owner: null,
+      });
+      expect((await planAgentEmailSetup(env)).state).toBe('ready');
+      expect((await run()).state).toBe('on');
+      expect(stored(ATTEMPT_KEY)).toBeNull();
     });
 
     it('refuses a run that loses the start to a concurrent one', async () => {
