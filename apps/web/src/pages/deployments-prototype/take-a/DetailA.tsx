@@ -221,6 +221,9 @@ function Hero({
   );
 }
 
+/** Two sections side by side from 1280 px; one column (page order) below that. */
+const PAIR = 'grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]';
+
 export function EnvironmentDetailA() {
   const { projectId } = useProjectContext();
   const { envId } = useParams<{ envId: string }>();
@@ -353,35 +356,41 @@ export function EnvironmentDetailA() {
       ) : (
         <RecentDeploys projectId={projectId} env={env} releases={releaseList} profiles={profiles} />
       )}
-      <WhoCanDeploy
-        projectId={projectId}
-        env={env}
-        profiles={profiles}
-        choosing={choosingAccess}
-        onChoosingChange={setChoosingAccess}
-      />
-      {config.isError && !config.data ? (
-        <LoadError what="the settings" error={config.error} onRetry={() => void config.refetch()} />
-      ) : (
-        <AppSettings projectId={projectId} envId={env.id} rows={config.data?.envVars ?? []} />
-      )}
-      {domains.isError && !domains.data ? (
-        <LoadError what="the addresses" error={domains.error} onRetry={() => void domains.refetch()} />
-      ) : (
-        <Addresses
+      {/* Desktop is wide enough for two phone-width columns: pairing the shorter sections
+          halves the scroll without changing their order on a phone. */}
+      <div className={PAIR}>
+        <WhoCanDeploy
           projectId={projectId}
           env={env}
-          answering={isAnswering(info.health)}
-          routes={routes}
-          domains={customDomains}
-          onAddDomain={() => setAddingDomain(true)}
+          profiles={profiles}
+          choosing={choosingAccess}
+          onChoosingChange={setChoosingAccess}
         />
-      )}
-      {volumes.isError && !volumes.data ? (
-        <LoadError what="the disks" error={volumes.error} onRetry={() => void volumes.refetch()} />
-      ) : (
-        <SavedData projectId={projectId} env={env} volumes={volumeList} />
-      )}
+        {config.isError && !config.data ? (
+          <LoadError what="the settings" error={config.error} onRetry={() => void config.refetch()} />
+        ) : (
+          <AppSettings projectId={projectId} envId={env.id} rows={config.data?.envVars ?? []} />
+        )}
+      </div>
+      <div className={PAIR}>
+        {domains.isError && !domains.data ? (
+          <LoadError what="the addresses" error={domains.error} onRetry={() => void domains.refetch()} />
+        ) : (
+          <Addresses
+            projectId={projectId}
+            env={env}
+            answering={isAnswering(info.health)}
+            routes={routes}
+            domains={customDomains}
+            onAddDomain={() => setAddingDomain(true)}
+          />
+        )}
+        {volumes.isError && !volumes.data ? (
+          <LoadError what="the disks" error={volumes.error} onRetry={() => void volumes.refetch()} />
+        ) : (
+          <SavedData projectId={projectId} env={env} volumes={volumeList} />
+        )}
+      </div>
       <BehindTheScenes
         projectId={projectId}
         env={env}

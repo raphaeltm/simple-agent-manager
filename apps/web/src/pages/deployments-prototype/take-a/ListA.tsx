@@ -98,7 +98,10 @@ function EnvRow({
         <HealthMark info={info} />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="min-w-0 break-words text-[15px] font-semibold leading-snug text-fg-primary [overflow-wrap:anywhere]">
+            <span
+              title={env.name}
+              className="line-clamp-2 min-w-0 break-words text-[15px] font-semibold leading-snug text-fg-primary [overflow-wrap:anywhere]"
+            >
               {env.name}
             </span>
             {info.health !== 'live' && !attention && <TonePill tone={info.tone} label={info.label} />}

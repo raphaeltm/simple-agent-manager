@@ -131,9 +131,10 @@ export function serverSilent(env: DeploymentEnvironment): boolean {
  * `failed` after a revert attempt means the previous version did not come back either.
  */
 export function liveVersionOf(env: DeploymentEnvironment): number | null {
-  // `error` with a linked server that reports a running version still serves: a failed
-  // pause, for one, leaves the app up. Stopped environments keep stale observed fields.
-  if (env.status !== 'active' && !(env.status === 'error' && env.nodeId)) return null;
+  // Heartbeats only update `active` and `starting` environments and tell the server to retire
+  // every other one (`node-lifecycle.ts`), so an `error` or stopped environment's observed
+  // version is frozen, not live.
+  if (env.status !== 'active') return null;
   const observed = env.observedDeployment;
   const applied = typeof observed.appliedSeq === 'number' && observed.appliedSeq > 0 ? observed.appliedSeq : null;
   if (observed.status === 'applied' || observed.status === 'reverted') return applied;

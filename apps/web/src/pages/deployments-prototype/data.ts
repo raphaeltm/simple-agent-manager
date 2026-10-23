@@ -311,9 +311,23 @@ export function useEnvironmentActions(projectId: string, envId: string) {
         updateDeploymentEnvironmentPolicy(projectId, envId, { agentDeployEnabled: true, allowedDeployProfileIds: ids }),
       ...options,
     }),
-    pause: useMutation({ mutationFn: () => stopDeploymentEnvironment(projectId, envId), ...options }),
+    pause: useMutation({
+      mutationFn: () => stopDeploymentEnvironment(projectId, envId),
+      ...options,
+      onSuccess: (result) => {
+        void invalidate();
+        // The API reports cleanup it had to skip (e.g. no server linked); don't drop it.
+        if (result.lifecycle.warnings.length > 0) toast.warning(`Paused. SAM noted: ${result.lifecycle.warnings.join(' ')}`);
+      },
+    }),
     start: useMutation({ mutationFn: () => startDeploymentEnvironment(projectId, envId), ...options }),
-    remove: useMutation({ mutationFn: () => deleteDeploymentEnvironment(projectId, envId), onError: options.onError }),
+    remove: useMutation({
+      mutationFn: () => deleteDeploymentEnvironment(projectId, envId),
+      onError: options.onError,
+      onSuccess: (result) => {
+        if (result.warnings.length > 0) toast.warning(`Deleted. SAM noted: ${result.warnings.join(' ')}`);
+      },
+    }),
     saveSetting: useMutation({
       mutationFn: (input: { key: string; value: string; isSecret: boolean }) =>
         upsertDeploymentEnvironmentConfigVar(projectId, envId, input),
