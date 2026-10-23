@@ -4,11 +4,12 @@
  */
 import type { NodeLogEntry } from '@simple-agent-manager/shared';
 import { StatusBadge } from '@simple-agent-manager/ui';
-import { Check, Copy, ExternalLink } from 'lucide-react';
+import { Check, Copy, ExternalLink, Trash2 } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 
 import { useToast } from '../../hooks/useToast';
+import { useTaskTitle } from './data';
 import { type Health, type HealthInfo, type Tone, TONE_COLOR, tint } from './model';
 
 const TONE_BADGE: Record<Tone, string> = {
@@ -160,6 +161,76 @@ export function useAskAgent(projectId: string) {
   return (_prompt: string) => {
     void navigate(`/projects/${projectId}/chat`);
   };
+}
+
+/** "from “Fix checkout button”" as a link to that chat, when the release came from one. */
+export function ChatLink({ projectId, taskId }: { projectId: string; taskId: string | null | undefined }) {
+  const title = useTaskTitle(projectId, taskId);
+  if (!taskId) return null;
+  return (
+    <Link
+      to={`/projects/${projectId}/tasks/${taskId}`}
+      className="min-w-0 break-words text-accent no-underline hover:underline [overflow-wrap:anywhere]"
+    >
+      “{title.data ?? 'the chat'}”
+    </Link>
+  );
+}
+
+/**
+ * A trash button that asks once, in place: tap it and it becomes "Remove · Keep". No native
+ * confirm() box, and nothing moves on the page.
+ */
+export function TwoStepRemove({
+  label,
+  confirm,
+  busy,
+  disabledReason,
+  onConfirm,
+}: {
+  label: string;
+  confirm: string;
+  busy?: boolean;
+  /** When set, the button is disabled and this says why. */
+  disabledReason?: string;
+  onConfirm: () => void;
+}) {
+  const [asking, setAsking] = useState(false);
+  if (asking) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => {
+            setAsking(false);
+            onConfirm();
+          }}
+          className="inline-flex min-h-11 cursor-pointer items-center rounded-md border-0 bg-danger-tint px-3 text-sm font-semibold text-danger-fg"
+        >
+          {confirm}
+        </button>
+        <button
+          type="button"
+          onClick={() => setAsking(false)}
+          className="inline-flex min-h-11 cursor-pointer items-center rounded-md border-0 bg-transparent px-3 text-sm font-medium text-fg-muted hover:text-fg-primary"
+        >
+          Keep
+        </button>
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={disabledReason ?? label}
+      disabled={busy || Boolean(disabledReason)}
+      onClick={() => setAsking(true)}
+      className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-fg-muted hover:bg-danger-tint hover:text-danger-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-muted"
+    >
+      <Trash2 size={16} aria-hidden />
+    </button>
+  );
 }
 
 /** Pressable profile chips, used wherever someone picks which agents may deploy. */

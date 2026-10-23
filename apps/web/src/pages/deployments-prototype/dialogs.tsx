@@ -2,14 +2,14 @@
  * PROTOTYPE dialogs both takes open: logs, add a domain, pause, delete.
  */
 import { Button, Dialog } from '@simple-agent-manager/ui';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, Search } from 'lucide-react';
 import { useState } from 'react';
 
 import { useToast } from '../../hooks/useToast';
 import type { DeploymentEnvironment, DeploymentPublicRoute, DeploymentVolume } from '../../lib/api';
 import { Chips } from '../automation/ui';
 import { type LogFilter, useEnvironmentActions, useLogs } from './data';
-import { LogList } from './shared';
+import { CopyIcon, LogList } from './shared';
 
 const LOG_FILTERS: Array<{ id: LogFilter; label: string }> = [
   { id: 'all', label: 'Everything' },
@@ -32,8 +32,11 @@ export function LogsDialog({
   initialFilter?: LogFilter;
 }) {
   const [filter, setFilter] = useState<LogFilter>(initialFilter);
-  const logs = useLogs(projectId, env.id, filter, open);
+  const [typed, setTyped] = useState('');
+  const [search, setSearch] = useState('');
+  const logs = useLogs(projectId, env.id, filter, open, search);
   const entries = logs.data?.entries ?? [];
+  const text = entries.map((entry) => `${entry.timestamp} [${entry.level}] [${entry.source}] ${entry.message}`).join('\n');
   return (
     <Dialog isOpen={open} onClose={onClose} maxWidth="lg" aria-label={`Logs for ${env.name}`}>
       <div className="flex flex-col gap-4">
@@ -44,6 +47,25 @@ export function LogsDialog({
           </p>
         </div>
         <Chips options={LOG_FILTERS} value={filter} onChange={setFilter} label="Show" />
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setSearch(typed.trim());
+          }}
+        >
+          <span className="relative flex min-w-0 flex-1 items-center">
+            <Search size={15} aria-hidden className="pointer-events-none absolute left-3 text-fg-muted" />
+            <input
+              value={typed}
+              onChange={(event) => setTyped(event.currentTarget.value)}
+              placeholder="Search the logs"
+              aria-label="Search the logs"
+              className="min-h-11 w-full min-w-0 rounded-md border border-border-default bg-surface pl-9 pr-3 text-[14px] text-fg-primary"
+            />
+          </span>
+          {entries.length > 0 && <CopyIcon label="these log lines" value={text} />}
+        </form>
         {logs.isPending ? (
           <p className="m-0 text-sm text-fg-muted">Loading logs…</p>
         ) : (
@@ -213,7 +235,7 @@ export function PauseDialog({
     <Dialog isOpen={open} onClose={onClose} aria-label={`Pause ${env.name}`}>
       <div className="flex flex-col gap-4">
         <h2 className="m-0 text-[19px] font-semibold text-fg-primary">Pause {env.name}?</h2>
-        <ul className="m-0 flex flex-col gap-2 pl-5 text-[15px] text-fg-primary">
+        <ul className="m-0 flex list-disc flex-col gap-2 pl-5 text-[15px] text-fg-primary marker:text-fg-muted">
           <li>The app stops and its addresses stop answering.</li>
           <li>
             {siblings > 1
@@ -264,7 +286,7 @@ export function DeleteDialog({
           Delete {env.name}?
         </h2>
         <p className="m-0 text-[15px] text-fg-primary">This removes, for good:</p>
-        <ul className="m-0 flex flex-col gap-2 pl-5 text-[15px] text-fg-primary">
+        <ul className="m-0 flex list-disc flex-col gap-2 pl-5 text-[15px] text-fg-primary marker:text-fg-muted">
           <li>The app and its version history</li>
           {domainCount > 0 && (
             <li>

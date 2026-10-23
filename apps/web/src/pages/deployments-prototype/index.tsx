@@ -4,14 +4,16 @@
  */
 import { EnvironmentDetailA } from './take-a/DetailA';
 import { DeploymentsListA } from './take-a/ListA';
+import { EnvironmentDetailB } from './take-b/DetailB';
+import { DeploymentsListB } from './take-b/ListB';
 import type { Take } from './take';
 
 export { useTake } from './take';
 
 export function DeploymentsPrototypeList({ take }: { take: Take }) {
-  return take === 'a' ? <DeploymentsListA /> : <DeploymentsListA />;
+  return take === 'a' ? <DeploymentsListA /> : <DeploymentsListB />;
 }
 
 export function DeploymentsPrototypeDetail({ take }: { take: Take }) {
-  return take === 'a' ? <EnvironmentDetailA /> : <EnvironmentDetailA />;
+  return take === 'a' ? <EnvironmentDetailA /> : <EnvironmentDetailB />;
 }

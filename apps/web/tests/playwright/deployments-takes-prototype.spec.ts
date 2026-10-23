@@ -25,6 +25,7 @@ import {
   PROFILES,
   PROJECT_ID,
   PUBLIC_ROUTES,
+  RELEASE_EVENTS,
   RELEASES,
   SYSTEM_INFO,
   TASK_TITLES,
@@ -32,7 +33,8 @@ import {
   VOLUMES,
 } from './deployments-takes-fixtures';
 
-const OUT = resolve(process.cwd(), '../../.codex/tmp/playwright-screenshots/takes');
+// Outside Playwright's outputDir, which every run wipes.
+const OUT = resolve(process.cwd(), '../../.tmp/deploy-takes');
 const TAKES = (process.env.TAKES ?? 'a,b').split(',') as Array<'a' | 'b'>;
 
 const json = (route: Route, body: unknown, status = 200) =>
@@ -77,6 +79,8 @@ async function mockApi(page: Page, opts: { environments?: unknown[] } = {}) {
         const rest = envMatch[2] ?? '';
         const env = environments.find((item) => (item as { id: string }).id === envId);
         if (rest === '/releases') return json(route, { releases: RELEASES[envId] ?? [] });
+        const events = rest.match(/^\/releases\/([^/]+)\/events$/);
+        if (events) return json(route, { events: RELEASE_EVENTS[events[1] ?? ''] ?? [] });
         if (rest === '/runtime-config')
           return json(route, CONFIG[envId] ?? { envVars: [], updatedAt: null, variableCount: 0, secretCount: 0 });
         if (rest === '/public-routes') return json(route, { publicRoutes: PUBLIC_ROUTES[envId] ?? [] });
@@ -185,4 +189,122 @@ for (const take of TAKES) {
       }
     });
   }
+}
+
+// ─── Interactions: the dialogs, sheets and menus each take opens ──────────────
+
+for (const vp of VIEWPORTS) {
+  test.describe(`Interactions — ${vp.label}`, () => {
+    test.use({ viewport: vp.viewport, isMobile: vp.isMobile, hasTouch: vp.isMobile });
+
+    if (TAKES.includes('a')) {
+      test('create environment sheet', async ({ page }) => {
+        await mockApi(page);
+        await page.goto(listUrl('a'));
+        await page.getByRole('button', { name: 'New', exact: true }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByPlaceholder('staging').fill('staging-eu');
+        await dialog.getByText('Only some agent profiles').click();
+        await dialog.getByRole('button', { name: 'Release Captain' }).click();
+        await dialog.getByRole('button', { name: 'Sol' }).click();
+        await expect(dialog.getByRole('button', { name: 'Create environment' })).toBeEnabled();
+        await dialog.getByRole('heading', { name: 'New environment' }).scrollIntoViewIfNeeded();
+        await capture(page, 'x-create-environment');
+      });
+
+      test('A — add a domain', async ({ page }) => {
+        await mockApi(page);
+        await page.goto(envUrl('a', 'env-prod'));
+        await page.getByRole('button', { name: 'Your domain' }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByPlaceholder('shop.example.com').fill('eu.northwind.dev');
+        await expect(dialog.getByText('eu.northwind.dev')).toBeVisible();
+        await capture(page, 'a-add-domain');
+      });
+
+      test('A — delete confirmation', async ({ page }) => {
+        await mockApi(page);
+        await page.goto(envUrl('a', 'env-prod'));
+        await page.getByRole('button', { name: 'Delete…' }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.getByRole('textbox').fill('produc');
+        await expect(dialog.getByRole('button', { name: 'Delete forever' })).toBeDisabled();
+        await capture(page, 'a-delete');
+      });
+
+      test('A — logs from a problem', async ({ page }) => {
+        await mockApi(page);
+        await page.goto(envUrl('a', 'env-staging'));
+        await page.getByRole('button', { name: 'See logs' }).first().click();
+        await expect(page.getByRole('dialog').getByText(/ECONNREFUSED/)).toBeVisible();
+        await capture(page, 'a-logs');
+      });
+
+      test('A — who can deploy, only these', async ({ page }) => {
+        await mockApi(page);
+        await page.goto(envUrl('a', 'env-staging'));
+        await page.getByRole('radio', { name: 'Only these' }).click();
+        const section = page.getByRole('region', { name: 'Who can deploy' });
+        await expect(section.getByText('Pick at least one profile')).toBeVisible();
+        await section.scrollIntoViewIfNeeded();
+        await capture(page, 'a-who-can-deploy');
+      });
+
+      test('A — behind the scenes', async ({ page }) => {
+        await mockApi(page);
+        await page.goto(envUrl('a', 'env-prod'));
+        await page.getByText('Behind the scenes').click();
+        await expect(page.getByText('deploy-prod-01')).toBeVisible();
+        await page.getByText('Behind the scenes').scrollIntoViewIfNeeded();
+        await capture(page, 'a-behind-the-scenes');
+      });
+    }
+
+    if (TAKES.includes('b')) {
+      test('B — settings pane and sheet', async ({ page }) => {
+        await mockApi(page);
+        await page.goto(envUrl('b', 'env-prod'));
+        if (vp.isMobile) {
+          await page.getByRole('tab', { name: 'Settings' }).click();
+          await capture(page, 'b-pane-settings');
+        }
+        await page.getByRole('button', { name: /Who can deploy/ }).click();
+        await expect(page.getByRole('dialog').getByText('Agents can deploy here')).toBeVisible();
+        await capture(page, 'b-sheet-who-can-deploy');
+      });
+
+      test('B — settings and secrets sheet', async ({ page }) => {
+        await mockApi(page);
+        await page.goto(envUrl('b', 'env-prod'));
+        if (vp.isMobile) await page.getByRole('tab', { name: 'Settings' }).click();
+        await page.getByRole('button', { name: /Settings and secrets/ }).click();
+        await expect(page.getByRole('dialog').getByText('STRIPE_SECRET_KEY')).toBeVisible();
+        await capture(page, 'b-sheet-settings');
+      });
+
+      test('B — health pane', async ({ page }) => {
+        await mockApi(page);
+        await page.goto(envUrl('b', 'env-eu'));
+        if (vp.isMobile) await page.getByRole('tab', { name: 'Health' }).click();
+        await expect(page.getByText('Disk', { exact: true })).toBeVisible();
+        await capture(page, 'b-pane-health');
+      });
+
+      test('B — more menu', async ({ page }) => {
+        await mockApi(page);
+        await page.goto(envUrl('b', 'env-prod'));
+        await page.getByRole('button', { name: 'More actions' }).click();
+        await expect(page.getByRole('menuitem', { name: /Delete environment/ })).toBeVisible();
+        await capture(page, 'b-menu');
+      });
+
+      test('B — roll back', async ({ page }) => {
+        await mockApi(page);
+        await page.goto(envUrl('b', 'env-prod'));
+        await page.getByRole('button', { name: 'Roll back to this' }).first().click();
+        await expect(page.getByRole('dialog').getByText('Roll back to v41?')).toBeVisible();
+        await capture(page, 'b-rollback');
+      });
+    }
+  });
 }

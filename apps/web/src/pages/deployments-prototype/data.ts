@@ -10,12 +10,16 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import {
+  attachDeploymentEnvironmentVolumes,
   createDeploymentCustomDomain,
   createDeploymentEnvironment,
+  createDeploymentEnvironmentVolume,
   deleteDeploymentCustomDomain,
   deleteDeploymentEnvironment,
   deleteDeploymentEnvironmentConfigVar,
+  deleteDeploymentEnvironmentVolume,
   type DeploymentEnvironment,
+  detachDeploymentEnvironmentVolumes,
   getDeploymentEnvironmentConfig,
   getDeploymentEnvironmentLogs,
   getDeploymentEnvironmentMetrics,
@@ -96,6 +100,38 @@ export function useReleases(projectId: string, envId: string | undefined) {
   return useEnvQuery(projectId, envId, 'releases', (id) => listReleases(projectId, id));
 }
 
+export interface ReleaseEvent {
+  seq: number;
+  level: string;
+  step: string | null;
+  eventType: string;
+  message: string;
+  createdAt: string;
+}
+
+/**
+ * The steps a server reported while applying one release. NEEDS API: nodes already write
+ * these to `deployment_release_events` (fetch, compose up, health check, …), but no route
+ * reads them back yet.
+ */
+export function useReleaseEvents(
+  projectId: string,
+  envId: string | undefined,
+  releaseId: string | undefined,
+  enabled = true
+) {
+  return useEnvQuery(
+    projectId,
+    envId,
+    `events:${releaseId}`,
+    (id) =>
+      request<{ events: ReleaseEvent[] }>(
+        `/api/projects/${projectId}/environments/${id}/releases/${releaseId}/events`
+      ),
+    Boolean(releaseId) && enabled
+  );
+}
+
 /** Releases for every environment. NEEDS API: a project-level feed instead of one call each. */
 export function useAllReleases(projectId: string, envs: DeploymentEnvironment[]) {
   const scope = useQueryScope();
@@ -164,16 +200,23 @@ export function useContainers(projectId: string, envId: string | undefined, enab
 
 export type LogFilter = 'all' | 'errors' | 'app' | 'sam';
 
-export function useLogs(projectId: string, envId: string | undefined, filter: LogFilter, enabled: boolean) {
+export function useLogs(
+  projectId: string,
+  envId: string | undefined,
+  filter: LogFilter,
+  enabled: boolean,
+  search = ''
+) {
   return useEnvQuery(
     projectId,
     envId,
-    `logs:${filter}`,
+    `logs:${filter}:${search}`,
     (id) =>
       getDeploymentEnvironmentLogs(projectId, id, {
         limit: 80,
         level: filter === 'errors' ? 'error' : undefined,
         source: filter === 'app' ? 'docker' : filter === 'sam' ? 'agent' : undefined,
+        search: search || undefined,
       }),
     enabled
   );
@@ -242,6 +285,17 @@ export function useEnvironmentActions(projectId: string, envId: string) {
       mutationFn: (domainId: string) => deleteDeploymentCustomDomain(projectId, envId, domainId),
       ...options,
     }),
+    addDisk: useMutation({
+      mutationFn: (input: { name: string; sizeGb: number; location: string }) =>
+        createDeploymentEnvironmentVolume(projectId, envId, input),
+      ...options,
+    }),
+    removeDisk: useMutation({
+      mutationFn: (volumeId: string) => deleteDeploymentEnvironmentVolume(projectId, envId, volumeId),
+      ...options,
+    }),
+    attachDisks: useMutation({ mutationFn: () => attachDeploymentEnvironmentVolumes(projectId, envId), ...options }),
+    detachDisks: useMutation({ mutationFn: () => detachDeploymentEnvironmentVolumes(projectId, envId), ...options }),
   };
 }
 

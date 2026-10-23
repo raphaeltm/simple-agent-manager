@@ -195,7 +195,14 @@ export const ENVIRONMENTS = [
     createdAt: daysAgo(60),
     updatedAt: hoursAgo(3),
     secretsUpdatedAt: daysAgo(4),
-    observedDeployment: observed(42, 'applied'),
+    observedDeployment: observed(42, 'applied', {
+      services: [
+        { name: 'web', status: 'running', health: 'healthy' },
+        { name: 'api', status: 'running', health: 'healthy' },
+        { name: 'worker', status: 'running', health: 'none' },
+        { name: 'db', status: 'running', health: 'healthy' },
+      ],
+    }),
     agentPolicy: policy(true, ['p-captain', 'p-opus']),
     latestRelease: latest('env-prod'),
     routeHostnames: hosts('01m5prod', ['web', 3000], ['api', 8080]),
@@ -486,4 +493,30 @@ export const SYSTEM_INFO = {
   docker: { running: true, version: '27.3.1', containers: 4, containerList: [] },
   software: { node: '22.16.0', docker: '27.3.1' },
   agent: { version: 'prototype', status: 'running' },
+};
+
+const event = (seq: number, step: string, state: 'started' | 'succeeded' | 'failed', minutes: number, message = '') => ({
+  seq,
+  level: state === 'failed' ? 'error' : 'info',
+  step,
+  eventType: `step.${state}`,
+  message,
+  createdAt: minsAgo(minutes),
+});
+
+/** Steps nodes report while applying a release (`deployment_release_events`; no read route yet). */
+export const RELEASE_EVENTS: Record<string, unknown[]> = {
+  'rel-env-staging-43': [
+    event(1, 'fetch', 'succeeded', 25),
+    event(2, 'compose-config', 'succeeded', 25),
+    event(3, 'artifact-load', 'succeeded', 25),
+    event(4, 'compose-up', 'failed', 24, 'service "api" exited with code 1'),
+    event(5, 'revert', 'succeeded', 24),
+  ],
+  'rel-env-preview-3': [
+    event(1, 'fetch', 'succeeded', 1),
+    event(2, 'compose-config', 'succeeded', 1),
+    event(3, 'artifact-load', 'succeeded', 1),
+    event(4, 'compose-up', 'started', 0),
+  ],
 };

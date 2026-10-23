@@ -44,11 +44,16 @@ import {
   TONE_COLOR,
   tint,
 } from '../model';
-import { AddressLine, AgentAvatar, HealthMark, useAskAgent } from '../shared';
+import { AddressLine, AgentAvatar, ChatLink, HealthMark, useAskAgent } from '../shared';
 import { withTake } from '../take';
 import { Column } from './column';
-import { ChatLink, ProblemList, RecentDeploys, WhoCanDeploy } from './sections-a';
-import { Addresses, AppSettings, BehindTheScenes, PauseOrDelete, SavedData } from './sections-a2';
+import { Addresses } from '../sections/addresses';
+import { AppSettings } from '../sections/app-settings';
+import { BehindTheScenes } from '../sections/behind';
+import { SavedData } from '../sections/saved-data';
+import { WhoCanDeploy } from '../sections/who-can-deploy';
+import { PauseOrDelete } from './pause-or-delete';
+import { ProblemList, RecentDeploys } from './sections-a';
 
 /** The one action that matters most right now, as the page's only primary button. */
 function HeroAction({
@@ -292,15 +297,15 @@ export function EnvironmentDetailA() {
       <WhoCanDeploy projectId={projectId} env={env} profiles={profiles} />
       <AppSettings projectId={projectId} envId={env.id} rows={config.data?.envVars ?? []} />
       <Addresses
+        projectId={projectId}
         env={env}
         answering={isAnswering(info.health)}
         routes={routes}
         domains={customDomains}
         onAddDomain={() => setAddingDomain(true)}
       />
-      <SavedData volumes={volumeList} />
+      <SavedData projectId={projectId} env={env} volumes={volumeList} />
       <BehindTheScenes
-        key={behindOpen ? 'open' : 'closed'}
         projectId={projectId}
         env={env}
         volumes={volumeList}
