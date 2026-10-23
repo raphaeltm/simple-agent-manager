@@ -239,6 +239,49 @@ describe('resolveFileReferences', () => {
     ).rejects.toMatchObject({ code: 'input_too_large' });
   });
 
+  it('charges a "bytes" file three times its size, so a byte array is refused before it is built', async () => {
+    // A JSON array of byte values costs up to 4 characters per byte; base64 costs 4 per 3, which
+    // the budget already allows for. Without the weight, a file that fits the budget raw would
+    // be expanded into a huge array (and string) in the Worker before the size check caught it.
+    const read = vi.fn(async (_path: string, maxBytes: number) => ({
+      data: new ArrayBuffer(Math.min(40, maxBytes + 1)),
+      contentType: 'application/octet-stream',
+    }));
+    const files = createFiles({ read });
+
+    await expect(
+      resolveFileReferences({ x: { $file: 'a.bin', encoding: 'bytes' } }, files, limits(99))
+    ).rejects.toMatchObject({
+      code: 'input_too_large',
+      message: expect.stringContaining('counts three times its size'),
+    });
+    // The read itself is limited to what the weighted budget allows.
+    expect(read).toHaveBeenCalledWith('a.bin', 33);
+
+    // Control: the same 33-byte file fits as bytes, and a 99-byte file fits as base64.
+    const small = createFiles({
+      read: vi.fn(async () => ({
+        data: new ArrayBuffer(33),
+        contentType: 'application/octet-stream',
+      })),
+    });
+    const bytesResult = await resolveFileReferences(
+      { x: { $file: 'a.bin', encoding: 'bytes' } },
+      small,
+      limits(99)
+    );
+    expect((bytesResult.input.x as number[]).length).toBe(33);
+    const big = createFiles({
+      read: vi.fn(async () => ({
+        data: new ArrayBuffer(99),
+        contentType: 'application/octet-stream',
+      })),
+    });
+    await expect(
+      resolveFileReferences({ x: { $file: 'a.bin' } }, big, limits(99))
+    ).resolves.toMatchObject({ fileCount: 1 });
+  });
+
   it('leaves plain values and objects without a $file key untouched', async () => {
     const files = createFiles();
     const input = { a: 1, b: 'hello', c: { d: true, e: null } };

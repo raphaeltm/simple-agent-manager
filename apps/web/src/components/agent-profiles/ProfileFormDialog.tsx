@@ -226,8 +226,6 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
     setResourceErrors({});
   };
 
-  const isInstantRuntime = runtime === 'cf-container';
-
   return (
     <Dialog isOpen={isOpen} onClose={onClose} maxWidth="lg">
       <form
@@ -392,7 +390,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
             onDevcontainerConfigNameChange={setDevcontainerConfigName}
             taskMode={taskMode}
             onTaskModeChange={setTaskMode}
-            disabled={saving || isInstantRuntime}
+            disabled={saving}
           />
         </Section>
 

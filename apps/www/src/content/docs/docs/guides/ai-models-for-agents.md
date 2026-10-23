@@ -71,7 +71,7 @@ SAM does not decide which model an agent should call. Put that guidance where yo
 
 **Files.** Files move through the agent's workspace, never through its conversation.
 
-- **Sending a file:** put `{ "$file": "path/in/workspace" }` anywhere in the input. SAM reads that file and sends its contents, base64-encoded by default. Add `"encoding": "bytes"` or `"encoding": "data-url"` when the model expects those formats.
+- **Sending a file:** put `{ "$file": "path/in/workspace" }` anywhere in the input. SAM reads that file and sends its contents, base64-encoded by default. Add `"encoding": "bytes"` or `"encoding": "data-url"` when the model expects those formats. A file sent as `"bytes"` becomes a list of numbers several times its size, so it counts three times against the request limit; use base64 for large files.
 - **Images, audio and very large outputs:** these are saved into the workspace under `.ai-outputs/`, or under the `outputDirectory` the agent chooses. The result names the saved file.
 
 ## Budget and costs

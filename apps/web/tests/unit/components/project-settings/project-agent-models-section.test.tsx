@@ -113,6 +113,17 @@ describe('ProjectAgentModelsSection', () => {
     expect(screen.getAllByText(/clef-flash/)).toHaveLength(1);
   });
 
+  it('shows the reset date in UTC, the day the monthly limit actually resets', async () => {
+    // 2026-11-01T00:00Z is still Oct 31 in Los Angeles.
+    vi.stubEnv('TZ', 'America/Los_Angeles');
+    try {
+      renderSection(makeSettings());
+      expect(await screen.findByText(/resets Nov 1/)).toBeInTheDocument();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('mentions run_ai_model exactly once, in the section subtitle', async () => {
     renderSection(makeSettings());
     await screen.findByText('$2.00 of $20.00 used this month');

@@ -118,6 +118,23 @@ function fileReference(value: unknown): { path: string; encoding: FileEncoding }
   return { path, encoding };
 }
 
+/**
+ * How much of the per-call file budget one file byte costs, by encoding. The budget is already
+ * three quarters of the request limit, which leaves room for base64's 4 characters per 3 bytes. A
+ * JSON array of byte values costs up to 4 characters per byte, three times as much, so it is
+ * charged three times: a "bytes" input is refused before it is built rather than after.
+ */
+const ENCODING_BUDGET_WEIGHT: Record<FileEncoding, number> = { base64: 1, 'data-url': 1, bytes: 3 };
+
+function encodeFile(data: ArrayBuffer, contentType: string, encoding: FileEncoding): unknown {
+  if (encoding === 'bytes') return Array.from(new Uint8Array(data));
+  const base64 = bytesToBase64(data);
+  if (encoding === 'data-url') {
+    return `data:${contentType.split(';')[0] || 'application/octet-stream'};base64,${base64}`;
+  }
+  return base64;
+}
+
 /** Replace every `$file` reference with the file's contents in the requested encoding. */
 export async function resolveFileReferences(
   input: Record<string, unknown>,
@@ -127,40 +144,35 @@ export async function resolveFileReferences(
   const { maxTotalBytes, maxFileReferences } = limits;
   let fileCount = 0;
   let totalBytes = 0;
+  const tooLarge = (encoding: FileEncoding) =>
+    new AgentModelCallError(
+      'input_too_large',
+      `Files in this call exceed ${maxTotalBytes} bytes.` +
+        (encoding === 'bytes'
+          ? ' A file sent with "encoding": "bytes" counts three times its size; use "base64" for large files.'
+          : '')
+    );
+  const readReference = async (reference: { path: string; encoding: FileEncoding }) => {
+    fileCount += 1;
+    if (fileCount > maxFileReferences) {
+      throw new AgentModelCallError(
+        'invalid_input',
+        maxFileReferences === 0
+          ? 'File inputs ($file) are turned off by your SAM administrator.'
+          : `At most ${maxFileReferences} $file references per call.`
+      );
+    }
+    const weight = ENCODING_BUDGET_WEIGHT[reference.encoding];
+    const remaining = Math.floor((maxTotalBytes - totalBytes) / weight);
+    if (remaining <= 0) throw tooLarge(reference.encoding);
+    const { data, contentType } = await files.read(reference.path, remaining);
+    totalBytes += data.byteLength * weight;
+    if (totalBytes > maxTotalBytes) throw tooLarge(reference.encoding);
+    return encodeFile(data, contentType, reference.encoding);
+  };
   const visit = async (value: unknown): Promise<unknown> => {
     const reference = fileReference(value);
-    if (reference) {
-      fileCount += 1;
-      if (fileCount > maxFileReferences) {
-        throw new AgentModelCallError(
-          'invalid_input',
-          maxFileReferences === 0
-            ? 'File inputs ($file) are turned off by your SAM administrator.'
-            : `At most ${maxFileReferences} $file references per call.`
-        );
-      }
-      const remaining = maxTotalBytes - totalBytes;
-      if (remaining <= 0) {
-        throw new AgentModelCallError(
-          'input_too_large',
-          `Files in this call exceed ${maxTotalBytes} bytes.`
-        );
-      }
-      const { data, contentType } = await files.read(reference.path, remaining);
-      totalBytes += data.byteLength;
-      if (totalBytes > maxTotalBytes) {
-        throw new AgentModelCallError(
-          'input_too_large',
-          `Files in this call exceed ${maxTotalBytes} bytes.`
-        );
-      }
-      if (reference.encoding === 'bytes') return Array.from(new Uint8Array(data));
-      const base64 = bytesToBase64(data);
-      if (reference.encoding === 'data-url') {
-        return `data:${contentType.split(';')[0] || 'application/octet-stream'};base64,${base64}`;
-      }
-      return base64;
-    }
+    if (reference) return readReference(reference);
     // Files are read one at a time, never in parallel: each read is handed only the budget the
     // previous reads left, so many sibling references cannot together pull more than the cap
     // into the Worker.

@@ -13,16 +13,14 @@ import {
 } from '../../lib/query-options';
 import { indexCatalog, summarizeModelsByCategory } from '../agent-models/model-picker-utils';
 import { ModelPicker } from '../agent-models/ModelPicker';
+import { getAgentModelBudgetInput, getAgentModelBudgetUsage } from './agent-model-budget';
+import { AgentModelUsageList } from './AgentModelUsageList';
 
-/** Fraction of the effective budget at which the bar turns cautionary, before it is fully used. */
-const NEARLY_USED_FRACTION = 0.9;
-/** Models listed by name under "Used this month"; any others are counted in one summary line. */
-const USED_MODELS_SHOWN = 5;
-
+/** The limit resets at the start of a UTC month, so show that date in UTC, not local time. */
 function formatResetDate(iso: string): string {
   const parsed = new Date(iso);
   if (Number.isNaN(parsed.getTime())) return iso;
-  return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 
 function SectionShell({ headingId, children }: { headingId: string; children: ReactNode }) {
@@ -119,29 +117,14 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
   // closures below) so the handlers don't need a non-null assertion: TS does not carry the
   // `if (!settings) return` narrowing above into a nested function's closure over `settings`.
   const maxMonthlyBudgetUsd = settings.maxMonthlyBudgetUsd;
-  const spent = settings.usage.spentUsd + settings.usage.reservedUsd;
-  const usedFraction =
-    settings.effectiveMonthlyBudgetUsd > 0
-      ? spent / settings.effectiveMonthlyBudgetUsd
-      : spent > 0
-        ? 1
-        : 0;
-  const isFullyUsed = usedFraction >= 1;
-  const isNearlyUsed = usedFraction >= NEARLY_USED_FRACTION && !isFullyUsed;
-  const barClass = isFullyUsed ? 'bg-danger' : isNearlyUsed ? 'bg-warning' : 'bg-accent';
-  const progressPercent = Math.round(Math.min(100, Math.max(0, usedFraction * 100)));
-
-  const parsedBudget = Number(budgetInput);
-  const budgetIsEmpty = budgetInput.trim() === '';
-  const budgetIsInvalid = budgetIsEmpty || !Number.isFinite(parsedBudget) || parsedBudget < 0;
-  const budgetExceedsMax = !budgetIsInvalid && parsedBudget > maxMonthlyBudgetUsd;
-  const budgetHasError = budgetIsInvalid || budgetExceedsMax;
-  const budgetUnchanged = !budgetIsInvalid && parsedBudget === effectiveBudgetDefault;
+  const { spent, usedFraction, isFullyUsed, isNearlyUsed, barClass, progressPercent } =
+    getAgentModelBudgetUsage(settings);
+  const budget = getAgentModelBudgetInput(budgetInput, effectiveBudgetDefault, maxMonthlyBudgetUsd);
 
   function handleSaveBudget() {
-    if (budgetHasError || budgetUnchanged || saveMutation.isPending) return;
+    if (budget.hasError || budget.unchanged || saveMutation.isPending) return;
     saveMutation.mutate(
-      { monthlyBudgetUsd: parsedBudget },
+      { monthlyBudgetUsd: budget.parsed },
       { onSuccess: () => toast.success('Monthly limit saved') }
     );
   }
@@ -151,10 +134,6 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
     budgetInputRef.current?.select();
   }
 
-  // The server ranks models by spend; the rest are summarised in one line (rule 65).
-  const usedModels = settings.usage.byModel.slice(0, USED_MODELS_SHOWN);
-  const otherUsedModels = settings.usage.byModel.slice(USED_MODELS_SHOWN);
-  const otherUsedSpentUsd = otherUsedModels.reduce((total, item) => total + item.spentUsd, 0);
   // A platform-level feature toggle outranks the per-project role check: when
   // an administrator has turned agent model calls off, every control is
   // disabled regardless of whether this caller is an owner/admin.
@@ -234,7 +213,7 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
                 size="sm"
                 variant="secondary"
                 loading={saveMutation.isPending}
-                disabled={saveMutation.isPending || budgetHasError || budgetUnchanged}
+                disabled={saveMutation.isPending || budget.hasError || budget.unchanged}
                 onClick={handleSaveBudget}
               >
                 Save
@@ -255,7 +234,7 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
                 </Button>
               )}
             </div>
-            <p className={`m-0 text-xs ${budgetExceedsMax ? 'text-danger' : 'text-fg-muted'}`}>
+            <p className={`m-0 text-xs ${budget.exceedsMax ? 'text-danger' : 'text-fg-muted'}`}>
               Up to {formatUsd(maxMonthlyBudgetUsd)} · Default:{' '}
               {formatUsd(settings.defaultMonthlyBudgetUsd)}
             </p>
@@ -269,37 +248,7 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
         )}
       </div>
 
-      <div className="grid min-w-0 gap-1">
-        <h3 className="m-0 text-sm font-medium text-fg-primary">Used this month</h3>
-        {usedModels.length === 0 ? (
-          <p className="m-0 text-xs text-fg-muted">No model calls yet this month.</p>
-        ) : (
-          <ul className="m-0 grid list-none gap-1 p-0">
-            {usedModels.map((item) => (
-              <li
-                key={item.modelId}
-                className="flex min-w-0 items-center justify-between gap-2 text-xs"
-              >
-                <span className="min-w-0 break-words text-fg-primary">
-                  {catalogById.get(item.modelId)?.name ?? item.modelId}
-                </span>
-                <span className="shrink-0 tabular-nums text-fg-muted">
-                  {item.callCount} call{item.callCount === 1 ? '' : 's'} ·{' '}
-                  {formatUsd(item.spentUsd)}
-                </span>
-              </li>
-            ))}
-            {otherUsedModels.length > 0 && (
-              <li className="flex min-w-0 items-center justify-between gap-2 text-xs text-fg-muted">
-                <span className="min-w-0 break-words">
-                  {otherUsedModels.length} more model{otherUsedModels.length === 1 ? '' : 's'}
-                </span>
-                <span className="shrink-0 tabular-nums">{formatUsd(otherUsedSpentUsd)}</span>
-              </li>
-            )}
-          </ul>
-        )}
-      </div>
+      <AgentModelUsageList byModel={settings.usage.byModel} catalogById={catalogById} />
 
       <div className="grid min-w-0 gap-2 border-t border-border-default pt-3">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">

@@ -507,6 +507,34 @@ describe('ProfileFormDialog', () => {
     });
   });
 
+  it('lets an Instant profile switch its runtime back to a Cloud VM', async () => {
+    // CodeRabbit caught a split of this dialog that disabled the whole Infrastructure block for
+    // Instant profiles, locking the Runtime select itself.
+    const user = userEvent.setup();
+    render(
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={defaultOnSave}
+        profile={makeProfile({ name: 'Instant Chat', runtime: 'cf-container' })}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
+    );
+    await user.click(screen.getByText('Infrastructure'));
+    const runtimeSelect = screen.getByLabelText('Runtime');
+    expect(runtimeSelect).toBeEnabled();
+    // The settings an Instant container fixes stay locked while it is selected.
+    expect(screen.getByLabelText('Task Mode')).toBeDisabled();
+
+    await user.selectOptions(runtimeSelect, 'vm');
+    expect(screen.getByLabelText('Task Mode')).toBeEnabled();
+    await user.click(screen.getByText('Save Changes'));
+    await waitFor(() => {
+      expect(defaultOnSave).toHaveBeenCalledWith(expect.objectContaining({ runtime: 'vm' }));
+    });
+  });
+
   it('pre-populates fields in edit mode', () => {
     const profile = makeProfile({
       name: 'My Profile',

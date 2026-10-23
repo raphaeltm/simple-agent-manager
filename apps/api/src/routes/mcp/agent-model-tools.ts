@@ -3,10 +3,14 @@
  * operations in `services/agent-models/` (policy 5cb362e8: one operation, thin surfaces).
  */
 import type { Env } from '../../env';
-import { AgentModelCallError } from '../../services/agent-models/errors';
+import {
+  AgentModelCallError,
+  type AgentModelCallErrorCode,
+} from '../../services/agent-models/errors';
 import { listAgentModelsForAgent } from '../../services/agent-models/list';
 import { type AgentModelCaller, runAgentModelForAgent } from '../../services/agent-models/run';
 import {
+  INTERNAL_ERROR,
   INVALID_PARAMS,
   jsonRpcError,
   type JsonRpcResponse,
@@ -14,6 +18,17 @@ import {
   mapServiceError,
   type McpTokenData,
 } from './_helpers';
+
+/**
+ * Refusals the agent can clear by retrying later. They are internal errors, so a client does not
+ * read them as "fix your input"; every other code asks for different input or a person's action.
+ * `reason` carries the exact code either way.
+ */
+const RETRYABLE_CODES: ReadonlySet<AgentModelCallErrorCode> = new Set([
+  'timeout',
+  'upstream_error',
+  'catalog_unavailable',
+]);
 
 function callerFromToken(tokenData: McpTokenData): AgentModelCaller {
   return {
@@ -32,7 +47,8 @@ function toolError(
   err: unknown
 ): JsonRpcResponse {
   if (err instanceof AgentModelCallError) {
-    return jsonRpcError(requestId, INVALID_PARAMS, err.message, { reason: err.code });
+    const code = RETRYABLE_CODES.has(err.code) ? INTERNAL_ERROR : INVALID_PARAMS;
+    return jsonRpcError(requestId, code, err.message, { reason: err.code });
   }
   return mapServiceError(requestId, err, {
     fallbackPrefix: `${tool} failed`,

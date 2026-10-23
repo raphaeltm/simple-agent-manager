@@ -286,6 +286,8 @@ describe('agent model calls through the MCP route', () => {
     });
 
     expect(response.error?.message).toContain('is not turned on for this agent');
+    // A refusal a person must clear is "invalid params", not a retryable internal error.
+    expect(response.error).toMatchObject({ code: -32602, data: { reason: 'not_enabled' } });
     expect(aiRun).not.toHaveBeenCalled();
     expect(usageRow()).toBeUndefined();
   });
@@ -400,6 +402,8 @@ describe('agent model calls through the MCP route', () => {
     });
 
     expect(response.error?.message).toContain('did not answer');
+    // Retrying later can succeed, so this is an internal error rather than "fix your input".
+    expect(response.error).toMatchObject({ code: -32603, data: { reason: 'timeout' } });
     const row = usageRow();
     expect(row?.reserved).toBe(0);
     expect(row?.spent).toBeGreaterThan(0);
@@ -590,6 +594,7 @@ describe('agent model calls through the MCP route', () => {
     });
 
     expect(response.error?.message).toContain('Cloudflare is rate limiting this model (429)');
+    expect(response.error).toMatchObject({ code: -32603, data: { reason: 'upstream_error' } });
     expect(usageRow()).toEqual({ reserved: 0, spent: 0, calls: 1 });
   });
 
