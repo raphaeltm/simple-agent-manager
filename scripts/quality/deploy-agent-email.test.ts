@@ -53,7 +53,9 @@ class FakeCloudflare {
   /** Whether the routing records show up as soon as routing is turned on for a subdomain. */
   routingRecordsAppear = true;
   /** Test hook: creating a DNS record at this name fails with this Cloudflare error. */
-  dnsCreateConflict: { name: string; code: number; message: string } | null = null;
+  dnsCreateError: { name: string; code: number; message: string; status?: number } | null = null;
+  /** Test hook: runs as a DNS record create arrives, after the step's own lookup. */
+  beforeDnsCreate: ((fake: FakeCloudflare, record: DnsRecord) => void) | null = null;
   calls: Array<{ method: HttpMethod; path: string }> = [];
 
   /**
@@ -104,10 +106,17 @@ class FakeCloudflare {
     });
   }
 
-  /** How Cloudflare compares record content: quoting and spacing do not change a value. */
+  /**
+   * How Cloudflare compares record content, as far as staging showed: a TXT value stored as
+   * several quoted strings equals the same value joined (deploy run 39882259188). Nothing else
+   * is folded, so spacing and case still make values differ.
+   */
   static sameContent(a: string, b: string): boolean {
-    const canonical = (value: string) => value.replace(/["\s]/g, '').toLowerCase();
-    return canonical(a) === canonical(b);
+    const payload = (value: string) => {
+      const quoted = value.trim().match(/"(?:[^"\\]|\\.)*"/g);
+      return quoted ? quoted.map((chunk) => chunk.slice(1, -1)).join('') : value.trim();
+    };
+    return payload(a) === payload(b);
   }
 
   apexMailRecords(): DnsRecord[] {
@@ -174,11 +183,12 @@ class FakeCloudflare {
         ttl: 1,
         proxied: false,
       });
-      const conflict = this.dnsCreateConflict;
-      if (conflict && conflict.name === record.name) {
+      this.beforeDnsCreate?.(this, record);
+      const failure = this.dnsCreateError;
+      if (failure && failure.name === record.name) {
         return {
-          status: 400,
-          body: { success: false, errors: [{ code: conflict.code, message: conflict.message }] },
+          status: failure.status ?? 400,
+          body: { success: false, errors: [{ code: failure.code, message: failure.message }] },
         };
       }
       const identical = this.dns.some(
@@ -597,33 +607,62 @@ describe('configureAgentEmail', () => {
     ).toEqual([]);
   });
 
-  it('carries on when Cloudflare says a sending record it holds is identical', async () => {
+  it('carries on when an identical sending record appears between its lookup and its create', async () => {
     const fake = new FakeCloudflare().useEmailRouting();
-    fake.onSendingSubdomainCreated = (cloudflare) => {
-      // Spaced differently from the sending API's copy, so the step cannot tell it is the same.
-      cloudflare.dns.push({
-        type: 'TXT',
-        name: '_dmarc.agents.fixture.example',
-        content: '"v=DMARC1;  p=none"',
-      });
+    let raced = false;
+    fake.beforeDnsCreate = (cloudflare, record) => {
+      // Another run, or Cloudflare itself, creates the exact record after the step looked.
+      if (raced || record.name !== '_dmarc.agents.fixture.example') return;
+      raced = true;
+      cloudflare.dns.push({ type: record.type, name: record.name, content: record.content });
     };
 
     await expect(run(fake)).resolves.toMatchObject({ status: 'configured' });
 
+    expect(raced).toBe(true);
     expect(
       fake.dns.filter((record) => record.name === '_dmarc.agents.fixture.example')
     ).toHaveLength(1);
   });
 
+  it('compares TXT values byte for byte, so a DKIM key differing only in case is not taken as present', async () => {
+    const fake = new FakeCloudflare().useEmailRouting();
+    const dkimName = 'cf-bounce._domainkey.agents.fixture.example';
+    fake.onSendingSubdomainCreated = (cloudflare) => {
+      const dkim = Object.values(cloudflare.sendingDns)
+        .flat()
+        .find((record) => record.name === dkimName)!;
+      cloudflare.dns.push({ ...dkim, content: `"${dkim.content.toLowerCase()}"` });
+    };
+
+    await expect(run(fake)).resolves.toMatchObject({ status: 'configured' });
+
+    expect(fake.dns.filter((record) => record.name === dkimName).map((r) => r.content)).toContain(
+      'v=DKIM1; k=rsa; p=MIIB'
+    );
+  });
+
   it('still fails the deploy when another record already holds a sending record name', async () => {
     const fake = new FakeCloudflare().useEmailRouting();
-    fake.dnsCreateConflict = {
+    fake.dnsCreateError = {
       name: '_dmarc.agents.fixture.example',
       code: 81053,
       message: 'An A, AAAA, or CNAME record with that host already exists.',
     };
 
     await expect(run(fake)).rejects.toThrow(/81053/);
+  });
+
+  it('still fails the deploy when creating a sending record fails for another reason', async () => {
+    const fake = new FakeCloudflare().useEmailRouting();
+    fake.dnsCreateError = {
+      name: '_dmarc.agents.fixture.example',
+      code: 10000,
+      message: 'Authentication error',
+      status: 403,
+    };
+
+    await expect(run(fake)).rejects.toThrow(/HTTP 403: 10000 Authentication error/);
   });
 
   it('stays pending, with sending set up, while Cloudflare is still verifying it', async () => {

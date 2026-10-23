@@ -143,12 +143,14 @@ function normalizeName(name: string): string {
 
 /**
  * Comparable record content. A TXT value can be stored as several quoted strings, which Cloudflare
- * does for long values such as DKIM keys; its meaning is the strings joined.
+ * does for long values such as DKIM keys; its payload is the strings joined, compared byte for
+ * byte because a DKIM key is case-sensitive. Host names (MX) compare without case or a trailing dot.
  */
-function normalizeContent(content: string): string {
-  const quoted = content.trim().match(/"(?:[^"\\]|\\.)*"/g);
-  const value = quoted ? quoted.map((chunk) => chunk.slice(1, -1)).join('') : content.trim();
-  return value.replace(/\.$/, '').toLowerCase();
+function comparableContent(record: Pick<DnsRecord, 'type' | 'content'>): string {
+  const content = record.content.trim();
+  if (record.type !== 'TXT') return content.replace(/\.$/, '').toLowerCase();
+  const quoted = content.match(/"(?:[^"\\]|\\.)*"/g);
+  return quoted ? quoted.map((chunk) => chunk.slice(1, -1)).join('') : content;
 }
 
 async function listDnsRecords(api: Api, zoneId: string, type: string, name: string) {
@@ -156,12 +158,13 @@ async function listDnsRecords(api: Api, zoneId: string, type: string, name: stri
   return api.call<DnsRecord[]>('GET', `/zones/${zoneId}/dns_records?${query}`);
 }
 
+/** A TXT record whose first term is `v=spf1` (matched without case) is an SPF record. */
 function isSpfRecord(record: DnsRecord): boolean {
-  return normalizeContent(record.content).startsWith('v=spf1');
+  return /^v=spf1(\s|$)/i.test(comparableContent(record));
 }
 
 function describeRecord(record: DnsRecord): string {
-  return `${record.type} ${normalizeContent(record.content)}`;
+  return `${record.type} ${comparableContent(record)}`;
 }
 
 /** The records that decide where a name's mail goes and who may send as it: MX and SPF. */
@@ -173,7 +176,7 @@ async function listMailRecords(api: Api, zoneId: string, name: string): Promise<
 
 function mailSignature(records: DnsRecord[]): string {
   return records
-    .map((record) => `${record.type}:${record.priority ?? ''}:${normalizeContent(record.content)}`)
+    .map((record) => `${record.type}:${record.priority ?? ''}:${comparableContent(record)}`)
     .sort((a, b) => a.localeCompare(b))
     .join(',');
 }
@@ -191,7 +194,7 @@ function assertApexUnchanged(apex: string, before: DnsRecord[], after: DnsRecord
 /** Email Routing is on for the subdomain when its MX records point at Cloudflare. */
 async function subdomainRoutingEnabled(api: Api, zoneId: string, domain: string): Promise<boolean> {
   const mx = await listDnsRecords(api, zoneId, 'MX', domain);
-  return mx.some((record) => CLOUDFLARE_MX_PATTERN.test(normalizeContent(record.content)));
+  return mx.some((record) => CLOUDFLARE_MX_PATTERN.test(comparableContent(record)));
 }
 
 /**
@@ -285,8 +288,8 @@ async function ensureDnsRecord(
     );
   }
   const existing = await listDnsRecords(api, zoneId, record.type, record.name);
-  const wanted = normalizeContent(record.content);
-  if (existing.some((candidate) => normalizeContent(candidate.content) === wanted)) return;
+  const wanted = comparableContent(record);
+  if (existing.some((candidate) => comparableContent(candidate) === wanted)) return;
   try {
     await api.call('POST', `/zones/${zoneId}/dns_records`, {
       type: record.type,
