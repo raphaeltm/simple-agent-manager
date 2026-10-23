@@ -29,7 +29,6 @@ import { runAgentEmailRecovery } from '../../src/services/agent-email/recovery';
 import { AgentEmailReplyError, replyToTriggerEmail } from '../../src/services/agent-email/reply';
 import { getAgentEmailLimits } from '../../src/services/agent-email/settings';
 import {
-  __resetAgentEmailSetupCacheForTest,
   AGENT_EMAIL_SETUP_KEY,
   agentEmailConfig,
 } from '../../src/services/agent-email/setup-state';
@@ -446,7 +445,6 @@ describe('agent email vertical slice', () => {
     await handleInboundAgentEmail(message, env, { submitter });
     const executionId = submitter.mock.calls[0]![1].triggerExecutionId;
     sqlite.prepare('DELETE FROM platform_settings WHERE key = ?').run(AGENT_EMAIL_SETUP_KEY);
-    __resetAgentEmailSetupCacheForTest();
 
     const refused = await callMcpTool(token(executionId), 'reply_to_email', { body: 'Done.' });
 
@@ -558,7 +556,6 @@ describe('agent email vertical slice', () => {
     it('refuses mail while the binding exists but no admin has run the setup', async () => {
       // The state a fresh deploy leaves: binding present, no setup record.
       sqlite.prepare('DELETE FROM platform_settings WHERE key = ?').run(AGENT_EMAIL_SETUP_KEY);
-      __resetAgentEmailSetupCacheForTest();
 
       const refused = inbound(rawEmail());
       await expect(handleInboundAgentEmail(refused, env, { submitter })).resolves.toMatchObject({

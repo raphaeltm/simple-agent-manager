@@ -1,6 +1,7 @@
 /**
- * Turns agent email on (preview). Shows what the setup would do now — including any records
- * Cloudflare adds to the main domain, which need the admin's consent first — and runs it.
+ * Turns agent email on (preview). Shows what the setup would do now, including any change
+ * outside the agent email subdomain, which needs the admin's consent first, and runs it.
+ * Consent is bound to the plan shown: the server runs only with that plan's `consentToken`.
  * `AdminAgentEmailPanel` renders this only while agent email is off. See
  * `apps/api/src/services/agent-email/setup.ts` for the server side.
  */
@@ -16,8 +17,21 @@ import {
   agentEmailQueryKeys,
 } from '../lib/query-options/agent-email';
 
+/** States the admin leaves by changing something elsewhere, then checking again. */
+const CHECK_AGAIN_STATES = new Set<AgentEmailSetupPlan['state']>([
+  'unavailable',
+  'verifying',
+  'refused',
+  'changed',
+]);
+
 function recordContent(record: AgentEmailMainDomainRecord): string {
   return record.content ?? 'a DKIM key Cloudflare generates';
+}
+
+function recordVerb(plan: AgentEmailSetupPlan, record: AgentEmailMainDomainRecord): string {
+  if (plan.state === 'changed') return record.change === 'add' ? 'Added' : 'Removed';
+  return record.change === 'add' ? 'Adds' : 'Removes';
 }
 
 interface Props {
@@ -29,11 +43,13 @@ export function AdminAgentEmailSetup({ onTurnedOn }: Props) {
   const scope = useQueryScope();
   const queryClient = useQueryClient();
   const query = useQuery(adminAgentEmailSetupQueryOptions(scope, true));
-  const [allowMainDomainChanges, setAllowMainDomainChanges] = useState(false);
+  // The token the admin allowed. A refetched plan with other changes has another token, so
+  // the box clears itself rather than carrying consent over to changes not yet read.
+  const [allowedToken, setAllowedToken] = useState<string | null>(null);
   const consentLabelId = useId();
   const [pending, setPending] = useState<AgentEmailSetupPlan | null>(null);
   const setup = useMutation({
-    mutationFn: (allow: boolean) => runAgentEmailSetup(allow),
+    mutationFn: (consentToken: string | null) => runAgentEmailSetup(consentToken),
     onSuccess: async (result) => {
       if (result.state === 'on') {
         setPending(null);
@@ -59,8 +75,10 @@ export function AdminAgentEmailSetup({ onTurnedOn }: Props) {
   const failure = setup.error ?? (plan ? null : query.error);
   const error =
     failure instanceof Error ? failure.message : failure ? 'Could not check agent email' : null;
-  const canRun = plan?.state === 'ready' || plan?.state === 'needs_consent';
-  const needsConsent = plan?.state === 'needs_consent';
+  const canRun =
+    plan?.state === 'ready' || plan?.state === 'needs_consent' || plan?.state === 'changed';
+  const consentToken = plan?.consentToken ?? null;
+  const allowed = consentToken !== null && allowedToken === consentToken;
   const busy = setup.isPending || query.isFetching;
 
   return (
@@ -77,7 +95,7 @@ export function AdminAgentEmailSetup({ onTurnedOn }: Props) {
         )
       ) : (
         <>
-          {plan.state === 'refused' ? (
+          {plan.state === 'refused' || plan.state === 'changed' ? (
             <Alert variant="warning">{plan.reason}</Alert>
           ) : plan.state === 'unavailable' || plan.state === 'verifying' ? (
             // Blocked until something outside this panel changes: say so as a notice, not as
@@ -87,36 +105,50 @@ export function AdminAgentEmailSetup({ onTurnedOn }: Props) {
             <p className="text-sm text-fg-secondary break-words">
               Turning it on sets up Email Routing for{' '}
               <span className="font-mono">{plan.domain}</span> and sends its mail to this
-              deployment. Nothing changes on <span className="font-mono">{plan.mainDomain}</span>.
+              deployment. Nothing changes on <span className="font-mono">{plan.mainDomain}</span> or
+              in the zone&rsquo;s Email Routing settings.
             </p>
           ) : plan.state === 'on' ? (
             <p className="text-sm text-fg-secondary">Agent email is on.</p>
           ) : (
             plan.reason && <p className="text-sm text-fg-secondary break-words">{plan.reason}</p>
           )}
-          {needsConsent && (
+          {consentToken !== null && (
             <div className="space-y-2 rounded-md border border-border-default p-3 min-w-0">
-              <p className="text-sm font-medium text-fg-primary">Cloudflare adds these records:</p>
-              <ul className="space-y-1" data-testid="agent-email-main-domain-changes">
+              <p className="text-sm font-medium text-fg-primary">
+                {plan.state === 'changed' ? 'What changed:' : 'Turning it on also changes:'}
+              </p>
+              <ul className="space-y-1" data-testid="agent-email-setup-changes">
                 {plan.mainDomainChanges.map((record) => (
-                  <li key={`${record.type}:${record.name}`} className="text-xs text-fg-muted">
+                  <li
+                    key={`${record.change}:${record.type}:${record.name}:${record.content ?? ''}`}
+                    className="text-xs text-fg-muted"
+                  >
+                    {recordVerb(plan, record)}{' '}
                     <span className="font-mono break-all text-fg-primary">
                       {record.type} {record.name}
                     </span>{' '}
                     — <span className="break-all">{recordContent(record)}</span>
                   </li>
                 ))}
+                {plan.zoneChanges.map((change) => (
+                  <li key={change.setting} className="text-xs text-fg-muted break-words">
+                    {change.description}
+                  </li>
+                ))}
               </ul>
               <label className="flex items-start gap-2.5 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={allowMainDomainChanges}
+                  checked={allowed}
                   disabled={setup.isPending}
-                  onChange={(event) => setAllowMainDomainChanges(event.target.checked)}
+                  onChange={(event) => setAllowedToken(event.target.checked ? consentToken : null)}
                   className="mt-0.5 h-4 w-4 shrink-0 rounded border-border-default accent-accent-primary"
                 />
                 <span id={consentLabelId} className="text-sm text-fg-secondary break-words">
-                  Allow Cloudflare to add these records to {plan.mainDomain}
+                  {plan.state === 'changed'
+                    ? `Turn agent email on with the records of ${plan.mainDomain} as they are now`
+                    : 'Allow these changes'}
                 </span>
               </label>
             </div>
@@ -124,14 +156,14 @@ export function AdminAgentEmailSetup({ onTurnedOn }: Props) {
           <div className="flex flex-wrap gap-2">
             {canRun && (
               <Button
-                disabled={busy || (needsConsent && !allowMainDomainChanges)}
-                aria-describedby={needsConsent ? consentLabelId : undefined}
-                onClick={() => setup.mutate(needsConsent && allowMainDomainChanges)}
+                disabled={busy || (consentToken !== null && !allowed)}
+                aria-describedby={consentToken !== null ? consentLabelId : undefined}
+                onClick={() => setup.mutate(allowed ? consentToken : null)}
               >
                 {setup.isPending ? 'Turning on…' : 'Turn on agent email'}
               </Button>
             )}
-            {(plan.state === 'verifying' || plan.state === 'unavailable') && (
+            {CHECK_AGAIN_STATES.has(plan.state) && (
               <Button variant="secondary" disabled={busy} onClick={() => void query.refetch()}>
                 {query.isFetching ? 'Checking…' : 'Check again'}
               </Button>

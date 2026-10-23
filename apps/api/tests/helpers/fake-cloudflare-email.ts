@@ -44,8 +44,12 @@ export interface FakeCloudflareEmailOptions {
   mxVisibleAfterEnable?: boolean;
   /** Runs after a subdomain enable changed the zone, to model further changes. */
   onEnable?: (dns: FakeDnsRecord[]) => void;
+  /** Most DNS records one page returns, below what `per_page` asks for. */
+  dnsPageLimit?: number;
   /** Return a response to replace the fake's own for one call. */
   respond?: (call: FakeCall) => Response | undefined;
+  /** Holds a response after the fake applied the call, until the returned promise settles. */
+  hold?: (call: FakeCall) => Promise<void> | undefined;
 }
 
 export interface FakeCall {
@@ -69,8 +73,14 @@ export function cloudflareRoutingMx(name: string): FakeRecordInput[] {
   ];
 }
 
-function ok(result: unknown): Response {
-  return new Response(JSON.stringify({ success: true, errors: [], result }), {
+function ok(result: unknown, resultInfo?: Record<string, number>): Response {
+  const body = {
+    success: true,
+    errors: [],
+    result,
+    ...(resultInfo ? { result_info: resultInfo } : {}),
+  };
+  return new Response(JSON.stringify(body), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
@@ -113,9 +123,22 @@ export function fakeCloudflareEmail(options: FakeCloudflareEmailOptions = {}) {
     if (method === 'GET' && path === '/dns_records') {
       const type = url.searchParams.get('type');
       const name = url.searchParams.get('name')?.toLowerCase();
-      return ok(
-        state.dns.filter((record) => record.type === type && record.name.toLowerCase() === name)
+      const matches = state.dns.filter(
+        (record) => record.type === type && record.name.toLowerCase() === name
       );
+      const perPage = Math.min(
+        Number(url.searchParams.get('per_page') ?? '100'),
+        options.dnsPageLimit ?? Number.POSITIVE_INFINITY
+      );
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const result = matches.slice((page - 1) * perPage, page * perPage);
+      return ok(result, {
+        page,
+        per_page: perPage,
+        count: result.length,
+        total_count: matches.length,
+        total_pages: Math.max(1, Math.ceil(matches.length / perPage)),
+      });
     }
     if (method === 'GET' && path === '/email/routing') {
       return ok({ name: zoneName, ...state.routing });
@@ -167,7 +190,9 @@ export function fakeCloudflareEmail(options: FakeCloudflareEmailOptions = {}) {
       body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
     };
     calls.push(call);
-    return options.respond?.(call) ?? handle(call, url);
+    const response = options.respond?.(call) ?? handle(call, url);
+    await options.hold?.(call);
+    return response;
   });
 
   return {

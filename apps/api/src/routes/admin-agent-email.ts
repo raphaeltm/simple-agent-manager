@@ -27,12 +27,11 @@ import { agentEmailAddress, parseAgentEmailRecipient } from '../services/agent-e
 import { CloudflareEmailApiError } from '../services/agent-email/cloudflare-email-api';
 import { readLoopbackStatus, sendLoopbackTest } from '../services/agent-email/loopback';
 import { getAgentEmailLimits } from '../services/agent-email/settings';
+import { planAgentEmailSetup, runAgentEmailSetup } from '../services/agent-email/setup';
 import {
   AgentEmailMainDomainChangedError,
   AgentEmailSetupRefusedError,
-  planAgentEmailSetup,
-  runAgentEmailSetup,
-} from '../services/agent-email/setup';
+} from '../services/agent-email/setup-errors';
 import { activeAgentEmailSender, agentEmailConfig } from '../services/agent-email/setup-state';
 
 const LoopbackSchema = v.object({
@@ -40,7 +39,8 @@ const LoopbackSchema = v.object({
 });
 
 const SetupSchema = v.object({
-  allowMainDomainChanges: v.optional(v.boolean()),
+  // The plan's consentToken (a SHA-256 hex digest) when the plan lists changes.
+  consentToken: v.optional(v.pipe(v.string(), v.maxLength(128))),
 });
 
 const adminAgentEmailRoutes = new Hono<{ Bindings: Env }>();
@@ -86,7 +86,7 @@ adminAgentEmailRoutes.post('/setup', jsonValidator(SetupSchema), async (c) => {
   if (!rate.allowed) throw errors.tooManyRequests('Setup run limit reached; try again later');
   try {
     const plan = await runAgentEmailSetup(c.env, {
-      allowMainDomainChanges: c.req.valid('json').allowMainDomainChanges === true,
+      consentToken: c.req.valid('json').consentToken ?? null,
       userId: getAuth(c).user.id,
     });
     return c.json(plan);

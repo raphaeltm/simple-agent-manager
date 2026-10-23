@@ -371,7 +371,14 @@ interface SetupPlanMock {
   state: string;
   domain: string | null;
   mainDomain: string | null;
-  mainDomainChanges: Array<{ type: string; name: string; content: string | null }>;
+  mainDomainChanges: Array<{
+    type: string;
+    name: string;
+    content: string | null;
+    change: 'add' | 'remove';
+  }>;
+  zoneChanges: Array<{ setting: 'subaddressing'; description: string }>;
+  consentToken: string | null;
   reason: string | null;
 }
 
@@ -468,17 +475,38 @@ const READY_PLAN: SetupPlanMock = {
   domain: `agents.${LONG_MAIN_DOMAIN}`,
   mainDomain: LONG_MAIN_DOMAIN,
   mainDomainChanges: [],
+  zoneChanges: [],
+  consentToken: null,
   reason: null,
 };
+
+const CONSENT_TOKEN = 'c'.repeat(64);
 
 const CONSENT_PLAN: SetupPlanMock = {
   ...READY_PLAN,
   state: 'needs_consent',
   mainDomainChanges: [
-    { type: 'TXT', name: LONG_MAIN_DOMAIN, content: 'v=spf1 include:_spf.mx.cloudflare.net ~all' },
-    { type: 'TXT', name: `cf2024-1._domainkey.${LONG_MAIN_DOMAIN}`, content: null },
+    {
+      type: 'TXT',
+      name: LONG_MAIN_DOMAIN,
+      content: 'v=spf1 include:_spf.mx.cloudflare.net ~all',
+      change: 'add',
+    },
+    {
+      type: 'TXT',
+      name: `cf2024-1._domainkey.${LONG_MAIN_DOMAIN}`,
+      content: null,
+      change: 'add',
+    },
   ],
-  reason: `${LONG_MAIN_DOMAIN} has never used Email Routing, so turning it on lets Cloudflare add an SPF record and a DKIM key to ${LONG_MAIN_DOMAIN}.`,
+  zoneChanges: [
+    {
+      setting: 'subaddressing',
+      description: `Turns on subaddressing for the whole zone: mail to name+anything@${LONG_MAIN_DOMAIN}, or to any other address in the zone with a +, then goes where mail to the address without the + goes.`,
+    },
+  ],
+  consentToken: CONSENT_TOKEN,
+  reason: `${LONG_MAIN_DOMAIN} has never used Email Routing, so turning it on lets Cloudflare add an SPF record and a DKIM key to ${LONG_MAIN_DOMAIN}. Agent email also needs subaddressing on for the zone.`,
 };
 
 /** The admin panel as a section image: on mobile it is taller than one screen. */
@@ -487,6 +515,16 @@ async function auditSetup(page: Page, name: string) {
   await assertNoOverflow(page);
   await assertNoClippedOverflow(page);
   await screenshotSectionNearHeading(page, 'Agent email', `agent-email/${name}`);
+  // A section taller than the screen is cut at the viewport; capture its end as well.
+  const section = page
+    .getByRole('heading', { name: 'Agent email' })
+    .locator('xpath=ancestor::section[1]');
+  const box = await section.boundingBox();
+  const viewport = page.viewportSize();
+  if (box && viewport && box.height > viewport.height * 0.8) {
+    await section.evaluate((element) => element.scrollIntoView({ block: 'end' }));
+    await screenshot(page, `agent-email/${name}-bottom`);
+  }
 }
 
 test.describe('Agent email — admin panel', () => {
@@ -528,14 +566,15 @@ test.describe('Agent email — admin panel', () => {
       setupRequests,
     });
     await page.goto('/admin/integrations');
-    const changes = page.getByTestId('agent-email-main-domain-changes');
+    const changes = page.getByTestId('agent-email-setup-changes');
     await expect(changes).toContainText('v=spf1 include:_spf.mx.cloudflare.net ~all');
     await expect(changes).toContainText('a DKIM key Cloudflare generates');
+    await expect(changes).toContainText('Turns on subaddressing for the whole zone');
     const turnOn = page.getByRole('button', { name: 'Turn on agent email' });
     await expect(turnOn).toBeDisabled();
     await auditSetup(page, 'agent-email-admin-needs-consent');
 
-    await page.getByLabel(`Allow Cloudflare to add these records to ${LONG_MAIN_DOMAIN}`).check();
+    await page.getByLabel('Allow these changes').check();
     await expect(turnOn).toBeEnabled();
     await turnOn.click();
 
@@ -544,7 +583,7 @@ test.describe('Agent email — admin panel', () => {
     );
     await expect(page.getByText(/Agent email is on for/)).toBeVisible();
     await expect(page.getByLabel('Send loopback test to')).toBeVisible();
-    expect(setupRequests).toEqual([{ allowMainDomainChanges: true }]);
+    expect(setupRequests).toEqual([{ consentToken: CONSENT_TOKEN }]);
     await auditSetup(page, 'agent-email-admin-turned-on');
   });
 
@@ -560,12 +599,60 @@ test.describe('Agent email — admin panel', () => {
     });
     await page.goto('/admin/integrations');
     await expect(
-      page.getByText(`Nothing changes on ${LONG_MAIN_DOMAIN}.`, { exact: false })
+      page.getByText(
+        `Nothing changes on ${LONG_MAIN_DOMAIN} or in the zone’s Email Routing settings.`,
+        { exact: false }
+      )
     ).toBeVisible();
     await auditSetup(page, 'agent-email-admin-ready');
     await page.getByRole('button', { name: 'Turn on agent email' }).click();
     await expect(page.getByLabel('Send loopback test to')).toBeVisible();
-    expect(setupRequests).toEqual([{ allowMainDomainChanges: false }]);
+    expect(setupRequests).toEqual([{}]);
+  });
+
+  test('lists what changed after a stopped run, and turns on only once allowed', async ({
+    page,
+  }) => {
+    const setupRequests: unknown[] = [];
+    await setupAdminAgentEmailMocks(page, {
+      enabled: false,
+      domain: null,
+      setupPlan: {
+        ...READY_PLAN,
+        state: 'changed',
+        mainDomainChanges: [
+          {
+            type: 'MX',
+            name: LONG_MAIN_DOMAIN,
+            content: 'route1.mx.cloudflare.net',
+            change: 'add',
+          },
+          {
+            type: 'TXT',
+            name: LONG_MAIN_DOMAIN,
+            content: 'v=spf1 include:_spf.google.com include:mailgun.org ~all',
+            change: 'remove',
+          },
+        ],
+        consentToken: CONSENT_TOKEN,
+        reason: `An earlier setup run turned Email Routing on, and the mail records of ${LONG_MAIN_DOMAIN} now differ from what it showed: added MX route1.mx.cloudflare.net, removed TXT v=spf1 include:_spf.google.com include:mailgun.org ~all. Agent email stays off. Fix them in Cloudflare and check again, or allow them as they are.`,
+      },
+      setupResult: { ...READY_PLAN, state: 'on' },
+      setupRequests,
+    });
+    await page.goto('/admin/integrations');
+    const changes = page.getByTestId('agent-email-setup-changes');
+    await expect(changes).toContainText('Added MX');
+    await expect(changes).toContainText('Removed TXT');
+    await expect(page.getByRole('button', { name: 'Check again' })).toBeVisible();
+    const turnOn = page.getByRole('button', { name: 'Turn on agent email' });
+    await expect(turnOn).toBeDisabled();
+    await auditSetup(page, 'agent-email-admin-changed');
+
+    await page.getByLabel(/as they are now/).check();
+    await turnOn.click();
+    await expect(page.getByLabel('Send loopback test to')).toBeVisible();
+    expect(setupRequests).toEqual([{ consentToken: CONSENT_TOKEN }]);
   });
 
   test('explains a refusal with the records that caused it', async ({ page }) => {

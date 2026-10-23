@@ -55,15 +55,15 @@ export async function fetchAgentEmailSetupPlan(): Promise<AgentEmailSetupPlan> {
 }
 
 /**
- * Superadmin only. Turns agent email on. In a zone new to Email Routing the server refuses
- * unless `allowMainDomainChanges` is set, because Cloudflare adds records to the main domain.
+ * Superadmin only. Turns agent email on. When the plan lists changes, pass its `consentToken`:
+ * the server runs only if the changes are still exactly the ones that plan listed.
  */
 export async function runAgentEmailSetup(
-  allowMainDomainChanges: boolean
+  consentToken: string | null
 ): Promise<AgentEmailSetupPlan> {
   return request<AgentEmailSetupPlan>('/api/admin/agent-email/setup', {
     method: 'POST',
-    body: JSON.stringify({ allowMainDomainChanges }),
+    body: JSON.stringify(consentToken ? { consentToken } : {}),
   });
 }
 

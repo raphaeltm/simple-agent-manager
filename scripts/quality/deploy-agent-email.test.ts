@@ -40,6 +40,8 @@ class FakeCloudflare {
   /** Test hook: runs as a DNS record create arrives, after the step's own lookup. */
   beforeDnsCreate: ((fake: FakeCloudflare, record: DnsRecord) => void) | null = null;
   calls: Array<{ method: HttpMethod; path: string }> = [];
+  /** Most DNS records one page returns, below what `per_page` asks for. */
+  dnsPageLimit = Number.POSITIVE_INFINITY;
 
   /**
    * How Cloudflare compares record content, as far as staging showed: a TXT value stored as
@@ -107,7 +109,17 @@ class FakeCloudflare {
     if (route === 'GET /dns_records') {
       const type = params.get('type');
       const name = params.get('name');
-      return this.ok(this.dns.filter((r) => r.type === type && r.name === name));
+      const perPage = Math.min(Number(params.get('per_page') ?? '100'), this.dnsPageLimit);
+      const matches = this.dns.filter((r) => r.type === type && r.name === name);
+      const result = matches.slice(0, perPage);
+      return {
+        status: 200,
+        body: {
+          success: true,
+          result,
+          result_info: { count: result.length, total_count: matches.length },
+        },
+      };
     }
     if (route === 'POST /dns_records') {
       const record = body as DnsRecord & { ttl: number; proxied: boolean };
@@ -454,6 +466,21 @@ describe('agent email marker', () => {
 
     writeAgentEmailMarker({ status: 'skipped', reason: 'no permission' }, dir);
     expect(readAgentEmailMarker(dir)).toBeNull();
+  });
+});
+
+describe('agent email DNS listing', () => {
+  it('fails rather than compare a listing Cloudflare reports as partial', async () => {
+    const fake = new FakeCloudflare();
+    fake.dnsPageLimit = 1;
+    fake.dns.push(
+      { type: 'TXT', name: 'fixture.example', content: '"google-site-verification=abc123"' },
+      { type: 'TXT', name: 'fixture.example', content: '"v=spf1 include:_spf.google.com ~all"' }
+    );
+    await expect(run(fake)).rejects.toThrow(
+      'Cloudflare listed 1 of 2 TXT records for fixture.example'
+    );
+    expect(fake.calls.filter((call) => call.method !== 'GET')).toEqual([]);
   });
 });
 

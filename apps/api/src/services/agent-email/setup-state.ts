@@ -1,77 +1,98 @@
 /**
- * Agent email's on-switch (preview). The deploy only prepares agent email: Email Sending for
- * `agents.<BASE_DOMAIN>` and the `AGENT_EMAIL` send binding. A superadmin turns it on with the
- * admin setup (`./setup.ts`), which writes the record kept here. Agent email is on only when
- * the binding exists and that record names the current agent email domain, so a deployment
- * whose binding ships before anyone ran the setup refuses inbound mail and replies.
+ * Agent email's on-switch and the admin setup's in-progress record (preview).
+ *
+ * The deploy only prepares agent email: Email Sending for `agents.<BASE_DOMAIN>` and the
+ * `AGENT_EMAIL` send binding. A superadmin turns it on with the admin setup (`./setup.ts`),
+ * which writes the record kept here. Agent email is on only when the binding exists and that
+ * record names the current agent email domain, so a deployment whose binding ships before
+ * anyone ran the setup refuses inbound mail and replies.
+ *
+ * Every check reads the record from D1 rather than a per-isolate cache, so an unreadable record
+ * or a D1 outage turns agent email off at once. The readers are not per-request paths: inbound
+ * mail, replies, email trigger creation, the recovery sweep, the loopback test, and the public
+ * config endpoint, which is HTTP-cached.
+ *
+ * While a setup runs, and after one stops part-way, the attempt record holds the main domain's
+ * MX and SPF records as they were before the setup first changed anything, and the changes the
+ * admin allowed. Every later run, concurrent or not, checks the main domain against that
+ * baseline, so no run can skip the check because an earlier one already turned routing on.
  */
 import type { AgentEmailConfigResponse } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import type { Env } from '../../env';
-import { resolveD1BindingIdentity } from '../../lib/d1-session';
 import { log } from '../../lib/logger';
-import { ADMIN_SETTINGS_CACHE_MAX_MS } from '../admin-settings-cache';
-import { readSetting, writeSetting } from '../platform-config-store';
+import { readSetting } from '../platform-config-store';
 import { agentEmailDomain } from './address';
 import { type AgentEmailSender, agentEmailSenderFor } from './provider';
 
-/** `platform_settings` key of the setup record. Not an admin setting: only the setup writes it. */
+/** `platform_settings` key of the on-switch. Not an admin setting: only the setup writes it. */
 export const AGENT_EMAIL_SETUP_KEY = 'agent_email.setup';
+const SETUP_ATTEMPT_KEY_PREFIX = 'agent_email.setup_attempt:';
 
+const mainDomainChangeSchema = v.object({
+  type: v.string(),
+  name: v.string(),
+  content: v.nullable(v.string()),
+  change: v.picklist(['add', 'remove']),
+});
 const setupRecordSchema = v.object({
   domain: v.string(),
   enabledAt: v.string(),
-  mainDomainChanges: v.array(
-    v.object({ type: v.string(), name: v.string(), content: v.nullable(v.string()) })
-  ),
+  mainDomainChanges: v.optional(v.array(mainDomainChangeSchema), []),
+  zoneChanges: v.optional(v.array(v.string()), []),
+});
+const mailRecordSchema = v.object({
+  type: v.string(),
+  content: v.string(),
+  priority: v.optional(v.number()),
+});
+const setupAttemptSchema = v.object({
+  domain: v.string(),
+  startedAt: v.string(),
+  startedBy: v.string(),
+  /** The main domain's MX and SPF records before the setup changed anything. */
+  baseline: v.array(mailRecordSchema),
+  /** Records the admin allowed Cloudflare to add. */
+  allowed: v.array(mailRecordSchema),
+  /** Zone settings the admin allowed the setup to change. */
+  zoneChanges: v.array(v.picklist(['subaddressing'])),
 });
 
 export type AgentEmailSetupRecord = v.InferOutput<typeof setupRecordSchema>;
+export type AgentEmailSetupAttempt = v.InferOutput<typeof setupAttemptSchema>;
+export type AgentEmailMailRecord = v.InferOutput<typeof mailRecordSchema>;
+
+/** An attempt as stored; `stored` is the exact value, for compare-and-set. */
+export interface StoredSetupAttempt {
+  attempt: AgentEmailSetupAttempt;
+  stored: string;
+}
 
 /** The deploy prepared agent email: the send binding exists. */
 export function hasAgentEmailBinding(env: Pick<Env, 'AGENT_EMAIL' | 'BASE_DOMAIN'>): boolean {
   return Boolean(env.AGENT_EMAIL && env.BASE_DOMAIN?.trim());
 }
 
-function parseSetupRecord(raw: string | null): AgentEmailSetupRecord | null {
-  if (!raw) return null;
+function parseStored<TSchema extends v.GenericSchema>(
+  schema: TSchema,
+  raw: string,
+  key: string
+): v.InferOutput<TSchema> | null {
   try {
-    const parsed = v.safeParse(setupRecordSchema, JSON.parse(raw));
+    const parsed = v.safeParse(schema, JSON.parse(raw));
     if (parsed.success) return parsed.output;
   } catch {
-    // Reported below; an unreadable record leaves agent email off.
+    // Reported below.
   }
-  log.error('agent_email.setup_record_unreadable', { key: AGENT_EMAIL_SETUP_KEY });
+  log.error('agent_email.setup_record_unreadable', { key });
   return null;
 }
 
-// Per-isolate cache of a present record, which only the setup writes and the inbound, config
-// and trigger paths all read. It is held for the admin settings cache ceiling, the bound every
-// other admin-written platform setting already uses. An absent record is not cached, so turning agent email on takes
-// effect on every isolate at once; nothing turns it off except a deploy without the binding or
-// a new BASE_DOMAIN, both checked on every call.
-let cache = new WeakMap<D1Database, { record: AgentEmailSetupRecord; expiresAt: number }>();
-
 /** Throws when the store cannot be read; callers apply their own outage policy. */
 export async function readAgentEmailSetup(env: Env): Promise<AgentEmailSetupRecord | null> {
-  const key = resolveD1BindingIdentity(env.DATABASE);
-  const cached = key ? cache.get(key) : undefined;
-  if (cached && cached.expiresAt > Date.now()) return cached.record;
-  const record = parseSetupRecord((await readSetting(env, AGENT_EMAIL_SETUP_KEY)).value);
-  if (key && record)
-    cache.set(key, { record, expiresAt: Date.now() + ADMIN_SETTINGS_CACHE_MAX_MS });
-  return record;
-}
-
-export async function recordAgentEmailSetup(
-  env: Env,
-  record: AgentEmailSetupRecord,
-  updatedBy: string
-): Promise<void> {
-  await writeSetting(env, AGENT_EMAIL_SETUP_KEY, JSON.stringify(record), updatedBy);
-  const key = resolveD1BindingIdentity(env.DATABASE);
-  if (key) cache.set(key, { record, expiresAt: Date.now() + ADMIN_SETTINGS_CACHE_MAX_MS });
+  const raw = (await readSetting(env, AGENT_EMAIL_SETUP_KEY)).value;
+  return raw ? parseStored(setupRecordSchema, raw, AGENT_EMAIL_SETUP_KEY) : null;
 }
 
 /** On: the deploy prepared it and an admin set it up for the current agent email domain. */
@@ -99,6 +120,86 @@ export async function activeAgentEmailSender(env: Env): Promise<AgentEmailSender
   return (await isAgentEmailOn(env)) ? agentEmailSenderFor(env) : null;
 }
 
-export function __resetAgentEmailSetupCacheForTest(): void {
-  cache = new WeakMap();
+function setupAttemptKey(domain: string): string {
+  return `${SETUP_ATTEMPT_KEY_PREFIX}${domain}`;
+}
+
+/** The attempt for `domain`, if a setup is running or stopped part-way. Throws if unreadable. */
+export async function readSetupAttempt(
+  env: Env,
+  domain: string
+): Promise<StoredSetupAttempt | null> {
+  const key = setupAttemptKey(domain);
+  const stored = (await readSetting(env, key)).value;
+  if (!stored) return null;
+  const attempt = parseStored(setupAttemptSchema, stored, key);
+  // Refuse rather than start over: starting over would drop the baseline this record keeps.
+  if (!attempt || attempt.domain !== domain) {
+    throw new Error(`The agent email setup record ${key} is unreadable`);
+  }
+  return { attempt, stored };
+}
+
+/**
+ * Records `attempt` unless an attempt for its domain exists already, and returns the one
+ * stored: the first run's baseline wins, so a concurrent run checks against it too. The insert
+ * goes to the primary, so the read after it sees any attempt it lost to.
+ */
+export async function claimSetupAttempt(
+  env: Env,
+  attempt: AgentEmailSetupAttempt
+): Promise<StoredSetupAttempt> {
+  await env.DATABASE.prepare(
+    `INSERT INTO platform_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)
+     ON CONFLICT(key) DO NOTHING`
+  )
+    .bind(
+      setupAttemptKey(attempt.domain),
+      JSON.stringify(attempt),
+      attempt.startedAt,
+      attempt.startedBy
+    )
+    .run();
+  const stored = await readSetupAttempt(env, attempt.domain);
+  if (!stored) throw new Error('The agent email setup record disappeared while it was claimed');
+  return stored;
+}
+
+/** Replaces `previous` with `next` only if no other run changed it since; false if one did. */
+export async function replaceSetupAttempt(
+  env: Env,
+  previous: StoredSetupAttempt,
+  next: AgentEmailSetupAttempt
+): Promise<boolean> {
+  const result = await env.DATABASE.prepare(
+    `UPDATE platform_settings SET value = ?, updated_at = ?, updated_by = ?
+     WHERE key = ? AND value = ?`
+  )
+    .bind(
+      JSON.stringify(next),
+      next.startedAt,
+      next.startedBy,
+      setupAttemptKey(next.domain),
+      previous.stored
+    )
+    .run();
+  return result.meta.changes === 1;
+}
+
+/** Turns agent email on and drops the attempt, in one transaction. */
+export async function completeAgentEmailSetup(
+  env: Env,
+  record: AgentEmailSetupRecord,
+  updatedBy: string
+): Promise<void> {
+  await env.DATABASE.batch([
+    env.DATABASE.prepare(
+      `INSERT INTO platform_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at,
+         updated_by = excluded.updated_by`
+    ).bind(AGENT_EMAIL_SETUP_KEY, JSON.stringify(record), record.enabledAt, updatedBy),
+    env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(
+      setupAttemptKey(record.domain)
+    ),
+  ]);
 }

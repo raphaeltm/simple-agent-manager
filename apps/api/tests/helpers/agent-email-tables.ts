@@ -4,7 +4,7 @@ import type Database from 'better-sqlite3';
 
 import type { Env } from '../../src/env';
 import { agentEmailDomain } from '../../src/services/agent-email/address';
-import { recordAgentEmailSetup } from '../../src/services/agent-email/setup-state';
+import { completeAgentEmailSetup } from '../../src/services/agent-email/setup-state';
 
 /**
  * The agent email tables exactly as the shipped migrations create them (unique dedupe index
@@ -26,12 +26,13 @@ export function createAgentEmailTables(sqlite: Database.Database): void {
  * for. Without it the binding alone leaves agent email off.
  */
 export async function markAgentEmailSetUp(env: Env, updatedBy = 'user-1'): Promise<void> {
-  await recordAgentEmailSetup(
+  await completeAgentEmailSetup(
     env,
     {
       domain: agentEmailDomain(env.BASE_DOMAIN),
       enabledAt: new Date().toISOString(),
       mainDomainChanges: [],
+      zoneChanges: [],
     },
     updatedBy
   );

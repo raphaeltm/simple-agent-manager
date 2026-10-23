@@ -114,9 +114,28 @@ function normalizeName(name: string): string {
   return name.toLowerCase().replace(/\.$/, '');
 }
 
+/** Cloudflare's `per_page` maximum for listing DNS records, so one page holds every match. */
+const DNS_RECORDS_PER_PAGE = 5_000_000;
+
+/**
+ * Every `type` record named `name`. The apex check compares these lists, so a listing Cloudflare
+ * reports as partial, or without its counts, is an error rather than a shorter list.
+ */
 async function listDnsRecords(api: Api, zoneId: string, type: string, name: string) {
-  const query = `type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}&per_page=100`;
-  return api.call<DnsRecord[]>('GET', `/zones/${zoneId}/dns_records?${query}`);
+  const query = `type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}&per_page=${DNS_RECORDS_PER_PAGE}`;
+  const path = `/zones/${zoneId}/dns_records?${query}`;
+  const response = await api.raw('GET', path);
+  if (response.status < 200 || response.status >= 300 || response.body.success === false) {
+    throw new CloudflareApiError('GET', path, response);
+  }
+  const records = (response.body.result ?? []) as DnsRecord[];
+  const total = response.body.result_info?.total_count;
+  if (typeof total !== 'number' || total > records.length) {
+    throw new Error(
+      `Cloudflare listed ${records.length} of ${total ?? 'an unknown number of'} ${type} records for ${name}`
+    );
+  }
+  return records;
 }
 
 /** The records that decide where a name's mail goes and who may send as it: MX and SPF. */

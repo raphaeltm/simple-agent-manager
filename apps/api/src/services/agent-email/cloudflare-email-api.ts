@@ -69,6 +69,11 @@ export interface RoutingRuleInput {
   actions: Array<{ type: 'worker'; value: string[] }>;
 }
 
+const resultInfoSchema = v.object({ count: v.number(), total_count: v.number() });
+
+/** Cloudflare's `per_page` maximum for listing DNS records, so one page holds every match. */
+const DNS_RECORDS_PER_PAGE = 5_000_000;
+
 async function call<TSchema extends v.GenericSchema>(
   env: Env,
   method: 'GET' | 'POST' | 'PUT' | 'PATCH',
@@ -76,6 +81,19 @@ async function call<TSchema extends v.GenericSchema>(
   resultSchema: TSchema,
   body?: unknown
 ): Promise<v.InferOutput<TSchema>> {
+  return (await callWithInfo(env, method, path, resultSchema, body)).result;
+}
+
+async function callWithInfo<TSchema extends v.GenericSchema>(
+  env: Env,
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH',
+  path: string,
+  resultSchema: TSchema,
+  body?: unknown
+): Promise<{
+  result: v.InferOutput<TSchema>;
+  resultInfo: v.InferOutput<typeof resultInfoSchema> | undefined;
+}> {
   const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}${path}`,
     {
@@ -101,19 +119,40 @@ async function call<TSchema extends v.GenericSchema>(
   }
   const parsed = await readResponseJson(
     response,
-    v.object({ result: resultSchema }),
+    v.object({ result: resultSchema, result_info: v.optional(resultInfoSchema) }),
     `cloudflare.agent_email.${method.toLowerCase()}`
   );
-  return parsed.result;
+  return { result: parsed.result, resultInfo: parsed.result_info };
 }
 
 export async function getZoneName(env: Env): Promise<string> {
   return (await call(env, 'GET', '', v.object({ name: v.string() }))).name;
 }
 
-export function listDnsRecords(env: Env, type: string, name: string): Promise<DnsRecordView[]> {
-  const query = `type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}&per_page=100`;
-  return call(env, 'GET', `/dns_records?${query}`, dnsRecordsSchema);
+/**
+ * Every `type` record named `name`. The setup compares these lists, so a listing Cloudflare
+ * reports as partial, or without its counts, is an error rather than a shorter list.
+ */
+export async function listDnsRecords(
+  env: Env,
+  type: string,
+  name: string
+): Promise<DnsRecordView[]> {
+  const query = `type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}&per_page=${DNS_RECORDS_PER_PAGE}`;
+  const { result, resultInfo } = await callWithInfo(
+    env,
+    'GET',
+    `/dns_records?${query}`,
+    dnsRecordsSchema
+  );
+  if (!resultInfo || resultInfo.total_count > result.length) {
+    throw new CloudflareEmailApiError(
+      200,
+      null,
+      `Cloudflare listed ${result.length} of ${resultInfo?.total_count ?? 'an unknown number of'} ${type} records for ${name}`
+    );
+  }
+  return result;
 }
 
 export function getRoutingSettings(env: Env) {

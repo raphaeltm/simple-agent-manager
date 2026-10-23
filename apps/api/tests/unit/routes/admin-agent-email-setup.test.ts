@@ -105,7 +105,7 @@ describe('admin agent email setup route', () => {
     for (const role of ['admin', 'user'] as const) {
       const app = appAs(role);
       expect((await getPlan(app)).status, role).toBe(403);
-      expect((await postSetup(app, { allowMainDomainChanges: true })).status, role).toBe(403);
+      expect((await postSetup(app, { consentToken: 'a'.repeat(64) })).status, role).toBe(403);
     }
     expect(fake.calls).toEqual([]);
   });
@@ -114,16 +114,24 @@ describe('admin agent email setup route', () => {
     const fake = cloudflare(NEW_ZONE);
     const app = appAs('superadmin');
 
-    const plan = await getPlan(app);
-    expect(plan.status).toBe(200);
-    expect(await plan.json()).toMatchObject({
+    const response = await getPlan(app);
+    expect(response.status).toBe(200);
+    const plan = (await response.json()) as { consentToken: string };
+    expect(plan).toMatchObject({
       state: 'needs_consent',
       domain: DOMAIN,
       mainDomain: MAIN,
       mainDomainChanges: [
-        { type: 'TXT', name: MAIN, content: 'v=spf1 include:_spf.mx.cloudflare.net ~all' },
-        { type: 'TXT', name: `cf2024-1._domainkey.${MAIN}`, content: null },
+        {
+          type: 'TXT',
+          name: MAIN,
+          content: 'v=spf1 include:_spf.mx.cloudflare.net ~all',
+          change: 'add',
+        },
+        { type: 'TXT', name: `cf2024-1._domainkey.${MAIN}`, content: null, change: 'add' },
       ],
+      zoneChanges: [expect.objectContaining({ setting: 'subaddressing' })],
+      consentToken: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
 
     const refused = await postSetup(app, {});
@@ -138,7 +146,7 @@ describe('admin agent email setup route', () => {
       domain: null,
     });
 
-    const done = await postSetup(app, { allowMainDomainChanges: true });
+    const done = await postSetup(app, { consentToken: plan.consentToken });
     expect(done.status).toBe(200);
     expect(await done.json()).toMatchObject({ state: 'on', domain: DOMAIN });
     expect(await (await app.request('/api/admin/agent-email', {}, env)).json()).toMatchObject({
@@ -164,7 +172,7 @@ describe('admin agent email setup route', () => {
 
     expect((await postSetup(app, {})).status).toBe(409);
     const callsAfterFirst = fake.calls.length;
-    const limited = await postSetup(app, { allowMainDomainChanges: true });
+    const limited = await postSetup(app, { consentToken: 'a'.repeat(64) });
     expect(limited.status).toBe(429);
     expect(fake.calls).toHaveLength(callsAfterFirst);
     // Reading the plan is not limited.
@@ -173,8 +181,9 @@ describe('admin agent email setup route', () => {
 
   it('rejects a malformed body before calling Cloudflare', async () => {
     const fake = cloudflare(NEW_ZONE);
-    const response = await postSetup(appAs('superadmin'), { allowMainDomainChanges: 'yes' });
-    expect(response.status).toBe(400);
+    for (const body of [{ consentToken: 42 }, { consentToken: 'a'.repeat(129) }]) {
+      expect((await postSetup(appAs('superadmin'), body)).status).toBe(400);
+    }
     expect(fake.calls).toEqual([]);
   });
 
@@ -186,9 +195,13 @@ describe('admin agent email setup route', () => {
         { type: 'TXT', name: zone, content: '"v=spf1 include:example.net -all"' },
       ],
     });
-    const response = await postSetup(appAs('superadmin'), { allowMainDomainChanges: true });
+    const app = appAs('superadmin');
+    const { consentToken } = (await (await getPlan(app)).json()) as { consentToken: string };
+    const response = await postSetup(app, { consentToken });
     expect(response.status).toBe(409);
     expect((await response.json()).message).toContain('added TXT v=spf1 include:example.net -all');
+    // Agent email stays off, and the plan now lists what changed.
+    expect(await (await getPlan(app)).json()).toMatchObject({ state: 'changed' });
   });
 
   it('answers 502 with Cloudflare’s code when a Cloudflare call fails', async () => {

@@ -1,8 +1,8 @@
 /**
  * The agent email admin setup against a fake Cloudflare zone (DNS, Email Routing, Email Sending)
- * and a real SQLite database for the on-switch record. Each case starts from a zone shape seen
- * in practice: staging (routing already on for the subdomain), a zone that uses Email Routing
- * elsewhere, a zone new to Email Routing, and zones whose main domain has its own mail.
+ * and a real SQLite database for the on-switch and attempt records. Each case starts from a zone
+ * shape seen in practice: staging (routing already on for the subdomain), a zone that uses Email
+ * Routing elsewhere, a zone new to Email Routing, and zones whose main domain has its own mail.
  */
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,14 +11,13 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { log } from '../../../src/lib/logger';
 import { CloudflareEmailApiError } from '../../../src/services/agent-email/cloudflare-email-api';
+import { planAgentEmailSetup, runAgentEmailSetup } from '../../../src/services/agent-email/setup';
+import { CLOUDFLARE_ROUTING_SPF } from '../../../src/services/agent-email/setup-changes';
 import {
-  AGENT_EMAIL_RULE_NAME,
   AgentEmailMainDomainChangedError,
   AgentEmailSetupRefusedError,
-  CLOUDFLARE_ROUTING_SPF,
-  planAgentEmailSetup,
-  runAgentEmailSetup,
-} from '../../../src/services/agent-email/setup';
+} from '../../../src/services/agent-email/setup-errors';
+import { AGENT_EMAIL_RULE_NAME } from '../../../src/services/agent-email/setup-routing-rule';
 import {
   AGENT_EMAIL_SETUP_KEY,
   agentEmailConfig,
@@ -38,12 +37,14 @@ const MAIN = 'fixture.example';
 const DOMAIN = `agents.${MAIN}`;
 const WORKER = 'sam-api-fixture';
 const VERIFIED = [{ name: DOMAIN, enabled: true }];
+const ATTEMPT_KEY = `agent_email.setup_attempt:${DOMAIN}`;
 const DESIRED_RULE = {
   name: AGENT_EMAIL_RULE_NAME,
   enabled: true,
   matchers: [{ type: 'literal', field: 'to', value: `agent@${DOMAIN}` }],
   actions: [{ type: 'worker', value: [WORKER] }],
 };
+const SUBADDRESSING = expect.objectContaining({ setting: 'subaddressing' });
 
 /** Staging on 2026-10-23: routing on for the subdomain only, subaddressing on. */
 const STAGING_LIKE: FakeCloudflareEmailOptions = {
@@ -88,15 +89,21 @@ describe('agent email admin setup', () => {
     return fake;
   }
 
-  function storedRecord(): unknown {
+  function stored(key: string): Record<string, unknown> | null {
     const row = sqlite
       .prepare('SELECT value, updated_by AS updatedBy FROM platform_settings WHERE key = ?')
-      .get(AGENT_EMAIL_SETUP_KEY) as { value: string; updatedBy: string } | undefined;
+      .get(key) as { value: string; updatedBy: string } | undefined;
     return row ? { ...JSON.parse(row.value), updatedBy: row.updatedBy } : null;
   }
 
-  const run = (allowMainDomainChanges = false) =>
-    runAgentEmailSetup(env, { allowMainDomainChanges, userId: 'admin-1' });
+  /** Runs the setup as the panel does: with the token of the plan it showed, when allowed. */
+  async function run(consent = false) {
+    const shown = await planAgentEmailSetup(env);
+    return runAgentEmailSetup(env, {
+      consentToken: consent ? shown.consentToken : null,
+      userId: 'admin-1',
+    });
+  }
 
   describe('plan', () => {
     it('is unavailable until the deploy prepared agent email, without calling Cloudflare', async () => {
@@ -124,22 +131,29 @@ describe('agent email admin setup', () => {
       expect(plan.reason).toContain(`Email Sending is not set up for ${DOMAIN}`);
     });
 
-    it('needs no consent where the zone already uses Email Routing', async () => {
+    it('is ready, with nothing to allow, where the zone already routes the subdomain', async () => {
       cloudflare(STAGING_LIKE);
       expect(await planAgentEmailSetup(env)).toEqual({
         state: 'ready',
         domain: DOMAIN,
         mainDomain: MAIN,
         mainDomainChanges: [],
+        zoneChanges: [],
+        consentToken: null,
         reason: null,
       });
+    });
 
-      cloudflare({
-        routing: { enabled: true },
-        dns: cloudflareRoutingFirstUse(MAIN),
-        sending: VERIFIED,
+    it('asks to allow subaddressing for the zone when it is off', async () => {
+      cloudflare({ ...STAGING_LIKE, routing: { enabled: true, support_subaddress: false } });
+      const plan = await planAgentEmailSetup(env);
+      expect(plan).toMatchObject({
+        state: 'needs_consent',
+        mainDomainChanges: [],
+        zoneChanges: [SUBADDRESSING],
+        consentToken: expect.stringMatching(/^[0-9a-f]{64}$/),
       });
-      expect((await planAgentEmailSetup(env)).state).toBe('ready');
+      expect(plan.zoneChanges[0]!.description).toContain(`name+anything@${MAIN}`);
     });
 
     it('asks to let Cloudflare add its SPF record and DKIM key in a zone new to Email Routing', async () => {
@@ -149,12 +163,22 @@ describe('agent email admin setup', () => {
         domain: DOMAIN,
         mainDomain: MAIN,
         mainDomainChanges: [
-          { type: 'TXT', name: MAIN, content: CLOUDFLARE_ROUTING_SPF },
-          { type: 'TXT', name: `cf2024-1._domainkey.${MAIN}`, content: null },
+          { type: 'TXT', name: MAIN, content: CLOUDFLARE_ROUTING_SPF, change: 'add' },
+          { type: 'TXT', name: `cf2024-1._domainkey.${MAIN}`, content: null, change: 'add' },
         ],
+        zoneChanges: [SUBADDRESSING],
+        consentToken: expect.stringMatching(/^[0-9a-f]{64}$/),
         reason: expect.stringContaining(`${MAIN} has never used Email Routing`),
       });
       expect(fake.writes()).toEqual([]);
+    });
+
+    it('gives each set of listed changes its own consent token', async () => {
+      cloudflare(NEW_ZONE);
+      const first = (await planAgentEmailSetup(env)).consentToken;
+      expect((await planAgentEmailSetup(env)).consentToken).toBe(first);
+      cloudflare({ ...STAGING_LIKE, routing: { enabled: true, support_subaddress: false } });
+      expect((await planAgentEmailSetup(env)).consentToken).not.toBe(first);
     });
 
     it('refuses a zone new to Email Routing whose main domain has its own MX or SPF records', async () => {
@@ -174,11 +198,12 @@ describe('agent email admin setup', () => {
         const plan = await planAgentEmailSetup(env);
         expect(plan.state, label).toBe('refused');
         expect(plan.reason, label).toContain(named);
-        expect(plan.mainDomainChanges, label).toEqual([]);
+        expect(plan.consentToken, label).toBeNull();
         await expect(run(true), label).rejects.toBeInstanceOf(AgentEmailSetupRefusedError);
         expect(fake.writes(), label).toEqual([]);
       }
-      expect(storedRecord()).toBeNull();
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toBeNull();
+      expect(stored(ATTEMPT_KEY)).toBeNull();
     });
 
     it('does not count a TXT record that is not SPF as mail', async () => {
@@ -187,6 +212,20 @@ describe('agent email admin setup', () => {
         dns: [{ type: 'TXT', name: MAIN, content: '"google-site-verification=abc123"' }],
       });
       expect((await planAgentEmailSetup(env)).state).toBe('needs_consent');
+    });
+
+    it('refuses to judge a listing Cloudflare reports as partial', async () => {
+      cloudflare({
+        ...NEW_ZONE,
+        dnsPageLimit: 1,
+        dns: [
+          { type: 'TXT', name: MAIN, content: '"google-site-verification=abc123"' },
+          { type: 'TXT', name: MAIN, content: '"v=spf1 include:_spf.google.com ~all"' },
+        ],
+      });
+      const failure = await planAgentEmailSetup(env).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(CloudflareEmailApiError);
+      expect((failure as Error).message).toBe(`Cloudflare listed 1 of 2 TXT records for ${MAIN}`);
     });
 
     it('waits while Cloudflare verifies the sending records, and refuses to run meanwhile', async () => {
@@ -198,7 +237,7 @@ describe('agent email admin setup', () => {
         await expect(run(true)).rejects.toBeInstanceOf(AgentEmailSetupRefusedError);
         expect(fake.writes()).toEqual([]);
       }
-      expect(storedRecord()).toBeNull();
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toBeNull();
     });
   });
 
@@ -210,23 +249,19 @@ describe('agent email admin setup', () => {
 
       const result = await run();
 
-      expect(result).toEqual({
-        state: 'on',
-        domain: DOMAIN,
-        mainDomain: MAIN,
-        mainDomainChanges: [],
-        reason: null,
-      });
+      expect(result).toMatchObject({ state: 'on', domain: DOMAIN, mainDomain: MAIN });
       expect(fake.writes()).toEqual([
         { method: 'POST', path: '/email/routing/rules', body: DESIRED_RULE },
       ]);
       expect(fake.state.dns.filter((record) => record.name === MAIN)).toEqual(mainBefore);
-      expect(storedRecord()).toEqual({
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toEqual({
         domain: DOMAIN,
         enabledAt: expect.any(String),
         mainDomainChanges: [],
+        zoneChanges: [],
         updatedBy: 'admin-1',
       });
+      expect(stored(ATTEMPT_KEY)).toBeNull();
       expect(await isAgentEmailOn(env)).toBe(true);
       expect(await agentEmailConfig(env)).toEqual({ enabled: true, domain: DOMAIN });
     });
@@ -246,25 +281,33 @@ describe('agent email admin setup', () => {
       expect(fake.records('MX', DOMAIN)).toHaveLength(3);
     });
 
-    it('changes nothing without consent in a zone new to Email Routing', async () => {
+    it('changes nothing without consent, or with consent to a different plan', async () => {
       const fake = cloudflare(NEW_ZONE);
-      const refusal = await run(false).catch((error: unknown) => error);
-      expect(refusal).toBeInstanceOf(AgentEmailSetupRefusedError);
-      expect((refusal as Error).message).toBe(
+      const without = await run(false).catch((error: unknown) => error);
+      expect(without).toBeInstanceOf(AgentEmailSetupRefusedError);
+      expect((without as Error).message).toBe(
         `Allow the changes to ${MAIN} to turn agent email on.`
       );
+
+      const stale = await runAgentEmailSetup(env, {
+        consentToken: 'f'.repeat(64),
+        userId: 'admin-1',
+      }).catch((error: unknown) => error);
+      expect(stale).toBeInstanceOf(AgentEmailSetupRefusedError);
+      expect((stale as Error).message).toContain('different from what you allowed');
+
       expect(fake.writes()).toEqual([]);
-      expect(storedRecord()).toBeNull();
+      expect(stored(ATTEMPT_KEY)).toBeNull();
       expect(await isAgentEmailOn(env)).toBe(false);
     });
 
-    it('with consent, turns routing on by name and the main domain gains only the disclosed records', async () => {
+    it('with consent, turns routing on by name and the main domain gains only the listed records', async () => {
       const fake = cloudflare(NEW_ZONE);
-      const disclosed = (await planAgentEmailSetup(env)).mainDomainChanges;
+      const listed = (await planAgentEmailSetup(env)).mainDomainChanges;
 
       const result = await run(true);
 
-      expect(result).toMatchObject({ state: 'on', mainDomainChanges: disclosed });
+      expect(result).toMatchObject({ state: 'on', mainDomainChanges: listed });
       expect(fake.writes()).toEqual([
         { method: 'POST', path: '/email/routing/dns', body: { name: DOMAIN } },
         { method: 'PATCH', path: '/email/routing', body: { support_subaddress: true } },
@@ -274,17 +317,37 @@ describe('agent email admin setup', () => {
         `"${CLOUDFLARE_ROUTING_SPF}"`,
       ]);
       expect(fake.records('MX', MAIN)).toEqual([]);
-      expect(storedRecord()).toMatchObject({ domain: DOMAIN, mainDomainChanges: disclosed });
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toMatchObject({
+        domain: DOMAIN,
+        mainDomainChanges: listed,
+        zoneChanges: ['subaddressing'],
+      });
+      expect(stored(ATTEMPT_KEY)).toBeNull();
       expect(await isAgentEmailOn(env)).toBe(true);
     });
 
-    it('accepts a main domain that gains fewer records than disclosed', async () => {
+    it('turns subaddressing on only after the admin allowed it', async () => {
+      const fake = cloudflare({
+        ...STAGING_LIKE,
+        routing: { enabled: true, support_subaddress: false },
+      });
+      await expect(run(false)).rejects.toBeInstanceOf(AgentEmailSetupRefusedError);
+      expect(fake.writes()).toEqual([]);
+
+      expect((await run(true)).state).toBe('on');
+      expect(fake.writes()).toEqual([
+        { method: 'PATCH', path: '/email/routing', body: { support_subaddress: true } },
+        { method: 'POST', path: '/email/routing/rules', body: DESIRED_RULE },
+      ]);
+    });
+
+    it('accepts a main domain that gains fewer records than listed', async () => {
       const fake = cloudflare({ ...NEW_ZONE, firstUseAdds: () => [] });
       expect((await run(true)).state).toBe('on');
       expect(fake.records('TXT', MAIN)).toEqual([]);
     });
 
-    it('stops with agent email off when the main domain gains a record it did not disclose', async () => {
+    it('stops with agent email off when the main domain gains a record it did not list, and keeps stopping', async () => {
       const error = vi.spyOn(log, 'error');
       const fake = cloudflare({
         ...NEW_ZONE,
@@ -301,17 +364,46 @@ describe('agent email admin setup', () => {
       expect((failure as Error).message).toContain('Agent email is still off');
       expect(error).toHaveBeenCalledWith('agent_email.setup_main_domain_changed', {
         mainDomain: MAIN,
-        added: ['MX route1.mx.cloudflare.net'],
-        removed: [],
+        differences: 'added MX route1.mx.cloudflare.net',
       });
       expect(fake.writes().map((call) => call.path)).toEqual(['/email/routing/dns']);
-      expect(storedRecord()).toBeNull();
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toBeNull();
       expect(await isAgentEmailOn(env)).toBe(false);
 
-      // As the error says: running again turns it on with the records as they are, without
-      // asking Cloudflare to turn routing on a second time.
-      expect((await run()).state).toBe('on');
+      // The baseline outlives the failed run: routing being on now is no reason to skip the check.
+      const changed = await planAgentEmailSetup(env);
+      expect(changed).toMatchObject({
+        state: 'changed',
+        mainDomainChanges: [
+          { type: 'MX', name: MAIN, content: 'route1.mx.cloudflare.net', change: 'add' },
+        ],
+        consentToken: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
+      await expect(run(false)).rejects.toBeInstanceOf(AgentEmailSetupRefusedError);
+      expect(await isAgentEmailOn(env)).toBe(false);
+
+      // Allowing the records as they are turns it on, without turning routing on again.
+      expect((await run(true)).state).toBe('on');
       expect(fake.writes().filter((call) => call.path === '/email/routing/dns')).toHaveLength(1);
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toMatchObject({
+        mainDomainChanges: [expect.objectContaining({ content: 'route1.mx.cloudflare.net' })],
+      });
+    });
+
+    it('lets a fixed main domain pass the check again without new consent', async () => {
+      const fake = cloudflare({
+        ...NEW_ZONE,
+        firstUseAdds: (zone) => [
+          ...cloudflareRoutingFirstUse(zone),
+          { type: 'TXT', name: zone, content: '"v=spf1 include:example.net -all"' },
+        ],
+      });
+      await expect(run(true)).rejects.toBeInstanceOf(AgentEmailMainDomainChangedError);
+
+      // The admin deletes the unexpected record in Cloudflare.
+      fake.state.dns = fake.state.dns.filter((record) => !record.content.includes('example.net'));
+      expect(await planAgentEmailSetup(env)).toMatchObject({ state: 'ready', consentToken: null });
+      expect((await run()).state).toBe('on');
     });
 
     it('stops with agent email off when the main domain loses a record', async () => {
@@ -328,7 +420,120 @@ describe('agent email admin setup', () => {
       expect(failure).toBeInstanceOf(AgentEmailMainDomainChangedError);
       expect((failure as Error).message).toContain(`removed TXT ${CLOUDFLARE_ROUTING_SPF}`);
       expect(fake.writes().map((call) => call.path)).toEqual(['/email/routing/dns']);
-      expect(storedRecord()).toBeNull();
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toBeNull();
+      expect((await planAgentEmailSetup(env)).state).toBe('changed');
+    });
+
+    it('a run that starts while another has turned routing on checks against the first baseline', async () => {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const fake = cloudflare({
+        ...NEW_ZONE,
+        firstUseAdds: (zone) => [
+          ...cloudflareRoutingFirstUse(zone),
+          { type: 'MX', name: zone, content: 'route1.mx.cloudflare.net', priority: 10 },
+        ],
+        // The first run's enable has reached Cloudflare; hold its answer.
+        hold: (call) => (call.path === '/email/routing/dns' ? held : undefined),
+      });
+      const shown = await planAgentEmailSetup(env);
+      const first = runAgentEmailSetup(env, {
+        consentToken: shown.consentToken,
+        userId: 'admin-1',
+      }).catch((error: unknown) => error);
+      await vi.waitFor(() =>
+        expect(fake.calls.some((call) => call.path === '/email/routing/dns')).toBe(true)
+      );
+
+      // A second run, allowed from the same plan, sees routing on and the subdomain's MX records.
+      expect(fake.records('MX', DOMAIN)).toHaveLength(3);
+      const second = await runAgentEmailSetup(env, {
+        consentToken: shown.consentToken,
+        userId: 'admin-2',
+      }).catch((error: unknown) => error);
+      release();
+
+      // It checks the first run's baseline, finds the unlisted MX record, and so lists it to be
+      // allowed: the consent it carries was for the original changes only.
+      expect(second).toBeInstanceOf(AgentEmailSetupRefusedError);
+      expect((second as Error).message).toContain('different from what you allowed');
+      expect(await first).toBeInstanceOf(AgentEmailMainDomainChangedError);
+      expect((await planAgentEmailSetup(env)).state).toBe('changed');
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toBeNull();
+      expect(await isAgentEmailOn(env)).toBe(false);
+      expect(stored(ATTEMPT_KEY)).toMatchObject({ startedBy: 'admin-1', baseline: [] });
+    });
+
+    it('two runs at once, with Cloudflare adding only the listed records, both end on', async () => {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const fake = cloudflare({
+        ...NEW_ZONE,
+        hold: (call) => (call.path === '/email/routing/dns' ? held : undefined),
+      });
+      const shown = await planAgentEmailSetup(env);
+      const first = runAgentEmailSetup(env, {
+        consentToken: shown.consentToken,
+        userId: 'admin-1',
+      });
+      await vi.waitFor(() =>
+        expect(fake.calls.some((call) => call.path === '/email/routing/dns')).toBe(true)
+      );
+      // The second run's plan already reflects the first run's attempt: nothing left to allow
+      // but subaddressing, which the first run's consent covers.
+      const midway = await planAgentEmailSetup(env);
+      expect(midway).toMatchObject({ state: 'ready', consentToken: null });
+      const second = await runAgentEmailSetup(env, { consentToken: null, userId: 'admin-2' });
+      release();
+
+      expect(second.state).toBe('on');
+      expect((await first).state).toBe('on');
+      expect(await isAgentEmailOn(env)).toBe(true);
+      expect(stored(ATTEMPT_KEY)).toBeNull();
+    });
+
+    it('refuses a run that loses the start to a concurrent one', async () => {
+      let armed = false;
+      const competitor = {
+        domain: DOMAIN,
+        startedAt: '2026-10-23T08:00:00.000Z',
+        startedBy: 'admin-2',
+        baseline: [],
+        allowed: [{ type: 'TXT', content: CLOUDFLARE_ROUTING_SPF }],
+        zoneChanges: ['subaddressing'],
+      };
+      const fake = cloudflare({
+        ...NEW_ZONE,
+        // Another run stores its attempt after this run read that there was none.
+        hold: async (call) => {
+          if (!armed || call.path !== '/email/sending/subdomains') return;
+          armed = false;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          sqlite
+            .prepare(
+              `INSERT INTO platform_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, 'admin-2')`
+            )
+            .run(ATTEMPT_KEY, JSON.stringify(competitor), competitor.startedAt);
+        },
+      });
+      const shown = await planAgentEmailSetup(env);
+      armed = true;
+
+      const failure = await runAgentEmailSetup(env, {
+        consentToken: shown.consentToken,
+        userId: 'admin-1',
+      }).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(AgentEmailSetupRefusedError);
+      expect((failure as Error).message).toBe(
+        'Another agent email setup run started at the same time. Check again.'
+      );
+      expect(fake.writes()).toEqual([]);
+      expect(stored(ATTEMPT_KEY)).toMatchObject({ startedBy: 'admin-2' });
     });
 
     it('reports pending until the subdomain MX records show, then finishes without new consent', async () => {
@@ -337,11 +542,11 @@ describe('agent email admin setup', () => {
       const first = await run(true);
       expect(first.state).toBe('pending');
       expect(first.reason).toContain('Run the setup again in a minute');
-      expect(storedRecord()).toBeNull();
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toBeNull();
+      expect(stored(ATTEMPT_KEY)).toMatchObject({ zoneChanges: ['subaddressing'] });
 
-      // Still not visible: the zone now uses Email Routing, so no consent is needed, and the
-      // root domain's new SPF record is not a surprise the second time.
-      expect(await planAgentEmailSetup(env)).toMatchObject({ state: 'ready' });
+      // Still not visible: the consent given holds, and the SPF record is not a surprise.
+      expect(await planAgentEmailSetup(env)).toMatchObject({ state: 'ready', consentToken: null });
       expect((await run()).state).toBe('pending');
 
       fake.state.dns.push(
@@ -349,8 +554,44 @@ describe('agent email admin setup', () => {
       );
       expect((await run()).state).toBe('on');
       expect(fake.writes().filter((call) => call.path === '/email/routing/dns')).toHaveLength(2);
+      expect(fake.writes().filter((call) => call.method === 'PATCH')).toHaveLength(1);
       expect(fake.records('TXT', MAIN)).toHaveLength(1);
+      expect(stored(ATTEMPT_KEY)).toBeNull();
       expect(await isAgentEmailOn(env)).toBe(true);
+    });
+
+    it('finishes on a second run after a Cloudflare call fails once routing is on', async () => {
+      for (const failing of [
+        { method: 'PATCH', path: '/email/routing' },
+        { method: 'POST', path: '/email/routing/rules' },
+      ]) {
+        sqlite.prepare('DELETE FROM platform_settings').run();
+        let failed = false;
+        const fake = cloudflare({
+          ...NEW_ZONE,
+          respond: (call) => {
+            if (failed || call.method !== failing.method || call.path !== failing.path) {
+              return undefined;
+            }
+            failed = true;
+            return cloudflareError(500, 1001, 'Internal error');
+          },
+        });
+
+        await expect(run(true), failing.path).rejects.toBeInstanceOf(CloudflareEmailApiError);
+        expect(stored(AGENT_EMAIL_SETUP_KEY), failing.path).toBeNull();
+        expect(await isAgentEmailOn(env), failing.path).toBe(false);
+
+        // Routing is on and the consent given holds, so the second run does not ask again
+        // and does not turn routing on again.
+        expect((await planAgentEmailSetup(env)).state, failing.path).toBe('ready');
+        expect((await run()).state, failing.path).toBe('on');
+        expect(
+          fake.writes().filter((call) => call.path === '/email/routing/dns'),
+          failing.path
+        ).toHaveLength(1);
+        expect(fake.state.rules, failing.path).toHaveLength(1);
+      }
     });
 
     it('does nothing once agent email is on', async () => {
@@ -390,60 +631,12 @@ describe('agent email admin setup', () => {
           ],
         });
         sqlite.prepare('DELETE FROM platform_settings').run();
-        env = { ...env, DATABASE: createSqliteD1(sqlite) };
 
         expect((await run()).state).toBe('on');
         expect(fake.writes()).toEqual([
           { method: 'PUT', path: '/email/routing/rules/rule-agent', body: DESIRED_RULE },
         ]);
         expect(fake.state.rules).toHaveLength(1);
-      }
-    });
-
-    it('turns subaddressing back on where the subdomain routes but subaddressing is off', async () => {
-      const fake = cloudflare({
-        ...STAGING_LIKE,
-        routing: { enabled: true, support_subaddress: false },
-      });
-      expect((await run()).state).toBe('on');
-      expect(fake.writes()).toEqual([
-        { method: 'PATCH', path: '/email/routing', body: { support_subaddress: true } },
-        { method: 'POST', path: '/email/routing/rules', body: DESIRED_RULE },
-      ]);
-    });
-
-    it('finishes on a second run after a Cloudflare call fails once routing is on', async () => {
-      for (const failing of [
-        { method: 'PATCH', path: '/email/routing' },
-        { method: 'POST', path: '/email/routing/rules' },
-      ]) {
-        sqlite.prepare('DELETE FROM platform_settings').run();
-        env = { ...env, DATABASE: createSqliteD1(sqlite) };
-        let failed = false;
-        const fake = cloudflare({
-          ...NEW_ZONE,
-          respond: (call) => {
-            if (failed || call.method !== failing.method || call.path !== failing.path) {
-              return undefined;
-            }
-            failed = true;
-            return cloudflareError(500, 1001, 'Internal error');
-          },
-        });
-
-        await expect(run(true), failing.path).rejects.toBeInstanceOf(CloudflareEmailApiError);
-        expect(storedRecord(), failing.path).toBeNull();
-        expect(await isAgentEmailOn(env), failing.path).toBe(false);
-
-        // Routing is already on, so the second run asks for no consent and does not turn
-        // routing on again.
-        expect((await planAgentEmailSetup(env)).state, failing.path).toBe('ready');
-        expect((await run()).state, failing.path).toBe('on');
-        expect(
-          fake.writes().filter((call) => call.path === '/email/routing/dns'),
-          failing.path
-        ).toHaveLength(1);
-        expect(fake.state.rules, failing.path).toHaveLength(1);
       }
     });
 
@@ -501,7 +694,7 @@ describe('agent email admin setup', () => {
       expect(refusal).toBeInstanceOf(AgentEmailSetupRefusedError);
       expect((refusal as Error).message).toContain('more than 250 Email Routing rules');
       expect(fake.writes()).toEqual([]);
-      expect(storedRecord()).toBeNull();
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toBeNull();
     });
 
     it('surfaces a failed Cloudflare call with its code and leaves agent email off', async () => {
@@ -519,7 +712,7 @@ describe('agent email admin setup', () => {
         'Cloudflare POST /email/routing/dns failed with HTTP 403: 10000 Authentication error'
       );
       expect(fake.state.rules).toEqual([]);
-      expect(storedRecord()).toBeNull();
+      expect(stored(AGENT_EMAIL_SETUP_KEY)).toBeNull();
       expect(await isAgentEmailOn(env)).toBe(false);
     });
   });

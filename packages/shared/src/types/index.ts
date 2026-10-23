@@ -625,6 +625,7 @@ export type {
   AgentEmailSetupPlan,
   AgentEmailSetupRequest,
   AgentEmailSetupState,
+  AgentEmailZoneChange,
   EmailTemplateContext,
   EmailTriggerConfig,
   EmailTriggerConfigInput,

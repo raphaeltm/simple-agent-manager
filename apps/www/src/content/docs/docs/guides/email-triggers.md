@@ -134,17 +134,26 @@ dashboard:
    prepares agent email.
 2. **A superadmin turns it on in Admin → Integrations → Agent email.** This turns Email Routing on
    for `agents.<your-domain>`, turns on subaddressing, and routes `agent@agents.<your-domain>` to
-   SAM. The panel says first what it will do:
+   SAM. The panel says first what it will do, and asks you to allow anything that reaches past
+   `agents.<your-domain>`:
    - In a zone that already uses Email Routing, nothing changes on your main domain.
    - In a zone that has never used it, Cloudflare adds an SPF record and a DKIM key to your main
-     domain. The panel lists both and turns agent email on only after you allow them.
-   - If your main domain has its own MX or SPF records, the panel refuses. Cloudflare may add a
-     second SPF record, which breaks SPF for your main domain's mail.
+     domain. The panel lists both.
+   - Subaddressing is a setting for the whole zone. When it is off, turning it on also changes
+     where mail to `name+anything@` addresses on your main domain goes, so the panel lists it.
+   - If your main domain has its own MX or SPF records in a zone that has never used Email
+     Routing, the panel refuses. Cloudflare may add a second SPF record, which breaks SPF for your
+     main domain's mail.
 
-   After turning Email Routing on, SAM checks your main domain again. If it gained anything other
-   than the SPF record it showed, or lost a record, agent email stays off and the panel lists what
-   changed. Cloudflare has made that change by then, so check those records before you run the
-   setup again.
+   Your consent covers exactly the changes the panel showed: if they differ when you press the
+   button, SAM asks again.
+
+   Before it changes anything, SAM stores your main domain's MX and SPF records. After turning
+   Email Routing on, it compares the main domain with them. If the main domain gained anything
+   other than the SPF record it showed, or lost a record, agent email stays off and the panel
+   lists what changed. Cloudflare has made that change by then. Fix the records in Cloudflare and
+   check again, or allow them as they are. Every later run, including two run at once, compares
+   against the same stored records.
 
 The panel can turn agent email on once Cloudflare has verified the new sending records, usually 5
 to 15 minutes after the deploy creates them; until then it says it is still verifying. A later

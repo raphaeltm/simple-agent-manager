@@ -12,11 +12,11 @@ Agents can't receive or send email. Raphaël wants to give an agent an email add
 
 The brainstorm was on 2026-05-21 (session `a9706d46-bcd2-4d3f-8366-2ee6556a0ab5`), recapped on 2026-07-15 (session `af33e708-edb3-4ac5-9443-935f9d404dd8`). It produced three linked ideas:
 
-| Idea | Role |
-| --- | --- |
-| `01KS4X886T3NRKR3696H25A2AN` Cloudflare Email triggers and reply-capable SAM sessions | Phase 1: inbound email trigger. Phase 2: reply-only tool. Phase 3: profile-level send |
-| `01KS4X8CWMQFHYNJXJZ1MR7Q5M` SAM platform policy for MCP tool use | Enforces tool permissions on the server. Email reply/send is meant to be its first use |
-| `01KS4Y3NV0Q51T0MQ6XG0GXD16` Provider interfaces for SAM subsystems | Email sits behind an `EmailProvider`. Cloudflare is the first implementation |
+| Idea                                                                                  | Role                                                                                   |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `01KS4X886T3NRKR3696H25A2AN` Cloudflare Email triggers and reply-capable SAM sessions | Phase 1: inbound email trigger. Phase 2: reply-only tool. Phase 3: profile-level send  |
+| `01KS4X8CWMQFHYNJXJZ1MR7Q5M` SAM platform policy for MCP tool use                     | Enforces tool permissions on the server. Email reply/send is meant to be its first use |
+| `01KS4Y3NV0Q51T0MQ6XG0GXD16` Provider interfaces for SAM subsystems                   | Email sits behind an `EmailProvider`. Cloudflare is the first implementation           |
 
 Decisions Raphaël made explicitly (verbatim intent, from knowledge entity `Architecture`):
 
@@ -332,6 +332,32 @@ main domain.
   pagination, subaddressing, the zone-uses-routing branch, pending, binding, domain match, cache,
   outage handling, and in the panel the consent gate, the consent flag, the config write, the
   re-read after an error, and not reading the plan once on.
+
+### Astra's review of the admin setup — task `01M5KVX8KDJ8VHKS3AY86SG7YP`, 2026-10-23
+
+Review of `f830eeedc..0e64f921d` ([PR comment](https://github.com/raphaeltm/simple-agent-manager/pull/2413#issuecomment-6360290640)); Astra's runs passed 74/74 (API) and 20/20 (deploy).
+
+1. **BLOCKER, fixed.** Two overlapping setups: the second saw the subdomain's new MX records,
+   skipped the main-domain check and turned agent email on while the first rejected an unlisted
+   apex MX; `pending` and retry paths dropped the original baseline. Now a run stores the main
+   domain's MX/SPF records and the allowed additions in an attempt row
+   (`agent_email.setup_attempt:<domain>`, first writer wins, compare-and-set to replace) before it
+   changes anything. Every run, concurrent or later, plans and checks against that baseline; a
+   difference makes the plan `changed`, which needs consent to the listed differences. Consent is
+   bound to the plan by a SHA-256 `consentToken`, so consent given to one set of changes cannot
+   carry over to another. Completing writes the on-switch and deletes the attempt in one batch.
+   Tests reproduce the race with a held enable call (`agent-email-setup.test.ts`), plus a lost
+   claim, a retry after `pending`, after a failed check, and after a late Cloudflare failure.
+2. **OK.** Multiset comparison; `enabled: true` is read only to decide whether consent is needed,
+   never to skip the check.
+3. **SHOULD-FIX, fixed.** The per-isolate cache is gone: every gate reads the D1 row, so an outage
+   fails the gates and an unreadable row is off at once. The readers are not per-request paths;
+   the public config endpoint stays HTTP-cached.
+4. **SHOULD-FIX, fixed.** DNS lists asked for 100 records. Both the API client and the deploy step
+   now request Cloudflare's documented `per_page` maximum (5,000,000) and fail when
+   `result_info.total_count` exceeds what was returned; both fakes paginate and report counts.
+5. **SHOULD-FIX, fixed.** Subaddressing is zone-wide, so when it is off the plan lists it as a
+   `zoneChanges` entry that needs consent; the panel no longer says nothing changes.
 
 ## Open questions for review
 

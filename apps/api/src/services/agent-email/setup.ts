@@ -3,92 +3,83 @@
  * prepared it (`scripts/deploy/configure-agent-email.ts`: Email Sending and the send binding).
  *
  * It turns Email Routing on for `agents.<BASE_DOMAIN>`, turns on subaddressing, and points one
- * literal rule `agent@agents.<BASE_DOMAIN>` at this Worker. The first time a zone uses Email
- * Routing, Cloudflare also adds its SPF record and a DKIM key to the root domain, whichever
- * subdomain is named (seen on staging, deploy run 39866499256; Cloudflare's domain configuration
- * docs: "Email Routing DNS records are configured on the root domain"). So:
+ * literal rule `agent@agents.<BASE_DOMAIN>` at this Worker (`./setup-routing-rule.ts`). Two of
+ * those reach past the subdomain, so the plan lists them and the admin must allow them first
+ * (`needs_consent`, bound to the plan by `consentToken`):
  *
- * - in a zone that already uses Email Routing, setup changes nothing on the root domain;
- * - in a zone new to it whose root domain has no MX or SPF records, the admin must allow exactly
- *   those two records first (`needs_consent`);
- * - in a zone new to it whose root domain has its own mail records, setup refuses: what
- *   Cloudflare does to an existing SPF record is untested, and a second one breaks SPF.
+ * - The first time a zone uses Email Routing, Cloudflare adds its SPF record and a DKIM key to
+ *   the root domain, whichever subdomain is named (seen on staging, deploy run 39866499256;
+ *   Cloudflare's domain configuration docs: "Email Routing DNS records are configured on the
+ *   root domain"). A zone new to Email Routing whose root domain has its own MX or SPF records is
+ *   refused: what Cloudflare does to an existing SPF record is untested, and a second one breaks
+ *   SPF.
+ * - Subaddressing is a zone setting, so turning it on changes how every address in the zone is
+ *   matched.
  *
  * A zone where routing is on for a subdomain alone reads `enabled: true` (staging on 2026-10-23:
- * status `misconfigured`, because the root domain has no MX), so a re-run after `pending` plans
- * `ready` and asks for no consent again.
+ * status `misconfigured`, because the root domain has no MX).
  *
- * After turning routing on, the root domain may have gained only the disclosed SPF record and
- * lost nothing; otherwise setup stops and agent email stays off. Cloudflare has already made that
- * change by then, so the error lists the records, and running the setup again turns agent email
- * on with them as they are. Re-running is safe: every step checks first. Two admins racing at
- * worst create a duplicate `agent@` rule pointing at this Worker, which changes no routing.
+ * Before changing anything, a run stores the root domain's MX and SPF records as its baseline
+ * (`./setup-state.ts`). After turning routing on, the root domain may differ from that baseline
+ * only by the SPF record the admin allowed. Every later run checks against the same baseline, so
+ * neither a concurrent run nor a retry after `pending` or a failed check can skip the check
+ * because routing is already on. A failed check leaves agent email off; the plan then lists the
+ * differences (`changed`), and the admin fixes the records or allows them as they are. Two runs
+ * at once at worst create a duplicate `agent@` rule pointing at this Worker, which changes no
+ * routing.
  */
 import {
   AGENT_EMAIL_LOCAL_PART,
   type AgentEmailMainDomainRecord,
   type AgentEmailSetupPlan,
+  type AgentEmailZoneChange,
   describeMailRecord,
   isCloudflareRoutingMx,
   isSpfRecord,
-  type MailDnsRecord,
-  mailRecordsMissingFrom,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { agentEmailDomain } from './address';
 import {
-  createRoutingRule,
   type DnsRecordView,
   enableSubaddressing,
   enableSubdomainRouting,
   getRoutingSettings,
   getZoneName,
   listDnsRecords,
-  listRoutingRules,
   listSendingSubdomains,
-  type RoutingRuleInput,
-  type RoutingRuleView,
-  updateRoutingRule,
 } from './cloudflare-email-api';
-import { hasAgentEmailBinding, isAgentEmailOn, recordAgentEmailSetup } from './setup-state';
+import {
+  allowedAdditions,
+  consentTokenFor,
+  describeChanges,
+  differencesFromBaseline,
+  firstRoutingRecords,
+  subaddressingChange,
+  toMailRecord,
+} from './setup-changes';
+import { AgentEmailMainDomainChangedError, AgentEmailSetupRefusedError } from './setup-errors';
+import { ensureRoutingRule } from './setup-routing-rule';
+import {
+  type AgentEmailSetupAttempt,
+  claimSetupAttempt,
+  completeAgentEmailSetup,
+  hasAgentEmailBinding,
+  isAgentEmailOn,
+  readSetupAttempt,
+  replaceSetupAttempt,
+  type StoredSetupAttempt,
+} from './setup-state';
 
-/** The SPF record Cloudflare adds to the root domain the first time a zone uses Email Routing. */
-export const CLOUDFLARE_ROUTING_SPF = 'v=spf1 include:_spf.mx.cloudflare.net ~all';
-/** The DKIM selector Cloudflare adds under the root domain at the same time. */
-export const CLOUDFLARE_ROUTING_DKIM_SELECTOR = 'cf2024-1._domainkey';
-/** The rule's display name only: the rule is found by the address it matches. */
-export const AGENT_EMAIL_RULE_NAME = 'SAM agent email';
-/** Cloudflare's `per_page` maximum for listing Email Routing rules. */
-const RULES_PAGE_SIZE = 50;
-/** Cloudflare's limit on Email Routing rules per domain. */
-const CLOUDFLARE_ROUTING_RULE_LIMIT = 200;
-/** Enough pages for a zone at the limit, plus one that shows the list has ended. */
-const MAX_RULE_PAGES = Math.ceil(CLOUDFLARE_ROUTING_RULE_LIMIT / RULES_PAGE_SIZE) + 1;
-
-/** Setup cannot run in the plan's current state; the message says why. */
-export class AgentEmailSetupRefusedError extends Error {
-  constructor(readonly plan: AgentEmailSetupPlan) {
-    super(plan.reason ?? `Agent email setup cannot run while it is ${plan.state}`);
-    this.name = 'AgentEmailSetupRefusedError';
-  }
-}
-
-/** Turning routing on changed the main domain's mail records beyond what was disclosed. */
-export class AgentEmailMainDomainChangedError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'AgentEmailMainDomainChangedError';
-  }
-}
-
-/** What the plan read from Cloudflare, so the run does not read it again. */
+/** What the plan read, so the run acts on the same facts the admin was shown. */
 interface SetupFacts {
+  mainDomain: string;
   subdomainRouting: boolean;
-  /** The main domain's MX and SPF records, when the plan read them. */
-  mainDomainMail: DnsRecordView[] | null;
-  subaddressing: boolean | null;
+  /** The main domain's MX and SPF records, read before this run changes anything. */
+  mainDomainMail: DnsRecordView[];
+  subaddressing: boolean;
+  attempt: StoredSetupAttempt | null;
 }
 
 interface Inspection {
@@ -96,21 +87,26 @@ interface Inspection {
   facts: SetupFacts | null;
 }
 
+type PlanFields = Partial<Omit<AgentEmailSetupPlan, 'state' | 'consentToken'>>;
+
 function normalizeName(name: string): string {
   return name.toLowerCase().replace(/\.$/, '');
 }
 
-function plan(
-  state: AgentEmailSetupPlan['state'],
-  fields: Partial<Omit<AgentEmailSetupPlan, 'state'>> = {}
-): AgentEmailSetupPlan {
+function plan(state: AgentEmailSetupPlan['state'], fields: PlanFields = {}): AgentEmailSetupPlan {
   return {
     state,
     domain: fields.domain ?? null,
     mainDomain: fields.mainDomain ?? null,
     mainDomainChanges: fields.mainDomainChanges ?? [],
+    zoneChanges: fields.zoneChanges ?? [],
+    consentToken: null,
     reason: fields.reason ?? null,
   };
+}
+
+async function withConsent(planned: AgentEmailSetupPlan): Promise<AgentEmailSetupPlan> {
+  return { ...planned, consentToken: await consentTokenFor(planned) };
 }
 
 /** The records that decide where a name's mail goes and who may send as it: MX and SPF. */
@@ -126,77 +122,58 @@ async function subdomainRoutingOn(env: Env, domain: string): Promise<boolean> {
   return (await listDnsRecords(env, 'MX', domain)).some(isCloudflareRoutingMx);
 }
 
-function routingRecordsFor(mainDomain: string): AgentEmailMainDomainRecord[] {
-  return [
-    { type: 'TXT', name: mainDomain, content: CLOUDFLARE_ROUTING_SPF },
-    // Cloudflare generates the key, so its content is not known in advance.
-    { type: 'TXT', name: `${CLOUDFLARE_ROUTING_DKIM_SELECTOR}.${mainDomain}`, content: null },
-  ];
-}
-
 /** What the setup would do now. Reads Cloudflare only when the deploy prepared agent email. */
 export async function planAgentEmailSetup(env: Env): Promise<AgentEmailSetupPlan> {
   return (await inspect(env)).plan;
 }
 
+function unavailable(reason: string, fields: PlanFields = {}): Inspection {
+  return { plan: plan('unavailable', { ...fields, reason }), facts: null };
+}
+
 async function inspect(env: Env): Promise<Inspection> {
   if (!hasAgentEmailBinding(env)) {
-    return {
-      plan: plan('unavailable', {
-        reason:
-          'This deployment has not prepared agent email. A staging deploy started with the agent_email input prepares it, once the deploy token has the Email Routing and Email Sending permissions.',
-      }),
-      facts: null,
-    };
+    return unavailable(
+      'This deployment has not prepared agent email. A staging deploy started with the agent_email input prepares it, once the deploy token has the Email Routing and Email Sending permissions.'
+    );
   }
   const domain = agentEmailDomain(env.BASE_DOMAIN);
   if (!env.AGENT_EMAIL_WORKER_NAME?.trim()) {
-    return {
-      plan: plan('unavailable', {
-        domain,
-        reason: 'Deploy again: this deployment predates the agent email setup.',
-      }),
-      facts: null,
-    };
+    return unavailable('Deploy again: this deployment predates the agent email setup.', {
+      domain,
+    });
   }
   if (await isAgentEmailOn(env)) return { plan: plan('on', { domain }), facts: null };
 
   const mainDomain = normalizeName(await getZoneName(env));
-  const sending = (await listSendingSubdomains(env)).find(
-    (subdomain) => normalizeName(subdomain.name) === domain
-  );
+  const [sendingSubdomains, subdomainMx, settings, mainDomainMail, attempt] = await Promise.all([
+    listSendingSubdomains(env),
+    listDnsRecords(env, 'MX', domain),
+    getRoutingSettings(env),
+    listMailRecords(env, mainDomain),
+    readSetupAttempt(env, domain),
+  ]);
+  const sending = sendingSubdomains.find((subdomain) => normalizeName(subdomain.name) === domain);
   if (!sending) {
-    return {
-      plan: plan('unavailable', {
-        domain,
-        mainDomain,
-        reason: `Email Sending is not set up for ${domain}. Deploy again with the agent_email input.`,
-      }),
-      facts: null,
-    };
+    return unavailable(
+      `Email Sending is not set up for ${domain}. Deploy again with the agent_email input.`,
+      { domain, mainDomain }
+    );
   }
-  const verified = sending.enabled === true;
-  const ready = (facts: SetupFacts): Inspection => ({
-    plan: verified ? plan('ready', { domain, mainDomain }) : verifying(domain, mainDomain),
-    facts,
-  });
+  const facts: SetupFacts = {
+    mainDomain,
+    subdomainRouting: subdomainMx.some(isCloudflareRoutingMx),
+    mainDomainMail,
+    subaddressing: settings.support_subaddress === true,
+    attempt,
+  };
+  const base = { domain, mainDomain };
+  const zoneUsesRouting = facts.subdomainRouting || settings.enabled === true;
 
-  if (await subdomainRoutingOn(env, domain)) {
-    return ready({ subdomainRouting: true, mainDomainMail: null, subaddressing: null });
-  }
-  const settings = await getRoutingSettings(env);
-  const subaddressing = settings.support_subaddress === true;
-  if (settings.enabled === true) {
-    return ready({ subdomainRouting: false, mainDomainMail: null, subaddressing });
-  }
-
-  const mainDomainMail = await listMailRecords(env, mainDomain);
-  const facts: SetupFacts = { subdomainRouting: false, mainDomainMail, subaddressing };
-  if (mainDomainMail.length > 0) {
+  if (!attempt && !zoneUsesRouting && mainDomainMail.length > 0) {
     return {
       plan: plan('refused', {
-        domain,
-        mainDomain,
+        ...base,
         reason: `${mainDomain} has its own mail records (${mainDomainMail
           .map(describeMailRecord)
           .join(
@@ -206,177 +183,197 @@ async function inspect(env: Env): Promise<Inspection> {
       facts,
     };
   }
-  if (!verified) return { plan: verifying(domain, mainDomain), facts };
+  if (sending.enabled !== true) {
+    return {
+      plan: plan('verifying', {
+        ...base,
+        reason: `Cloudflare is still verifying the sending records for ${domain}, usually 5 to 15 minutes after the deploy created them. Try again then.`,
+      }),
+      facts,
+    };
+  }
+
+  // Consent to subaddressing given for an earlier run still holds.
+  const zoneChanges =
+    facts.subaddressing || attempt?.attempt.zoneChanges.includes('subaddressing')
+      ? []
+      : [subaddressingChange(mainDomain)];
+  if (attempt) {
+    const differences = differencesFromBaseline(attempt.attempt, mainDomain, mainDomainMail);
+    if (differences.length > 0) {
+      return {
+        plan: await withConsent(
+          plan('changed', {
+            ...base,
+            mainDomainChanges: differences,
+            zoneChanges,
+            reason: `An earlier setup run turned Email Routing on, and the mail records of ${mainDomain} now differ from what it showed: ${describeChanges(differences)}. Agent email stays off. Fix them in Cloudflare and check again, or allow them as they are.`,
+          })
+        ),
+        facts,
+      };
+    }
+    // The records Cloudflare adds were allowed when that run started.
+    return { plan: await consentPlan(base, [], zoneChanges), facts };
+  }
   return {
-    plan: plan('needs_consent', {
-      domain,
-      mainDomain,
-      mainDomainChanges: routingRecordsFor(mainDomain),
-      reason: `${mainDomain} has never used Email Routing, so turning it on lets Cloudflare add an SPF record and a DKIM key to ${mainDomain}.`,
-    }),
+    plan: await consentPlan(
+      base,
+      zoneUsesRouting ? [] : firstRoutingRecords(mainDomain),
+      zoneChanges
+    ),
     facts,
   };
 }
 
-function verifying(domain: string, mainDomain: string): AgentEmailSetupPlan {
-  return plan('verifying', {
-    domain,
-    mainDomain,
-    reason: `Cloudflare is still verifying the sending records for ${domain}, usually 5 to 15 minutes after the deploy created them. Try again then.`,
-  });
-}
-
-function ruleMatchesAddress(rule: RoutingRuleView, address: string): boolean {
-  return (rule.matchers ?? []).some(
-    (matcher) =>
-      matcher.type === 'literal' &&
-      matcher.field === 'to' &&
-      normalizeName(matcher.value ?? '') === address
+async function consentPlan(
+  base: { domain: string; mainDomain: string },
+  mainDomainChanges: AgentEmailMainDomainRecord[],
+  zoneChanges: AgentEmailZoneChange[]
+): Promise<AgentEmailSetupPlan> {
+  if (mainDomainChanges.length === 0 && zoneChanges.length === 0) return plan('ready', base);
+  const reasons = [
+    ...(mainDomainChanges.length > 0
+      ? [
+          `${base.mainDomain} has never used Email Routing, so turning it on lets Cloudflare add an SPF record and a DKIM key to ${base.mainDomain}.`,
+        ]
+      : []),
+    ...(zoneChanges.length > 0 ? ['Agent email also needs subaddressing on for the zone.'] : []),
+  ];
+  return withConsent(
+    plan('needs_consent', { ...base, mainDomainChanges, zoneChanges, reason: reasons.join(' ') })
   );
 }
 
-function ruleRoutesToWorker(rule: RoutingRuleView, workerName: string): boolean {
-  return (
-    rule.enabled === true &&
-    rule.actions?.length === 1 &&
-    rule.actions[0]?.type === 'worker' &&
-    rule.actions[0]?.value?.length === 1 &&
-    rule.actions[0]?.value?.[0] === workerName
-  );
-}
-
-async function findRule(env: Env, address: string): Promise<RoutingRuleView | null> {
-  for (let page = 1; page <= MAX_RULE_PAGES; page += 1) {
-    const rules = await listRoutingRules(env, page, RULES_PAGE_SIZE);
-    const match = rules.find((rule) => ruleMatchesAddress(rule, address));
-    if (match) return match;
-    if (rules.length < RULES_PAGE_SIZE) return null;
-  }
-  throw new AgentEmailSetupRefusedError(
-    plan('refused', {
-      reason: `This zone lists more than ${MAX_RULE_PAGES * RULES_PAGE_SIZE} Email Routing rules, past Cloudflare's limit of ${CLOUDFLARE_ROUTING_RULE_LIMIT}, so SAM cannot tell whether the agent email rule exists.`,
-    })
-  );
-}
-
-// Managed through this REST call. Do not also add a top-level `addresses` field to
-// apps/api/wrangler.toml: Wrangler reconciles that field on every deploy and would take over,
-// or remove, this rule.
-async function ensureRoutingRule(env: Env, address: string, workerName: string): Promise<void> {
-  const desired: RoutingRuleInput = {
-    name: AGENT_EMAIL_RULE_NAME,
-    enabled: true,
-    matchers: [{ type: 'literal', field: 'to', value: address }],
-    actions: [{ type: 'worker', value: [workerName] }],
-  };
-  const existing = await findRule(env, address);
-  if (existing && ruleRoutesToWorker(existing, workerName)) return;
-  if (existing) await updateRoutingRule(env, existing.id, desired);
-  else await createRoutingRule(env, desired);
+function sameAttempt(a: AgentEmailSetupAttempt, b: AgentEmailSetupAttempt): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 /**
- * After routing came on, the root domain may have gained the disclosed SPF record and nothing
- * else, and lost nothing. Gaining less than disclosed is fine: a zone that used Email Routing
- * before gets no new records.
+ * Stores the attempt before anything changes Cloudflare, and returns the one to check against.
+ * A new attempt keeps the baseline this run read; one left by an earlier run keeps its own,
+ * unless the admin allowed the records as they are now (`changed`).
  */
-function assertMainDomainAsDisclosed(
-  mainDomain: string,
-  before: MailDnsRecord[],
-  after: MailDnsRecord[],
-  disclosed: AgentEmailMainDomainRecord[]
-): void {
-  const allowed: MailDnsRecord[] = [
-    ...before,
-    ...disclosed.flatMap((record) =>
-      record.name === mainDomain &&
-      record.content !== null &&
-      isSpfRecord({ type: record.type, content: record.content })
-        ? [{ type: record.type, name: record.name, content: record.content }]
-        : []
-    ),
-  ];
-  const removed = mailRecordsMissingFrom(before, after);
-  const added = mailRecordsMissingFrom(after, allowed);
-  if (removed.length === 0 && added.length === 0) return;
-  log.error('agent_email.setup_main_domain_changed', {
-    mainDomain,
-    added: added.map(describeMailRecord),
-    removed: removed.map(describeMailRecord),
-  });
-  const changes = [
-    ...added.map((record) => `added ${describeMailRecord(record)}`),
-    ...removed.map((record) => `removed ${describeMailRecord(record)}`),
-  ];
-  throw new AgentEmailMainDomainChangedError(
-    `Turning Email Routing on changed the mail records of ${mainDomain} in a way the setup did not show: ${changes.join(
-      ', '
-    )}. Agent email is still off. Check these records; running the setup again turns agent email on with them as they are.`
-  );
+async function claimAttempt(
+  env: Env,
+  current: AgentEmailSetupPlan,
+  facts: SetupFacts,
+  userId: string
+): Promise<AgentEmailSetupAttempt> {
+  const startedAt = new Date().toISOString();
+  const acceptedZoneChanges = current.zoneChanges.map((change) => change.setting);
+  const domain = current.domain ?? '';
+  if (!facts.attempt) {
+    const attempt: AgentEmailSetupAttempt = {
+      domain,
+      startedAt,
+      startedBy: userId,
+      baseline: facts.mainDomainMail.map(toMailRecord),
+      allowed: allowedAdditions(current.mainDomainChanges, facts.mainDomain),
+      zoneChanges: acceptedZoneChanges,
+    };
+    const stored = await claimSetupAttempt(env, attempt);
+    if (!sameAttempt(stored.attempt, attempt)) {
+      throw new AgentEmailSetupRefusedError(
+        'Another agent email setup run started at the same time. Check again.'
+      );
+    }
+    return attempt;
+  }
+  const previous = facts.attempt.attempt;
+  const next: AgentEmailSetupAttempt = {
+    ...previous,
+    ...(current.state === 'changed'
+      ? { baseline: facts.mainDomainMail.map(toMailRecord), allowed: [] }
+      : {}),
+    zoneChanges: [...new Set([...previous.zoneChanges, ...acceptedZoneChanges])],
+  };
+  if (sameAttempt(next, previous)) return previous;
+  if (!(await replaceSetupAttempt(env, facts.attempt, { ...next, startedAt, startedBy: userId }))) {
+    throw new AgentEmailSetupRefusedError(
+      'Another agent email setup run changed the setup at the same time. Check again.'
+    );
+  }
+  return next;
 }
 
 /**
- * Runs the setup. Refuses (AgentEmailSetupRefusedError) unless the plan is `ready`, or
- * `needs_consent` with `allowMainDomainChanges`. Returns `on`, or `pending` when routing was
+ * Runs the setup. Refuses (AgentEmailSetupRefusedError) unless the plan is `ready`, or lists
+ * changes and `consentToken` is that plan's token. Returns `on`, or `pending` when routing was
  * turned on but its records are not visible yet.
  */
 export async function runAgentEmailSetup(
   env: Env,
-  options: { allowMainDomainChanges: boolean; userId: string }
+  options: { consentToken: string | null; userId: string }
 ): Promise<AgentEmailSetupPlan> {
   const { plan: current, facts } = await inspect(env);
   if (current.state === 'on') return current;
-  if (current.state === 'needs_consent' && !options.allowMainDomainChanges) {
-    throw new AgentEmailSetupRefusedError({
-      ...current,
-      reason: `Allow the changes to ${current.mainDomain} to turn agent email on.`,
+  const workerName = env.AGENT_EMAIL_WORKER_NAME?.trim();
+  const runnable =
+    current.state === 'ready' || current.state === 'needs_consent' || current.state === 'changed';
+  if (!runnable || !facts || !current.domain || !workerName) {
+    throw new AgentEmailSetupRefusedError(
+      current.reason ?? `Agent email setup cannot run while it is ${current.state}`
+    );
+  }
+  if (current.consentToken !== null && options.consentToken !== current.consentToken) {
+    throw new AgentEmailSetupRefusedError(
+      options.consentToken
+        ? 'What turning agent email on would change is different from what you allowed. Review it and allow it again.'
+        : `Allow the changes to ${facts.mainDomain} to turn agent email on.`
+    );
+  }
+  const domain = current.domain;
+  const { mainDomain } = facts;
+  const attempt = await claimAttempt(env, current, facts, options.userId);
+
+  if (!facts.subdomainRouting) await enableSubdomainRouting(env, domain);
+  const differences = differencesFromBaseline(
+    attempt,
+    mainDomain,
+    await listMailRecords(env, mainDomain)
+  );
+  if (differences.length > 0) {
+    log.error('agent_email.setup_main_domain_changed', {
+      mainDomain,
+      differences: describeChanges(differences),
+    });
+    throw new AgentEmailMainDomainChangedError(
+      `Turning Email Routing on changed the mail records of ${mainDomain} in a way the setup did not show: ${describeChanges(differences)}. Agent email is still off. Fix them in Cloudflare and check again, or allow them as they are.`
+    );
+  }
+  if (!facts.subdomainRouting && !(await subdomainRoutingOn(env, domain))) {
+    return plan('pending', {
+      domain,
+      mainDomain,
+      reason: `Email Routing is turning on for ${domain}, but its records are not visible yet. Run the setup again in a minute.`,
     });
   }
-  const { domain, mainDomain } = current;
-  const workerName = env.AGENT_EMAIL_WORKER_NAME?.trim();
-  if (
-    (current.state !== 'ready' && current.state !== 'needs_consent') ||
-    !facts ||
-    !domain ||
-    !mainDomain ||
-    !workerName
-  ) {
-    throw new AgentEmailSetupRefusedError(current);
-  }
-
-  if (!facts.subdomainRouting) {
-    const before = facts.mainDomainMail ?? (await listMailRecords(env, mainDomain));
-    await enableSubdomainRouting(env, domain);
-    assertMainDomainAsDisclosed(
-      mainDomain,
-      before,
-      await listMailRecords(env, mainDomain),
-      current.mainDomainChanges
-    );
-    if (!(await subdomainRoutingOn(env, domain))) {
-      return plan('pending', {
-        domain,
-        mainDomain,
-        mainDomainChanges: current.mainDomainChanges,
-        reason: `Email Routing is turning on for ${domain}, but its records are not visible yet. Run the setup again in a minute.`,
-      });
-    }
-  }
-  const subaddressing =
-    facts.subaddressing ?? (await getRoutingSettings(env)).support_subaddress === true;
-  if (!subaddressing) await enableSubaddressing(env);
+  // Allowed by this run's consent or an earlier one: the plan listed it otherwise.
+  if (!facts.subaddressing) await enableSubaddressing(env);
   await ensureRoutingRule(env, `${AGENT_EMAIL_LOCAL_PART}@${domain}`, workerName);
 
-  await recordAgentEmailSetup(
+  await completeAgentEmailSetup(
     env,
-    { domain, enabledAt: new Date().toISOString(), mainDomainChanges: current.mainDomainChanges },
+    {
+      domain,
+      enabledAt: new Date().toISOString(),
+      mainDomainChanges: current.mainDomainChanges,
+      zoneChanges: attempt.zoneChanges,
+    },
     options.userId
   );
   log.info('agent_email.setup_completed', {
     domain,
     mainDomain,
     mainDomainChanges: current.mainDomainChanges.length,
+    zoneChanges: attempt.zoneChanges,
     userId: options.userId,
   });
-  return plan('on', { domain, mainDomain, mainDomainChanges: current.mainDomainChanges });
+  return plan('on', {
+    domain,
+    mainDomain,
+    mainDomainChanges: current.mainDomainChanges,
+    zoneChanges: current.zoneChanges,
+  });
 }

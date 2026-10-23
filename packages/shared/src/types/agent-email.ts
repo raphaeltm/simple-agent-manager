@@ -68,6 +68,14 @@ export interface AgentEmailMainDomainRecord {
   name: string;
   /** Exact content when Cloudflare's value is known in advance; null for a key it generates. */
   content: string | null;
+  /** `add`: Cloudflare adds it, or added it unexpectedly. `remove`: it disappeared. */
+  change: 'add' | 'remove';
+}
+
+/** A zone-wide Email Routing setting the setup changes. */
+export interface AgentEmailZoneChange {
+  setting: 'subaddressing';
+  description: string;
 }
 
 /**
@@ -75,13 +83,23 @@ export interface AgentEmailMainDomainRecord {
  * - `unavailable`: this deployment has not prepared agent email; `reason` says what is missing
  * - `verifying`: Cloudflare is still verifying the sending records
  * - `refused`: setup would change mail records the main domain already has
- * - `needs_consent`: the zone is new to Email Routing, so Cloudflare will add `mainDomainChanges`
- * - `ready`: setup changes nothing on the main domain
+ * - `changed`: an earlier run left the main domain's mail records different from what it
+ *   showed; `mainDomainChanges` lists the differences
+ * - `needs_consent`: Cloudflare will add `mainDomainChanges`, or the setup will make
+ *   `zoneChanges`; the admin must allow them
+ * - `ready`: setup changes nothing on the main domain or the zone
  * - `pending`: routing was turned on but its records are not visible yet; run setup again
  * - `on`: agent email is on
  */
 export type AgentEmailSetupState =
-  'unavailable' | 'verifying' | 'refused' | 'needs_consent' | 'ready' | 'pending' | 'on';
+  | 'unavailable'
+  | 'verifying'
+  | 'refused'
+  | 'changed'
+  | 'needs_consent'
+  | 'ready'
+  | 'pending'
+  | 'on';
 
 export interface AgentEmailSetupPlan {
   state: AgentEmailSetupState;
@@ -90,11 +108,14 @@ export interface AgentEmailSetupPlan {
   /** The zone's root domain, which `mainDomainChanges` apply to. */
   mainDomain: string | null;
   mainDomainChanges: AgentEmailMainDomainRecord[];
+  zoneChanges: AgentEmailZoneChange[];
+  /** Set when the admin must allow the listed changes; the run accepts only this value. */
+  consentToken: string | null;
   reason: string | null;
 }
 
 /** `POST /api/admin/agent-email/setup`. */
 export interface AgentEmailSetupRequest {
-  /** Required when the plan lists main-domain changes: the admin allows exactly those. */
-  allowMainDomainChanges?: boolean;
+  /** The plan's `consentToken`: the admin allows exactly the changes that plan listed. */
+  consentToken?: string;
 }

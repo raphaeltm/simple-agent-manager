@@ -38,10 +38,17 @@ function plan(overrides: Partial<AgentEmailSetupPlan>): AgentEmailSetupPlan {
     domain: 'agents.example.com',
     mainDomain: 'example.com',
     mainDomainChanges: [],
+    zoneChanges: [],
+    consentToken: null,
     reason: null,
     ...overrides,
   };
 }
+
+const SUBADDRESSING = {
+  setting: 'subaddressing' as const,
+  description: 'Turns on subaddressing for the whole zone.',
+};
 
 let queryClient: QueryClient;
 function render(ui: ReactElement) {
@@ -87,7 +94,7 @@ describe('AdminAgentEmailPanel', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Turn on agent email' }));
 
-    expect(mocks.runAgentEmailSetup).toHaveBeenCalledWith(false);
+    expect(mocks.runAgentEmailSetup).toHaveBeenCalledWith(null);
     expect(await screen.findByTestId('agent-email-status')).toHaveTextContent(
       'On — agents.example.com'
     );
@@ -105,7 +112,7 @@ describe('AdminAgentEmailPanel', () => {
     });
   });
 
-  it('lists the main-domain records and needs the box ticked before turning on', async () => {
+  it('lists every change outside the subdomain and sends the plan token once allowed', async () => {
     const user = userEvent.setup();
     mocks.fetchAdminAgentEmail.mockResolvedValueOnce(OFF).mockResolvedValue(ON);
     mocks.fetchAgentEmailSetupPlan.mockResolvedValue(
@@ -116,34 +123,83 @@ describe('AdminAgentEmailPanel', () => {
             type: 'TXT',
             name: 'example.com',
             content: 'v=spf1 include:_spf.mx.cloudflare.net ~all',
+            change: 'add',
           },
-          { type: 'TXT', name: 'cf2024-1._domainkey.example.com', content: null },
+          {
+            type: 'TXT',
+            name: 'cf2024-1._domainkey.example.com',
+            content: null,
+            change: 'add',
+          },
         ],
+        zoneChanges: [SUBADDRESSING],
+        consentToken: 'token-1',
         reason: 'example.com has never used Email Routing.',
       })
     );
     mocks.runAgentEmailSetup.mockResolvedValue(plan({ state: 'on' }));
     render(<AdminAgentEmailPanel />);
 
-    const changes = await screen.findByTestId('agent-email-main-domain-changes');
+    const changes = await screen.findByTestId('agent-email-setup-changes');
     expect(changes).toHaveTextContent(
-      'TXT example.com — v=spf1 include:_spf.mx.cloudflare.net ~all'
+      'Adds TXT example.com — v=spf1 include:_spf.mx.cloudflare.net ~all'
     );
     expect(changes).toHaveTextContent(
-      'TXT cf2024-1._domainkey.example.com — a DKIM key Cloudflare generates'
+      'Adds TXT cf2024-1._domainkey.example.com — a DKIM key Cloudflare generates'
     );
+    expect(changes).toHaveTextContent('Turns on subaddressing for the whole zone.');
     const turnOn = screen.getByRole('button', { name: 'Turn on agent email' });
     expect(turnOn).toBeDisabled();
     // Assistive tech hears why the button is disabled.
-    expect(turnOn).toHaveAccessibleDescription(
-      'Allow Cloudflare to add these records to example.com'
-    );
+    expect(turnOn).toHaveAccessibleDescription('Allow these changes');
 
-    await user.click(screen.getByLabelText('Allow Cloudflare to add these records to example.com'));
+    await user.click(screen.getByLabelText('Allow these changes'));
     expect(turnOn).toBeEnabled();
     await user.click(turnOn);
-    expect(mocks.runAgentEmailSetup).toHaveBeenCalledWith(true);
+    expect(mocks.runAgentEmailSetup).toHaveBeenCalledWith('token-1');
     expect(await screen.findByTestId('agent-email-status')).toHaveTextContent('On');
+  });
+
+  it('drops the consent when a refetched plan lists other changes', async () => {
+    const user = userEvent.setup();
+    mocks.fetchAdminAgentEmail.mockResolvedValue(OFF);
+    mocks.fetchAgentEmailSetupPlan
+      .mockResolvedValueOnce(
+        plan({
+          state: 'changed',
+          mainDomainChanges: [
+            { type: 'MX', name: 'example.com', content: 'mx1.example.net', change: 'add' },
+          ],
+          consentToken: 'token-1',
+          reason: 'The mail records of example.com now differ.',
+        })
+      )
+      .mockResolvedValueOnce(
+        plan({
+          state: 'changed',
+          mainDomainChanges: [
+            { type: 'MX', name: 'example.com', content: 'mx1.example.net', change: 'add' },
+            { type: 'MX', name: 'example.com', content: 'mx2.example.net', change: 'add' },
+          ],
+          consentToken: 'token-2',
+          reason: 'The mail records of example.com now differ.',
+        })
+      );
+    render(<AdminAgentEmailPanel />);
+
+    const label = 'Turn agent email on with the records of example.com as they are now';
+    expect(await screen.findByRole('alert')).toHaveTextContent('now differ');
+    expect(screen.getByTestId('agent-email-setup-changes')).toHaveTextContent(
+      'Added MX example.com — mx1.example.net'
+    );
+    await user.click(screen.getByLabelText(label));
+    expect(screen.getByRole('button', { name: 'Turn on agent email' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: 'Check again' }));
+    expect(await screen.findByText(/mx2\.example\.net/)).toBeInTheDocument();
+    expect(screen.getByLabelText(label)).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Turn on agent email' })).toBeDisabled();
+    expect(mocks.runAgentEmailSetup).not.toHaveBeenCalled();
   });
 
   it('explains a refusal and offers no way to turn it on', async () => {

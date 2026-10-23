@@ -10,6 +10,7 @@ export interface CloudflareEnvelope {
   success?: boolean;
   errors?: Array<{ code?: number; message?: string }>;
   result?: unknown;
+  result_info?: { count?: number; total_count?: number };
 }
 
 export interface CloudflareResponse {
