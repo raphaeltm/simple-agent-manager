@@ -192,6 +192,32 @@ in favour of the row count — the one number that is certainly true. So the ass
 been measuring the normaliser. The fixture's totals are now all >= `items.length`, and the
 comment says why, because the next person to write one will reach for a small number too.
 
+### Finding 11 — I guessed twice at a measurement that was one query away
+
+SonarCloud failed the PR on 5.5% duplication on new code. I dedup'd the audit's phone/laptop
+pairs; still 5.5%. I extracted the idea fixtures into one factory; still 5.4%. Both were real
+improvements and neither was the cause, because I was reasoning about where duplication
+*probably* was instead of asking.
+
+jscpd over the changed files reported ZERO clones, which looked like a contradiction and was
+actually the clue: jscpd does not compare a file against itself by default, and SonarCloud
+does. SonarCloud's own API is readable without auth for this project:
+
+```
+https://sonarcloud.io/api/measures/component_tree?component=<key>&pullRequest=<n>&metricKeys=new_duplicated_lines_density,new_lines&qualifiers=FIL
+https://sonarcloud.io/api/duplications/show?key=<key>:<path>&pullRequest=<n>
+```
+
+The first named the files (idea-page-audit.spec.ts 119 duplicated lines of 698 new;
+idea-page.test.tsx 32; ideas-list-audit.spec.ts 5), the second gave exact line ranges. The
+answer was seven per-state audit tests with identical bodies and different strings — which is
+a table, and specifically the table the page's design IS: a state, the word the status card
+says, and the actions that follow in order.
+
+The rule this is an instance of is already written down (`.claude/rules/39`: measure before
+theorising). What makes it worth recording is that the metric *looked* unmeasurable locally —
+the dashboard needs auth — so I substituted plausible theories for a query I had not tried.
+
 ### Finding 10 — the sanitising fix had a second path I missed (security-auditor, HIGH)
 
 Converging the Work rows onto `LinkedWorkRow` fixed the raw `tasks.output_pr_url` there, and I
