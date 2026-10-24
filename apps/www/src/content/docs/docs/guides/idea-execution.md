@@ -15,7 +15,7 @@ Type your description in the project chat input and submit. Submitting a message
 4. **Start the agent** — runs the agent from your selected profile (Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, or Amp) with your description
 5. **Stream output** — watch the agent work in real time in the chat
 
-The **Ideas** board holds work you've drafted but not started yet. Once an idea is executing or done, you follow it in the chat session list. You can also start a saved idea from its detail page with the **Execute** button.
+The **Ideas** list holds work you want done but have not started yet, and keeps following it after you do. You can start a saved idea from its page with **Start work**. See [Ideas](#ideas) below for how an idea's state is worked out.
 
 ### Keep the plan current with Updates
 
@@ -46,17 +46,46 @@ modern fields take precedence at the same configuration layer. See
 [Upgrading existing compute pools](/docs/reference/configuration/#upgrading-existing-compute-pools)
 for migration and rollback behavior.
 
-## Idea Lifecycle
+## Ideas
 
-Ideas progress through these stages as seen in the UI:
+An idea is something you want done that nobody has handed to an agent yet. It collects
+context — chats, files, notes, pull requests — until someone starts work on it, and then it
+follows that work.
 
-| Stage         | What's happening                           |
-| ------------- | ------------------------------------------ |
-| **Exploring** | You're brainstorming — the idea is a draft |
-| **Ready**     | The idea is defined and ready to execute   |
-| **Executing** | An agent is actively working on it         |
-| **Done**      | The agent finished and created a PR        |
-| **Parked**    | The idea was cancelled or execution failed |
+### Where an idea stands is worked out, not typed
+
+Nobody sets an idea's state by hand. SAM derives it from the chats linked to the idea, those
+chats' tasks and their pull requests, and shows where each state came from ("From GitHub, a
+minute ago") so you can tell whether to trust it:
+
+| State               | What it means                                                            |
+| ------------------- | ------------------------------------------------------------------------ |
+| **Not started**     | Nothing is linked yet, or nothing is in flight                           |
+| **In progress**     | A linked chat is working on it (a sleeping chat still counts — it wakes) |
+| **In review**       | A pull request for the work is open                                      |
+| **Merged**          | A pull request merged, and nobody has said whether that finished it      |
+| **Stopped**         | The latest work failed and nothing else is running                       |
+| **Waiting for you** | An agent asked you something and nobody has answered                     |
+| **Done**            | You marked it done                                                       |
+| **Parked**          | You parked it                                                            |
+
+Higher rows win: an unanswered question outranks running work, running work outranks an open
+pull request. Only chats that actually work on the idea move it; a chat that merely read or
+mentioned it never does.
+
+**Done and Parked stay your decision.** A merged pull request does not always finish an idea —
+the docs page may still be missing — so SAM asks once, with **Mark done** and **Keep open**,
+and does not ask again about that merge.
+
+### What needs you comes first
+
+The Ideas list opens on **Needs you**: the ideas with a question, a stopped run, or a merged
+pull request waiting on your call, each with its fix as a button (**Answer**, **Try again…**,
+**Mark done**). At most three are shown before the rest fold away, so a bad day cannot push the
+whole list off a phone screen. Below that come **In progress** and **Not started**; ideas you
+have finished and ideas an automation filed fold away at the bottom.
+
+## While the work runs
 
 ### Linked work
 
@@ -66,7 +95,7 @@ Agents can use `link_to_idea` for a file, pull request, or related idea created 
 
 ### Execution Steps
 
-While an idea is executing, SAM tracks detailed progress:
+While a task is running, SAM tracks detailed progress:
 
 | Step                 | Description                                     |
 | -------------------- | ----------------------------------------------- |
@@ -90,7 +119,7 @@ When an agent finishes its work:
 
 ## Where the work lands
 
-Every **submitted task** gets its own **output branch** — a prefixed name derived from your description, `sam/` by default (self-hosters can change the prefix with `BRANCH_NAME_PREFIX`). This covers work you submit as a task and work an agent creates with `dispatch_task`, on either runtime. A message-box chat on an [Instant](/docs/guides/instant-sessions/) profile, without attachments or explicit resource overrides and not started with an idea's **Execute** button, is the exception: it gets no branch at all — see [What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work). Having a branch does not mean SAM publishes to it: commits, pushes and pull requests are agent-directed on both runtimes. The workspace is now checked out on that branch from the moment it's created: SAM clones your project's default branch as the base, then creates and checks out the output branch before the agent starts. Run `git branch --show-current` inside a task workspace and you'll see the task branch, not `main`.
+Every **submitted task** gets its own **output branch** — a prefixed name derived from your description, `sam/` by default (self-hosters can change the prefix with `BRANCH_NAME_PREFIX`). This covers work you submit as a task and work an agent creates with `dispatch_task`, on either runtime. A message-box chat on an [Instant](/docs/guides/instant-sessions/) profile, without attachments or explicit resource overrides and not started from an idea with **Start work**, is the exception: it gets no branch at all — see [What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work). Having a branch does not mean SAM publishes to it: commits, pushes and pull requests are agent-directed on both runtimes. The workspace is now checked out on that branch from the moment it's created: SAM clones your project's default branch as the base, then creates and checks out the output branch before the agent starts. Run `git branch --show-current` inside a task workspace and you'll see the task branch, not `main`.
 
 The output branch provides a place for the agent to commit and publish when instructed. SAM does not publish whatever the agent leaves behind.
 

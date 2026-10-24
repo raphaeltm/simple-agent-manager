@@ -380,7 +380,7 @@ describe('connector operations current membership and creator authority', () => 
   });
   it('cross-project task and idea lists exclude foreign/revoked projects and support cursor paging', async () => {
     sqlite.exec(
-      "INSERT INTO tasks (id,project_id,user_id,title,status,updated_at) VALUES ('idea-a','project','owner','Idea A','draft','2026-10-09'),('idea-b','project','owner','Idea B','draft','2026-10-09'),('private','secret','outsider','Private','draft','2026-10-10')"
+      "INSERT INTO tasks (id,project_id,user_id,title,status,is_idea,updated_at) VALUES ('idea-a','project','owner','Idea A','draft',1,'2026-10-09'),('idea-b','project','owner','Idea B','draft',1,'2026-10-09'),('private','secret','outsider','Private','draft',1,'2026-10-10')"
     );
     const first = await samIdeasSearch.run(ctx(), { limit: 1 });
     expect(first.ideas.map((idea) => ('ideaId' in idea ? idea.ideaId : ''))).toEqual(['idea-b']);
@@ -480,19 +480,24 @@ describe('connector operations current membership and creator authority', () => 
     expect(mocks.send).not.toHaveBeenCalled();
     sqlite
       .prepare(
-        "INSERT INTO tasks (id,project_id,user_id,title,status) VALUES ('missing','project','owner','Idea','completed')"
+        "INSERT INTO tasks (id,project_id,user_id,title,status,is_idea) VALUES ('missing','project','owner','Idea','completed',1)"
       )
       .run();
+    // `completed` is a reopenable idea status now (a done idea can be reopened to draft), so
+    // completed → ready is a rejected transition rather than a terminal state.
     await expect(
       samIdeaUpdate.run(c, { projectId: 'project', ideaId: 'missing', status: 'ready' })
-    ).rejects.toThrow('terminal status');
-    sqlite.prepare("UPDATE tasks SET status='draft' WHERE id='missing'").run();
+    ).rejects.toThrow('Invalid status transition: completed → ready');
+    // A parked idea can only be reopened, so cancelled → completed is still refused.
+    // (draft → completed is allowed now: that is "Mark done", which the old table forbade.)
+    sqlite.prepare("UPDATE tasks SET status='cancelled' WHERE id='missing'").run();
     await expect(
       samIdeaUpdate.run(c, { projectId: 'project', ideaId: 'missing', status: 'completed' })
     ).rejects.toThrow('Invalid status transition');
     expect(sqlite.prepare('SELECT count(*) AS n FROM cli_operation_receipts').get()).toEqual({
       n: 0,
     });
+    sqlite.prepare("UPDATE tasks SET status='draft' WHERE id='missing'").run();
     const result = await samIdeaUpdate.run(c, {
       projectId: 'project',
       ideaId: 'missing',

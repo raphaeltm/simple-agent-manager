@@ -60,6 +60,7 @@ import * as durability from './durability-foundation';
 import * as groupedFtsCleanup from './grouped-fts-cleanup';
 import * as groupedFtsWallRecovery from './grouped-fts-wall-recovery';
 import * as ideaUpdates from './idea-updates';
+import * as ideaWork from './idea-work';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
@@ -2279,6 +2280,11 @@ export class ProjectData extends DurableObject<Env> {
     cap: number
   ) {
     return links.getLinkSnapshot(this.sql, kind, id, cap);
+  }
+
+  /** Batched: the work linked to many ideas at once, for the Ideas list. */
+  getIdeaWorkSnapshots(ideaIds: string[]) {
+    return ideaWork.getIdeaWorkSnapshots(this.sql, ideaIds);
   }
 
   async cacheCommands(

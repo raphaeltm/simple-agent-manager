@@ -21,7 +21,10 @@ import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedWorkspace, requireProjectCapability } from '../../middleware/project-auth';
+import { toOperationHttpError } from '../../operations/errors';
+import { applyIdeaStatusTransition } from '../../operations/idea-transitions';
 import { getIdeaSessionLinks } from '../../operations/link-core';
+import { webOperationContext } from '../../operations/types';
 import {
   CreateTaskDependencySchema,
   CreateTaskSchema,
@@ -452,6 +455,41 @@ crudRoutes.post(
 
     if (!isTaskStatus(body.toStatus)) {
       throw errors.badRequest('Invalid toStatus value');
+    }
+
+    // An idea is not a task in flight: it has its own transition table, and this route must
+    // agree with `update_idea` and the Ideas UI rather than validating with the task table
+    // (`operations/idea-transitions.ts`).
+    //
+    // The flag IS the definition of an idea, so this reads the same thing
+    // `ideaTaskPredicateSql` does — the two surfaces cannot disagree about which state machine
+    // governs a row (`operations/idea-core.ts`).
+    if (task.isIdea) {
+      try {
+        await applyIdeaStatusTransition(webOperationContext(c, userId), {
+          projectId,
+          ideaId: task.id,
+          status: body.toStatus,
+        });
+      } catch (error) {
+        throw toOperationHttpError(error);
+      }
+      const ideaRows = await db
+        .select()
+        .from(schema.tasks)
+        .where(eq(schema.tasks.id, task.id))
+        .limit(1);
+      const idea = ideaRows[0];
+      if (!idea) throw errors.notFound('Idea');
+      return c.json(
+        await toDisplayTaskResponse(
+          db,
+          idea,
+          projectId,
+          userId,
+          await computeBlockedForTask(db, idea.id)
+        )
+      );
     }
 
     const blocked = await computeBlockedForTask(db, task.id);

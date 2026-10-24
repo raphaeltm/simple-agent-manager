@@ -573,6 +573,23 @@ Create a task record.
 }
 ```
 
+## Ideas
+
+An idea is a `tasks` row nobody has handed to an agent yet. These endpoints return each idea's
+state **derived** from the work linked to it, never a stored label — see
+[Idea Execution](/docs/guides/idea-execution/#ideas).
+
+| Method | Endpoint                                           | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------ | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/projects/:projectId/ideas`                   | Returns `{ items, truncated, totals }`. Each item carries `derived` (the state, its `source`, and the chat or pull request that decided it), `counts`, and a one-line `summary`. Open ideas and finished ones are capped separately, so a project that shipped a lot cannot push its open ideas off the page. Pull request state is not populated yet: the reader is a stub pending the shared pull-request-state operation, so pull requests are listed without their state. |
+| POST   | `/api/projects/:projectId/ideas`                   | Body `{ title, content? }`; files a new idea and returns it. Goes through the same operation the MCP `create_idea` tool uses.                                                                                                                                                                                                                                                                                                                                                 |
+| POST   | `/api/projects/:projectId/ideas/:ideaId/status`    | Body `{ status: 'completed' \| 'cancelled' \| 'draft' }` — "Mark done", "Park", "Reopen". One transition table is shared with `update_idea` and the generic task status route, so every surface allows the same moves.                                                                                                                                                                                                                                                        |
+| POST   | `/api/projects/:projectId/ideas/:ideaId/keep-open` | Records that a person answered the idea's "a pull request merged, is this done?" question with **Keep open**. Changes no status; the question simply stops being asked for that merge.                                                                                                                                                                                                                                                                                        |
+
+Reads require project membership; writes require the `task:write` capability. Every lookup is
+scoped to the project in the query itself, so an idea from another project is reported as not
+found rather than disclosed.
+
 ## Deployment Releases
 
 ### `POST /api/projects/:projectId/environments/:envId/releases`

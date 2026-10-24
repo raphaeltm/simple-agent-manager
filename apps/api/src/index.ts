@@ -112,6 +112,7 @@ import { githubRoutes } from './routes/github';
 import { gitlabRoutes } from './routes/gitlab';
 import { googleAuthRoutes } from './routes/google-auth';
 import { ideaUpdateRoutes } from './routes/idea-updates';
+import { ideaRoutes } from './routes/ideas';
 import {
   handleInteractivePreviewRequest,
   isInteractivePreviewRequest,
@@ -853,6 +854,7 @@ app.route('/api/projects', deploymentPublishJobCallbackRoute); // Must be before
 app.route('/api/projects', workspaceEvictionCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', workspaceResourceHistoryCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);
+app.route('/api/projects/:projectId/ideas', ideaRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRoutes);
 app.route('/api/projects/:projectId/cli', cliProjectMetadataRoutes);

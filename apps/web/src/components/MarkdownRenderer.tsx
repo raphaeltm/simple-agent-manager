@@ -252,13 +252,16 @@ export const MARKDOWN_COMPONENTS: Components = {
       {children}
     </p>
   ),
+  // `listStyleType` is explicit because Tailwind's preflight sets `list-style: none` on every
+  // ul/ol. Without it the padding is there but the bullets and numbers are not, which is how
+  // every markdown surface lost its list markers (idea 01M0JQBW9E0T5PJZXY0K72V9BX).
   ul: ({ children }) => (
-    <ul className="mb-3" style={{ margin: '0 0 12px', paddingLeft: 22 }}>
+    <ul className="mb-3" style={{ margin: '0 0 12px', paddingLeft: 22, listStyleType: 'disc' }}>
       {children}
     </ul>
   ),
   ol: ({ children }) => (
-    <ol className="mb-3" style={{ margin: '0 0 12px', paddingLeft: 22 }}>
+    <ol className="mb-3" style={{ margin: '0 0 12px', paddingLeft: 22, listStyleType: 'decimal' }}>
       {children}
     </ol>
   ),

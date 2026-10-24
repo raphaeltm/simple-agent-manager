@@ -729,6 +729,29 @@ export type {
   UserQuotaStatusResponse,
 } from './compute-quotas';
 
+// Ideas (derived status)
+export type {
+  IdeaCounts,
+  IdeaDerivedState,
+  IdeaDerivedStatus,
+  IdeaHumanTransition,
+  IdeaListItem,
+  IdeaListResponse,
+  IdeaNeedsYouState,
+  IdeaPullRequestSummary,
+  IdeaStatusOrigin,
+  IdeaStatusSession,
+  IdeaStatusSource,
+} from './ideas';
+export {
+  DEFAULT_IDEA_TITLE_MAX_LENGTH,
+  IDEA_DERIVED_STATES,
+  IDEA_HUMAN_TRANSITIONS,
+  IDEA_NEEDS_YOU_STATES,
+  ideaNeedsYou,
+  isIdeaHumanTransition,
+} from './ideas';
+
 // Knowledge Graph
 export type {
   AddObservationRequest,

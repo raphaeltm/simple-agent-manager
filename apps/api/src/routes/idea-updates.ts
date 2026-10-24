@@ -10,18 +10,18 @@ import { AppError } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { OperationError, operationErrorHttpStatus } from '../operations/errors';
 import { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from '../operations/idea-update-core';
-import type { OperationContext } from '../operations/types';
+import { webOperationContext } from '../operations/types';
 import { jsonValidator } from '../schemas';
 
 const ideaUpdateRoutes = new Hono<{ Bindings: Env }>();
 
-function context(c: Context<{ Bindings: Env }>): OperationContext {
-  return {
-    env: c.env,
-    requestId: '',
-    actor: { userId: getUserId(c), via: 'web', scopes: new Set(['sam.read', 'sam.write']) },
-  };
-}
+/**
+ * One definition of the browser's operation context, shared with the Ideas routes and the
+ * task status route. The copies drifted the moment there were two: this one dropped
+ * `execCtx`, which is what lets an operation schedule bounded background work, and the
+ * request id with it.
+ */
+const context = (c: Context<{ Bindings: Env }>) => webOperationContext(c, getUserId(c));
 
 async function run<T>(operation: () => Promise<T>): Promise<T> {
   try {

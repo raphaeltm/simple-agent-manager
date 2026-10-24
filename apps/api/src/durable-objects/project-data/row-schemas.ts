@@ -8,7 +8,9 @@ export {
 export {
   parseActivityEventRow,
   parseCachedCommandRow,
+  parseIdeaNeedsInputRow,
   parseIdeaSessionDetail,
+  parseIdeaWorkSessionRow,
   parseIdleCleanupSchedule,
   parseSessionIdeaLink,
   parseWorkspaceIdleCheck,

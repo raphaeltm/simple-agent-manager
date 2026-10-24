@@ -190,9 +190,11 @@ export async function upsertUserReportIncident(
   if (!row.idea_id) {
     const ideaId = ulid();
     await env.DATABASE.prepare(
-      `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority,
-        task_mode, dispatch_depth, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'draft', 0, 'task', 0, ?, ?, ?)`
+      // `is_idea = 1` so the Ideas list can find it; `triggered_by = 'incident'` so it folds
+      // into "Filed by agents" instead of competing with the ideas a person wrote.
+      `INSERT INTO tasks (id, project_id, user_id, title, description, status, is_idea, priority,
+        task_mode, dispatch_depth, created_by, created_at, updated_at, triggered_by)
+       VALUES (?, ?, ?, ?, ?, 'draft', 1, 0, 'task', 0, ?, ?, ?, 'incident')`
     )
       .bind(
         ideaId,

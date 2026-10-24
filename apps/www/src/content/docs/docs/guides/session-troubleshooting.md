@@ -64,7 +64,7 @@ Anything else — including a message that delivery "could not be confirmed" —
 classify the failure. Treat it like the interrupted case: check before you resend.
 
 Several sections below say to check GitHub for anything the agent pushed. A chat sent from the
-message box on an Instant profile, without attachments and not from an idea's **Execute** button,
+message box on an Instant profile, without attachments and not from an idea's **Start work** button,
 has no branch of its own. Any other chat or task runs on its own `sam/…`
 [output branch](/docs/guides/idea-execution/#where-the-work-lands), and the project **Files** tab
 shows what was pushed to it without opening a workspace. Either way, a **Chat** pushes only what you

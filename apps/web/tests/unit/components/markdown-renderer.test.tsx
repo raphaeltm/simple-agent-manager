@@ -176,6 +176,32 @@ describe('RenderedMarkdown', () => {
     expect(mocks.mermaidRender).not.toHaveBeenCalled();
   });
 
+  /**
+   * Tailwind's preflight sets `list-style: none` on every ul and ol, so a markdown list
+   * rendered without an explicit marker loses its bullets and numbers. That is what happened
+   * on every markdown surface in the app, including the idea page, from the day the renderer
+   * was written (idea 01M0JQBW9E0T5PJZXY0K72V9BX).
+   */
+  it('renders bullets on an unordered list', () => {
+    render(<RenderedMarkdown content={'- first\n- second'} />);
+    const list = screen.getByRole('list');
+    expect(list.tagName).toBe('UL');
+    expect(list.style.listStyleType).toBe('disc');
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+  });
+
+  it('renders numbers on an ordered list', () => {
+    render(<RenderedMarkdown content={'1. first\n2. second'} />);
+    const list = screen.getByRole('list');
+    expect(list.tagName).toBe('OL');
+    expect(list.style.listStyleType).toBe('decimal');
+  });
+
+  it('indents a list so its markers sit outside the text', () => {
+    render(<RenderedMarkdown content={'- only'} />);
+    expect(screen.getByRole('list').style.paddingLeft).toBe('22px');
+  });
+
   it('renders GFM tables', () => {
     const content = '| A | B |\n|---|---|\n| 1 | 2 |';
     render(<RenderedMarkdown content={content} />);
