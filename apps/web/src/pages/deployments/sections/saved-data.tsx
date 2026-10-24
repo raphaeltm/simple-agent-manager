@@ -7,8 +7,8 @@ import { Button } from '@simple-agent-manager/ui';
 import { HardDrive, Plus } from 'lucide-react';
 import { useState } from 'react';
 
+import { Panel, SectionTitle } from '../../../components/page-kit/ui';
 import type { DeploymentEnvironment, DeploymentVolume } from '../../../lib/api';
-import { Panel, SectionTitle } from '../../automation/ui';
 import { useEnvironmentActions } from '../data';
 import { TwoStepRemove } from '../shared';
 

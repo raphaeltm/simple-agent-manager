@@ -1,3 +1,7 @@
+import {
+  DEPLOYMENT_PLACEMENT_ERROR_PREFIX,
+  DEPLOYMENT_STOP_ERROR_PREFIX,
+} from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import type {
@@ -111,8 +115,31 @@ describe('describeHealth', () => {
         observed: { status: 'reverted', appliedSeq: 42 },
       })
     );
-    expect(info).toMatchObject({ health: 'trouble', label: 'Needs attention', liveVersion: 42 });
-    expect(info.sentence).toBe("Running version 42. Version 43 didn't start.");
+    expect(info).toMatchObject({
+      health: 'trouble',
+      label: 'Needs attention',
+      liveVersion: 42,
+      tone: 'warning',
+    });
+    // The problem list says what went wrong; the status says only what runs.
+    expect(info.sentence).toBe('Running version 42.');
+    expect(describeProblems(env({ latestRelease: release(43, 'failed') }))[0]?.title).toBe(
+      "Version 43 didn't start"
+    );
+  });
+
+  it('takes the tone of the worst problem, so a part that is down is not a mere warning', () => {
+    const info = describeHealth(
+      env({
+        observed: {
+          services: [
+            { name: 'web', status: 'running', health: 'healthy' },
+            { name: 'worker', status: 'exited', health: 'unhealthy' },
+          ],
+        },
+      })
+    );
+    expect(info).toMatchObject({ health: 'trouble', tone: 'danger' });
   });
 
   it('says a deploy takes the app offline until the new version is up', () => {
@@ -150,7 +177,7 @@ describe('describeHealth', () => {
       observed: {
         status: 'failed',
         appliedSeq: null,
-        errorMessage: 'Deployment node placement failed: hetzner has no cx32 capacity in nbg1',
+        errorMessage: `${DEPLOYMENT_PLACEMENT_ERROR_PREFIX} failed: hetzner has no cx32 capacity in nbg1`,
       },
     });
     expect(failureKind(placement)).toBe('placement');
@@ -171,7 +198,7 @@ describe('describeHealth', () => {
       status: 'error',
       observed: {
         status: 'failed',
-        errorMessage: 'Stop failed while tearing down the deployment node: timeout',
+        errorMessage: `${DEPLOYMENT_STOP_ERROR_PREFIX} while tearing down the deployment node: timeout`,
       },
     });
     expect(failureKind(pause)).toBe('pause');
@@ -202,7 +229,7 @@ describe('describeProblems', () => {
         observed: {
           status: 'failed',
           appliedSeq: null,
-          errorMessage: 'Deployment node placement failed: quota',
+          errorMessage: `${DEPLOYMENT_PLACEMENT_ERROR_PREFIX} failed: quota`,
         },
       })
     );

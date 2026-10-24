@@ -8,6 +8,7 @@
  * the read is broken outright (`.claude/rules/28`).
  */
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,6 +16,7 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { deploymentReleaseRoutes } from '../../../src/routes/deployment-releases';
+import { listRoutedCustomDomainHostnames } from '../../../src/services/deployment-environment-summary';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const currentUser = vi.hoisted(() => ({ id: 'user-a' }));
@@ -247,6 +249,51 @@ describe('deployment release reads — real SQL', () => {
       expect(owner.status).toBe(200);
       const body = (await owner.json()) as { releases: Array<{ id: string }> };
       expect(body.releases.map((release) => release.id)).toEqual(['rel-b1']);
+    });
+  });
+
+  describe('listRoutedCustomDomainHostnames', () => {
+    function insertDomain(
+      id: string,
+      environmentId: string,
+      hostname: string,
+      overrides: { desiredState?: string; routingStatus?: string; deletedAt?: string | null } = {}
+    ): void {
+      sqlite
+        .prepare(
+          `INSERT INTO deployment_custom_domains
+             (id, environment_id, service, port, route_index, hostname, verification_status,
+              desired_state, routing_status, deleted_at, created_at)
+           VALUES (?, ?, 'web', 3000, 0, ?, 'verified', ?, ?, ?, ?)`
+        )
+        .run(
+          id,
+          environmentId,
+          hostname,
+          overrides.desiredState ?? 'active',
+          overrides.routingStatus ?? 'active',
+          overrides.deletedAt ?? null,
+          `2026-10-23T08:0${id.length % 10}:00.000Z`
+        );
+    }
+
+    it("returns only a project's routed, active, undeleted domains", async () => {
+      insertDomain('dom-1', 'env-a', 'shop.example.com');
+      insertDomain('dom-22', 'env-a', 'www.example.com');
+      insertDomain('dom-3', 'env-a', 'pending.example.com', { routingStatus: 'pending_dns' });
+      insertDomain('dom-4', 'env-a', 'gone.example.com', { deletedAt: '2026-10-23T09:00:00.000Z' });
+      insertDomain('dom-5', 'env-a', 'leaving.example.com', { desiredState: 'deactivating' });
+      // Another project's routed domain: never part of project A's list.
+      insertDomain('dom-6', 'env-b', 'other-tenant.example.com');
+      const db = drizzle(createSqliteD1(sqlite), { schema });
+
+      const projectA = await listRoutedCustomDomainHostnames(db, 'proj-a');
+      expect(Object.fromEntries(projectA)).toEqual({
+        'env-a': ['shop.example.com', 'www.example.com'],
+      });
+      // Owner control: the other project's domain is readable through its own project.
+      const projectB = await listRoutedCustomDomainHostnames(db, 'proj-b');
+      expect(Object.fromEntries(projectB)).toEqual({ 'env-b': ['other-tenant.example.com'] });
     });
   });
 

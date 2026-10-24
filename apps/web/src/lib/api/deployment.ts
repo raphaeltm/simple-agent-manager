@@ -108,6 +108,8 @@ export interface DeploymentEnvironment {
   agentPolicy: DeploymentAgentPolicy;
   latestRelease: DeploymentReleaseSummary | null;
   routeHostnames: string[];
+  /** Custom domains the server routes, oldest first. Only the environment list includes it. */
+  customDomainHostnames?: string[];
   node: DeploymentEnvironmentNodeSummary | null;
 }
 

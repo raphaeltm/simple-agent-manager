@@ -7,8 +7,8 @@ import { Lock, Pencil, Plus } from 'lucide-react';
 import { useState } from 'react';
 
 import { ModelToggleSwitch } from '../../../components/agent-models/ModelToggleSwitch';
+import { Panel, SectionTitle } from '../../../components/page-kit/ui';
 import type { DeploymentEnvironmentConfigVar } from '../../../lib/api';
-import { Panel, SectionTitle } from '../../automation/ui';
 import { useEnvironmentActions } from '../data';
 import { TwoStepRemove } from '../shared';
 

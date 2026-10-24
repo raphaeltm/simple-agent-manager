@@ -7,12 +7,12 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 
 import { HardwareDetails } from '../../../components/hardware/HardwareDetails';
+import { CopyButton, Disclosure, KeyValues } from '../../../components/page-kit/ui';
 import type {
   DeploymentEnvironment,
   DeploymentEnvironmentNodeSummary,
   DeploymentVolume,
 } from '../../../lib/api';
-import { CopyButton, Disclosure, KeyValues } from '../../automation/ui';
 import { useContainers, useEnvironmentActions, useMetrics } from '../data';
 import { ago, objectRecord } from '../format';
 

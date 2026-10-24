@@ -4,6 +4,7 @@
  * Extracted from `routes/deployment-release-placement.ts` so that route file
  * stays within the 500/800-line ceiling (`.claude/rules/18-file-size-limits.md`).
  */
+import { DEPLOYMENT_PLACEMENT_ERROR_PREFIX } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
@@ -71,7 +72,7 @@ export async function markDeploymentReleasePlacementFailed(
     .set({ status: 'failed', statusUpdatedAt: now })
     .where(eq(schema.deploymentReleases.id, releaseId));
   if (updateEnvironment) {
-    const observedErrorMessage = `Deployment node placement failed: ${message}`;
+    const observedErrorMessage = `${DEPLOYMENT_PLACEMENT_ERROR_PREFIX} failed: ${message}`;
     if (typeof env.DATABASE.prepare === 'function') {
       // The failure is always recorded on observed_* so it stays visible; only
       // the destructive `status = 'error'` flip is withheld while a release is
@@ -253,7 +254,7 @@ async function markStrandedPlacementFailed(
             )`
       )
       .bind(
-        `Deployment node placement stopped before a server was created: ${reason}. Deploy again to retry.`,
+        `${DEPLOYMENT_PLACEMENT_ERROR_PREFIX} stopped before a server was created: ${reason}. Deploy again to retry.`,
         now,
         environmentId,
         releaseId,

@@ -108,6 +108,7 @@ export {
   projectCredentialLimitsQueryOptions,
 } from './credential-limits';
 export { credentialQueryKeys, credentialsQueryOptions } from './credentials';
+export { deploymentQueryKeys } from './deployments';
 export { githubInstallationsQueryOptions, githubQueryKeys } from './github';
 export {
   nodeListQueryOptions,

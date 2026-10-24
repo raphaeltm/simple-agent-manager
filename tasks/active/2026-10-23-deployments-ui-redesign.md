@@ -96,49 +96,76 @@ Ship **Take A** (calm status page) as the structure, plus **Take B's live deploy
 ## Implementation checklist
 
 ### API
-- [ ] Release list returns `submittedBy` per release (`json_extract`, no manifest load)
-- [ ] `GET …/releases/:releaseId/events`: auth, project and environment scoping in the predicate,
+- [x] Release list returns `submittedBy` per release (`json_extract`, no manifest load)
+- [x] `GET …/releases/:releaseId/events`: auth, project and environment scoping in the predicate,
   ordered by seq, bounded, no `detail_json`
-- [ ] Tests for both against a real SQL engine (`createSqliteD1`), each with a cross-project attack
+- [x] Tests for both against a real SQL engine (`createSqliteD1`), each with a cross-project attack
   case and an owner control
 
 ### Web
-- [ ] Move the Take A prototype and shared modules into `apps/web/src/pages/deployments/`; delete
+- [x] Move the Take A prototype and shared modules into `apps/web/src/pages/deployments/`; delete
   Take B and the `?take` switch
-- [ ] `ProjectDeployments.tsx` and `ProjectDeploymentEnvironmentDetail.tsx` render the new pages
-- [ ] Deploy steps (from Take B) inside Recent deploys for the newest release
-- [ ] Poll cadences in `lib/poll-intervals.ts`
-- [ ] "Ask an agent" pre-fills a new chat through a validated `deployHelp` parameter
-- [ ] Delete the old components, `EnvironmentSecretsSection`, and their now-dead tests
-- [ ] Unit tests: the model (health, problems, live version, steps, release outcome, domain state,
+- [x] `ProjectDeployments.tsx` and `ProjectDeploymentEnvironmentDetail.tsx` render the new pages
+- [x] Deploy steps (from Take B) inside Recent deploys for the newest release
+- [x] Poll cadences in `lib/poll-intervals.ts`
+- [x] "Ask an agent" pre-fills a new chat through a validated `deployHelp` parameter
+- [x] Delete the old components, `EnvironmentSecretsSection`, and their now-dead tests
+- [x] Unit tests: the model (health, problems, live version, steps, release outcome, domain state,
   failure kind)
-- [ ] Rendered behavior tests:
+- [x] Rendered behavior tests:
   - the who-can-deploy switch never grants by itself
   - the new-environment sheet requires an access choice
   - Delete needs the typed name
   - the deployHelp pre-fill
-- [ ] Playwright audit (`deployments-ui-audit.spec.ts`) at 375 and 1280, covering every state, long
+- [x] Playwright audit (`deployments-ui-audit.spec.ts`) at 375 and 1280, covering every state, long
   text, empty, and load errors
-- [ ] Update or replace the old Playwright specs, including the staging ones
+- [x] Update or replace the old Playwright specs, including the staging ones
 
 ### Docs
-- [ ] `guides/app-deployments.md`: section names, Pause/Start, and a new domains screenshot
+- [x] `guides/app-deployments.md`: section names, Pause/Start, and a new domains screenshot
+
+### Review fixes (Phase 5)
+- [x] ui-ux: trouble status takes the worst problem's tone; the hero says only what runs, the
+  problem list says what went wrong
+- [x] ui-ux: the "On this page" entry is "Delete" for a never-deployed environment
+  (`pauseOrDeleteTitle`)
+- [x] ui-ux: the profile chips scroll into view when "Only these" is picked; the Ask an agent
+  divider runs the row's full height
+- [x] performance: the list response carries each environment's routed custom domains
+  (`listRoutedCustomDomainHostnames`, one query per list), so the list no longer fans out a
+  domains read per environment
+- [x] performance: the release list is bounded (`?limit`, default 50, max 200); the events read is
+  two index-friendly queries instead of an `OR`
+- [x] architecture: the automation page kit moved to `components/page-kit/` and the Deployments
+  pages share it (one `CopyButton`, with a `quiet` variant, instead of a second copy icon)
+- [x] architecture: Deployments query keys live in `lib/query-options/deployments.ts`
+- [x] architecture: placement and stop failure prefixes are shared constants
+  (`packages/shared/src/deployment-manifest/lifecycle-errors.ts`) that the API writes and the
+  page reads
+- [x] architecture: `environment.tsx` split (`hero.tsx`)
+- [x] task-completion: the audit's clipped-overflow check is blocking; checked that it fails
+  when an environment name can't wrap. Updated the stale row in
+  `tasks/backlog/2026-08-11-clipped-overflow-debt-sweep.md`
+- Not changed, with reasons in the PR: `StepMark` stays separate from the workflow step marks
+  (a different state model); `since` stays local (one caller)
+- Deferred LOW: cap the release manifest size at submission (idea 01M5NGDCZ8SKEN4YW3Y6M67R6M)
 
 ### Ship
-- [ ] `pnpm lint`, `pnpm typecheck`, and the affected tests, all green locally
-- [ ] Specialist reviews, recorded in the PR
+- [x] `pnpm lint`, `pnpm typecheck`, and the affected tests, all green locally
+- [x] Specialist reviews, recorded in the PR
 - [ ] Staging deploy and live verification as a user
 - [ ] PR with preflight evidence and UI screenshots; request CodeRabbit and wait
 - [ ] Merge, then monitor Deploy Production to success
 
 ## Acceptance criteria
 
-- [ ] An environment with v43 failed and v42 serving reads "Needs attention: running version 42,
-  version 43 didn't start", credits v42, and shows v43's steps with the failed step and the revert
-- [ ] A deploy in progress says the app is offline until it's up, and shows live steps
-- [ ] Turning agent deploys on never grants access without an explicit choice; "Only these" can't
+- [x] An environment with v43 failed and v42 serving reads "Needs attention: running version 42",
+  lists "Version 43 didn't start" as its problem, credits v42, and shows v43's steps with the
+  failed step and the revert (audit `environment — failed-deploy`, unit `describeHealth`)
+- [x] A deploy in progress says the app is offline until it's up, and shows live steps
+- [x] Turning agent deploys on never grants access without an explicit choice; "Only these" can't
   be saved empty
-- [ ] Delete requires typing the environment name
-- [ ] "Ask an agent" opens a new chat whose composer holds a request naming the environment
-- [ ] No horizontal overflow at 375 or 1280 with long names
+- [x] Delete requires typing the environment name
+- [x] "Ask an agent" opens a new chat whose composer holds a request naming the environment
+- [x] No horizontal overflow at 375 or 1280 with long names
 - [ ] Works on staging against real environments, with zero errors

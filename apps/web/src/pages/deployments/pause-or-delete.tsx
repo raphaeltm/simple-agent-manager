@@ -3,8 +3,8 @@
  */
 import { Button } from '@simple-agent-manager/ui';
 
+import { Panel, SectionTitle } from '../../components/page-kit/ui';
 import type { DeploymentEnvironment } from '../../lib/api';
-import { Panel, SectionTitle } from '../automation/ui';
 import { describeHealth, failureKind, liveVersionOf } from './model';
 
 /** What Pause does, said for what is actually running. */
@@ -22,6 +22,12 @@ function pauseSentence(env: DeploymentEnvironment): string {
   return `Stops the app. Its server is removed when nothing else runs on it. ${kept}`;
 }
 
+/** The footer's title: there is nothing to pause or start before a first deploy. */
+export function pauseOrDeleteTitle(env: DeploymentEnvironment): string {
+  if (env.status === 'stopped') return 'Start or delete';
+  return env.latestRelease ? 'Pause or delete' : 'Delete';
+}
+
 export function PauseOrDelete({
   env,
   onPause,
@@ -37,7 +43,7 @@ export function PauseOrDelete({
   const changing = env.status === 'starting' || env.status === 'stopping';
   // Nothing was ever deployed: there is nothing to pause or start, only to delete.
   const neverDeployed = !env.latestRelease && !paused;
-  const title = neverDeployed ? 'Delete' : paused ? 'Start or delete' : 'Pause or delete';
+  const title = pauseOrDeleteTitle(env);
   return (
     <section id="pause" className="flex scroll-mt-4 flex-col gap-3" aria-label={title}>
       <SectionTitle title={title} />

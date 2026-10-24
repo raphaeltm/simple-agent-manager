@@ -258,7 +258,7 @@ export async function assertNoOverflow(page: Page) {
  *
  * So: `assertNoOverflow` REPORTS offenders (advisory), and surfaces that are
  * clean call `assertNoClippedOverflow` directly to make it BLOCKING. The trigger
- * audits do. As each surface on the list is fixed, switch it over too.
+ * and Deployments audits do. As each surface on the list is fixed, switch it over too.
  */
 export async function findClippedOverflow(page: Page): Promise<string[]> {
   return page.evaluate(() => {

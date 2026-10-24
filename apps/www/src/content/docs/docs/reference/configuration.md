@@ -1714,6 +1714,10 @@ Project event MCP tools use the ProjectData event limits above: `PROJECT_EVENT_L
 | `VITE_CREDENTIAL_LIMITS_STALE_TIME_MS`       | `30000`            | Freshness window for credential usage-limit windows shown in the chat header and Settings → Advanced  |
 | `VITE_CREDENTIAL_LIMITS_REFETCH_INTERVAL_MS` | `60000`            | Poll cadence for credential usage-limit windows while the tab is visible (paused in the background)   |
 | `VITE_AUTOMATION_POLL_MS`                    | `30000`            | Automation page refresh cadence for schedules and watches while the tab is visible                    |
+| `VITE_DEPLOYMENTS_ACTIVE_POLL_MS`            | `5000`             | Deployments refresh cadence while a deploy, start or pause is in progress or a domain is turning on   |
+| `VITE_DEPLOYMENTS_IDLE_POLL_MS`              | `30000`            | Deployments refresh cadence otherwise; both cadences pause while the tab is hidden                    |
+| `VITE_DEPLOY_HELP_FIX_PROMPT_TEMPLATE`       | built-in text      | Request a Deployments **Ask an agent** puts in a new chat for a problem; `{environment}` is the name  |
+| `VITE_DEPLOY_HELP_DEPLOY_PROMPT_TEMPLATE`    | built-in text      | Request **Ask an agent** puts in a new chat to deploy; `{environment}` is the name                    |
 | `VITE_AUTOMATION_ATTENTION_WINDOW_MS`        | `259200000` (3 d)  | How long a failed one-time automation or workflow stays under **Needs your attention**                |
 | `VITE_AUTOMATION_RECENT_RUNS_PER_TRIGGER`    | `10`               | Runs read per trigger for the Automation overview, and shown on a watch's page                        |
 | `VITE_AUTOMATION_MAX_RUN_READS`              | `25`               | Most triggers whose runs the Automation overview or History reads, one request each                   |

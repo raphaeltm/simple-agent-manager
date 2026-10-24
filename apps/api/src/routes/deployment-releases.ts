@@ -129,14 +129,17 @@ export async function loadResolvedSecrets(
 
 const deploymentReleaseRoutes = new Hono<{ Bindings: Env }>();
 
+/** Releases returned per list request, newest first. Retention keeps few per environment. */
+const DEFAULT_RELEASE_LIST_LIMIT = 50;
+const MAX_RELEASE_LIST_LIMIT = 200;
 /** Apply events returned per request: enough for several re-applies of one release. */
 const DEFAULT_RELEASE_EVENTS_LIMIT = 200;
 const MAX_RELEASE_EVENTS_LIMIT = 500;
 
-function parseReleaseEventsLimit(raw: string | undefined): number {
+function parseLimit(raw: string | undefined, fallback: number, max: number): number {
   const parsed = Number.parseInt(raw ?? '', 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_RELEASE_EVENTS_LIMIT;
-  return Math.min(parsed, MAX_RELEASE_EVENTS_LIMIT);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
 }
 
 /**
@@ -280,7 +283,8 @@ export { buildProjectImageResolver, resolveManifestImageTags };
 
 /**
  * GET /api/projects/:projectId/environments/:envId/releases
- * List releases for an environment (newest first), each with who submitted it.
+ * List releases for an environment (newest first, `?limit=`, default 50), each with who
+ * submitted it.
  *
  * `submittedBy` lives in the manifest JSON. Reading it with `json_extract` keeps the large
  * manifests out of the response path; `json_valid` turns a malformed manifest into a null
@@ -312,7 +316,8 @@ deploymentReleaseRoutes.get(
       })
       .from(schema.deploymentReleases)
       .where(eq(schema.deploymentReleases.environmentId, envId))
-      .orderBy(desc(schema.deploymentReleases.version));
+      .orderBy(desc(schema.deploymentReleases.version))
+      .limit(parseLimit(c.req.query('limit'), DEFAULT_RELEASE_LIST_LIMIT, MAX_RELEASE_LIST_LIMIT));
 
     return c.json({
       releases: rows.map(({ submittedByJson, ...row }) => ({
@@ -385,7 +390,11 @@ deploymentReleaseRoutes.get(
       environmentId: envId,
       releaseId: release.id,
       releaseVersion: release.version,
-      limit: parseReleaseEventsLimit(c.req.query('limit')),
+      limit: parseLimit(
+        c.req.query('limit'),
+        DEFAULT_RELEASE_EVENTS_LIMIT,
+        MAX_RELEASE_EVENTS_LIMIT
+      ),
     });
     return c.json({ events });
   }

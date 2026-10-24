@@ -52,15 +52,21 @@ export function domainState(domain: DeploymentCustomDomain): { label: string; to
 
 const KEPT_DOMAIN = new Set(['active', 'activating', 'inactive_environment_stopped']);
 
-/** The address people use: their own domain when it is set up, else the one SAM made. */
+/**
+ * The address people use: their own domain when it is set up, else the one SAM made. With the
+ * environment's full domain list (the environment page) the domain's serving state decides;
+ * without it (the list page), the routed hostnames the environment list returns do.
+ */
 export function primaryAddress(
   env: DeploymentEnvironment,
-  domains: DeploymentCustomDomain[] | undefined
+  domains?: DeploymentCustomDomain[]
 ): { hostname: string; custom: boolean } | null {
-  const own = domains?.find(
-    (domain) => domain.desiredState !== 'deactivating' && KEPT_DOMAIN.has(domain.servingStatus)
-  );
-  if (own) return { hostname: own.hostname, custom: true };
+  const own = domains
+    ? domains.find(
+        (domain) => domain.desiredState !== 'deactivating' && KEPT_DOMAIN.has(domain.servingStatus)
+      )?.hostname
+    : env.customDomainHostnames?.[0];
+  if (own) return { hostname: own, custom: true };
   const generated = env.routeHostnames[0];
   return generated ? { hostname: generated, custom: false } : null;
 }

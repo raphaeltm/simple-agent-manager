@@ -8,7 +8,7 @@
  */
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Button, Dialog } from '@simple-agent-manager/ui';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { useCreateEnvironment } from './data';
 import { STICKY_FOOTER } from './dialogs';
@@ -44,6 +44,13 @@ export function NewEnvironmentDialog({
   const [name, setName] = useState('');
   const [access, setAccess] = useState<Access | null>(null);
   const [chosen, setChosen] = useState<string[]>([]);
+  // On a phone the profile chips open below the fold, under a Create button that is already
+  // on screen: bring them into view so the choice is seen before it is submitted.
+  const profilesRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (access === 'some')
+      profilesRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, [access]);
   const clean = name.trim();
   const taken = existing.includes(clean);
   const nameError =
@@ -133,7 +140,7 @@ export function NewEnvironmentDialog({
             </label>
           ))}
           {access === 'some' && (
-            <div className="flex flex-col gap-2 pt-1">
+            <div ref={profilesRef} className="flex scroll-mb-28 flex-col gap-2 pt-1">
               <span className="text-[13px] text-fg-muted">Pick at least one:</span>
               <ProfileToggles
                 profiles={profiles}

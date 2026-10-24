@@ -37,8 +37,7 @@ import {
   verifyDeploymentCustomDomain,
 } from '../../lib/api';
 import { DEPLOYMENTS_ACTIVE_POLL_MS, DEPLOYMENTS_IDLE_POLL_MS } from '../../lib/poll-intervals';
-
-const root = (scope: string, projectId: string) => ['auth', scope, 'deployments', projectId];
+import { deploymentQueryKeys } from '../../lib/query-options';
 
 const CHANGING_ENVIRONMENT = new Set(['starting', 'stopping']);
 const IN_FLIGHT_RELEASE = new Set(['created', 'applying']);
@@ -46,7 +45,7 @@ const IN_FLIGHT_RELEASE = new Set(['created', 'applying']);
 export function useEnvironments(projectId: string) {
   const scope = useQueryScope();
   return useQuery({
-    queryKey: [...root(scope, projectId), 'environments'],
+    queryKey: deploymentQueryKeys.environments(scope, projectId),
     queryFn: () => listDeploymentEnvironments(projectId),
     enabled: Boolean(scope),
     select: (result) => result.environments,
@@ -82,7 +81,7 @@ function useEnvQuery<T>(
 ) {
   const scope = useQueryScope();
   return useQuery({
-    queryKey: [...root(scope, projectId), envId, part],
+    queryKey: deploymentQueryKeys.environment(scope, projectId, part, envId),
     queryFn: () => fn(envId ?? ''),
     enabled: Boolean(scope && envId && enabled),
     refetchInterval:
@@ -154,28 +153,6 @@ export function useDomains(projectId: string, envId: string | undefined) {
   );
 }
 
-/** Custom domains for every environment, so the list can show `shop.example.com`. */
-export function useAllDomains(projectId: string, envIds: string[]) {
-  const scope = useQueryScope();
-  return useQuery({
-    queryKey: [...root(scope, projectId), 'all-domains', envIds.join(',')],
-    queryFn: async () => {
-      const results = await Promise.all(
-        envIds.map(
-          async (envId) =>
-            [
-              envId,
-              (await listDeploymentCustomDomains(projectId, envId)).customDomains ?? [],
-            ] as const
-        )
-      );
-      return new Map(results);
-    },
-    enabled: Boolean(scope) && envIds.length > 0,
-    refetchInterval: DEPLOYMENTS_IDLE_POLL_MS,
-  });
-}
-
 export function useVolumes(projectId: string, envId: string | undefined) {
   return useEnvQuery(projectId, envId, 'volumes', (id) =>
     listDeploymentEnvironmentVolumes(projectId, id)
@@ -233,7 +210,7 @@ export function useLogs(
 export function useTaskTitle(projectId: string, taskId: string | null | undefined) {
   const scope = useQueryScope();
   return useQuery({
-    queryKey: [...root(scope, projectId), 'task', taskId],
+    queryKey: deploymentQueryKeys.task(scope, projectId, taskId),
     queryFn: () => getProjectTask(projectId, taskId ?? ''),
     enabled: Boolean(scope && taskId),
     select: (task) => task.title,
@@ -246,15 +223,15 @@ export function useProfiles(projectId: string) {
   return useAgentProfiles(projectId, scope).profiles;
 }
 
-/** Mutations refresh every Deployments query for the project: few, cheap, and always right. */
-function useInvalidate(projectId: string) {
+/** Mutations refresh every Deployments query: few, cheap, and always right. */
+function useInvalidate() {
   const scope = useQueryScope();
   const client = useQueryClient();
-  return () => client.invalidateQueries({ queryKey: root(scope, projectId) });
+  return () => client.invalidateQueries({ queryKey: deploymentQueryKeys.all(scope) });
 }
 
 export function useEnvironmentActions(projectId: string, envId: string) {
-  const invalidate = useInvalidate(projectId);
+  const invalidate = useInvalidate();
   const toast = useToast();
   // Every action reports its failure in words; none fails silently.
   const options = {
@@ -354,7 +331,7 @@ export function useEnvironmentActions(projectId: string, envId: string) {
 }
 
 export function useCreateEnvironment(projectId: string) {
-  const invalidate = useInvalidate(projectId);
+  const invalidate = useInvalidate();
   const toast = useToast();
   return useMutation({
     mutationFn: async (input: { name: string; agents: 'off' | 'any' | string[] }) => {

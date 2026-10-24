@@ -9,15 +9,12 @@
  * 5. Server internals, collapsed. Pause and Delete at the very bottom, with Delete
  *    behind a typed confirmation instead of a red button beside Stop.
  */
-import { Button, buttonClassName } from '@simple-agent-manager/ui';
-import { ChevronLeft, ExternalLink, ScrollText, Sparkles } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
+import { LoadError, Loading } from '../../components/page-kit/page';
 import { useToast } from '../../hooks/useToast';
-import type { DeploymentEnvironment, DeploymentReleaseSummary } from '../../lib/api';
-import { LoadError, Loading } from '../automation/page';
-import { Panel } from '../automation/ui';
 import { useProjectContext } from '../ProjectContext';
 import { Column, type IndexEntry, OnThisPage } from './column';
 import {
@@ -31,7 +28,7 @@ import {
 } from './data';
 import { AddDomainDialog, DeleteDialog, LogsDialog, PauseDialog } from './dialogs';
 import { domainProblems, primaryAddress } from './domains';
-import { ago, tint, TONE_COLOR } from './format';
+import { Hero } from './hero';
 import {
   agentAccess,
   ASKS_AGENT,
@@ -39,12 +36,10 @@ import {
   describeHealth,
   describeProblems,
   type Fix,
-  type HealthInfo,
   isAnswering,
   profileNameOf,
-  versionOnStart,
 } from './model';
-import { PauseOrDelete } from './pause-or-delete';
+import { PauseOrDelete, pauseOrDeleteTitle } from './pause-or-delete';
 import { ProblemList } from './problems';
 import { RecentDeploys } from './recent-deploys';
 import { Addresses } from './sections/addresses';
@@ -52,173 +47,7 @@ import { AppSettings } from './sections/app-settings';
 import { BehindTheScenes } from './sections/behind';
 import { SavedData } from './sections/saved-data';
 import { WhoCanDeploy } from './sections/who-can-deploy';
-import { AddressLine, AgentAvatar, ChatLink, EnvTitle, HealthMark, useAskAgent } from './shared';
-
-/** The one action that matters most right now, as the page's only primary button. */
-function HeroAction({
-  info,
-  hostname,
-  agentsOn,
-  hasProblems,
-  canStart,
-  onStart,
-  onAsk,
-  onAllowAgents,
-}: {
-  info: HealthInfo;
-  hostname: string | null;
-  agentsOn: boolean;
-  /** When a problem card below already offers the fix, the hero does not repeat it. */
-  hasProblems: boolean;
-  /** Start needs a release to bring back. */
-  canStart: boolean;
-  onStart: () => void;
-  onAsk: () => void;
-  onAllowAgents: () => void;
-}) {
-  if (info.health === 'paused')
-    return canStart ? <Button onClick={onStart}>Start again</Button> : null;
-  // A problem card below already offers the fix (or "Let agents deploy here…"); don't repeat it.
-  if (info.health === 'down' && hasProblems) return null;
-  if (info.health === 'new' || info.health === 'down') {
-    // Asking an agent is pointless while agents may not deploy here: offer the switch first.
-    // Opens the "who can deploy" choice; it never grants access by itself.
-    if (!agentsOn) return <Button onClick={onAllowAgents}>Let agents deploy here…</Button>;
-    return (
-      <Button onClick={onAsk}>
-        <Sparkles size={16} aria-hidden />
-        {info.health === 'new' ? 'Ask an agent to deploy' : 'Ask an agent to fix it'}
-      </Button>
-    );
-  }
-  if (!hostname || !isAnswering(info.health)) return null;
-  return (
-    <a
-      href={`https://${hostname}`}
-      target="_blank"
-      rel="noreferrer"
-      className={`${buttonClassName({ variant: 'primary' })} no-underline`}
-    >
-      Open app <ExternalLink size={16} aria-hidden />
-    </a>
-  );
-}
-
-function Hero({
-  env,
-  info,
-  hostname,
-  extraAddresses,
-  projectId,
-  credit,
-  profileName,
-  agentsOn,
-  hasProblems,
-  onLogs,
-  onStart,
-  onAsk,
-  onAllowAgents,
-}: {
-  env: DeploymentEnvironment;
-  info: HealthInfo;
-  hostname: string | null;
-  extraAddresses: number;
-  projectId: string;
-  /** The release the status sentence is about: the live one, else the newest. */
-  credit: DeploymentReleaseSummary | null;
-  profileName: string | null;
-  agentsOn: boolean;
-  hasProblems: boolean;
-  onLogs: () => void;
-  onStart: () => void;
-  onAsk: () => void;
-  onAllowAgents: () => void;
-}) {
-  const color = TONE_COLOR[info.tone];
-  const release = credit;
-  const answering = isAnswering(info.health);
-  // Logs come from a running server; without one there are none to show.
-  const showLogs = Boolean(env.latestRelease) && env.node?.status === 'running';
-  return (
-    <Panel className="relative overflow-hidden p-5 sm:p-6" label={env.name}>
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-28"
-        style={{ background: `linear-gradient(180deg, ${tint(color, 16)}, transparent)` }}
-      />
-      <div className="relative flex flex-col gap-4">
-        <div className="flex items-start gap-3">
-          <HealthMark info={info} size={48} />
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <EnvTitle name={env.name} />
-            <p className="m-0 text-[15px] text-fg-primary">
-              <span className="font-semibold" style={{ color }}>
-                {info.label}.
-              </span>{' '}
-              {info.sentence}
-            </p>
-          </div>
-        </div>
-
-        {hostname && (
-          <div className="flex flex-col">
-            <AddressLine hostname={hostname} size="lg" answering={answering} />
-            {!answering && (
-              <span className="text-[13px] text-fg-muted">
-                {info.health === 'paused'
-                  ? 'Answers again when you start it.'
-                  : 'Not answering right now.'}
-              </span>
-            )}
-            {extraAddresses > 0 && (
-              <a
-                href="#addresses"
-                className="inline-flex min-h-9 w-fit items-center text-[13px] font-medium text-fg-muted no-underline hover:text-fg-primary"
-              >
-                +{extraAddresses} more {extraAddresses === 1 ? 'address' : 'addresses'}
-              </a>
-            )}
-          </div>
-        )}
-
-        {release && (
-          <div className="flex items-center gap-2.5 text-[13px] text-fg-muted">
-            <AgentAvatar name={profileName ?? 'Someone'} size={28} />
-            <span className="min-w-0">
-              v{release.version} by{' '}
-              <span className="font-semibold text-fg-primary">{profileName ?? 'someone'}</span>,{' '}
-              {ago(release.createdAt)}
-              {release.submittedBy?.taskId && (
-                <>
-                  {', from '}
-                  <ChatLink projectId={projectId} taskId={release.submittedBy.taskId} />
-                </>
-              )}
-            </span>
-          </div>
-        )}
-
-        <div className="flex flex-wrap gap-3">
-          <HeroAction
-            info={info}
-            hostname={hostname}
-            agentsOn={agentsOn}
-            hasProblems={hasProblems}
-            canStart={Boolean(versionOnStart(env))}
-            onStart={onStart}
-            onAsk={onAsk}
-            onAllowAgents={onAllowAgents}
-          />
-          {showLogs && (
-            <Button variant="secondary" onClick={onLogs}>
-              <ScrollText size={16} aria-hidden /> Logs
-            </Button>
-          )}
-        </div>
-      </div>
-    </Panel>
-  );
-}
+import { useAskAgent } from './shared';
 
 /** Two sections side by side from 1280 px; one column (page order) below that. */
 const PAIR = 'grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]';
@@ -346,7 +175,7 @@ export function EnvironmentPage() {
     { id: 'addresses', label: 'Addresses', value: String(addressCount) },
     { id: 'data', label: 'Saved data', value: diskSize ? `${diskSize} GB` : 'None' },
     { id: 'behind-the-scenes', label: 'Behind the scenes' },
-    { id: 'pause', label: env.status === 'stopped' ? 'Start or delete' : 'Pause or delete' },
+    { id: 'pause', label: pauseOrDeleteTitle(env) },
   ];
 
   return (

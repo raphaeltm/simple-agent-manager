@@ -585,6 +585,18 @@ Preferred body: Docker Compose YAML with `Content-Type: text/yaml`, `application
 
 Raw manifest JSON is still accepted for backward compatibility when another content type is used.
 
+### `GET /api/projects/:projectId/environments/:envId/releases`
+
+List an environment's releases, newest first. Each release includes `submittedBy` — the `taskId`, `agentProfileId`, `workspaceId` and `userId` of the chat that sent it — or `null` when it was not sent by an agent. Optional `?limit=` (default 50, at most 200) caps how many releases come back.
+
+### `GET /api/projects/:projectId/environments/:envId/releases/:releaseId`
+
+Get one release, including its stored manifest.
+
+### `GET /api/projects/:projectId/environments/:envId/releases/:releaseId/events`
+
+The steps the deployment server reported while applying a release, oldest first: `{ "events": [{ "seq", "level", "eventType", "step", "message", "createdAt" }] }`. Each step reports `deployment.apply.<step>_started` and `…_completed`; a failure arrives as `deployment.apply.failed`. Optional `?limit=` (default 200, at most 500) returns the newest events.
+
 ### `POST /api/projects/:id/tasks/submit`
 
 Submit an idea for autonomous execution. This is the chat-first path used by the web app; it creates the task, records the first message, and starts execution.

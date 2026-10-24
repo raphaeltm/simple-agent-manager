@@ -540,6 +540,26 @@ export const CUSTOM_DOMAINS: Record<string, unknown[]> = {
   ],
 };
 
+/**
+ * What `GET …/environments` adds to each environment: the custom domains that route to it,
+ * by the server's own rule (`listRoutedCustomDomainHostnames`: wanted, routed, not deleted).
+ */
+export function withRoutedHostnames(environments: unknown[]): unknown[] {
+  return environments.map((env) => {
+    const id = (env as { id: string }).id;
+    const domains = (CUSTOM_DOMAINS[id] ?? []) as Array<{
+      hostname: string;
+      desiredState: string;
+      routingStatus: string;
+      deletedAt: string | null;
+    }>;
+    const customDomainHostnames = domains
+      .filter((d) => d.desiredState === 'active' && d.routingStatus === 'active' && !d.deletedAt)
+      .map((d) => d.hostname);
+    return { ...(env as Record<string, unknown>), customDomainHostnames };
+  });
+}
+
 function volume(envId: string, name: string, sizeGb: number, attached: boolean, n: number) {
   return {
     id: `vol-${envId}-${name}`,

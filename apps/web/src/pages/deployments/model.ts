@@ -14,7 +14,11 @@
  * `observedDeployment.deployStatus` (the six-dimension model in `deploy/status.go`) is read
  * when present, in the agent's own vocabulary, but no agent sends it yet.
  */
-import type { AgentProfile } from '@simple-agent-manager/shared';
+import {
+  type AgentProfile,
+  DEPLOYMENT_PLACEMENT_ERROR_PREFIX,
+  DEPLOYMENT_STOP_ERROR_PREFIX,
+} from '@simple-agent-manager/shared';
 
 import type { DeploymentEnvironment, DeploymentReleaseSummary } from '../../lib/api';
 import { objectRecord, serviceRecords, since, type Tone } from './format';
@@ -71,8 +75,8 @@ export type FailureKind = 'placement' | 'pause' | 'start';
 export function failureKind(env: DeploymentEnvironment): FailureKind | null {
   const error = env.observedDeployment.errorMessage;
   if (!error) return null;
-  if (/^Deployment node placement/i.test(error)) return 'placement';
-  if (/^Stop failed/i.test(error)) return 'pause';
+  if (error.startsWith(DEPLOYMENT_PLACEMENT_ERROR_PREFIX)) return 'placement';
+  if (error.startsWith(DEPLOYMENT_STOP_ERROR_PREFIX)) return 'pause';
   if (env.status === 'error' && !env.nodeId && env.observedDeployment.status === 'failed')
     return 'start';
   return null;
@@ -230,14 +234,16 @@ export function describeHealth(env: DeploymentEnvironment): HealthInfo {
                 : "The app isn't running.",
     };
   }
-  const first = describeProblems(env)[0];
-  if (first) {
+  const problems = describeProblems(env);
+  if (problems.length > 0) {
+    // The problem cards below say what is wrong; the status takes the colour of the worst one,
+    // so the two never disagree.
     return {
       ...base,
       health: 'trouble',
       label: 'Needs attention',
-      tone: 'warning',
-      sentence: `Running version ${live}. ${first.title}.`,
+      tone: problems.some((problem) => problem.tone === 'danger') ? 'danger' : 'warning',
+      sentence: `Running version ${live}.`,
     };
   }
   return {

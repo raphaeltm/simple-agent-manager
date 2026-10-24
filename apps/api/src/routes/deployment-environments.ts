@@ -25,7 +25,10 @@ import {
   validateAllowedDeployProfiles,
 } from '../services/deployment-control';
 import { getEnvironmentPublicRouteTargets } from '../services/deployment-custom-domains';
-import { buildDeploymentEnvironmentResponse } from '../services/deployment-environment-summary';
+import {
+  buildDeploymentEnvironmentResponse,
+  listRoutedCustomDomainHostnames,
+} from '../services/deployment-environment-summary';
 import { collectEnvironmentRouteHostnames } from '../services/deployment-routing';
 import {
   deleteEnvironmentVolume,
@@ -289,14 +292,19 @@ deploymentEnvironmentRoutes.get(
     const db = drizzle(c.env.DATABASE, { schema });
     await requireProjectAccess(db, projectId, userId);
 
-    const rows = await db
-      .select()
-      .from(schema.deploymentEnvironments)
-      .where(eq(schema.deploymentEnvironments.projectId, projectId))
-      .orderBy(schema.deploymentEnvironments.createdAt);
+    const [rows, routedDomains] = await Promise.all([
+      db
+        .select()
+        .from(schema.deploymentEnvironments)
+        .where(eq(schema.deploymentEnvironments.projectId, projectId))
+        .orderBy(schema.deploymentEnvironments.createdAt),
+      listRoutedCustomDomainHostnames(db, projectId),
+    ]);
 
     const environments = await Promise.all(
-      rows.map((row) => buildDeploymentEnvironmentResponse(db, c.env, row))
+      rows.map((row) =>
+        buildDeploymentEnvironmentResponse(db, c.env, row, routedDomains.get(row.id) ?? [])
+      )
     );
 
     return c.json({ environments });

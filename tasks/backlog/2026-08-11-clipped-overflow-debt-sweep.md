@@ -29,7 +29,7 @@ This matches the repo's progressive quality-tool rollout policy.
 | `settings-infomaniak-credential-audit`   | same                                                    |                                                                                        |
 | `settings-digitalocean-credential-audit` | same                                                    |                                                                                        |
 | `project-settings-subpages-audit`        | `<div class="min-h-screen min-w-0 overflow-x-hidden…">` | Project.tsx wrapper — same shape as the triggers bug, with a long project name         |
-| `deployment-control-surface-audit`       | same                                                    |                                                                                        |
+| ~~`deployment-control-surface-audit`~~   | same                                                    | Gone 2026-10-23: `deployments-ui-audit` replaced it and blocks on clipped overflow     |
 | `slice-e-theme-audit`                    | same                                                    | Agent Context page                                                                     |
 | `skills-ui-audit`                        | `<p class="…line-clamp-2 text-xs…">`                    | Same `line-clamp` + unbreakable-token bug fixed in `TriggerCard` — needs `break-words` |
 | `project-chat-composer-audit`            | `<div class="mb-3 overflow-hidden rounded-lg…">`        | Composer wizard step container; check whether it is an intentional slide               |

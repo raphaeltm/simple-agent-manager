@@ -1,4 +1,8 @@
 export { DEPLOYMENT_ENVIRONMENT_NAME_RE } from './environment-name';
+export {
+  DEPLOYMENT_PLACEMENT_ERROR_PREFIX,
+  DEPLOYMENT_STOP_ERROR_PREFIX,
+} from './lifecycle-errors';
 export type { DeploymentReservationDefaults, DeploymentReservationManifest } from './resources';
 export {
   DEFAULT_DEPLOYMENT_SERVICE_CPU_MILLIS,

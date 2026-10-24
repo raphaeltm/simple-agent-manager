@@ -139,8 +139,9 @@ vi.mock('../../../src/middleware/error', () => ({
   },
 }));
 
-// Manifest validation passthrough
-vi.mock('@simple-agent-manager/shared', () => ({
+// Manifest validation passthrough; everything else (lifecycle error prefixes) is real.
+vi.mock('@simple-agent-manager/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/shared')>()),
   DEFAULT_DEPLOYMENT_SERVICE_CPU_MILLIS: 250,
   DEFAULT_DEPLOYMENT_SERVICE_MEMORY_MB: 256,
   DEFAULT_DEPLOYMENT_SERVICE_DISK_MB: 1024,

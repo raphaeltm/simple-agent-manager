@@ -4,11 +4,11 @@
  */
 import type { NodeLogEntry } from '@simple-agent-manager/shared';
 import { StatusBadge } from '@simple-agent-manager/ui';
-import { Check, Copy, ExternalLink, Trash2 } from 'lucide-react';
+import { ExternalLink, Trash2 } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
-import { useToast } from '../../hooks/useToast';
+import { CopyButton } from '../../components/page-kit/ui';
 import { useTaskTitle } from './data';
 import { tint, type Tone, TONE_COLOR } from './format';
 import { type Health, type HealthInfo } from './model';
@@ -70,30 +70,6 @@ export function EnvTitle({ name }: { name: string }) {
   );
 }
 
-/** A quiet copy button: a 44 px target without a box around it. */
-export function CopyIcon({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
-  const toast = useToast();
-  return (
-    <button
-      type="button"
-      aria-label={`Copy ${label}`}
-      onClick={() => {
-        navigator.clipboard.writeText(value).then(
-          () => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          },
-          () => toast.error('Copy failed. Select the text and copy it instead.')
-        );
-      }}
-      className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-fg-muted hover:bg-surface-hover hover:text-fg-primary"
-    >
-      {copied ? <Check size={16} aria-hidden /> : <Copy size={16} aria-hidden />}
-    </button>
-  );
-}
-
 /**
  * A hostname with copy beside it. It is a link only while the app answers; a paused or
  * down app shows the address as text, so nobody taps through to an error page.
@@ -133,7 +109,7 @@ export function AddressLine({
           {hostname}
         </span>
       )}
-      {copy && <CopyIcon label={hostname} value={`https://${hostname}`} />}
+      {copy && <CopyButton quiet label={hostname} value={`https://${hostname}`} />}
     </span>
   );
 }

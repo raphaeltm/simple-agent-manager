@@ -9,8 +9,8 @@ import { Button } from '@simple-agent-manager/ui';
 import { Check, LoaderCircle, X } from 'lucide-react';
 import { useState } from 'react';
 
+import { Panel, SectionTitle } from '../../components/page-kit/ui';
 import type { DeploymentEnvironment, DeploymentReleaseSummary } from '../../lib/api';
-import { Panel, SectionTitle } from '../automation/ui';
 import { useReleaseEvents } from './data';
 import { ago, tint } from './format';
 import { placementFailed, profileNameOf, releaseOutcome } from './model';

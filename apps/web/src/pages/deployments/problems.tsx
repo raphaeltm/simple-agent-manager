@@ -4,7 +4,7 @@
 import { Button } from '@simple-agent-manager/ui';
 import { ChevronDown, CircleAlert, Sparkles, TriangleAlert } from 'lucide-react';
 
-import { Panel, SectionTitle } from '../automation/ui';
+import { Panel, SectionTitle } from '../../components/page-kit/ui';
 import { ASKS_AGENT, type Fix, type Problem } from './model';
 
 const FIX_LABEL: Record<Fix, string> = {

@@ -12,7 +12,7 @@ import { resolve } from 'node:path';
 
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow, seedTheme } from './audit-helpers';
+import { assertNoClippedOverflow, assertNoOverflow, seedTheme } from './audit-helpers';
 import {
   CONFIG,
   CONTAINERS,
@@ -30,6 +30,7 @@ import {
   TASK_TITLES,
   USER_ID,
   VOLUMES,
+  withRoutedHostnames,
 } from './deployments-ui-fixtures';
 
 const OUT = resolve(process.cwd(), '../../.codex/tmp/playwright-screenshots/deployments');
@@ -92,7 +93,7 @@ async function mockApi(page: Page, opts: MockOptions = {}): Promise<PolicyWrite[
           return json(route, { error: 'INTERNAL_ERROR', message: 'D1 is unavailable' }, 500);
         if (method === 'POST')
           return json(route, { ...ENVIRONMENTS[6], id: 'env-new', name: 'staging-eu' });
-        return json(route, { environments });
+        return json(route, { environments: withRoutedHostnames(environments) });
       }
       if (envMatch) {
         const envId = envMatch[1] ?? '';
@@ -188,6 +189,15 @@ async function capture(page: Page, name: string, opts: { full?: boolean } = {}) 
   if (opts.full && size) await page.setViewportSize(size);
 }
 
+/**
+ * Nothing overflows the page, and nothing is clipped inside a container either: the app
+ * shell hides horizontal overflow, so the document check alone cannot see a clipped row.
+ */
+async function assertLayout(page: Page) {
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
 const envUrl = (envId: string) => `/projects/${PROJECT_ID}/deployments/${envId}`;
 const listUrl = `/projects/${PROJECT_ID}/deployments`;
 
@@ -209,7 +219,7 @@ for (const vp of VIEWPORTS) {
       await expect(attention.getByText("SAM couldn't get a server for version 1")).toBeVisible();
       // The address people visit: the custom domain, not the generated hostname.
       await expect(page.getByText('shop.northwind.dev').first()).toBeVisible();
-      await assertNoOverflow(page);
+      await assertLayout(page);
       await capture(page, 'list');
       await capture(page, 'list', { full: true });
     });
@@ -222,7 +232,7 @@ for (const vp of VIEWPORTS) {
         'href',
         /\/docs\/guides\/app-deployments\/$/
       );
-      await assertNoOverflow(page);
+      await assertLayout(page);
       await capture(page, 'list-empty');
     });
 
@@ -231,7 +241,7 @@ for (const vp of VIEWPORTS) {
       await page.goto(listUrl);
       await expect(page.getByText(/Could not load/)).toBeVisible();
       await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
-      await assertNoOverflow(page);
+      await assertLayout(page);
     });
 
     // Each state names the sentence it must say.
@@ -281,7 +291,7 @@ for (const vp of VIEWPORTS) {
           // No server ever ran: no logs to offer.
           await expect(page.getByRole('button', { name: 'Logs' })).toHaveCount(0);
         }
-        await assertNoOverflow(page);
+        await assertLayout(page);
         await capture(page, `environment-${label}`);
         await capture(page, `environment-${label}`, { full: true });
       });
@@ -293,7 +303,7 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByText(/Could not load recent deploys/)).toBeVisible();
       await expect(page.getByText(/Could not load the settings/)).toBeVisible();
       await expect(page.getByRole('region', { name: 'Who can deploy' })).toBeVisible();
-      await assertNoOverflow(page);
+      await assertLayout(page);
     });
 
     test('new environment needs an access choice before it can be created', async ({ page }) => {
@@ -306,10 +316,20 @@ for (const vp of VIEWPORTS) {
       await expect(create).toBeDisabled();
       await dialog.getByText('Only some agent profiles').click();
       await expect(create).toBeDisabled();
-      await dialog.getByRole('button', { name: 'Release Captain' }).click();
+      // On a phone the profile chips open below the fold: the sheet scrolls them into view,
+      // clear of the sticky footer that holds Create.
+      const captain = dialog.getByRole('button', { name: 'Release Captain' });
+      const footer = create.locator('xpath=..');
+      await expect(async () => {
+        const chip = await captain.boundingBox();
+        const bar = await footer.boundingBox();
+        expect(chip && bar ? chip.y + chip.height <= bar.y : false).toBe(true);
+      }).toPass({ timeout: 3000 });
+      await capture(page, 'create-environment-profiles');
+      await captain.click();
       await expect(create).toBeEnabled();
       await dialog.getByRole('heading', { name: 'New environment' }).scrollIntoViewIfNeeded();
-      await assertNoOverflow(page);
+      await assertLayout(page);
       await capture(page, 'create-environment');
     });
 
@@ -342,7 +362,7 @@ for (const vp of VIEWPORTS) {
       await expect(section.getByText(/Pick at least one profile/)).toBeVisible();
       expect(writes).toEqual([]);
       await section.scrollIntoViewIfNeeded();
-      await assertNoOverflow(page);
+      await assertLayout(page);
       await capture(page, 'who-can-deploy');
     });
 
@@ -357,7 +377,7 @@ for (const vp of VIEWPORTS) {
         .getByText('Points to')
         .evaluate((element) => element.closest('div')?.scrollIntoView({ block: 'center' }));
       await expect(dialog.getByText('r1-web-3000-env-01m5prod.apps.sammy.party')).toBeInViewport();
-      await assertNoOverflow(page);
+      await assertLayout(page);
       await capture(page, 'add-domain');
     });
 
@@ -369,7 +389,7 @@ for (const vp of VIEWPORTS) {
       const confirm = dialog.getByRole('button', { name: 'Delete forever' });
       await dialog.getByRole('textbox').fill('produc');
       await expect(confirm).toBeDisabled();
-      await assertNoOverflow(page);
+      await assertLayout(page);
       await capture(page, 'delete');
       await dialog.getByRole('textbox').fill('production');
       await expect(confirm).toBeEnabled();
@@ -380,7 +400,7 @@ for (const vp of VIEWPORTS) {
       await page.goto(envUrl('env-staging'));
       await page.getByRole('button', { name: 'See logs' }).first().click();
       await expect(page.getByRole('dialog').getByText(/ECONNREFUSED/)).toBeVisible();
-      await assertNoOverflow(page);
+      await assertLayout(page);
       await capture(page, 'logs');
       await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
       await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -394,7 +414,7 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByText('deploy-prod-01')).toBeVisible();
       await expect(page.getByLabel('Hardware details')).toBeVisible();
       await summary.scrollIntoViewIfNeeded();
-      await assertNoOverflow(page);
+      await assertLayout(page);
       await capture(page, 'behind-the-scenes');
     });
 

@@ -6,15 +6,15 @@
 import { Button } from '@simple-agent-manager/ui';
 import { Plus, RefreshCw } from 'lucide-react';
 
+import { CopyButton, Panel, SectionTitle } from '../../../components/page-kit/ui';
 import type {
   DeploymentCustomDomain,
   DeploymentEnvironment,
   DeploymentPublicRoute,
 } from '../../../lib/api';
-import { Panel, SectionTitle } from '../../automation/ui';
 import { useEnvironmentActions } from '../data';
 import { domainState } from '../domains';
-import { AddressLine, CopyIcon, TonePill, TwoStepRemove } from '../shared';
+import { AddressLine, TonePill, TwoStepRemove } from '../shared';
 
 function DomainRow({
   projectId,
@@ -54,7 +54,7 @@ function DomainRow({
             <code className="min-w-0 break-all font-mono text-[13px] text-fg-primary">
               {domain.cnameTarget}
             </code>
-            <CopyIcon label="DNS target" value={domain.cnameTarget} />
+            <CopyButton quiet label="DNS target" value={domain.cnameTarget} />
           </span>
           <Button
             variant="secondary"

@@ -5,7 +5,10 @@
  * provider volumes while tearing down or restoring the runtime node placement.
  */
 
-import type { CredentialProvider } from '@simple-agent-manager/shared';
+import {
+  type CredentialProvider,
+  DEPLOYMENT_STOP_ERROR_PREFIX,
+} from '@simple-agent-manager/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Hono } from 'hono';
@@ -312,7 +315,7 @@ async function teardownLinkedDeploymentNode(
       await markEnvironmentStopFailed(
         db,
         envId,
-        'Stop failed because the linked deployment node record was not found; refusing to detach volumes without live teardown.'
+        `${DEPLOYMENT_STOP_ERROR_PREFIX} because the linked deployment node record was not found; refusing to detach volumes without live teardown.`
       );
       throw errors.conflict(
         'Cannot safely stop deployment environment: linked deployment node record was not found, so volumes were not detached.'
@@ -327,7 +330,7 @@ async function teardownLinkedDeploymentNode(
       await markEnvironmentStopFailed(
         db,
         envId,
-        `Stop failed because the deployment node was ${node.status}; refusing to detach volumes without live teardown.`
+        `${DEPLOYMENT_STOP_ERROR_PREFIX} because the deployment node was ${node.status}; refusing to detach volumes without live teardown.`
       );
       throw errors.conflict(
         `Cannot safely stop deployment environment: deployment node is ${node.status}, so volumes were not detached.`
@@ -353,7 +356,7 @@ async function teardownLinkedDeploymentNode(
     await markEnvironmentStopFailed(
       db,
       envId,
-      `Stop failed while tearing down the deployment node: ${message}`
+      `${DEPLOYMENT_STOP_ERROR_PREFIX} while tearing down the deployment node: ${message}`
     );
     throw errors.conflict(`Could not stop deployment environment on node: ${message}`);
   }
@@ -396,7 +399,7 @@ async function detachVolumesForEnvironmentStop(
       await markEnvironmentStopFailed(
         db,
         envId,
-        `Stop failed while detaching deployment volumes: ${message}`
+        `${DEPLOYMENT_STOP_ERROR_PREFIX} while detaching deployment volumes: ${message}`
       );
       throw errors.conflict(`Could not detach deployment volume(s): ${message}`);
     }

@@ -5,12 +5,12 @@ import { Button, Dialog } from '@simple-agent-manager/ui';
 import { Check, Copy, Search, X } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 
+import { LoadError } from '../../components/page-kit/page';
+import { Chips, COPIED_FEEDBACK_MS, CopyButton } from '../../components/page-kit/ui';
 import { useToast } from '../../hooks/useToast';
 import type { DeploymentEnvironment, DeploymentPublicRoute, DeploymentVolume } from '../../lib/api';
-import { LoadError } from '../automation/page';
-import { Chips } from '../automation/ui';
 import { type LogFilter, useEnvironmentActions, useLogs } from './data';
-import { CopyIcon, LogList } from './shared';
+import { LogList } from './shared';
 
 /**
  * Keeps a sheet's buttons on screen while its body scrolls: phones are shorter than the
@@ -120,7 +120,7 @@ export function LogsDialog({
               className="min-h-11 w-full min-w-0 rounded-md border border-border-default bg-surface pl-9 pr-3 text-[14px] text-fg-primary"
             />
           </span>
-          {entries.length > 0 && <CopyIcon label="these log lines" value={text} />}
+          {entries.length > 0 && <CopyButton quiet label="these log lines" value={text} />}
         </form>
         {logs.isPending ? (
           <p className="m-0 text-sm text-fg-muted">Loading logs…</p>
@@ -162,7 +162,7 @@ function RecordRow({
             navigator.clipboard.writeText(value).then(
               () => {
                 setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
+                setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
               },
               () => toast.error('Copy failed. Select the text instead.')
             );

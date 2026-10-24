@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -104,38 +104,45 @@ export interface ListDeploymentReleaseEventsInput {
 /**
  * The newest apply events for one release, returned oldest first.
  *
- * Project and environment are part of the predicate, not just the release ID, so an ID from
- * another project reads nothing. Events written before the release ID was resolved carry
- * only the version (`appendDeploymentReleaseEvent`), so those match on environment + version.
- * Re-applies of the same release (Start, agent restart) append to the same history; the
- * newest window is what callers need.
+ * Project and environment are part of every predicate, not just the release ID, so an ID from
+ * another project reads nothing. Events written before the release ID was resolved carry only
+ * the version (`appendDeploymentReleaseEvent`); those are read separately, so the common case
+ * walks `idx_deployment_release_events_release_seq` in order instead of sorting. Re-applies of
+ * the same release (Start, agent restart) append to the same history; the newest window is
+ * what callers need.
  */
 export async function listDeploymentReleaseEvents(
   db: Db,
   input: ListDeploymentReleaseEventsInput
 ): Promise<DeploymentReleaseEventView[]> {
   const events = schema.deploymentReleaseEvents;
-  const rows = await db
-    .select({
-      seq: events.seq,
-      level: events.level,
-      eventType: events.eventType,
-      step: events.step,
-      message: events.message,
-      createdAt: events.createdAt,
-    })
-    .from(events)
-    .where(
-      and(
-        eq(events.projectId, input.projectId),
-        eq(events.environmentId, input.environmentId),
-        or(
-          eq(events.releaseId, input.releaseId),
-          and(isNull(events.releaseId), eq(events.releaseVersion, input.releaseVersion))
-        )
-      )
-    )
-    .orderBy(desc(events.createdAt), desc(events.seq))
-    .limit(input.limit);
-  return rows.reverse();
+  const columns = {
+    seq: events.seq,
+    level: events.level,
+    eventType: events.eventType,
+    step: events.step,
+    message: events.message,
+    createdAt: events.createdAt,
+  };
+  const scope = and(
+    eq(events.projectId, input.projectId),
+    eq(events.environmentId, input.environmentId)
+  );
+  const [byId, byVersion] = await Promise.all([
+    db
+      .select(columns)
+      .from(events)
+      .where(and(eq(events.releaseId, input.releaseId), scope))
+      .orderBy(desc(events.seq))
+      .limit(input.limit),
+    db
+      .select(columns)
+      .from(events)
+      .where(and(isNull(events.releaseId), eq(events.releaseVersion, input.releaseVersion), scope))
+      .orderBy(desc(events.createdAt))
+      .limit(input.limit),
+  ]);
+  return [...byId, ...byVersion]
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.seq - b.seq)
+    .slice(-input.limit);
 }

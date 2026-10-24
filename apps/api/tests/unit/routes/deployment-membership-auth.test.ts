@@ -109,6 +109,7 @@ vi.mock('../../../src/services/deployment-control', () => ({
 }));
 
 vi.mock('../../../src/services/deployment-environment-summary', () => ({
+  listRoutedCustomDomainHostnames: vi.fn(async () => new Map<string, string[]>()),
   buildDeploymentEnvironmentResponse: vi.fn(async (_db, _env, row: EnvironmentRow) => ({
     id: row.id,
     projectId: row.projectId,

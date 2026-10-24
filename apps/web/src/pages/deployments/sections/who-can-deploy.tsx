@@ -12,14 +12,24 @@ import { CircleAlert } from 'lucide-react';
 import { useState } from 'react';
 
 import { ModelToggleSwitch } from '../../../components/agent-models/ModelToggleSwitch';
+import { Panel, SectionTitle } from '../../../components/page-kit/ui';
 import type { DeploymentEnvironment } from '../../../lib/api';
-import { Panel, SectionTitle } from '../../automation/ui';
 import { useEnvironmentActions } from '../data';
 import { agentAccess, liveVersionOf } from '../model';
 import { ProfileToggles } from '../shared';
 
 type Mode = 'any' | 'some';
 
+const MODES = [
+  { id: 'any', label: 'Any agent in this project' },
+  { id: 'some', label: 'Only these' },
+] as const;
+
+/**
+ * Each choice saves at once, and "Any agent" widens access. So the options take Tab and
+ * Enter only, not the radio-group arrow keys (`useRadioKeys`), which select as they move:
+ * one stray key press would let every agent deploy.
+ */
 function ModeChoice({
   value,
   busy,
@@ -31,12 +41,7 @@ function ModeChoice({
 }) {
   return (
     <div role="radiogroup" aria-label="Which agents" className="flex flex-wrap gap-2">
-      {(
-        [
-          { id: 'any', label: 'Any agent in this project' },
-          { id: 'some', label: 'Only these' },
-        ] as const
-      ).map((option) => (
+      {MODES.map((option) => (
         <button
           key={option.id}
           type="button"

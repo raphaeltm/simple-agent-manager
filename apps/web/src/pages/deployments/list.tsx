@@ -14,12 +14,12 @@ import { ChevronRight, ExternalLink, Plus, Rocket, Sparkles } from 'lucide-react
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
-import type { DeploymentCustomDomain, DeploymentEnvironment } from '../../lib/api';
-import { LoadError, Loading, PageHeader } from '../automation/page';
-import { Panel, SectionTitle } from '../automation/ui';
+import { LoadError, Loading, PageHeader } from '../../components/page-kit/page';
+import { Panel, SectionTitle } from '../../components/page-kit/ui';
+import type { DeploymentEnvironment } from '../../lib/api';
 import { useProjectContext } from '../ProjectContext';
 import { Column } from './column';
-import { useAllDomains, useEnvironments, useProfiles } from './data';
+import { useEnvironments, useProfiles } from './data';
 import { primaryAddress } from './domains';
 import { ago, tint, TONE_COLOR } from './format';
 import {
@@ -61,19 +61,18 @@ function shippedLine(env: DeploymentEnvironment, profileName: string | null): st
  */
 function EnvRow({
   env,
-  domains,
   profileName,
   projectId,
 }: {
   env: DeploymentEnvironment;
-  domains: DeploymentCustomDomain[] | undefined;
   profileName: string | null;
   projectId: string;
 }) {
   const info = describeHealth(env);
   const askAgent = useAskAgent(projectId);
   const problem = describeProblems(env)[0];
-  const address = primaryAddress(env, domains);
+  // The list response carries each environment's routed custom domains.
+  const address = primaryAddress(env);
   const answering = isAnswering(info.health);
   const shipped = shippedLine(env, profileName);
   const attention = groupOf(info.health) === 'attention';
@@ -122,7 +121,7 @@ function EnvRow({
         // "Ask an agent" only where an agent may deploy and the problem is the app's to fix;
         // a silent server or a closed environment needs a look, not a deploy.
         canAskAgent(env) && problem?.fixes.some((fix) => ASKS_AGENT.has(fix)) ? (
-          <div className="flex pb-3 pl-[68px] sm:pb-0 sm:pl-0 sm:pr-4">
+          <div className="flex pb-3 pl-[68px] sm:self-stretch sm:border-0 sm:border-l sm:border-solid sm:border-border-default sm:pb-0 sm:pl-4 sm:pr-4 sm:items-center">
             <Button
               variant="secondary"
               onClick={() =>
@@ -190,10 +189,6 @@ export function DeploymentsList() {
   const navigate = useNavigate();
   const environments = useEnvironments(projectId);
   const envs = useMemo(() => sortForAttention(environments.data ?? []), [environments.data]);
-  const envIds = useMemo(() => envs.map((env) => env.id), [envs]);
-  // Follow-up (idea 01M5NBRGEV68MMK65BV0BT06EP): one request per environment until the list
-  // response carries custom domains.
-  const domains = useAllDomains(projectId, envIds);
   const profiles = useProfiles(projectId);
   const [creating, setCreating] = useState(false);
 
@@ -245,7 +240,6 @@ export function DeploymentsList() {
                       key={env.id}
                       env={env}
                       projectId={projectId}
-                      domains={domains.data?.get(env.id)}
                       profileName={profileNameOf(
                         env.latestRelease?.submittedBy?.agentProfileId,
                         profiles
