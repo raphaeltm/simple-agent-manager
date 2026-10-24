@@ -270,7 +270,13 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
     }
   });
 
-  it('is idempotent on retry: a second identical start touches the same link', async () => {
+  // What this proves and what it does not: the route always asks for the SAME
+  // (source, target, relation) triple for a given chat and idea, which is the shape
+  // T1's store upserts rather than duplicating (its own DO tests cover that). It does
+  // not drive a real retry — a second `POST /tasks/submit` mints a new task and a new
+  // session, so the only production path that re-links one session is a replayed SAM
+  // dispatch reservation, which this route cannot reach.
+  it('always asks for the same link triple for a given chat and idea', async () => {
     const { sqlite, env } = createEnv();
     try {
       const app = createApp();
@@ -278,8 +284,6 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
       await submit(app, env, body);
       await submit(app, env, body);
       expect(mocks.recordLink).toHaveBeenCalledTimes(2);
-      // Same source/target/relation both times: T1's store upserts, so two identical
-      // writes are one row rather than a duplicate.
       expect(mocks.recordLink.mock.calls[0]?.[2]).toEqual(mocks.recordLink.mock.calls[1]?.[2]);
     } finally {
       sqlite.close();

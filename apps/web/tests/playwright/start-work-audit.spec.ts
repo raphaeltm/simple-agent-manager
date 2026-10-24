@@ -285,9 +285,10 @@ test.describe('Start work sheet', () => {
 
     // `toBeVisible` says nothing about stacking order, and the picker makes every other
     // body child `inert` while it is open, so a hit test cannot see the sheet on top of
-    // it either. The picker's default drawer layer (41) sits BELOW the dialog layer this
-    // sheet uses (50), which would paint it behind the sheet that opened it while every
-    // interaction assertion still passed. Compare the painted stacking levels.
+    // it either. The picker's default drawer layer sits BELOW the dialog layer this
+    // sheet uses, which would paint it behind the sheet that opened it while every
+    // interaction assertion still passed. Compare the painted stacking levels rather
+    // than any particular number, so a change to the token scale cannot silently pass.
     const stacking = await page.evaluate(() => {
       const level = (element: Element | null): number => {
         for (let node = element as HTMLElement | null; node; node = node.parentElement) {
@@ -421,8 +422,27 @@ test.describe('Start work sheet', () => {
   test('Escape closes the sheet and returns focus to the trigger', async ({ page }) => {
     await setupMocks(page);
     await openSheet(page);
+    // The sheet takes focus on open, so Escape and a screen reader both land inside it.
+    await expect(page.getByTestId('start-work-sheet')).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Start work on this idea/i })).toBeFocused();
+  });
+
+  // Two stacked modals each register their own document-level Escape listener, and this
+  // sheet's was registered first. Without the guard, one press closes the whole sheet out
+  // from under the picker the person is actually looking at.
+  test('Escape closes only the profile picker while it is open', async ({ page }) => {
+    await setupMocks(page);
+    await openSheet(page);
+    await page.getByRole('button', { name: /Who works on it/i }).click();
+    await expect(page.getByRole('dialog', { name: /Choose a profile/i })).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: /Choose a profile/i })).toHaveCount(0);
+    // The sheet is still there, and a second press closes it.
+    await expect(page.getByTestId('start-work-sheet')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 });

@@ -27,21 +27,21 @@ const TRUNCATION_NOTICE = '[truncated by SAM: the full text is available with ge
  *
  * It only ever sees a line that `foldLookalikes` has already canonicalised, which is the
  * load-bearing half of the defence: this pattern alone matches ASCII hyphens, so a body
- * written with em dashes (`————— END UNTRUSTED IDEA —————`) or with a zero-width space
- * inside the rule (`-​---- END …`) would slip past it while rendering identically.
+ * written with em dashes, or with a zero-width space wedged inside the rule, would slip
+ * past it while rendering identically.
  */
 const MARKER_LINE = /^\s*-{3,}\s*(BEGIN|END)\s+UNTRUSTED\b.*$/i;
 
 /** Dash lookalikes folded to ASCII `-` before the marker test. */
 const DASH_LOOKALIKES =
-  /[‐-―⁃−─━ー︱︲﹘﹣－ｰ]/g;
+  /[\u2010-\u2015\u2043\u2212\u2500\u2501\u30fc\ufe31\ufe32\ufe58\ufe63\uff0d\uff70]/g;
 /**
  * Invisible characters removed before the marker test: zero-width, word joiner, BOM, the
  * bidirectional overrides and isolates, and the soft hyphen. None of them render, so a
  * line carrying them looks exactly like a marker to a reader while defeating a naive
  * pattern match.
  */
-const INVISIBLE = /[­​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
+const INVISIBLE = /[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
 
 /**
  * The form a line is matched against: dash lookalikes folded to ASCII and invisible
@@ -117,7 +117,8 @@ export function untrustedTextBlock(input: UntrustedTextInput): UntrustedTextBloc
   if (raw.length === 0 || cap === 0) return { ...base, text: '', truncated: raw.length > cap };
 
   const truncated = raw.length > cap;
-  const body = neutralizeUntrustedText(raw.slice(0, cap)) + (truncated ? `\n${TRUNCATION_NOTICE}` : '');
+  const body =
+    neutralizeUntrustedText(raw.slice(0, cap)) + (truncated ? `\n${TRUNCATION_NOTICE}` : '');
   const label = kind.toUpperCase();
   return {
     ...base,

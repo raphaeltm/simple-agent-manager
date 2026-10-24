@@ -15,7 +15,13 @@ import { describe, expect, it } from 'vitest';
 
 import { ideaInstructionLines } from '../../../src/routes/mcp/instruction-idea-context';
 
-/** Every module that produces text an agent sees when it starts work on an idea. */
+/**
+ * Every module that produces text an agent sees when it starts work on an idea.
+ *
+ * Hand-maintained: nothing forces a new generator to add itself here. Add the file when
+ * you write one, and prefer putting generated agent-visible text in one of these rather
+ * than in a new module, so the guard keeps covering it.
+ */
 const GENERATED_TEXT_SOURCES = [
   '../../../src/routes/mcp/instruction-idea-context.ts',
   '../../../src/operations/start-work-core.ts',

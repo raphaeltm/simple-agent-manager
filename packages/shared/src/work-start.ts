@@ -28,10 +28,13 @@ export interface WorkStartLayer {
 }
 
 export interface WorkStartPlan {
-  /** null = the server resolves it from the project's credentials and settings. */
-  runtime: AgentProfileRuntime | null;
-  workspaceProfile: WorkspaceProfile;
+  /**
+   * The mode the caller sends explicitly on start. Both submit branches honour an
+   * explicit mode, so what the sheet promises and what the server creates are the same
+   * value rather than two resolutions that could drift.
+   */
   taskMode: TaskMode;
+  /** The same fact, named: what SAM will do with this profile. */
   capability: WorkStartCapability;
 }
 
@@ -57,12 +60,17 @@ function asTaskMode(value: string | null | undefined): TaskMode | null {
  * `POST /tasks/submit` passes. Keep those four in step: if the submit path changes its
  * layering, this changes with it or the sheet starts promising the wrong thing.
  *
+ * The runtime is deliberately NOT part of the result. The server resolves it from the
+ * profile and the project's credentials, and nothing here should encourage a caller to
+ * send one — that is how the July "Execute silently turned an Instant profile into a VM"
+ * bug happened. The layer's `runtime` is still read, because a skill that pins one is
+ * part of what the person chose, but only to keep the override chain honest.
+ *
  * `cf-container` is NOT forced to `conversation`. `submitInstantTask` honours a `task`
  * mode inside a container, so claiming otherwise would be a lie about a real capability.
  */
 export function resolveWorkStartPlan(input: WorkStartPlanInput): WorkStartPlan {
   const { profile, skill } = input;
-  const runtime = skill?.runtime ?? profile?.runtime ?? null;
   const workspaceProfile =
     asWorkspaceProfile(skill?.workspaceProfile) ??
     asWorkspaceProfile(profile?.workspaceProfile) ??
@@ -72,12 +80,7 @@ export function resolveWorkStartPlan(input: WorkStartPlanInput): WorkStartPlan {
     asTaskMode(skill?.taskMode) ??
     asTaskMode(profile?.taskMode) ??
     (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
-  return {
-    runtime,
-    workspaceProfile,
-    taskMode,
-    capability: taskMode === 'task' ? 'task-execution' : 'conversation',
-  };
+  return { taskMode, capability: taskMode === 'task' ? 'task-execution' : 'conversation' };
 }
 
 /**

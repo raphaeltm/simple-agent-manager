@@ -89,8 +89,13 @@ export function useStartWork({
   projectDefaultWorkspaceProfile?: string | null;
 }>): UseStartWorkResult {
   const queryScope = useQueryScope();
-  const { profiles, loading: profilesLoading } = useAgentProfiles(projectId, queryScope);
-  const profilePicker = useProfilePicker(projectId, queryScope);
+  // Every query here is gated on the sheet being open: an idea page that nobody starts
+  // work from must not fetch profiles, picker state, skills or links
+  // (`.claude/rules/60-request-io-and-bundle-budgets.md`). These two hooks take their
+  // `enabled` from the project id, so withholding it is how they are gated.
+  const scopedProjectId = enabled ? projectId : undefined;
+  const { profiles, loading: profilesLoading } = useAgentProfiles(scopedProjectId, queryScope);
+  const profilePicker = useProfilePicker(scopedProjectId, queryScope);
   const { picker } = profilePicker;
 
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);

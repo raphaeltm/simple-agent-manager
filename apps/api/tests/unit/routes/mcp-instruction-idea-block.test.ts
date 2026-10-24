@@ -217,6 +217,23 @@ describe('get_instructions idea block', () => {
     }
   });
 
+  // The second sort key. Unreachable through Start work today (one origin per chat), but
+  // an explicit re-link could produce it, and a flipped comparator would otherwise ship green.
+  it('prefers the most recently linked idea when two carry the same relation', async () => {
+    const { sqlite, d1 } = makeIdeaDatabase();
+    try {
+      mocks.listLinks.mockResolvedValue([
+        link({ targetId: 'idea-foreign', firstAt: 1_000 }),
+        link({ targetId: 'idea-1', firstAt: 9_000 }),
+      ]);
+      expect(payloadOf(await handleGetInstructions(1, token, makeEnv(d1))).idea).toMatchObject({
+        ideaId: 'idea-1',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('uses the conversation wording for a discusses link', async () => {
     const { sqlite, d1 } = makeIdeaDatabase();
     try {

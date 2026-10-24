@@ -162,8 +162,10 @@ Each session is labelled **Chat** or **Task** in the session list. A **Task** ca
 permission, but not ask questions or send links. Which you get depends on what you start it with:
 
 - An [agent profile](/docs/guides/agents/#agent-profiles) whose runtime is
-  [Instant](/docs/guides/instant-sessions/) gives a **Chat** (unless you attach a file or start from
-  an idea's **Execute** button, and also pick a skill set to **Task**).
+  [Instant](/docs/guides/instant-sessions/) gives a **Chat**, unless you attach a file and also pick
+  a skill set to **Task**. [Starting work on an idea](/docs/guides/idea-execution/#starting-work-on-an-idea)
+  no longer forces a **Task**: the sheet runs the profile and skill you chose, and says which of the
+  two you will get before you press the button.
 - On a VM, a profile whose **Task Mode** is **Conversation** gives a **Chat**; profiles you create
   with **Chat and explore** in the chat input are set that way. With **Task Mode** left at
   **Default**, a profile whose **Workspace Profile** is **Lightweight** does too. If you also pick a

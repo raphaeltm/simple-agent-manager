@@ -7,33 +7,33 @@
   "highlights": [
     "Capture a problem statement and a phased plan before dispatching an agent",
     "Link related chat conversations so the agent starts with the discussion that shaped the plan",
-    "Dispatch an agent with one click once the idea is ready"
+    "Hand the idea to an agent when it is ready, choosing who works on it"
   ],
   "docsHref": "/docs/guides/idea-execution/",
   "group": "automate",
   "screenshots": [
     {
       "src": "/images/features/sam-ideas-detail.png",
-      "alt": "Idea detail page for rate-limiting the payouts endpoint showing a Ready badge, a problem statement, a three-phase plan with bullets, a green Execute button, and a Conversations sidebar listing three linked sessions",
-      "caption": "Structured ideas with problem, plan, and an Execute button to dispatch an agent"
+      "alt": "Idea detail page for rate-limiting the payouts endpoint showing a Ready badge, a problem statement, a three-phase plan with bullets, a green primary action button, and a Conversations sidebar listing three linked sessions",
+      "caption": "Structured ideas with problem, plan, and a Start work button to hand the idea to an agent"
     }
   ],
   "details": [
     {
       "headline": "Structured idea capture",
-      "body": "Write down the problem, sketch a plan, and link related chat conversations for context. When you are ready, hit Execute to dispatch an agent that picks up the idea as a task.",
+      "body": "Write down the problem, sketch a plan, and link related chat conversations for context. When you are ready, hit Start work: you choose who works on it, add a note, and SAM hands the agent the idea and everything already linked to it.",
       "screenshot": {
         "src": "/images/features/sam-ideas-detail.png",
-        "alt": "Idea detail page for rate-limiting the payouts endpoint showing a Ready badge, a problem statement, a three-phase plan with bullets, a green Execute button, and a Conversations sidebar listing three linked sessions",
-        "caption": "Each idea has a problem statement, plan, and a button to dispatch an agent"
+        "alt": "Idea detail page for rate-limiting the payouts endpoint showing a Ready badge, a problem statement, a three-phase plan with bullets, a green primary action button, and a Conversations sidebar listing three linked sessions",
+        "caption": "Each idea has a problem statement, a plan, and a button that hands it to an agent"
       }
     },
     {
       "headline": "Link chat context",
-      "body": "Attach related conversations to an idea before you dispatch it, so the agent that picks it up starts with the discussion that shaped the plan instead of a bare problem statement.",
+      "body": "Attach related conversations to an idea before you start work on it, so the agent that picks it up starts with the discussion that shaped the plan instead of a bare problem statement.",
       "screenshot": {
         "src": "/images/features/sam-ideas-detail.png",
-        "alt": "Idea detail page for rate-limiting the payouts endpoint showing a Ready badge, a problem statement, a three-phase plan with bullets, a green Execute button, and a Conversations sidebar listing three linked sessions",
+        "alt": "Idea detail page for rate-limiting the payouts endpoint showing a Ready badge, a problem statement, a three-phase plan with bullets, a green primary action button, and a Conversations sidebar listing three linked sessions",
         "caption": "Linked conversations sit beside the plan, so context travels with the idea"
       }
     }

@@ -2141,3 +2141,63 @@ describe('ProjectChat agent profile selection', () => {
     expect(screen.queryByText('Which agent?')).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Start work (T7) replaced the Execute button, so the chat page no longer has an
+ * idea-execution mode: `?executeIdea=` is not read, the composer is not pre-filled with a
+ * generated prompt, and no idea is linked after submit. Regression guard for the removal —
+ * the old effect and the old post-submit link both lived in `useProjectChatState`.
+ */
+describe('ProjectChat no longer executes ideas', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.listCredentials.mockResolvedValue([]);
+    mocks.getTrialStatus.mockResolvedValue({ available: false });
+    mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.listAgentProfiles.mockResolvedValue([makeAgentProfile()]);
+    mocks.listSkills.mockResolvedValue([]);
+    mocks.availableCommands = [];
+    mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+    mocks.listCredentials.mockResolvedValue([
+      { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
+    ]);
+  });
+
+  it('leaves the composer empty when the URL still carries an executeIdea parameter', async () => {
+    renderProjectChat(`/projects/${PROJECT_ID}/chat?executeIdea=idea-1`);
+
+    await waitFor(() => {
+      expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
+    });
+
+    const composer = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    expect(composer).toHaveValue('');
+    expect(screen.queryByText(/\/do skill/i)).not.toBeInTheDocument();
+  });
+
+  it('submits a typed message without an idea id and links nothing afterwards', async () => {
+    mocks.submitTask.mockResolvedValue({
+      taskId: 'task-new',
+      sessionId: 'session-new',
+      branchName: 'sam/thing',
+      status: 'queued',
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat?executeIdea=idea-1`);
+
+    await waitFor(() => {
+      expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
+    });
+
+    const composer = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    fireEvent.change(composer, { target: { value: 'Run the tests.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(mocks.submitTask).toHaveBeenCalledTimes(1));
+    const body = mocks.submitTask.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(body.message).toBe('Run the tests.');
+    expect(body).not.toHaveProperty('sourceIdeaId');
+  });
+});

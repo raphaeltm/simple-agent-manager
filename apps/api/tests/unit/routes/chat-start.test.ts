@@ -347,6 +347,21 @@ describe('chatStartRoutes', () => {
       expect(db.insert).not.toHaveBeenCalled();
     });
 
+    // The Instant counterpart of the VM path's "no orphaned queued task": a link failure
+    // inside `acceptInstantSession` must reach the route's failure handling and stop,
+    // never schedule the launch that gives the agent its first prompt.
+    it('does not launch the agent when acceptance fails on the idea link', async () => {
+      mocks.instant.acceptInstantSession.mockImplementation(() =>
+        Promise.reject(new Error('Could not link this chat to the idea'))
+      );
+      const res = await start({ sourceIdeaId: 'idea-open' });
+      expect(res.status).toBe(500);
+      expect(mocks.instant.continueInstantSessionLaunch).not.toHaveBeenCalled();
+      // Liveness: the task row WAS created, so this is the failure path and not a
+      // rejection that happened before anything was written.
+      expect(db.insert).toHaveBeenCalled();
+    });
+
     it('409s a done idea before anything is created', async () => {
       const res = await start({ sourceIdeaId: 'idea-done' });
       expect(res.status).toBe(409);

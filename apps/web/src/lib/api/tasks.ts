@@ -6,6 +6,7 @@ import type {
   ListTasksResponse,
   RunTaskRequest,
   RunTaskResponse,
+  SubmitTaskRequest as SharedSubmitTaskRequest,
   Task,
   TaskDependency,
   TaskDetailResponse,
@@ -38,28 +39,20 @@ export interface TaskAttachmentRef {
 /**
  * The browser's view of `POST /api/projects/:id/tasks/submit`.
  *
- * A looser local copy of `SubmitTaskRequest` in `@simple-agent-manager/shared` (wider
- * `vmSize`/`vmLocation`, and `TaskAttachmentRef` instead of `TaskAttachment`). Keep any
- * new field in step with the shared definition, which is the canonical one.
+ * Derived from the canonical `SubmitTaskRequest` in `@simple-agent-manager/shared` rather
+ * than re-typed, so a new field on the contract cannot be forgotten here. Only the three
+ * fields the browser genuinely sees differently are replaced: the two VM hints it passes
+ * through as plain strings from form state, and attachments, which are presigned upload
+ * references at this layer and only become `TaskAttachment`s server-side.
  */
-export interface SubmitTaskRequest {
-  message: string;
+export type SubmitTaskRequest = Omit<
+  SharedSubmitTaskRequest,
+  'vmSize' | 'vmLocation' | 'attachments'
+> & {
   vmSize?: string;
   vmLocation?: string;
-  nodeId?: string;
-  agentType?: string;
-  resourceRequirements?: import('@simple-agent-manager/shared').ResourceRequirements;
-  workspaceProfile?: 'full' | 'lightweight';
-  devcontainerConfigName?: string | null;
-  parentTaskId?: string;
-  sourceSessionId?: string;
-  taskMode?: 'task' | 'conversation';
-  agentProfileId?: string;
-  skillId?: string;
   attachments?: TaskAttachmentRef[];
-  /** An open idea this work starts from; the server links it before the agent starts. */
-  sourceIdeaId?: string;
-}
+};
 
 export interface SubmitTaskResponse {
   taskId: string;

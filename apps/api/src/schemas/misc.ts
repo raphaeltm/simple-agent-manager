@@ -1,8 +1,8 @@
 import { MAX_HUMAN_INPUT_OPTION_LENGTH } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
-import { TaskAttachmentSchema } from './tasks';
 import { MAX_RESOURCE_ID_LENGTH } from './_validator';
+import { TaskAttachmentSchema } from './tasks';
 
 // Terminal
 export const TerminalRequestSchema = v.object({
