@@ -106,11 +106,13 @@ export async function addIdeaUpdate(
 
 export async function listIdeaUpdates(
   ctx: OperationContext,
-  input: { projectId: string; ideaId: string; cursor?: string }
+  input: { projectId: string; ideaId: string; cursor?: string; limit?: number }
 ) {
   await requireIdea(ctx, input.projectId, input.ideaId);
   const cursor = readOperationCursor(input.cursor);
-  const limit = await setting(ctx, 'collaboration.ideaUpdatePageSize');
+  const pageSize = await setting(ctx, 'collaboration.ideaUpdatePageSize');
+  // The optional override is internal and comes from the typed agent-context setting.
+  const limit = input.limit ?? pageSize;
   const page = await projectData.listIdeaUpdates(
     ctx.env,
     input.projectId,
@@ -120,6 +122,7 @@ export async function listIdeaUpdates(
   );
   return {
     updates: page.updates,
+    total: page.total,
     nextCursor: page.nextCursor
       ? formatOperationCursor({ updatedAt: page.nextCursor.createdAt, id: page.nextCursor.id })
       : null,

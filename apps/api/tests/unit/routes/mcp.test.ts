@@ -414,13 +414,9 @@ const mockDoStub = {
     (_owner: unknown, query: string, roles: string[] | null, limit: number) =>
       mockDoStub.searchMessages(query, null, roles, limit)
   ),
-  linkSessionIdea: vi.fn(),
-  unlinkSessionIdea: vi.fn(),
   recordResourceLink: vi.fn().mockResolvedValue('written'),
   removeResourceLink: vi.fn().mockResolvedValue(undefined),
   listResourceLinks: vi.fn().mockResolvedValue([]),
-  getIdeasForSession: vi.fn().mockReturnValue([]),
-  getSessionsForIdea: vi.fn().mockReturnValue([]),
   updateSessionTopic: vi.fn().mockResolvedValue(true),
   getAllHighConfidenceKnowledge: vi.fn().mockResolvedValue([]),
   // Without this, every get_instructions test in this file silently exercises only the

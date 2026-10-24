@@ -111,7 +111,6 @@ vi.mock('../../src/services/project-data', () => ({
   markAgentCompleted: vi.fn().mockResolvedValue(undefined),
   scheduleIdleCleanup: vi.fn().mockResolvedValue(undefined),
   updateNodeHeartbeats: vi.fn().mockResolvedValue(0),
-  getSessionsForIdea: vi.fn().mockResolvedValue([]),
 }));
 
 // Mock notification service

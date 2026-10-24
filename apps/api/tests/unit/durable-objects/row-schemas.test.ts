@@ -25,7 +25,6 @@ import {
   parseCount,
   parseCountCnt,
   parseEnabled,
-  parseIdeaSessionDetail,
   parseIdleCleanupSchedule,
   parseInboxMessageRow,
   parseMaterializationState,
@@ -40,7 +39,6 @@ import {
   parseRowid,
   parseSearchResultRow,
   parseSessionId,
-  parseSessionIdeaLink,
   parseSessionStatus,
   parseSessionStop,
   parseTrailingGroup,
@@ -87,7 +85,9 @@ describe('parseRow', () => {
   });
 
   it('handles non-object row input', () => {
-    expect(() => parseRow(TestSchema, 'not-an-object', 'ctx')).toThrow(/Row validation failed \(ctx\)/);
+    expect(() => parseRow(TestSchema, 'not-an-object', 'ctx')).toThrow(
+      /Row validation failed \(ctx\)/
+    );
   });
 });
 
@@ -381,7 +381,11 @@ describe('parseChatSessionListRow', () => {
   });
 
   it('is not idle when status is stopped even with agent_completed_at', () => {
-    const result = parseChatSessionListRow({ ...baseRow, status: 'stopped', agent_completed_at: 1050 });
+    const result = parseChatSessionListRow({
+      ...baseRow,
+      status: 'stopped',
+      agent_completed_at: 1050,
+    });
     expect(result.isIdle).toBe(false);
   });
 });
@@ -579,36 +583,6 @@ describe('parseWorkspaceIdleCheck', () => {
 });
 
 // =============================================================================
-// Session–Idea link parsers
-// =============================================================================
-
-describe('parseSessionIdeaLink', () => {
-  it('maps idea link row', () => {
-    const result = parseSessionIdeaLink({ task_id: 't1', context: 'related to', created_at: 1000 });
-    expect(result).toEqual({ taskId: 't1', context: 'related to', createdAt: 1000 });
-  });
-});
-
-describe('parseIdeaSessionDetail', () => {
-  it('maps idea session detail', () => {
-    const result = parseIdeaSessionDetail({
-      session_id: 's1',
-      topic: 'topic',
-      status: 'active',
-      context: 'ctx',
-      created_at: 1000,
-    });
-    expect(result).toEqual({
-      sessionId: 's1',
-      topic: 'topic',
-      status: 'active',
-      context: 'ctx',
-      linkedAt: 1000,
-    });
-  });
-});
-
-// =============================================================================
 // Cached command parsers
 // =============================================================================
 
@@ -777,6 +751,8 @@ describe('parseInboxMessageRow', () => {
   });
 
   it('throws on wrong type for content', () => {
-    expect(() => parseInboxMessageRow({ ...validRow, content: 123 })).toThrow(/Row validation failed/);
+    expect(() => parseInboxMessageRow({ ...validRow, content: 123 })).toThrow(
+      /Row validation failed/
+    );
   });
 });

@@ -4,10 +4,14 @@ import { log } from '../lib/logger';
 import { sanitizeUserInput } from '../lib/sanitize-user-input';
 import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../lib/search-query-limits';
 import { ulid } from '../lib/ulid';
+import { resolveAdminSetting } from '../services/admin-settings';
+import { getAgentLinkedContext } from './agent-linked-context';
 import { operationLink } from './connector-read-core';
 import { formatOperationCursor, readOperationCursor } from './cursors';
 import { OperationError } from './errors';
+import { ideaTaskPredicateSql } from './idea-identity';
 import { addIdeaUpdate, validateIdeaUpdateNote } from './idea-update-core';
+import { UNTRUSTED_TEXT_GUIDANCE, untrustedTextBlock } from './untrusted-text';
 export { ideaTaskPredicateSql } from './idea-identity';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
@@ -163,11 +167,32 @@ export async function searchIdeas(ctx: OperationContext, input: IdeasSearchInput
   };
 }
 
-export async function getIdea(ctx: OperationContext, projectId: string, ideaId: string) {
+function ideaContentPage(content: string, offset: number, maxLength: number) {
+  const encoder = new TextEncoder();
+  const characters: string[] = [];
+  let bytes = 0;
+  let length = 0;
+  for (const character of content.slice(offset, offset + maxLength)) {
+    const characterBytes = encoder.encode(character).length;
+    if (length + character.length > maxLength || bytes + characterBytes > maxLength) break;
+    characters.push(character);
+    length += character.length;
+    bytes += characterBytes;
+  }
+  return characters.join('');
+}
+
+export async function getIdea(
+  ctx: OperationContext,
+  projectId: string,
+  ideaId: string,
+  contentOffset = 0
+) {
+  const limits = getPlatformOperationLimits(ctx.env);
   const id = typeof ideaId === 'string' ? ideaId.trim() : '';
   if (!id) throw new OperationError('invalid_input', 'ideaId is required');
   const idea = await ctx.env.DATABASE.prepare(
-    'SELECT id, triggered_by, connector_client_name, title, description, status, priority, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ?'
+    `SELECT id, triggered_by, connector_client_name, title, description, status, priority, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ? AND ${ideaTaskPredicateSql()}`
   )
     .bind(id, projectId)
     .first<{
@@ -182,23 +207,70 @@ export async function getIdea(ctx: OperationContext, projectId: string, ideaId: 
       updated_at: string;
     }>();
   if (!idea) throw new OperationError('not_found', `Idea not found in this project: ${id}`);
+  if (
+    !Number.isSafeInteger(contentOffset) ||
+    contentOffset < 0 ||
+    contentOffset > (idea.description?.length ?? 0)
+  )
+    throw new OperationError('invalid_input', 'Invalid idea content offset');
+  const contentPageLength = Number(
+    await resolveAdminSetting(ctx.env, 'operations.agentIdeaContentPageLength')
+  );
+  if (!Number.isInteger(contentPageLength) || contentPageLength < 1)
+    throw new OperationError('unavailable', 'Idea content page setting is unavailable');
+  const related = await getAgentLinkedContext(ctx, { projectId, ideaId: id });
+  const titleBlock = untrustedTextBlock({
+    kind: 'idea title',
+    text: idea.title,
+    maxLength: limits.ideaTitleMaxLength,
+  });
+  const page =
+    idea.description === null
+      ? null
+      : ideaContentPage(idea.description, contentOffset, contentPageLength);
+  const nextContentOffset =
+    idea.description && page !== null && contentOffset + page.length < idea.description.length
+      ? contentOffset + page.length
+      : null;
+  const contentBlock =
+    page === null
+      ? null
+      : untrustedTextBlock({
+          kind: 'idea',
+          text: page,
+          maxLength: contentPageLength,
+          moreWith: 'get_idea',
+        });
   return {
     ideaId: idea.id,
     ...(ctx.actor.via !== 'workspace-agent'
       ? {
           triggeredBy: idea.triggered_by,
-          connectorClientName: idea.connector_client_name,
+          connectorClientName:
+            idea.connector_client_name === null
+              ? null
+              : untrustedTextBlock({
+                  kind: 'connector name',
+                  text: idea.connector_client_name,
+                  maxLength: limits.ideaTitleMaxLength,
+                }).text,
           link: `${operationLink(ctx, projectId)}/ideas/${encodeURIComponent(idea.id)}`,
           untrustedContent: true,
         }
       : {}),
-    title: idea.title,
-    content: idea.description,
+    title: titleBlock.text,
+    titleTruncated: titleBlock.truncated,
+    content: contentBlock?.text ?? null,
+    contentTruncated: contentOffset > 0 || nextContentOffset !== null,
+    contentOffset,
+    nextContentOffset,
     contentLength: idea.description?.length ?? 0,
     priority: idea.priority,
     status: idea.status,
     createdAt: idea.created_at,
     updatedAt: idea.updated_at,
+    related,
+    untrustedTextGuidance: UNTRUSTED_TEXT_GUIDANCE,
   };
 }
 

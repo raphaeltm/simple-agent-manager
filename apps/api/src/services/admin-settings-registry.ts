@@ -61,6 +61,11 @@ export type AdminSettingName =
   | 'operations.agentIdeaContextMaxLength'
   | 'operations.accountMapLinkProjectCap'
   | 'operations.accountMapIdeaCap'
+  | 'operations.agentLinkedListCap'
+  | 'operations.agentLinkedUpdatesCap'
+  | 'operations.agentLinkedTextMaxLength'
+  | 'operations.agentLinkedMaxBytes'
+  | 'operations.agentIdeaContentPageLength'
   | 'operations.cronSweepsEnabled'
   | 'operations.doAlarmsEnabled'
   | 'operations.stalledTaskClassifierEnabled'
@@ -350,6 +355,41 @@ const definitions: AdminSettingDefinition[] = [
     'Operations',
     'Maximum recent idea candidates checked for Account Map chat links.',
     { min: 1, max: 100 }
+  ),
+  integerDefinition(
+    'operations.agentLinkedListCap',
+    12,
+    'Operations',
+    'Maximum related items per list in agent context.',
+    { min: 1, max: 50 }
+  ),
+  integerDefinition(
+    'operations.agentLinkedUpdatesCap',
+    5,
+    'Operations',
+    'Maximum recent idea notes in agent context.',
+    { min: 1, max: 50 }
+  ),
+  integerDefinition(
+    'operations.agentLinkedTextMaxLength',
+    300,
+    'Operations',
+    'Maximum characters per related item text field sent to agents.',
+    { min: 50, max: 2000 }
+  ),
+  integerDefinition(
+    'operations.agentLinkedMaxBytes',
+    24000,
+    'Operations',
+    'Maximum serialized bytes of related context returned to an agent.',
+    { min: 2000, max: 36000 }
+  ),
+  integerDefinition(
+    'operations.agentIdeaContentPageLength',
+    12000,
+    'Operations',
+    'Maximum idea content characters in one agent get_idea response.',
+    { min: 1000, max: 16000 }
   ),
   integerDefinition(
     'operations.workloadIdentityTokenTtlSeconds',

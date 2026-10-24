@@ -46,10 +46,6 @@ const mockDoStub = {
   getSession: vi.fn().mockResolvedValue(null),
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
   searchMessages: vi.fn().mockReturnValue([]),
-  linkSessionIdea: vi.fn(),
-  unlinkSessionIdea: vi.fn(),
-  getIdeasForSession: vi.fn().mockReturnValue([]),
-  getSessionsForIdea: vi.fn().mockReturnValue([]),
   updateSessionTopic: vi.fn().mockResolvedValue(true),
   // Knowledge DO methods — will be configured per test
   searchKnowledgeObservations: vi.fn(),

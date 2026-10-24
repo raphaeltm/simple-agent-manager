@@ -19,6 +19,10 @@ import {
 } from '../../../src/operations/platform-operations';
 import { operationInputJsonSchema, operations } from '../../../src/operations/registry';
 import type { Actor, OperationContext } from '../../../src/operations/types';
+import {
+  UNTRUSTED_TEXT_GUIDANCE,
+  untrustedTextBlock,
+} from '../../../src/operations/untrusted-text';
 import { runWorkspaceOperation } from '../../../src/operations/workspace-adapter';
 import { getMcpLimits } from '../../../src/routes/mcp/_helpers';
 import { handleGetPeerAgentOutput } from '../../../src/routes/mcp/workspace-tools-direct';
@@ -40,6 +44,19 @@ vi.mock('../../../src/services/project-data', async (importOriginal) => {
     searchKnowledgeObservations: vi.fn().mockResolvedValue([]),
   };
 });
+vi.mock('../../../src/operations/agent-linked-context', () => ({
+  getAgentLinkedContext: vi.fn().mockResolvedValue({
+    kind: 'idea',
+    id: 'idea-owner',
+    sessions: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    files: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    pullRequests: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    relatedIdeas: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    recentUpdates: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    untrustedContent: true,
+    untrustedTextGuidance: 'mock guidance',
+  }),
+}));
 
 const projectId = 'project-owner';
 const otherProjectId = 'project-other';
@@ -421,13 +438,49 @@ describe('shared platform operation authorization on real SQLite', () => {
               text: JSON.stringify(
                 {
                   ideaId: 'idea-owner',
-                  title: 'Owner idea',
-                  content: 'Content',
+                  title: untrustedTextBlock({
+                    kind: 'idea title',
+                    text: 'Owner idea',
+                    maxLength: 200,
+                  }).text,
+                  titleTruncated: false,
+                  content: untrustedTextBlock({ kind: 'idea', text: 'Content', maxLength: 65536 })
+                    .text,
+                  contentTruncated: false,
+                  contentOffset: 0,
+                  nextContentOffset: null,
                   contentLength: 7,
                   priority: 0,
                   status: 'draft',
                   createdAt: '2026-10-09',
                   updatedAt: '2026-10-09',
+                  related: {
+                    kind: 'idea',
+                    id: 'idea-owner',
+                    sessions: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+                    files: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+                    pullRequests: {
+                      items: [],
+                      total: 0,
+                      truncated: false,
+                      totalIsLowerBound: false,
+                    },
+                    relatedIdeas: {
+                      items: [],
+                      total: 0,
+                      truncated: false,
+                      totalIsLowerBound: false,
+                    },
+                    recentUpdates: {
+                      items: [],
+                      total: 0,
+                      truncated: false,
+                      totalIsLowerBound: false,
+                    },
+                    untrustedContent: true,
+                    untrustedTextGuidance: 'mock guidance',
+                  },
+                  untrustedTextGuidance: UNTRUSTED_TEXT_GUIDANCE,
                 },
                 null,
                 2
@@ -528,7 +581,7 @@ describe('operation registry contract', () => {
     expect(platform.taskDetailRecentMessageLimit).toBe(7);
     expect(platform.messageSearchLimit).toBe(11);
   });
-  it('exports twenty-six stable operations and JSON Schema inputs', () => {
+  it('exports stable operations and JSON Schema inputs', () => {
     expect(operations.map((operation) => operation.name)).toEqual([
       'sam_task_get',
       'sam_tasks_list',
@@ -536,6 +589,7 @@ describe('operation registry contract', () => {
       'sam_chats_search',
       'sam_ideas_search',
       'sam_idea_get',
+      'sam_linked_context_get',
       'sam_idea_create',
       'sam_idea_update',
       'sam_idea_updates_list',

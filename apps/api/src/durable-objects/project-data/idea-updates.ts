@@ -76,6 +76,14 @@ export function listIdeaUpdates(
   cursor: { createdAt: string; id: string } | null,
   limit: number
 ) {
+  const total = Number(
+    sql
+      .exec(
+        'SELECT COUNT(*) AS count FROM idea_updates WHERE idea_id = ? AND deleted_at IS NULL',
+        ideaId
+      )
+      .one()?.count ?? 0
+  );
   const rows = cursor
     ? sql
         .exec(
@@ -97,6 +105,7 @@ export function listIdeaUpdates(
   const selected = rows.slice(0, limit);
   const last = selected.at(-1);
   return {
+    total,
     updates: selected.map(note),
     nextCursor:
       rows.length > limit && last

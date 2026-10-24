@@ -79,6 +79,8 @@ SAM connects an idea to the chats that created, edited, read, or worked on it. W
 
 Agents can use `link_to_idea` for a file, pull request, or related idea created outside those automatic paths, and `unlink_from_idea` to remove an explicit link. The idea's Conversations list still shows its connected chats. Linked lists are capped; the API reports their totals and whether results were truncated. A pull request total may be shown as a lower bound when the associated chat list is too large to scan in one bounded read.
 
+Agent tools expose this context in one call. `get_idea` returns the idea's plan, related chats, files, pull requests with recorded state and checks, related ideas, and recent updates. For a long plan, `contentTruncated` and `nextContentOffset` tell the agent to call `get_idea` again with that offset to read the next part. `get_linked_context` returns related work for an idea, chat or library file; in a workspace, calling it without an ID uses the current chat. These responses cap each list and disclose totals and truncation. Text written by people, agents or GitHub is enclosed as untrusted data, so a quoted instruction in a note or pull request title does not change the agent's instructions.
+
 ### Execution Steps
 
 While an idea is executing, SAM tracks detailed progress:
@@ -156,6 +158,7 @@ An agent running inside a workspace has access to MCP tools that provide project
 | `list_idea_updates`   | Read the idea's updates newest first, using `nextCursor` for older notes.                                                                                                                                                  |
 | `list_ideas`          | View existing ideas                                                                                                                                                                                                        |
 | `get_idea`            | Read idea details                                                                                                                                                                                                          |
+| `get_linked_context`  | Read bounded related chats, ideas, files, pull requests and recent updates for an idea, chat or library file; defaults to the current chat in a workspace.                                                                 |
 | `search_ideas`        | Search ideas by keyword                                                                                                                                                                                                    |
 | `update_task_status`  | Report progress                                                                                                                                                                                                            |
 | `complete_task`       | Mark the current work as done; pass the pull request URL as `evidence.prUrl` so it is saved on the task, alongside any structured verification evidence                                                                    |

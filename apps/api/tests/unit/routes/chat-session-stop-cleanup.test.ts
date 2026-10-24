@@ -51,13 +51,11 @@ vi.mock('../../../src/services/project-data', () => ({
     grants: [],
   }),
   getSessionState: vi.fn(),
-  linkSessionIdea: vi.fn(),
   listAcpSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
   listSessionIdeas: vi.fn().mockResolvedValue({ ideas: [] }),
   listSessions: vi.fn(),
   resetIdleCleanup: vi.fn(),
   stopSession: mocks.stopSession,
-  unlinkSessionIdea: vi.fn(),
 }));
 vi.mock('../../../src/services/workspace-cleanup', () => ({
   cleanupWorkspaceForDeletion: (...args: unknown[]) => mocks.cleanupWorkspaceForDeletion(...args),

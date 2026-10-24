@@ -77,52 +77,6 @@ export function parseWorkspaceIdleCheck(row: unknown): {
 }
 
 // =============================================================================
-// Session–Idea link row schemas
-// =============================================================================
-
-/** Idea link row for getIdeasForSession */
-const SessionIdeaLinkSchema = v.object({
-  task_id: v.string(),
-  context: v.nullable(v.string()),
-  created_at: v.number(),
-});
-
-export function parseSessionIdeaLink(row: unknown): {
-  taskId: string;
-  context: string | null;
-  createdAt: number;
-} {
-  const r = parseRow(SessionIdeaLinkSchema, row, 'session_idea_link');
-  return { taskId: r.task_id, context: r.context, createdAt: r.created_at };
-}
-
-/** Idea session detail row for getSessionsForIdea */
-const IdeaSessionDetailSchema = v.object({
-  session_id: v.string(),
-  topic: v.nullable(v.string()),
-  status: v.string(),
-  context: v.nullable(v.string()),
-  created_at: v.number(),
-});
-
-export function parseIdeaSessionDetail(row: unknown): {
-  sessionId: string;
-  topic: string | null;
-  status: string;
-  context: string | null;
-  linkedAt: number;
-} {
-  const r = parseRow(IdeaSessionDetailSchema, row, 'idea_session_detail');
-  return {
-    sessionId: r.session_id,
-    topic: r.topic,
-    status: r.status,
-    context: r.context,
-    linkedAt: r.created_at,
-  };
-}
-
-// =============================================================================
 // Cached command row schemas
 // =============================================================================
 

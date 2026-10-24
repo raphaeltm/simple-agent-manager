@@ -127,8 +127,6 @@ vi.mock('../../../src/services/project-data', () => ({
   listAcpSessions: mocks.listAcpSessions,
   getSessionState: mocks.getSessionState,
   stopSession: vi.fn(),
-  linkSessionIdea: vi.fn(),
-  unlinkSessionIdea: vi.fn(),
 }));
 
 vi.mock('../../../src/services/observability', () => ({

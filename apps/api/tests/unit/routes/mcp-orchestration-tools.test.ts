@@ -271,10 +271,6 @@ const mockDoStub = {
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
   searchMessages: vi.fn().mockReturnValue([]),
   persistMessage: vi.fn().mockResolvedValue('msg-1'),
-  linkSessionIdea: vi.fn(),
-  unlinkSessionIdea: vi.fn(),
-  getIdeasForSession: vi.fn().mockReturnValue([]),
-  getSessionsForIdea: vi.fn().mockReturnValue([]),
   updateSessionTopic: vi.fn().mockResolvedValue(true),
 };
 const mockProjectData = {

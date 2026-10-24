@@ -60,7 +60,6 @@ import * as durability from './durability-foundation';
 import * as groupedFtsCleanup from './grouped-fts-cleanup';
 import * as groupedFtsWallRecovery from './grouped-fts-wall-recovery';
 import * as ideaUpdates from './idea-updates';
-import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
 import * as libraryFileComments from './library-file-comments';
@@ -2242,18 +2241,6 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  async linkSessionIdea(sessionId: string, taskId: string, context: string | null): Promise<void> {
-    ideas.linkSessionIdea(this.sql, sessionId, taskId, context);
-  }
-  async unlinkSessionIdea(sessionId: string, taskId: string): Promise<void> {
-    ideas.unlinkSessionIdea(this.sql, sessionId, taskId);
-  }
-  getIdeasForSession(sessionId: string) {
-    return ideas.getIdeasForSession(this.sql, sessionId);
-  }
-  getSessionsForIdea(taskId: string) {
-    return ideas.getSessionsForIdea(this.sql, taskId);
-  }
   addIdeaUpdate(input: IdeaUpdateNote, minAgentIntervalMs: number) {
     return ideaUpdates.addIdeaUpdate(this.sql, input, minAgentIntervalMs);
   }

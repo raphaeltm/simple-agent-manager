@@ -78,8 +78,6 @@ vi.mock('../../../src/services/project-data', () => ({
   releaseAttentionAnswer: vi.fn(),
   listAcpSessions: vi.fn(),
   stopSession: vi.fn(),
-  linkSessionIdea: vi.fn(),
-  unlinkSessionIdea: vi.fn(),
   acceptPromptDelivery: vi.fn(),
   getDurableExecutionSnapshot: vi.fn(),
   recordSessionTurnEnd: vi.fn(),

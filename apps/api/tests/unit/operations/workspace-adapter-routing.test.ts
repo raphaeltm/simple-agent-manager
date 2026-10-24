@@ -25,6 +25,7 @@ const routes = [
   ['search_ideas', 'sam_ideas_search', platform.samIdeasSearch],
   ['find_related_ideas', 'sam_ideas_search', platform.samIdeasSearch],
   ['get_idea', 'sam_idea_get', platform.samIdeaGet],
+  ['get_linked_context', 'sam_linked_context_get', platform.samLinkedContextGet],
   ['create_idea', 'sam_idea_create', platform.samIdeaCreate],
   ['update_idea', 'sam_idea_update', platform.samIdeaUpdate],
   ['search_knowledge', 'sam_knowledge_search', platform.samKnowledgeSearch],

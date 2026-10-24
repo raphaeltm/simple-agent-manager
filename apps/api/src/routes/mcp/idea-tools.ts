@@ -246,6 +246,15 @@ export async function handleGetIdea(
   return runWorkspaceOperation('get_idea', requestId, params, tokenData, env);
 }
 
+export async function handleGetLinkedContext(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env
+): Promise<JsonRpcResponse> {
+  return runWorkspaceOperation('get_linked_context', requestId, params, tokenData, env);
+}
+
 export async function handleListIdeas(
   requestId: string | number | null,
   params: Record<string, unknown>,
