@@ -69,6 +69,21 @@ describe('Phase 1 settings registry', () => {
     expect(findAdminSetting('collaboration.commentNotificationWindowSeconds')?.defaultValue).toBe(
       600
     );
+    const contextMessages = findAdminSetting('collaboration.commentContextMessages')!;
+    expect(contextMessages).toMatchObject({
+      defaultValue: 6,
+      category: 'Collaboration',
+      range: { min: 1, max: 50 },
+    });
+    for (const value of [0, 51, 2.5, '6']) expect(contextMessages.validate(value)).toBe(false);
+    const contextRows = findAdminSetting('collaboration.commentContextMaxRows')!;
+    expect(contextRows).toMatchObject({
+      defaultValue: 1_000,
+      category: 'Collaboration',
+      range: { min: 50, max: 5_000 },
+    });
+    for (const value of [49, 5_001]) expect(contextRows.validate(value)).toBe(false);
+    expect(contextRows.validate(50)).toBe(true);
     const usageWindow = findAdminSetting('chat.profileUsageWindowDays')!;
     expect(usageWindow).toMatchObject({
       defaultValue: 30,
