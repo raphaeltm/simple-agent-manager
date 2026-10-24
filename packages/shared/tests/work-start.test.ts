@@ -8,12 +8,7 @@ describe('resolveWorkStartPlan', () => {
       resolveWorkStartPlan({
         profile: { runtime: 'vm', taskMode: 'task', workspaceProfile: 'full' },
       })
-    ).toEqual({
-      runtime: 'vm',
-      workspaceProfile: 'full',
-      taskMode: 'task',
-      capability: 'task-execution',
-    });
+    ).toEqual({ taskMode: 'task', capability: 'task-execution' });
   });
 
   it('lets a skill override the profile, as resolveSkillProfile does', () => {
@@ -26,30 +21,33 @@ describe('resolveWorkStartPlan', () => {
           workspaceProfile: 'lightweight',
         },
       })
-    ).toEqual({
-      runtime: 'cf-container',
-      workspaceProfile: 'lightweight',
-      taskMode: 'conversation',
-      capability: 'conversation',
-    });
+    ).toEqual({ taskMode: 'conversation', capability: 'conversation' });
   });
 
   it('keeps the profile value for a field the skill leaves unset', () => {
-    const plan = resolveWorkStartPlan({
-      profile: { runtime: 'vm', taskMode: 'task', workspaceProfile: 'full' },
-      skill: { runtime: null, taskMode: null, workspaceProfile: null },
-    });
-    expect(plan.runtime).toBe('vm');
-    expect(plan.taskMode).toBe('task');
-    expect(plan.workspaceProfile).toBe('full');
+    expect(
+      resolveWorkStartPlan({
+        profile: { runtime: 'vm', taskMode: 'task', workspaceProfile: 'full' },
+        skill: { runtime: null, taskMode: null, workspaceProfile: null },
+      }).taskMode
+    ).toBe('task');
   });
 
-  it('falls back to the project default workspace profile', () => {
-    const plan = resolveWorkStartPlan({
-      profile: { runtime: null, taskMode: null, workspaceProfile: null },
-      projectDefaultWorkspaceProfile: 'lightweight',
-    });
-    expect(plan.workspaceProfile).toBe('lightweight');
+  // The workspace profile is not returned, so it is observed through the mode it decides
+  // when nothing sets one explicitly.
+  it("falls back to the project's default workspace profile to decide an unset mode", () => {
+    expect(
+      resolveWorkStartPlan({
+        profile: { runtime: null, taskMode: null, workspaceProfile: null },
+        projectDefaultWorkspaceProfile: 'lightweight',
+      }).taskMode
+    ).toBe('conversation');
+    expect(
+      resolveWorkStartPlan({
+        profile: { runtime: null, taskMode: null, workspaceProfile: null },
+        projectDefaultWorkspaceProfile: 'full',
+      }).taskMode
+    ).toBe('task');
   });
 
   // The submit path passes `taskModeDefault: 'workspace-profile'`, so an unset task mode
@@ -67,30 +65,39 @@ describe('resolveWorkStartPlan', () => {
     ).toBe('task');
   });
 
-  it('uses the full workspace profile default when nothing sets one', () => {
-    const plan = resolveWorkStartPlan({ profile: { runtime: null, taskMode: null } });
-    expect(plan.workspaceProfile).toBe('full');
-    expect(plan.taskMode).toBe('task');
+  it("a skill's workspace profile outranks the profile's when deciding an unset mode", () => {
+    expect(
+      resolveWorkStartPlan({
+        profile: { runtime: null, taskMode: null, workspaceProfile: 'full' },
+        skill: { runtime: null, taskMode: null, workspaceProfile: 'lightweight' },
+      }).taskMode
+    ).toBe('conversation');
   });
 
-  // `submitInstantTask` honours `taskMode: 'task'` inside a container, so claiming a
+  it('uses the full workspace profile default when nothing sets one', () => {
+    expect(resolveWorkStartPlan({ profile: { runtime: null, taskMode: null } })).toEqual({
+      taskMode: 'task',
+      capability: 'task-execution',
+    });
+  });
+
+  // `submitInstantTask` honours a `task` mode inside a container, so claiming a
   // cf-container profile can only converse would be a lie about a real capability.
   it('does not force a cf-container profile to conversation', () => {
-    const plan = resolveWorkStartPlan({
-      profile: { runtime: 'cf-container', taskMode: 'task', workspaceProfile: 'lightweight' },
-    });
-    expect(plan.runtime).toBe('cf-container');
-    expect(plan.taskMode).toBe('task');
-    expect(plan.capability).toBe('task-execution');
+    expect(
+      resolveWorkStartPlan({
+        profile: { runtime: 'cf-container', taskMode: 'task', workspaceProfile: 'lightweight' },
+      })
+    ).toEqual({ taskMode: 'task', capability: 'task-execution' });
   });
 
   it('ignores values outside the known enums', () => {
-    const plan = resolveWorkStartPlan({
-      profile: { runtime: null, taskMode: 'nonsense', workspaceProfile: 'nonsense' },
-      projectDefaultWorkspaceProfile: 'lightweight',
-    });
-    expect(plan.workspaceProfile).toBe('lightweight');
-    expect(plan.taskMode).toBe('conversation');
+    expect(
+      resolveWorkStartPlan({
+        profile: { runtime: null, taskMode: 'nonsense', workspaceProfile: 'nonsense' },
+        projectDefaultWorkspaceProfile: 'lightweight',
+      }).taskMode
+    ).toBe('conversation');
   });
 
   it('handles no profile at all', () => {
