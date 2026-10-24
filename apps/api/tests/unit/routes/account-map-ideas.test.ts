@@ -82,6 +82,24 @@ beforeEach(() => {
         relation: 'linked',
         lastAt: 12,
       },
+      /*
+       * The attack row must be LINKED, or it proves nothing.
+       *
+       * `account-map.ts:301` filters candidates down to ideas that have links
+       * (`candidateIdeas.filter((idea) => linkedIdeaIds.has(idea.id))`), so an unlinked row is
+       * dropped whatever the predicate says. Verified: with this link absent, restoring the old
+       * `status = 'draft'` predicate left the test GREEN — an attack case that could not fail.
+       * With the link present, the only thing keeping `ordinary-draft` out of the owner's own
+       * Account Map is `is_idea = 0`.
+       */
+      {
+        sourceKind: 'session',
+        sourceId: `chat-${projectId}`,
+        targetKind: 'idea',
+        targetId: 'ordinary-draft',
+        relation: 'works_on',
+        lastAt: 13,
+      },
     ] as never;
   });
 });
@@ -138,11 +156,24 @@ describe('Account Map linked ideas', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as any;
     expect(body.ideas.map((idea: { id: string }) => idea.id)).toEqual(['idea-own-a', 'idea-own-b']);
+    /*
+     * The attack case and its owner control, named rather than left to the array equality
+     * above — an edit that loosened that assertion would otherwise drop this silently.
+     *
+     * `ordinary-draft` is `status = 'draft'` in the owner's OWN project, so the only thing
+     * keeping it out of someone's Account Map is `is_idea = 0`. Under the previous
+     * "an idea is a task in draft" rule it would have been listed as one. `ordinary` is
+     * `ready` and `idea-foreign` belongs to another user, so neither can discriminate here.
+     */
     expect(
       body.ideas.some(
-        (idea: { id: string }) => idea.id === 'idea-foreign' || idea.id === 'ordinary'
+        (idea: { id: string }) =>
+          idea.id === 'idea-foreign' || idea.id === 'ordinary' || idea.id === 'ordinary-draft'
       )
     ).toBe(false);
+    // The owner control: the same query, same project, still returns the real ideas — so the
+    // refusal above cannot be the query being broken for everything.
+    expect(body.ideas.map((idea: { id: string }) => idea.id)).toContain('idea-own-a');
     expect(body.relationships).toContainEqual(
       expect.objectContaining({
         source: 'idea-own-a',

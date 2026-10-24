@@ -354,6 +354,25 @@ describe('chatStartRoutes', () => {
       expect(db.insert).not.toHaveBeenCalled();
     });
 
+    /*
+     * The case the OLD definition would have let through. `idea-foreign` is excluded by its
+     * project and there was no same-project non-idea case at all, so nothing here could tell
+     * `status = 'draft'` from `is_idea = 1`. This row is draft, in THIS project, differing
+     * only in the flag — and the gate runs before any effects, so nothing may be created.
+     */
+    it('404s an ordinary DRAFT task in this project, which only the flag excludes', async () => {
+      const res = await start({ sourceIdeaId: 'task-ordinary-draft' });
+      expect(res.status).toBe(404);
+      expect(mocks.instant.acceptInstantSession).not.toHaveBeenCalled();
+      expect(db.insert).not.toHaveBeenCalled();
+
+      // Owner control: a real idea on the same path is accepted, so the refusal is the flag
+      // rather than the route refusing everything.
+      const accepted = await start({ sourceIdeaId: 'idea-open' });
+      expect(accepted.status).toBe(202);
+      expect(mocks.instant.acceptInstantSession).toHaveBeenCalled();
+    });
+
     // The Instant counterpart of the VM path's "no orphaned queued task": a link failure
     // inside `acceptInstantSession` must reach the route's failure handling and stop,
     // never schedule the launch that gives the agent its first prompt.

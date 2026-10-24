@@ -327,6 +327,36 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
     }
   });
 
+  /*
+   * The discriminating version of the test above. `task-ordinary` is `queued`, which the OLD
+   * `status = 'draft'` rule excluded too — so that test passes under either definition and
+   * cannot tell them apart. This row is `draft` in the same project, differing only in
+   * `is_idea = 0`: exactly what the old rule would have accepted as an idea.
+   */
+  it('404s an ordinary DRAFT task, which the old status rule would have accepted', async () => {
+    const { sqlite, env } = createEnv();
+    try {
+      const refused = await submit(createApp(), env, {
+        message: 'Match the window.',
+        taskMode: 'task',
+        sourceIdeaId: 'task-ordinary-draft',
+      });
+      expect(refused.status).toBe(404);
+      expect(mocks.createSession).not.toHaveBeenCalled();
+
+      // Owner control: a real idea on the same path still starts, so the refusal above is the
+      // flag and not the route being broken for everything.
+      const accepted = await submit(createApp(), env, {
+        message: 'Match the window.',
+        taskMode: 'task',
+        sourceIdeaId: 'idea-open',
+      });
+      expect(accepted.status).toBe(202);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it.each([
     ['idea-done', /idea is done/i],
     ['idea-parked', /idea is parked/i],
