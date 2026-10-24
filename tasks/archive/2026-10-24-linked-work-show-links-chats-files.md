@@ -337,6 +337,44 @@ the file link were all deleted before `STAGING RELEASE T4`. Nothing belonging to
 touched: the five nodes and seven workspaces live on the staging account at the time belong to
 other agents and were left alone.
 
+## Shipped (2026-10-24)
+
+|                    |                                                                                                                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| PR                 | [#2431](https://github.com/raphaeltm/simple-agent-manager/pull/2431), squash-merged 07:12:55Z                                                                                                    |
+| Merge SHA          | `35f14a954ae63847281e0e0563ad643de85ceda4`                                                                                                                                                       |
+| PR CI              | run [40070088890](https://github.com/raphaeltm/simple-agent-manager/actions/runs/40070088890) on `837cec838` — 33 checks, all pass                                                               |
+| Production deploy  | run [40075823301](https://github.com/raphaeltm/simple-agent-manager/actions/runs/40075823301), **success** 08:09:11Z — target validation, configuration, Deploy to Cloudflare, deployment record |
+| Live check         | `app.simple-agent-manager.org` 200, `api…/health` `healthy`                                                                                                                                      |
+| CodeRabbit         | requested once 06:39Z via the trusted workflow; replied "Action not completed — Review rate limited"; zero reviews; recorded, not re-triggered (rule 25)                                         |
+| Coordinator window | 06:40Z-07:11Z, no feedback                                                                                                                                                                       |
+
+### Main CI failed once after the merge, and it was not this change
+
+Run [40073253970](https://github.com/raphaeltm/simple-agent-manager/actions/runs/40073253970) on
+the merge SHA failed on a single test:
+`apps/api/tests/unit/routes/project-capacity-pools.test.ts:803`, "chunks catalog addition source
+reads below the D1 bind limit", `Test timed out in 15000ms` — a timeout, not an assertion. 946
+files passed, 1 skipped.
+
+Established as unrelated rather than assumed: this diff contains **zero** `apps/api` files; the
+identical API tree had already passed that same `Test` job on the PR head `837cec838`; and the
+file runs locally on the merged tree in 4.4s (21 passed). Re-ran the failed job once; it passed,
+CI went green and the deploy ran.
+
+Filed as `tasks/backlog/2026-10-24-capacity-pool-bind-limit-test-timeout.md`. A timeout flake on
+`main` is a release problem, not a test problem: it blocks Deploy Production for whoever is on
+main and forces the next agent to decide under time pressure whether a red main is theirs.
+
+### A watcher lesson worth keeping
+
+Deploy Production fires on `workflow_run`, so every workflow completing on main spawns another
+run for the same head SHA and all but one report `skipped`. The post-merge watcher took the
+**latest** run for the SHA and reported "skipped" for 59 minutes while the real deploy had already
+succeeded. The correct predicate is "**any** run for this SHA concluded success". This is
+`.claude/rules/74` in miniature — a gate keyed on a signal that merely correlates with its
+condition.
+
 ## References
 
 - Program overview: idea `01M5NG3W2ZMDFD797SQF8DWNHR` (shared types, coordination rules, test bar,
