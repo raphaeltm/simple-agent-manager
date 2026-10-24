@@ -43,6 +43,29 @@ function d1Database(db: Database.Database): D1Database {
 }
 
 describe('idea linked context', () => {
+  it('rejects an ordinary task as an idea context', async () => {
+    const db = new Database(':memory:');
+    try {
+      db.exec(`CREATE TABLE tasks(id TEXT PRIMARY KEY,project_id TEXT,title TEXT,status TEXT,
+          chat_session_id TEXT,output_pr_url TEXT);
+        CREATE TABLE project_files(id TEXT PRIMARY KEY,project_id TEXT,filename TEXT,directory TEXT);
+        CREATE TABLE task_pull_request_associations(task_id TEXT,project_id TEXT,pr_url TEXT);
+        CREATE TABLE projects(id TEXT PRIMARY KEY,repository TEXT);
+        INSERT INTO tasks VALUES ('ordinary','p','Ordinary task','ready',NULL,NULL);
+        INSERT INTO projects VALUES ('p','o/r');`);
+      snapshot.mockResolvedValueOnce({
+        exists: true,
+        links: [],
+        sessions: [],
+        totals: { sessions: 0, strongSessions: 0, ideas: 0, files: 0, prs: 0 },
+      });
+      await expect(
+        getIdeaContext({ DATABASE: d1Database(db) } as Env, 'p', 'ordinary')
+      ).rejects.toThrow('Resource');
+    } finally {
+      db.close();
+    }
+  });
   it('resolves more than 100 linked files without exceeding D1 parameter limits', async () => {
     const db = new Database(':memory:');
     try {

@@ -17,6 +17,7 @@ import type { Env } from '../env';
 import { errors } from '../middleware/error';
 import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
 import * as projectData from '../services/project-data';
+import { ideaTaskPredicateSql } from './idea-core';
 import { limits, validateEntity } from './link-write';
 
 export { recordAutoLink, recordLink, removeLink } from './link-write';
@@ -147,7 +148,12 @@ async function contextData(env: Env, projectId: string, kind: LinkKind, id: stri
     );
     groups.push(group);
   };
-  add('ideas', 'SELECT id,title,status FROM tasks WHERE project_id=? AND id IN', ideaIds);
+  add(
+    'ideas',
+    'SELECT id,title,status FROM tasks WHERE project_id=? AND id IN',
+    ideaIds,
+    `AND ${ideaTaskPredicateSql('tasks')}`
+  );
   add(
     'files',
     'SELECT id,filename,directory FROM project_files WHERE project_id=? AND id IN',
