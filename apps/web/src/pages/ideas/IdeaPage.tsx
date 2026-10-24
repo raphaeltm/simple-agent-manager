@@ -30,6 +30,7 @@ import { EditIdeaDialog } from './EditIdeaDialog';
 import { IdeaUpdates, IdeaWork } from './idea-activity';
 import { IdeaPlan, IdeaRelated, IdeaStatusCard } from './idea-sections';
 import type { IdeaActionHandlers } from './parts';
+import { useStartWorkLauncher } from './useStartWorkLauncher';
 
 export function IdeaPage() {
   const { projectId } = useProjectContext();
@@ -109,15 +110,20 @@ export function IdeaPage() {
       toast.error(error instanceof Error ? error.message : 'Could not post the update'),
   });
 
+  // The page is scoped to one idea, so the title the sheet needs is the one already loaded.
+  const titleOf = useCallback(() => ideaQuery.data?.title, [ideaQuery.data?.title]);
+  const { onStartWork, startWorkSheet } = useStartWorkLauncher(titleOf);
+
   const handlers: IdeaActionHandlers = useMemo(
     () => ({
       onMarkDone: () => markDone.mutate(),
       onPark: () => park.mutate(),
       onReopen: () => reopen.mutate(),
       onKeepOpen: () => keepOpen.mutate(),
+      onStartWork,
       pending: markDone.isPending || park.isPending || reopen.isPending || keepOpen.isPending,
     }),
-    [markDone, park, reopen, keepOpen]
+    [markDone, park, reopen, keepOpen, onStartWork]
   );
 
   const idea = ideaQuery.data;
@@ -165,14 +171,24 @@ export function IdeaPage() {
   );
   const related = <IdeaRelated links={linksQuery.data} projectId={projectId} />;
 
-  const dialog = (
-    <EditIdeaDialog
-      projectId={projectId}
-      idea={idea}
-      open={editing}
-      onClose={() => setEditing(false)}
-      onSaved={refresh}
-    />
+  /*
+   * Both overlays in one group, rendered once per layout branch.
+   *
+   * The page this replaced mounted its Start work sheet separately in each branch, which is
+   * one edit away from a phone-only or desktop-only Start work. Grouping them means a branch
+   * cannot render the edit dialog and forget the sheet.
+   */
+  const overlays = (
+    <>
+      <EditIdeaDialog
+        projectId={projectId}
+        idea={idea}
+        open={editing}
+        onClose={() => setEditing(false)}
+        onSaved={refresh}
+      />
+      {startWorkSheet}
+    </>
   );
 
   if (isMobile) {
@@ -184,7 +200,7 @@ export function IdeaPage() {
         {work}
         {updates}
         {related}
-        {dialog}
+        {overlays}
       </Page>
     );
   }
@@ -203,7 +219,7 @@ export function IdeaPage() {
           {related}
         </div>
       </div>
-      {dialog}
+      {overlays}
     </Page>
   );
 }

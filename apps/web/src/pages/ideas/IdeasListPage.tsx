@@ -20,6 +20,7 @@ import { useIsMobile } from '../../hooks/useIsMobile';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { useToast } from '../../hooks/useToast';
 import { keepProjectIdeaOpen, setProjectIdeaStatus } from '../../lib/api';
+import { projectIdeaPath } from '../../lib/project-routes';
 import { ideaQueryKeys, ideasListQueryOptions } from '../../lib/query-options';
 import { LoadError, Page, PageHeader } from '../automation/page';
 import { Disclosure, Panel, SectionTitle } from '../automation/ui';
@@ -29,10 +30,10 @@ import {
   AgentFiledIcon,
   type IdeaActionHandlers,
   IdeaAttentionCard,
-  ideaPath,
   IdeaRow,
   IdeaStateIcon,
 } from './parts';
+import { useStartWorkLauncher } from './useStartWorkLauncher';
 import { groupIdeas, IDEA_NEEDS_YOU_VISIBLE, ideaAttention, ideaMatchesSearch } from './view-model';
 
 function Rows({
@@ -224,6 +225,15 @@ export function IdeasListPage() {
     },
   });
 
+  const items = useMemo(() => ideasQuery.data?.items ?? [], [ideasQuery.data]);
+
+  // The rows are already loaded, so the sheet's heading costs no extra read.
+  const titleOf = useCallback(
+    (ideaId: string) => items.find((item) => item.ideaId === ideaId)?.title,
+    [items]
+  );
+  const { onStartWork, startWorkSheet } = useStartWorkLauncher(titleOf);
+
   const handlers: IdeaActionHandlers = useMemo(
     () => ({
       onMarkDone: (ideaId: string) => markDone.mutate(ideaId),
@@ -232,21 +242,21 @@ export function IdeasListPage() {
       // "Keep open" leaves the idea exactly where it is; what it records is that a person
       // answered the merged question, so the card does not come back tomorrow.
       onKeepOpen: (ideaId: string) => keepOpen.mutate(ideaId),
+      onStartWork,
       pending: markDone.isPending || park.isPending || reopen.isPending || keepOpen.isPending,
     }),
-    [markDone, park, reopen, keepOpen]
+    [markDone, park, reopen, keepOpen, onStartWork]
   );
 
   const handleNewIdea = useCallback(() => setNewIdeaOpen(true), []);
   const handleIdeaCreated = useCallback(
     (ideaId: string) => {
       refreshIdeas();
-      navigate(ideaPath(projectId, ideaId));
+      navigate(projectIdeaPath(projectId, ideaId));
     },
     [navigate, projectId, refreshIdeas]
   );
 
-  const items = useMemo(() => ideasQuery.data?.items ?? [], [ideasQuery.data]);
   const filtered = useMemo(
     () => items.filter((item) => ideaMatchesSearch(item, search)),
     [items, search]
@@ -450,6 +460,7 @@ export function IdeasListPage() {
         </p>
       )}
       {newIdeaDialog}
+      {startWorkSheet}
     </Page>
   );
 }

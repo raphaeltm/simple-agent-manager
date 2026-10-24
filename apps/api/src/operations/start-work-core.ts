@@ -33,21 +33,27 @@ export type WorkStartAdmission =
  * Two independent questions, deliberately kept independent: is this row an idea, and is that
  * idea open?
  *
- * Today they happen to be the same SQL test, because `ideaTaskPredicateSql` is
- * `status = 'draft'`. T8's migration widens it to `(status = 'draft' OR is_idea = 1)` so an
- * idea stays an idea after it is marked done. If openness were inferred from the predicate —
- * `if (!isIdea) …` — that widening would silently make a DONE idea startable, with nothing in
- * T8's diff to show it. So openness is tested on `status` directly and the predicate is only
- * ever asked whether the row is an idea at all.
+ * "Is it an idea" is asked first, and its answer is final. A row that is not an idea gets one
+ * non-disclosing answer whatever its status, exactly like a foreign-project id or a typo
+ * (rule 11). The caller is authorized for this project, but that does not entitle them to
+ * learn that an id they guessed names a completed task. Testing the status first answers
+ * `409 "That idea is done."` for any ordinary completed or cancelled row, which is why the
+ * order here is load-bearing rather than stylistic.
  *
- * One case is genuinely ambiguous until T8 lands: a completed or cancelled row that is NOT an
- * idea is indistinguishable from a completed or cancelled idea, because the only discriminator
- * today IS the status. Those rows get the 409 rather than the 404 they will get afterwards.
- * It is the safe direction — the caller is already authorized for this project, and the start
- * is refused either way.
+ * The order used to be the other way round, and was safe at the time, because the only
+ * discriminator WAS the status: with an idea defined as `status = 'draft'`, a closed idea and
+ * a closed ordinary task were the same row shape, so neither answer could be withheld from
+ * the other. `tasks.is_idea` (program decision 16, migration 0207) separates them, which
+ * removed the ambiguity and the excuse with it.
+ *
+ * Openness is still read off `status` directly rather than inferred from
+ * `ideaTaskPredicateSql`. The two must keep disagreeing: the predicate is `is_idea = 1`, which
+ * stays true after an idea is marked done, so `if (!isIdea) …` alone would make a DONE idea
+ * startable.
  */
 export function classifyWorkStartIdea(status: string, isIdea: boolean): WorkStartAdmission {
-  if (isIdea && status === OPEN_IDEA_STATUS) return { outcome: 'open' };
+  if (!isIdea) return { outcome: 'not-an-open-idea' };
+  if (status === OPEN_IDEA_STATUS) return { outcome: 'open' };
   const label = CLOSED_IDEA_LABEL[status];
   if (label) return { outcome: 'closed', label };
   return { outcome: 'not-an-open-idea' };
@@ -63,9 +69,9 @@ export interface WorkStartIdea {
  *
  * The project scope lives in the SQL predicate, not only in a caller's check, so a
  * cross-project id cannot be read back at all (rule 11). Another project's id, a typo and an
- * ordinary open task all get the same non-disclosing 404. A done or parked idea gets a 409
- * the person can act on instead — see `classifyWorkStartIdea` for the one row shape that is
- * ambiguous until T8's `tasks.is_idea` column exists.
+ * ordinary open task all get the same non-disclosing 404 — as does an ordinary CLOSED task,
+ * whose status is not the caller's to learn. Only a real idea that is done or parked gets the
+ * 409 the person can act on; see `classifyWorkStartIdea` for why that order matters.
  */
 export async function requireOpenIdeaForWorkStart(
   env: Env,

@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   postIdeaUpdate: vi.fn(),
   getIdeaLinks: vi.fn(),
   updateProjectTask: vi.fn(),
+  navigate: vi.fn(),
   isMobile: false,
   toast: { success: vi.fn(), error: vi.fn() },
 }));
@@ -32,13 +33,27 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   keepProjectIdeaOpen: mocks.keepProjectIdeaOpen,
   listIdeaUpdates: mocks.listIdeaUpdates,
   postIdeaUpdate: mocks.postIdeaUpdate,
-  getIdeaLinks: mocks.getIdeaLinks,
   updateProjectTask: mocks.updateProjectTask,
+}));
+
+/*
+ * `query-options/links.ts` imports `api/links` directly, as T4's chat and library surfaces
+ * do, so the barrel mock above does not intercept this read. Mocking the barrel alone left
+ * the real `request()` running and the Related section rendering its error state, which the
+ * assertions below would not have noticed.
+ */
+vi.mock('../../../src/lib/api/links', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/links')>()),
+  getIdeaLinks: mocks.getIdeaLinks,
 }));
 
 vi.mock('react-router', async () => {
   const actual = await vi.importActual<typeof import('react-router')>('react-router');
-  return { ...actual, useParams: () => ({ taskId: 'idea-1' }) };
+  return {
+    ...actual,
+    useParams: () => ({ taskId: 'idea-1' }),
+    useNavigate: () => mocks.navigate,
+  };
 });
 
 vi.mock('../../../src/pages/ProjectContext', () => ({
@@ -144,10 +159,28 @@ describe('IdeaPage', () => {
   });
 
   describe('the one primary action follows the state', () => {
-    it('offers Start work when nothing has happened', async () => {
+    /*
+     * Start work opens the sheet; it is not a link anywhere.
+     *
+     * It briefly WAS one, to `/chat?executeIdea=<id>`, and this assertion pinned that URL —
+     * while the branch that read the parameter had already been removed with the sheet. The
+     * href was present, the test was green, and pressing the button landed the person in an
+     * empty new chat with the idea dropped. So the assertion is on the outcome a person gets.
+     * `components/start-work-sheet.test.tsx` drives the rest of the flow from this page.
+     */
+    it('opens the Start work sheet when nothing has happened, rather than linking anywhere', async () => {
       renderPage();
-      const link = await screen.findByRole('link', { name: 'Start work' });
-      expect(link).toHaveAttribute('href', '/projects/proj-1/chat?executeIdea=idea-1');
+      const button = await screen.findByRole('button', { name: 'Start work' });
+      expect(button).not.toHaveAttribute('href');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+      await userEvent.click(button);
+
+      const sheet = await screen.findByRole('dialog', { name: /Start work|Talk it through/i });
+      // The sheet asks the person to confirm work on a NAMED idea, so it must carry the title.
+      expect(within(sheet).getByText('Retry failed webhook deliveries')).toBeInTheDocument();
+      // Nothing navigated: starting work is the sheet's job, not the button's.
+      expect(mocks.navigate).not.toHaveBeenCalled();
     });
 
     it('opens the chat while work is running', async () => {
@@ -159,7 +192,7 @@ describe('IdeaPage', () => {
         'href',
         '/projects/proj-1/chat/sess-live'
       );
-      expect(screen.queryByRole('link', { name: 'Start work' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Start work' })).not.toBeInTheDocument();
     });
 
     it('answers the question while one is open, and says who asked', async () => {
@@ -212,7 +245,10 @@ describe('IdeaPage', () => {
     it('offers follow-up work on a done idea', async () => {
       mocks.getProjectIdea.mockResolvedValue(idea({ derived: derived({ state: 'done' }) }));
       renderPage();
-      expect(await screen.findByRole('link', { name: 'Start follow-up work' })).toBeInTheDocument();
+      // Also a `start-work` action, so also the sheet rather than a link.
+      expect(
+        await screen.findByRole('button', { name: 'Start follow-up work' })
+      ).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Reopen' })).toBeInTheDocument();
     });
   });
@@ -245,7 +281,7 @@ describe('IdeaPage', () => {
     );
     expect(mocks.toast.success).toHaveBeenCalledWith('Parked');
     // The control: Start work is still the obvious step beside it.
-    expect(screen.getByRole('link', { name: 'Start work' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start work' })).toBeInTheDocument();
   });
 
   it('reopens a parked idea instead of only acknowledging a merge', async () => {
@@ -318,7 +354,18 @@ describe('IdeaPage', () => {
         'href',
         '/projects/proj-1/chat/sess-failed'
       );
-      expect(within(work).getByText(/PR #482 · Open, checks passed/)).toBeInTheDocument();
+      /*
+       * The pull request's state is the shared `PullRequestStateBadge` now, not a sentence
+       * this page spells out — so "Open" and "checks passed" are their own pills beside
+       * "PR #482" rather than one run of text.
+       */
+      expect(within(work).getByText('PR #482')).toBeInTheDocument();
+      expect(within(work).getByText('Open')).toBeInTheDocument();
+      expect(within(work).getByText('Checks passed')).toBeInTheDocument();
+      // External, and routed through the shared row so the agent-reported URL is sanitised.
+      const prRow = within(work).getByRole('link', { name: /Retry failed webhook deliveries/ });
+      expect(prRow).toHaveAttribute('href', 'https://github.com/acme/payments/pull/482');
+      expect(prRow).toHaveAttribute('target', '_blank');
     });
 
     it('says plainly when nothing has worked on the idea yet', async () => {
@@ -435,9 +482,19 @@ describe('IdeaPage', () => {
 
     const related = await screen.findByRole('region', { name: 'Related' });
     expect(within(related).getByText('retry-schedules.md')).toBeInTheDocument();
+    /*
+     * The shared row carries the relation in plain words beside the title, so the link's
+     * accessible name is the whole row rather than the title alone.
+     */
     expect(
-      within(related).getByRole('link', { name: 'Rate-limit the delivery log' })
+      within(related).getByRole('link', { name: /Rate-limit the delivery log/ })
     ).toHaveAttribute('href', '/projects/proj-1/ideas/idea-2');
+    expect(within(related).getByText('Related')).toBeInTheDocument();
+    // The file row links to the file, which it did not before: it was inert text.
+    expect(within(related).getByRole('link', { name: /retry-schedules\.md/ })).toHaveAttribute(
+      'href',
+      '/projects/proj-1/library?preview=file-1'
+    );
   });
 
   it('edits the plan through the task route and refreshes the page', async () => {
@@ -487,7 +544,7 @@ describe('IdeaPage', () => {
     renderPage();
 
     const status = await screen.findByRole('region', { name: 'Status' });
-    expect(within(status).getByRole('link', { name: 'Start work' })).toHaveClass('w-full');
+    expect(within(status).getByRole('button', { name: 'Start work' })).toHaveClass('w-full');
     const regions = screen.getAllByRole('region').map((node) => node.getAttribute('aria-label'));
     expect(regions.indexOf('Status')).toBeLessThan(regions.indexOf('The idea'));
   });

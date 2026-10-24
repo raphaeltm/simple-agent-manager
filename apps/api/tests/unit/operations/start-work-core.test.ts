@@ -34,6 +34,10 @@ function fixture() {
       -- The row only the NEW definition excludes. Under the old \`status = 'draft'\` rule this
       -- was indistinguishable from an idea, so Start work would have accepted it.
       ('task-ordinary-draft','own','An ordinary task nobody has dispatched','draft',0),
+      -- Ordinary CLOSED tasks. Their status matches an idea's done/parked statuses exactly, so
+      -- they are what separates "is this an idea" from "what state is it in".
+      ('task-ordinary-done','own','An ordinary task that finished','completed',0),
+      ('task-ordinary-cancelled','own','An ordinary task that was cancelled','cancelled',0),
       ('idea-foreign','other','Another project''s idea','draft',1);`);
   const d1 = {
     prepare: (sql: string) => ({
@@ -109,6 +113,39 @@ describe('requireOpenIdeaForWorkStart', () => {
     }
   });
 
+  /*
+   * The disclosure case. `task-ordinary-done` is `completed` in the caller's OWN project, so
+   * authorization is not what refuses it — only `is_idea = 0` is. A 409 would answer
+   * "That idea is done. Reopen it before starting work on it." for an arbitrary task id,
+   * telling the caller both that the row exists and what state it is in. Every other non-idea
+   * gets a bare 404 and so must this one.
+   */
+  it('404s an ordinary CLOSED task without naming its state', async () => {
+    const { db, env } = fixture();
+    try {
+      for (const id of ['task-ordinary-done', 'task-ordinary-cancelled']) {
+        expect(await statusOf(requireOpenIdeaForWorkStart(env, 'own', id))).toBe(404);
+        // The 409 wording must not be reachable from a non-idea at all, not merely a 404 that
+        // happens to carry it.
+        await expect(requireOpenIdeaForWorkStart(env, 'own', id)).rejects.not.toThrow(
+          /Reopen it/i
+        );
+      }
+      /*
+       * The owner controls. A real done idea still gets its actionable 409, and an open idea
+       * still starts — so the refusal above cannot be the gate having broken for everything,
+       * and the fix cannot have been "404 anything that is not draft".
+       */
+      expect(await statusOf(requireOpenIdeaForWorkStart(env, 'own', 'idea-done'))).toBe(409);
+      await expect(requireOpenIdeaForWorkStart(env, 'own', 'idea-done')).rejects.toThrow(
+        /Reopen it/i
+      );
+      expect(await statusOf(requireOpenIdeaForWorkStart(env, 'own', 'idea-open'))).toBe(200);
+    } finally {
+      db.close();
+    }
+  });
+
   it('409s a done idea with a message that says what to do', async () => {
     const { db, env } = fixture();
     try {
@@ -144,18 +181,26 @@ describe('requireOpenIdeaForWorkStart', () => {
 });
 
 describe('classifyWorkStartIdea', () => {
-  // The whole matrix, including the shapes that only exist AFTER T8 widens
-  // `ideaTaskPredicateSql` to `(status = 'draft' OR is_idea = 1)`. The row that matters is
-  // ('completed', true): a done idea that still reads as an idea. If openness were inferred
-  // from the predicate rather than read from the status, that row would be admitted and a
-  // done idea would become startable — and nothing in T8's diff would say so.
+  /*
+   * The whole matrix. Two rows carry the design and neither can be dropped:
+   *
+   * ('completed', true) — a done idea still reads as an idea, because the predicate is
+   * `is_idea = 1`. If openness were inferred from the predicate rather than read off the
+   * status, that row would be admitted and a done idea would become startable.
+   *
+   * ('completed', false) — an ordinary finished task. It shares its status with a done idea,
+   * so it is the only row that can tell the two questions apart in the other direction. It
+   * must be `not-an-open-idea`, i.e. a non-disclosing 404: `closed` here would answer
+   * "That idea is done" for an id the caller only guessed at. This row asserted `closed`
+   * while the status test ran first.
+   */
   const cases: Array<[string, boolean, string]> = [
     ['draft', true, 'open'],
     ['draft', false, 'not-an-open-idea'],
     ['completed', true, 'closed'],
     ['cancelled', true, 'closed'],
-    ['completed', false, 'closed'],
-    ['cancelled', false, 'closed'],
+    ['completed', false, 'not-an-open-idea'],
+    ['cancelled', false, 'not-an-open-idea'],
     ['in_progress', true, 'not-an-open-idea'],
     ['in_progress', false, 'not-an-open-idea'],
     ['ready', false, 'not-an-open-idea'],

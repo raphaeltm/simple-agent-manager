@@ -24,6 +24,7 @@ import type { ComponentType, ReactNode } from 'react';
 import { Link } from 'react-router';
 
 import { ConnectorChip } from '../../components/ConnectorChip';
+import { projectChatPath, projectIdeaPath } from '../../lib/project-routes';
 import { Panel, RowLink } from '../automation/ui';
 import {
   IDEA_STATE_LABELS,
@@ -103,31 +104,23 @@ export function LiveDot() {
   );
 }
 
-export function ideaPath(projectId: string, ideaId: string): string {
-  return `/projects/${projectId}/ideas/${ideaId}`;
-}
-
-export function chatPath(projectId: string, sessionId: string): string {
-  return `/projects/${projectId}/chat/${sessionId}`;
-}
-
 /**
- * Where starting work goes. T7 replaces this with the "Start work" sheet (who, how, a note);
- * until then it is the existing entry point, which pre-fills the chat composer.
+ * The href for a navigating action, or null when the action is handled in the page.
+ *
+ * `start-work` is deliberately absent: it opens T7's `StartWorkSheet` (who, how, a note), so
+ * it is dispatched to `onStartWork` below. It briefly WAS a link here, to
+ * `/chat?executeIdea=<id>`, which was the entry point at the time — but the branch that read
+ * that parameter was removed with the sheet (`useComposerPrefill.ts` records this, and
+ * `project-chat.test.tsx` now asserts the composer stays empty when the parameter is
+ * present). A link to a parameter nobody reads lands the person in an empty new chat with
+ * the idea silently dropped, so there is no URL left to return.
  */
-export function startWorkPath(projectId: string, ideaId: string): string {
-  return `/projects/${projectId}/chat?executeIdea=${encodeURIComponent(ideaId)}`;
-}
-
-/** The href for a navigating action, or null when the action is a mutation. */
 export function ideaActionHref(projectId: string, target: IdeaActionTarget): string | null {
   switch (target.to) {
     case 'idea':
-      return ideaPath(projectId, target.ideaId);
+      return projectIdeaPath(projectId, target.ideaId);
     case 'chat':
-      return chatPath(projectId, target.sessionId);
-    case 'start-work':
-      return startWorkPath(projectId, target.ideaId);
+      return projectChatPath(projectId, target.sessionId);
     case 'pull-request':
       return target.url;
     default:
@@ -142,6 +135,8 @@ export interface IdeaActionHandlers {
   /** Moves a done or parked idea back to not-started. */
   onReopen: (ideaId: string) => void;
   onKeepOpen: (ideaId: string) => void;
+  /** Opens the Start work sheet for this idea. Not a mutation — nothing is written yet. */
+  onStartWork: (ideaId: string) => void;
   /** True while either mutation is in flight, so the buttons can say so. */
   pending?: boolean;
 }
@@ -212,13 +207,20 @@ export function IdeaActionControl({
         return handlers.onReopen(target.ideaId);
       case 'keep-open':
         return handlers.onKeepOpen(target.ideaId);
+      case 'start-work':
+        return handlers.onStartWork(target.ideaId);
     }
   };
   return (
     <Button
       variant={variant === 'primary' ? 'primary' : 'ghost'}
       onClick={onClick}
-      loading={handlers.pending}
+      /*
+       * `pending` tracks the status mutations. Start work writes nothing here — it opens a
+       * sheet — so it must not show their spinner, or parking one idea makes every visible
+       * Start work button look busy.
+       */
+      loading={target.to === 'start-work' ? undefined : handlers.pending}
       className={width}
     >
       {action.label}
@@ -271,7 +273,7 @@ export function IdeaAttentionCard({
       className="flex min-w-0 flex-col gap-1 px-4 pb-4 pt-1.5"
     >
       <Link
-        to={ideaPath(projectId, item.ideaId)}
+        to={projectIdeaPath(projectId, item.ideaId)}
         className="-ml-1 inline-flex min-h-11 w-fit max-w-full items-center gap-2 rounded-md px-1 text-[13px] font-semibold text-fg-primary no-underline hover:underline"
       >
         <span className={`shrink-0 ${toneClass}`}>
@@ -316,7 +318,7 @@ export function IdeaRow({
   const counts = ideaCountsLine(item.counts);
   return (
     <RowLink
-      to={ideaPath(projectId, item.ideaId)}
+      to={projectIdeaPath(projectId, item.ideaId)}
       leading={leading ?? <IdeaStateIcon state={item.derived.state} />}
       title={item.title}
       // No flex wrapper here: `RowLink` clamps the subtitle with `line-clamp`, which is a

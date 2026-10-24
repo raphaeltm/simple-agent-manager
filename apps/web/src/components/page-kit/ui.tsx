@@ -52,7 +52,14 @@ export function SectionTitle({
   level = 2,
 }: {
   title: string;
-  count?: number;
+  /**
+   * A string is allowed so a capped list can say "12+".
+   *
+   * A bounded cross-store read can only establish a minimum, and the pill is where that has
+   * to be visible — rendering a bare number there asserts a total the server declined to
+   * claim (linked-work program decision 9, `.claude/rules/65`).
+   */
+  count?: number | string;
   action?: ReactNode;
   hint?: string;
   level?: 2 | 3;

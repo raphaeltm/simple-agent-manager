@@ -361,18 +361,8 @@ export {
   listRepositories,
 } from './github';
 export { listGitLabBranches, listGitLabProjects } from './gitlab';
-export type {
-  CappedList,
-  IdeaContext,
-  IdeaUpdateNote,
-  IdeaUpdatesPage,
-  LinkedFile,
-  LinkedIdea,
-  LinkedPullRequest,
-  LinkedSession,
-  LinkRelation,
-} from './idea-links';
-export { getIdeaLinks, listIdeaUpdates, postIdeaUpdate } from './idea-links';
+export type { IdeaUpdateNote, IdeaUpdatesPage } from './idea-updates';
+export { listIdeaUpdates, postIdeaUpdate } from './idea-updates';
 export type { IdeaDetail, IdeaLinkedSession, IdeaListTotals, IdeasListResponse } from './ideas';
 export {
   createProjectIdea,

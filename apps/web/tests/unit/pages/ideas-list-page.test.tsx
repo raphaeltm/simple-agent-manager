@@ -30,6 +30,18 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   createProjectIdea: mocks.createProjectIdea,
 }));
 
+// The Start work sheet reads the idea's linked work, and `query-options/links.ts` imports
+// `api/links` directly, so the barrel mock above does not intercept it.
+vi.mock('../../../src/lib/api/links', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/links')>()),
+  getIdeaLinks: vi.fn().mockResolvedValue({
+    sessions: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    files: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    pullRequests: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    relatedIdeas: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+  }),
+}));
+
 vi.mock('react-router', async () => {
   const actual = await vi.importActual<typeof import('react-router')>('react-router');
   return { ...actual, useNavigate: () => mocks.navigate };
@@ -232,24 +244,37 @@ describe('IdeasListPage', () => {
     respondWith([STUCK]);
     renderPage();
 
-    // Order matters: reading the failure comes before retrying it.
     const card = await screen.findByTestId('ideas-needs-you');
-    const links = within(card).getAllByRole('link');
-    expect(links.map((link) => link.textContent)).toEqual(
-      expect.arrayContaining(['See what happened', 'Try again…'])
-    );
-    expect(links.findIndex((link) => link.textContent === 'See what happened')).toBeLessThan(
-      links.findIndex((link) => link.textContent === 'Try again…')
-    );
+    const read = await within(card).findByRole('link', { name: 'See what happened' });
+    const retry = within(card).getByRole('button', { name: 'Try again…' });
 
-    expect(await screen.findByRole('link', { name: 'See what happened' })).toHaveAttribute(
-      'href',
-      '/projects/proj-1/chat/sess-failed'
-    );
-    expect(screen.getByRole('link', { name: 'Try again…' })).toHaveAttribute(
-      'href',
-      '/projects/proj-1/chat?executeIdea=idea-stuck'
-    );
+    // Order matters: reading the failure comes before retrying it.
+    expect(read.compareDocumentPosition(retry) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(read).toHaveAttribute('href', '/projects/proj-1/chat/sess-failed');
+  });
+
+  /*
+   * Try again is a `start-work` action, and this is the surface that proves the dead link is
+   * gone. It used to be a `<Link>` to `/chat?executeIdea=<id>`, whose reader had already been
+   * removed with the Start work sheet — so the retry a person pressed on a stopped idea
+   * silently dropped the idea and opened an empty chat. The old test asserted that href and
+   * passed throughout.
+   */
+  it('opens the Start work sheet from Try again, rather than linking to a dropped parameter', async () => {
+    respondWith([STUCK]);
+    renderPage();
+
+    const card = await screen.findByTestId('ideas-needs-you');
+    const retry = within(card).getByRole('button', { name: 'Try again…' });
+    expect(retry).not.toHaveAttribute('href');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    await userEvent.click(retry);
+
+    const sheet = await screen.findByRole('dialog', { name: /Start work|Talk it through/i });
+    // The sheet must name the idea being retried, not merely open.
+    expect(within(sheet).getByText('Backfill the delivery index')).toBeInTheDocument();
+    expect(mocks.navigate).not.toHaveBeenCalled();
   });
 
   it('Mark done tells the server, and refreshes the list rather than reloading', async () => {

@@ -112,7 +112,6 @@ export { deploymentQueryKeys } from './deployments';
 export { githubInstallationsQueryOptions, githubQueryKeys } from './github';
 export {
   ideaDetailQueryOptions,
-  ideaLinksQueryOptions,
   ideaQueryKeys,
   ideasListQueryOptions,
   ideaUpdatesQueryOptions,

@@ -5,17 +5,18 @@
  * Split out of `IdeaPage.tsx` so the page itself is about layout and loading, and each
  * section is one idea you can read in one screen.
  */
+import type { IdeaContext } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { FileText, History, Lightbulb } from 'lucide-react';
-import { Link } from 'react-router';
 
+import { describeRelations, LinkedWorkRow } from '../../components/linked-work';
 import { RenderedMarkdown } from '../../components/MarkdownRenderer';
-import type { IdeaContext, IdeaDetail } from '../../lib/api';
+import type { IdeaDetail } from '../../lib/api';
+import { projectIdeaPath, projectLibraryFilePath } from '../../lib/project-routes';
 import { Panel, SectionTitle } from '../automation/ui';
 import {
   IdeaActionControl,
   type IdeaActionHandlers,
-  ideaPath,
   IdeaStateIcon,
   LiveDot,
 } from './parts';
@@ -164,6 +165,11 @@ export function IdeaPlan({
 /**
  * The files and other ideas this one picked up as agents worked. Nobody links these by hand:
  * an agent reading a research file while working on the idea is what puts it here.
+ *
+ * The count is `formatCappedTotal` over each list's own total, not `items.length`. The reads
+ * behind these lists are bounded, so a capped one reports `totalIsLowerBound` and the honest
+ * rendering is "N+" (program decision 9) — summing the rendered items instead would state an
+ * exact figure the server explicitly declined to claim, and would under-report it.
  */
 export function IdeaRelated({
   links,
@@ -172,43 +178,42 @@ export function IdeaRelated({
   links: IdeaContext | undefined;
   projectId: string;
 }) {
-  const files = links?.files.items ?? [];
-  const ideas = links?.relatedIdeas.items ?? [];
-  const total = files.length + ideas.length;
   if (links === undefined) return null;
+  const files = links.files.items;
+  const ideas = links.relatedIdeas.items;
+  const rendered = files.length + ideas.length;
+  const count =
+    links.files.totalIsLowerBound || links.relatedIdeas.totalIsLowerBound
+      ? `${links.files.total + links.relatedIdeas.total}+`
+      : String(links.files.total + links.relatedIdeas.total);
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <SectionTitle title="Related" count={total} hint="Linked automatically as agents work" />
+      <SectionTitle title="Related" count={count} hint="Linked automatically as agents work" />
       <Panel label="Related" className="overflow-hidden">
-        {total === 0 ? (
+        {rendered === 0 ? (
           <p className="m-0 px-4 py-6 text-sm text-fg-muted">Nothing else is linked yet.</p>
         ) : (
           <>
             {files.map((file) => (
-              <span
+              <LinkedWorkRow
                 key={file.fileId}
-                className="flex min-h-14 w-full min-w-0 items-center gap-3 border-0 border-b border-solid border-border-default px-4 py-3 last:border-b-0"
-              >
-                <FileText size={17} aria-hidden className="shrink-0 text-fg-muted" />
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-[14px] font-medium text-fg-primary">
-                    {file.filename}
-                  </span>
-                  <span className="truncate text-xs text-fg-muted">{file.directory}</span>
-                </span>
-              </span>
+                icon={FileText}
+                accent="var(--sam-color-fg-muted)"
+                title={file.filename}
+                meta={describeRelations(file.relations)}
+                secondaryMeta={file.directory}
+                to={projectLibraryFilePath(projectId, file.fileId)}
+              />
             ))}
             {ideas.map((related) => (
-              <Link
+              <LinkedWorkRow
                 key={related.ideaId}
-                to={ideaPath(projectId, related.ideaId)}
-                className="flex min-h-14 w-full min-w-0 items-center gap-3 border-0 border-b border-solid border-border-default px-4 py-3 no-underline last:border-b-0 hover:bg-surface-hover"
-              >
-                <Lightbulb size={17} aria-hidden className="shrink-0 text-fg-muted" />
-                <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-fg-primary">
-                  {related.title}
-                </span>
-              </Link>
+                icon={Lightbulb}
+                accent="var(--sam-color-warning-fg)"
+                title={related.title}
+                meta={describeRelations(related.relations)}
+                to={projectIdeaPath(projectId, related.ideaId)}
+              />
             ))}
           </>
         )}

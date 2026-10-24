@@ -18,9 +18,11 @@ import {
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router';
 
+import { LinkedWorkRow, PullRequestStateBadge } from '../../components/linked-work';
 import type { IdeaDetail, IdeaLinkedSession, IdeaUpdateNote } from '../../lib/api';
+import { projectChatPath } from '../../lib/project-routes';
 import { Panel, SectionTitle } from '../automation/ui';
-import { chatPath, LiveDot } from './parts';
+import { LiveDot } from './parts';
 import { relativeTime } from './view-model';
 
 /** How much of a note the composer accepts. Long enough for a paragraph, not an essay. */
@@ -57,7 +59,17 @@ function workOutcome(session: IdeaLinkedSession): { text: string; tone: string }
   }
 }
 
-/** Every chat and pull request for this idea, and what each one produced. */
+/**
+ * Every chat and pull request for this idea, and what each one produced.
+ *
+ * Rows render through T4's shared `LinkedWorkRow` and `PullRequestStateBadge`, so a chat or a
+ * pull request reads the same here as in the chat's Related panel and the library file's
+ * Linked strip (`.claude/rules/24`). These rows were hand-built first and drifted in three
+ * ways worth naming: the title did not clamp to two lines, the pull-request state was spelled
+ * out in a nested ternary instead of the shared pill, and the pull-request href was passed
+ * through raw — `tasks.output_pr_url` is agent-reported, and the shared row is where
+ * `sanitizeUrl` runs.
+ */
 export function IdeaWork({ idea, projectId }: { idea: IdeaDetail; projectId: string }) {
   const total = idea.sessions.length + idea.pullRequests.length;
   return (
@@ -74,67 +86,41 @@ export function IdeaWork({ idea, projectId }: { idea: IdeaDetail; projectId: str
               const outcome = workOutcome(session);
               const live = session.taskStatus === 'in_progress' || session.taskStatus === 'queued';
               return (
-                <Link
+                <LinkedWorkRow
                   key={session.sessionId}
-                  to={chatPath(projectId, session.sessionId)}
-                  className="group flex min-h-16 w-full min-w-0 items-center gap-3 border-0 border-b border-solid border-border-default px-4 py-3 text-left no-underline last:border-b-0 hover:bg-surface-hover"
-                >
-                  <MessageSquare size={17} aria-hidden className="shrink-0 text-fg-muted" />
-                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="line-clamp-2 break-words text-[14px] font-semibold leading-snug text-fg-primary">
-                      {session.topic ?? 'Untitled chat'}
+                  icon={MessageSquare}
+                  accent="var(--sam-color-info-fg)"
+                  title={session.topic ?? 'Untitled chat'}
+                  meta={session.agentLabel ?? 'An agent'}
+                  trailing={
+                    <span className={`inline-flex items-center gap-1.5 font-medium ${outcome.tone}`}>
+                      {live && <LiveDot />}
+                      <span className="line-clamp-1 break-words">{outcome.text}</span>
                     </span>
-                    <span className="flex min-w-0 flex-wrap items-center gap-x-2 text-[13px] text-fg-muted">
-                      <span className="break-words">{session.agentLabel ?? 'An agent'}</span>
-                      <span aria-hidden>·</span>
-                      <span
-                        className={`inline-flex items-center gap-1.5 font-medium ${outcome.tone}`}
-                      >
-                        {live && <LiveDot />}
-                        <span className="line-clamp-1 break-words">{outcome.text}</span>
-                      </span>
-                    </span>
-                  </span>
-                  {session.lastActivityAt && (
-                    <span className="shrink-0 self-start pt-0.5 text-xs text-fg-muted">
-                      {relativeTime(new Date(session.lastActivityAt).toISOString())}
-                    </span>
-                  )}
-                </Link>
+                  }
+                  timestamp={
+                    session.lastActivityAt
+                      ? relativeTime(new Date(session.lastActivityAt).toISOString())
+                      : undefined
+                  }
+                  to={projectChatPath(projectId, session.sessionId)}
+                />
               );
             })}
             {idea.pullRequests.map((pullRequest) => (
-              <a
+              <LinkedWorkRow
                 key={pullRequest.url}
+                icon={pullRequest.state === 'merged' ? GitMerge : GitPullRequest}
+                accent={
+                  pullRequest.state === 'merged'
+                    ? 'var(--sam-color-success-fg)'
+                    : 'var(--sam-color-purple)'
+                }
+                title={pullRequest.title ?? `Pull request #${pullRequest.number}`}
+                meta={`PR #${pullRequest.number}`}
+                trailing={<PullRequestStateBadge state={pullRequest} />}
                 href={pullRequest.url}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="group flex min-h-16 w-full min-w-0 items-center gap-3 border-0 border-b border-solid border-border-default px-4 py-3 text-left no-underline last:border-b-0 hover:bg-surface-hover"
-              >
-                {pullRequest.state === 'merged' ? (
-                  <GitMerge size={17} aria-hidden className="shrink-0 text-success-fg" />
-                ) : (
-                  <GitPullRequest size={17} aria-hidden className="shrink-0 text-purple" />
-                )}
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="line-clamp-2 break-words text-[14px] font-semibold leading-snug text-fg-primary">
-                    {pullRequest.title ?? `Pull request #${pullRequest.number}`}
-                  </span>
-                  <span className="text-[13px] text-fg-muted">
-                    PR #{pullRequest.number} ·{' '}
-                    {pullRequest.state === 'merged'
-                      ? 'Merged'
-                      : pullRequest.state === 'closed'
-                        ? 'Closed'
-                        : pullRequest.isDraft
-                          ? 'Draft'
-                          : 'Open'}
-                    {pullRequest.checksState === 'success' && ', checks passed'}
-                    {pullRequest.checksState === 'failure' && ', checks failed'}
-                    {pullRequest.checksState === 'pending' && ', checks running'}
-                  </span>
-                </span>
-              </a>
+              />
             ))}
           </>
         )}
@@ -162,7 +148,7 @@ function UpdateRow({ update, projectId }: { update: IdeaUpdateNote; projectId: s
           <span className="text-sm font-semibold text-fg-primary">{author}</span>
           {update.sessionId && (
             <Link
-              to={chatPath(projectId, update.sessionId)}
+              to={projectChatPath(projectId, update.sessionId)}
               className="min-w-0 truncate text-xs text-accent no-underline hover:underline"
             >
               {update.sessionTopic ?? 'in a chat'}

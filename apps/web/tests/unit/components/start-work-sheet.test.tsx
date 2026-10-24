@@ -1,8 +1,17 @@
 /**
  * Start work, driven the way a person drives it: open the sheet from the idea page, pick
  * a profile, write a note, press the button (rule 62). Nothing hand-feeds the request.
+ *
+ * The entry point is `pages/ideas/IdeaPage`, which replaced `pages/IdeaDetailPage`. This
+ * suite is pointed at the page rather than mounting `StartWorkSheet` directly on purpose:
+ * what broke Start work before was never the sheet, it was the page's way in. Mounting the
+ * sheet itself would keep passing through exactly that failure.
  */
-import type { AgentProfile, AgentSkill, TaskDetailResponse } from '@simple-agent-manager/shared';
+import type {
+  AgentProfile,
+  AgentSkill,
+  IdeaDerivedStatus,
+} from '@simple-agent-manager/shared';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
@@ -11,8 +20,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
-  getProjectTask: vi.fn(),
-  getTaskSessions: vi.fn(),
+  getProjectIdea: vi.fn(),
+  listIdeaUpdates: vi.fn(),
   listAgentProfiles: vi.fn(),
   getProfilePickerState: vi.fn(),
   updateProfilePicker: vi.fn(),
@@ -24,8 +33,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
-  getProjectTask: mocks.getProjectTask,
-  getTaskSessions: mocks.getTaskSessions,
+  getProjectIdea: mocks.getProjectIdea,
+  listIdeaUpdates: mocks.listIdeaUpdates,
   listAgentProfiles: mocks.listAgentProfiles,
   getProfilePickerState: mocks.getProfilePickerState,
   updateProfilePicker: mocks.updateProfilePicker,
@@ -53,38 +62,43 @@ vi.mock('../../../src/pages/ProjectContext', () => ({
 }));
 
 vi.mock('../../../src/hooks/useIsMobile', () => ({ useIsMobile: () => false }));
+vi.mock('../../../src/hooks/useToast', () => ({
+  useToast: () => ({ success: vi.fn(), error: vi.fn() }),
+}));
 vi.mock('../../../src/hooks/useQueryScope', () => ({ useQueryScope: () => 'user-1' }));
 
-import { IdeaDetailPage } from '../../../src/pages/IdeaDetailPage';
+import type { IdeaDetail } from '../../../src/lib/api';
+import { IdeaPage } from '../../../src/pages/ideas/IdeaPage';
 
-function makeIdea(overrides: Partial<TaskDetailResponse> = {}): TaskDetailResponse {
+function derived(overrides: Partial<IdeaDerivedStatus> = {}): IdeaDerivedStatus {
   return {
-    id: 'idea-1',
-    projectId: 'proj-test',
-    userId: 'user-1',
-    parentTaskId: null,
-    workspaceId: null,
+    state: 'not-started',
+    needsYou: null,
+    source: { origin: 'none', observedAt: null, stale: false },
+    session: null,
+    pullRequest: null,
+    note: null,
+    ...overrides,
+  };
+}
+
+function makeIdea(overrides: Partial<IdeaDetail> = {}): IdeaDetail {
+  return {
+    ideaId: 'idea-1',
     title: 'Retry failed webhook deliveries',
-    description: 'Use the 3-day window.',
+    content: 'Use the 3-day window.',
+    summary: 'Use the 3-day window.',
     status: 'draft',
-    executionStep: null,
-    priority: 0,
-    taskMode: 'task',
-    dispatchDepth: 0,
-    agentProfileHint: null,
-    blocked: false,
-    startedAt: null,
-    completedAt: null,
-    errorMessage: null,
-    outputSummary: null,
-    outputBranch: null,
-    outputPrUrl: null,
-    finalizedAt: null,
     createdAt: '2026-10-24T00:00:00Z',
     updatedAt: '2026-10-24T00:00:00Z',
-    dependencies: [],
+    derived: derived(),
+    counts: { updates: 0, chats: 0, files: 0, pullRequests: 0 },
+    filedByAgent: false,
+    filedBy: null,
+    sessions: [],
+    pullRequests: [],
     ...overrides,
-  } as TaskDetailResponse;
+  };
 }
 
 function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
@@ -149,7 +163,7 @@ function renderIdeaDetail() {
   return renderWithQuery(
     <MemoryRouter initialEntries={['/projects/proj-test/ideas/idea-1']}>
       <Routes>
-        <Route path="/projects/:id/ideas/:taskId" element={<IdeaDetailPage />} />
+        <Route path="/projects/:id/ideas/:taskId" element={<IdeaPage />} />
       </Routes>
     </MemoryRouter>
   );
@@ -158,7 +172,7 @@ function renderIdeaDetail() {
 async function openSheet() {
   const user = userEvent.setup();
   renderIdeaDetail();
-  const trigger = await screen.findByRole('button', { name: /Start work on this idea/i });
+  const trigger = await screen.findByRole('button', { name: /^Start work$/ });
   await user.click(trigger);
   const dialog = await screen.findByRole('dialog', { name: /Start work|Talk it through/i });
   return { user, dialog };
@@ -167,8 +181,8 @@ async function openSheet() {
 describe('Start work sheet', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getProjectTask.mockResolvedValue(makeIdea());
-    mocks.getTaskSessions.mockResolvedValue({ sessions: [], count: 0 });
+    mocks.getProjectIdea.mockResolvedValue(makeIdea());
+    mocks.listIdeaUpdates.mockResolvedValue({ updates: [], nextCursor: null });
     mocks.listAgentProfiles.mockResolvedValue([makeProfile(), CHAT_PROFILE]);
     mocks.getProfilePickerState.mockResolvedValue({
       hiddenProfileIds: [],
@@ -282,20 +296,19 @@ describe('Start work sheet', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(mocks.submitTask).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole('button', { name: /Start work on this idea/i }));
+    await user.click(screen.getByRole('button', { name: /^Start work$/ }));
     const reopened = await screen.findByRole('dialog', { name: /Start work/i });
     expect(within(reopened).getByLabelText('Note for the agent')).toHaveValue('');
   });
 
-  it.each([
-    ['completed', /done/i],
-    ['cancelled', /parked/i],
-  ])('hides Start work for a %s idea', async (status) => {
-    mocks.getProjectTask.mockResolvedValue(makeIdea({ status: status as never }));
+  it.each([['done'], ['parked']])('hides Start work for a %s idea', async (status) => {
+    mocks.getProjectIdea.mockResolvedValue(
+      makeIdea({ derived: derived({ state: status as never }) })
+    );
     renderIdeaDetail();
     await screen.findByRole('heading', { name: /Retry failed webhook deliveries/i });
     expect(
-      screen.queryByRole('button', { name: /Start work on this idea/i })
+      screen.queryByRole('button', { name: /^Start work$/ })
     ).not.toBeInTheDocument();
   });
 });
