@@ -171,9 +171,14 @@ export function EnvironmentPage() {
           ? 'Any agent'
           : `${access.names.length} only`,
     },
-    { id: 'settings', label: 'Settings', value: String(settingsCount) },
-    { id: 'addresses', label: 'Addresses', value: String(addressCount) },
-    { id: 'data', label: 'Saved data', value: diskSize ? `${diskSize} GB` : 'None' },
+    // A count the page has not loaded yet is left blank, never shown as 0 or None.
+    { id: 'settings', label: 'Settings', value: config.data ? String(settingsCount) : undefined },
+    { id: 'addresses', label: 'Addresses', value: domains.data ? String(addressCount) : undefined },
+    {
+      id: 'data',
+      label: 'Saved data',
+      value: volumes.data ? (diskSize ? `${diskSize} GB` : 'None') : undefined,
+    },
     { id: 'behind-the-scenes', label: 'Behind the scenes' },
     { id: 'pause', label: pauseOrDeleteTitle(env) },
   ];
@@ -223,7 +228,12 @@ export function EnvironmentPage() {
             onRetry={() => void config.refetch()}
           />
         ) : (
-          <AppSettings projectId={projectId} envId={env.id} rows={config.data?.envVars ?? []} />
+          <AppSettings
+            projectId={projectId}
+            envId={env.id}
+            rows={config.data?.envVars ?? []}
+            loading={!config.data}
+          />
         )}
       </div>
       <div className={PAIR}>
@@ -240,6 +250,7 @@ export function EnvironmentPage() {
             answering={isAnswering(info.health)}
             routes={routes}
             domains={customDomains}
+            loading={!domains.data}
             onAddDomain={() => setAddingDomain(true)}
           />
         )}
@@ -250,7 +261,7 @@ export function EnvironmentPage() {
             onRetry={() => void volumes.refetch()}
           />
         ) : (
-          <SavedData projectId={projectId} env={env} volumes={volumeList} />
+          <SavedData projectId={projectId} env={env} volumes={volumeList} loading={!volumes.data} />
         )}
       </div>
       <BehindTheScenes

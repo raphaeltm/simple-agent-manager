@@ -14,7 +14,7 @@ import type {
 } from '../../../lib/api';
 import { useEnvironmentActions } from '../data';
 import { domainState } from '../domains';
-import { AddressLine, TonePill, TwoStepRemove } from '../shared';
+import { AddressLine, SectionLoading, TonePill, TwoStepRemove } from '../shared';
 
 function DomainRow({
   projectId,
@@ -81,6 +81,7 @@ export function Addresses({
   answering,
   routes,
   domains,
+  loading = false,
   onAddDomain,
 }: {
   projectId: string;
@@ -88,6 +89,8 @@ export function Addresses({
   answering: boolean;
   routes: DeploymentPublicRoute[];
   domains: DeploymentCustomDomain[];
+  /** The addresses have not loaded yet: say so rather than "No addresses yet". */
+  loading?: boolean;
   onAddDomain: () => void;
 }) {
   const reaches = (domain: DeploymentCustomDomain, route: DeploymentPublicRoute) =>
@@ -155,11 +158,16 @@ export function Addresses({
             </li>
           ))}
         </ul>
-        {routes.length === 0 && domains.length === 0 && (
-          <p className="m-0 px-4 py-5 text-sm text-fg-muted">
-            No addresses yet. The first deploy creates one for each part of the app that serves web
-            traffic.
-          </p>
+        {loading ? (
+          <SectionLoading />
+        ) : (
+          routes.length === 0 &&
+          domains.length === 0 && (
+            <p className="m-0 px-4 py-5 text-sm text-fg-muted">
+              No addresses yet. The first deploy creates one for each part of the app that serves
+              web traffic.
+            </p>
+          )
         )}
       </Panel>
     </section>

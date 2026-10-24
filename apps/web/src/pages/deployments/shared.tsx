@@ -21,6 +21,15 @@ const TONE_BADGE: Record<Tone, string> = {
   muted: 'stopped',
 };
 
+/** A section whose data has not arrived yet: a loading line, never its empty state. */
+export function SectionLoading() {
+  return (
+    <p role="status" className="m-0 px-4 py-5 text-sm text-fg-muted">
+      Loading…
+    </p>
+  );
+}
+
 export function TonePill({ tone, label }: { tone: Tone; label: string }) {
   return <StatusBadge status={TONE_BADGE[tone]} label={label} pulse={false} />;
 }

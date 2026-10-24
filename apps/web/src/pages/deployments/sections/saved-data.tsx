@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { Panel, SectionTitle } from '../../../components/page-kit/ui';
 import type { DeploymentEnvironment, DeploymentVolume } from '../../../lib/api';
 import { useEnvironmentActions } from '../data';
-import { TwoStepRemove } from '../shared';
+import { SectionLoading, TwoStepRemove } from '../shared';
 
 const NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 /** 10 GB is the smallest block volume Hetzner and Vultr sell. */
@@ -90,10 +90,13 @@ export function SavedData({
   projectId,
   env,
   volumes,
+  loading = false,
 }: {
   projectId: string;
   env: DeploymentEnvironment;
   volumes: DeploymentVolume[];
+  /** The disks have not loaded yet: say so rather than describe an empty list. */
+  loading?: boolean;
 }) {
   const actions = useEnvironmentActions(projectId, env.id);
   const [adding, setAdding] = useState(false);
@@ -103,9 +106,11 @@ export function SavedData({
       <SectionTitle
         title="Saved data"
         hint={
-          volumes.length === 0
-            ? "Disks keep data between deploys. Agents add them from your Compose file's volumes."
-            : `${volumes.length} ${volumes.length === 1 ? 'disk' : 'disks'}, ${total} GB. Kept when you pause.`
+          loading
+            ? undefined
+            : volumes.length === 0
+              ? "Disks keep data between deploys. Agents add them from your Compose file's volumes."
+              : `${volumes.length} ${volumes.length === 1 ? 'disk' : 'disks'}, ${total} GB. Kept when you pause.`
         }
         action={
           !adding && env.location ? (
@@ -115,6 +120,11 @@ export function SavedData({
           ) : undefined
         }
       />
+      {loading && !adding && (
+        <Panel className="overflow-hidden">
+          <SectionLoading />
+        </Panel>
+      )}
       {(volumes.length > 0 || adding) && (
         <Panel className="overflow-hidden">
           {adding && <AddDisk projectId={projectId} env={env} onDone={() => setAdding(false)} />}

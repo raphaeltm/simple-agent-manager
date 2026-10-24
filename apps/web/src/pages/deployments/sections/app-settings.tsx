@@ -10,7 +10,7 @@ import { ModelToggleSwitch } from '../../../components/agent-models/ModelToggleS
 import { Panel, SectionTitle } from '../../../components/page-kit/ui';
 import type { DeploymentEnvironmentConfigVar } from '../../../lib/api';
 import { useEnvironmentActions } from '../data';
-import { TwoStepRemove } from '../shared';
+import { SectionLoading, TwoStepRemove } from '../shared';
 
 const KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -93,10 +93,13 @@ export function AppSettings({
   projectId,
   envId,
   rows,
+  loading = false,
 }: {
   projectId: string;
   envId: string;
   rows: DeploymentEnvironmentConfigVar[];
+  /** The settings have not loaded yet: say so rather than "No settings yet". */
+  loading?: boolean;
 }) {
   const actions = useEnvironmentActions(projectId, envId);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -132,7 +135,9 @@ export function AppSettings({
             }
           />
         )}
-        {rows.length === 0 && !draft ? (
+        {loading && !draft ? (
+          <SectionLoading />
+        ) : rows.length === 0 && !draft ? (
           <p className="m-0 px-4 py-5 text-sm text-fg-muted">
             No settings yet. Agents add what the app needs when they deploy, and you can add your
             own.

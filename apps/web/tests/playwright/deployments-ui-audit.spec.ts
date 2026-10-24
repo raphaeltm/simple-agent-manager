@@ -42,6 +42,8 @@ interface MockOptions {
   environments?: unknown[];
   /** Path suffixes (after `/environments/:id`) that answer 500, or 'list' for the list itself. */
   failing?: string[];
+  /** Path suffixes that wait for `until` before answering: the page while data is in flight. */
+  hold?: { paths: string[]; until: Promise<void> };
 }
 
 interface PolicyWrite {
@@ -101,6 +103,7 @@ async function mockApi(page: Page, opts: MockOptions = {}): Promise<PolicyWrite[
         const env = environments.find((item) => (item as { id: string }).id === envId);
         if (failing.has(rest))
           return json(route, { error: 'INTERNAL_ERROR', message: 'Upstream read failed' }, 500);
+        if (opts.hold?.paths.includes(rest)) await opts.hold.until;
         if (rest === '/policy' && method === 'PATCH') {
           policyWrites.push({
             envId,
@@ -304,6 +307,50 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByText(/Could not load the settings/)).toBeVisible();
       await expect(page.getByRole('region', { name: 'Who can deploy' })).toBeVisible();
       await assertLayout(page);
+    });
+
+    test('sections say they are loading, not empty, until their data arrives', async ({ page }) => {
+      let release = () => {};
+      const until = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await mockApi(page, {
+        hold: {
+          paths: ['/custom-domains', '/public-routes', '/volumes', '/runtime-config'],
+          until,
+        },
+      });
+      await page.goto(envUrl('env-prod'));
+      await expect(page.getByRole('heading', { name: 'production', level: 1 })).toBeVisible();
+      const addresses = page.getByRole('region', { name: 'Addresses' });
+      const data = page.getByRole('region', { name: 'Saved data' });
+      const settings = page.getByRole('region', { name: 'Settings your app reads' });
+      for (const section of [addresses, data, settings]) {
+        await expect(section.getByRole('status')).toHaveText('Loading…');
+      }
+      // Nothing claims the lists are empty while they are still on their way.
+      await expect(page.getByText(/No addresses yet|No settings yet|Disks keep data/)).toHaveCount(
+        0
+      );
+      if (!vp.isMobile) {
+        const index = page.getByRole('navigation', { name: 'On this page' });
+        await expect(index.getByRole('link', { name: 'Saved data' })).toHaveText('Saved data');
+        await expect(index.getByRole('link', { name: 'Addresses' })).toHaveText('Addresses');
+      }
+      await assertLayout(page);
+      await capture(page, 'environment-loading');
+      release();
+      await expect(addresses.getByText('shop.northwind.dev')).toBeVisible();
+      await expect(data.getByText('postgres-data')).toBeVisible();
+      await expect(settings.getByText('PUBLIC_URL')).toBeVisible();
+      await expect(page.getByRole('status').filter({ hasText: 'Loading…' })).toHaveCount(0);
+      if (!vp.isMobile) {
+        await expect(
+          page
+            .getByRole('navigation', { name: 'On this page' })
+            .getByRole('link', { name: /Saved data/ })
+        ).toContainText('70 GB');
+      }
     });
 
     test('new environment needs an access choice before it can be created', async ({ page }) => {
