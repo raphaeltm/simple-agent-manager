@@ -19,8 +19,8 @@ import { describe, expect, it } from 'vitest';
 import type { ProjectData } from '../../src/durable-objects/project-data';
 import {
   getIdeaWorkSnapshots,
-  type IdeaWorkLinkCaps,
   IDEA_NEEDS_INPUT_MARKER_KIND,
+  type IdeaWorkLinkCaps,
 } from '../../src/durable-objects/project-data/idea-work';
 import type { LinkLimits, LinkWrite } from '../../src/durable-objects/project-data/links';
 
@@ -75,7 +75,10 @@ interface IdeaWorkTestDouble {
   }): Promise<{ id: string }>;
   recordResourceLink(input: LinkWrite, limits: LinkLimits): Promise<unknown>;
   addIdeaUpdate(input: IdeaUpdateNote, minAgentIntervalMs: number): Promise<unknown>;
-  getIdeaWorkSnapshots(ideaIds: string[], caps: IdeaWorkLinkCaps): Promise<Record<string, Snapshot>>;
+  getIdeaWorkSnapshots(
+    ideaIds: string[],
+    caps: IdeaWorkLinkCaps
+  ): Promise<Record<string, Snapshot>>;
 }
 
 function getStub(projectId: string): DurableObjectStub<IdeaWorkTestDouble> {
@@ -341,8 +344,18 @@ describe('getIdeaWorkSnapshots', () => {
       const stub = getStub('idea-work-assets');
       const worker = await stub.createSession(null, 'Working on it', 'task-work');
       await link(stub, worker, 'idea-a', 'works_on');
-      await linkAsset(stub, { kind: 'idea', id: 'idea-a' }, { kind: 'file', id: 'file-plan' }, 'linked');
-      await linkAsset(stub, { kind: 'session', id: worker }, { kind: 'file', id: 'file-output' }, 'uploaded');
+      await linkAsset(
+        stub,
+        { kind: 'idea', id: 'idea-a' },
+        { kind: 'file', id: 'file-plan' },
+        'linked'
+      );
+      await linkAsset(
+        stub,
+        { kind: 'session', id: worker },
+        { kind: 'file', id: 'file-output' },
+        'uploaded'
+      );
       await linkAsset(
         stub,
         { kind: 'session', id: worker },
@@ -361,8 +374,18 @@ describe('getIdeaWorkSnapshots', () => {
       const worker = await stub.createSession(null, 'Working on it', 'task-work');
       await link(stub, reader, 'idea-a', 'viewed', 'auto');
       await link(stub, worker, 'idea-a', 'works_on');
-      await linkAsset(stub, { kind: 'session', id: reader }, { kind: 'file', id: 'file-theirs' }, 'uploaded');
-      await linkAsset(stub, { kind: 'session', id: worker }, { kind: 'file', id: 'file-mine' }, 'uploaded');
+      await linkAsset(
+        stub,
+        { kind: 'session', id: reader },
+        { kind: 'file', id: 'file-theirs' },
+        'uploaded'
+      );
+      await linkAsset(
+        stub,
+        { kind: 'session', id: worker },
+        { kind: 'file', id: 'file-mine' },
+        'uploaded'
+      );
 
       const snapshots = await stub.getIdeaWorkSnapshots(['idea-a'], CAPS);
       // The owner control sits beside the attack case: a read that returned nothing at all
@@ -376,8 +399,18 @@ describe('getIdeaWorkSnapshots', () => {
       const second = await stub.createSession(null, 'Second', 'task-2');
       await link(stub, first, 'idea-a', 'works_on');
       await link(stub, second, 'idea-a', 'works_on');
-      await linkAsset(stub, { kind: 'session', id: first }, { kind: 'file', id: 'file-shared' }, 'uploaded');
-      await linkAsset(stub, { kind: 'session', id: second }, { kind: 'file', id: 'file-shared' }, 'replaced');
+      await linkAsset(
+        stub,
+        { kind: 'session', id: first },
+        { kind: 'file', id: 'file-shared' },
+        'uploaded'
+      );
+      await linkAsset(
+        stub,
+        { kind: 'session', id: second },
+        { kind: 'file', id: 'file-shared' },
+        'replaced'
+      );
 
       const snapshots = await stub.getIdeaWorkSnapshots(['idea-a'], CAPS);
       expect(snapshots['idea-a']?.fileIds).toEqual(['file-shared']);
@@ -396,7 +429,10 @@ describe('getIdeaWorkSnapshots', () => {
         );
       }
 
-      const capped = await stub.getIdeaWorkSnapshots(['idea-a'], { perTargetCap: 3, maxTargets: 100 });
+      const capped = await stub.getIdeaWorkSnapshots(['idea-a'], {
+        perTargetCap: 3,
+        maxTargets: 100,
+      });
       expect(capped['idea-a']?.fileIds).toHaveLength(3);
       expect(capped['idea-a']?.truncated.files).toBe(true);
 

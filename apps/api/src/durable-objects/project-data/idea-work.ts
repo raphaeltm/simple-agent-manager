@@ -107,10 +107,7 @@ function chunkTargets(ids: string[], maxTargets: number): string[][] {
 }
 
 /** The chat rows behind a set of session ids, by id. One query, one bound parameter. */
-function readSessionDisplay(
-  sql: SqlStorage,
-  sessionIds: string[]
-): Map<string, SessionDisplayRow> {
+function readSessionDisplay(sql: SqlStorage, sessionIds: string[]): Map<string, SessionDisplayRow> {
   const byId = new Map<string, SessionDisplayRow>();
   if (!sessionIds.length) return byId;
   const rows = sql
@@ -242,9 +239,7 @@ export function getIdeaWorkSnapshots(
   }
 
   // 2. Those chats' own rows, and the questions on them, in one query each.
-  const sessionIds = [
-    ...new Set([...sessionsByIdea.values()].flatMap((byId) => [...byId.keys()])),
-  ];
+  const sessionIds = [...new Set([...sessionsByIdea.values()].flatMap((byId) => [...byId.keys()]))];
   const display = readSessionDisplay(sql, sessionIds);
   const needsInput = readNeedsInput(sql, sessionIds, now);
 

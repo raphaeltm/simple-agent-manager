@@ -301,7 +301,9 @@ describe('weak links never move an idea', () => {
   // these go red, which is the point.
   it('a weakly linked running chat does not make the idea in progress', () => {
     const result = deriveIdeaStatus(
-      input({ sessions: [session({ relations: ['read'], strong: false, taskStatus: 'in_progress' })] })
+      input({
+        sessions: [session({ relations: ['read'], strong: false, taskStatus: 'in_progress' })],
+      })
     );
     expect(result.state).toBe('not-started');
   });

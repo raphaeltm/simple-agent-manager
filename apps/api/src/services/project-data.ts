@@ -92,10 +92,7 @@ import type {
   GroupedFtsWallRecoveryRequest,
   GroupedFtsWallRecoveryResult,
 } from '../durable-objects/project-data/grouped-fts-wall-recovery';
-import type {
-  IdeaWorkLinkCaps,
-  IdeaWorkSnapshot,
-} from '../durable-objects/project-data/idea-work';
+import type { IdeaWorkLinkCaps, IdeaWorkSnapshot } from '../durable-objects/project-data/idea-work';
 import type {
   MessageContextRequest,
   MessageContextResult,
