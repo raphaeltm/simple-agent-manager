@@ -17,9 +17,9 @@ Appending progress to an idea's description obscures the current plan and can ex
 - [x] Add REST, workspace MCP and connector MCP paths; preserve existing content update behavior.
 - [x] Document agent note use and listing.
 - [x] Complete real SQL and handler tests, including foreign project and deletion attack.
-- [x] Run specialist reviews and lint/typecheck/build; full test retry is in progress after an unrelated web-suite failure on the concurrent monorepo run.
-- [ ] Claim, deploy and verify staging; release claim.
-- [ ] Open PR, pass CI/CodeRabbit/coordinator review, merge and watch production deploy.
+- [x] Run specialist reviews and lint/typecheck/build; isolated web and focused API suites pass. The full API run exposed stale count assertions, each corrected and rerun, plus one unrelated timeout whose focused route test passed.
+- [x] Claim, deploy and verify staging; release claim. Run 40045283143 passed migration safety, deploy and smoke; live note CRUD preserved the draft description, and the test draft was deleted.
+- [ ] PR #2427 is open and CodeRabbit approved. Pass CI/coordinator review, merge and watch production deploy.
 
 ## Acceptance
 
