@@ -263,51 +263,38 @@ function toSessions(
     (s) => s.sessionId
   );
 }
+function toPrRef(
+  rawUrl: string,
+  repository: string,
+  source: LinkedPullRequest['source'],
+  bySessionId: string | null
+): LinkedPullRequest[] {
+  const url = canonicalProjectPullRequestUrl(rawUrl, repository);
+  const number = Number(/\/pull\/(\d+)$/.exec(url ?? '')?.[1]);
+  if (!url || !number) return [];
+  return [{ url, number, source, state: null, bySessionId }];
+}
+
 function toPrs(
   data: Awaited<ReturnType<typeof contextData>>,
   links: ResourceLink[],
   sessionIds: string[]
 ): LinkedPullRequest[] {
-  const refs: LinkedPullRequest[] = [];
-  for (const l of links)
-    if (l.targetKind === 'pr') {
-      const url = canonicalProjectPullRequestUrl(l.targetId, data.repository);
-      const number = Number(/\/pull\/(\d+)$/.exec(url ?? '')?.[1]);
-      if (url && number)
-        refs.push({
-          url,
-          number,
-          source: 'explicit_link',
-          state: null,
-          bySessionId: l.sourceKind === 'session' ? l.sourceId : null,
-        });
-    }
-  for (const row of data.outputs)
-    if (row.chatSessionId && sessionIds.includes(row.chatSessionId) && row.outputPrUrl) {
-      const url = canonicalProjectPullRequestUrl(row.outputPrUrl, data.repository);
-      const number = Number(/\/pull\/(\d+)$/.exec(url ?? '')?.[1]);
-      if (url && number)
-        refs.push({
-          url,
-          number,
-          source: 'task_output',
-          state: null,
-          bySessionId: row.chatSessionId,
-        });
-    }
-  for (const row of data.associations)
-    if (row.chatSessionId && sessionIds.includes(row.chatSessionId)) {
-      const url = canonicalProjectPullRequestUrl(row.prUrl, data.repository);
-      const number = Number(/\/pull\/(\d+)$/.exec(url ?? '')?.[1]);
-      if (url && number)
-        refs.push({
-          url,
-          number,
-          source: 'pr_association',
-          state: null,
-          bySessionId: row.chatSessionId,
-        });
-    }
+  const sessionSet = new Set(sessionIds);
+  const explicit = links.flatMap((link) => {
+    if (link.targetKind !== 'pr') return [];
+    const bySessionId = link.sourceKind === 'session' ? link.sourceId : null;
+    return toPrRef(link.targetId, data.repository, 'explicit_link', bySessionId);
+  });
+  const outputs = data.outputs.flatMap((row) => {
+    if (!row.chatSessionId || !sessionSet.has(row.chatSessionId) || !row.outputPrUrl) return [];
+    return toPrRef(row.outputPrUrl, data.repository, 'task_output', row.chatSessionId);
+  });
+  const associations = data.associations.flatMap((row) => {
+    if (!row.chatSessionId || !sessionSet.has(row.chatSessionId)) return [];
+    return toPrRef(row.prUrl, data.repository, 'pr_association', row.chatSessionId);
+  });
+  const refs = [...explicit, ...outputs, ...associations];
   return unique(refs, (r) => r.url);
 }
 
