@@ -324,6 +324,25 @@ async function prepareIdeaNoteUpdate(
   };
 }
 
+function appendIdeaContentUpdate(
+  input: IdeaUpdateInput,
+  maxLength: number,
+  updates: string[],
+  bindValues: unknown[]
+): void {
+  if (typeof input.content !== 'string') return;
+  const content = sanitizeUserInput(input.content).slice(0, maxLength);
+  if (input.append !== false) {
+    updates.push(
+      'description = CASE WHEN description IS NULL THEN ? ELSE substr(description || char(10) || char(10) || ?, 1, ?) END'
+    );
+    bindValues.push(content, content, maxLength);
+  } else {
+    updates.push('description = ?');
+    bindValues.push(content);
+  }
+}
+
 export async function prepareIdeaUpdate(
   ctx: OperationContext,
   input: IdeaUpdateInput
@@ -368,18 +387,7 @@ export async function prepareIdeaUpdate(
       bindValues.push(title);
     }
   }
-  if (typeof input.content === 'string') {
-    const content = sanitizeUserInput(input.content).slice(0, limits.ideaContentMaxLength);
-    if (input.append !== false) {
-      updates.push(
-        'description = CASE WHEN description IS NULL THEN ? ELSE substr(description || char(10) || char(10) || ?, 1, ?) END'
-      );
-      bindValues.push(content, content, limits.ideaContentMaxLength);
-    } else {
-      updates.push('description = ?');
-      bindValues.push(content);
-    }
-  }
+  appendIdeaContentUpdate(input, limits.ideaContentMaxLength, updates, bindValues);
   if (typeof input.priority === 'number') {
     updates.push('priority = ?');
     bindValues.push(
