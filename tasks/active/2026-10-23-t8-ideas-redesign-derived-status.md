@@ -249,6 +249,32 @@ created on 2026-10-24, so both predicates return the same count of zero there. A
 only evidence is "it returned zero" is indistinguishable from a query that cannot match
 anything, which is the whole reason for the comparison above.
 
+### Run it, and the answer, 2026-10-24
+
+The window is **08:43:39 → 12:52:58Z** (migration applied, to the last Worker swap of the day),
+which is about four hours across four deploys — not the "one to three minutes" estimated above.
+The migration runs early in `Deploy to Cloudflare` and the Worker swaps at the end of it, and
+each re-deploy reopens nothing: the migration is applied once, so the window closes at the
+FIRST swap. The figure above is the conservative outer bound.
+
+**Window rows: 0.**
+
+That zero only means something because the predicate was shown to be capable of matching. It
+was not, for most of the day: staging held no `status='draft' AND is_idea=0` row at all, so the
+query would have returned 0 whether or not it worked. Proven against the deployed Worker at
+13:00Z, with the row created and removed in the same job:
+
+| step                                 | result                              |
+| ------------------------------------ | ----------------------------------- |
+| before                               | predicate matches **0**             |
+| `POST /tasks` on the deployed Worker | `status='draft'`, **`is_idea = 0`** |
+| after                                | predicate matches **1**             |
+| `GET /api/projects/:id/ideas/<id>`   | **404** — the Ideas read refuses it |
+| after delete                         | back to **0**                       |
+
+That is also the live verification of this PR's documented claim that `POST /tasks` drafts are
+no longer ideas — against deployed code rather than a fixture.
+
 Count zero is the expected answer, and the window is one to three minutes wide. Anything in it
 needs a human look at `has_content` and `agent_profile_hint` before a backfill by id, because
 an ordinary task created in the same minute looks identical to the query.
