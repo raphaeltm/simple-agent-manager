@@ -9,8 +9,8 @@ import type { IdeaCounts, IdeaDerivedStatus, IdeaListItem } from '@simple-agent-
 import { describe, expect, it } from 'vitest';
 
 import {
-  IDEA_NEEDS_YOU_VISIBLE,
   groupIdeas,
+  IDEA_NEEDS_YOU_VISIBLE,
   ideaAttention,
   ideaCountsLine,
   ideaMatchesSearch,
