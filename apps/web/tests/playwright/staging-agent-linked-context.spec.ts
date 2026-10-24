@@ -125,17 +125,17 @@ test('real agent gets bounded linked context and treats fenced text as data', as
       async () => {
         const result = await request(
           'get',
-          `/sessions/${created.sessionId}/messages?limit=100&compact=false`
+          `/sessions/${created.sessionId}/messages?limit=1000&compact=false`
         );
         const rows = (result.messages ?? result.items ?? []) as Array<{
           role: string;
           content: string;
         }>;
-        return rows.some(
-          (row) => row.role === 'assistant' && row.content.includes(`READY ${marker}`)
-        )
-          ? rows
-          : null;
+        const assistant = rows
+          .filter((row) => row.role === 'assistant')
+          .map((row) => row.content)
+          .join('');
+        return assistant.includes(`READY ${marker}`) ? rows : null;
       },
       'first Instant reply',
       180_000
@@ -154,7 +154,7 @@ test('real agent gets bounded linked context and treats fenced text as data', as
       async () => {
         const result = await request(
           'get',
-          `/sessions/${created.sessionId}/messages?limit=100&compact=false`
+          `/sessions/${created.sessionId}/messages?limit=1000&compact=false`
         );
         const rows = (result.messages ?? result.items ?? []) as Array<{
           role: string;
@@ -166,10 +166,10 @@ test('real agent gets bounded linked context and treats fenced text as data', as
         const assistant = rows
           .filter((row) => row.role === 'assistant')
           .map((row) => row.content)
-          .join('\n');
-        const toolText = tools.map((row) => row.content).join('\n');
-        return names.includes('get_idea') &&
-          names.includes('get_linked_context') &&
+          .join('');
+        const toolText = tools.map((row) => row.content).join('');
+        return names.some((name) => name?.endsWith('get_idea')) &&
+          names.some((name) => name?.endsWith('get_linked_context')) &&
           assistant.includes(marker) &&
           assistant.includes(created.fileId!) &&
           (!prUrl || assistant.includes(prUrl)) &&
