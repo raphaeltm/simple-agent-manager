@@ -24,6 +24,13 @@ const LOGIN_ATTEMPTS = 3;
  * appeared within this window, it is not coming.
  */
 const ONBOARDING_PROBE_TIMEOUT_MS = 2_000;
+/** How many times to attempt the dismissal before asserting the wizard is gone. */
+const ONBOARDING_DISMISS_ATTEMPTS = 4;
+/**
+ * Short, so a click onto a node that is about to detach fails fast and the next attempt gets a
+ * freshly resolved one. Playwright's default would retry inside one call until the TEST timeout.
+ */
+const ONBOARDING_CLICK_TIMEOUT_MS = 5_000;
 
 type StoredCookies = Awaited<ReturnType<BrowserContext['storageState']>>['cookies'];
 let cachedCookies: StoredCookies | null = null;
@@ -94,9 +101,36 @@ export async function dismissStagingOnboarding(page: Page): Promise<void> {
    */
   const appeared = await wizard
     .waitFor({ state: 'visible', timeout: ONBOARDING_PROBE_TIMEOUT_MS })
-    .then(() => true, () => false);
+    .then(
+      () => true,
+      () => false
+    );
   if (!appeared) return;
-  await page.getByRole('button', { name: 'Exit setup' }).click();
+  /*
+   * Attempt the dismissal, then judge the OUTCOME, and retry the attempt — rather than
+   * requiring one particular click to succeed.
+   *
+   * The modal remounts while the route behind it finishes loading, so a click can resolve a
+   * node, scroll it into view and then find it detached. Playwright keeps retrying inside the
+   * single `click()`, which turns a transient remount into the whole test's timeout: on the
+   * Ideas route (87 real ideas on staging) that burnt 120s and took the other six tests with
+   * it, reporting the failure against a shared helper rather than against anything the spec
+   * was testing.
+   *
+   * The click is allowed to fail because it is not the thing being asserted; the wizard being
+   * gone is, and that is asserted unconditionally below whether or not any click reported
+   * success (`.claude/rules/17` — a conditional attempt still needs an unconditional
+   * assertion).
+   */
+  const exitSetup = wizard.getByRole('button', { name: 'Exit setup' });
+  for (let attempt = 0; attempt < ONBOARDING_DISMISS_ATTEMPTS; attempt += 1) {
+    const gone = await wizard.waitFor({ state: 'hidden', timeout: 1_000 }).then(
+      () => true,
+      () => false
+    );
+    if (gone) return;
+    await exitSetup.click({ timeout: ONBOARDING_CLICK_TIMEOUT_MS }).catch(() => undefined);
+  }
   await expect(wizard).toBeHidden({ timeout: 10_000 });
 }
 
