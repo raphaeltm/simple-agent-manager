@@ -388,9 +388,13 @@ export function ReaderConversation({
         </div>
       </div>
       {placement !== 'visible' && anchorItemId && (
+        // A wash from the scroller's edge sits behind the pill, so it never reads on top of a
+        // line of the conversation.
         <div
-          className="pointer-events-none absolute inset-x-0 flex justify-center"
-          style={placement === 'above' ? { top: 10 } : { bottom: bottomInset + 12 }}
+          className={`pointer-events-none absolute inset-x-0 flex justify-center from-[var(--sam-color-bg-canvas)] to-transparent ${
+            placement === 'above' ? 'bg-gradient-to-b pt-2.5 pb-6' : 'bg-gradient-to-t pt-6 pb-3'
+          }`}
+          style={placement === 'above' ? { top: 0 } : { bottom: bottomInset }}
         >
           <button
             type="button"

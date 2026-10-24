@@ -181,6 +181,9 @@ export const ReaderThreadSheet = forwardRef<
           const end = event.changedTouches[0]?.clientY;
           touchStartY.current = null;
           if (start === null || end === undefined || Math.abs(end - start) < SWIPE_PX) return;
+          // Cancelling the touch keeps the browser from also delivering a click, which would
+          // toggle the sheet straight back.
+          event.preventDefault();
           onOpenChange(end < start);
         }}
         aria-expanded={open}

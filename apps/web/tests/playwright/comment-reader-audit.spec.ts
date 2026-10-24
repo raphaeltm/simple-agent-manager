@@ -174,6 +174,7 @@ interface Scenario {
   hasMoreBefore?: boolean;
   hasMoreAfter?: boolean;
   earlierRows?: Row[];
+  laterRows?: Row[];
   anchorFound?: boolean;
   contextStatus?: number;
   inboxThreads?: ReturnType<typeof thread>[];
@@ -242,8 +243,9 @@ async function setupMocks(page: Page, scenario: Scenario = {}) {
       return route.fulfill({ json: { comments: threads } });
     }
     if (pathname === `${sessionBase}/messages`) {
-      // Earlier page: everything before the cursor, then nothing more.
-      return route.fulfill({ json: { messages: scenario.earlierRows ?? [], hasMore: false } });
+      // One page each way: the earlier or later rows, then nothing more.
+      const rowsForPage = searchParams.has('after') ? scenario.laterRows : scenario.earlierRows;
+      return route.fulfill({ json: { messages: rowsForPage ?? [], hasMore: false } });
     }
     if (pathname === `${base}/members`) return route.fulfill({ json: { members: [] } });
     if (pathname === '/api/notifications') {
@@ -379,6 +381,32 @@ test.describe('Comment reader', () => {
     if (await back.isVisible()) await back.click();
     await page.waitForTimeout(300);
     await expectQuoteOnScreen(page, 'the ledger write happens before');
+  });
+
+  test('loads later messages below and keeps the comment in place', async ({ page }) => {
+    const rows = conversation();
+    seq = 200;
+    const later = [
+      row('u-9', 'user', 'Later: did the deploy go out?', NOW - 20 * MIN),
+      ...streamed('a-9', 'Yes. The deploy finished and the retries stopped.', NOW - 19 * MIN),
+    ];
+    await setupMocks(page, { rows, hasMoreAfter: true, laterRows: later });
+    await openReader(page);
+    const anchorRow = page.locator('[data-reader-anchor="true"]');
+    const before = await anchorRow.boundingBox();
+    const laterButton = page.getByRole('button', { name: 'Later messages' });
+    await laterButton.click();
+    await expect(page.getByText('Later: did the deploy go out?')).toBeAttached();
+    await expect(page.getByText('Latest message')).toBeAttached();
+    await expect(laterButton).toHaveCount(0);
+    // Clicking scrolled the button into view; bring the comment back and check it is intact.
+    const back = page.getByRole('button', { name: 'Back to the comment' });
+    if (await back.isVisible()) await back.click();
+    await page.waitForTimeout(300);
+    await expectQuoteOnScreen(page, 'the ledger write happens before');
+    expect(before).not.toBeNull();
+    await checkLayout(page);
+    await screenshot(page, 'comment-reader-later-loaded');
   });
 
   test('long title, long comment and an unbroken URL wrap without overflow', async ({ page }) => {

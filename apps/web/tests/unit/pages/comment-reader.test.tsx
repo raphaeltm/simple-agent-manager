@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   listProjectComments: vi.fn(),
   createMessageCommentReply: vi.fn(),
   resolveMessageCommentThread: vi.fn(),
+  reopenMessageCommentThread: vi.fn(),
+  sendMessageCommentThreadToAgent: vi.fn(),
   listChatMessages: vi.fn(),
 }));
 
@@ -26,6 +28,8 @@ vi.mock('../../../src/lib/api/comments', async (importOriginal) => ({
   listProjectComments: mocks.listProjectComments,
   createMessageCommentReply: mocks.createMessageCommentReply,
   resolveMessageCommentThread: mocks.resolveMessageCommentThread,
+  reopenMessageCommentThread: mocks.reopenMessageCommentThread,
+  sendMessageCommentThreadToAgent: mocks.sendMessageCommentThreadToAgent,
 }));
 
 vi.mock('../../../src/lib/api/sessions', async (importOriginal) => ({
@@ -226,6 +230,28 @@ describe('comment reader', () => {
     );
   });
 
+  it('loads later messages below, from the newest loaded row', async () => {
+    mocks.getMessageCommentContext.mockResolvedValue(
+      context({ messages: ROWS.slice(0, 4), hasMoreAfter: true })
+    );
+    mocks.listChatMessages.mockResolvedValue({ messages: [ROWS[4]], hasMore: false });
+    renderAt(READER_PATH);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Later messages' }));
+
+    expect(await screen.findByText('Fix it please.')).toBeInTheDocument();
+    expect(mocks.listChatMessages).toHaveBeenCalledWith(PROJECT, SESSION, {
+      after: formatMessageCursor({ createdAt: 202, sequence: 202, id: 'a3' }),
+      order: 'asc',
+      signal: expect.any(AbortSignal),
+    });
+    expect(screen.getByText('Latest message')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Later messages' })).toBeNull();
+    expect(document.querySelector('[data-reader-anchor="true"]')).toHaveTextContent(
+      'It retries because'
+    );
+  });
+
   it('steps to the next comment in the Comments page order', async () => {
     const older = makeThread('thread-2', { createdAt: 500, body: 'Older question' });
     const resolved = makeThread('thread-3', { status: 'resolved', createdAt: 2_000 });
@@ -314,6 +340,46 @@ describe('comment reader', () => {
     expect(await screen.findByRole('button', { name: 'Send to agent' })).toBeInTheDocument();
   });
 
+  it('reopens a resolved thread from the reader', async () => {
+    const resolved = makeThread('thread-1', { status: 'resolved' });
+    mocks.listMessageComments.mockResolvedValue({ comments: [resolved] });
+    mocks.getMessageCommentContext.mockResolvedValue(context({ thread: resolved }));
+    mocks.reopenMessageCommentThread.mockImplementation(async () => {
+      const reopened = { ...resolved, status: 'open' as const };
+      mocks.listMessageComments.mockResolvedValue({ comments: [reopened] });
+      return { comment: reopened };
+    });
+    renderAt(READER_PATH);
+    fireEvent.click(await screen.findByRole('button', { name: /Show the whole thread/ }));
+
+    // Opened on purpose, so a resolved thread shows expanded with Reopen.
+    fireEvent.click(await screen.findByRole('button', { name: 'Reopen' }));
+
+    await waitFor(() =>
+      expect(mocks.reopenMessageCommentThread).toHaveBeenCalledWith(PROJECT, SESSION, 'thread-1')
+    );
+    expect(await screen.findByRole('button', { name: 'Resolve' })).toBeInTheDocument();
+  });
+
+  it('sends the comment to the agent from the reader', async () => {
+    mocks.sendMessageCommentThreadToAgent.mockResolvedValue({
+      comment: { ...THREAD, status: 'sent' },
+    });
+    renderAt(READER_PATH);
+    fireEvent.click(await screen.findByRole('button', { name: /Show the whole thread/ }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Send to agent' }));
+
+    await waitFor(() =>
+      expect(mocks.sendMessageCommentThreadToAgent).toHaveBeenCalledWith(
+        PROJECT,
+        SESSION,
+        'thread-1',
+        expect.anything()
+      )
+    );
+  });
+
   it('says so when the commented message is gone, and still shows the comment', async () => {
     mocks.getMessageCommentContext.mockResolvedValue(
       context({ anchor: { messageId: 'a2', found: false }, messages: [] })
@@ -360,13 +426,14 @@ describe('comment reader', () => {
     const handle = await screen.findByRole('button', { name: /Show the whole thread/ });
 
     fireEvent.touchStart(handle, { touches: [{ clientY: 600 }] });
-    fireEvent.touchEnd(handle, { changedTouches: [{ clientY: 520 }] });
+    // A recognised swipe cancels the touch, so the browser delivers no click to undo it.
+    expect(fireEvent.touchEnd(handle, { changedTouches: [{ clientY: 520 }] })).toBe(false);
     const close = await screen.findByRole('button', { name: 'Hide the thread' });
     expect(close).toHaveAttribute('aria-expanded', 'true');
 
     // A small movement is a tap, not a swipe, and does not close it.
     fireEvent.touchStart(close, { touches: [{ clientY: 300 }] });
-    fireEvent.touchEnd(close, { changedTouches: [{ clientY: 310 }] });
+    expect(fireEvent.touchEnd(close, { changedTouches: [{ clientY: 310 }] })).toBe(true);
     expect(screen.getByRole('button', { name: 'Hide the thread' })).toBeInTheDocument();
 
     fireEvent.touchStart(close, { touches: [{ clientY: 300 }] });
