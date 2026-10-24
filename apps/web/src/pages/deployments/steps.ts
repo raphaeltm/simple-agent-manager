@@ -3,7 +3,8 @@
  * (`GET …/releases/:releaseId/events`, written by `packages/vm-agent/internal/deploy/engine.go`).
  *
  * Each step sends `deployment.apply.<prefix>_started` and, when it finishes, `…_completed`
- * (some steps `…_skipped` or `…_verified`). The `step` field is the key below; the event
+ * (some `…_verified`). A step with nothing to do sends only `…_skipped` (`compose_pull` when
+ * the images were loaded from the release), and is left out. The `step` field is the key below; the event
  * prefix can differ from it (`artifacts_load` reports step `load_artifacts`). A failure
  * arrives as one `deployment.apply.failed` (or `failed_initial`) event, so the failed step
  * is the one that started and never finished. Putting the previous version back sends
@@ -60,6 +61,7 @@ export const STEP_NAMES: Record<string, [string, string, string]> = {
 export type StepState = 'done' | 'running' | 'failed';
 
 const FINISHED = /_(completed|skipped|verified)$/;
+const SKIPPED = /_skipped$/;
 const FAILED = new Set(['deployment.apply.failed', 'deployment.apply.failed_initial']);
 /** Events that open an attempt before `deployment.apply.started`. */
 const PRELUDE = new Set([
@@ -102,6 +104,8 @@ export function collapseSteps(
     }
     const step = event.step;
     if (!step || step === 'other' || !STEP_NAMES[step]) continue;
+    // A step the server skipped did nothing: listing it as done would say it happened.
+    if (SKIPPED.test(event.eventType) && !order.includes(step)) continue;
     if (!order.includes(step)) order.push(step);
     if (FINISHED.test(event.eventType) || event.eventType === 'deployment.apply.reverted')
       done.add(step);

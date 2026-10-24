@@ -110,4 +110,51 @@ describe('collapseSteps', () => {
     const events = attempt();
     expect(latestAttempt(events)[0]?.eventType).toBe('deployment.apply.fetch_started');
   });
+
+  it('leaves out a step the server skipped', () => {
+    const events = [
+      event('artifacts_load_started', 'load_artifacts'),
+      event('artifacts_load_completed', 'load_artifacts'),
+      event('compose_pull_skipped', 'compose_pull'),
+      event('compose_up_started', 'compose_up'),
+    ];
+    expect(labels(collapseSteps(events, false))).toEqual([
+      'done: Loaded the images',
+      'running: Starting the app…',
+    ]);
+  });
+
+  it('reads a real failed first deploy, as staging reported it', () => {
+    // The newest attempt of a staging release (2026-10-24), event names and steps verbatim.
+    const events = [
+      event('fetch_started', 'fetch_release'),
+      event('fetch_completed', 'fetch_release'),
+      event('fetch_completed', 'fetch_release'),
+      event('payload_verified', 'verify_payload'),
+      event('started', 'apply'),
+      event('release_written', 'write_release'),
+      event('volume_mount_started', 'volume_mounts'),
+      event('volume_mount_completed', 'volume_mounts'),
+      event('volume_mounts_verified', 'volume_mounts'),
+      event('artifacts_load_started', 'load_artifacts'),
+      event('artifacts_load_completed', 'load_artifacts'),
+      event('compose_config_started', 'compose_config'),
+      event('compose_config_completed', 'compose_config'),
+      event('compose_pull_skipped', 'compose_pull'),
+      event('compose_up_started', 'compose_up'),
+      event('compose_up_completed', 'compose_up'),
+      event('health_check_started', 'health_check'),
+      event('failed', 'failed', 'error'),
+      event('cleanup_started', 'cleanup_failed_initial'),
+      event('failed_initial', 'failed_initial', 'error'),
+    ];
+    expect(labels(collapseSteps(events, true))).toEqual([
+      'done: Got the new version',
+      'done: Attached the saved data',
+      'done: Loaded the images',
+      "done: Checked the app's setup",
+      'done: Started the app',
+      'failed: Failed its health check',
+    ]);
+  });
 });
