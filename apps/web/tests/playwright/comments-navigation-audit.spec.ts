@@ -427,6 +427,29 @@ async function setupMocks(page: Page) {
       await route.fulfill({ json: PROJECT_COMMENTS_RESPONSE });
       return;
     }
+    // The comment reader: the thread and the conversation around its message.
+    if (
+      pathname.startsWith(`${base}/sessions/${SESSION_ID}/comments/`) &&
+      pathname.endsWith('/context')
+    ) {
+      const thread = THREADS.find((candidate) => candidate.id === pathname.split('/').at(-2));
+      await route.fulfill(
+        thread
+          ? {
+              json: {
+                thread: { ...thread, projectId: PROJECT_ID },
+                session: { id: SESSION_ID, topic: SESSIONS[0].topic },
+                viewerAccess: 'owner',
+                anchor: { messageId: thread.anchor.messageId, found: true },
+                messages: MESSAGES,
+                hasMoreBefore: false,
+                hasMoreAfter: false,
+              },
+            }
+          : { status: 404, json: { error: 'NOT_FOUND', message: 'Comment not found' } }
+      );
+      return;
+    }
     if (pathname === `${base}/sessions/${SESSION_ID}/comments`) {
       await route.fulfill({ json: { comments: THREADS } });
       return;
@@ -787,7 +810,9 @@ for (const [label, viewport] of [
       await assertNoOverflow(page);
     });
 
-    test('project comments opens and reveals a chat message comment', async ({ page }) => {
+    test('project comments opens a chat message comment in the comment reader', async ({
+      page,
+    }) => {
       await setupMocks(page);
       await page.goto(`/projects/${PROJECT_ID}/comments`);
       await page.getByRole('heading', { name: 'Comments', level: 1 }).waitFor({ timeout: 15_000 });
@@ -798,15 +823,18 @@ for (const [label, viewport] of [
         })
         .click();
 
-      await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`));
-      await expect(page).not.toHaveURL(/commentMessage=/);
-      const highlighted = page.locator('.sam-message-highlight');
-      await expect(highlighted).toContainText(
+      // ct-2 is anchored to msg-5, a later chunk of the reply that msg-4 starts, so the
+      // reader must land on the merged message that shows it.
+      await expect(page).toHaveURL(
+        new RegExp(`/projects/${PROJECT_ID}/comments/${SESSION_ID}/ct-2$`)
+      );
+      const anchored = page.locator('[data-reader-anchor="true"]');
+      await expect(anchored).toContainText(
         'The project-level page now reads the project-wide comments endpoint once'
       );
-      await expect(highlighted).toBeInViewport();
+      await expect(anchored).toBeInViewport();
       await waitForUiSettled(page);
-      await screenshot(page, `comments-14-project-to-chat-message-${label}`);
+      await screenshot(page, `comments-14-project-to-reader-${label}`);
       await assertNoOverflow(page);
     });
 
