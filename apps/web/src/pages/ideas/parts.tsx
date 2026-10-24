@@ -25,6 +25,7 @@ import { Link } from 'react-router';
 
 import { ConnectorChip } from '../../components/ConnectorChip';
 import { projectChatPath, projectIdeaPath } from '../../lib/project-routes';
+import { sanitizeUrl } from '../../lib/url-utils';
 import { Panel, RowLink } from '../automation/ui';
 import {
   IDEA_STATE_LABELS,
@@ -122,7 +123,19 @@ export function ideaActionHref(projectId: string, target: IdeaActionTarget): str
     case 'chat':
       return projectChatPath(projectId, target.sessionId);
     case 'pull-request':
-      return target.url;
+      /*
+       * Sanitised HERE, at the one place every consumer of an `IdeaActionTarget` resolves its
+       * destination, rather than in each branch that renders one.
+       *
+       * This URL comes from `tasks.output_pr_url`, which an agent reports. It reaches two
+       * surfaces — the idea page's "Review #NNN" primary action and the Ideas list's
+       * attention cards — and both render it through `IdeaActionControl`. The Work section's
+       * rows are safe for a different reason (`LinkedWorkRow` sanitises its own `href`), and
+       * relying on that was the mistake: it left a second, independent path from the same
+       * agent-reported value to a live `href`. Sanitising at the resolver means a new consumer
+       * is safe by construction instead of by remembering (`.claude/rules/24`).
+       */
+      return sanitizeUrl(target.url);
     default:
       return null;
   }

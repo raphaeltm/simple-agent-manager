@@ -38,6 +38,14 @@ import {
 } from './staging-helpers';
 
 const PROJECT_ID = process.env.T8_PROJECT_ID ?? '';
+/**
+ * A `cf-container` profile on the target project, so Start work can reach a 2xx.
+ *
+ * Overridable because the default is only correct for the staging project this spec is
+ * normally pointed at; the assertion below still holds on a project without one.
+ */
+const CONTAINER_PROFILE_ID =
+  process.env.T8_CONTAINER_PROFILE_ID ?? '01KYQ60N603GE9G3Y767K9NSW4';
 
 /** Unique per run, so a failed run never collides with the next one. */
 const RUN = Date.now().toString(36);
@@ -385,25 +393,42 @@ test.describe('Ideas list on staging — laptop', () => {
     expect(idea.status(), await idea.text()).toBe(201);
     created.startWorkIdeaId = ((await idea.json()) as { ideaId: string }).ideaId;
 
+    /*
+     * Ask for a container profile by id, so the request can reach a real 2xx.
+     *
+     * `STAGING_CONTAINER_PROFILE_ID` defaults to a profile verified in D1 on the staging
+     * project this spec targets:
+     *
+     *   SELECT id, name, runtime FROM agent_profiles WHERE project_id = ?
+     *   -- 01KYQ5YDHC1VS0BZ9F3NY97FNH  Codex MCP Test    cf-container
+     *   -- 01KYQ60N603GE9G3Y767K9NSW4  Claude MCP Test   cf-container
+     *   -- (12 more, all runtime NULL)
+     *
+     * This corrects a claim in the previous version of this comment. It said "every profile on
+     * this project has `runtime: null`", which came from reading a `LIMIT 6` page of that same
+     * query — the two container profiles sort after the six it returned. Acting on that reading
+     * left the test unable to take its own success branch, so the 409 fallback was the only
+     * branch that ever ran.
+     */
     const started = await api(page, 'POST', `/api/projects/${PROJECT_ID}/sessions/start`, {
       message: 'Say hello and stop. This is a staging verification run.',
       sourceIdeaId: created.startWorkIdeaId,
+      agentProfileId: CONTAINER_PROFILE_ID,
     });
     const startedText = await started.text();
 
     /*
      * The control has to be discriminating in BOTH branches, which the first version of it was
      * not: it tolerated 409 outright, so on a project whose profiles resolve to a VM runtime it
-     * passed without ever accepting anything. CodeRabbit caught that, and the staging run
-     * confirmed it — every profile on this project has `runtime: null`, so the request really
-     * did take the 409 path and proved nothing.
+     * passed without ever accepting anything. CodeRabbit caught that.
      *
-     * What makes 409 informative is WHICH 409. `requireOpenIdeaForWorkStart` runs before any
-     * effects; `resolveWorkspaceRuntime` and its VM refusal run after it
-     * (`routes/chat-start.ts`). So a 409 carrying the VM-runtime message is positive evidence
-     * that the idea gate ACCEPTED — the request got past it and died further down — while a
-     * 404 is the gate rejecting. Asserting the message is therefore the acceptance proof on a
-     * project where no profile resolves to a container.
+     * With a container profile requested, 2xx is the expected branch and the one that proves
+     * the most: a task id linked to the idea. The 409 branch is kept as a fallback for a run
+     * against a project without a container profile, and is still discriminating on WHICH 409:
+     * `requireOpenIdeaForWorkStart` runs before any effects, while `resolveWorkspaceRuntime`
+     * and its VM refusal run after it (`routes/chat-start.ts`), so a 409 carrying the
+     * VM-runtime message is positive evidence that the idea gate ACCEPTED — the request got
+     * past it and died further down — whereas a 404 is the gate rejecting.
      */
     expect(started.status(), startedText).not.toBe(404);
     expect(started.status(), startedText).not.toBe(403);
@@ -417,6 +442,28 @@ test.describe('Ideas list on staging — laptop', () => {
       created.startWorkTaskId = startedBody.taskId ?? '';
       // A started idea must have produced real work, not just a 2xx.
       expect(created.startWorkTaskId, startedText).not.toBe('');
+      expect(created.startWorkSessionId, startedText).not.toBe('');
+
+      /*
+       * And that work must be ON THE IDEA. A 2xx with a task id proves something started;
+       * only the link proves it started against this idea, which is the whole contract of
+       * `recordWorkStartIdeaLink`. Without this the test would pass if `sourceIdeaId` were
+       * accepted and then dropped — the same class of defect as the dead Start work link this
+       * PR fixes, where the idea was collected and silently discarded.
+       */
+      const links = await api(
+        page,
+        'GET',
+        `/api/projects/${PROJECT_ID}/ideas/${created.startWorkIdeaId}/links`
+      );
+      const linksText = await links.text();
+      expect(links.status(), linksText).toBe(200);
+      const sessions = (JSON.parse(linksText) as { sessions: { items: { sessionId: string }[] } })
+        .sessions.items;
+      expect(
+        sessions.map((session) => session.sessionId),
+        linksText
+      ).toContain(created.startWorkSessionId);
     }
   });
 

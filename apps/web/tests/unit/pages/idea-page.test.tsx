@@ -227,6 +227,36 @@ describe('IdeaPage', () => {
       expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
     });
 
+    /*
+     * `tasks.output_pr_url` is agent-reported, and this action is the page's PRIMARY button in
+     * the review state — the most likely thing a person clicks.
+     *
+     * The Work section's rows were already safe because `LinkedWorkRow` sanitises its own
+     * href, and relying on that is exactly how this path was missed: it is a second,
+     * independent route from the same stored value to a live `href`. The sanitising now
+     * happens in `ideaActionHref`, so this asserts the outcome at the surface rather than the
+     * helper (`.claude/rules/62`).
+     */
+    it('refuses to make a javascript: pull-request URL clickable', async () => {
+      mocks.getProjectIdea.mockResolvedValue(
+        idea({
+          derived: derived({
+            state: 'review',
+            // eslint-disable-next-line no-script-url -- the stored value under test
+            pullRequest: { ...PULL_REQUEST, url: 'javascript:alert(document.cookie)' },
+          }),
+        })
+      );
+      renderPage();
+
+      const link = await screen.findByRole('link', { name: 'Review PR #482' });
+      expect(link).toHaveAttribute('href', '#');
+      // Still rendered and still labelled, so the refusal is the href and not the row
+      // vanishing. The owner control is the test directly above: an ordinary https URL keeps
+      // its own href, so this pair cannot both pass if sanitising were simply "always '#'".
+      expect(link).toHaveAttribute('target', '_blank');
+    });
+
     it('asks you to decide once a pull request merged, with both answers', async () => {
       mocks.getProjectIdea.mockResolvedValue(
         idea({

@@ -223,6 +223,60 @@ const LINKS = {
   },
 };
 
+/**
+ * Profiles for the Start work sheet. The second name is far longer than the sheet's
+ * `NAME_IN_COPY_MAX_CHARS`, so the audit exercises its ellipsis rather than only the happy
+ * path, and the picker row has to survive that name at 375px.
+ */
+const START_WORK_PROFILES = [
+  {
+    id: 'profile-builder',
+    projectId: 'proj-audit',
+    userId: 'user-audit',
+    name: 'Opus 5.5',
+    description: 'Plans and builds carefully, opens a pull request',
+    agentType: 'claude-code',
+    model: 'claude-opus-5-5',
+    workspaceProfile: 'full',
+    runtime: 'vm',
+    taskMode: 'task',
+    isBuiltin: false,
+    createdAt: '2026-10-01T00:00:00Z',
+    updatedAt: '2026-10-01T00:00:00Z',
+  },
+  {
+    id: 'profile-long',
+    projectId: 'proj-audit',
+    userId: 'user-audit',
+    name: 'Careful reviewer that reads the whole repository before touching anything',
+    description:
+      'Reads every rule file, traces the data path end to end and writes the regression test first',
+    agentType: 'claude-code',
+    model: 'claude-opus-5-5',
+    workspaceProfile: 'full',
+    runtime: 'vm',
+    taskMode: 'task',
+    isBuiltin: false,
+    createdAt: '2026-10-01T00:00:00Z',
+    updatedAt: '2026-10-01T00:00:00Z',
+  },
+];
+
+/**
+ * Opens Start work the way a person does, and waits for the sheet itself.
+ *
+ * The sheet is the reason this page's primary action is a button rather than a link: the
+ * action it replaced navigated to `/chat?executeIdea=<id>`, a parameter nothing read any
+ * more, so the person arrived at an empty chat with the idea dropped. A screenshot of the
+ * page alone cannot see that, which is why the audit presses the button.
+ */
+async function openStartWork(page: Page) {
+  await page.getByRole('button', { name: 'Start work' }).click();
+  const sheet = page.getByRole('dialog', { name: /Start work|Talk it through/i });
+  await expect(sheet).toBeVisible();
+  return sheet;
+}
+
 async function setupIdeaMocks(
   page: Page,
   options: { idea?: unknown; updates?: unknown[]; links?: unknown; updatesFail?: boolean } = {}
@@ -249,7 +303,10 @@ async function setupIdeaMocks(
     const sub = match[2] ?? '';
     if (sub === '') return respond(200, makeMockProject());
     if (sub === '/members') return respond(200, { members: [], accessRequests: [] });
-    if (sub.startsWith('/agent-profiles')) return respond(200, { items: [] });
+    // The picker state must be matched before the list: both start with `/agent-profiles`.
+    if (sub.startsWith('/agent-profiles/picker'))
+      return respond(200, { hiddenProfileIds: [], usage: [], windowDays: 30 });
+    if (sub.startsWith('/agent-profiles')) return respond(200, { items: START_WORK_PROFILES });
     if (sub.startsWith('/skills')) return respond(200, { items: [] });
     if (sub.startsWith('/sessions')) return respond(200, { sessions: [], total: 0 });
     if (sub.startsWith('/triggers')) return respond(200, { triggers: [] });
@@ -307,7 +364,7 @@ test.describe('Idea page — phone', () => {
     await openIdea(page);
 
     await expect(page.getByText('Not started')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Start work' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start work' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Updates' })).toBeVisible();
     await expect(page.getByText('Marcus Chen')).toBeVisible();
 
@@ -346,7 +403,7 @@ test.describe('Idea page — phone', () => {
     // Reading the failure leads; retrying is the quieter half. Asserted as order, because
     // "both buttons are visible" passed happily while they were the wrong way round.
     await expect(page.getByRole('link', { name: 'See what happened' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Try again…' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Try again…' })).toBeVisible();
     await expectActionOrder(page, ['See what happened', 'Try again…']);
 
     await assertLayoutIsSound(page);
@@ -385,7 +442,7 @@ test.describe('Idea page — phone', () => {
     await openIdea(page);
 
     await expect(page.getByText('Done')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Start follow-up work' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start follow-up work' })).toBeVisible();
 
     await assertLayoutIsSound(page);
     await screenshot(page, 'idea-page-done-phone');
@@ -431,6 +488,42 @@ test.describe('Idea page — phone', () => {
     await screenshot(page, 'idea-page-updates-error-phone');
   });
 
+  test('Start work opens the sheet, which fits a phone and names the idea', async ({ page }) => {
+    await setupIdeaMocks(page);
+    await openIdea(page);
+
+    const sheet = await openStartWork(page);
+    // It must name the idea it is about to start, and offer the two things the design asks
+    // for: who works on it, and a note.
+    await expect(sheet.getByText('Retry failed webhook deliveries')).toBeVisible();
+    await expect(sheet.getByRole('button', { name: /Who works on it/i })).toBeVisible();
+    await expect(sheet.getByLabel('Note for the agent')).toBeVisible();
+
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'idea-page-start-work-sheet-phone');
+  });
+
+  test('a profile name far longer than the sheet still fits', async ({ page }) => {
+    await setupIdeaMocks(page);
+    await openIdea(page);
+
+    const sheet = await openStartWork(page);
+    await sheet.getByRole('button', { name: /Who works on it/i }).click();
+    const picker = page.getByRole('dialog', { name: /Choose a profile/i });
+    await expect(picker).toBeVisible();
+    await picker
+      .getByRole('button', { name: /Careful reviewer that reads the whole repository/i })
+      .click();
+
+    // Back in the sheet, with the long name in copy. The ellipsis is the sheet's job; not
+    // widening the phone is the layout's.
+    await expect(page.getByRole('dialog', { name: /Start work|Talk it through/i })).toBeVisible();
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'idea-page-start-work-long-profile-phone');
+  });
+
   test('the edit dialog fits a phone screen', async ({ page }) => {
     await setupIdeaMocks(page);
     await openIdea(page);
@@ -469,6 +562,19 @@ test.describe('Idea page — laptop', () => {
 
     await assertLayoutIsSound(page);
     await screenshot(page, 'idea-page-stuck-desktop');
+  });
+
+  test('Start work opens the sheet on a laptop too', async ({ page }) => {
+    await setupIdeaMocks(page);
+    await openIdea(page);
+
+    const sheet = await openStartWork(page);
+    await expect(sheet.getByText('Retry failed webhook deliveries')).toBeVisible();
+    await expect(sheet.getByLabel('Note for the agent')).toBeVisible();
+
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'idea-page-start-work-sheet-desktop');
   });
 
   test('the edit dialog stays inside the viewport', async ({ page }) => {

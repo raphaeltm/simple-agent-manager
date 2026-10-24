@@ -125,15 +125,72 @@ not a proxy: every rule reads the condition itself and carries its source), `76-
 
 ### PR2 — the idea page
 
-- [ ] `GET /api/projects/:projectId/ideas/:ideaId` returns idea + derived status + Work + Related
+- [x] `GET /api/projects/:projectId/ideas/:ideaId` returns idea + derived status + Work + Related
       (T1 `IdeaContext`, T2 PR state with `refresh: 'single'`).
-- [ ] `apps/web/src/pages/ideas/IdeaPage.tsx` (+ parts): status card with the one status-dependent
+- [x] `apps/web/src/pages/ideas/IdeaPage.tsx` (+ parts): status card with the one status-dependent
       primary action, "The idea" (markdown, the current plan), Work, Updates (T3 notes + composer +
       quote + derived lifecycle entries), Related. Desktop two columns; the conversations drawer and
       mobile FAB go away.
-- [ ] Keep Start work (T7) wired; whichever of T7/T8 merges second does the wiring.
-- [ ] Tests: status-dependent primary action per state, Updates composer through the real POST,
+- [x] Keep Start work (T7) wired; whichever of T7/T8 merges second does the wiring. **T8 merged
+      second, and the wiring was worse than missing — see the three findings below.**
+- [x] Tests: status-dependent primary action per state, Updates composer through the real POST,
       Mark done / Park through the real route, Playwright both viewports, ui-ux-specialist review.
+
+### Finding 6 — Start work was a dead link on `main`, shipped by PR1
+
+`startWorkPath()` built `/projects/:id/chat?executeIdea=<id>`. T7 removed the branch that read
+that parameter when it built the sheet (`useComposerPrefill.ts` says so, and
+`project-chat.test.tsx` asserts the composer stays empty when the parameter is present). Neither
+PR broke it alone: PR1 added the producer, T7's merge removed the consumer. The Ideas list's
+"Start work" and the stopped-idea "Try again…" therefore opened an empty chat with the idea
+dropped, and `ideas-list-page.test.tsx` asserted that href, which pinned it.
+
+Fixed here: `start-work` is a handler target with no href, `IdeaActionHandlers` gains
+`onStartWork`, and both surfaces open the real sheet through one `useStartWorkLauncher`.
+Discriminating: restoring the old href reddens 13 tests.
+
+### Finding 7 — T7's Start work suite had stopped collecting
+
+`tests/unit/components/start-work-sheet.test.tsx` imports the page this branch deletes
+(`pages/IdeaDetailPage`), so after the deletion it failed to COLLECT — its 10 tests were absent,
+not failing, and a per-file run of the ideas tests never showed them (rule 02: a green test count
+is not a green suite). Repointed at `pages/ideas/IdeaPage`; all 10 pass there, which is the
+evidence that the Start work port is faithful rather than merely present.
+
+### Finding 8 — a closed ordinary task answered 409 with its state
+
+`classifyWorkStartIdea` tested the status before `isIdea`, so a `completed` ordinary task in the
+caller's own project got `409 "That idea is done. Reopen it before starting work on it."` — both
+that the row exists and what state it is in, for an id the caller only guessed at. T7's comment
+explains the ordering was safe while an idea WAS `status = 'draft'` and the two shapes were
+indistinguishable; decision 16's `tasks.is_idea` removed the ambiguity and with it the excuse.
+Non-ideas now get the same non-disclosing 404 as every other non-idea (rule 11). Discriminating:
+reverting only the `!isIdea` early return reddens exactly 3 tests, all 21 controls stay green.
+
+### Finding 10 — the sanitising fix had a second path I missed (security-auditor, HIGH)
+
+Converging the Work rows onto `LinkedWorkRow` fixed the raw `tasks.output_pr_url` there, and I
+reported that as "the pull-request URL is now sanitised". It was not. `ideaPrimaryAction` builds
+a SECOND action from the same stored value — `{ to: 'pull-request', url }` for the review state —
+and `IdeaActionControl` rendered it as a raw `href`. That is the idea page's primary button and
+the Ideas list's attention card, so the most likely thing a person clicks was the one path still
+unsanitised.
+
+The lesson is the shape of my own fix: I made one path safe by adopting a component that happens
+to sanitise, and then assumed the value was safe rather than the path. Sanitising now happens in
+`ideaActionHref`, the one place every consumer of an `IdeaActionTarget` resolves a destination,
+so a new consumer is safe by construction (rule 24). Discriminating: reverting it reddens exactly
+one test while the https owner control beside it stays green.
+
+### Finding 9 — the idea page had forked three shared surfaces
+
+Converging onto the merged T1/T4 work fixed two real defects, not just duplication:
+`tasks.output_pr_url` is agent-reported and the Work section rendered it as a raw `href`, where
+`LinkedWorkRow` runs `sanitizeUrl`; and the Related count summed `items.length`, asserting an
+exact total for a bounded read that can only report a lower bound (rule 65). `SectionTitle.count`
+now takes a string so a capped list can say "N+". Also dropped: the hand-copied `IdeaContext` and
+`getIdeaLinks` (that file's own comment asked for this once T1 landed), the duplicate
+`ideaLinksQueryOptions`, and local `ideaPath`/`chatPath` in favour of `lib/project-routes.ts`.
 
 ## Every idea writer, and what it sets (coordinator condition, channel seq 133a)
 
