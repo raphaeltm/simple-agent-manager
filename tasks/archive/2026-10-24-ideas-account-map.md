@@ -19,8 +19,16 @@ The Map has an idea node component but the API returns no ideas or idea to chat 
 - [x] Map ideas in the web client, filter, navigation, and responsive presentation.
 - [x] Add real SQL multi-project attack/control route tests and Ideas filter behavior test.
 - [x] Update public docs, review mobile and desktop Playwright screenshots.
-- [ ] Run quality, specialist, staging, PR, CodeRabbit, merge, production deploy gates.
+- [x] Run quality, specialist, staging, PR, CodeRabbit, merge, production deploy gates.
 
 ## Acceptance
 
 Caller-owned ideas linked to visible chats appear with project and chat edges; foreign ideas never appear. Ideas filter hides and restores nodes and edges. Caps are visible. Map works on phone and desktop.
+
+## Completion evidence
+
+- PR #2434 merged as `ae5500a1d` after green PR CI 40085920371 and main CI 40087539232.
+- Specialists completed with findings addressed; the final task-completion validation found no uncovered research, checklist, acceptance, UI data path, or vertical slice gap.
+- Staging deploy 40085925785 succeeded; authenticated Playwright verified the live idea/chat link and Ideas filter at 1280×800 and 375×667, with cleanup readback.
+- CodeRabbit trusted request 40071454461 returned an explicit rate limit; no review arrived.
+- Production deploy 40088696987 succeeded for merge SHA `ae5500a1d`.
