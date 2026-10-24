@@ -497,15 +497,18 @@ describe('connector operations current membership and creator authority', () => 
     expect(sqlite.prepare('SELECT count(*) AS n FROM cli_operation_receipts').get()).toEqual({
       n: 0,
     });
+    // The successful transition this test needs in order to prove the receipt IS reserved
+    // once a call succeeds. `draft -> ready` is no longer one: ideas are not run in place
+    // (program decision 1), so "Mark done" is the move a person makes from a draft.
     sqlite.prepare("UPDATE tasks SET status='draft' WHERE id='missing'").run();
     const result = await samIdeaUpdate.run(c, {
       projectId: 'project',
       ideaId: 'missing',
-      status: 'ready',
+      status: 'completed',
     });
     expect(result.updated).toBe(true);
     expect(
-      await samIdeaUpdate.run(c, { projectId: 'project', ideaId: 'missing', status: 'ready' })
+      await samIdeaUpdate.run(c, { projectId: 'project', ideaId: 'missing', status: 'completed' })
     ).toEqual(result);
   });
 

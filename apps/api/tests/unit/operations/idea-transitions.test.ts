@@ -33,10 +33,23 @@ const USER = 'user-1';
 
 describe('the idea transition table', () => {
   it('lets a person finish, park and reopen an idea', () => {
-    expect(getAllowedIdeaTransitions('draft')).toEqual(['ready', 'completed', 'cancelled']);
-    expect(getAllowedIdeaTransitions('ready')).toEqual(['draft', 'completed', 'cancelled']);
+    expect(getAllowedIdeaTransitions('draft')).toEqual(['completed', 'cancelled']);
     expect(getAllowedIdeaTransitions('completed')).toEqual(['draft']);
     expect(getAllowedIdeaTransitions('cancelled')).toEqual(['draft']);
+  });
+
+  // Program decision 1: ideas are not run in place. `draft -> ready -> POST /tasks/:id/run`
+  // is the legacy path that turns an idea row into a task row; Start work creates a new task
+  // linked to the idea instead.
+  it('refuses to move an idea into ready', () => {
+    expect(canTransitionIdeaStatus('draft', 'ready')).toBe(false);
+    expect(validateIdeaStatusTransition('draft', 'ready')).toContain('Invalid status transition');
+  });
+
+  // The other half, and the reason `ready` is still in the table at all: rows that reached it
+  // before that decision keep every way out, rather than being stranded (rule 71).
+  it('keeps every exit for an idea that is already ready', () => {
+    expect(getAllowedIdeaTransitions('ready')).toEqual(['draft', 'completed', 'cancelled']);
   });
 
   it('allows ready → completed, which the task table forbade', () => {
@@ -258,7 +271,8 @@ describe('applyIdeaStatusTransition', () => {
     it.each([
       ['draft', 'completed', true],
       ['draft', 'cancelled', true],
-      ['draft', 'ready', true],
+      ['draft', 'ready', false],
+      ['ready', 'draft', true],
       ['ready', 'completed', true],
       ['completed', 'draft', true],
       ['completed', 'cancelled', false],

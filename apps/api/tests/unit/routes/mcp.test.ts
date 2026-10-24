@@ -5577,7 +5577,35 @@ describe('MCP Routes', () => {
       }
     );
 
-    it('should transition draft → ready', async () => {
+    // Ideas are not run in place: `draft -> ready -> POST /tasks/:id/run` is the legacy path
+    // that turns an idea row into a task row, and Start work creates a new linked task
+    // instead (program decision 1, `operations/idea-transitions.ts`).
+    it('should refuse draft → ready', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        is_idea: 1,
+        title: 'My idea',
+        description: 'Content',
+        status: 'draft',
+        priority: 0,
+      });
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'idea-1', status: 'ready' },
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(JSON.stringify(body)).toContain('Invalid status transition');
+    });
+
+    // The owner control: the move a person actually makes from a draft still works, so the
+    // refusal above cannot pass by `update_idea` being broken outright.
+    it('should transition draft → completed', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         id: 'idea-1',
         is_idea: 1,
@@ -5592,7 +5620,7 @@ describe('MCP Routes', () => {
         app,
         jsonRpcRequest('tools/call', {
           name: 'update_idea',
-          arguments: { ideaId: 'idea-1', status: 'ready' },
+          arguments: { ideaId: 'idea-1', status: 'completed' },
         })
       );
 

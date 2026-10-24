@@ -595,6 +595,11 @@ that was in your list has left it.
 | POST   | `/api/projects/:projectId/ideas/:ideaId/status`    | Body `{ status: 'completed' \| 'cancelled' \| 'draft' }` — "Mark done", "Park", "Reopen". One transition table is shared with `update_idea` and the generic task status route, so every surface allows the same moves.                                                                                        |
 | POST   | `/api/projects/:projectId/ideas/:ideaId/keep-open` | Records that a person answered the idea's "a pull request merged, is this done?" question with **Keep open**. Changes no status; the question simply stops being asked for that merge.                                                                                                                        |
 
+An idea is open, done or parked, and those are the only moves: an open idea can be marked
+done or parked, and a done or parked idea can be reopened. An idea is never handed to an agent
+in place — **Start work** creates a new task linked to the idea instead — so moving one to
+`ready` is refused. Ideas that were already `ready` keep every way out of it.
+
 Pull request state comes from what SAM has already stored for the project's pull requests. The
 list never asks GitHub, because one page view would be one call per pull request in the project;
 the single-idea read may ask for one bounded background refresh.

@@ -181,6 +181,28 @@ as a linked idea.
 Migration `0207` backfills `is_idea = 1` for every row the old `status = 'draft'` definition
 covered, so nothing that was in anyone's Ideas list has left it.
 
+## What the five local reviews changed (2026-10-24)
+
+Security found 0 CRITICAL and 0 HIGH. Everything below is from the other four, or is the one
+CI failure, and all of it is fixed in `1f44320f5` except where noted.
+
+| From                   | Finding                                                                     | Resolution                                                                                   |
+| ---------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| CI                     | `tests/workers/resource-links-routes.ts` built its idea with `POST /tasks`  | Uses `POST /ideas`; gained the reciprocal attack case through the composed router            |
+| Security (MED x3)      | Three live readers still said `status = 'draft'`                            | All call `ideaTaskPredicateSql`; two more reads in `idea-tools.ts` joined them               |
+| Security (LOW)         | A `ready` idea could be delegated, running an idea in place                 | `draft -> ready` refused (decision 1); exits from `ready` kept (rule 71)                     |
+| UI/UX (HIGH)           | Needs you was ranked by recency, so a merged card could fold a blocked one  | Ranked question -> stuck -> merged, stably; mixed-severity tests, proven discriminating      |
+| UI/UX (MED)            | The phone never showed the "N in total" hint the laptop did                 | One `doneHint` for both layouts                                                              |
+| UI/UX (LOW x3)         | `Panel` tone override, `aria-label` mismatch, `ideaSourceLabel` unused here | `success` tone added; label matches the heading; the function moves to PR2 with its consumer |
+| Cloudflare             | `listIdeaAssetLinksForTargets` lost its index seek without ANALYZE          | Rewritten to `IN (SELECT value FROM json_each(?))`, matching `listLinksForTargets`           |
+| Cloudflare             | `projects.repository` read twice per page                                   | `getPullRequestStates` takes an optional `repository`                                        |
+| Cloudflare             | The <=8 budget was proven only for a session-link-free page                 | Second case: 100 ideas x 2 chats, 200 task ids, three chunks                                 |
+| Architecture (HIGH x2) | Duplicate cap resolver; duplicated PR-source rule                           | `resolveResourceLinkBatchCaps` and `canonicalPullRequestRefs` in `link-core.ts`              |
+| Architecture (MED)     | `/sam` `create_idea` is a fourth idea-creation path                         | Deferred: idea `01M5PBGHYP4Q4CBDYRM707KWHT`                                                  |
+| Completion (HIGH)      | Criterion 3's third surface was never tested                                | `tests/unit/routes/idea-status-surface-agreement.test.ts` drives all three                   |
+| Completion (MED)       | Two writers missing from the enumeration                                    | Added above                                                                                  |
+| Completion (MED)       | No single test crosses the real route -> DO RPC hop                         | Open; recorded as a gap in the PR                                                            |
+
 ## Acceptance criteria
 
 1. An idea's state is derived from its linked work, never typed: a linked chat starting moves it to

@@ -88,6 +88,10 @@ Higher rows win: an unanswered question outranks running work, running work outr
 pull request. Only chats that actually work on the idea move it; a chat that merely read or
 mentioned it never does.
 
+**An idea is never run in place.** Starting work creates a new task linked to the idea, so the
+idea keeps following that work rather than turning into it. That is why an idea moves only
+between open, done and parked.
+
 **Done and Parked stay your decision.** A merged pull request does not always finish an idea —
 the docs page may still be missing — so SAM asks once, with **Mark done** and **Keep open**,
 and does not ask again about that merge.
