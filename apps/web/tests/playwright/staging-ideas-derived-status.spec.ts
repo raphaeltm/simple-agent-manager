@@ -247,6 +247,17 @@ test.describe('Ideas list on staging — laptop', () => {
     await expect(ideaRow(page)).toContainText('Done');
     // The done row keeps the evidence of the work: it is still the idea that chat worked on.
     await expect(page.getByRole('heading', { name: /In progress/ })).toBeHidden();
+
+    /*
+     * The main column is empty here — every match is the done idea, which renders in the side
+     * column — so it must SAY so rather than render a void. This is the defect the first
+     * staging screenshot at this width showed: a third of the page blank while the match sat
+     * to the right of it. Asserted on staging as well as locally because the local audit runs
+     * against mocks, and this is the one state where a real list and a mocked one differ in
+     * how easy it is to reach.
+     */
+    await expect(page.getByText(/Nothing open matches/)).toBeVisible();
+    await expect(page.getByText(/under Done recently/)).toBeVisible();
     await shot(page, 't8-ideas-desktop');
   });
 
