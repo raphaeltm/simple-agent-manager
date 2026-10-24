@@ -13,6 +13,7 @@
  */
 import { GitPullRequest } from 'lucide-react';
 
+import { sanitizeUrl } from '../../lib/url-utils';
 import { PullRequestStateBadge } from '../linked-work';
 import type { SessionState } from './types';
 import { formatCountdown } from './types';
@@ -50,7 +51,8 @@ export function SessionHeaderPullRequestRow({
       {pullRequest && (
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <a
-            href={pullRequest.url}
+            // `tasks.output_pr_url` is agent-reported; only http(s) becomes a live link.
+            href={sanitizeUrl(pullRequest.url)}
             target="_blank"
             rel="noopener noreferrer"
             className="sam-type-caption inline-flex shrink-0 items-center gap-1 font-medium no-underline"

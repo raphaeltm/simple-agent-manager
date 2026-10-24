@@ -125,7 +125,7 @@ export function FileLinkedWorkSection({
                   accent={CHAT_ACCENT}
                   title={linkedSessionLabel(session)}
                   meta={describeRelations(session.relations)}
-                  to={`/projects/${projectId}/chat/${session.sessionId}`}
+                  to={`/projects/${projectId}/chat/${encodeURIComponent(session.sessionId)}`}
                   testId="file-linked-chat"
                 />
               ))}
@@ -148,7 +148,7 @@ export function FileLinkedWorkSection({
                   accent={IDEA_ACCENT}
                   title={idea.title}
                   meta={describeRelations(idea.relations)}
-                  to={`/projects/${projectId}/ideas/${idea.ideaId}`}
+                  to={`/projects/${projectId}/ideas/${encodeURIComponent(idea.ideaId)}`}
                   testId="file-linked-idea"
                 />
               ))}

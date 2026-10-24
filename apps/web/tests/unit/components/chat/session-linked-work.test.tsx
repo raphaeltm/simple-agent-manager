@@ -474,6 +474,44 @@ describe('chat linked work — the header', () => {
     expect(viewPr).toHaveAttribute('href', 'https://gitlab.com/owner/repo/-/merge_requests/7');
   });
 
+  it('refuses to make a javascript: pull-request URL a live link', async () => {
+    // `tasks.output_pr_url` is agent-reported. The server canonicalises explicit links, but a
+    // stored hostile value must not become an href on the way out.
+    mockGetChatSession.mockResolvedValue({
+      session: makeSession({
+        // eslint-disable-next-line no-script-url -- the hostile value is the fixture
+        task: { ...makeSession().task, outputPrUrl: 'javascript:alert(document.cookie)' },
+      }),
+      messages: [],
+      hasMore: false,
+    });
+    mockGetSessionLinks.mockResolvedValue(emptyContext());
+    await renderChat();
+    fireEvent.click(await screen.findByTestId('session-tool-details'));
+
+    const viewPr = await screen.findByTestId('session-view-pr');
+    expect(viewPr).toHaveAttribute('href', '#');
+  });
+
+  it('refuses to make a javascript: linked pull request a live row', async () => {
+    mockGetSessionLinks.mockResolvedValue({
+      ...emptyContext(),
+      pullRequests: cappedList([
+        {
+          // eslint-disable-next-line no-script-url -- the hostile value is the fixture
+          url: 'javascript:alert(1)',
+          number: 9,
+          source: 'explicit_link' as const,
+          bySessionId: SESSION_ID,
+          state: null,
+        },
+      ]),
+    });
+    await renderChat();
+    const drawer = await openRelated();
+    expect(within(drawer).getByTestId('linked-work-pr')).toHaveAttribute('href', '#');
+  });
+
   it('falls back to a pull request only the link store knows about', async () => {
     mockGetChatSession.mockResolvedValue({
       session: makeSession({ task: { ...makeSession().task, outputPrUrl: null } }),

@@ -23,7 +23,7 @@ export function SessionWorkingOnChip({
   const { idea, verb } = workingOn;
   return (
     <Link
-      to={`/projects/${projectId}/ideas/${idea.ideaId}`}
+      to={`/projects/${projectId}/ideas/${encodeURIComponent(idea.ideaId)}`}
       // `max-w-full` + `truncate`, not `shrink-0`: a 200-character idea title must give way
       // instead of pushing the chip row past the viewport. The row wraps, so on a phone the
       // chip gets a line of its own and may use all of it. The full title stays available as

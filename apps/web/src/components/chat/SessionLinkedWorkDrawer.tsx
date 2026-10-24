@@ -77,7 +77,7 @@ function LinkedWorkSections({
               accent={IDEA_ACCENT}
               title={idea.title}
               meta={describeRelations(idea.relations)}
-              to={`/projects/${projectId}/ideas/${idea.ideaId}`}
+              to={`/projects/${projectId}/ideas/${encodeURIComponent(idea.ideaId)}`}
               testId="linked-work-idea"
             />
           ))}

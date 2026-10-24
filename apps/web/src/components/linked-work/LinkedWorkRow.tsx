@@ -17,6 +17,8 @@ import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
+import { sanitizeUrl } from '../../lib/url-utils';
+
 const ROW_CLASS =
   'group flex w-full min-w-0 items-center gap-3 border-0 border-b border-solid border-border-default bg-transparent px-3 py-2.5 text-left no-underline last:border-b-0 hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-primary';
 
@@ -41,7 +43,7 @@ export interface LinkedWorkRowProps {
   timestamp?: ReactNode;
   /** In-app destination. Exactly one of `to` / `href` must be given. */
   to?: string;
-  /** External destination (a pull request), opened in a new tab. */
+  /** External destination (a pull request), opened in a new tab. Sanitised before use. */
   href?: string;
   testId?: string;
 }
@@ -99,7 +101,12 @@ export function LinkedWorkRow(props: LinkedWorkRowProps) {
   if (href) {
     return (
       <a
-        href={href}
+        /*
+         * Sanitised here, once, for every external row. A pull request URL reaches the UI from
+         * `tasks.output_pr_url`, which an agent reports: the server canonicalises explicit
+         * links, but a stored `javascript:` value must not become a live link on the way out.
+         */
+        href={sanitizeUrl(href)}
         target="_blank"
         rel="noopener noreferrer"
         className={ROW_CLASS}
