@@ -150,7 +150,7 @@ a preview modal is pure noise.
       `PERSISTED_QUERY_OPERATIONS` (chat-derived free text).
 - [x] `apps/web/src/components/project-message-view/useSessionLinkedWork.ts`: one hook owning the
       session query, returning `{ ideas, files, pullRequests, workingOn, primaryPullRequest,
-  totalCount, isLoading, isError, refetch }`. Memoised derivations so the header chip, the rail
+totalCount, isLoading, isError, refetch }`. Memoised derivations so the header chip, the rail
       badge and the drawer all read one object identity (rule 64).
 
 ### Shared presentation
@@ -282,6 +282,60 @@ Two mutants initially failed to redden and were made faithful before being trust
 - `isLoading: isFetching` was neutralised by the memo's dep list until the dep was added too.
 - Both Playwright mutants were masked by a stale `vite preview` server; the preview must be
   killed before a source mutation can reach the browser. Worth knowing for the next audit.
+
+## Staging verification (2026-10-24)
+
+Claimed the shared slot at 05:28 UTC (channel seq 165) after checking `gh run list` and T2's
+release; T7 acknowledged and queued behind (seq 170).
+
+**Deploy.** `deploy-staging.yml` run `40066233186` on `4e2dce49e` — every job success, including
+the workflow smoke tests. No VM and no node was created at any point; the postflight shows the
+same 0 active nodes / 0 active workspaces as the preflight.
+
+**Seeding the chat half.** A draft idea (`01M5P6QHYG0V2K7NVB4EZ0SF6T`, draft per coordinator
+seq 127 — done and parked ideas stay invisible to linked work until T8 widens the predicate),
+linked to an existing chat through the browser route.
+
+**Seeding the file half.** This was the hard part and it is worth recording. File links have no
+browser writer at all: `scheduleToolAutoLink`
+(`apps/api/src/routes/mcp/auto-link-tools.ts`) writes them only after a successful MCP library
+tool call, which is why a sweep of all 64 library files across three staging projects found zero
+files with any links. `upload_to_library` needs a live workspace VM to read the file from;
+`display_from_library` needs only a `fileId` and records `['file','viewed']`. So the file was
+uploaded through the browser route (the smoke user's own file, deletable) and then viewed through
+the real MCP tool, using the MCP token of a chat session this task had already created and was
+about to delete. The link came from the production writer, not from a fixture.
+
+**Result — 6 passed, 0 skipped**, `staging-linked-work.spec.ts` at 375x667 and 1280x800:
+
+| Check                                                                     | Evidence                                                    |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Related opens from the real tool rail and lists the chat's linked work    | `t4-staging-rail-*`, `t4-staging-related-*`                 |
+| A linked idea row navigates to the idea page                              | `t4-staging-idea-from-row-*`                                |
+| The file preview says where the file came from, and expands to the detail | `t4-staging-file-collapsed-*`, `t4-staging-file-expanded-*` |
+
+Screenshots reviewed at both viewports: the drawer's right edge sits at the viewport edge with
+the rail's column inside it, the idea row's two-line title clamps with an ellipsis rather than
+overflowing, the file strip's summary truncates while its chevron stays visible, and the expanded
+region renders `CHATS 1` with the relation word `Viewed`. No console error mentioning links.
+
+**T2's state, confirmed rather than asserted.** T2 merged before this run, so `LinkedPullRequest.state`
+is now populated by `withPullRequestStates`. The pull-request rows and the header's View PR picked
+that up with no code change on this branch, exactly as predicted on the channel (seq 60, seq 165).
+
+**Two things the run itself taught, both fixed in the spec:**
+
+- `POST /api/auth/token-login` is limited to 20 per clock hour per IP
+  (`DEFAULT_RATE_LIMIT_TOKEN_LOGIN`), and the window does not slide. Six tests logging in
+  separately exhausted it and four failed on a 429 rather than on the feature. The spec now spends
+  one login per run and shares the cookies; run it with `--workers=1`.
+- The spec reads its IDs from `T4_PROJECT_ID` / `T4_SESSION_ID` / `T4_FILE_ID` so it carries no
+  staging state of its own.
+
+**Cleanup.** The library file, the seeded idea and its link, and the chat task whose token seeded
+the file link were all deleted before `STAGING RELEASE T4`. Nothing belonging to another item was
+touched: the five nodes and seven workspaces live on the staging account at the time belong to
+other agents and were left alone.
 
 ## References
 

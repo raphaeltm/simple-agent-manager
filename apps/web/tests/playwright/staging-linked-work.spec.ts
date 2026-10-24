@@ -12,8 +12,10 @@
  *   T4_PROJECT_ID   the staging project
  *   T4_SESSION_ID   a chat that has linked work
  *   T4_FILE_ID      a library file that has linked work (optional)
+ *
+ * Run with `--workers=1`: the whole run shares one token-login (see `login` below).
  */
-import { expect, type Page, test } from '@playwright/test';
+import { type BrowserContext, expect, type Page, test } from '@playwright/test';
 
 const STAGING_APP = 'https://app.sammy.party';
 const STAGING_API = 'https://api.sammy.party';
@@ -23,7 +25,24 @@ const PROJECT_ID = process.env.T4_PROJECT_ID ?? '';
 const SESSION_ID = process.env.T4_SESSION_ID ?? '';
 const FILE_ID = process.env.T4_FILE_ID ?? '';
 
+/**
+ * Cookies from the one token-login this run is allowed to spend.
+ *
+ * `POST /api/auth/token-login` is rate limited to 20 per clock hour per IP
+ * (`DEFAULT_RATE_LIMIT_TOKEN_LOGIN`, `apps/api/src/routes/api-tokens.ts`), and that budget is
+ * shared with every other script in the session. Six tests logging in separately exhausted it
+ * mid-run on 2026-10-24 and four of them failed on a 429 rather than on anything about the
+ * feature. Each test gets a fresh browser context, but module state lives for the worker, so
+ * one login is reused — run this spec with `--workers=1`.
+ */
+type SessionCookies = Awaited<ReturnType<BrowserContext['cookies']>>;
+let sessionCookies: SessionCookies | null = null;
+
 async function login(page: Page): Promise<void> {
+  if (sessionCookies && sessionCookies.length > 0) {
+    await page.context().addCookies(sessionCookies);
+    return;
+  }
   const token = process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
   if (!token) throw new Error('SAM_PLAYWRIGHT_PRIMARY_USER is not set');
   if (token.startsWith('__SAM_SECRET')) {
@@ -34,7 +53,14 @@ async function login(page: Page): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
     timeout: 20_000,
   });
+  if (res.status() === 429) {
+    throw new Error(
+      'token-login is rate limited (20 per clock hour per IP). Wait for the next clock hour ' +
+        'rather than retrying — the window does not slide.'
+    );
+  }
   expect(res.status(), `token-login rejected: ${await res.text()}`).toBe(200);
+  sessionCookies = await page.context().cookies();
 }
 
 /** The first-run wizard swallows clicks, so it has to go before anything is driven. */
