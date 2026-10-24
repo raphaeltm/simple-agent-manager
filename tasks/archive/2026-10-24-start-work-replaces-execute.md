@@ -234,7 +234,28 @@ the new chat on success.
 - [x] The selected runtime is never silently changed. (The sheet sends no `runtime` — asserted in `start-work-sheet.test.tsx` — so the server's own resolution decides; `task-submit-source-idea.test.ts` "passes the validated idea to the Instant branch" proves a cf-container profile reaches `acceptInstantSession` rather than VM placement.)
 - [x] `get_instructions` carries the idea inside the untrusted-data envelope, capped. (`mcp-instruction-idea-block.test.ts` drives the real handler: block present for a linked chat, absent without a link, absent for a foreign-project idea, truncation reported, and the whole slice degrading without taking bootstrap down.)
 - [x] No horizontal overflow at 375x667; keyboard and screen-reader operable. (`start-work-audit.spec.ts`: `assertNoOverflow` + `assertNoClippedOverflow` on every scene at both viewports, a measured sheet-within-viewport check, Escape closing the sheet and restoring focus to the trigger, and a painted-stacking assertion for the nested picker.)
-- [ ] Verified end-to-end on staging for both profile kinds. **PENDING** — the shared staging slot is queued behind deployments-ui, the comments task, T1 and T2, and this branch cannot be marked ready until T1 is on main.
+- [x] Verified end-to-end on staging for both profile kinds. Deploy 40069463293 on `073799dc8`,
+      every job success. **VM seam** (`submit-task-implementation`, link written between the first
+      message and `startTaskRunnerDO`): relation `works_on` and not `discusses`, and the agent
+      answered with marker `T7-VM-TASK-PNSO969Y`. **Instant seam** (`acceptInstantSession`):
+      relation `discusses` and not `works_on`, marker `T7-INSTANT-DUQ34L8V`, task state trace
+      `queued -> in_progress/running -> in_progress/awaiting_followup`. The marker exists only in
+      its idea's body, so each one proves the link was written before the agent's first prompt
+      rather than merely that a row appeared. Negatives live: unknown `sourceIdeaId` -> 404
+      non-disclosing; parked idea -> 409 `That idea is parked. Reopen it before starting work on
+      it.` UI: the sheet opens on a real staging idea page at 1280x800 and 375x667 with no
+      horizontal overflow and no page errors.
+
+      Worth recording because it nearly went the other way: the first run picked its
+      "conversation" profile by `taskMode === 'conversation'` alone and got a fixture with
+      `runtime=null`, which resolves to a VM. That run therefore exercised the VM seam twice and
+      the Instant seam not at all, while reporting a `discusses` relation that looked exactly like
+      Instant coverage. Selecting on `runtime === 'cf-container'` is what actually reaches
+      `acceptInstantSession`. `taskMode` does not tell you the runtime.
+
+      Cleanup re-read rather than asserted: 7 tasks, 2 workspaces and 1 node deleted; the Instant
+      run created neither node nor workspace. Postflight showed only pre-existing sleeping
+      resources belonging to other items. Net new staging resources from T7: zero.
 
 ## References
 
