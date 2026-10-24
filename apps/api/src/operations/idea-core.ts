@@ -293,6 +293,37 @@ export function validateIdeaStatusTransition(
   return null;
 }
 
+async function prepareIdeaNoteUpdate(
+  ctx: OperationContext,
+  input: IdeaUpdateInput,
+  ideaId: string
+): Promise<(() => Promise<IdeaUpdateResult>) | null> {
+  if (input.quote !== undefined && input.note === undefined)
+    throw new OperationError('invalid_input', 'quote requires note');
+  if (input.note === undefined) return null;
+  const note = input.note;
+  if (
+    input.title !== undefined ||
+    input.content !== undefined ||
+    input.priority !== undefined ||
+    input.status !== undefined
+  )
+    throw new OperationError(
+      'invalid_input',
+      'Post a note separately from editing the current plan'
+    );
+  await validateIdeaUpdateNote(ctx, note, input.quote);
+  return async () => {
+    const { update } = await addIdeaUpdate(ctx, {
+      projectId: input.projectId,
+      ideaId,
+      body: note,
+      quote: input.quote,
+    });
+    return { updated: true, ideaId, updatedFields: [], note: update };
+  };
+}
+
 export async function prepareIdeaUpdate(
   ctx: OperationContext,
   input: IdeaUpdateInput
@@ -312,31 +343,8 @@ export async function prepareIdeaUpdate(
       priority: number;
     }>();
   if (!existing) throw new OperationError('not_found', `Idea not found in this project: ${ideaId}`);
-  if (input.quote !== undefined && input.note === undefined)
-    throw new OperationError('invalid_input', 'quote requires note');
-  if (input.note !== undefined) {
-    const note = input.note;
-    if (
-      input.title !== undefined ||
-      input.content !== undefined ||
-      input.priority !== undefined ||
-      input.status !== undefined
-    )
-      throw new OperationError(
-        'invalid_input',
-        'Post a note separately from editing the current plan'
-      );
-    await validateIdeaUpdateNote(ctx, note, input.quote);
-    return async () => {
-      const { update } = await addIdeaUpdate(ctx, {
-        projectId: input.projectId,
-        ideaId,
-        body: note,
-        quote: input.quote,
-      });
-      return { updated: true, ideaId, updatedFields: [], note: update };
-    };
-  }
+  const noteUpdate = await prepareIdeaNoteUpdate(ctx, input, ideaId);
+  if (noteUpdate) return noteUpdate;
   if (!(existing.status in IDEA_STATUS_TRANSITIONS))
     throw new OperationError(
       'conflict',
