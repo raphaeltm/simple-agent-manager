@@ -47,6 +47,18 @@ const PROJECT_ID = process.env.T8_PROJECT_ID ?? '';
 const CONTAINER_PROFILE_ID =
   process.env.T8_CONTAINER_PROFILE_ID ?? '01KYQ60N603GE9G3Y767K9NSW4';
 
+/**
+ * A COMPLETED ordinary task (`is_idea = 0`) on the target project.
+ *
+ * The row shape PR2's gate exists for: it shares its status with a done idea, so before the
+ * fix it answered `409 "That idea is done. Reopen it..."` — telling a caller both that the row
+ * exists and what state it is in, for an id they only guessed at. Taken from staging D1 rather
+ * than created, because `POST /tasks` cannot make a task-mode task terminal and a real row is
+ * the honest fixture anyway.
+ */
+const CLOSED_NON_IDEA_ID =
+  process.env.T8_CLOSED_TASK_ID ?? '01M5Q7Z0QQXPC0NH6R8XZHMA84';
+
 /** Unique per run, so a failed run never collides with the next one. */
 const RUN = Date.now().toString(36);
 const IDEA_TITLE = `T8 staging — derived status ${RUN}`;
@@ -480,6 +492,95 @@ test.describe('Ideas list on staging — laptop', () => {
    * must be gone. A cleanup failure is reported through `expect`, which `afterAll` surfaces as
    * a suite failure, so a silent leak cannot pass.
    */
+  /*
+   * The disclosure gate, on deployed code (PR2).
+   *
+   * `classifyWorkStartIdea` tested the status BEFORE `isIdea`, so this row — completed,
+   * is_idea = 0, in the caller's own project — got the idea-shaped 409 rather than the
+   * non-disclosing 404 every other non-idea gets. Authorization is not what refuses it here;
+   * only the flag is, which is why the owner control matters.
+   */
+  test('a completed ordinary task 404s without naming its state, while a done idea 409s', async ({
+    page,
+  }) => {
+    await stagingLogin(page);
+
+    const closed = await api(page, 'POST', `/api/projects/${PROJECT_ID}/sessions/start`, {
+      message: 'Start work on this.',
+      sourceIdeaId: CLOSED_NON_IDEA_ID,
+    });
+    const closedText = await closed.text();
+    expect(closed.status(), closedText).toBe(404);
+    // The 409 wording must be unreachable from a non-idea, not merely accompanied by a 404.
+    expect(closedText).not.toMatch(/Reopen it/i);
+    expect(closedText).not.toMatch(/is done/i);
+
+    /*
+     * The owner control. Mark the run's own idea done through the real route, then ask again:
+     * a REAL done idea must still get the actionable 409. Without this the assertion above is
+     * also satisfied by the gate being broken for everything.
+     */
+    const done = await api(
+      page,
+      'POST',
+      `/api/projects/${PROJECT_ID}/ideas/${created.ideaId}/status`,
+      { status: 'completed' }
+    );
+    expect(done.status(), await done.text()).toBe(200);
+
+    const doneIdea = await api(page, 'POST', `/api/projects/${PROJECT_ID}/sessions/start`, {
+      message: 'Start work on this.',
+      sourceIdeaId: created.ideaId,
+    });
+    const doneText = await doneIdea.text();
+    expect(doneIdea.status(), doneText).toBe(409);
+    expect(doneText).toMatch(/Reopen it/i);
+
+    // Put it back, so the cleanup below and the rest of the file see the state they expect.
+    const reopened = await api(
+      page,
+      'POST',
+      `/api/projects/${PROJECT_ID}/ideas/${created.ideaId}/status`,
+      { status: 'draft' }
+    );
+    expect(reopened.status(), await reopened.text()).toBe(200);
+  });
+
+  /*
+   * The idea page itself, which is what PR2 ships, driven as a person drives it.
+   *
+   * Start work is a BUTTON here, not a link. It was a link to `/chat?executeIdea=<id>` whose
+   * reader had already been removed, so pressing it opened an empty chat with the idea
+   * dropped. A page-load check cannot see that; pressing it can.
+   */
+  test('the idea page renders on staging and Start work opens the sheet', async ({ page }) => {
+    await stagingLogin(page);
+    await page.goto(`${STAGING_APP}/projects/${PROJECT_ID}/ideas/${created.ideaId}`);
+    await dismissStagingOnboarding(page);
+
+    await expect(page.getByRole('heading', { name: new RegExp(RUN) })).toBeVisible({
+      timeout: 30_000,
+    });
+    // The status card and its one primary action, from real derived state.
+    await expect(page.getByRole('region', { name: 'Status' })).toBeVisible();
+    const startWork = page.getByRole('button', { name: 'Start work' });
+    await expect(startWork).toBeVisible();
+    expect(await startWork.getAttribute('href')).toBeNull();
+
+    await startWork.click();
+    const sheet = page.getByRole('dialog', { name: /Start work|Talk it through/i });
+    await expect(sheet).toBeVisible({ timeout: 20_000 });
+    // It must name the idea it is about to start.
+    await expect(sheet.getByText(new RegExp(RUN))).toBeVisible();
+
+    await assertNoOverflow(page);
+    await stagingShot(page, 't8-pr2-idea-page-start-work');
+
+    // Close without starting: this test proves the entry point, not a second workspace.
+    await sheet.getByRole('button', { name: 'Cancel' }).click();
+    await expect(sheet).toBeHidden();
+  });
+
   test.afterAll(async ({ browser }) => {
     const page = await browser.newPage();
     try {

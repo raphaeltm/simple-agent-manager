@@ -45,7 +45,6 @@ frontend-cache-audit.spec.ts
 gcp-credential-audit.spec.ts
 github-reauth-prompt-audit.spec.ts
 global-audio-player-audit.spec.ts
-idea-detail-audit.spec.ts
 instant-runtime-recovery-audit.spec.ts
 knowledge-ui-audit.spec.ts
 lazy-route-chunks-audit.spec.ts
