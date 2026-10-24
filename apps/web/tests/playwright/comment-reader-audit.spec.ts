@@ -480,6 +480,8 @@ test.describe('Comment reader', () => {
     await setupMocks(page, { contextStatus: 500 });
     await openReader(page);
     await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+    // No thread actions next to a conversation that failed to load.
+    await expect(page.getByLabel('Comment thread')).toHaveCount(0);
     await checkLayout(page);
     await screenshot(page, 'comment-reader-error');
   });
@@ -488,6 +490,7 @@ test.describe('Comment reader', () => {
     await setupMocks(page, { contextStatus: 404 });
     await openReader(page);
     await expect(page.getByText('This comment is no longer available.')).toBeVisible();
+    await expect(page.getByLabel('Comment thread')).toHaveCount(0);
     await checkLayout(page);
     await screenshot(page, 'comment-reader-not-found');
   });
