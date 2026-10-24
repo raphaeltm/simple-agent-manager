@@ -150,6 +150,19 @@ Ship **Take A** (calm status page) as the structure, plus **Take B's live deploy
   (a different state model); `since` stays local (one caller)
 - Deferred LOW: cap the release manifest size at submission (idea 01M5NGDCZ8SKEN4YW3Y6M67R6M)
 
+### Staging findings (2026-10-24)
+- [x] Config spec passes on staging. A signed-in check passed 24/24 at 1280 and 375, with no
+  console errors and no failed requests, covering the list, environment page, chat pre-fill and
+  API shapes
+- [x] 20 leaked `pw-cfg-*` test environments deleted from staging. They had no nodes, volumes or
+  DNS. The spec's cleanup bug is fixed on this branch
+- [x] Real apply events from staging, run through `collapseSteps`, read correctly. A skipped
+  `compose_pull` was listed as "Pulled the images", so skip-only steps are now left out, with a
+  regression test that replays the real sequence (7497e7f87)
+- [x] The staging deploy spec's page opened behind the first-run setup modal and was still
+  loading at 5 s. It now dismisses the modal and waits 30 s (77905c791)
+- [ ] VM-backed spec (live page, pause from the page) on the final build
+
 ### Ship
 - [x] `pnpm lint`, `pnpm typecheck`, and the affected tests, all green locally
 - [x] Specialist reviews, recorded in the PR
