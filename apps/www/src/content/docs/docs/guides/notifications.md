@@ -101,6 +101,7 @@ SAM automatically deduplicates notifications:
   each person gets at most one per chat in a 10-minute window (the
   `collaboration.commentNotificationWindowSeconds` [admin setting](/docs/guides/admin-settings/)).
   Nobody is notified about their own comment, and a person who is mentioned gets only the mention.
+  Both open the comment [in its conversation](/docs/guides/collaboration/#read-a-comment-in-its-conversation).
 - `cron_failure` notifications are throttled per sweep name. KV provides the
   expiring coarse marker, and an atomic per-user Notification Durable Object
   claim guarantees that overlapping cron invocations do not send duplicates.

@@ -124,10 +124,26 @@ comment, and so can agents in the project (they read comments with the
 A comment never messages the agent by itself. The agent sees it only if it looks, or if someone who
 controls the chat sends it on (see [Send a comment to the agent](#send-a-comment-to-the-agent)).
 
+### Read a comment in its conversation
+
+The project's **Comments** page lists every comment thread in the project. Select a comment on a
+chat to read it where it was made: the conversation opens on the words the comment is about,
+highlighted, with the thread beside it on a desktop or in a sheet at the bottom of the screen on a
+phone. Reply, resolve or send the comment to the agent from there.
+
+Scroll up or down to read more of the chat; earlier and later messages load as you reach them.
+**Back to the comment** takes you back to the highlighted words. The arrows at the top step to the
+previous or next comment in the order the Comments page shows them, and **Open in chat** opens the
+chat itself at that message. Comment and Mention notifications open the same view.
+
+If the words a comment quotes are no longer in the message, the whole message is marked instead.
+Admins can change how much of the chat is loaded around a comment under
+[Admin settings → Collaboration](/docs/guides/admin-settings/).
+
 ### Mention a teammate
 
 Type `@` in a comment or reply and pick a person from the list. They get a **Mention** notification
-that opens the thread. Only people you pick from the list are notified: typing `@name` by hand does
+that opens the thread in its conversation. Only people you pick from the list are notified: typing `@name` by hand does
 not notify anyone. You can mention active project members, up to 10 per comment by default.
 
 The owner of a chat is also notified about new comments on it, and people in a thread are notified

@@ -13,13 +13,18 @@ Every mutation records the actor, time, affected setting and action in a value-f
 
 ## Collaboration
 
-These limit [shared chats and comments](/docs/guides/collaboration/#work-together-in-a-chat).
+These limit [shared chats and comments](/docs/guides/collaboration/#work-together-in-a-chat), and how much of a chat [a comment opens in](/docs/guides/collaboration/#read-a-comment-in-its-conversation).
 
 | Setting                                          | Default | Range     | What it limits                                                                                     |
 | ------------------------------------------------ | ------- | --------- | -------------------------------------------------------------------------------------------------- |
 | `collaboration.sessionAccessMaxGrants`           | 10      | 1–100     | People one chat can be shared with at a time                                                       |
 | `collaboration.commentMentionsMax`               | 10      | 1–50      | People one comment or reply can @mention                                                           |
 | `collaboration.commentNotificationWindowSeconds` | 600     | 60–86,400 | Seconds during which further comments on one chat send each person no new **Comment** notification |
+| `collaboration.commentContextMessages`           | 6       | 1–50      | Messages shown before and after a commented message when a comment is opened in its conversation   |
+| `collaboration.commentContextMaxRows`            | 1,000   | 50–5,000  | Stored rows read before and after a commented message for that view                                |
+
+An agent's reply counts as one message however many streamed parts it was stored in, and the
+whole commented message is always loaded. The row limit bounds the read when replies are very long.
 
 Lowering the share limit does not remove anyone's access. It only blocks new shares while a chat is at or above the limit.
 

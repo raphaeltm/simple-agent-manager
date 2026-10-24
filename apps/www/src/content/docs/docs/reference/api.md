@@ -342,6 +342,8 @@ A chat's creator can give another project member the same controls in that one c
 
 Comment threads and replies accept an optional `mentions: [{ "userId": "..." }]`. The server keeps active project members only, stores each person's display name at the time, and returns `400` above `collaboration.commentMentionsMax`.
 
+`GET /api/projects/:id/sessions/:sessionId/comments/:threadId/context` returns one comment thread with the chat around the message it is on, for [reading a comment in its conversation](/docs/guides/collaboration/#read-a-comment-in-its-conversation): `{ thread, session: { id, topic }, viewerAccess, anchor: { messageId, found }, messages, hasMoreBefore, hasMoreAfter }`. It needs `task:read`. `messages` is in transcript order and holds the whole commented message (an agent reply is stored as many streamed rows, and a comment can be on any of them) plus `collaboration.commentContextMessages` messages each side, reading at most `collaboration.commentContextMaxRows` rows each side. Page further with `GET .../sessions/:sessionId/messages` and `before`/`after` cursors from the first and last rows. When the commented message is no longer in the chat, `anchor.found` is `false` and `messages` is empty. A thread from another chat or another project returns `404`.
+
 ## Nodes
 
 ### `GET /api/nodes`
