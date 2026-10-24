@@ -59,10 +59,8 @@ function createMockD1() {
 
   // Wrap raw/all so the membership lookup short-circuits ahead of whatever a test
   // installed, without advancing that test's sequence cursor.
-  const wrap =
-    <T>(inner: () => Promise<T>, membership: () => T) =>
-    () =>
-      isMembershipQuery() ? Promise.resolve(membership()) : inner();
+  const wrap = <T>(inner: () => Promise<T>, membership: () => T) => () =>
+    isMembershipQuery() ? Promise.resolve(membership()) : inner();
   const rawImpl = stmt.raw;
   const allImpl = stmt.all;
   const membershipRaw = () => state.membershipRoles.map((role) => [role]) as never;
@@ -655,24 +653,20 @@ describe('MCP Orchestration Communication Tools', () => {
 
     it('cancels a sleeping child without contacting its released runtime', async () => {
       mockD1ResultSequence([
-        [
-          {
-            id: 'child-001',
-            status: 'sleeping',
-            workspace_id: 'ws-child-001',
-            project_id: 'proj-001',
-            parent_task_id: 'parent-task-001',
-            recovery_source_task_id: 'source-child-001',
-          },
-        ],
-        [
-          {
-            id: 'ws-child-001',
-            node_id: null,
-            chat_session_id: 'chat-child-001',
-            status: null,
-          },
-        ],
+        [{
+          id: 'child-001',
+          status: 'sleeping',
+          workspace_id: 'ws-child-001',
+          project_id: 'proj-001',
+          parent_task_id: 'parent-task-001',
+          recovery_source_task_id: 'source-child-001',
+        }],
+        [{
+          id: 'ws-child-001',
+          node_id: null,
+          chat_session_id: 'chat-child-001',
+          status: null,
+        }],
         [],
       ]);
 

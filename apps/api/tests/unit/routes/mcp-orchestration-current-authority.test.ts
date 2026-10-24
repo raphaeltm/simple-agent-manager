@@ -154,7 +154,9 @@ async function createFixture(memberRole: string | null): Promise<{
       .run(PROJECT_ID, ACTOR_ID);
   } else if (memberRole === 'removed') {
     sqlite
-      .prepare(`UPDATE project_members SET status = 'removed' WHERE project_id = ? AND user_id = ?`)
+      .prepare(
+        `UPDATE project_members SET status = 'removed' WHERE project_id = ? AND user_id = ?`
+      )
       .run(PROJECT_ID, ACTOR_ID);
   } else {
     sqlite
@@ -187,11 +189,9 @@ async function createFixture(memberRole: string | null): Promise<{
 }
 
 function childStatus(sqlite: Database.Database): string {
-  return (
-    sqlite.prepare(`SELECT status FROM tasks WHERE id = 'child-1'`).get() as {
-      status: string;
-    }
-  ).status;
+  return (sqlite.prepare(`SELECT status FROM tasks WHERE id = 'child-1'`).get() as {
+    status: string;
+  }).status;
 }
 
 function taskCount(sqlite: Database.Database): number {

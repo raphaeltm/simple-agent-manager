@@ -38,9 +38,7 @@ describe('devcontainer-cache service', () => {
       'node:20'
     );
 
-    expect(ref).toBe(
-      'registry.cloudflare.com/acct-123/sam-octo-hello-world:devcontainer-cache-node-20'
-    );
+    expect(ref).toBe('registry.cloudflare.com/acct-123/sam-octo-hello-world:devcontainer-cache-node-20');
   });
 
   it('mints short-lived pull and push credentials with configurable TTL', async () => {

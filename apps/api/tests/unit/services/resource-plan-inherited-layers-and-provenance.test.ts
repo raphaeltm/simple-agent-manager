@@ -92,9 +92,10 @@ describe('explicit Run task override preserves inherited resource layers', () =>
     // The explicit task override does not replace the skill layer, so a broken
     // skill row must not be swallowed by the repair path.
     expect(() =>
-      readPersistedTaskResourcePlan(legacyTaskRow('skill', JSON.stringify({ minVcpu: 'banana' })), {
-        ignoreLegacyResourceRequirementsJson: true,
-      })
+      readPersistedTaskResourcePlan(
+        legacyTaskRow('skill', JSON.stringify({ minVcpu: 'banana' })),
+        { ignoreLegacyResourceRequirementsJson: true }
+      )
     ).toThrow(ResourceRequirementsValidationError);
   });
 

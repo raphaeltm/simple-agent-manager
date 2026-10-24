@@ -25,45 +25,27 @@ describe('ProjectData shared alarm deadlines', () => {
   });
 
   function addSchedule(id: string, nextAttemptAt: number) {
-    sql.exec(
-      `INSERT INTO project_schedules (
+    sql.exec(`INSERT INTO project_schedules (
       id, project_id, creator_user_id, action_json, fingerprint, state,
       due_at, display_timezone, expires_at, version, idempotency_key,
       created_at, updated_at, next_attempt_at
     ) VALUES (?, 'project-1', 'user-1', '{}', ?, 'pending', ?, 'UTC', ?, 1, ?, ?, ?, ?)`,
-      id,
-      id,
-      nextAttemptAt,
-      now + 60_000,
-      id,
-      now,
-      now,
-      nextAttemptAt
-    );
+    id, id, nextAttemptAt, now + 60_000, id, now, now, nextAttemptAt);
   }
 
-  it.each([0, -1, now - 1])(
-    'schedules overdue persisted deadline %s immediately at a valid alarm time',
-    (deadline) => {
-      addSchedule('overdue', deadline);
-      addSchedule('future', now + 30_000);
-      expect(
-        computeProjectDataAlarmTime(sql, { PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })
-      ).toBe(now);
-    }
-  );
+  it.each([0, -1, now - 1])('schedules overdue persisted deadline %s immediately at a valid alarm time', (deadline) => {
+    addSchedule('overdue', deadline);
+    addSchedule('future', now + 30_000);
+    expect(computeProjectDataAlarmTime(sql, { PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })).toBe(now);
+  });
 
   it('preserves the earliest future deadline without accelerating it', () => {
     addSchedule('later', now + 30_000);
     addSchedule('earlier', now + 10_000);
-    expect(
-      computeProjectDataAlarmTime(sql, { PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })
-    ).toBe(now + 10_000);
+    expect(computeProjectDataAlarmTime(sql, { PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })).toBe(now + 10_000);
   });
 
   it('keeps an empty project unscheduled', () => {
-    expect(
-      computeProjectDataAlarmTime(sql, { PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })
-    ).toBeNull();
+    expect(computeProjectDataAlarmTime(sql, { PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })).toBeNull();
   });
 });

@@ -31,10 +31,7 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
   } as unknown as Env;
 }
 
-function createCollectingWriter(): {
-  writer: WritableStreamDefaultWriter<Uint8Array>;
-  output: string[];
-} {
+function createCollectingWriter(): { writer: WritableStreamDefaultWriter<Uint8Array>; output: string[] } {
   const decoder = new TextDecoder();
   const output: string[] = [];
   const writable = new WritableStream<Uint8Array>({
@@ -81,7 +78,7 @@ describe('runAgentLoop metering', () => {
       writer,
       vi.fn(),
       undefined,
-      { systemPrompt: 'system', tools: [], executeTool: async () => ({}) }
+      { systemPrompt: 'system', tools: [], executeTool: async () => ({}) },
     );
     await writer.close();
 
@@ -99,21 +96,11 @@ describe('runAgentLoop metering', () => {
       storedBudget = JSON.parse(value) as { inputTokens: number; outputTokens: number };
     });
     const env = makeEnv({ KV: { get: kvGet, put: kvPut } as unknown as KVNamespace });
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValue(
-          sseResponse([
-            JSON.stringify({ choices: [{ delta: { content: 'Hello' }, finish_reason: 'stop' }] }),
-            JSON.stringify({
-              choices: [{ delta: {}, finish_reason: 'stop' }],
-              usage: { prompt_tokens: 7, completion_tokens: 3 },
-            }),
-            '[DONE]',
-          ])
-        )
-    );
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: 'Hello' }, finish_reason: 'stop' }] }),
+      JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 7, completion_tokens: 3 } }),
+      '[DONE]',
+    ])));
     const waitUntilPromises: Promise<unknown>[] = [];
     const { writer, output } = createCollectingWriter();
 
@@ -128,11 +115,7 @@ describe('runAgentLoop metering', () => {
       vi.fn(),
       undefined,
       { systemPrompt: 'system', tools: [], executeTool: async () => ({}) },
-      {
-        waitUntil: (promise) => {
-          waitUntilPromises.push(promise);
-        },
-      }
+      { waitUntil: (promise) => { waitUntilPromises.push(promise); } },
     );
     await Promise.all(waitUntilPromises);
     await writer.close();

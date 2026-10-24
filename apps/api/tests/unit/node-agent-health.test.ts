@@ -9,7 +9,7 @@
  * waitForNodeAgentReady is tested by mocking global fetch to simulate
  * various failure/success scenarios.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   getCfContainerWakeTimeoutMs,
@@ -89,15 +89,11 @@ describe('getNodeAgentReadyPollIntervalMs', () => {
   });
 
   it('parses valid integer from env var', () => {
-    expect(getNodeAgentReadyPollIntervalMs({ NODE_AGENT_READY_POLL_INTERVAL_MS: '2000' })).toBe(
-      2000
-    );
+    expect(getNodeAgentReadyPollIntervalMs({ NODE_AGENT_READY_POLL_INTERVAL_MS: '2000' })).toBe(2000);
   });
 
   it('returns default for non-numeric string', () => {
-    expect(getNodeAgentReadyPollIntervalMs({ NODE_AGENT_READY_POLL_INTERVAL_MS: 'abc' })).toBe(
-      5000
-    );
+    expect(getNodeAgentReadyPollIntervalMs({ NODE_AGENT_READY_POLL_INTERVAL_MS: 'abc' })).toBe(5000);
   });
 
   it('returns default for zero', () => {
@@ -105,9 +101,7 @@ describe('getNodeAgentReadyPollIntervalMs', () => {
   });
 
   it('returns default for negative number', () => {
-    expect(getNodeAgentReadyPollIntervalMs({ NODE_AGENT_READY_POLL_INTERVAL_MS: '-1000' })).toBe(
-      5000
-    );
+    expect(getNodeAgentReadyPollIntervalMs({ NODE_AGENT_READY_POLL_INTERVAL_MS: '-1000' })).toBe(5000);
   });
 });
 
@@ -120,19 +114,18 @@ describe('waitForNodeAgentReady', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   // Minimal env required by waitForNodeAgentReady
-  const makeEnv = (overrides: Record<string, string> = {}) =>
-    ({
-      BASE_DOMAIN: 'test.example.com',
-      NODE_AGENT_READY_TIMEOUT_MS: overrides.NODE_AGENT_READY_TIMEOUT_MS ?? '500',
-      NODE_AGENT_READY_POLL_INTERVAL_MS: overrides.NODE_AGENT_READY_POLL_INTERVAL_MS ?? '50',
-      // other required Env fields stub
-      DATABASE: {} as any,
-      OBSERVABILITY_DATABASE: {} as any,
-      JWT_PRIVATE_KEY: 'test-key',
-      JWT_PUBLIC_KEY: 'test-pub',
-      ENCRYPTION_KEY: 'test-enc',
-      KV: {} as any,
-    }) as any;
+  const makeEnv = (overrides: Record<string, string> = {}) => ({
+    BASE_DOMAIN: 'test.example.com',
+    NODE_AGENT_READY_TIMEOUT_MS: overrides.NODE_AGENT_READY_TIMEOUT_MS ?? '500',
+    NODE_AGENT_READY_POLL_INTERVAL_MS: overrides.NODE_AGENT_READY_POLL_INTERVAL_MS ?? '50',
+    // other required Env fields stub
+    DATABASE: {} as any,
+    OBSERVABILITY_DATABASE: {} as any,
+    JWT_PRIVATE_KEY: 'test-key',
+    JWT_PUBLIC_KEY: 'test-pub',
+    ENCRYPTION_KEY: 'test-enc',
+    KV: {} as any,
+  }) as any;
 
   beforeEach(() => {
     fetchMock = vi.fn();
@@ -186,7 +179,9 @@ describe('waitForNodeAgentReady', () => {
     });
 
     const { waitForNodeAgentReady } = await import('../../src/services/node-agent');
-    await expect(waitForNodeAgentReady('node-1', env)).rejects.toThrow(/Node Agent not reachable/);
+    await expect(waitForNodeAgentReady('node-1', env)).rejects.toThrow(
+      /Node Agent not reachable/
+    );
   });
 
   it('includes last error in timeout message', async () => {
@@ -198,7 +193,9 @@ describe('waitForNodeAgentReady', () => {
     });
 
     const { waitForNodeAgentReady } = await import('../../src/services/node-agent');
-    await expect(waitForNodeAgentReady('node-1', env)).rejects.toThrow(/Last error:.*502/);
+    await expect(waitForNodeAgentReady('node-1', env)).rejects.toThrow(
+      /Last error:.*502/
+    );
   });
 
   it('uses the correct health URL based on nodeId and BASE_DOMAIN', async () => {

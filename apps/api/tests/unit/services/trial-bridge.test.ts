@@ -29,12 +29,10 @@ vi.mock('../../../src/services/trial/trial-runner', () => ({
 
 const bridge = await import('../../../src/services/trial/bridge');
 
-function makeEnv(
-  options: {
-    readyUpdateChanges?: number;
-    currentTrial?: { status: string; expires_at: number; claimed_by_user_id: string | null } | null;
-  } = {}
-): Env {
+function makeEnv(options: {
+  readyUpdateChanges?: number;
+  currentTrial?: { status: string; expires_at: number; claimed_by_user_id: string | null } | null;
+} = {}): Env {
   const prepare = vi.fn(() => ({
     bind: vi.fn(() => ({
       run: vi.fn(async () => ({ meta: { changes: options.readyUpdateChanges ?? 1 } })),
@@ -74,7 +72,9 @@ describe('bridgeAcpSessionTransition', () => {
     expect(env.DATABASE.prepare).toHaveBeenCalledWith(
       expect.stringContaining('claimed_by_user_id IS NULL')
     );
-    expect(env.DATABASE.prepare).toHaveBeenCalledWith(expect.stringContaining('expires_at > ?'));
+    expect(env.DATABASE.prepare).toHaveBeenCalledWith(
+      expect.stringContaining('expires_at > ?')
+    );
   });
 
   it('does not emit trial.ready when D1 refused the transition and the trial is expired', async () => {
@@ -112,11 +112,7 @@ describe('bridgeAcpSessionTransition', () => {
   it('does not emit trial.ready idempotently after the trial has been claimed', async () => {
     const env = makeEnv({
       readyUpdateChanges: 0,
-      currentTrial: {
-        status: 'ready',
-        expires_at: Date.now() + 60_000,
-        claimed_by_user_id: 'user_1',
-      },
+      currentTrial: { status: 'ready', expires_at: Date.now() + 60_000, claimed_by_user_id: 'user_1' },
     });
     readTrialByProjectMock.mockResolvedValueOnce({
       trialId: 'trial_claimed',
@@ -180,7 +176,12 @@ describe('bridgeKnowledgeAdded / bridgeIdeaCreated', () => {
       projectId: 'proj_k',
       workspaceId: null,
     });
-    await bridge.bridgeKnowledgeAdded(makeEnv(), 'proj_k', 'repository', 'uses TypeScript');
+    await bridge.bridgeKnowledgeAdded(
+      makeEnv(),
+      'proj_k',
+      'repository',
+      'uses TypeScript'
+    );
     const [, , event] = emitTrialEventForProjectMock.mock.calls[0];
     expect(event.type).toBe('trial.knowledge');
     expect(event.entity).toBe('repository');
@@ -193,7 +194,13 @@ describe('bridgeKnowledgeAdded / bridgeIdeaCreated', () => {
       projectId: 'proj_i',
       workspaceId: null,
     });
-    await bridge.bridgeIdeaCreated(makeEnv(), 'proj_i', 'idea_42', 'Add CLI', 'Short summary');
+    await bridge.bridgeIdeaCreated(
+      makeEnv(),
+      'proj_i',
+      'idea_42',
+      'Add CLI',
+      'Short summary'
+    );
     const [, , event] = emitTrialEventForProjectMock.mock.calls[0];
     expect(event.type).toBe('trial.idea');
     expect(event.ideaId).toBe('idea_42');

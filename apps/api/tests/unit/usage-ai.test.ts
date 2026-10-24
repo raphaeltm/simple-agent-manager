@@ -80,7 +80,7 @@ describe('GET /api/usage/ai', () => {
       mockIterateGatewayLogs.mockImplementation(
         async (_env: unknown, _gw: string, _start: string, cb: (e: AIGatewayLogEntry) => void) => {
           cb(makeEntry({ metadata: { userId: 'user-test-1' }, cost: 0.05, tokens_in: 200 }));
-        }
+        },
       );
 
       const resp = await testApp.request('/api/usage/ai', {}, makeEnv());
@@ -94,10 +94,10 @@ describe('GET /api/usage/ai', () => {
     it('excludes entries from other users', async () => {
       mockIterateGatewayLogs.mockImplementation(
         async (_env: unknown, _gw: string, _start: string, cb: (e: AIGatewayLogEntry) => void) => {
-          cb(makeEntry({ metadata: { userId: 'user-other' }, cost: 0.1 }));
+          cb(makeEntry({ metadata: { userId: 'user-other' }, cost: 0.10 }));
           cb(makeEntry({ metadata: { userId: 'user-test-1' }, cost: 0.05 }));
-          cb(makeEntry({ metadata: { userId: 'user-another' }, cost: 0.2 }));
-        }
+          cb(makeEntry({ metadata: { userId: 'user-another' }, cost: 0.20 }));
+        },
       );
 
       const resp = await testApp.request('/api/usage/ai', {}, makeEnv());
@@ -113,7 +113,7 @@ describe('GET /api/usage/ai', () => {
           cb(makeEntry({ metadata: undefined }));
           cb(makeEntry({ metadata: {} }));
           cb(makeEntry({ metadata: { userId: 'user-test-1' }, cost: 0.03 }));
-        }
+        },
       );
 
       const resp = await testApp.request('/api/usage/ai', {}, makeEnv());
@@ -145,11 +145,7 @@ describe('GET /api/usage/ai', () => {
 
     it('does not call iterateGatewayLogs when gateway is missing', async () => {
       mockIterateGatewayLogs.mockClear();
-      await testApp.request(
-        '/api/usage/ai',
-        {},
-        makeEnv({ AI_GATEWAY_ID: undefined as unknown as string })
-      );
+      await testApp.request('/api/usage/ai', {}, makeEnv({ AI_GATEWAY_ID: undefined as unknown as string }));
       expect(mockIterateGatewayLogs).not.toHaveBeenCalled();
     });
   });
@@ -205,7 +201,7 @@ describe('GET /api/usage/ai', () => {
         async (_env: unknown, _gw: string, _start: string, cb: (e: AIGatewayLogEntry) => void) => {
           cb(makeEntry({ cached: true }));
           cb(makeEntry({ success: false }));
-        }
+        },
       );
 
       const resp = await testApp.request('/api/usage/ai', {}, makeEnv());
@@ -231,10 +227,8 @@ describe('GET /api/usage/ai', () => {
       mockIterateGatewayLogs.mockImplementation(
         async (_env: unknown, _gw: string, _start: string, cb: (e: AIGatewayLogEntry) => void) => {
           cb(makeEntry({ model: 'cheap-model', cost: 0.01, metadata: { userId: 'user-test-1' } }));
-          cb(
-            makeEntry({ model: 'expensive-model', cost: 0.5, metadata: { userId: 'user-test-1' } })
-          );
-        }
+          cb(makeEntry({ model: 'expensive-model', cost: 0.50, metadata: { userId: 'user-test-1' } }));
+        },
       );
 
       const resp = await testApp.request('/api/usage/ai', {}, makeEnv());
@@ -247,13 +241,9 @@ describe('GET /api/usage/ai', () => {
     it('sorts byDay ascending by date', async () => {
       mockIterateGatewayLogs.mockImplementation(
         async (_env: unknown, _gw: string, _start: string, cb: (e: AIGatewayLogEntry) => void) => {
-          cb(
-            makeEntry({ created_at: '2026-04-20T10:00:00Z', metadata: { userId: 'user-test-1' } })
-          );
-          cb(
-            makeEntry({ created_at: '2026-04-15T10:00:00Z', metadata: { userId: 'user-test-1' } })
-          );
-        }
+          cb(makeEntry({ created_at: '2026-04-20T10:00:00Z', metadata: { userId: 'user-test-1' } }));
+          cb(makeEntry({ created_at: '2026-04-15T10:00:00Z', metadata: { userId: 'user-test-1' } }));
+        },
       );
 
       const resp = await testApp.request('/api/usage/ai', {}, makeEnv());
@@ -266,37 +256,33 @@ describe('GET /api/usage/ai', () => {
     it('rolls up Gateway and direct proxy usage by provider', async () => {
       mockIterateGatewayLogs.mockImplementation(
         async (_env: unknown, _gw: string, _start: string, cb: (e: AIGatewayLogEntry) => void) => {
-          cb(
-            makeEntry({
-              provider: 'openai',
-              model: 'gpt-4o',
-              cost: 0.03,
-              tokens_in: 300,
-              tokens_out: 100,
-              metadata: {
-                userId: 'user-test-1',
-                providerId: 'openai',
-                providerName: 'OpenAI',
-                providerDialect: 'openai-compatible',
-              },
-            })
-          );
-          cb(
-            makeEntry({
-              provider: 'openai',
-              model: 'gpt-4o-mini',
-              cost: 0.01,
-              tokens_in: 100,
-              tokens_out: 50,
-              metadata: {
-                userId: 'user-test-1',
-                providerId: 'openai',
-                providerName: 'OpenAI',
-                providerDialect: 'openai-compatible',
-              },
-            })
-          );
-        }
+          cb(makeEntry({
+            provider: 'openai',
+            model: 'gpt-4o',
+            cost: 0.03,
+            tokens_in: 300,
+            tokens_out: 100,
+            metadata: {
+              userId: 'user-test-1',
+              providerId: 'openai',
+              providerName: 'OpenAI',
+              providerDialect: 'openai-compatible',
+            },
+          }));
+          cb(makeEntry({
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            cost: 0.01,
+            tokens_in: 100,
+            tokens_out: 50,
+            metadata: {
+              userId: 'user-test-1',
+              providerId: 'openai',
+              providerName: 'OpenAI',
+              providerDialect: 'openai-compatible',
+            },
+          }));
+        },
       );
       mockGetProviderUsage.mockResolvedValueOnce([
         {

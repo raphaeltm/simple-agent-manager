@@ -50,7 +50,9 @@ describe('CLI routes', () => {
     expect(res.status).toBe(200);
     expect(get).toHaveBeenCalledWith('cli/sam-darwin-arm64');
     expect(res.headers.get('content-type')).toBe('application/octet-stream');
-    expect(res.headers.get('content-disposition')).toBe('attachment; filename="sam-darwin-arm64"');
+    expect(res.headers.get('content-disposition')).toBe(
+      'attachment; filename="sam-darwin-arm64"'
+    );
     expect(res.headers.get('content-length')).toBe(String(bytes.byteLength));
     expect(res.headers.get('cache-control')).toBe('public, max-age=3600');
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes);
@@ -74,7 +76,11 @@ describe('CLI routes', () => {
   });
 
   it('returns not configured when the R2 binding is missing', async () => {
-    const res = await app.request('/api/cli/download?os=linux&arch=amd64', {}, {} as Env);
+    const res = await app.request(
+      '/api/cli/download?os=linux&arch=amd64',
+      {},
+      {} as Env
+    );
 
     expect(res.status).toBe(503);
     expect(await res.json()).toMatchObject({

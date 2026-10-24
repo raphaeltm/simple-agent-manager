@@ -15,7 +15,7 @@
  */
 import { Button, useModalInteraction } from '@simple-agent-manager/ui';
 import { Check, ChevronDown, CircleAlert, MessagesSquare, X } from 'lucide-react';
-import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 
@@ -191,6 +191,7 @@ export function StartWorkSheet({
   const navigate = useNavigate();
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const subtitleId = useId();
   const [profileSheet, setProfileSheet] = useState<{ open: boolean; anchor: DOMRect | null }>({
     open: false,
     anchor: null,
@@ -206,7 +207,18 @@ export function StartWorkSheet({
   const { reset } = work;
 
   // Escape, focus trap, scroll lock and focus restored to the Start work button.
-  useModalInteraction({ enabled: open, modalRef: dialogRef, onEscape: onClose });
+  //
+  // Both this sheet and the profile picker register their own document-level Escape
+  // listener, and this one was registered first, so a single press would close the whole
+  // sheet out from under the open picker. Ignore Escape while the picker is on top and
+  // let its own listener handle it. A ref keeps the callback identity stable, so the
+  // hook does not tear down and re-arm the focus trap when the picker opens.
+  const profileSheetOpenRef = useRef(false);
+  profileSheetOpenRef.current = profileSheet.open;
+  const handleEscape = useCallback(() => {
+    if (!profileSheetOpenRef.current) onClose();
+  }, [onClose]);
+  useModalInteraction({ enabled: open, modalRef: dialogRef, onEscape: handleEscape });
 
   // Every opening starts clean. Guarded on `open` so typing does not reset the note.
   useEffect(() => {
@@ -262,9 +274,15 @@ export function StartWorkSheet({
         <div
           ref={dialogRef}
           data-testid="start-work-sheet"
+          // `useModalInteraction` focuses this node on open, and makes every other body
+          // child inert — which blurs the trigger. Without `tabIndex` the focus() call is
+          // a no-op on a plain div and focus lands nowhere. Same as `Dialog` and
+          // `ProfilePickerSheet`.
+          tabIndex={-1}
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
+          aria-describedby={subtitleId}
           className={`glass-panel-container glass-composited glass-modal relative flex w-full flex-col shadow-overlay ${
             isMobile
               ? 'max-h-[92dvh] rounded-t-2xl'
@@ -282,7 +300,9 @@ export function StartWorkSheet({
               <h2 id={titleId} className="m-0 text-[19px] font-bold text-fg-primary">
                 {isTaskWork ? 'Start work' : 'Talk it through'}
               </h2>
-              <p className="m-0 truncate text-[13px] text-fg-muted">{ideaTitle}</p>
+              <p id={subtitleId} className="m-0 truncate text-[13px] text-fg-muted">
+                {ideaTitle}
+              </p>
             </div>
             <button
               type="button"

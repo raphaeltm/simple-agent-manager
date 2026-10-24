@@ -126,13 +126,7 @@ describe('backfillProjectGithubRepoId', () => {
     });
 
     // No pre-minted token on the lazy self-heal path -> minted on demand inside getRepositoryMetadata.
-    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith(
-      '120081765',
-      'raph',
-      'sam',
-      env,
-      undefined
-    );
+    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith('120081765', 'raph', 'sam', env, undefined);
     expect(result).toEqual({
       status: 'backfilled',
       githubRepoId: 42,
@@ -144,7 +138,7 @@ describe('backfillProjectGithubRepoId', () => {
         githubRepoId: 42,
         githubRepoNodeId: 'R_node42',
         repository: 'raph/sam',
-      })
+      }),
     );
     // Idempotency: the heal is a conditional UPDATE (only null rows), never blanket.
     expect(whereSpy).toHaveBeenCalledTimes(1);
@@ -168,7 +162,7 @@ describe('backfillProjectGithubRepoId', () => {
     expect(result.status).toBe('backfilled');
     expect(result.fullName).toBe('raph/sam-renamed');
     expect(setSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ repository: 'raph/sam-renamed' })
+      expect.objectContaining({ repository: 'raph/sam-renamed' }),
     );
   });
 
@@ -258,7 +252,7 @@ describe('backfillProjectGithubRepoId', () => {
         projectId: 'proj-1',
         repository: 'raph/sam',
         externalInstallationId: '120081765',
-      })
+      }),
     ).rejects.toThrow(/disk I\/O error/);
   });
 });
@@ -276,14 +270,12 @@ describe('bulkBackfillGithubRepoIds', () => {
 
   it('processes every dormant project, tallies a summary, and a single inaccessible repo does not abort the batch', async () => {
     // Two installations; the middle repo is inaccessible (null metadata).
-    mocks.getRepositoryMetadata.mockImplementation(
-      async (_inst: string, _owner: string, repo: string) => {
-        if (repo === 'gone') {
-          return null;
-        }
-        return { id: repo === 'one' ? 1 : 3, nodeId: `R_${repo}`, fullName: `org/${repo}` };
+    mocks.getRepositoryMetadata.mockImplementation(async (_inst: string, _owner: string, repo: string) => {
+      if (repo === 'gone') {
+        return null;
       }
-    );
+      return { id: repo === 'one' ? 1 : 3, nodeId: `R_${repo}`, fullName: `org/${repo}` };
+    });
 
     const { db, updatedSets } = makeBulkDb({
       projects: [
@@ -312,27 +304,9 @@ describe('bulkBackfillGithubRepoIds', () => {
     expect(updatedSets).toHaveLength(2);
     // inst-a was cached: one token mint + repo lookups reuse it; two installations.
     expect(mocks.getInstallationToken).toHaveBeenCalledTimes(2);
-    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith(
-      'ext-a',
-      'org',
-      'one',
-      env,
-      'inst-token'
-    );
-    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith(
-      'ext-a',
-      'org',
-      'gone',
-      env,
-      'inst-token'
-    );
-    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith(
-      'ext-b',
-      'org',
-      'three',
-      env,
-      'inst-token'
-    );
+    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith('ext-a', 'org', 'one', env, 'inst-token');
+    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith('ext-a', 'org', 'gone', env, 'inst-token');
+    expect(mocks.getRepositoryMetadata).toHaveBeenCalledWith('ext-b', 'org', 'three', env, 'inst-token');
   });
 
   it('counts projects with no installation (or an installation missing an external id) as noInstallation', async () => {
@@ -385,7 +359,7 @@ describe('bulkBackfillGithubRepoIds', () => {
           throw new Error('GitHub 502');
         }
         return { id: repo === 'one' ? 1 : 2, nodeId: `R_${repo}`, fullName: `org/${repo}` };
-      }
+      },
     );
 
     const { db, updatedSets } = makeBulkDb({

@@ -87,7 +87,9 @@ describe('listSessionsFromIndex', () => {
         opts.workspaceId ?? null,
         5,
         opts.startedAt ?? 1000,
-        opts.lastMessageAt === undefined ? (opts.updatedAt ?? 5000) : opts.lastMessageAt,
+        opts.lastMessageAt === undefined
+          ? (opts.updatedAt ?? 5000)
+          : opts.lastMessageAt,
         opts.agentCompletedAt ?? null,
         opts.updatedAt ?? 5000,
         opts.createdByUserId === undefined ? OWNER : opts.createdByUserId,
@@ -345,9 +347,8 @@ describe('listSessionsFromIndex', () => {
       if (!('result' in first) || !('result' in second)) throw new Error('expected index reads');
       expect(first.result.sessions.map((s) => s.id)).toEqual(['d', 'c']);
       expect(second.result.sessions.map((s) => s.id)).toEqual(['b', 'a']);
-      expect(
-        new Set([...first.result.sessions, ...second.result.sessions].map((s) => s.id)).size
-      ).toBe(4);
+      expect(new Set([...first.result.sessions, ...second.result.sessions].map((s) => s.id)).size)
+        .toBe(4);
     });
   });
 

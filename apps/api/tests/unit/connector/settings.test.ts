@@ -5,16 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { connectorAdminRoutes } from '../../../src/routes/connector-settings';
 vi.mock('../../../src/middleware/auth', () => ({
-  requireAuth: () => async (c: any, next: any) => {
-    c.set('auth', {
-      user: {
-        id: 'admin',
-        role: c.req.header('x-test-role') ?? 'superadmin',
-        status: c.req.header('x-test-status') ?? 'active',
-      },
-    });
-    await next();
-  },
+  requireAuth: () => async (c: any, next: any) => { c.set('auth',{user:{id:'admin',role:c.req.header('x-test-role') ?? 'superadmin',status:c.req.header('x-test-status') ?? 'active'}}); await next(); },
   requireApproved: () => async (_c: any, next: any) => next(),
   requireSuperadmin: () => async (_c: any, next: any) => next(),
 }));
@@ -79,23 +70,15 @@ describe('Connector settings overrides', () => {
   });
 });
 
-for (const status of ['pending', 'suspended']) {
+for (const status of ['pending','suspended']) {
   it(`prevents ${status} superadmins bypassing settings authorization through legacy Connector routes`, async () => {
-    const app = new Hono<{ Bindings: Env }>();
+    const app = new Hono<{Bindings:Env}>();
     app.onError(handleAppError);
-    app.route('/admin/connector', connectorAdminRoutes);
-    const response = await app.request(
-      '/admin/connector/settings',
-      {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'x-test-status': status },
-        body: JSON.stringify({ enabled: false }),
-      },
-      env
-    );
+    app.route('/admin/connector',connectorAdminRoutes);
+    const response = await app.request('/admin/connector/settings',{
+      method:'PATCH',headers:{'Content-Type':'application/json','x-test-status':status},body:JSON.stringify({enabled:false}),
+    },env);
     expect(response.status).toBe(403);
-    expect(sqlite.prepare('SELECT revision FROM admin_settings_revision').get()).toEqual({
-      revision: 0,
-    });
+    expect(sqlite.prepare('SELECT revision FROM admin_settings_revision').get()).toEqual({revision:0});
   });
 }

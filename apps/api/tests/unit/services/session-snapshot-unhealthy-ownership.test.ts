@@ -16,12 +16,7 @@ describe('unhealthy-node snapshot ownership fences', () => {
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [
-      schema.nodes,
-      schema.workspaces,
-      schema.agentSessions,
-      schema.sessionSnapshots,
-    ]);
+    createSchemaTables(sqlite, [schema.nodes, schema.workspaces, schema.agentSessions, schema.sessionSnapshots]);
     sqlite.exec(
       'CREATE UNIQUE INDEX idx_session_snapshots_chat_session_id ON session_snapshots(chat_session_id)'
     );

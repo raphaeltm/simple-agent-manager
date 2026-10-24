@@ -63,7 +63,11 @@ describe('credential attribution health service', () => {
     clearCredentialAttributionHealthCache();
   });
   it('counts personal trigger credential paths when no project coverage exists', async () => {
-    const db = makeDb([[trigger], [], [owner]]);
+    const db = makeDb([
+      [trigger],
+      [],
+      [owner],
+    ]);
 
     const summary = await getProjectCredentialAttributionHealth({
       db: db as never,
@@ -81,9 +85,7 @@ describe('credential attribution health service', () => {
       'personal',
       'personal',
     ]);
-    expect(summary.resources[0]?.checks[0]?.warning).toBe(
-      "This runs on Owner User's personal key."
-    );
+    expect(summary.resources[0]?.checks[0]?.warning).toBe("This runs on Owner User's personal key.");
   });
 
   it('lets project attachment coverage win and does not leak secret material', async () => {

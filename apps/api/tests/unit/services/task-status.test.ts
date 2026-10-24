@@ -39,12 +39,21 @@ describe('isTaskStatus', () => {
     expect(isTaskStatus(status)).toBe(true);
   });
 
-  it.each(['unknown', 'running', 'pending', 'active', '', null, undefined, 42, true, {}, []])(
-    'rejects invalid value: %j',
-    (value) => {
-      expect(isTaskStatus(value)).toBe(false);
-    }
-  );
+  it.each([
+    'unknown',
+    'running',
+    'pending',
+    'active',
+    '',
+    null,
+    undefined,
+    42,
+    true,
+    {},
+    [],
+  ])('rejects invalid value: %j', (value) => {
+    expect(isTaskStatus(value)).toBe(false);
+  });
 });
 
 // =============================================================================
@@ -153,15 +162,18 @@ describe('getAllowedTaskTransitions', () => {
 // Terminal status helpers
 // =============================================================================
 describe('isTerminalStatus', () => {
-  it.each(['completed', 'failed', 'cancelled'] as TaskStatus[])('%s is terminal', (status) => {
-    expect(isTerminalStatus(status)).toBe(true);
-  });
+  it.each(['completed', 'failed', 'cancelled'] as TaskStatus[])(
+    '%s is terminal',
+    (status) => {
+      expect(isTerminalStatus(status)).toBe(true);
+    },
+  );
 
   it.each(['draft', 'ready', 'queued', 'delegated', 'in_progress', 'sleeping'] as TaskStatus[])(
     '%s is not terminal',
     (status) => {
       expect(isTerminalStatus(status)).toBe(false);
-    }
+    },
   );
 
   it('TERMINAL_STATUSES set contains exactly completed, failed, cancelled', () => {
@@ -176,15 +188,18 @@ describe('isTerminalStatus', () => {
 // Executable status identification
 // =============================================================================
 describe('isExecutableTaskStatus', () => {
-  it.each(['queued', 'delegated', 'in_progress'] as TaskStatus[])('%s is executable', (status) => {
-    expect(isExecutableTaskStatus(status)).toBe(true);
-  });
+  it.each(['queued', 'delegated', 'in_progress'] as TaskStatus[])(
+    '%s is executable',
+    (status) => {
+      expect(isExecutableTaskStatus(status)).toBe(true);
+    },
+  );
 
   it.each(['draft', 'ready', 'sleeping', 'completed', 'failed', 'cancelled'] as TaskStatus[])(
     '%s is not executable',
     (status) => {
       expect(isExecutableTaskStatus(status)).toBe(false);
-    }
+    },
   );
 
   it('TASK_EXECUTION_STATUSES contains exactly queued, delegated, in_progress', () => {
@@ -225,7 +240,9 @@ describe('getExecutionStepIndex', () => {
       'awaiting_followup',
     ];
     for (let i = 0; i < ordered.length - 1; i++) {
-      expect(getExecutionStepIndex(ordered[i])).toBeLessThan(getExecutionStepIndex(ordered[i + 1]));
+      expect(getExecutionStepIndex(ordered[i])).toBeLessThan(
+        getExecutionStepIndex(ordered[i + 1]),
+      );
     }
   });
 });
@@ -370,13 +387,7 @@ describe('state machine structural invariants', () => {
 
   it('cancellation is available from all non-terminal, non-completed states', () => {
     const cancellableStatuses: TaskStatus[] = [
-      'draft',
-      'ready',
-      'queued',
-      'delegated',
-      'in_progress',
-      'sleeping',
-      'failed',
+      'draft', 'ready', 'queued', 'delegated', 'in_progress', 'sleeping', 'failed',
     ];
     for (const status of cancellableStatuses) {
       expect(canTransitionTaskStatus(status, 'cancelled')).toBe(true);
@@ -384,14 +395,7 @@ describe('state machine structural invariants', () => {
   });
 
   it('the happy path is reachable: draft → ready → queued → delegated → in_progress → completed', () => {
-    const path: TaskStatus[] = [
-      'draft',
-      'ready',
-      'queued',
-      'delegated',
-      'in_progress',
-      'completed',
-    ];
+    const path: TaskStatus[] = ['draft', 'ready', 'queued', 'delegated', 'in_progress', 'completed'];
     for (let i = 0; i < path.length - 1; i++) {
       expect(canTransitionTaskStatus(path[i], path[i + 1])).toBe(true);
     }
@@ -420,7 +424,7 @@ describe('property-based tests', () => {
     fc.assert(
       fc.property(statusArb, (status) => {
         expect(canTransitionTaskStatus(status, status)).toBe(true);
-      })
+      }),
     );
   });
 
@@ -430,7 +434,7 @@ describe('property-based tests', () => {
         if (from === to) return; // Self-transitions are a special case
         const allowed = getAllowedTaskTransitions(from);
         expect(canTransitionTaskStatus(from, to)).toBe(allowed.includes(to));
-      })
+      }),
     );
   });
 
@@ -442,7 +446,7 @@ describe('property-based tests', () => {
         if (to !== 'completed') {
           // This is already covered above
         }
-      })
+      }),
     );
   });
 
@@ -454,7 +458,7 @@ describe('property-based tests', () => {
         expect(new Set(allowed).size).toBe(allowed.length);
         expect(allowed).not.toContain(status);
         expect(allowed.length).toBeLessThan(TASK_STATUSES.length);
-      })
+      }),
     );
   });
 
@@ -468,7 +472,7 @@ describe('property-based tests', () => {
         } else {
           expect(canProgressExecutionStep(from, to)).toBe(false);
         }
-      })
+      }),
     );
   });
 
@@ -476,7 +480,7 @@ describe('property-based tests', () => {
     fc.assert(
       fc.property(stepArb, (to) => {
         expect(canProgressExecutionStep(null, to)).toBe(true);
-      })
+      }),
     );
   });
 
@@ -489,7 +493,7 @@ describe('property-based tests', () => {
           // completed has no outgoing transitions
           expect(getAllowedTaskTransitions('completed')).toHaveLength(0);
         }
-      })
+      }),
     );
   });
 });

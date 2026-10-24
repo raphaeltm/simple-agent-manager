@@ -166,7 +166,7 @@ describe('rateLimit middleware (behavioral)', () => {
         limit: options.limit ?? 3,
         keyPrefix: options.keyPrefix ?? 'test',
         useIp: options.useIp,
-      }) as any
+      }) as any,
     );
 
     app.get('/test', (c) => c.json({ ok: true }));

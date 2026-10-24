@@ -16,9 +16,7 @@ describe('composeUrgentDeliveryContent', () => {
     expect(content).toContain('review the transcript above');
     // The directive is fenced and labelled untrusted so a peer cannot easily
     // forge server framing outside the fence.
-    expect(content).toContain(
-      'Directive (untrusted, verbatim):\n<<<\npause the staging deploy\n>>>'
-    );
+    expect(content).toContain('Directive (untrusted, verbatim):\n<<<\npause the staging deploy\n>>>');
     expect(content).toContain('untrusted peer content');
   });
 

@@ -63,13 +63,11 @@ describe('translateRequestToAnthropic', () => {
         {
           role: 'assistant',
           content: 'Let me check.',
-          tool_calls: [
-            {
-              id: 'call_123',
-              type: 'function',
-              function: { name: 'get_time', arguments: '{}' },
-            },
-          ],
+          tool_calls: [{
+            id: 'call_123',
+            type: 'function',
+            function: { name: 'get_time', arguments: '{}' },
+          }],
         },
         {
           role: 'tool',
@@ -105,16 +103,14 @@ describe('translateRequestToAnthropic', () => {
     const body = {
       model: 'claude-haiku-4-5-20251001',
       messages: [{ role: 'user', content: 'Hi' }],
-      tools: [
-        {
-          type: 'function',
-          function: {
-            name: 'get_weather',
-            description: 'Get the weather',
-            parameters: { type: 'object', properties: { city: { type: 'string' } } },
-          },
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'get_weather',
+          description: 'Get the weather',
+          parameters: { type: 'object', properties: { city: { type: 'string' } } },
         },
-      ],
+      }],
     };
 
     const result = translateRequestToAnthropic(body, 'claude-haiku-4-5-20251001');

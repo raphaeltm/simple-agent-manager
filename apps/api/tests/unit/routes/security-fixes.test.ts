@@ -28,14 +28,7 @@ vi.mock('../../../src/middleware/auth', () => ({
   requireSuperadmin: () => vi.fn((c: any, next: any) => next()),
   getUserId: () => 'user-1',
   getAuth: () => ({
-    user: {
-      id: 'user-1',
-      role: 'superadmin',
-      status: 'active',
-      email: 'test@test.com',
-      name: 'Test',
-      avatarUrl: null,
-    },
+    user: { id: 'user-1', role: 'superadmin', status: 'active', email: 'test@test.com', name: 'Test', avatarUrl: null },
     session: { id: 'sess-1', expiresAt: new Date() },
   }),
 }));
@@ -119,15 +112,11 @@ describe('Shannon Security Fixes', () => {
 
   describe('INJ-VULN-03: Runtime file path restrictions', () => {
     const postFile = (path: string) =>
-      app.request(
-        '/api/projects/proj-1/runtime/files',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path, content: 'test content', isSecret: false }),
-        },
-        mockEnv
-      );
+      app.request('/api/projects/proj-1/runtime/files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, content: 'test content', isSecret: false }),
+      }, mockEnv);
 
     it('rejects /etc/cron.d/ paths (cron injection)', async () => {
       const res = await postFile('/etc/cron.d/backdoor');
@@ -213,7 +202,7 @@ describe('Shannon Security Fixes', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ nodeId: 'attacker-node-id' }),
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(403);
@@ -231,7 +220,7 @@ describe('Shannon Security Fixes', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ nodeId: 'some-node' }),
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(404);
@@ -253,7 +242,7 @@ describe('Shannon Security Fixes', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ nodeId: 'correct-node' }),
         },
-        mockEnv
+        mockEnv,
       );
 
       expect(res.status).toBe(204);

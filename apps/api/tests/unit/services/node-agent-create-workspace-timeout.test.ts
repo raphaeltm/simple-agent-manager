@@ -88,8 +88,7 @@ describe('getCfContainerCreateWorkspaceTimeoutMs', () => {
 
 describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
   it.each(['cf-container', 'vm', 'no-database'])(
-    'preserves a sleep identity error before any %s external fetch',
-    async (runtime) => {
+    'preserves a sleep identity error before any %s external fetch', async (runtime) => {
       mocks.drizzle.mockReturnValue({
         select: () => ({ from: () => ({ where: () => ({ get: async () => ({ runtime }) }) }) }),
       });
@@ -99,16 +98,9 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
       const beforeExternalMutation = vi.fn().mockRejectedValue(error);
       const env = runtime === 'no-database' ? { BASE_DOMAIN: 'example.com' } : cfContainerEnv;
 
-      await expect(
-        fetchNodeAgent(
-          'node-1',
-          env as never,
-          'https://node-1.vm.example.com/workspaces/ws-1/stop',
-          { method: 'POST' },
-          30_000,
-          { beforeExternalMutation }
-        )
-      ).rejects.toBe(error);
+      await expect(fetchNodeAgent('node-1', env as never,
+        'https://node-1.vm.example.com/workspaces/ws-1/stop', { method: 'POST' }, 30_000,
+        { beforeExternalMutation })).rejects.toBe(error);
 
       expect(beforeExternalMutation).toHaveBeenCalledOnce();
       expect(directFetch).not.toHaveBeenCalled();

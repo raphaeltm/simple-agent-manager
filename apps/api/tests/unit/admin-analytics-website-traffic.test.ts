@@ -110,15 +110,11 @@ describe('website traffic — period parameter', () => {
   /** Replicated from admin-analytics.ts */
   function periodToInterval(period: string): string {
     switch (period) {
-      case '24h':
-        return "INTERVAL '1' DAY";
-      case '30d':
-        return "INTERVAL '30' DAY";
-      case '90d':
-        return "INTERVAL '90' DAY";
+      case '24h': return "INTERVAL '1' DAY";
+      case '30d': return "INTERVAL '30' DAY";
+      case '90d': return "INTERVAL '90' DAY";
       case '7d':
-      default:
-        return "INTERVAL '7' DAY";
+      default: return "INTERVAL '7' DAY";
     }
   }
 

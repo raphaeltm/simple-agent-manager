@@ -505,7 +505,7 @@ describe('Session State Mirror — vertical slice', () => {
       expect(history.activityReason).toBe('completed');
     });
 
-    it("never reaches another chat session's rows", () => {
+    it('never reaches another chat session\'s rows', () => {
       seedLinkedSession('chat-a', 'acp-a');
       seedLinkedSession('chat-b', 'acp-b');
       sessionState.upsertActivityState(sql, 'acp-a', { activity: 'prompting' });

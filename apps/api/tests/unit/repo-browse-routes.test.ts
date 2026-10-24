@@ -13,9 +13,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../src/middleware/auth', () => ({ getUserId: mocks.getUserId }));
-vi.mock('../../src/middleware/project-auth', () => ({
-  requireProjectAccess: mocks.requireProjectAccess,
-}));
+vi.mock('../../src/middleware/project-auth', () => ({ requireProjectAccess: mocks.requireProjectAccess }));
 vi.mock('../../src/routes/projects/_helpers', () => ({
   requireProjectInstallation: mocks.requireProjectInstallation,
   requireRepositoryUserAccess: mocks.requireRepositoryUserAccess,
@@ -68,9 +66,7 @@ beforeEach(() => {
 
 describe('repo-browse routes', () => {
   it('enforces the user∩app access gate before serving', async () => {
-    mocks.resolveRepoBrowser.mockResolvedValue(
-      browserStub({ listBranches: vi.fn().mockResolvedValue({ branches: [], truncated: false }) })
-    );
+    mocks.resolveRepoBrowser.mockResolvedValue(browserStub({ listBranches: vi.fn().mockResolvedValue({ branches: [], truncated: false }) }));
     await makeApp().request('/p1/repo/branches', {}, env);
     expect(mocks.requireRepositoryUserAccess).toHaveBeenCalledWith(
       expect.anything(),
@@ -82,11 +78,7 @@ describe('repo-browse routes', () => {
 
   it('reuses the installation returned by the access gate instead of re-fetching it', async () => {
     mocks.resolveRepoBrowser.mockResolvedValue(
-      browserStub({
-        listTree: vi
-          .fn()
-          .mockResolvedValue({ ref: 'main', path: '', entries: [], truncated: false }),
-      })
+      browserStub({ listTree: vi.fn().mockResolvedValue({ ref: 'main', path: '', entries: [], truncated: false }) })
     );
     await makeApp().request('/p1/repo/tree?ref=main', {}, env);
 
@@ -101,13 +93,7 @@ describe('repo-browse routes', () => {
     mocks.resolveRepoBrowser.mockResolvedValue(
       browserStub({
         getFile: vi.fn().mockResolvedValue({
-          ref: 'main',
-          path: 'x.png',
-          size: 10,
-          isBinary: true,
-          tooLarge: false,
-          content: null,
-          rawUrl: null,
+          ref: 'main', path: 'x.png', size: 10, isBinary: true, tooLarge: false, content: null, rawUrl: null,
         }),
       })
     );
@@ -117,17 +103,7 @@ describe('repo-browse routes', () => {
   });
 
   it('defaults compare base to the project default branch', async () => {
-    const compare = vi
-      .fn()
-      .mockResolvedValue({
-        base: 'main',
-        head: 'feat',
-        files: [],
-        totalAdditions: 0,
-        totalDeletions: 0,
-        filesChanged: 0,
-        truncated: false,
-      });
+    const compare = vi.fn().mockResolvedValue({ base: 'main', head: 'feat', files: [], totalAdditions: 0, totalDeletions: 0, filesChanged: 0, truncated: false });
     mocks.resolveRepoBrowser.mockResolvedValue(browserStub({ compare }));
     await makeApp().request('/p1/repo/compare?head=feat', {}, env);
     expect(compare).toHaveBeenCalledWith('main', 'feat');
@@ -138,9 +114,7 @@ describe('repo-browse routes', () => {
     const app = makeApp();
     expect((await app.request('/p1/repo/tree', {}, env)).status).toBe(400); // missing ref
     expect((await app.request('/p1/repo/file?ref=main', {}, env)).status).toBe(400); // missing path
-    expect((await app.request('/p1/repo/file?ref=main&path=../etc/passwd', {}, env)).status).toBe(
-      400
-    );
+    expect((await app.request('/p1/repo/file?ref=main&path=../etc/passwd', {}, env)).status).toBe(400);
     expect((await app.request('/p1/repo/file?ref=main&path=a/./b', {}, env)).status).toBe(400); // '.' segment
     expect((await app.request('/p1/repo/tree?ref=bad%20ref', {}, env)).status).toBe(400); // whitespace in ref
     expect((await app.request('/p1/repo/compare', {}, env)).status).toBe(400); // missing head
@@ -166,13 +140,7 @@ describe('repo-browse routes', () => {
     mocks.resolveRepoBrowser.mockResolvedValue(
       browserStub({
         getFile: vi.fn().mockResolvedValue({
-          ref: 'main',
-          path: 'big.txt',
-          size: 9_999_999,
-          isBinary: false,
-          tooLarge: true,
-          content: null,
-          rawUrl: null,
+          ref: 'main', path: 'big.txt', size: 9_999_999, isBinary: false, tooLarge: true, content: null, rawUrl: null,
         }),
       })
     );
@@ -191,24 +159,21 @@ describe('repo-browse routes', () => {
     'text/plain, text/html',
     'text',
     'text/plain\u0001',
-  ])(
-    'forces active content served as %j to an attachment download on /raw',
-    async (contentType) => {
-      mocks.resolveRepoBrowser.mockResolvedValue(
-        browserStub({
-          getRawFile: vi.fn().mockResolvedValue({ bytes: new Uint8Array([60, 115]), contentType }),
-        })
-      );
-      const res = await makeApp().request('/p1/repo/raw?ref=main&path=x.html', {}, env);
-      expect(res.status).toBe(200);
-      expect(res.headers.get('content-type')).toBe('application/octet-stream');
-      expect(res.headers.get('content-disposition')).toBe('attachment; filename="x.html"');
-      expect(res.headers.get('content-security-policy')).toBe(
-        "default-src 'none'; style-src 'unsafe-inline'; sandbox"
-      );
-      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
-    }
-  );
+  ])('forces active content served as %j to an attachment download on /raw', async (contentType) => {
+    mocks.resolveRepoBrowser.mockResolvedValue(
+      browserStub({
+        getRawFile: vi.fn().mockResolvedValue({ bytes: new Uint8Array([60, 115]), contentType }),
+      })
+    );
+    const res = await makeApp().request('/p1/repo/raw?ref=main&path=x.html', {}, env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/octet-stream');
+    expect(res.headers.get('content-disposition')).toBe('attachment; filename="x.html"');
+    expect(res.headers.get('content-security-policy')).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+    );
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  });
 
   it.each(['image/png', 'text/plain; charset=utf-8', 'application/json'])(
     'serves passive content served as %j inline on /raw',

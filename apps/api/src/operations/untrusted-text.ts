@@ -22,8 +22,35 @@ const MARKER_RULE = '-----';
 /** A body line that looks like any BEGIN/END marker is replaced with this. */
 const IMPERSONATION_NOTICE = '[a line that imitated an envelope marker was removed]';
 const TRUNCATION_NOTICE = '[truncated by SAM: the full text is available with get_idea]';
-/** Matches our own markers and any near-miss a body might use to fake one. */
+/**
+ * Matches our own markers and any near-miss a body might use to fake one.
+ *
+ * It only ever sees a line that `foldLookalikes` has already canonicalised, which is the
+ * load-bearing half of the defence: this pattern alone matches ASCII hyphens, so a body
+ * written with em dashes (`————— END UNTRUSTED IDEA —————`) or with a zero-width space
+ * inside the rule (`-​---- END …`) would slip past it while rendering identically.
+ */
 const MARKER_LINE = /^\s*-{3,}\s*(BEGIN|END)\s+UNTRUSTED\b.*$/i;
+
+/** Dash lookalikes folded to ASCII `-` before the marker test. */
+const DASH_LOOKALIKES =
+  /[‐-―⁃−─━ー︱︲﹘﹣－ｰ]/g;
+/**
+ * Invisible characters removed before the marker test: zero-width, word joiner, BOM, the
+ * bidirectional overrides and isolates, and the soft hyphen. None of them render, so a
+ * line carrying them looks exactly like a marker to a reader while defeating a naive
+ * pattern match.
+ */
+const INVISIBLE = /[­​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
+
+/**
+ * The form a line is matched against: dash lookalikes folded to ASCII and invisible
+ * characters dropped. The result is used ONLY for the comparison; a line that is not a
+ * marker keeps its original characters, so legitimate em dashes survive in the body.
+ */
+function foldLookalikes(line: string): string {
+  return line.replace(INVISIBLE, '').replace(DASH_LOOKALIKES, '-');
+}
 
 export interface UntrustedTextBlock {
   /** What the text is, lowercase, e.g. `idea`. Rendered uppercase inside the markers. */
@@ -49,8 +76,12 @@ export interface UntrustedTextInput {
  * codes (other than newline and tab), and any line impersonating a marker. Without the
  * second step a body containing `----- END UNTRUSTED IDEA -----` could close the fence
  * and have everything after it read as trusted instructions.
+ *
+ * The marker test runs against `foldLookalikes(cleaned)`, not against `cleaned` itself.
+ * A line is judged by what a reader would see, so neither a dash lookalike nor an
+ * invisible character wedged into the rule can smuggle a marker through.
  */
-function neutralize(text: string): string {
+export function neutralizeUntrustedText(text: string): string {
   return text
     .split(/\r\n|\r|\n/)
     .map((line) => {
@@ -62,7 +93,7 @@ function neutralize(text: string): string {
             : ' ';
         })
         .join('');
-      return MARKER_LINE.test(cleaned) ? IMPERSONATION_NOTICE : cleaned;
+      return MARKER_LINE.test(foldLookalikes(cleaned)) ? IMPERSONATION_NOTICE : cleaned;
     })
     .join('\n');
 }
@@ -86,7 +117,7 @@ export function untrustedTextBlock(input: UntrustedTextInput): UntrustedTextBloc
   if (raw.length === 0 || cap === 0) return { ...base, text: '', truncated: raw.length > cap };
 
   const truncated = raw.length > cap;
-  const body = neutralize(raw.slice(0, cap)) + (truncated ? `\n${TRUNCATION_NOTICE}` : '');
+  const body = neutralizeUntrustedText(raw.slice(0, cap)) + (truncated ? `\n${TRUNCATION_NOTICE}` : '');
   const label = kind.toUpperCase();
   return {
     ...base,

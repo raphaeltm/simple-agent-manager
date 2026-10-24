@@ -2,15 +2,21 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
-  const requireAuth = vi.fn(() => async (_: unknown, next: () => Promise<void>) => {
-    await next();
-  });
-  const requireApproved = vi.fn(() => async (_: unknown, next: () => Promise<void>) => {
-    await next();
-  });
-  const requireSuperadmin = vi.fn(() => async (_: unknown, next: () => Promise<void>) => {
-    await next();
-  });
+  const requireAuth = vi.fn(
+    () => async (_: unknown, next: () => Promise<void>) => {
+      await next();
+    }
+  );
+  const requireApproved = vi.fn(
+    () => async (_: unknown, next: () => Promise<void>) => {
+      await next();
+    }
+  );
+  const requireSuperadmin = vi.fn(
+    () => async (_: unknown, next: () => Promise<void>) => {
+      await next();
+    }
+  );
   const getUserId = vi.fn(() => 'user-1');
   const createUiGovernanceService = vi.fn();
   return { requireAuth, requireApproved, requireSuperadmin, getUserId, createUiGovernanceService };
@@ -83,9 +89,11 @@ const jsonHeaders = { 'Content-Type': 'application/json' };
 describe('UI governance routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireAuth.mockReturnValue(async (_: unknown, next: () => Promise<void>) => {
-      await next();
-    });
+    mocks.requireAuth.mockReturnValue(
+      async (_: unknown, next: () => Promise<void>) => {
+        await next();
+      }
+    );
   });
 
   it('returns active standard', async () => {
@@ -106,11 +114,7 @@ describe('UI governance routes', () => {
     service.getActiveStandard.mockResolvedValue(standard);
 
     const app = createApp(service);
-    const response = await app.request(
-      '/api/ui-governance/standards/active',
-      { method: 'GET' },
-      env
-    );
+    const response = await app.request('/api/ui-governance/standards/active', { method: 'GET' }, env);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(standard);
@@ -122,11 +126,7 @@ describe('UI governance routes', () => {
     service.getActiveStandard.mockResolvedValue(null);
 
     const app = createApp(service);
-    const response = await app.request(
-      '/api/ui-governance/standards/active',
-      { method: 'GET' },
-      env
-    );
+    const response = await app.request('/api/ui-governance/standards/active', { method: 'GET' }, env);
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toMatchObject({
@@ -257,11 +257,7 @@ describe('UI governance routes', () => {
     service.getComponentDefinition.mockResolvedValue(null);
 
     const app = createApp(service);
-    const response = await app.request(
-      '/api/ui-governance/components/cmp_missing',
-      { method: 'GET' },
-      env
-    );
+    const response = await app.request('/api/ui-governance/components/cmp_missing', { method: 'GET' }, env);
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toMatchObject({
@@ -412,11 +408,7 @@ describe('UI governance routes', () => {
     });
 
     const app = createApp(service);
-    const response = await app.request(
-      '/api/ui-governance/compliance-runs/run_02',
-      { method: 'GET' },
-      env
-    );
+    const response = await app.request('/api/ui-governance/compliance-runs/run_02', { method: 'GET' }, env);
 
     expect(response.status).toBe(200);
     expect(service.getComplianceRun).toHaveBeenCalledWith('run_02');
@@ -438,11 +430,7 @@ describe('UI governance routes', () => {
       ...clientPayload,
       requestedBy: 'user-1', // Overridden by getUserId()
     };
-    service.createExceptionRequest.mockResolvedValue({
-      id: 'exc_01',
-      ...expectedPayload,
-      status: 'pending',
-    });
+    service.createExceptionRequest.mockResolvedValue({ id: 'exc_01', ...expectedPayload, status: 'pending' });
 
     const app = createApp(service);
     const response = await app.request(
@@ -478,11 +466,7 @@ describe('UI governance routes', () => {
     });
 
     const app = createApp(service);
-    const response = await app.request(
-      '/api/ui-governance/agent-instructions/active',
-      { method: 'GET' },
-      env
-    );
+    const response = await app.request('/api/ui-governance/agent-instructions/active', { method: 'GET' }, env);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ id: 'inst_01', isActive: true });
@@ -493,11 +477,7 @@ describe('UI governance routes', () => {
     service.getActiveAgentInstructions.mockResolvedValue(null);
 
     const app = createApp(service);
-    const response = await app.request(
-      '/api/ui-governance/agent-instructions/active',
-      { method: 'GET' },
-      env
-    );
+    const response = await app.request('/api/ui-governance/agent-instructions/active', { method: 'GET' }, env);
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toMatchObject({
@@ -527,12 +507,8 @@ describe('UI governance routes', () => {
 
       // Override requireSuperadmin to reject
       vi.doMock('../../../src/middleware/auth', () => ({
-        requireAuth: () => async (_: unknown, next: () => Promise<void>) => {
-          await next();
-        },
-        requireApproved: () => async (_: unknown, next: () => Promise<void>) => {
-          await next();
-        },
+        requireAuth: () => async (_: unknown, next: () => Promise<void>) => { await next(); },
+        requireApproved: () => async (_: unknown, next: () => Promise<void>) => { await next(); },
         requireSuperadmin: () => async (c: any) => {
           return c.json({ error: 'FORBIDDEN', message: 'Superadmin access required' }, 403);
         },
@@ -542,8 +518,7 @@ describe('UI governance routes', () => {
         createUiGovernanceService: mocks.createUiGovernanceService,
       }));
 
-      const { uiGovernanceRoutes: blockedRoutes } =
-        await import('../../../src/routes/ui-governance');
+      const { uiGovernanceRoutes: blockedRoutes } = await import('../../../src/routes/ui-governance');
       const service = createMockService();
       mocks.createUiGovernanceService.mockReturnValue(service);
 
@@ -551,10 +526,7 @@ describe('UI governance routes', () => {
       blockApp.onError((err, c) => {
         const appError = err as { statusCode?: number; error?: string; message?: string };
         if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
-          return c.json(
-            { error: appError.error, message: appError.message },
-            appError.statusCode as 400
-          );
+          return c.json({ error: appError.error, message: appError.message }, appError.statusCode as 400);
         }
         return c.json({ error: 'INTERNAL_ERROR', message: 'Internal server error' }, 500);
       });
@@ -567,12 +539,8 @@ describe('UI governance routes', () => {
           method: 'PUT',
           headers: jsonHeaders,
           body: JSON.stringify({
-            status: 'active',
-            name: 'Test',
-            visualDirection: 'test',
-            mobileFirstRulesRef: 'test',
-            accessibilityRulesRef: 'test',
-            ownerRole: 'test',
+            status: 'active', name: 'Test', visualDirection: 'test',
+            mobileFirstRulesRef: 'test', accessibilityRulesRef: 'test', ownerRole: 'test',
           }),
         },
         env
@@ -586,16 +554,10 @@ describe('UI governance routes', () => {
           method: 'POST',
           headers: jsonHeaders,
           body: JSON.stringify({
-            standardId: 'std_01',
-            name: 'Btn',
-            category: 'input',
-            supportedSurfaces: ['web'],
-            requiredStates: ['default'],
-            usageGuidance: 't',
-            accessibilityNotes: 't',
-            mobileBehavior: 't',
-            desktopBehavior: 't',
-            status: 'ready',
+            standardId: 'std_01', name: 'Btn', category: 'input',
+            supportedSurfaces: ['web'], requiredStates: ['default'],
+            usageGuidance: 't', accessibilityNotes: 't',
+            mobileBehavior: 't', desktopBehavior: 't', status: 'ready',
           }),
         },
         env
@@ -609,11 +571,8 @@ describe('UI governance routes', () => {
           method: 'POST',
           headers: jsonHeaders,
           body: JSON.stringify({
-            standardId: 'std_01',
-            surface: 'control-plane',
-            targetRef: 'test',
-            priority: 'high',
-            status: 'backlog',
+            standardId: 'std_01', surface: 'control-plane',
+            targetRef: 'test', priority: 'high', status: 'backlog',
           }),
         },
         env

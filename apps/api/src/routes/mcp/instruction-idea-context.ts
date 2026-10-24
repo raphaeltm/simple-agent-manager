@@ -16,7 +16,11 @@ import type { LinkRelation } from '@simple-agent-manager/shared';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { listLinks } from '../../operations/link-core';
-import { type UntrustedTextBlock, untrustedTextBlock } from '../../operations/untrusted-text';
+import {
+  neutralizeUntrustedText,
+  type UntrustedTextBlock,
+  untrustedTextBlock,
+} from '../../operations/untrusted-text';
 import { resolveAdminSettingDetails } from '../../services/admin-settings';
 
 /** The relations Start work writes. `linked` is an explicit tag, not a work intent. */
@@ -80,7 +84,10 @@ export async function resolveInstructionIdeaContext(
     : null;
   return {
     ideaId: idea.id,
-    title: idea.title,
+    // The title is as editable as the body, so it gets the same character treatment. It
+    // is short and structured, so it does not need its own fence — only the guarantee
+    // that it cannot carry control characters or impersonate the body's markers.
+    title: neutralizeUntrustedText(idea.title).trim(),
     relation: chosen.relation === 'works_on' ? 'works_on' : 'discusses',
     status: idea.status,
     content,

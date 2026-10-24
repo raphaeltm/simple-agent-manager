@@ -7,10 +7,7 @@ import { join } from 'node:path';
 import git from 'isomorphic-git';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  collectCompareFiles,
-  collectTreeEntries,
-} from '../../../src/services/repo-browse/artifacts';
+import { collectCompareFiles, collectTreeEntries } from '../../../src/services/repo-browse/artifacts';
 
 // Regression suite for the isomorphic-git walk recursion bug: `walk` PRUNES
 // recursion into a node's children when `map` returns `null`. The original

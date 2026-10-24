@@ -164,10 +164,7 @@ describe('systemPromptAppend wiring through submit → startTaskRunnerDO → Tas
   // They read source files to confirm the wiring, since the DO methods are
   // private and can't be directly unit-tested without Miniflare integration.
 
-  const submitSource = readFileSync(
-    resolve(process.cwd(), 'src/services/submit-task-implementation.ts'),
-    'utf8'
-  );
+  const submitSource = readFileSync(resolve(process.cwd(), 'src/services/submit-task-implementation.ts'), 'utf8');
 
   const taskRunnerDoSource = readFileSync(
     resolve(process.cwd(), 'src/services/task-runner-do.ts'),

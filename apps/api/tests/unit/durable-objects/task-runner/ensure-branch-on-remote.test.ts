@@ -29,10 +29,7 @@ vi.mock('../../../../src/services/github-app', () => ({
   ensureBranchExists: mocks.ensureBranchExists,
 }));
 
-import type {
-  TaskRunnerContext,
-  TaskRunnerState,
-} from '../../../../src/durable-objects/task-runner/types';
+import type { TaskRunnerContext, TaskRunnerState } from '../../../../src/durable-objects/task-runner/types';
 import { ensureBranchExistsOnRemote } from '../../../../src/durable-objects/task-runner/workspace-steps';
 import { SessionRecoveryAuthorityRevokedError } from '../../../../src/services/session-recovery-authority';
 
@@ -86,12 +83,10 @@ type InstallationRow = {
   externalInstallationId: string | null;
 };
 
-function makeContext(
-  installation: InstallationRow | null = {
-    installationId: 'legacy-external-123',
-    externalInstallationId: '987654321',
-  }
-): TaskRunnerContext {
+function makeContext(installation: InstallationRow | null = {
+  installationId: 'legacy-external-123',
+  externalInstallationId: '987654321',
+}): TaskRunnerContext {
   const first = vi.fn().mockResolvedValue(installation);
   const bind = vi.fn().mockReturnValue({ first });
   const prepare = vi.fn().mockReturnValue({ bind });
@@ -152,7 +147,7 @@ describe('ensureBranchExistsOnRemote', () => {
       'widgets',
       'feature/my-branch',
       'main',
-      mockRc.env
+      mockRc.env,
     );
     expect(mocks.log.info).toHaveBeenCalledWith('task_runner_do.ensure_branch.ok', {
       taskId: 'task-test-001',
@@ -183,7 +178,7 @@ describe('ensureBranchExistsOnRemote', () => {
       'widgets',
       'feature/my-branch',
       'main',
-      mockRc.env
+      mockRc.env,
     );
   });
 

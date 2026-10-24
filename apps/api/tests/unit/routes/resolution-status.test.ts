@@ -86,10 +86,11 @@ describe('resolution-status route', () => {
     };
     mocks.buildSnapshot.mockResolvedValue(snapshot);
 
-    const res = await makeApp().request('/api/credentials/resolution-status', { method: 'GET' }, {
-      DATABASE: {} as Env['DATABASE'],
-      ENCRYPTION_KEY: 'test-key',
-    } as Env);
+    const res = await makeApp().request(
+      '/api/credentials/resolution-status',
+      { method: 'GET' },
+      { DATABASE: {} as Env['DATABASE'], ENCRYPTION_KEY: 'test-key' } as Env
+    );
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {

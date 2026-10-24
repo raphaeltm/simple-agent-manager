@@ -2,10 +2,7 @@ import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import {
-  classifyLongRunningTaskStall,
-  classifyReconciliationLoop,
-} from '../../../src/scheduled/stalled-task-classifier';
+import { classifyLongRunningTaskStall, classifyReconciliationLoop } from '../../../src/scheduled/stalled-task-classifier';
 import {
   invalidateAdminSettings,
   readAdminSettings,
@@ -38,18 +35,12 @@ afterEach(() => sqlite.close());
 
 describe('Phase 1 existing consumer integration', () => {
   it('the new classifier switch reaches both actual asynchronous entrypoints', async () => {
-    await updateAdminSettings(env, {
-      changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }],
-      actorUserId: 'admin',
-    });
+    await updateAdminSettings(env, {changes:[{name:'operations.stalledTaskClassifierEnabled',value:false}],actorUserId:'admin'});
     expect(await classifyReconciliationLoop(env, [])).toBeNull();
-    expect(
-      await classifyLongRunningTaskStall(env, {
-        task: { id: 'task', project_id: 'project', workspace_id: null, chat_session_id: 'chat' },
-        liveness: {} as never,
-        nowMs: Date.now(),
-      })
-    ).toBeNull();
+    expect(await classifyLongRunningTaskStall(env, {
+      task:{id:'task',project_id:'project',workspace_id:null,chat_session_id:'chat'},
+      liveness:{} as never,nowMs:Date.now(),
+    })).toBeNull();
   });
   it('preserves defaults and legacy environment/KV values until a D1 override exists', async () => {
     env.CONNECTOR_ENABLED = 'false';

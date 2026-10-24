@@ -45,7 +45,7 @@ describe('safeParseJson', () => {
       expect(result).not.toBeNull();
       expect(result!.toolCallId).toBe('tc-123');
       expect(result!.title).toBe('Edit file');
-      expect(result!.locations as unknown[]).toHaveLength(1);
+      expect((result!.locations as unknown[])).toHaveLength(1);
     });
 
     it('parses objects with numeric and boolean values', () => {

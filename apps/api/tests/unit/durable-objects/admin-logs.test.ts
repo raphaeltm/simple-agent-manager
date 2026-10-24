@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 /**
  * Unit tests for the AdminLogs Durable Object.
@@ -49,9 +49,7 @@ function createMockWebSocket() {
   return {
     send: vi.fn((data: string) => sent.push(data)),
     close: vi.fn(),
-    serializeAttachment: vi.fn((data: unknown) => {
-      attachment = data;
-    }),
+    serializeAttachment: vi.fn((data: unknown) => { attachment = data; }),
     deserializeAttachment: vi.fn(() => attachment),
     _sent: sent,
     readyState: 1,
@@ -83,13 +81,10 @@ describe('AdminLogs Durable Object', () => {
       // works, but Node.js rejects status 101. We verify the DO calls the right APIs instead.
       const clientWs = createMockWebSocket();
       const serverWs = createMockWebSocket();
-      vi.stubGlobal(
-        'WebSocketPair',
-        class {
-          0 = clientWs;
-          1 = serverWs;
-        }
-      );
+      vi.stubGlobal('WebSocketPair', class {
+        0 = clientWs;
+        1 = serverWs;
+      });
 
       // The Response constructor will throw in Node.js for status 101.
       // This is expected — in production the Cloudflare runtime handles it.
@@ -170,7 +165,7 @@ describe('AdminLogs Durable Object', () => {
       const response = await adminLogs.fetch(request);
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Type')).toBe('application/json');
-      const body = (await response.json()) as { ok: boolean; subscribers: number };
+      const body = await response.json() as { ok: boolean; subscribers: number };
       expect(body.subscribers).toBe(0);
     });
 
@@ -195,16 +190,14 @@ describe('AdminLogs Durable Object', () => {
         },
       ];
 
-      const response = await adminLogs.fetch(
-        new Request('https://internal/ingest', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ logs }),
-        })
-      );
+      const response = await adminLogs.fetch(new Request('https://internal/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ logs }),
+      }));
 
       expect(response.status).toBe(200);
-      const body = (await response.json()) as { ok: boolean; subscribers: number };
+      const body = await response.json() as { ok: boolean; subscribers: number };
       expect(body.subscribers).toBe(2);
     });
   });
@@ -224,12 +217,11 @@ describe('AdminLogs Durable Object', () => {
 
       await adminLogs.webSocketMessage(
         ws as any,
-        JSON.stringify({ type: 'filter', levels: ['error'], search: 'timeout' })
+        JSON.stringify({ type: 'filter', levels: ['error'], search: 'timeout' }),
       );
 
       expect(ws.serializeAttachment).toHaveBeenCalled();
-      const lastCall =
-        ws.serializeAttachment.mock.calls[ws.serializeAttachment.mock.calls.length - 1][0];
+      const lastCall = ws.serializeAttachment.mock.calls[ws.serializeAttachment.mock.calls.length - 1][0];
       expect(lastCall.levels).toEqual(['error']);
       expect(lastCall.search).toBe('timeout');
     });
@@ -240,8 +232,7 @@ describe('AdminLogs Durable Object', () => {
 
       await adminLogs.webSocketMessage(ws as any, JSON.stringify({ type: 'pause' }));
 
-      const lastCall =
-        ws.serializeAttachment.mock.calls[ws.serializeAttachment.mock.calls.length - 1][0];
+      const lastCall = ws.serializeAttachment.mock.calls[ws.serializeAttachment.mock.calls.length - 1][0];
       expect(lastCall.paused).toBe(true);
     });
 
@@ -251,8 +242,7 @@ describe('AdminLogs Durable Object', () => {
 
       await adminLogs.webSocketMessage(ws as any, JSON.stringify({ type: 'resume' }));
 
-      const lastCall =
-        ws.serializeAttachment.mock.calls[ws.serializeAttachment.mock.calls.length - 1][0];
+      const lastCall = ws.serializeAttachment.mock.calls[ws.serializeAttachment.mock.calls.length - 1][0];
       expect(lastCall.paused).toBe(false);
     });
 
@@ -275,11 +265,10 @@ describe('AdminLogs Durable Object', () => {
 
       await adminLogs.webSocketMessage(
         ws as any,
-        JSON.stringify({ type: 'filter', levels: ['error', 'critical', 'debug'] })
+        JSON.stringify({ type: 'filter', levels: ['error', 'critical', 'debug'] }),
       );
 
-      const lastCall =
-        ws.serializeAttachment.mock.calls[ws.serializeAttachment.mock.calls.length - 1][0];
+      const lastCall = ws.serializeAttachment.mock.calls[ws.serializeAttachment.mock.calls.length - 1][0];
       // Only 'error' should survive — 'critical' and 'debug' are not in ALL_LEVELS
       expect(lastCall.levels).toEqual(['error']);
     });
@@ -306,7 +295,7 @@ describe('AdminLogs Durable Object', () => {
       // Create with small buffer
       const smallBufferLogs = new AdminLogs(
         mockCtx as any,
-        createMockEnv({ OBSERVABILITY_STREAM_BUFFER_SIZE: '5' }) as any
+        createMockEnv({ OBSERVABILITY_STREAM_BUFFER_SIZE: '5' }) as any,
       );
 
       // Ingest more entries than buffer size
@@ -339,7 +328,7 @@ describe('AdminLogs Durable Object', () => {
     it('should use default buffer size when env var is not set', () => {
       const defaultLogs = new AdminLogs(
         mockCtx as any,
-        createMockEnv({ OBSERVABILITY_STREAM_BUFFER_SIZE: '' }) as any
+        createMockEnv({ OBSERVABILITY_STREAM_BUFFER_SIZE: '' }) as any,
       );
       // Should not throw — uses default of 1000
       expect(defaultLogs).toBeDefined();
@@ -353,19 +342,17 @@ describe('AdminLogs Durable Object', () => {
       ws.serializeAttachment({ levels: ['error', 'warn', 'info'], search: '', paused: false });
       mockCtx._websockets.push(ws);
 
-      const logs = [
-        {
-          type: 'log' as const,
-          entry: {
-            timestamp: '2026-02-14T12:00:00Z',
-            level: 'info',
-            event: 'test',
-            message: 'Hello',
-            details: {},
-            scriptName: 'test',
-          },
+      const logs = [{
+        type: 'log' as const,
+        entry: {
+          timestamp: '2026-02-14T12:00:00Z',
+          level: 'info',
+          event: 'test',
+          message: 'Hello',
+          details: {},
+          scriptName: 'test',
         },
-      ];
+      }];
 
       const request = new Request('https://internal/ingest', {
         method: 'POST',
@@ -383,19 +370,17 @@ describe('AdminLogs Durable Object', () => {
       ws.serializeAttachment({ levels: ['error', 'warn', 'info'], search: '', paused: true });
       mockCtx._websockets.push(ws);
 
-      const logs = [
-        {
-          type: 'log' as const,
-          entry: {
-            timestamp: '2026-02-14T12:00:00Z',
-            level: 'info',
-            event: 'test',
-            message: 'Hello',
-            details: {},
-            scriptName: 'test',
-          },
+      const logs = [{
+        type: 'log' as const,
+        entry: {
+          timestamp: '2026-02-14T12:00:00Z',
+          level: 'info',
+          event: 'test',
+          message: 'Hello',
+          details: {},
+          scriptName: 'test',
         },
-      ];
+      }];
 
       const request = new Request('https://internal/ingest', {
         method: 'POST',
@@ -455,11 +440,7 @@ describe('AdminLogs Durable Object', () => {
 
     it('should filter logs by client search term', async () => {
       const ws = createMockWebSocket();
-      ws.serializeAttachment({
-        levels: ['error', 'warn', 'info'],
-        search: 'timeout',
-        paused: false,
-      });
+      ws.serializeAttachment({ levels: ['error', 'warn', 'info'], search: 'timeout', paused: false });
       mockCtx._websockets.push(ws);
 
       const logs = [
@@ -503,25 +484,21 @@ describe('AdminLogs Durable Object', () => {
 
     it('should gracefully handle send failures', async () => {
       const ws = createMockWebSocket();
-      ws.send.mockImplementation(() => {
-        throw new Error('Socket closed');
-      });
+      ws.send.mockImplementation(() => { throw new Error('Socket closed'); });
       ws.serializeAttachment({ levels: ['error', 'warn', 'info'], search: '', paused: false });
       mockCtx._websockets.push(ws);
 
-      const logs = [
-        {
-          type: 'log' as const,
-          entry: {
-            timestamp: '2026-02-14T12:00:00Z',
-            level: 'info',
-            event: 'test',
-            message: 'Hello',
-            details: {},
-            scriptName: 'test',
-          },
+      const logs = [{
+        type: 'log' as const,
+        entry: {
+          timestamp: '2026-02-14T12:00:00Z',
+          level: 'info',
+          event: 'test',
+          message: 'Hello',
+          details: {},
+          scriptName: 'test',
         },
-      ];
+      }];
 
       const request = new Request('https://internal/ingest', {
         method: 'POST',

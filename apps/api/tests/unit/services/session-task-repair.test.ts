@@ -233,14 +233,7 @@ describe('ensureSessionTaskBacked linking an existing task (real SQLite)', () =>
   it("links the session's task when no task owns the chat-session link yet", async () => {
     const { db, insertTask, linkOf } = createTasksDb();
     insertTask.run('task-recovery', 'project-1', 'user-1', 'Recovery', 'in_progress', null);
-    insertTask.run(
-      'task-unrelated',
-      'project-1',
-      'user-1',
-      'Other chat',
-      'in_progress',
-      'session-2'
-    );
+    insertTask.run('task-unrelated', 'project-1', 'user-1', 'Other chat', 'in_progress', 'session-2');
 
     const result = await ensureSessionTaskBacked(db as never, env, {
       projectId: 'project-1',

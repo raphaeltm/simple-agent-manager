@@ -36,7 +36,9 @@ const nodes = {
 };
 
 type Condition =
-  { op: 'eq'; col: unknown; val: unknown } | { op: 'and'; conds: Condition[] } | undefined;
+  | { op: 'eq'; col: unknown; val: unknown }
+  | { op: 'and'; conds: Condition[] }
+  | undefined;
 
 interface ProjectRow {
   id: string;

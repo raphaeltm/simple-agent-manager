@@ -59,48 +59,48 @@ describe('generatePresignedUploadUrl', () => {
 
   it('rejects unsafe filenames', async () => {
     await expect(
-      generatePresignedUploadUrl(makePresignEnv(), { ...validOptions, filename: '../etc/passwd' })
+      generatePresignedUploadUrl(makePresignEnv(), { ...validOptions, filename: '../etc/passwd' }),
     ).rejects.toThrow('Unsafe filename');
   });
 
   it('rejects zero size', async () => {
     await expect(
-      generatePresignedUploadUrl(makePresignEnv(), { ...validOptions, size: 0 })
+      generatePresignedUploadUrl(makePresignEnv(), { ...validOptions, size: 0 }),
     ).rejects.toThrow('File size must be positive');
   });
 
   it('rejects negative size', async () => {
     await expect(
-      generatePresignedUploadUrl(makePresignEnv(), { ...validOptions, size: -1 })
+      generatePresignedUploadUrl(makePresignEnv(), { ...validOptions, size: -1 }),
     ).rejects.toThrow('File size must be positive');
   });
 
   it('rejects when file exceeds max bytes', async () => {
     const env = makePresignEnv({ ATTACHMENT_UPLOAD_MAX_BYTES: '500' });
-    await expect(generatePresignedUploadUrl(env, { ...validOptions, size: 1000 })).rejects.toThrow(
-      'exceeds maximum'
-    );
+    await expect(
+      generatePresignedUploadUrl(env, { ...validOptions, size: 1000 }),
+    ).rejects.toThrow('exceeds maximum');
   });
 
   it('rejects when R2_BUCKET_NAME is missing', async () => {
     const env = makePresignEnv({ R2_BUCKET_NAME: undefined });
-    await expect(generatePresignedUploadUrl(env, validOptions)).rejects.toThrow(
-      'R2_BUCKET_NAME not configured'
-    );
+    await expect(
+      generatePresignedUploadUrl(env, validOptions),
+    ).rejects.toThrow('R2_BUCKET_NAME not configured');
   });
 
   it('rejects when R2 S3 credentials are missing', async () => {
     const env = makePresignEnv({ R2_ACCESS_KEY_ID: undefined });
-    await expect(generatePresignedUploadUrl(env, validOptions)).rejects.toThrow(
-      'R2 S3 credentials not configured'
-    );
+    await expect(
+      generatePresignedUploadUrl(env, validOptions),
+    ).rejects.toThrow('R2 S3 credentials not configured');
   });
 
   it('rejects when CF_ACCOUNT_ID is missing', async () => {
     const env = makePresignEnv({ CF_ACCOUNT_ID: undefined });
-    await expect(generatePresignedUploadUrl(env, validOptions)).rejects.toThrow(
-      'R2 S3 credentials not configured'
-    );
+    await expect(
+      generatePresignedUploadUrl(env, validOptions),
+    ).rejects.toThrow('R2 S3 credentials not configured');
   });
 
   it('uses configurable presign expiry from env', async () => {
@@ -187,7 +187,7 @@ describe('validateAttachments', () => {
 
   it('uses default max files when env not set', async () => {
     const manyAttachments = Array.from({ length: ATTACHMENT_DEFAULTS.MAX_FILES + 1 }, (_, i) =>
-      makeAttachment({ uploadId: `up-${i}`, size: 100 })
+      makeAttachment({ uploadId: `up-${i}`, size: 100 }),
     );
     const result = await validateAttachments(makeEnv(), 'user-1', manyAttachments);
     expect(result.valid).toBe(false);
@@ -283,7 +283,9 @@ describe('cleanupAttachments', () => {
   it('does not throw when delete fails (best-effort)', async () => {
     const r2 = makeMockR2Bucket();
     (r2.delete as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('R2 error'));
-    await expect(cleanupAttachments(r2, 'user-1', [makeAttachment()])).resolves.not.toThrow();
+    await expect(
+      cleanupAttachments(r2, 'user-1', [makeAttachment()]),
+    ).resolves.not.toThrow();
   });
 
   it('continues cleaning up remaining files when one fails', async () => {
@@ -320,9 +322,9 @@ describe('getAttachmentFromR2', () => {
 
   it('throws when attachment not found in R2', async () => {
     const r2 = makeMockR2Bucket({});
-    await expect(getAttachmentFromR2(r2, 'user-1', makeAttachment())).rejects.toThrow(
-      'Attachment not found in R2'
-    );
+    await expect(
+      getAttachmentFromR2(r2, 'user-1', makeAttachment()),
+    ).rejects.toThrow('Attachment not found in R2');
   });
 
   it('falls back to attachment contentType when R2 httpMetadata is missing', async () => {
@@ -338,7 +340,7 @@ describe('getAttachmentFromR2', () => {
     const result = await getAttachmentFromR2(
       r2,
       'user-1',
-      makeAttachment({ contentType: 'text/csv' })
+      makeAttachment({ contentType: 'text/csv' }),
     );
     expect(result.contentType).toBe('text/csv');
   });

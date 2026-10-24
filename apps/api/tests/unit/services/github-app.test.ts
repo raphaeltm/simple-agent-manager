@@ -254,12 +254,16 @@ describe('getUserInstallationRepositories', () => {
   });
 
   it('checks a fresh hinted page with the current token and stops at the match', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      Response.json({
-        total_count: 900,
-        repositories: [{ id: 4, full_name: 'Acme/Target', private: true, default_branch: 'main' }],
-      })
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({
+          total_count: 900,
+          repositories: [
+            { id: 4, full_name: 'Acme/Target', private: true, default_branch: 'main' },
+          ],
+        })
+      );
     vi.stubGlobal('fetch', fetchMock);
     const onFound = vi.fn();
     await expect(

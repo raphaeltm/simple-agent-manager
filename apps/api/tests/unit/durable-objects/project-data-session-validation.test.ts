@@ -81,9 +81,7 @@ function createMockWebSocket(tags: string[] = []): MockWebSocket {
 
 function createMockCtx(queryHandler: QueryHandler) {
   const sockets: MockWebSocket[] = [];
-  const sqlExec = vi.fn((query: string, ...args: unknown[]) =>
-    sqlResult(queryHandler(query, args))
-  );
+  const sqlExec = vi.fn((query: string, ...args: unknown[]) => sqlResult(queryHandler(query, args)));
 
   return {
     storage: {
@@ -114,15 +112,7 @@ function createProjectData(queryHandler: QueryHandler) {
 }
 
 function parseSent(socket: MockWebSocket) {
-  return socket.sent.map(
-    (message) =>
-      JSON.parse(message) as {
-        type: string;
-        message?: string;
-        messageId?: string;
-        sessionId?: string;
-      }
-  );
+  return socket.sent.map((message) => JSON.parse(message) as { type: string; message?: string; messageId?: string; sessionId?: string });
 }
 
 async function expectMessageSendRejected(input: {
@@ -138,13 +128,13 @@ async function expectMessageSendRejected(input: {
 
   expect(ctx.sqlExec).not.toHaveBeenCalledWith(
     expect.stringContaining('INSERT INTO chat_messages'),
-    expect.anything()
+    expect.anything(),
   );
   expect(parseSent(socket)).toContainEqual(
     expect.objectContaining({
       type: 'error',
       message: expect.stringContaining(input.error),
-    })
+    }),
   );
 }
 
@@ -173,12 +163,8 @@ describe('ProjectData DO session validation behavior', () => {
     });
     ctx.sqlExec.mockClear();
     const runtimeGuard = {
-      projectId: 'project-1',
-      userId: 'user-1',
-      workspaceId: 'workspace-1',
-      nodeId: 'node-1',
-      evictionGeneration: null,
-      claimId: 'claim-1',
+      projectId: 'project-1', userId: 'user-1', workspaceId: 'workspace-1',
+      nodeId: 'node-1', evictionGeneration: null, claimId: 'claim-1',
     };
 
     await expect(projectData.sleepSession('session-1', { runtimeGuard })).rejects.toBe(lookupError);
@@ -196,52 +182,34 @@ describe('ProjectData DO session validation behavior', () => {
     {
       name: 'an active session the socket is tagged for',
       socketTags: ['session:session-a'],
-      payload: {
-        type: 'message.send' as const,
-        sessionId: 'session-a',
-        role: 'user',
-        content: 'hello',
-      },
+      payload: { type: 'message.send' as const, sessionId: 'session-a', role: 'user', content: 'hello' },
     },
     {
       name: 'a different session than the socket tag',
       socketTags: ['session:session-a'],
-      payload: {
-        type: 'message.send' as const,
-        sessionId: 'session-b',
-        role: 'user',
-        content: 'hello',
-      },
+      payload: { type: 'message.send' as const, sessionId: 'session-b', role: 'user', content: 'hello' },
     },
     {
       name: 'an assistant-role message',
       socketTags: ['session:session-a'],
-      payload: {
-        type: 'message.send' as const,
-        sessionId: 'session-a',
-        role: 'assistant',
-        content: 'hello',
-      },
+      payload: { type: 'message.send' as const, sessionId: 'session-a', role: 'assistant', content: 'hello' },
     },
-  ])(
-    'never persists a WebSocket message.send for $name (gap G1)',
-    async ({ socketTags, payload }) => {
-      // Any connected project member used to be able to write a user message into any active
-      // session over the browser socket, unauthenticated as to who they were. Prompts now come
-      // only from authorized REST delivery, so the socket refuses every write.
-      await expectMessageSendRejected({
-        socketTags,
-        payload,
-        queryHandler: (query: string) => {
-          if (query.includes('SELECT id, status FROM chat_sessions')) {
-            return [{ id: 'session-a', status: 'active' }];
-          }
-          return [];
-        },
-        error: 'not supported',
-      });
-    }
-  );
+  ])('never persists a WebSocket message.send for $name (gap G1)', async ({ socketTags, payload }) => {
+    // Any connected project member used to be able to write a user message into any active
+    // session over the browser socket, unauthenticated as to who they were. Prompts now come
+    // only from authorized REST delivery, so the socket refuses every write.
+    await expectMessageSendRejected({
+      socketTags,
+      payload,
+      queryHandler: (query: string) => {
+        if (query.includes('SELECT id, status FROM chat_sessions')) {
+          return [{ id: 'session-a', status: 'active' }];
+        }
+        return [];
+      },
+      error: 'not supported',
+    });
+  });
 
   it('still answers pings on a socket that tried to write (liveness control)', async () => {
     const { projectData } = createProjectData(() => []);
@@ -275,7 +243,7 @@ describe('ProjectData DO session validation behavior', () => {
           toolMetadata: null,
           timestamp: new Date(0).toISOString(),
         },
-      ])
+      ]),
     ).rejects.toThrow('Session session-a is stopped and cannot accept messages');
   });
 });

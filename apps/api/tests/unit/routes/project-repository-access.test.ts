@@ -29,12 +29,17 @@ describe('isValidRepositoryFormat', () => {
     }
   );
 
-  it.each(['no-slash', 'too/many/segments', 'owner/', '/repo', 'owner repo', 'owner /repo', ''])(
-    'rejects malformed repository: %s',
-    (value) => {
-      expect(isValidRepositoryFormat(value)).toBe(false);
-    }
-  );
+  it.each([
+    'no-slash',
+    'too/many/segments',
+    'owner/',
+    '/repo',
+    'owner repo',
+    'owner /repo',
+    '',
+  ])('rejects malformed repository: %s', (value) => {
+    expect(isValidRepositoryFormat(value)).toBe(false);
+  });
 });
 
 describe('assertRepositoryAccess', () => {
@@ -54,13 +59,7 @@ describe('assertRepositoryAccess', () => {
 
   it('authorizes repositories visible to the authenticated GitHub user for the installation', async () => {
     mocks.getUserInstallationRepositories.mockResolvedValue([
-      {
-        id: 1,
-        nodeId: 'MDEwOlJlcG8x',
-        fullName: 'acme/private-repo',
-        private: true,
-        defaultBranch: 'main',
-      },
+      { id: 1, nodeId: 'MDEwOlJlcG8x', fullName: 'acme/private-repo', private: true, defaultBranch: 'main' },
     ]);
 
     await expect(
@@ -81,8 +80,7 @@ describe('assertRepositoryAccess', () => {
         userId: 'user-1',
         installationId: '120081765',
         repository: 'acme/private-repo',
-      },
-      expect.objectContaining({ repository: 'acme/private-repo' })
+      }, expect.objectContaining({ repository: 'acme/private-repo' })
     );
   });
 
@@ -101,93 +99,51 @@ describe('assertRepositoryAccess', () => {
       { id: 1, nodeId: null, fullName: 'acme/repo', private: false, defaultBranch: 'main' },
     ]);
 
-    await assertRepositoryAccess(
-      'github-user-token',
-      '120081765',
-      'acme/repo',
-      'user-1',
-      'branches'
-    );
+    await assertRepositoryAccess('github-user-token', '120081765', 'acme/repo', 'user-1', 'branches');
 
     expect(getUserInstallationRepositories).toHaveBeenCalledWith(
       'github-user-token',
       '120081765',
-      expect.objectContaining({ flow: 'branches' }),
-      expect.objectContaining({ repository: 'acme/repo' })
+      expect.objectContaining({ flow: 'branches' }), expect.objectContaining({ repository: 'acme/repo' })
     );
   });
 
   it('ignores legacy positive cache and freshly checks the user token', async () => {
     const env = makeEnv({ fullName: 'acme/repo', id: 9 });
     mocks.getUserInstallationRepositories.mockResolvedValue([]);
-    await expect(
-      assertRepositoryAccess('revoked', '123', 'acme/repo', 'u', 'project-access', env as never)
-    ).rejects.toThrow('Repository is not accessible');
-    expect(mocks.getUserInstallationRepositories).toHaveBeenCalledWith(
-      'revoked',
-      '123',
-      expect.anything(),
-      expect.objectContaining({ pageHint: undefined })
-    );
+    await expect(assertRepositoryAccess('revoked', '123', 'acme/repo', 'u', 'project-access', env as never)).rejects.toThrow('Repository is not accessible');
+    expect(mocks.getUserInstallationRepositories).toHaveBeenCalledWith('revoked', '123', expect.anything(), expect.objectContaining({ pageHint: undefined }));
   });
 
   it('uses cache only for a nonauthoritative scoped page hint and writes valid KV TTL', async () => {
     const env = makeEnv({ page: 4 });
-    mocks.getUserInstallationRepositories.mockImplementation(
-      async (_token, _id, _diagnostics, lookup) => {
-        expect(lookup.pageHint).toBe(4);
-        await lookup.onFound(2);
-        return [{ id: 7, fullName: 'acme/repo' }];
-      }
-    );
-    await assertRepositoryAccess(
-      'current',
-      '123',
-      'acme/repo',
-      'u',
-      'project-access',
-      env as never
-    );
+    mocks.getUserInstallationRepositories.mockImplementation(async (_token, _id, _diagnostics, lookup) => {
+      expect(lookup.pageHint).toBe(4);
+      await lookup.onFound(2);
+      return [{ id: 7, fullName: 'acme/repo' }];
+    });
+    await assertRepositoryAccess('current', '123', 'acme/repo', 'u', 'project-access', env as never);
     expect(env.KV.get).toHaveBeenCalledWith('github-repo-page:v2:u:123:acme/repo', 'json');
-    expect(env.KV.put).toHaveBeenCalledWith(
-      'github-repo-page:v2:u:123:acme/repo',
-      JSON.stringify({ page: 2 }),
-      { expirationTtl: 60 }
-    );
+    expect(env.KV.put).toHaveBeenCalledWith('github-repo-page:v2:u:123:acme/repo', JSON.stringify({ page: 2 }), { expirationTtl: 60 });
   });
 
   it('cache read/write failure does not replace fresh authorization', async () => {
     const env = makeEnv();
     env.KV.get.mockRejectedValue(new Error('unavailable'));
     env.KV.put.mockRejectedValue(new Error('unavailable'));
-    mocks.getUserInstallationRepositories.mockImplementation(
-      async (_token, _id, _diagnostics, lookup) => {
-        await lookup.onFound(1);
-        return [{ id: 7, fullName: 'acme/repo' }];
-      }
-    );
-    await expect(
-      assertRepositoryAccess('current', '123', 'acme/repo', 'u', 'project-access', env as never)
-    ).resolves.toMatchObject({ id: 7 });
+    mocks.getUserInstallationRepositories.mockImplementation(async (_token, _id, _diagnostics, lookup) => {
+      await lookup.onFound(1);
+      return [{ id: 7, fullName: 'acme/repo' }];
+    });
+    await expect(assertRepositoryAccess('current', '123', 'acme/repo', 'u', 'project-access', env as never)).resolves.toMatchObject({ id: 7 });
   });
 
   it('does not write hints when TTL is zero', async () => {
-    const env = makeEnv();
-    env.GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS = '0';
-    mocks.getUserInstallationRepositories.mockImplementation(
-      async (_token, _id, _diagnostics, lookup) => {
-        await lookup.onFound(1);
-        return [{ id: 7, fullName: 'acme/repo' }];
-      }
-    );
-    await assertRepositoryAccess(
-      'current',
-      '123',
-      'acme/repo',
-      'u',
-      'project-access',
-      env as never
-    );
+    const env = makeEnv(); env.GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS = '0';
+    mocks.getUserInstallationRepositories.mockImplementation(async (_token, _id, _diagnostics, lookup) => {
+      await lookup.onFound(1); return [{ id: 7, fullName: 'acme/repo' }];
+    });
+    await assertRepositoryAccess('current', '123', 'acme/repo', 'u', 'project-access', env as never);
     expect(env.KV.put).not.toHaveBeenCalled();
   });
 

@@ -691,8 +691,7 @@ describe('delivery-aware attention expiry', () => {
 
       expect(taskRow()).toMatchObject({
         status: 'failed',
-        error_message:
-          'SAM check-in expired after the workspace lost its node; agent progress is unknown',
+        error_message: 'SAM check-in expired after the workspace lost its node; agent progress is unknown',
       });
       expect(failSession).not.toHaveBeenCalled();
       expect(cleanupTaskRun).not.toHaveBeenCalled();
@@ -732,8 +731,7 @@ describe('delivery-aware attention expiry', () => {
 
       expect(taskRow()).toMatchObject({
         status: 'failed',
-        error_message:
-          'No agent response to SAM check-in by deadline; node heartbeat remained healthy',
+        error_message: 'No agent response to SAM check-in by deadline; node heartbeat remained healthy',
       });
       expect(snapshotRow()).toMatchObject({
         status: 'pending',
@@ -791,8 +789,7 @@ describe('delivery-aware attention expiry', () => {
 
         expect(taskRow()).toMatchObject({
           status: 'failed',
-          error_message:
-            'No agent response to SAM check-in by deadline; node heartbeat remained healthy',
+          error_message: 'No agent response to SAM check-in by deadline; node heartbeat remained healthy',
         });
         expect(snapshotRow()).toBeUndefined();
         expect(persistMessage).toHaveBeenCalledWith(

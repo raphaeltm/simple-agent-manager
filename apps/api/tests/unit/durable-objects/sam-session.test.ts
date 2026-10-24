@@ -38,11 +38,7 @@ import {
 } from '../../../src/durable-objects/sam-session/index';
 import { executeTool } from '../../../src/durable-objects/sam-session/tools';
 import { searchConversationHistory } from '../../../src/durable-objects/sam-session/tools/search-conversation-history';
-import type {
-  CollectedToolCall,
-  MessageRow,
-  ToolContext,
-} from '../../../src/durable-objects/sam-session/types';
+import type { CollectedToolCall, MessageRow, ToolContext } from '../../../src/durable-objects/sam-session/types';
 import {
   DEFAULT_SEARCH_QUERY_MAX_LENGTH,
   DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
@@ -455,13 +451,9 @@ describe('search_conversation_history tool', () => {
    ═══════════════════════════════════════════════════════════════ */
 
 /** Build a synthetic Anthropic SSE stream from events. */
-function buildAnthropicSseStream(
-  events: Array<Record<string, unknown>>
-): ReadableStream<Uint8Array> {
+function buildAnthropicSseStream(events: Array<Record<string, unknown>>): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  const lines = events.map(
-    (e) => `event: ${(e.type as string) || 'message'}\ndata: ${JSON.stringify(e)}\n\n`
-  );
+  const lines = events.map((e) => `event: ${(e.type as string) || 'message'}\ndata: ${JSON.stringify(e)}\n\n`);
   const body = lines.join('');
   return new ReadableStream({
     start(controller) {
@@ -503,10 +495,7 @@ function createCollectingWriter(): {
       let done = false;
       while (!done) {
         const result = await reader.read();
-        if (result.done) {
-          done = true;
-          break;
-        }
+        if (result.done) { done = true; break; }
         buffer += decoder.decode(result.value, { stream: true });
         const parts = buffer.split('\n\n');
         buffer = parts.pop() || '';
@@ -514,14 +503,10 @@ function createCollectingWriter(): {
           if (!part.startsWith('data: ')) continue;
           try {
             events.push(JSON.parse(part.slice(6)) as Record<string, unknown>);
-          } catch {
-            /* ignore */
-          }
+          } catch { /* ignore */ }
         }
       }
-    } catch {
-      /* stream may close */
-    }
+    } catch { /* stream may close */ }
   })();
 
   return { writer, events };
@@ -537,11 +522,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
       { type: 'message_start', message: { id: 'msg_1', role: 'assistant' } },
       { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
       { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello!' } },
-      {
-        type: 'content_block_delta',
-        index: 0,
-        delta: { type: 'text_delta', text: ' How can I help?' },
-      },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: ' How can I help?' } },
       { type: 'content_block_stop', index: 0 },
       { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
       { type: 'message_stop' },
@@ -575,7 +556,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
       writer,
       (_convId, role, content) => {
         persisted.push({ role, content });
-      }
+      },
     );
     await writer.close();
     await new Promise((r) => setTimeout(r, 50));
@@ -596,16 +577,8 @@ describe('Agent Loop — Anthropic Streaming', () => {
   it('emits tool_start, tool_result events for tool use response', async () => {
     const firstCallEvents = [
       { type: 'message_start', message: { id: 'msg_2', role: 'assistant' } },
-      {
-        type: 'content_block_start',
-        index: 0,
-        content_block: { type: 'tool_use', id: 'toolu_1', name: 'list_projects' },
-      },
-      {
-        type: 'content_block_delta',
-        index: 0,
-        delta: { type: 'input_json_delta', partial_json: '{}' },
-      },
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_1', name: 'list_projects' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } },
       { type: 'content_block_stop', index: 0 },
       { type: 'message_delta', delta: { stop_reason: 'tool_use' } },
       { type: 'message_stop' },
@@ -614,11 +587,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
     const secondCallEvents = [
       { type: 'message_start', message: { id: 'msg_3', role: 'assistant' } },
       { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
-      {
-        type: 'content_block_delta',
-        index: 0,
-        delta: { type: 'text_delta', text: 'You have projects.' },
-      },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'You have projects.' } },
       { type: 'content_block_stop', index: 0 },
       { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
       { type: 'message_stop' },
@@ -660,7 +629,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
       writer,
       (_convId, role, content) => {
         persisted.push({ role, content });
-      }
+      },
     );
     await writer.close();
     await new Promise((r) => setTimeout(r, 50));
@@ -702,30 +671,29 @@ describe('Agent Loop — Anthropic Streaming', () => {
       KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
-    await runAgentLoop('conv-3', [], 'Hello', config, mockEnv, 'user-1', writer, () => {
-      /* no-op */
-    });
+    await runAgentLoop(
+      'conv-3',
+      [],
+      'Hello',
+      config,
+      mockEnv,
+      'user-1',
+      writer,
+      () => { /* no-op */ },
+    );
     await writer.close();
     await new Promise((r) => setTimeout(r, 50));
 
     const errors = events.filter((e) => e.type === 'error');
     expect(errors.length).toBe(1);
-    expect(errors[0]!.message as string).toContain('401');
+    expect((errors[0]!.message as string)).toContain('401');
   });
 
   it('respects maxTurns limit', async () => {
     const toolUseEvents = [
       { type: 'message_start', message: { id: 'msg_loop', role: 'assistant' } },
-      {
-        type: 'content_block_start',
-        index: 0,
-        content_block: { type: 'tool_use', id: 'toolu_loop', name: 'list_projects' },
-      },
-      {
-        type: 'content_block_delta',
-        index: 0,
-        delta: { type: 'input_json_delta', partial_json: '{}' },
-      },
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_loop', name: 'list_projects' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } },
       { type: 'content_block_stop', index: 0 },
       { type: 'message_delta', delta: { stop_reason: 'tool_use' } },
       { type: 'message_stop' },
@@ -751,15 +719,22 @@ describe('Agent Loop — Anthropic Streaming', () => {
       KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
-    await runAgentLoop('conv-4', [], 'Loop forever', config, mockEnv, 'user-1', writer, () => {
-      /* no-op */
-    });
+    await runAgentLoop(
+      'conv-4',
+      [],
+      'Loop forever',
+      config,
+      mockEnv,
+      'user-1',
+      writer,
+      () => { /* no-op */ },
+    );
     await writer.close();
     await new Promise((r) => setTimeout(r, 50));
 
     const errors = events.filter((e) => e.type === 'error');
     expect(errors.length).toBe(1);
-    expect(errors[0]!.message as string).toContain('Maximum tool iterations');
+    expect((errors[0]!.message as string)).toContain('Maximum tool iterations');
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
@@ -767,35 +742,19 @@ describe('Agent Loop — Anthropic Streaming', () => {
   it('converts history rows to message format', async () => {
     const history: MessageRow[] = [
       {
-        id: 'h1',
-        conversation_id: 'c1',
-        role: 'user',
-        content: 'Previous question',
-        tool_calls_json: null,
-        tool_call_id: null,
-        created_at: '',
-        sequence: 1,
+        id: 'h1', conversation_id: 'c1', role: 'user', content: 'Previous question',
+        tool_calls_json: null, tool_call_id: null, created_at: '', sequence: 1,
       },
       {
-        id: 'h2',
-        conversation_id: 'c1',
-        role: 'assistant',
-        content: 'Previous answer',
-        tool_calls_json: null,
-        tool_call_id: null,
-        created_at: '',
-        sequence: 2,
+        id: 'h2', conversation_id: 'c1', role: 'assistant', content: 'Previous answer',
+        tool_calls_json: null, tool_call_id: null, created_at: '', sequence: 2,
       },
     ];
 
     const anthropicEvents = [
       { type: 'message_start', message: { id: 'msg_hist', role: 'assistant' } },
       { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
-      {
-        type: 'content_block_delta',
-        index: 0,
-        delta: { type: 'text_delta', text: 'Response with context' },
-      },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Response with context' } },
       { type: 'content_block_stop', index: 0 },
       { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
       { type: 'message_stop' },
@@ -818,16 +777,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
       KV: makeBudgetKv(),
     } as unknown as Parameters<typeof runAgentLoop>[4];
 
-    await runAgentLoop(
-      'conv-hist',
-      history,
-      'New question',
-      config,
-      mockEnv,
-      'user-1',
-      writer,
-      () => {}
-    );
+    await runAgentLoop('conv-hist', history, 'New question', config, mockEnv, 'user-1', writer, () => {});
     await writer.close();
 
     // Verify the fetch body includes history + new message (Anthropic format)
@@ -888,7 +838,7 @@ describe('Agent Loop — OpenAI (Workers AI) Streaming', () => {
       writer,
       (_convId, role, content) => {
         persisted.push({ role, content });
-      }
+      },
     );
     await writer.close();
     await new Promise((r) => setTimeout(r, 50));
@@ -907,10 +857,7 @@ describe('Agent Loop — OpenAI (Workers AI) Streaming', () => {
 
   it('routes Workers AI requests to the correct gateway URL', async () => {
     const openAIChunks = [
-      {
-        id: 'chatcmpl-1',
-        choices: [{ index: 0, delta: { content: 'Ok' }, finish_reason: 'stop' }],
-      },
+      { id: 'chatcmpl-1', choices: [{ index: 0, delta: { content: 'Ok' }, finish_reason: 'stop' }] },
     ];
 
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
@@ -948,41 +895,14 @@ describe('Agent Loop — OpenAI (Workers AI) Streaming', () => {
   it('handles Workers AI tool calls in OpenAI format', async () => {
     // First call: tool_calls in delta
     const firstCallChunks = [
-      {
-        id: 'chatcmpl-2',
-        choices: [
-          {
-            index: 0,
-            delta: {
-              role: 'assistant',
-              content: null,
-              tool_calls: [
-                {
-                  index: 0,
-                  id: 'call_1',
-                  type: 'function',
-                  function: { name: 'list_projects', arguments: '' },
-                },
-              ],
-            },
-          },
-        ],
-      },
-      {
-        id: 'chatcmpl-2',
-        choices: [
-          { index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{}' } }] } },
-        ],
-      },
+      { id: 'chatcmpl-2', choices: [{ index: 0, delta: { role: 'assistant', content: null, tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'list_projects', arguments: '' } }] } }] },
+      { id: 'chatcmpl-2', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{}' } }] } }] },
       { id: 'chatcmpl-2', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
     ];
 
     // Second call: text response after tool result
     const secondCallChunks = [
-      {
-        id: 'chatcmpl-3',
-        choices: [{ index: 0, delta: { content: 'Found your projects.' }, finish_reason: 'stop' }],
-      },
+      { id: 'chatcmpl-3', choices: [{ index: 0, delta: { content: 'Found your projects.' }, finish_reason: 'stop' }] },
     ];
 
     const fetchMock = vi.spyOn(globalThis, 'fetch');
@@ -1022,7 +942,7 @@ describe('Agent Loop — OpenAI (Workers AI) Streaming', () => {
       writer,
       (_convId, role, content) => {
         persisted.push({ role, content });
-      }
+      },
     );
     await writer.close();
     await new Promise((r) => setTimeout(r, 50));
@@ -1068,13 +988,11 @@ describe('Agent Loop — Fetch Error Handling', () => {
 
     const errors = events.filter((e) => e.type === 'error');
     expect(errors.length).toBe(1);
-    expect(errors[0]!.message as string).toContain('Failed to reach AI service');
+    expect((errors[0]!.message as string)).toContain('Failed to reach AI service');
   });
 
   it('emits timeout error when fetch is aborted', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(
-      new DOMException('The operation was aborted', 'AbortError')
-    );
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new DOMException('The operation was aborted', 'AbortError'));
 
     const { writer, events } = createCollectingWriter();
 
@@ -1093,6 +1011,6 @@ describe('Agent Loop — Fetch Error Handling', () => {
 
     const errors = events.filter((e) => e.type === 'error');
     expect(errors.length).toBe(1);
-    expect(errors[0]!.message as string).toContain('timed out');
+    expect((errors[0]!.message as string)).toContain('timed out');
   });
 });

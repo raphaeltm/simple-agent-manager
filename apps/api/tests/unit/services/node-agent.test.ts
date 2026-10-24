@@ -17,8 +17,12 @@ describe('node-agent readiness helpers', () => {
     expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: '0' })).toBe(900000);
     expect(getNodeAgentReadyTimeoutMs({ NODE_AGENT_READY_TIMEOUT_MS: 'abc' })).toBe(900000);
 
-    expect(getNodeAgentReadyPollIntervalMs({ NODE_AGENT_READY_POLL_INTERVAL_MS: '750' })).toBe(750);
-    expect(getNodeAgentReadyPollIntervalMs({ NODE_AGENT_READY_POLL_INTERVAL_MS: '-1' })).toBe(5000);
+    expect(getNodeAgentReadyPollIntervalMs({ NODE_AGENT_READY_POLL_INTERVAL_MS: '750' })).toBe(
+      750
+    );
+    expect(getNodeAgentReadyPollIntervalMs({ NODE_AGENT_READY_POLL_INTERVAL_MS: '-1' })).toBe(
+      5000
+    );
     expect(getNodeAgentReadyPollIntervalMs({ NODE_AGENT_READY_POLL_INTERVAL_MS: 'oops' })).toBe(
       5000
     );
@@ -61,7 +65,9 @@ describe('node-agent readiness helpers', () => {
   it('throws after timeout when node agent health never becomes reachable', async () => {
     vi.useFakeTimers();
 
-    const fetchMock = vi.fn().mockResolvedValue(new Response('error code: 1014', { status: 403 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('error code: 1014', { status: 403 }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 
     const waitPromise = waitForNodeAgentReady('NODE_TIMEOUT', {

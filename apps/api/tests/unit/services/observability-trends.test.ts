@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 // Use vi.hoisted() so mock functions are available when vi.mock factories run
 //
@@ -140,7 +140,7 @@ describe('getErrorTrends()', () => {
     const mockRows = [
       { source: 'client', timestamp: oneHourAgo + fiveMinMs * 2 + 1000 }, // bucket 2
       { source: 'client', timestamp: oneHourAgo + fiveMinMs * 2 + 2000 }, // bucket 2
-      { source: 'api', timestamp: oneHourAgo + fiveMinMs * 5 + 1000 }, // bucket 5
+      { source: 'api', timestamp: oneHourAgo + fiveMinMs * 5 + 1000 },    // bucket 5
     ];
 
     // Configure mock to return our test rows via thenable

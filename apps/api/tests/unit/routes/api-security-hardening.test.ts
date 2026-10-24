@@ -25,7 +25,10 @@ describe('Global error handler — error message leakage', () => {
         return c.json(err.toJSON(), err.statusCode as any);
       }
       // This mirrors the production handler — generic message, no err.message
-      return c.json({ error: 'INTERNAL_ERROR', message: 'Internal server error' }, 500);
+      return c.json(
+        { error: 'INTERNAL_ERROR', message: 'Internal server error' },
+        500
+      );
     });
 
     return app;
@@ -38,7 +41,7 @@ describe('Global error handler — error message leakage', () => {
     });
 
     const res = await app.request('/boom');
-    const body = (await res.json()) as any;
+    const body = await res.json() as any;
 
     expect(res.status).toBe(500);
     expect(body.message).toBe('Internal server error');
@@ -52,7 +55,7 @@ describe('Global error handler — error message leakage', () => {
     });
 
     const res = await app.request('/boom');
-    const body = (await res.json()) as any;
+    const body = await res.json() as any;
 
     expect(res.status).toBe(500);
     expect(body.message).toBe('Internal server error');
@@ -66,7 +69,7 @@ describe('Global error handler — error message leakage', () => {
     });
 
     const res = await app.request('/bad');
-    const body = (await res.json()) as any;
+    const body = await res.json() as any;
 
     expect(res.status).toBe(400);
     expect(body.message).toBe('Name is required');

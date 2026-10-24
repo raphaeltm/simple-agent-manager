@@ -39,7 +39,9 @@ describe('trial helpers — env-var resolvers', () => {
   });
 
   it('resolveMonthlyCap: empty string → DEFAULT', () => {
-    expect(resolveMonthlyCap(envWith({ TRIAL_MONTHLY_CAP: '' }))).toBe(DEFAULT_TRIAL_MONTHLY_CAP);
+    expect(resolveMonthlyCap(envWith({ TRIAL_MONTHLY_CAP: '' }))).toBe(
+      DEFAULT_TRIAL_MONTHLY_CAP
+    );
   });
 
   it('resolveMonthlyCap: valid numeric string → parsed', () => {
@@ -63,7 +65,9 @@ describe('trial helpers — env-var resolvers', () => {
   });
 
   it('resolveWorkspaceTtlMs: positive override is used', () => {
-    expect(resolveWorkspaceTtlMs(envWith({ TRIAL_WORKSPACE_TTL_MS: '60000' }))).toBe(60000);
+    expect(
+      resolveWorkspaceTtlMs(envWith({ TRIAL_WORKSPACE_TTL_MS: '60000' }))
+    ).toBe(60000);
   });
 
   it('resolveRepoMaxKb: DEFAULT when missing', () => {
@@ -75,28 +79,36 @@ describe('trial helpers — env-var resolvers', () => {
   });
 
   it('resolveGithubTimeoutMs: DEFAULT when missing', () => {
-    expect(resolveGithubTimeoutMs(envWith())).toBe(DEFAULT_TRIAL_GITHUB_TIMEOUT_MS);
+    expect(resolveGithubTimeoutMs(envWith())).toBe(
+      DEFAULT_TRIAL_GITHUB_TIMEOUT_MS
+    );
   });
 
   it('resolveCounterKeepMonths: floors fractional overrides', () => {
-    expect(resolveCounterKeepMonths(envWith({ TRIAL_COUNTER_KEEP_MONTHS: '3.9' }))).toBe(3);
+    expect(
+      resolveCounterKeepMonths(envWith({ TRIAL_COUNTER_KEEP_MONTHS: '3.9' }))
+    ).toBe(3);
   });
 
   it('resolveCounterKeepMonths: DEFAULT when missing', () => {
-    expect(resolveCounterKeepMonths(envWith())).toBe(DEFAULT_TRIAL_COUNTER_KEEP_MONTHS);
+    expect(resolveCounterKeepMonths(envWith())).toBe(
+      DEFAULT_TRIAL_COUNTER_KEEP_MONTHS
+    );
   });
 
   it('resolveWaitlistPurgeDays: DEFAULT when missing', () => {
-    expect(resolveWaitlistPurgeDays(envWith())).toBe(DEFAULT_TRIAL_WAITLIST_PURGE_DAYS);
+    expect(resolveWaitlistPurgeDays(envWith())).toBe(
+      DEFAULT_TRIAL_WAITLIST_PURGE_DAYS
+    );
   });
 
   it('resolveWaitlistPurgeDays: negative or zero → DEFAULT', () => {
-    expect(resolveWaitlistPurgeDays(envWith({ TRIAL_WAITLIST_PURGE_DAYS: '0' }))).toBe(
-      DEFAULT_TRIAL_WAITLIST_PURGE_DAYS
-    );
-    expect(resolveWaitlistPurgeDays(envWith({ TRIAL_WAITLIST_PURGE_DAYS: '-1' }))).toBe(
-      DEFAULT_TRIAL_WAITLIST_PURGE_DAYS
-    );
+    expect(
+      resolveWaitlistPurgeDays(envWith({ TRIAL_WAITLIST_PURGE_DAYS: '0' }))
+    ).toBe(DEFAULT_TRIAL_WAITLIST_PURGE_DAYS);
+    expect(
+      resolveWaitlistPurgeDays(envWith({ TRIAL_WAITLIST_PURGE_DAYS: '-1' }))
+    ).toBe(DEFAULT_TRIAL_WAITLIST_PURGE_DAYS);
   });
 });
 
@@ -193,7 +205,9 @@ describe('trial helpers — parseGithubRepoUrl', () => {
   });
 
   it('rejects paths deeper than owner/repo', () => {
-    expect(parseGithubRepoUrl('https://github.com/owner/repo/tree/main')).toBeNull();
+    expect(
+      parseGithubRepoUrl('https://github.com/owner/repo/tree/main')
+    ).toBeNull();
   });
 
   it('rejects empty strings', () => {

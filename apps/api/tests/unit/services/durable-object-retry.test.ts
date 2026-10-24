@@ -194,6 +194,7 @@ describe('CPU-limit reset and lost-connection classification', () => {
   });
 });
 
+
 describe('SQLite memory exhaustion', () => {
   it('classifies NOMEM separately and permits only explicitly idempotent retries', () => {
     for (const message of ['out of memory: SQLITE_NOMEM', 'Durable Object reset: SQLITE_NOMEM']) {
