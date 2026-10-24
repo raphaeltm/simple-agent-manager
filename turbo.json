@@ -1,5 +1,8 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  // turbo 2.11.7 injects a managed block into AGENTS.md whenever it detects an agent.
+  // SAM owns that file by hand, so the injection only ever arrives as accidental diff noise.
+  "agentGuidance": false,
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
