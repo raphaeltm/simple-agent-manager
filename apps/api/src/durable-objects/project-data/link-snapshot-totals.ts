@@ -1,4 +1,4 @@
-import { STRONG_LINK_RELATIONS, type LinkKind } from '@simple-agent-manager/shared';
+import { type LinkKind, STRONG_LINK_RELATIONS } from '@simple-agent-manager/shared';
 
 const STRONG_SQL = `(${STRONG_LINK_RELATIONS.map((relation) => "'" + relation + "'").join(',')})`;
 
