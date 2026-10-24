@@ -603,7 +603,11 @@ export const CONFIG: Record<string, unknown> = {
       variable('PUBLIC_URL', 'https://shop.northwind.dev'),
       variable('API_URL', 'https://api.northwind.dev'),
       variable('LOG_LEVEL', 'info'),
-      variable('ASSETS_BASE_URL', 'https://cdn.northwind.dev/storefront/releases/2026-10-23/assets-4f2a9c1e7b'),
+      // A long unbroken value, for the settings rows' wrapping.
+      variable(
+        'ASSETS_BASE_URL',
+        'https://cdn.northwind.dev/storefront/releases/2026-10-23/assets-4f2a9c1e7b'
+      ),
       variable('DATABASE_URL', null, true),
       variable('STRIPE_SECRET_KEY', null, true),
       variable('SESSION_SECRET', null, true),
