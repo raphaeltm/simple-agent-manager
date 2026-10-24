@@ -24,10 +24,11 @@ export function SessionWorkingOnChip({
   return (
     <Link
       to={`/projects/${projectId}/ideas/${idea.ideaId}`}
-      // `max-w` + `truncate`, not `shrink-0`: a 200-character idea title must give way to the
-      // chips beside it instead of pushing the row past the viewport. The full title stays
-      // available as the accessible name and the tooltip.
-      className="inline-flex max-w-[55%] items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium no-underline transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary sm:max-w-[16rem]"
+      // `max-w-full` + `truncate`, not `shrink-0`: a 200-character idea title must give way
+      // instead of pushing the chip row past the viewport. The row wraps, so on a phone the
+      // chip gets a line of its own and may use all of it. The full title stays available as
+      // the accessible name and the tooltip.
+      className="inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium no-underline transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary sm:max-w-[22rem]"
       style={{
         color: 'var(--sam-color-accent-primary)',
         borderColor: 'color-mix(in srgb, var(--sam-color-accent-primary) 40%, transparent)',

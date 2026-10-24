@@ -34,11 +34,15 @@ function GroupHeading({
   truncated,
 }: Readonly<{ label: string; count: string; truncated: boolean }>) {
   return (
-    <div className="flex items-baseline justify-between gap-2 px-3 pb-1 pt-3">
+    <div className="flex items-baseline gap-2 px-3 pb-1 pt-3">
+      {/* The count sits beside the label, not at the far right: across a 460px panel the two
+          stopped reading as one fact. */}
       <h3 className="m-0 text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-muted">
         {label}
       </h3>
-      <span className="text-[11px] font-semibold tabular-nums text-fg-muted">{count}</span>
+      <span className="rounded-full bg-surface-hover px-1.5 py-0.5 text-[10px] font-semibold leading-none tabular-nums text-fg-muted">
+        {count}
+      </span>
       {truncated && <span className="sr-only">Showing the most recent only</span>}
     </div>
   );

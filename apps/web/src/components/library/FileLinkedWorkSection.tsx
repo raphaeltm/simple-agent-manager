@@ -34,8 +34,17 @@ import { FOCUS_RING } from './types';
 const CHAT_ACCENT = 'var(--sam-color-info-fg)';
 const IDEA_ACCENT = 'var(--sam-color-accent-primary)';
 
-/** "Uploaded by Fix the login bug" — plus how much more is behind the disclosure. */
-function summaryLine(sessions: readonly LinkedSession[], ideaCount: number): string {
+/**
+ * The collapsed line, split into the part that may truncate and the part that may not.
+ *
+ * On a 375px screen a chat topic fills the whole line, and as one string the "· 2 more chats
+ * · 1 idea" tail — the only hint that expanding is worth it — was the first thing `truncate`
+ * threw away. The tail is rendered as its own `shrink-0` element so the topic gives way instead.
+ */
+function summaryParts(
+  sessions: readonly LinkedSession[],
+  ideaCount: number
+): { head: string; tail: string | null } {
   const provenance = fileProvenance(sessions);
   const head = provenance
     ? `${provenance.verb} ${linkedSessionLabel(provenance.session)}`
@@ -44,7 +53,7 @@ function summaryLine(sessions: readonly LinkedSession[], ideaCount: number): str
   const otherChats = sessions.length - (provenance ? 1 : 0);
   if (otherChats > 0) extras.push(`${otherChats} more ${otherChats === 1 ? 'chat' : 'chats'}`);
   if (ideaCount > 0) extras.push(`${ideaCount} ${ideaCount === 1 ? 'idea' : 'ideas'}`);
-  return extras.length > 0 ? `${head} · ${extras.join(' · ')}` : head;
+  return { head, tail: extras.length > 0 ? extras.join(' · ') : null };
 }
 
 export function FileLinkedWorkSection({
@@ -66,6 +75,7 @@ export function FileLinkedWorkSection({
   if (sessions.length === 0 && ideas.length === 0) return null;
 
   const Chevron = expanded ? ChevronDown : ChevronRight;
+  const { head, tail } = summaryParts(sessions, ideas.length);
 
   return (
     <section
@@ -81,14 +91,23 @@ export function FileLinkedWorkSection({
         data-testid="file-linked-work-toggle"
       >
         <Link2 size={14} aria-hidden="true" className="shrink-0 text-fg-muted" />
-        <span className="min-w-0 flex-1 truncate text-xs text-fg-muted">
-          {summaryLine(sessions, ideas.length)}
-        </span>
+        <span className="min-w-0 flex-1 truncate text-xs text-fg-muted">{head}</span>
+        {tail && <span className="shrink-0 text-xs text-fg-muted">· {tail}</span>}
         <Chevron size={15} aria-hidden="true" className="shrink-0 text-fg-muted" />
       </button>
 
       {expanded && (
-        <div className="max-h-[40vh] overflow-y-auto border-t border-border-default">
+        /* A real scroller with a faded bottom edge, the same affordance the session tool rail
+           uses. A plain `max-h` + `overflow-y-auto` clipped the last group's rows with no
+           visible cue, because the platform hides the scrollbar until you drag. */
+        <div
+          className="max-h-[50vh] overflow-y-auto border-t border-border-default"
+          style={{
+            maskImage: 'linear-gradient(to bottom, black calc(100% - 14px), transparent 100%)',
+            WebkitMaskImage:
+              'linear-gradient(to bottom, black calc(100% - 14px), transparent 100%)',
+          }}
+        >
           {sessions.length > 0 && (
             <div aria-label="Chats">
               <h4 className="m-0 px-4 pb-1 pt-2.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-muted">
