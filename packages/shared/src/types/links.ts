@@ -23,9 +23,19 @@ export type LinkOrigin = 'auto' | 'explicit';
  *
  * `LinkRelation` is the type; this is its runtime enumeration, for the boundaries that have to
  * reject an unrecognised string (the web client's payload normaliser) and for tests that assert
- * a per-relation map is complete. `satisfies` keeps it tied to the union: a member added to the
- * union without being added here is not a compile error, so the exhaustiveness proof is a
- * `Record<LinkRelation, …>` elsewhere plus a test that compares the two.
+ * a per-relation map is complete.
+ *
+ * `satisfies` catches a member here that is NOT in the union, but not a union member missing
+ * from here. Two things close that gap, both verified by mutation rather than assumed:
+ *
+ * 1. `LINK_RELATION_LABELS` (`apps/web/src/components/linked-work/relation-labels.ts`) is a
+ *    `Record<LinkRelation, string>` in a SOURCE file, so `pnpm typecheck` reads it: a member
+ *    added to this union with no phrase fails with TS2741.
+ * 2. `relation-labels.test.ts` compares that map's keys against this array at runtime, which is
+ *    what catches a phrase added with no entry here.
+ *
+ * Point 1 has to live in `src/`: the shared, api and web tsconfigs all `exclude` their `tests`
+ * directory, so a type-level proof written inside a test file is never checked by `tsc`.
  */
 export const LINK_RELATIONS = [
   'created',
