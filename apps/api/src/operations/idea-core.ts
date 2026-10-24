@@ -241,6 +241,9 @@ export async function getIdea(
           maxLength: contentPageLength,
           moreWith: 'get_idea',
         });
+  let content = contentBlock?.text ?? null;
+  if (content !== null && nextContentOffset !== null)
+    content += `\n[continued by SAM: call get_idea with contentOffset=${nextContentOffset} for the rest]`;
   return {
     ideaId: idea.id,
     ...(ctx.actor.via !== 'workspace-agent'
@@ -260,7 +263,7 @@ export async function getIdea(
       : {}),
     title: titleBlock.text,
     titleTruncated: titleBlock.truncated,
-    content: contentBlock?.text ?? null,
+    content,
     contentTruncated: contentOffset > 0 || nextContentOffset !== null,
     contentOffset,
     nextContentOffset,

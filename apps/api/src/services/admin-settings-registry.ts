@@ -7,6 +7,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from '../operations/limits';
 import {
   AGENT_EMAIL_SETTINGS,
   type AgentEmailSettingName,
@@ -386,10 +387,10 @@ const definitions: AdminSettingDefinition[] = [
   ),
   integerDefinition(
     'operations.agentIdeaContentPageLength',
-    12000,
+    DEFAULT_IDEA_CONTENT_MAX_LENGTH,
     'Operations',
     'Maximum idea content characters in one agent get_idea response.',
-    { min: 1000, max: 16000 }
+    { min: 1000, max: DEFAULT_IDEA_CONTENT_MAX_LENGTH }
   ),
   integerDefinition(
     'operations.workloadIdentityTokenTtlSeconds',
