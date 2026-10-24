@@ -87,41 +87,41 @@ not a proxy: every rule reads the condition itself and carries its source), `76-
 
 ### PR1 — derived status, the transition operation, the API and the Ideas list
 
-- [ ] `packages/shared/src/types/ideas.ts`: `IdeaDerivedState`, `IdeaAttentionKind`, `IdeaAttention`,
+- [x] `packages/shared/src/types/ideas.ts`: `IdeaDerivedState`, `IdeaAttentionKind`, `IdeaAttention`,
       `IdeaStatusSource`, `IdeaDerivedStatus`, `IdeaListItem`, `IdeaListResponse`, `IdeaCounts`;
       `IDEA_NEEDS_YOU_STATES`; exported from `types/index.ts`.
-- [ ] `apps/api/src/db/migrations/0207_tasks_idea_flag.sql` (+ `schema.ts` `isIdea` column) — **after
+- [x] `apps/api/src/db/migrations/0207_tasks_idea_flag.sql` (+ `schema.ts` `isIdea` column) — **after
       channel ack**.
-- [ ] `prepareIdeaCreate` writes `is_idea = 1`; every idea reader filters on it (with the
+- [x] `prepareIdeaCreate` writes `is_idea = 1`; every idea reader filters on it (with the
       `status='draft'` legacy fallback removed only where the backfill covers it).
-- [ ] `apps/api/src/operations/idea-status.ts` — **pure** `deriveIdeaStatus(input)` implementing the
+- [x] `apps/api/src/operations/idea-status.ts` — **pure** `deriveIdeaStatus(input)` implementing the
       precedence: done → parked → question → stuck → working → review → merged → not-started, each with
       its `source`.
-- [ ] `apps/api/src/operations/idea-transitions.ts` — one allowed-transition table for idea rows
+- [x] `apps/api/src/operations/idea-transitions.ts` — one allowed-transition table for idea rows
       (`markIdeaDone`, `parkIdea`, `reopenIdea`), used by `update_idea`, the new status route and the
       generic task PATCH/status route when the row is an idea. Delete `IDEA_STATUS_TRANSITIONS` from
       `idea-core.ts`.
-- [ ] DO: `durable-objects/project-data/idea-work.ts` + a one-line delegating method
+- [x] DO: `durable-objects/project-data/idea-work.ts` + a one-line delegating method
       `getIdeaWorkSnapshots(taskIds)` on the class.
-- [ ] `apps/api/src/operations/idea-list-core.ts` — batched aggregation (ideas → snapshots → tasks → PR
+- [x] `apps/api/src/operations/idea-list-core.ts` — batched aggregation (ideas → snapshots → tasks → PR
       state), ≤20 round trips, no per-idea queries.
-- [ ] `apps/api/src/routes/ideas.ts` mounted at `/api/projects/:projectId/ideas`: `GET /`,
+- [x] `apps/api/src/routes/ideas.ts` mounted at `/api/projects/:projectId/ideas`: `GET /`,
       `GET /:ideaId`, `POST /:ideaId/status`. Project scoping on every read and write.
-- [ ] Fix markdown list markers: `MARKDOWN_COMPONENTS` `ul`/`ol` get `list-style-type`, and
+- [x] Fix markdown list markers: `MARKDOWN_COMPONENTS` `ul`/`ol` get `list-style-type`, and
       `MessageBubble`'s agent/user components get the same lists. Mark idea
       `01M0JQBW9E0T5PJZXY0K72V9BX` done.
-- [ ] `apps/web/src/pages/ideas/`: `IdeasListPage.tsx` + `parts.tsx` (`StateIcon`, `IdeaRow`,
+- [x] `apps/web/src/pages/ideas/`: `IdeasListPage.tsx` + `parts.tsx` (`StateIcon`, `IdeaRow`,
       `AttentionCard`), `view-model.ts` (grouping, Needs-you cap, labels), `api`/`query-options`.
       Needs you (≤3 + "N more need you") → In progress → Not started; Done recently and Filed by agents
       folded; desktop side column.
-- [ ] Route `IdeasPage` → the new page; delete the old one (no dead code).
-- [ ] Tests: table-driven `deriveIdeaStatus` (every rule, weak links must not move status),
+- [x] Route `IdeasPage` → the new page; delete the old one (no dead code).
+- [x] Tests: table-driven `deriveIdeaStatus` (every rule, weak links must not move status),
       transition operation against real SQL (allowed + rejected + PATCH/`update_idea` agreement),
       list route vertical slice with multi-session fixtures, foreign-project attack + owner control,
       list view-model + behavioural tests for each Needs-you action, markdown `ul`/`ol` rendered test.
-- [ ] Playwright 375×667 + 1280×800 with stress/empty data, `assertNoOverflow`, screenshots reviewed.
-- [ ] `pnpm quality:cloudflare-cost` before/after, noted in the PR.
-- [ ] Docs: `apps/www/src/content/docs/docs/` page for how idea status is derived.
+- [x] Playwright 375×667 + 1280×800 with stress/empty data, `assertNoOverflow`, screenshots reviewed.
+- [x] `pnpm quality:cloudflare-cost` before/after, noted in the PR.
+- [x] Docs: `apps/www/src/content/docs/docs/` page for how idea status is derived.
 
 ### PR2 — the idea page
 
@@ -134,6 +134,30 @@ not a proxy: every rule reads the condition itself and carries its source), `76-
 - [ ] Keep Start work (T7) wired; whichever of T7/T8 merges second does the wiring.
 - [ ] Tests: status-dependent primary action per state, Updates composer through the real POST,
       Mark done / Park through the real route, Playwright both viewports, ui-ux-specialist review.
+
+## Every idea writer, and what it sets (coordinator condition, channel seq 133a)
+
+An idea is `tasks.is_idea = 1`. Every path that creates one sets the flag; every path that
+creates an ordinary task leaves it 0. Verified by reading each INSERT, 2026-10-24:
+
+| Writer | Sets `is_idea` |
+| ------ | -------------- |
+| `operations/idea-core.ts:231` (`createIdea`, the REST and MCP path) | `1`, literal in the INSERT |
+| `durable-objects/sam-session/tools/create-idea.ts:97` (`/sam` `create_idea`) | `1`, literal in the INSERT |
+| `services/platform-feedback-incidents/user-report.ts:195` (Report an issue) | `1`, literal in the INSERT |
+| `services/platform-feedback-triage/runner.ts:309` (hourly triage) | `1`, literal in the INSERT |
+| `services/debug-agent.ts:748` (`saveDebugDiagnosisAsIdea`) | `isIdea: true` on the drizzle insert |
+| `services/report-issue.ts` | **Writes no task.** It delegates to `upsertUserReportIncident`, the row above; the only `tasks` INSERT for a user report is that one. |
+| `routes/tasks/crud.ts:128` (`POST /api/projects/:projectId/tasks`) | **`0`, deliberately.** An ordinary task also starts in `draft`, which is why the predicate is the flag; commented at the call site. |
+
+Every other `tasks` INSERT in `apps/api/src` creates work that is already dispatched
+(`chat-start.ts`, `chat.ts`, `submit-task-implementation.ts`, `submit-instant-task.ts`,
+`session-task-repair.ts`, `reserved-task-submission-storage.ts`, `trial/trial-runner.ts`,
+`routes/mcp/dispatch-tool.ts`, `routes/mcp/orchestration-tools.ts`,
+`routes/workspaces/workspace-create.ts`) and leaves the column at its default.
+
+Migration `0207` backfills `is_idea = 1` for every row the old `status = 'draft'` definition
+covered, so nothing that was in anyone's Ideas list has left it.
 
 ## Acceptance criteria
 
