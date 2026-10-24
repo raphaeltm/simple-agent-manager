@@ -1,4 +1,8 @@
 /** Project-scoped relationships between work resources. */
+import type { PullRequestRef, PullRequestState } from './pull-requests';
+
+export type { PullRequestRef, PullRequestState } from './pull-requests';
+
 export type LinkKind = 'session' | 'idea' | 'file' | 'pr';
 export type LinkRelation =
   | 'created'
@@ -41,20 +45,6 @@ export interface CappedList<T> {
   totalIsLowerBound: boolean;
 }
 
-export interface PullRequestRef {
-  url: string;
-  number: number;
-  source: 'task_output' | 'pr_association' | 'explicit_link';
-}
-export interface PullRequestState {
-  state: 'open' | 'closed' | 'merged';
-  isDraft: boolean;
-  title: string | null;
-  checksState: 'pending' | 'success' | 'failure' | 'neutral' | null;
-  mergedAt: string | null;
-  updatedAt: string | null;
-  stale: boolean;
-}
 export interface LinkedSession {
   sessionId: string;
   topic: string | null;

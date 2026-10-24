@@ -305,7 +305,7 @@ async function refreshOne(
 
 /** Read stored state only; single-context callers may schedule refresh separately. */
 export async function getPullRequestStates(
-  ctx: OperationContext,
+  ctx: Pick<OperationContext, 'env' | 'execCtx'>,
   projectId: string,
   refs: readonly Pick<PullRequestRef, 'url'>[],
   options: { refresh?: 'single' } = {}

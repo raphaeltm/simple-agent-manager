@@ -2,7 +2,12 @@ import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
 const snapshot = vi.hoisted(() => vi.fn());
+const prStates = vi.hoisted(() => vi.fn().mockResolvedValue({}));
 vi.mock('../../../src/services/project-data', () => ({ getResourceLinkSnapshot: snapshot }));
+vi.mock('../../../src/operations/pull-request-core', async (importActual) => ({
+  ...(await importActual<typeof import('../../../src/operations/pull-request-core')>()),
+  getPullRequestStates: prStates,
+}));
 vi.mock('../../../src/services/admin-settings', () => ({
   resolveAdminSettingDetailsMany: vi
     .fn()
@@ -19,7 +24,7 @@ vi.mock('../../../src/services/admin-settings', () => ({
 import { MIGRATIONS } from '../../../src/durable-objects/migrations';
 import { getLinkSnapshot, recordLink } from '../../../src/durable-objects/project-data/links';
 import type { Env } from '../../../src/env';
-import { getIdeaContext } from '../../../src/operations/link-core';
+import { getIdeaContext, getSessionContext } from '../../../src/operations/link-core';
 import { resolveAdminSettingDetailsMany } from '../../../src/services/admin-settings';
 import { createSqlStorage } from '../durable-objects/sql-storage-test-utils';
 
@@ -191,9 +196,19 @@ describe('idea linked context', () => {
         4
       );
       snapshot.mockImplementation(
-        async (_env: Env, _project: string, kind: 'idea', id: string, cap: number) =>
+        async (_env: Env, _project: string, kind: 'idea' | 'session', id: string, cap: number) =>
           getLinkSnapshot(sql, kind, id, cap)
       );
+      const prState = {
+        state: 'merged',
+        isDraft: false,
+        title: 'Merged pull request',
+        checksState: 'success',
+        mergedAt: '2026-10-24T00:00:00Z',
+        updatedAt: '2026-10-24T00:00:00Z',
+        stale: false,
+      };
+      prStates.mockResolvedValue({ 'https://github.com/o/r/pull/1': prState });
       const context = await getIdeaContext({ DATABASE: d1Database(db) } as Env, 'p', 'idea1');
       expect(context.sessions.total).toBe(2);
       expect(context.sessions.truncated).toBe(true);
@@ -201,6 +216,21 @@ describe('idea linked context', () => {
       expect(context.files.items.map((f) => f.fileId)).toEqual(['f1']);
       expect(context.pullRequests.items.map((pr) => pr.number)).toEqual([1]);
       expect(context.pullRequests.items[0]?.url).toBe('https://github.com/o/r/pull/1');
+      expect(context.pullRequests.items[0]?.state).toEqual(prState);
+      expect(prStates).toHaveBeenCalledWith(
+        expect.objectContaining({ env: expect.anything() }),
+        'p',
+        [expect.objectContaining({ url: 'https://github.com/o/r/pull/1' })]
+      );
+      const sessionContext = await getSessionContext(
+        { DATABASE: d1Database(db) } as Env,
+        'p',
+        's1'
+      );
+      expect(sessionContext.pullRequests.items[0]?.state).toEqual(prState);
+      prStates.mockRejectedValueOnce(new Error('D1 unavailable'));
+      const degraded = await getIdeaContext({ DATABASE: d1Database(db) } as Env, 'p', 'idea1');
+      expect(degraded.pullRequests.items[0]?.state).toBeNull();
       expect(context.pullRequests.total).toBe(1);
       expect(context.pullRequests.totalIsLowerBound).toBe(false);
       expect(context.relatedIdeas.items.map((i) => i.ideaId)).toEqual(['idea2']);

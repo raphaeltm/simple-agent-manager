@@ -19,7 +19,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
-import { getPullRequestStates, parseProjectPullRequestUrl } from '../operations/pull-request-core';
+import { getPullRequestStates } from '../operations/pull-request-core';
 import type { OperationContext } from '../operations/types';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as projectDataService from '../services/project-data';
@@ -128,34 +128,24 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
           .limit(1);
 
         if (taskRow) {
-          const [project] = taskRow.outputPrUrl
-            ? await db
-                .select({ repository: schema.projects.repository })
-                .from(schema.projects)
-                .where(eq(schema.projects.id, projectId))
-                .limit(1)
-            : [];
-          const parsedPr =
-            taskRow.outputPrUrl && project
-              ? parseProjectPullRequestUrl(taskRow.outputPrUrl, project.repository)
-              : null;
+          let prNumber = taskRow.outputPrNumber;
           let prState: Awaited<ReturnType<typeof getPullRequestStates>>[string] = null;
-          if (parsedPr) {
+          if (taskRow.outputPrUrl) {
             try {
-              prState =
-                (
-                  await getPullRequestStates(
-                    {
-                      env: c.env,
-                      actor: { userId, via: 'web', scopes: new Set(['sam.read']) },
-                      requestId: c.req.header('cf-ray') ?? crypto.randomUUID(),
-                      execCtx: c.executionCtx as OperationContext['execCtx'],
-                    } satisfies OperationContext,
-                    projectId,
-                    [{ url: parsedPr.url }],
-                    { refresh: 'single' }
-                  )
-                )[parsedPr.url] ?? null;
+              const states = await getPullRequestStates(
+                {
+                  env: c.env,
+                  execCtx: c.executionCtx as OperationContext['execCtx'],
+                },
+                projectId,
+                [{ url: taskRow.outputPrUrl }],
+                { refresh: 'single' }
+              );
+              const [canonicalUrl, state] = Object.entries(states)[0] ?? [];
+              prNumber = canonicalUrl
+                ? Number(canonicalUrl.slice(canonicalUrl.lastIndexOf('/') + 1))
+                : null;
+              prState = state ?? null;
             } catch (error) {
               log.warn('chat.session_pr_state_failed', {
                 projectId,
@@ -183,9 +173,9 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
             ),
             outputBranch: taskRow.outputBranch,
             outputPrUrl: taskRow.outputPrUrl,
-            pr: parsedPr
+            pr: prNumber
               ? {
-                  number: parsedPr.number,
+                  number: prNumber,
                   state: prState?.state ?? null,
                   checks: prState?.checksState ?? null,
                 }

@@ -14,11 +14,13 @@ import { canonicalProjectPullRequestUrl, isStrongLinkRelation } from '@simple-ag
 
 import type { ResourceLink } from '../durable-objects/project-data/links';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
 import * as projectData from '../services/project-data';
 import { ideaTaskPredicateSql } from './idea-identity';
 import { limits, validateEntity } from './link-write';
+import { getPullRequestStates } from './pull-request-core';
 
 export { recordAutoLink, recordLink, removeLink } from './link-write';
 
@@ -313,6 +315,21 @@ function toPrs(
   return unique(refs, (r) => r.url);
 }
 
+async function withPullRequestStates(
+  env: Env,
+  projectId: string,
+  refs: LinkedPullRequest[]
+): Promise<LinkedPullRequest[]> {
+  if (refs.length === 0) return refs;
+  try {
+    const states = await getPullRequestStates({ env }, projectId, refs);
+    return refs.map((ref) => ({ ...ref, state: states[ref.url] ?? null }));
+  } catch (error) {
+    log.warn('linked_work.pr_state_failed', { projectId, error: String(error) });
+    return refs;
+  }
+}
+
 function strongIdeaSessionIds(links: ResourceLink[], ideaId: string): string[] {
   return links
     .filter(
@@ -354,7 +371,7 @@ export async function getIdeaContext(
       (l.sourceKind === 'idea' && l.sourceId === ideaId) ||
       (l.sourceKind === 'session' && strongIdSet.has(l.sourceId))
   );
-  const prs = toPrs(data, assetLinks, strongIds);
+  const prs = await withPullRequestStates(env, projectId, toPrs(data, assetLinks, strongIds));
   const storedPrCount = new Set(
     assetLinks.filter((l) => l.targetKind === 'pr').map((l) => l.targetId)
   ).size;
@@ -374,7 +391,7 @@ export async function getSessionContext(
   sessionId: string
 ): Promise<SessionContext> {
   const data = await contextData(env, projectId, 'session', sessionId);
-  const prs = toPrs(data, data.links, [sessionId]);
+  const prs = await withPullRequestStates(env, projectId, toPrs(data, data.links, [sessionId]));
   const storedPrCount = new Set(
     data.links.filter((l) => l.targetKind === 'pr').map((l) => l.targetId)
   ).size;

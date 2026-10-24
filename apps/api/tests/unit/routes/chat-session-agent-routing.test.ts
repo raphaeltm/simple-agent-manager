@@ -304,25 +304,23 @@ describe('chatRoutes agent session routing', () => {
       endedAt: null,
       createdAt: 1,
     });
-    mocks.drizzle.mockReturnValue({
-      select: vi
-        .fn()
-        .mockReturnValueOnce(
-          makeTaskQuery([
-            {
-              id: 'task-1',
-              status: 'in_progress',
-              executionStep: 'agent_session',
-              outputPrUrl: 'https://github.com/Acme/Widget/pull/17/',
-              outputPrNumber: 999,
-              taskMode: 'task',
-              agentProfileHint: null,
-            },
-          ])
-        )
-        .mockReturnValueOnce(makeTaskQuery([{ repository: 'acme/widget' }]))
-        .mockReturnValueOnce(makeProfileQuery([])),
-    });
+    const select = vi
+      .fn()
+      .mockReturnValueOnce(
+        makeTaskQuery([
+          {
+            id: 'task-1',
+            status: 'in_progress',
+            executionStep: 'agent_session',
+            outputPrUrl: 'https://github.com/Acme/Widget/pull/17/',
+            outputPrNumber: 999,
+            taskMode: 'task',
+            agentProfileHint: null,
+          },
+        ])
+      )
+      .mockReturnValueOnce(makeProfileQuery([]));
+    mocks.drizzle.mockReturnValue({ select });
     const response = await app.fetch(
       new Request('https://example.test/api/projects/proj-1/sessions/chat-1'),
       { DATABASE: {} as D1Database } as Env,
@@ -331,10 +329,11 @@ describe('chatRoutes agent session routing', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.session.task.pr).toEqual({ number: 17, state: 'merged', checks: 'failure' });
+    expect(select).toHaveBeenCalledTimes(1);
     expect(mocks.getPullRequestStates).toHaveBeenCalledWith(
       expect.anything(),
       'proj-1',
-      [{ url }],
+      [{ url: 'https://github.com/Acme/Widget/pull/17/' }],
       { refresh: 'single' }
     );
   });
@@ -361,12 +360,12 @@ describe('chatRoutes agent session routing', () => {
               id: 'task-1',
               status: 'in_progress',
               outputPrUrl: 'https://github.com/acme/widget/pull/17',
+              outputPrNumber: 17,
               taskMode: 'task',
               agentProfileHint: null,
             },
           ])
         )
-        .mockReturnValueOnce(makeTaskQuery([{ repository: 'acme/widget' }]))
         .mockReturnValueOnce(makeProfileQuery([])),
     });
     const response = await app.fetch(
@@ -380,6 +379,42 @@ describe('chatRoutes agent session routing', () => {
       status: 'in_progress',
       pr: { number: 17, state: null, checks: null },
     });
+  });
+
+  it('drops a stale PR number when the URL is rejected by the project-scoped lookup', async () => {
+    mocks.getPullRequestStates.mockResolvedValue({});
+    mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
+    mocks.getSession.mockResolvedValue({
+      id: 'chat-1',
+      workspaceId: 'ws-1',
+      taskId: 'task-1',
+      status: 'active',
+      messageCount: 0,
+      startedAt: 1,
+      endedAt: null,
+      createdAt: 1,
+    });
+    mocks.drizzle.mockReturnValue({
+      select: vi.fn().mockReturnValueOnce(
+        makeTaskQuery([
+          {
+            id: 'task-1',
+            status: 'in_progress',
+            outputPrUrl: 'https://github.com/other/repo/pull/17',
+            outputPrNumber: 17,
+            taskMode: 'task',
+            agentProfileHint: null,
+          },
+        ])
+      ),
+    });
+    const response = await app.fetch(
+      new Request('https://example.test/api/projects/proj-1/sessions/chat-1'),
+      { DATABASE: {} as D1Database } as Env,
+      { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()).session.task.pr).toBeNull();
   });
 
   it('returns agentType from ACP session in the response', async () => {
