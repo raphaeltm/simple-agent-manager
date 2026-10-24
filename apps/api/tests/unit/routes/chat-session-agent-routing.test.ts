@@ -359,7 +359,7 @@ describe('chatRoutes agent session routing', () => {
             {
               id: 'task-1',
               status: 'in_progress',
-              outputPrUrl: 'https://github.com/acme/widget/pull/17',
+              outputPrUrl: 'https://github.com/other/repo/pull/17',
               outputPrNumber: 17,
               taskMode: 'task',
               agentProfileHint: null,
@@ -377,7 +377,7 @@ describe('chatRoutes agent session routing', () => {
     const body = await response.json();
     expect(body.session.task).toMatchObject({
       status: 'in_progress',
-      pr: { number: 17, state: null, checks: null },
+      pr: null,
     });
   });
 

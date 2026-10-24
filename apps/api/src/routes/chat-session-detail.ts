@@ -117,7 +117,6 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
             placementExplanationJson: schema.tasks.placementExplanationJson,
             outputBranch: schema.tasks.outputBranch,
             outputPrUrl: schema.tasks.outputPrUrl,
-            outputPrNumber: schema.tasks.outputPrNumber,
             outputSummary: schema.tasks.outputSummary,
             finalizedAt: schema.tasks.finalizedAt,
             taskMode: schema.tasks.taskMode,
@@ -128,7 +127,7 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
           .limit(1);
 
         if (taskRow) {
-          let prNumber = taskRow.outputPrNumber;
+          let prNumber: number | null = null;
           let prState: Awaited<ReturnType<typeof getPullRequestStates>>[string] = null;
           if (taskRow.outputPrUrl) {
             try {
