@@ -2,13 +2,12 @@
  * Deployment environment lifecycle routes.
  *
  * Stop/start preserves environment configuration, releases, custom domains, and
- * provider volumes while tearing down or restoring the runtime node placement.
+ * provider volumes while tearing down or restoring the runtime node placement. The stop
+ * helpers (container teardown, volume detach, recording the result) are in
+ * `deployment-environment-stop.ts`.
  */
 
-import {
-  type CredentialProvider,
-  DEPLOYMENT_STOP_ERROR_PREFIX,
-} from '@simple-agent-manager/shared';
+import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Hono } from 'hono';
@@ -26,15 +25,21 @@ import {
   detachEnvironmentVolumes,
   listEnvironmentVolumes,
 } from '../services/deployment-volumes';
-import { teardownDeploymentEnvironmentOnNode } from '../services/node-agent';
 import { deleteNodeResources, retireDeletedDeploymentNodeRecord } from '../services/nodes';
 import { recordDeploymentEnvironmentLifecycleEventBestEffort } from '../services/project-lifecycle-events';
 import {
   parseStoredResolvedReservationJson,
   ResourceRequirementsValidationError,
 } from '../services/resource-requirements-input';
-
-type DeploymentDb = ReturnType<typeof drizzle<typeof schema>>;
+import {
+  collectAttachedServerIds,
+  type DeploymentDb,
+  detachVolumesForEnvironmentStop,
+  hasAttachedVolumes,
+  lifecycleErrorMessage,
+  markEnvironmentStopped,
+  teardownLinkedDeploymentNode,
+} from './deployment-environment-stop';
 
 interface LastNodeCleanupResult {
   nodeDeleted: boolean;
@@ -262,167 +267,6 @@ async function finishEnvironmentStart(
     }
     throw err;
   }
-}
-
-function lifecycleErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-async function markEnvironmentStopFailed(
-  db: DeploymentDb,
-  envId: string,
-  observedErrorMessage: string
-): Promise<void> {
-  await db
-    .update(schema.deploymentEnvironments)
-    .set({
-      status: 'error',
-      observedStatus: 'failed',
-      observedErrorMessage,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.deploymentEnvironments.id, envId));
-}
-
-async function teardownLinkedDeploymentNode(
-  db: DeploymentDb,
-  env: Env,
-  userId: string,
-  envId: string,
-  nodeId: string | null,
-  opts: { requireLiveTeardownBeforeDetach?: boolean } = {}
-): Promise<{ providerInstanceId: string | null; nodeStatus: string | null; warnings: string[] }> {
-  const warnings: string[] = [];
-  if (!nodeId) {
-    if (opts.requireLiveTeardownBeforeDetach) {
-      warnings.push('No deployment node is linked; detaching stale provider volumes only.');
-    }
-    return { providerInstanceId: null, nodeStatus: null, warnings };
-  }
-
-  const nodeRows = await db
-    .select({
-      id: schema.nodes.id,
-      status: schema.nodes.status,
-      providerInstanceId: schema.nodes.providerInstanceId,
-    })
-    .from(schema.nodes)
-    .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)))
-    .limit(1);
-  const node = nodeRows[0];
-  if (!node) {
-    if (opts.requireLiveTeardownBeforeDetach) {
-      await markEnvironmentStopFailed(
-        db,
-        envId,
-        `${DEPLOYMENT_STOP_ERROR_PREFIX} because the linked deployment node record was not found; refusing to detach volumes without live teardown.`
-      );
-      throw errors.conflict(
-        'Cannot safely stop deployment environment: linked deployment node record was not found, so volumes were not detached.'
-      );
-    }
-    warnings.push('Deployment node record was not found; skipped live container teardown.');
-    return { providerInstanceId: null, nodeStatus: null, warnings };
-  }
-
-  if (node.status !== 'running') {
-    if (opts.requireLiveTeardownBeforeDetach) {
-      await markEnvironmentStopFailed(
-        db,
-        envId,
-        `${DEPLOYMENT_STOP_ERROR_PREFIX} because the deployment node was ${node.status}; refusing to detach volumes without live teardown.`
-      );
-      throw errors.conflict(
-        `Cannot safely stop deployment environment: deployment node is ${node.status}, so volumes were not detached.`
-      );
-    }
-    warnings.push(`Deployment node was ${node.status}; skipped live container teardown.`);
-    return {
-      providerInstanceId: node.providerInstanceId ?? null,
-      nodeStatus: node.status,
-      warnings,
-    };
-  }
-
-  try {
-    await teardownDeploymentEnvironmentOnNode(node.id, envId, env, userId);
-    return {
-      providerInstanceId: node.providerInstanceId ?? null,
-      nodeStatus: node.status,
-      warnings,
-    };
-  } catch (err) {
-    const message = lifecycleErrorMessage(err);
-    await markEnvironmentStopFailed(
-      db,
-      envId,
-      `${DEPLOYMENT_STOP_ERROR_PREFIX} while tearing down the deployment node: ${message}`
-    );
-    throw errors.conflict(`Could not stop deployment environment on node: ${message}`);
-  }
-}
-
-function collectAttachedServerIds(
-  volumes: schema.DeploymentVolumeRow[],
-  providerInstanceId: string | null
-): string[] {
-  const attachedServerIds = new Set<string>();
-  for (const volume of volumes) {
-    if (volume.attachedServerId) {
-      attachedServerIds.add(volume.attachedServerId);
-    }
-  }
-  if (providerInstanceId) {
-    attachedServerIds.add(providerInstanceId);
-  }
-  return [...attachedServerIds];
-}
-
-function hasAttachedVolumes(volumes: schema.DeploymentVolumeRow[]): boolean {
-  return volumes.some((volume) => Boolean(volume.attachedServerId));
-}
-
-async function detachVolumesForEnvironmentStop(
-  db: DeploymentDb,
-  env: Env,
-  userId: string,
-  envId: string,
-  serverIds: string[]
-): Promise<number> {
-  let volumesDetached = 0;
-  for (const serverId of serverIds) {
-    try {
-      const detached = await detachEnvironmentVolumes(db, env, userId, envId, serverId);
-      volumesDetached += detached.length;
-    } catch (err) {
-      const message = lifecycleErrorMessage(err);
-      await markEnvironmentStopFailed(
-        db,
-        envId,
-        `${DEPLOYMENT_STOP_ERROR_PREFIX} while detaching deployment volumes: ${message}`
-      );
-      throw errors.conflict(`Could not detach deployment volume(s): ${message}`);
-    }
-  }
-  return volumesDetached;
-}
-
-async function markEnvironmentStopped(db: DeploymentDb, envId: string): Promise<void> {
-  await db
-    .update(schema.deploymentEnvironments)
-    .set({
-      status: 'stopped',
-      nodeId: null,
-      observedAppliedSeq: null,
-      observedStatus: 'stopped',
-      observedErrorMessage: null,
-      observedServicesJson: '[]',
-      observedDeployStatusJson: null,
-      observedDiskTelemetryJson: null,
-      observedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.deploymentEnvironments.id, envId));
 }
 
 async function stopDeploymentEnvironment(params: {
