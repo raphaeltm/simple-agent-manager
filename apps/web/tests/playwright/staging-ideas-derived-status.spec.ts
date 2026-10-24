@@ -42,6 +42,15 @@ const PROJECT_ID = process.env.T8_PROJECT_ID ?? '';
 /** Unique per run, so a failed run never collides with the next one. */
 const RUN = Date.now().toString(36);
 const IDEA_TITLE = `T8 staging — derived status ${RUN}`;
+/**
+ * The chat's topic. The list's row for a working idea reads
+ * "<agent> is working in <chat topic>", and that topic can ONLY have come from the Durable
+ * Object's `chat_sessions` join inside `getIdeaWorkSnapshots` — the route has no other source
+ * for it. When the snapshot comes back empty, `chatName` falls back to the literal "the chat"
+ * (`pages/ideas/view-model.ts`), so asserting this exact string is what distinguishes "the hop
+ * returned data" from "the page rendered" (coordinator, seq 224).
+ */
+const CHAT_TOPIC = `T8 staging chat ${RUN}`;
 
 interface Created {
   ideaId: string;
@@ -149,7 +158,7 @@ test.describe('Ideas list on staging — phone', () => {
     // One chat, created through the real route, then linked through the real link route —
     // which writes a `resource_links` row in the ProjectData Durable Object.
     const session = await api(page, 'POST', `/api/projects/${PROJECT_ID}/sessions`, {
-      topic: `T8 staging chat ${RUN}`,
+      topic: CHAT_TOPIC,
     });
     expect(session.status(), await session.text()).toBe(201);
     const sessionBody = (await session.json()) as { sessionId: string; taskId: string };
@@ -174,9 +183,20 @@ test.describe('Ideas list on staging — phone', () => {
     // narrowed the page to it — so this heading is about this idea and nothing else.
     await expect(page.getByRole('heading', { name: /In progress/ })).toBeVisible();
     await expect(page.getByRole('heading', { name: /Not started/ })).toBeHidden();
+    // Per-row, not just per-section: the row's own state label.
+    await expect(row).toContainText('In progress');
 
-    // And the counts are real, not zeros: the chat the link store just recorded is counted.
-    await expect(row).toContainText(/\d+ chat/);
+    // THE PROOF THE HOP RETURNED DATA. This string is the chat's topic, which the route can
+    // only have from the Durable Object's `chat_sessions` join. An empty snapshot renders the
+    // literal "the chat" instead, so this assertion fails on exactly the failure it exists to
+    // catch — and the second line forbids that fallback explicitly.
+    await expect(row).toContainText(`is working in ${CHAT_TOPIC}`);
+    await expect(row).not.toContainText('is working in the chat');
+
+    // And the count is non-zero. `\\d+ chat` would have passed on "0 chats", which is what an
+    // empty snapshot produces — the bug this regex had until seq 224 asked for the stronger
+    // assertion.
+    await expect(row).toContainText(/[1-9]\d* chat/);
     await shot(page, 't8-ideas-in-progress');
   });
 
@@ -203,6 +223,8 @@ test.describe('Ideas list on staging — phone', () => {
     // The summary carries the count, so this also asserts the fold found the idea.
     await fold.getByText(/Done recently · \d+/).click();
     await expect(fold).toContainText(IDEA_TITLE, { timeout: 20_000 });
+    // Per-row state, so "it is in the fold" cannot pass for a row still showing In progress.
+    await expect(ideaRow(page)).toContainText('Done');
     await shot(page, 't8-ideas-done-recently');
   });
 });
@@ -217,10 +239,14 @@ test.describe('Ideas list on staging — laptop', () => {
     await shot(page, 't8-ideas-desktop-real-list');
 
     await page.getByPlaceholder('Search ideas').fill(RUN);
-    // Done recently is a side-column panel at this width rather than a fold, so the done idea
-    // is on screen without opening anything.
+    // The same Mark done result at the laptop width, where "Done recently" is a side-column
+    // panel rather than a fold — so the coordinator's "both viewports" is two different
+    // layouts of the same state, not the same layout twice.
     await expect(page.getByRole('heading', { name: /Done recently/ })).toBeVisible();
-    await expect(page.getByText(IDEA_TITLE).first()).toBeVisible({ timeout: 20_000 });
+    await expect(ideaRow(page)).toBeVisible({ timeout: 20_000 });
+    await expect(ideaRow(page)).toContainText('Done');
+    // The done row keeps the evidence of the work: it is still the idea that chat worked on.
+    await expect(page.getByRole('heading', { name: /In progress/ })).toBeHidden();
     await shot(page, 't8-ideas-desktop');
   });
 
