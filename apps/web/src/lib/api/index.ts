@@ -385,6 +385,7 @@ export {
   updateFileTags,
   uploadLibraryFile,
 } from './library';
+export { getIdeaLinks, getLibraryFileLinks, getSessionLinks } from './links';
 export {
   emptyCappedList,
   getLibraryFileLinks,
@@ -556,7 +557,6 @@ export {
   deleteProjectTask,
   getProjectTask,
   getTaskSessions,
-  linkSessionIdea,
   listProjectTasks,
   listTaskEvents,
   removeTaskDependency,

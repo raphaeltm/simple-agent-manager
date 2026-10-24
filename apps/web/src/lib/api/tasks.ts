@@ -35,6 +35,13 @@ export interface TaskAttachmentRef {
   contentType: string;
 }
 
+/**
+ * The browser's view of `POST /api/projects/:id/tasks/submit`.
+ *
+ * A looser local copy of `SubmitTaskRequest` in `@simple-agent-manager/shared` (wider
+ * `vmSize`/`vmLocation`, and `TaskAttachmentRef` instead of `TaskAttachment`). Keep any
+ * new field in step with the shared definition, which is the canonical one.
+ */
 export interface SubmitTaskRequest {
   message: string;
   vmSize?: string;
@@ -50,6 +57,8 @@ export interface SubmitTaskRequest {
   agentProfileId?: string;
   skillId?: string;
   attachments?: TaskAttachmentRef[];
+  /** An open idea this work starts from; the server links it before the agent starts. */
+  sourceIdeaId?: string;
 }
 
 export interface SubmitTaskResponse {
@@ -308,16 +317,4 @@ export async function getTaskSessions(
   taskId: string
 ): Promise<TaskSessionsResponse> {
   return request<TaskSessionsResponse>(`/api/projects/${projectId}/tasks/${taskId}/sessions`);
-}
-
-export async function linkSessionIdea(
-  projectId: string,
-  sessionId: string,
-  taskId: string,
-  context?: string
-): Promise<{ linked: boolean }> {
-  return request<{ linked: boolean }>(`/api/projects/${projectId}/sessions/${sessionId}/ideas`, {
-    method: 'POST',
-    body: JSON.stringify({ taskId, ...(context ? { context } : {}) }),
-  });
 }

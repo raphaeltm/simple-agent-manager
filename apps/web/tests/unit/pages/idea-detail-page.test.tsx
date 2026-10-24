@@ -34,7 +34,7 @@ vi.mock('react-router', async () => {
 vi.mock('../../../src/pages/ProjectContext', () => ({
   useProjectContext: () => ({
     projectId: 'proj-test',
-    project: { name: 'Test Project' },
+    project: { name: 'Test Project', defaultWorkspaceProfile: null },
   }),
 }));
 
@@ -42,7 +42,8 @@ vi.mock('../../../src/hooks/useIsMobile', () => ({
   useIsMobile: () => false,
 }));
 
-vi.mock('@simple-agent-manager/ui', () => ({
+vi.mock('@simple-agent-manager/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/ui')>()),
   Spinner: ({ size }: { size: string }) => <span data-testid="spinner" data-size={size}>Loading...</span>,
 }));
 

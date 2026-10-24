@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 
-import { getLibraryFileLinks, getSessionLinks } from '../api/links';
+import { getIdeaLinks, getLibraryFileLinks, getSessionLinks } from '../api/links';
 
 /**
  * Linked work for one chat or one library file.
@@ -18,11 +18,20 @@ import { getLibraryFileLinks, getSessionLinks } from '../api/links';
  */
 export const linkedWorkQueryKeys = {
   all: (queryScope: string) => ['auth', queryScope, 'linked-work'] as const,
+  idea: (queryScope: string, projectId: string, ideaId: string) =>
+    [...linkedWorkQueryKeys.all(queryScope), 'idea', projectId, ideaId] as const,
   session: (queryScope: string, projectId: string, sessionId: string) =>
     [...linkedWorkQueryKeys.all(queryScope), 'session', projectId, sessionId] as const,
   libraryFile: (queryScope: string, projectId: string, fileId: string) =>
     [...linkedWorkQueryKeys.all(queryScope), 'library-file', projectId, fileId] as const,
 };
+
+export function ideaLinksQueryOptions(queryScope: string, projectId: string, ideaId: string) {
+  return queryOptions({
+    queryKey: linkedWorkQueryKeys.idea(queryScope, projectId, ideaId),
+    queryFn: ({ signal }) => getIdeaLinks(projectId, ideaId, { signal }),
+  });
+}
 
 export function sessionLinksQueryOptions(queryScope: string, projectId: string, sessionId: string) {
   return queryOptions({

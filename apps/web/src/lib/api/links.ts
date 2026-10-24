@@ -15,6 +15,7 @@
 import type {
   CappedList,
   FileContext,
+  IdeaContext,
   LinkedFile,
   LinkedIdea,
   LinkedPullRequest,
@@ -164,6 +165,16 @@ function parsePullRequest(row: JsonRecord): LinkedPullRequest | null {
   };
 }
 
+export function normalizeIdeaContext(value: unknown): IdeaContext {
+  const root = isJsonRecord(value) ? value : {};
+  return {
+    sessions: cappedList(root['sessions'], parseSession),
+    files: cappedList(root['files'], parseFile),
+    pullRequests: cappedList(root['pullRequests'], parsePullRequest),
+    relatedIdeas: cappedList(root['relatedIdeas'], parseIdea),
+  };
+}
+
 export function normalizeSessionContext(value: unknown): SessionContext {
   const root = isJsonRecord(value) ? value : {};
   return {
@@ -179,6 +190,19 @@ export function normalizeFileContext(value: unknown): FileContext {
     sessions: cappedList(root['sessions'], parseSession),
     ideas: cappedList(root['ideas'], parseIdea),
   };
+}
+
+export async function getIdeaLinks(
+  projectId: string,
+  ideaId: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<IdeaContext> {
+  return normalizeIdeaContext(
+    await request<unknown>(
+      `/api/projects/${encodeURIComponent(projectId)}/ideas/${encodeURIComponent(ideaId)}/links`,
+      options
+    )
+  );
 }
 
 export async function getSessionLinks(

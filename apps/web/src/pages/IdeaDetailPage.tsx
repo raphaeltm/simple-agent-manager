@@ -17,6 +17,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
+import { StartWorkSheet } from '../components/ideas/StartWorkSheet';
 import { RenderedMarkdown } from '../components/MarkdownRenderer';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useQueryScope } from '../hooks/useQueryScope';
@@ -43,11 +44,35 @@ const STATUS_FROM_TASK: Record<TaskStatus, IdeaStatus> = {
 };
 
 const STATUS_CONFIG: Record<IdeaStatus, { label: string; color: string; icon: React.ReactNode }> = {
-  exploring: { label: 'Exploring', color: 'var(--sam-color-accent-primary)', icon: <Lightbulb size={12} aria-hidden="true" /> },
-  ready: { label: 'Ready', color: 'var(--sam-color-warning)', icon: <Play size={12} aria-hidden="true" /> },
-  executing: { label: 'Executing', color: 'var(--sam-color-info)', icon: <span aria-hidden="true"><Spinner size="sm" /></span> },
-  done: { label: 'Done', color: 'var(--sam-color-success)', icon: <Check size={12} aria-hidden="true" /> },
-  parked: { label: 'Parked', color: 'var(--sam-color-fg-muted)', icon: <Archive size={12} aria-hidden="true" /> },
+  exploring: {
+    label: 'Exploring',
+    color: 'var(--sam-color-accent-primary)',
+    icon: <Lightbulb size={12} aria-hidden="true" />,
+  },
+  ready: {
+    label: 'Ready',
+    color: 'var(--sam-color-warning)',
+    icon: <Play size={12} aria-hidden="true" />,
+  },
+  executing: {
+    label: 'Executing',
+    color: 'var(--sam-color-info)',
+    icon: (
+      <span aria-hidden="true">
+        <Spinner size="sm" />
+      </span>
+    ),
+  },
+  done: {
+    label: 'Done',
+    color: 'var(--sam-color-success)',
+    icon: <Check size={12} aria-hidden="true" />,
+  },
+  parked: {
+    label: 'Parked',
+    color: 'var(--sam-color-fg-muted)',
+    icon: <Archive size={12} aria-hidden="true" />,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -143,14 +168,18 @@ interface ConversationsPanelProps {
   onSearchChange: (query: string) => void;
 }
 
-function ConversationsPanel({ sessions, onSessionClick, searchQuery, onSearchChange }: ConversationsPanelProps) {
+function ConversationsPanel({
+  sessions,
+  onSessionClick,
+  searchQuery,
+  onSearchChange,
+}: ConversationsPanelProps) {
   const filtered = useMemo(() => {
     if (!searchQuery.trim()) return sessions;
     const q = searchQuery.toLowerCase();
     return sessions.filter(
       (s) =>
-        (s.topic || '').toLowerCase().includes(q) ||
-        (s.context || '').toLowerCase().includes(q),
+        (s.topic || '').toLowerCase().includes(q) || (s.context || '').toLowerCase().includes(q)
     );
   }, [sessions, searchQuery]);
 
@@ -158,7 +187,10 @@ function ConversationsPanel({ sessions, onSessionClick, searchQuery, onSearchCha
     <div className="flex flex-col gap-3 h-full">
       {/* Search */}
       <div className="relative">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted pointer-events-none" />
+        <Search
+          size={14}
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted pointer-events-none"
+        />
         <input
           type="text"
           placeholder="Search conversations..."
@@ -189,13 +221,14 @@ function ConversationsPanel({ sessions, onSessionClick, searchQuery, onSearchCha
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-1.5 overflow-y-auto flex-1 min-h-0" role="list" aria-label="Linked conversations">
+        <div
+          className="flex flex-col gap-1.5 overflow-y-auto flex-1 min-h-0"
+          role="list"
+          aria-label="Linked conversations"
+        >
           {filtered.map((session) => (
             <div key={session.sessionId} role="listitem">
-              <SessionRow
-                session={session}
-                onClick={() => onSessionClick(session.sessionId)}
-              />
+              <SessionRow session={session} onClick={() => onSessionClick(session.sessionId)} />
             </div>
           ))}
         </div>
@@ -287,12 +320,13 @@ function MobileConversationsModal({
 export function IdeaDetailPage() {
   const navigate = useNavigate();
   const { taskId } = useParams<{ taskId: string }>();
-  const { projectId } = useProjectContext();
+  const { projectId, project } = useProjectContext();
   const isMobile = useIsMobile();
   const queryScope = useQueryScope();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [showMobileConversations, setShowMobileConversations] = useState(false);
+  const [startWorkOpen, setStartWorkOpen] = useState(false);
 
   const ideaQuery = useQuery({
     ...taskDetailQueryOptions(queryScope, projectId, taskId ?? ''),
@@ -326,13 +360,16 @@ export function IdeaDetailPage() {
       setShowMobileConversations(false);
       navigate(`/projects/${projectId}/chat/${sessionId}`);
     },
-    [projectId, navigate],
+    [projectId, navigate]
   );
 
-  const handleExecute = useCallback(() => {
-    if (!taskId) return;
-    navigate(`/projects/${projectId}/chat?executeIdea=${encodeURIComponent(taskId)}`);
-  }, [projectId, taskId, navigate]);
+  const handleStartWorkStarted = useCallback(
+    (sessionId: string) => {
+      setStartWorkOpen(false);
+      navigate(`/projects/${projectId}/chat/${sessionId}`);
+    },
+    [navigate, projectId]
+  );
 
   // ---------------------------------------------------------------------------
   // Render: Loading
@@ -340,7 +377,11 @@ export function IdeaDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12" aria-label="Loading idea details" role="status">
+      <div
+        className="flex items-center justify-center py-12"
+        aria-label="Loading idea details"
+        role="status"
+      >
         <Spinner size="lg" />
       </div>
     );
@@ -361,9 +402,7 @@ export function IdeaDetailPage() {
           Back to Ideas
         </button>
         <div className="flex flex-col items-center justify-center py-16 text-center gap-4">
-          <p className="text-sm text-fg-muted m-0">
-            {error || 'Idea not found.'}
-          </p>
+          <p className="text-sm text-fg-muted m-0">{error || 'Idea not found.'}</p>
           {error && (
             <button
               onClick={loadData}
@@ -380,6 +419,9 @@ export function IdeaDetailPage() {
 
   const ideaStatus = STATUS_FROM_TASK[idea.status];
   const statusConfig = STATUS_CONFIG[ideaStatus];
+  // An open idea is one still in draft — the same rule the server enforces on start
+  // (`requireOpenIdeaForWorkStart`). Done and parked ideas are reopened first.
+  const canStartWork = idea.status === 'draft';
 
   // ---------------------------------------------------------------------------
   // Render: Idea detail
@@ -396,23 +438,26 @@ export function IdeaDetailPage() {
         Back to Ideas
       </button>
 
-      {/* Title + Execute button */}
+      {/* Title + Start work button */}
       <div className="flex items-start justify-between gap-3">
-        <h1 className="text-xl font-semibold text-fg-primary m-0 leading-tight min-w-0 flex-1" style={{ overflowWrap: 'anywhere' }}>
+        <h1
+          className="text-xl font-semibold text-fg-primary m-0 leading-tight min-w-0 flex-1"
+          style={{ overflowWrap: 'anywhere' }}
+        >
           {idea.title}
         </h1>
-        {ideaStatus !== 'done' && ideaStatus !== 'parked' && (
+        {canStartWork && (
           <button
-            onClick={handleExecute}
+            onClick={() => setStartWorkOpen(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border-none cursor-pointer shrink-0 min-h-[44px] transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             style={{
               backgroundColor: 'var(--sam-color-accent-primary)',
               color: 'var(--sam-color-fg-on-accent)',
             }}
-            aria-label="Execute this idea"
+            aria-label="Start work on this idea"
           >
             <Rocket size={14} aria-hidden="true" />
-            Execute
+            Start work
           </button>
         )}
       </div>
@@ -467,6 +512,15 @@ export function IdeaDetailPage() {
             />
           </div>
         </aside>
+        <StartWorkSheet
+          open={startWorkOpen}
+          projectId={projectId}
+          ideaId={idea.id}
+          ideaTitle={idea.title}
+          projectDefaultWorkspaceProfile={project?.defaultWorkspaceProfile ?? null}
+          onClose={() => setStartWorkOpen(false)}
+          onStarted={handleStartWorkStarted}
+        />
       </div>
     );
   }
@@ -487,14 +541,20 @@ export function IdeaDetailPage() {
       <button
         onClick={() => setShowMobileConversations(true)}
         className="fixed bottom-5 right-5 z-[5] flex items-center justify-center w-14 h-14 rounded-full shadow-lg hover:opacity-90 transition-opacity cursor-pointer border-none"
-        style={{ backgroundColor: 'var(--sam-color-accent-primary)', color: 'var(--sam-color-fg-on-accent)' }}
+        style={{
+          backgroundColor: 'var(--sam-color-accent-primary)',
+          color: 'var(--sam-color-fg-on-accent)',
+        }}
         aria-label={`Show conversations${sessions.length > 0 ? ` (${sessions.length})` : ''}`}
       >
         <MessageSquare size={22} />
         {sessions.length > 0 && (
           <span
             className="absolute -top-1 -right-1 flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full text-[11px] font-bold"
-            style={{ backgroundColor: 'var(--sam-color-bg-surface)', color: 'var(--sam-color-accent-primary)' }}
+            style={{
+              backgroundColor: 'var(--sam-color-bg-surface)',
+              color: 'var(--sam-color-accent-primary)',
+            }}
           >
             {sessions.length}
           </span>
@@ -509,6 +569,16 @@ export function IdeaDetailPage() {
         onSessionClick={handleSessionClick}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+      />
+
+      <StartWorkSheet
+        open={startWorkOpen}
+        projectId={projectId}
+        ideaId={idea.id}
+        ideaTitle={idea.title}
+        projectDefaultWorkspaceProfile={project?.defaultWorkspaceProfile ?? null}
+        onClose={() => setStartWorkOpen(false)}
+        onStarted={handleStartWorkStarted}
       />
     </div>
   );

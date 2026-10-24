@@ -31,7 +31,6 @@ import {
   closeConversationTask,
   getProjectTask,
   getTranscribeApiUrl,
-  linkSessionIdea,
   listChatSessions,
   listProjectTasks,
   sleepChatSession,
@@ -263,9 +262,10 @@ export function useProjectChatState() {
     }
   }, [multiplayerActive]);
 
-  // Execute-idea and Deployments "Ask an agent" links pre-fill the composer; the idea ID is
-  // kept to link the chat that gets sent.
-  const executeIdeaIdRef = useComposerPrefill(sessionId, setMessage);
+  // The Deployments page's "Ask an agent" link pre-fills the composer. The idea half of this
+  // hook is gone: an idea is now started from its own page through Start work, which links it
+  // on the server before the agent runs rather than from a query parameter afterwards.
+  useComposerPrefill(sessionId, setMessage);
 
   const loadSessions = useCallback(async () => {
     if (hasLoadedRef.current) setIsRefreshing(true);
@@ -431,7 +431,7 @@ export function useProjectChatState() {
         : null;
       const attachmentRefs = getCompletedAttachmentRefs(attachments.chatAttachments);
       const selectedRuntime = selectedSkill?.runtime ?? selectedProfile?.runtime ?? null;
-      const requiresTaskSubmission = attachmentRefs.length > 0 || executeIdeaIdRef.current !== null;
+      const requiresTaskSubmission = attachmentRefs.length > 0;
       // Fix 2: when task has explicit resource overrides, route through submitTask
       // so the backend can honor them; Instant cannot carry resource requirements.
       const useInstantSession =
@@ -492,18 +492,6 @@ export function useProjectChatState() {
         requestedVmSize: null,
         provisionedVmSize: null,
       });
-      if (executeIdeaIdRef.current) {
-        const ideaId = executeIdeaIdRef.current;
-        executeIdeaIdRef.current = null;
-        void linkSessionIdea(
-          projectId,
-          result.sessionId,
-          ideaId,
-          'Executed from idea detail page'
-        ).catch((err) => {
-          console.warn('Failed to auto-link idea to session:', err);
-        });
-      }
       newChatIntentRef.current = false;
       navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
       void loadSessions();
@@ -517,7 +505,6 @@ export function useProjectChatState() {
 
   const handleNewChat = useCallback(() => {
     newChatIntentRef.current = true;
-    executeIdeaIdRef.current = null;
     setPendingDerived(null);
     navigate(`/projects/${projectId}/chat`, { replace: true });
     setMessage('');
@@ -560,7 +547,6 @@ export function useProjectChatState() {
         buildForkMessage({ sessionLabel, projectId, sessionId: session.id, taskId: parentTaskId })
       );
       newChatIntentRef.current = true;
-      executeIdeaIdRef.current = null;
       setSubmitError(null);
       setProvisioning(null);
       navigate(`/projects/${projectId}/chat`, { replace: true });
@@ -588,7 +574,6 @@ export function useProjectChatState() {
       };
       setPendingDerived(derived);
       newChatIntentRef.current = true;
-      executeIdeaIdRef.current = null;
       setSubmitError(null);
       setProvisioning(null);
       navigate(`/projects/${projectId}/chat`, { replace: true });

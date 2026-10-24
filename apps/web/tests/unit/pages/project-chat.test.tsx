@@ -95,7 +95,6 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
   closeConversationTask: mocks.closeConversationTask,
   resolveAttentionAnswer: mocks.resolveAttentionAnswer,
-  linkSessionIdea: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../../src/components/task-hierarchy', async (importOriginal) => {
