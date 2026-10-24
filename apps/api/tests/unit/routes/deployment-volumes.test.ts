@@ -11,9 +11,7 @@ const deploymentEnvironments = {
 };
 
 type Condition =
-  | { op: 'eq'; col: unknown; val: unknown }
-  | { op: 'and'; conds: Condition[] }
-  | undefined;
+  { op: 'eq'; col: unknown; val: unknown } | { op: 'and'; conds: Condition[] } | undefined;
 
 interface EnvironmentRow {
   id: string;

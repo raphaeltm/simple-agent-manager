@@ -7,7 +7,9 @@ import {
   mintCloudflareRegistryCredentials,
 } from '../../../src/services/cf-registry';
 
-function makeConfig(overrides: Partial<CloudflareRegistryMintConfig> = {}): CloudflareRegistryMintConfig {
+function makeConfig(
+  overrides: Partial<CloudflareRegistryMintConfig> = {}
+): CloudflareRegistryMintConfig {
   return {
     accountId: 'acct-123',
     apiToken: 'tok-secret',
@@ -30,7 +32,7 @@ function mockMintResponse(overrides: Record<string, unknown> = {}) {
         ...overrides,
       },
     }),
-    { status: 200 },
+    { status: 200 }
   );
 }
 
@@ -48,7 +50,7 @@ describe('mintCloudflareRegistryCredentials', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit & { signal?: AbortSignal }];
     expect(url).toBe(
-      'https://api.cloudflare.com/client/v4/accounts/my-acct/containers/registries/registry.cloudflare.com/credentials',
+      'https://api.cloudflare.com/client/v4/accounts/my-acct/containers/registries/registry.cloudflare.com/credentials'
     );
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body as string)).toEqual({
@@ -73,51 +75,47 @@ describe('mintCloudflareRegistryCredentials', () => {
 
   it('throws on non-200 HTTP response', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ errors: [{ message: 'unauthorized' }] }), { status: 403 }),
+      new Response(JSON.stringify({ errors: [{ message: 'unauthorized' }] }), { status: 403 })
     );
 
     await expect(mintCloudflareRegistryCredentials(makeConfig())).rejects.toThrow(
-      'Cloudflare registry credential mint failed: unauthorized',
+      'Cloudflare registry credential mint failed: unauthorized'
     );
   });
 
   it('throws on 200 with empty result', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ success: true, result: null }), { status: 200 }),
+      new Response(JSON.stringify({ success: true, result: null }), { status: 200 })
     );
 
     await expect(mintCloudflareRegistryCredentials(makeConfig())).rejects.toThrow(
-      'Cloudflare registry credential mint failed',
+      'Cloudflare registry credential mint failed'
     );
   });
 
   it('throws when response is missing username', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      mockMintResponse({ username: '', password: 'pass' }),
+      mockMintResponse({ username: '', password: 'pass' })
     );
 
     await expect(mintCloudflareRegistryCredentials(makeConfig())).rejects.toThrow(
-      'missing registry, username, or password',
+      'missing registry, username, or password'
     );
   });
 
   it('throws when response is missing password', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      mockMintResponse({ password: '' }),
-    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockMintResponse({ password: '' }));
 
     await expect(mintCloudflareRegistryCredentials(makeConfig())).rejects.toThrow(
-      'missing registry, username, or password',
+      'missing registry, username, or password'
     );
   });
 
   it('falls back to config registryHost when response omits registry_host', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      mockMintResponse({ registry_host: undefined }),
-    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockMintResponse({ registry_host: undefined }));
 
     const result = await mintCloudflareRegistryCredentials(
-      makeConfig({ registryHost: 'custom-registry.example.com' }),
+      makeConfig({ registryHost: 'custom-registry.example.com' })
     );
 
     expect(result.registry).toBe('custom-registry.example.com');
@@ -160,7 +158,7 @@ describe('buildMintConfigFromEnv', () => {
         registryHost: 'custom.registry.io',
         expirationMinutes: 15,
         permissions: ['pull'],
-      },
+      }
     );
 
     expect(config?.registryHost).toBe('custom.registry.io');

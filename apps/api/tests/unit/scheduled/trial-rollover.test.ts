@@ -37,9 +37,7 @@ function makeEnv(options: {
       idFromName: vi.fn(() => 'do-id'),
       get: vi.fn(() => ({
         prune: options.pruneFn,
-        get:
-          options.getFn ??
-          vi.fn(async (key: string) => ({ monthKey: key, count: 0 })),
+        get: options.getFn ?? vi.fn(async (key: string) => ({ monthKey: key, count: 0 })),
       })),
     },
   } as unknown as Env;
@@ -91,9 +89,6 @@ describe('runTrialRolloverAudit', () => {
 
     const res = await runTrialRolloverAudit(env, now);
     expect(res).toEqual({ monthKey: '2026-04', pruned: 0 });
-    expect(mockLogError).toHaveBeenCalledWith(
-      'trial.rollover.failed',
-      expect.any(Object)
-    );
+    expect(mockLogError).toHaveBeenCalledWith('trial.rollover.failed', expect.any(Object));
   });
 });

@@ -217,7 +217,9 @@ describe('trimMessagesToFit', () => {
     const messages = [];
     for (let i = 0; i < 10; i++) {
       messages.push({ role: 'user' as const, content: `Question ${i}` });
-      messages.push(assistantWithToolCall(`call_${i}`, 'get_session_messages', '{"sessionId":"abc"}'));
+      messages.push(
+        assistantWithToolCall(`call_${i}`, 'get_session_messages', '{"sessionId":"abc"}')
+      );
       messages.push(toolResult(`call_${i}`, JSON.stringify({ data: 'x'.repeat(20_000) })));
     }
     messages.push({ role: 'user' as const, content: 'Final question' });
@@ -233,7 +235,9 @@ describe('trimMessagesToFit', () => {
     const messages = [];
     for (let i = 0; i < 10; i++) {
       messages.push({ role: 'user' as const, content: `Question ${i}` });
-      messages.push(assistantWithToolCall(`call_${i}`, 'get_session_messages', '{"sessionId":"abc"}'));
+      messages.push(
+        assistantWithToolCall(`call_${i}`, 'get_session_messages', '{"sessionId":"abc"}')
+      );
       messages.push(toolResult(`call_${i}`, JSON.stringify({ data: 'x'.repeat(100_000) })));
     }
     messages.push({ role: 'user' as const, content: 'Final question' });

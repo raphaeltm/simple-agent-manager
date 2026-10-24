@@ -39,7 +39,14 @@ vi.mock('../../../src/middleware/auth', () => {
     requireSuperadmin,
     getUserId: () => 'user-test',
     getAuth: () => ({
-      user: { id: 'user-test', role: 'superadmin', status: 'active', email: 'a@b.com', name: 'Test', avatarUrl: null },
+      user: {
+        id: 'user-test',
+        role: 'superadmin',
+        status: 'active',
+        email: 'a@b.com',
+        name: 'Test',
+        avatarUrl: null,
+      },
       session: { id: 'sess-1', expiresAt: new Date() },
     }),
   };
@@ -55,7 +62,9 @@ vi.mock('../../../src/middleware/error', () => {
       this.statusCode = statusCode;
       this.error = error;
     }
-    toJSON() { return { error: this.error, message: this.message }; }
+    toJSON() {
+      return { error: this.error, message: this.message };
+    }
   }
   return {
     errors: {
@@ -87,7 +96,11 @@ vi.mock('../../../src/services/observability', () => ({
   getErrorTrends: vi.fn(),
   queryCloudflareLogs: vi.fn(),
   getLogQueryRateLimit: () => 30,
-  CfApiError: class extends Error { constructor(m: string) { super(m); } },
+  CfApiError: class extends Error {
+    constructor(m: string) {
+      super(m);
+    }
+  },
 }));
 
 // --- Limits mock ---
@@ -159,9 +172,11 @@ describe('Observability ingest auth regression', () => {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ logs: [{ type: 'log', entry: { level: 'info', message: 'test' } }] }),
+          body: JSON.stringify({
+            logs: [{ type: 'log', entry: { level: 'info', message: 'test' } }],
+          }),
         },
-        env,
+        env
       );
 
       expect(res.status).toBe(200);
@@ -177,7 +192,7 @@ describe('Observability ingest auth regression', () => {
         new Response(JSON.stringify({ ok: true, subscribers: 3 }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
-        }),
+        })
       );
 
       const env = createEnv();
@@ -186,14 +201,16 @@ describe('Observability ingest auth regression', () => {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ logs: [{ type: 'log', entry: { level: 'info', message: 'test' } }] }),
+          body: JSON.stringify({
+            logs: [{ type: 'log', entry: { level: 'info', message: 'test' } }],
+          }),
         },
-        env,
+        env
       );
 
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toBe('application/json');
-      const body = await res.json() as { ok: boolean; subscribers: number };
+      const body = (await res.json()) as { ok: boolean; subscribers: number };
       expect(body.subscribers).toBe(3);
     });
 
@@ -207,7 +224,7 @@ describe('Observability ingest auth regression', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ logs: [] }),
         },
-        env,
+        env
       );
 
       expect(res.status).toBe(401);
@@ -223,11 +240,11 @@ describe('Observability ingest auth regression', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ logs: [] }),
         },
-        env,
+        env
       );
 
       expect(res.status).toBe(401);
-      const body = await res.json() as { error: string };
+      const body = (await res.json()) as { error: string };
       expect(body.error).toBe('UNAUTHORIZED');
     });
 
@@ -241,7 +258,7 @@ describe('Observability ingest auth regression', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ logs: [] }),
         },
-        env,
+        env
       );
 
       expect(res.status).toBe(401);
@@ -258,7 +275,7 @@ describe('Observability ingest auth regression', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ logs: [] }),
         },
-        env,
+        env
       );
 
       // Should succeed without any session auth
@@ -280,7 +297,7 @@ describe('Observability ingest auth regression', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ timeRange: { start: '2026-01-01', end: '2026-01-02' } }),
         },
-        env,
+        env
       );
 
       expect(res.status).toBe(401);
@@ -292,7 +309,7 @@ describe('Observability ingest auth regression', () => {
       const res = await app.request(
         'https://api.example.com/api/admin/observability/logs/stream',
         { headers: { Upgrade: 'websocket' } },
-        env,
+        env
       );
 
       expect(res.status).toBe(401);
@@ -310,7 +327,7 @@ describe('Observability ingest auth regression', () => {
             'X-Test-Role': 'user',
           },
         },
-        env,
+        env
       );
 
       expect(res.status).toBe(403);
@@ -330,7 +347,7 @@ describe('Observability ingest auth regression', () => {
           },
           body: JSON.stringify({ timeRange: { start: '2026-01-01', end: '2026-01-02' } }),
         },
-        env,
+        env
       );
 
       expect(res.status).toBe(403);

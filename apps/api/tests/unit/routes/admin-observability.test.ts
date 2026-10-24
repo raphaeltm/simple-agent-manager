@@ -1045,7 +1045,7 @@ describe('Admin Observability Routes', () => {
         },
         createEnv()
       );
-      
+
       expect(response.status).toBe(202);
       expect(await response.json()).toEqual({ run: diagnosis });
       expect(mockCreateDebugDiagnosisRun).toHaveBeenCalledWith(

@@ -6,7 +6,10 @@
  *
  * See: apps/api/src/services/mcp-token.ts
  */
-import { DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS, DEFAULT_MCP_TOKEN_TTL_SECONDS } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS,
+  DEFAULT_MCP_TOKEN_TTL_SECONDS,
+} from '@simple-agent-manager/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { McpTokenData, McpTokenEnv } from '../../../src/services/mcp-token';
@@ -54,7 +57,9 @@ describe('MCP Token Sliding Window', () => {
 
     it('returns default for invalid env value', async () => {
       const { getMcpTokenMaxLifetime } = await import('../../../src/services/mcp-token');
-      expect(getMcpTokenMaxLifetime({ MCP_TOKEN_MAX_LIFETIME_SECONDS: 'invalid' })).toBe(DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS);
+      expect(getMcpTokenMaxLifetime({ MCP_TOKEN_MAX_LIFETIME_SECONDS: 'invalid' })).toBe(
+        DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS
+      );
     });
   });
 
@@ -88,7 +93,11 @@ describe('MCP Token Sliding Window', () => {
       expect(result).toEqual({ ...data, lastRefreshedAt: '2026-05-12T17:00:00.000Z' });
       // Should write back to KV with refreshed TTL
       expect(mockKV.put).toHaveBeenCalledTimes(1);
-      const [key, value, opts] = mockKV.put.mock.calls[0] as [string, string, { expirationTtl: number }];
+      const [key, value, opts] = mockKV.put.mock.calls[0] as [
+        string,
+        string,
+        { expirationTtl: number },
+      ];
       expect(key).toBe('mcp:test-token');
       const parsed = JSON.parse(value) as McpTokenData;
       expect(parsed.lastRefreshedAt).toBe('2026-05-12T17:00:00.000Z');

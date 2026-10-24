@@ -26,9 +26,7 @@ vi.mock('../../../src/services/trial/trial-runner', () => ({
   emitTrialEvent: emitTrialEventMock,
 }));
 
-const { emitGithubKnowledgeEvents } = await import(
-  '../../../src/services/trial/github-knowledge'
-);
+const { emitGithubKnowledgeEvents } = await import('../../../src/services/trial/github-knowledge');
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
@@ -83,8 +81,7 @@ describe('emitGithubKnowledgeEvents', () => {
           topics: ['cli', 'widgets', 'typescript'],
           license: { spdx_id: 'MIT' },
         }),
-      languages: () =>
-        jsonResp({ TypeScript: 9000, JavaScript: 500, CSS: 100 }),
+      languages: () => jsonResp({ TypeScript: 9000, JavaScript: 500, CSS: 100 }),
       readme: () =>
         textResp(
           '# Widgets\n\nA delightful CLI for widgets — does amazing things when you need them most.\n\n## Installation\n\nRun npm install.'
@@ -99,19 +96,13 @@ describe('emitGithubKnowledgeEvents', () => {
     );
 
     const calls = emitTrialEventMock.mock.calls;
-    const observations = calls.map(
-      (c) => (c[2] as { observation: string }).observation
-    );
+    const observations = calls.map((c) => (c[2] as { observation: string }).observation);
     expect(observations.some((o) => o.includes('Description:'))).toBe(true);
-    expect(observations.some((o) => o.includes('Primary language: TypeScript'))).toBe(
-      true
-    );
+    expect(observations.some((o) => o.includes('Primary language: TypeScript'))).toBe(true);
     expect(observations.some((o) => o.includes('Stars: 1234'))).toBe(true);
     expect(observations.some((o) => o.includes('Topics:'))).toBe(true);
     expect(observations.some((o) => o.includes('License: MIT'))).toBe(true);
-    expect(observations.some((o) => o.includes('Languages (by bytes):'))).toBe(
-      true
-    );
+    expect(observations.some((o) => o.includes('Languages (by bytes):'))).toBe(true);
     expect(observations.some((o) => o.startsWith('README:'))).toBe(true);
   });
 
@@ -126,7 +117,8 @@ describe('emitGithubKnowledgeEvents', () => {
           license: { spdx_id: 'Apache-2.0' },
         }),
       languages: () => jsonResp({ Go: 100, Shell: 50 }),
-      readme: () => textResp('A decent description paragraph that exceeds twenty characters by enough.'),
+      readme: () =>
+        textResp('A decent description paragraph that exceeds twenty characters by enough.'),
     });
     // Cap at 2 — must NOT emit more than 2 events even though the probes
     // would naturally produce ~7.
@@ -154,9 +146,7 @@ describe('emitGithubKnowledgeEvents', () => {
   });
 
   it('survives a non-2xx repo metadata response without throwing', async () => {
-    const fetchFn = vi
-      .fn()
-      .mockResolvedValue(new Response('rate limited', { status: 403 }));
+    const fetchFn = vi.fn().mockResolvedValue(new Response('rate limited', { status: 403 }));
     await expect(
       emitGithubKnowledgeEvents(
         makeEnv(),

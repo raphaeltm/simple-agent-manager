@@ -25,7 +25,7 @@ describe('generateBranchName', () => {
   });
 
   it('handles special characters', () => {
-    const result = generateBranchName('Fix bug #123: user can\'t login!', TASK_ID);
+    const result = generateBranchName("Fix bug #123: user can't login!", TASK_ID);
     expect(result).toBe('sam/fix-bug-123-user-345678');
   });
 

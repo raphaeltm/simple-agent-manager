@@ -56,8 +56,7 @@ vi.mock('drizzle-orm/d1', () => ({
             run: execute,
             then: <TResult1 = { meta: { changes: number } }, TResult2 = never>(
               onfulfilled?:
-                | ((value: { meta: { changes: number } }) => TResult1 | PromiseLike<TResult1>)
-                | null,
+                ((value: { meta: { changes: number } }) => TResult1 | PromiseLike<TResult1>) | null,
               onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
             ) => execute().then(onfulfilled, onrejected),
           };

@@ -258,9 +258,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
     // Verify encrypt was called with the new credential
     expect(encrypt).toHaveBeenCalledWith(validBody.credential, 'test-key');
     // Verify the exact workspace-incarnation CAS received the new ciphertext.
-    expect(d1Database.prepare).toHaveBeenCalledWith(
-      expect.stringContaining('UPDATE credentials')
-    );
+    expect(d1Database.prepare).toHaveBeenCalledWith(expect.stringContaining('UPDATE credentials'));
     expect(d1PreparedStmt.bind).toHaveBeenCalledWith(
       'new-encrypted',
       'new-iv',

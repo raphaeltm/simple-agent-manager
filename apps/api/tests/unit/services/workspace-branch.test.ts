@@ -127,12 +127,12 @@ describe('ensureWorkspaceBranchOnRemote — short circuits', () => {
     // dispatch_task only checks that an explicit `branch` is a non-empty string,
     // and this guard turns it into a ref CREATE on the caller's repository.
     const invalid = [
-      'feature branch',        // space
-      'feature..branch',       // consecutive dots
+      'feature branch', // space
+      'feature..branch', // consecutive dots
       '-leading-dash',
-      'refs/heads/.hidden',    // component starting with a dot
-      'feature.lock',          // .lock suffix
-      'feature/',              // trailing slash
+      'refs/heads/.hidden', // component starting with a dot
+      'feature.lock', // .lock suffix
+      'feature/', // trailing slash
       '/leading-slash',
       'double//slash',
       'has@{reflog}',
@@ -409,10 +409,7 @@ describe('ensureWorkspaceBranchOnRemote — GitLab', () => {
     // Must NOT be swallowed into `unknown` by the provider catch: losing
     // recovery authority means this replacement must stop provisioning.
     await expect(
-      ensureWorkspaceBranchOnRemote(
-        env,
-        baseInput({ repoProvider: 'gitlab', beforeRemoteWrite })
-      )
+      ensureWorkspaceBranchOnRemote(env, baseInput({ repoProvider: 'gitlab', beforeRemoteWrite }))
     ).rejects.toThrow(boom);
 
     expect(beforeRemoteWrite).toHaveBeenCalledTimes(1);
@@ -435,10 +432,7 @@ describe('ensureWorkspaceBranchOnRemote — GitLab', () => {
   it('reports unknown when GitLab metadata is missing', async () => {
     mocks.getProjectGitLabRepository.mockResolvedValue(null);
 
-    const result = await ensureWorkspaceBranchOnRemote(
-      env,
-      baseInput({ repoProvider: 'gitlab' })
-    );
+    const result = await ensureWorkspaceBranchOnRemote(env, baseInput({ repoProvider: 'gitlab' }));
 
     expect(result.status).toBe('unknown');
     expect(mocks.ensureGitLabBranchExists).not.toHaveBeenCalled();
@@ -448,10 +442,7 @@ describe('ensureWorkspaceBranchOnRemote — GitLab', () => {
     mocks.getProjectGitLabRepository.mockResolvedValue({ gitlabProjectId: 4242 });
     mocks.ensureGitLabBranchExists.mockRejectedValue(new Error('GitLab branch create failed: 403'));
 
-    const result = await ensureWorkspaceBranchOnRemote(
-      env,
-      baseInput({ repoProvider: 'gitlab' })
-    );
+    const result = await ensureWorkspaceBranchOnRemote(env, baseInput({ repoProvider: 'gitlab' }));
 
     expect(result).toEqual({
       status: 'unknown',

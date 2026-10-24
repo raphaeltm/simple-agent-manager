@@ -170,9 +170,7 @@ describe('acceptInstantSession — checkout branch guard', () => {
     // would still burn a container on every failure.
     expect(callOrder.indexOf('ensureBranch')).toBeGreaterThanOrEqual(0);
     expect(callOrder.indexOf('ensureBranch')).toBeLessThan(callOrder.indexOf('createNodeRecord'));
-    expect(callOrder.indexOf('ensureBranch')).toBeLessThan(
-      callOrder.indexOf('insertWorkspaceRow')
-    );
+    expect(callOrder.indexOf('ensureBranch')).toBeLessThan(callOrder.indexOf('insertWorkspaceRow'));
     // acceptInstantSession must not have reached container allocation at all.
     expect(callOrder).not.toContain('launchContainer');
     expect(callOrder).not.toContain('containerPhase');

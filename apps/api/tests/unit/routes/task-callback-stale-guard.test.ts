@@ -141,7 +141,6 @@ const OLD_TOKEN = tokenWithIatSeconds(TOKEN_IAT_SECONDS);
 
 // Routes import during collection so cold compilation is outside the callback test deadline.
 function createTestApp(): Hono {
-
   const app = new Hono();
   app.route('/api/projects', taskCallbackRoute);
   app.onError((err, c) => {

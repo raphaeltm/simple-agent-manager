@@ -23,13 +23,12 @@ import { submitTask } from '../../lib/api';
 import { ideaLinksQueryOptions, projectSkillsQueryOptions } from '../../lib/query-options';
 import { selectProfileId } from '../project-chat/profile-picker/model';
 
-/** The idea's linked work, as counts. Zero-count entries are dropped by the sheet. */
-export interface StartWorkRelatedCounts {
-  chats: number;
-  files: number;
-  pullRequests: number;
-  /** True when any count is a lower bound, so the UI shows "N+" (program decision 9). */
-  approximate: boolean;
+/** One kind of linked work on the idea. Zero-count entries are dropped by the sheet. */
+export interface StartWorkRelatedCount {
+  kind: 'chats' | 'files' | 'pullRequests';
+  count: number;
+  /** True when the count is a lower bound, so the UI shows "N+" (program decision 9). */
+  lowerBound: boolean;
 }
 
 export interface UseStartWorkResult {
@@ -45,7 +44,7 @@ export interface UseStartWorkResult {
   setNote: (note: string) => void;
   /** What SAM will do with this choice. `null` until a profile is known. */
   plan: WorkStartPlan | null;
-  related: StartWorkRelatedCounts | null;
+  related: StartWorkRelatedCount[] | null;
   submitting: boolean;
   error: string | null;
   start: () => Promise<SubmitTaskResponse | null>;
@@ -59,16 +58,20 @@ export function defaultStartWorkMessage(ideaTitle: string): string {
   return title ? `Work on the idea “${title}”.` : 'Work on this idea.';
 }
 
-function countsFrom(context: IdeaContext): StartWorkRelatedCounts {
-  return {
-    chats: context.sessions.total,
-    files: context.files.total,
-    pullRequests: context.pullRequests.total,
-    approximate:
-      context.sessions.totalIsLowerBound ||
-      context.files.totalIsLowerBound ||
-      context.pullRequests.totalIsLowerBound,
-  };
+function countsFrom(context: IdeaContext): StartWorkRelatedCount[] {
+  return (
+    [
+      { kind: 'chats', list: context.sessions },
+      { kind: 'files', list: context.files },
+      { kind: 'pullRequests', list: context.pullRequests },
+    ] as const
+  )
+    .filter((entry) => entry.list.total > 0)
+    .map((entry) => ({
+      kind: entry.kind,
+      count: entry.list.total,
+      lowerBound: entry.list.totalIsLowerBound,
+    }));
 }
 
 export function useStartWork({

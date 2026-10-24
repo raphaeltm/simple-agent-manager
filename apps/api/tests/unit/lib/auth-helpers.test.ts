@@ -25,7 +25,9 @@ describe('extractBearerToken', () => {
   });
 
   it('throws on non-Bearer scheme', () => {
-    expect(() => extractBearerToken('Basic abc123')).toThrow('Missing or invalid Authorization header');
+    expect(() => extractBearerToken('Basic abc123')).toThrow(
+      'Missing or invalid Authorization header'
+    );
   });
 
   it('throws on Bearer with no token (just "Bearer ")', () => {
@@ -37,7 +39,9 @@ describe('extractBearerToken', () => {
   });
 
   it('throws on lowercase bearer', () => {
-    expect(() => extractBearerToken('bearer abc123')).toThrow('Missing or invalid Authorization header');
+    expect(() => extractBearerToken('bearer abc123')).toThrow(
+      'Missing or invalid Authorization header'
+    );
   });
 
   it('preserves token with special characters', () => {

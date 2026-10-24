@@ -17,9 +17,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
-import {
-  parsePolicyRow,
-} from '../../src/durable-objects/project-data/row-schemas';
+import { parsePolicyRow } from '../../src/durable-objects/project-data/row-schemas';
 
 // ─── Shared Types & Guards ──────────────────────────────────────────────────
 

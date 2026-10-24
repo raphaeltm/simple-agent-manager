@@ -16,9 +16,7 @@ import { AppError } from '../../../src/middleware/error';
 const mocks = vi.hoisted(() => {
   class CommentNotFoundError extends Error {
     readonly code = 'COMMENT_NOT_FOUND';
-    constructor(
-      readonly resource: 'Chat session' | 'Message' | 'Comment thread' | 'Library file'
-    ) {
+    constructor(readonly resource: 'Chat session' | 'Message' | 'Comment thread' | 'Library file') {
       super(`${resource} not found`);
       this.name = 'CommentNotFoundError';
     }

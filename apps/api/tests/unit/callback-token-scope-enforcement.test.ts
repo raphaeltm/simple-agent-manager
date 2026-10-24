@@ -8,7 +8,7 @@
  * secret access vulnerability where a shared node-level CALLBACK_TOKEN
  * could fetch API keys for any co-tenant workspace.
  */
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CallbackTokenPayload } from '../../src/services/jwt';
 
@@ -36,7 +36,8 @@ vi.mock('drizzle-orm', async (importOriginal) => {
 });
 
 // Mock JWT verification with controllable scope
-const mockVerifyCallbackToken = vi.fn<(token: string, env: unknown) => Promise<CallbackTokenPayload>>();
+const mockVerifyCallbackToken =
+  vi.fn<(token: string, env: unknown) => Promise<CallbackTokenPayload>>();
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: (...args: [string, unknown]) => mockVerifyCallbackToken(...args),
   signCallbackToken: vi.fn().mockResolvedValue('mock-workspace-token'),
@@ -80,9 +81,9 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
 
     const c = makeContext('node-scoped-token');
 
-    await expect(
-      verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).rejects.toThrow('Insufficient token scope');
+    await expect(verifyWorkspaceCallbackAuth(c, 'ws-abc')).rejects.toThrow(
+      'Insufficient token scope'
+    );
   });
 
   it('REJECTS node-scoped tokens even when workspace claim matches workspaceId', async () => {
@@ -96,9 +97,9 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
 
     const c = makeContext('forged-node-token');
 
-    await expect(
-      verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).rejects.toThrow('Insufficient token scope');
+    await expect(verifyWorkspaceCallbackAuth(c, 'ws-abc')).rejects.toThrow(
+      'Insufficient token scope'
+    );
   });
 
   // ==========================================================================
@@ -115,9 +116,7 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
     const c = makeContext('workspace-token');
 
     // Should resolve without throwing
-    await expect(
-      verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).resolves.toBeUndefined();
+    await expect(verifyWorkspaceCallbackAuth(c, 'ws-abc')).resolves.toBeUndefined();
   });
 
   it('REJECTS workspace-scoped tokens when workspace claim does not match', async () => {
@@ -129,9 +128,9 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
 
     const c = makeContext('wrong-workspace-token');
 
-    await expect(
-      verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).rejects.toThrow('Insufficient token scope');
+    await expect(verifyWorkspaceCallbackAuth(c, 'ws-abc')).rejects.toThrow(
+      'Insufficient token scope'
+    );
   });
 
   it('REJECTS workspace-scoped tokens for a different workspace on the same node', async () => {
@@ -145,9 +144,9 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
 
     const c = makeContext('cross-workspace-token');
 
-    await expect(
-      verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).rejects.toThrow('Insufficient token scope');
+    await expect(verifyWorkspaceCallbackAuth(c, 'ws-abc')).rejects.toThrow(
+      'Insufficient token scope'
+    );
 
     // Verify no DB query was made (scope: workspace does direct match only)
     expect(mockDbSelect).not.toHaveBeenCalled();
@@ -166,9 +165,7 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
 
     const c = makeContext('legacy-workspace-token');
 
-    await expect(
-      verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).resolves.toBeUndefined();
+    await expect(verifyWorkspaceCallbackAuth(c, 'ws-abc')).resolves.toBeUndefined();
   });
 
   it('REJECTS legacy node-level tokens (node fallback removed)', async () => {
@@ -180,9 +177,9 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
 
     const c = makeContext('legacy-node-token');
 
-    await expect(
-      verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).rejects.toThrow('Insufficient token scope');
+    await expect(verifyWorkspaceCallbackAuth(c, 'ws-abc')).rejects.toThrow(
+      'Insufficient token scope'
+    );
   });
 
   it('REJECTS legacy tokens when workspace claim does not match', async () => {
@@ -194,9 +191,9 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
 
     const c = makeContext('bad-legacy-token');
 
-    await expect(
-      verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).rejects.toThrow('Insufficient token scope');
+    await expect(verifyWorkspaceCallbackAuth(c, 'ws-abc')).rejects.toThrow(
+      'Insufficient token scope'
+    );
   });
 
   // ==========================================================================
@@ -211,8 +208,8 @@ describe('verifyWorkspaceCallbackAuth — scope enforcement', () => {
       env: { DATABASE: {}, JWT_PUBLIC_KEY: 'key', BASE_DOMAIN: 'example.com' },
     } as any;
 
-    await expect(
-      verifyWorkspaceCallbackAuth(c, 'ws-abc')
-    ).rejects.toThrow('Missing or invalid Authorization header');
+    await expect(verifyWorkspaceCallbackAuth(c, 'ws-abc')).rejects.toThrow(
+      'Missing or invalid Authorization header'
+    );
   });
 });

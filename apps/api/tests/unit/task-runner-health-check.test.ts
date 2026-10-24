@@ -43,7 +43,9 @@ describe('isNodeAgentReadyForWorkspaceDispatch', () => {
       agent_ready_at: isoAt(-120_000),
     });
 
-    expect(isNodeAgentReadyForWorkspaceDispatch(readyBeforePollingStarted, waitStartedAt)).toBe(true);
+    expect(isNodeAgentReadyForWorkspaceDispatch(readyBeforePollingStarted, waitStartedAt)).toBe(
+      true
+    );
   });
 
   it('does not accept a stale heartbeat even when /ready was sent earlier', () => {
@@ -66,15 +68,30 @@ describe('isNodeAgentReadyForWorkspaceDispatch', () => {
 
   it('rejects unhealthy, creating, and malformed node records', () => {
     expect(isNodeAgentReadyForWorkspaceDispatch(null, waitStartedAt)).toBe(false);
-    expect(isNodeAgentReadyForWorkspaceDispatch(readyRow({
-      status: 'creating',
-    }), waitStartedAt)).toBe(false);
-    expect(isNodeAgentReadyForWorkspaceDispatch(readyRow({
-      health_status: 'unhealthy',
-    }), waitStartedAt)).toBe(false);
-    expect(isNodeAgentReadyForWorkspaceDispatch(readyRow({
-      last_heartbeat_at: 'not-a-date',
-    }), waitStartedAt)).toBe(false);
+    expect(
+      isNodeAgentReadyForWorkspaceDispatch(
+        readyRow({
+          status: 'creating',
+        }),
+        waitStartedAt
+      )
+    ).toBe(false);
+    expect(
+      isNodeAgentReadyForWorkspaceDispatch(
+        readyRow({
+          health_status: 'unhealthy',
+        }),
+        waitStartedAt
+      )
+    ).toBe(false);
+    expect(
+      isNodeAgentReadyForWorkspaceDispatch(
+        readyRow({
+          last_heartbeat_at: 'not-a-date',
+        }),
+        waitStartedAt
+      )
+    ).toBe(false);
   });
 
   it('matches the readiness invariant across randomized signal timings', () => {
@@ -98,12 +115,13 @@ describe('isNodeAgentReadyForWorkspaceDispatch', () => {
         last_heartbeat_at: missingHeartbeat ? null : isoAt(heartbeatOffset),
         agent_ready_at: missingReady ? null : isoAt(readyOffset),
       });
-      const expected = status === 'running'
-        && healthStatus === 'healthy'
-        && row.last_heartbeat_at !== null
-        && row.agent_ready_at !== null
-        && heartbeatOffset > -30_000
-        && readyOffset <= heartbeatOffset + 30_000;
+      const expected =
+        status === 'running' &&
+        healthStatus === 'healthy' &&
+        row.last_heartbeat_at !== null &&
+        row.agent_ready_at !== null &&
+        heartbeatOffset > -30_000 &&
+        readyOffset <= heartbeatOffset + 30_000;
 
       expect(isNodeAgentReadyForWorkspaceDispatch(row, waitStartedAt)).toBe(expected);
     }

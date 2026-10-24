@@ -1,22 +1,21 @@
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Use vi.hoisted() so mock functions are available when vi.mock factories run
-const {
-  mockObsSelectFrom,
-  mockObsSelect,
-  mockMainSelectFrom,
-  mockMainSelect,
-} = vi.hoisted(() => {
+const { mockObsSelectFrom, mockObsSelect, mockMainSelectFrom, mockMainSelect } = vi.hoisted(() => {
   // Observability DB mock chain
   const mockObsSelectGet = vi.fn();
   const mockObsSelectWhere = vi.fn().mockReturnValue({ get: mockObsSelectGet });
-  const mockObsSelectFrom = vi.fn().mockReturnValue({ where: mockObsSelectWhere, get: mockObsSelectGet });
+  const mockObsSelectFrom = vi
+    .fn()
+    .mockReturnValue({ where: mockObsSelectWhere, get: mockObsSelectGet });
   const mockObsSelect = vi.fn().mockReturnValue({ from: mockObsSelectFrom });
 
   // Main DB mock chain
   const mockMainSelectGet = vi.fn();
   const mockMainSelectWhere = vi.fn().mockReturnValue({ get: mockMainSelectGet });
-  const mockMainSelectFrom = vi.fn().mockReturnValue({ where: mockMainSelectWhere, get: mockMainSelectGet });
+  const mockMainSelectFrom = vi
+    .fn()
+    .mockReturnValue({ where: mockMainSelectWhere, get: mockMainSelectGet });
   const mockMainSelect = vi.fn().mockReturnValue({ from: mockMainSelectFrom });
 
   return {

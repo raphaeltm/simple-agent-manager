@@ -91,7 +91,8 @@ describe('old node-pool requests through TaskRunner admission', () => {
 
   it('wakes an old sleeping session with its persisted reservation after project defaults change, then admits it on the same source', async () => {
     const f = fixture();
-    f.sqlite.prepare('UPDATE projects SET resource_requirements_json = ? WHERE id = ?')
+    f.sqlite
+      .prepare('UPDATE projects SET resource_requirements_json = ? WHERE id = ?')
       .run(JSON.stringify({ minMemoryGb: 1 }), 'project-1');
     f.sqlite.exec('UPDATE tasks SET requested_vm_size = NULL, requested_vm_size_source = NULL');
     const original = await f.run({
@@ -117,11 +118,7 @@ describe('old node-pool requests through TaskRunner admission', () => {
       .prepare(
         'UPDATE projects SET default_vm_size = ?, resource_requirements_json = ? WHERE id = ?'
       )
-      .run(
-        'large',
-        JSON.stringify({ minMemoryGb: 2 }),
-        'project-1'
-      );
+      .run('large', JSON.stringify({ minMemoryGb: 2 }), 'project-1');
     const historicalNode = f.sqlite
       .prepare('SELECT * FROM nodes WHERE id = ?')
       .get('sleeping-host');
@@ -145,8 +142,9 @@ describe('old node-pool requests through TaskRunner admission', () => {
     const freshNode = await createSelectedNode(f, state);
     // Recovery's fresh allocation must preserve the canonical candidate's boot
     // options. Native local disk capacity is not a requested boot-disk override.
-    await expect(assertNodeAllocationPlanCurrent(f.env, freshNode.id, 'user-1', 'project-1'))
-      .resolves.toBeUndefined();
+    await expect(
+      assertNodeAllocationPlanCurrent(f.env, freshNode.id, 'user-1', 'project-1')
+    ).resolves.toBeUndefined();
     expect(state.config.resolvedReservation).toEqual(original.config.resolvedReservation);
     const snapshot = await seedHost(f, wake);
     expect(snapshot.capacityPoolId).toBe(originalSnapshot.capacityPoolId);
@@ -169,38 +167,48 @@ describe('old node-pool requests through TaskRunner admission', () => {
     });
   });
 
-  it.each(['compact', 'snapshot'] as const)('preserves explicit native boot options from a %s candidate through provider allocation authority', async (representation) => {
-    const f = fixture();
-    const start = await f.run();
-    const candidate = start.config.capacityPoolSelection!.candidates[0]!;
-    const nativeOptions = {
-      providerInstanceBootDiskSizeGb: 30,
-      providerInstanceImage: 'ubuntu-24.04',
-      providerInstanceArchitecture: 'x86_64',
-    };
-    f.sqlite.prepare(`UPDATE capacity_pool_candidates SET provider_instance_boot_disk_size_gb = ?,
-      provider_instance_image = ?, provider_instance_architecture = ? WHERE id = ?`)
-      .run(30, 'ubuntu-24.04', 'x86_64', candidate.id);
-    const snapshot = { ...snapshotFor(start), ...nativeOptions };
-    if (representation === 'snapshot') {
-      candidate.snapshot = snapshot;
-      delete candidate.providerInstanceBootDiskSizeGb;
-      delete candidate.providerInstanceImage;
-      delete candidate.providerInstanceArchitecture;
-    } else {
-      delete candidate.snapshot;
-      Object.assign(candidate, nativeOptions);
+  it.each(['compact', 'snapshot'] as const)(
+    'preserves explicit native boot options from a %s candidate through provider allocation authority',
+    async (representation) => {
+      const f = fixture();
+      const start = await f.run();
+      const candidate = start.config.capacityPoolSelection!.candidates[0]!;
+      const nativeOptions = {
+        providerInstanceBootDiskSizeGb: 30,
+        providerInstanceImage: 'ubuntu-24.04',
+        providerInstanceArchitecture: 'x86_64',
+      };
+      f.sqlite
+        .prepare(
+          `UPDATE capacity_pool_candidates SET provider_instance_boot_disk_size_gb = ?,
+      provider_instance_image = ?, provider_instance_architecture = ? WHERE id = ?`
+        )
+        .run(30, 'ubuntu-24.04', 'x86_64', candidate.id);
+      const snapshot = { ...snapshotFor(start), ...nativeOptions };
+      if (representation === 'snapshot') {
+        candidate.snapshot = snapshot;
+        delete candidate.providerInstanceBootDiskSizeGb;
+        delete candidate.providerInstanceImage;
+        delete candidate.providerInstanceArchitecture;
+      } else {
+        delete candidate.snapshot;
+        Object.assign(candidate, nativeOptions);
+      }
+      const state = { ...start, stepResults: {} } as TaskRunnerState;
+      const node = await createSelectedNode(f, state);
+      await expect(
+        assertNodeAllocationPlanCurrent(f.env, node.id, 'user-1', 'project-1')
+      ).resolves.toBeUndefined();
+      expect(state.config).toMatchObject(nativeOptions);
+      expect(state.stepResults.capacityPlacementSnapshot).toMatchObject(nativeOptions);
+      f.sqlite
+        .prepare('UPDATE capacity_pools SET revision = revision + 1 WHERE id = ?')
+        .run(candidate.poolId);
+      await expect(
+        assertNodeAllocationPlanCurrent(f.env, node.id, 'user-1', 'project-1')
+      ).rejects.toThrow('Node allocation plan is no longer current');
     }
-    const state = { ...start, stepResults: {} } as TaskRunnerState;
-    const node = await createSelectedNode(f, state);
-    await expect(assertNodeAllocationPlanCurrent(f.env, node.id, 'user-1', 'project-1'))
-      .resolves.toBeUndefined();
-    expect(state.config).toMatchObject(nativeOptions);
-    expect(state.stepResults.capacityPlacementSnapshot).toMatchObject(nativeOptions);
-    f.sqlite.prepare('UPDATE capacity_pools SET revision = revision + 1 WHERE id = ?').run(candidate.poolId);
-    await expect(assertNodeAllocationPlanCurrent(f.env, node.id, 'user-1', 'project-1'))
-      .rejects.toThrow('Node allocation plan is no longer current');
-  });
+  );
 
   it('rejects a queued snapshot after owner removal without rewriting historical hardware or falling through to another credential', async () => {
     const f = fixture('project');

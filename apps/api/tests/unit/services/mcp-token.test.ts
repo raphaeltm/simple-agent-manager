@@ -1,5 +1,8 @@
-import { DEFAULT_MCP_TOKEN_TTL_SECONDS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS } from '@simple-agent-manager/shared';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import {
+  DEFAULT_MCP_TOKEN_TTL_SECONDS,
+  DEFAULT_TASK_RUN_MAX_EXECUTION_MS,
+} from '@simple-agent-manager/shared';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockKV = {
   put: vi.fn(),
@@ -40,7 +43,9 @@ describe('MCP Token Service', () => {
 
     it('should return default for invalid env value', async () => {
       const { getMcpTokenTTL } = await import('../../../src/services/mcp-token');
-      expect(getMcpTokenTTL({ MCP_TOKEN_TTL_SECONDS: 'invalid' })).toBe(DEFAULT_MCP_TOKEN_TTL_SECONDS);
+      expect(getMcpTokenTTL({ MCP_TOKEN_TTL_SECONDS: 'invalid' })).toBe(
+        DEFAULT_MCP_TOKEN_TTL_SECONDS
+      );
     });
 
     it('should return default for negative value', async () => {
@@ -68,7 +73,11 @@ describe('MCP Token Service', () => {
       const taskMaxExecutionSeconds = DEFAULT_TASK_RUN_MAX_EXECUTION_MS / 1000;
 
       await storeMcpToken(mockKV as unknown as KVNamespace, 'token', {
-        taskId: 't', projectId: 'p', userId: 'u', workspaceId: 'w', createdAt: '2026-01-01T00:00:00Z',
+        taskId: 't',
+        projectId: 'p',
+        userId: 'u',
+        workspaceId: 'w',
+        createdAt: '2026-01-01T00:00:00Z',
       });
 
       const [, , opts] = mockKV.put.mock.calls[0] as [string, string, { expirationTtl: number }];
@@ -91,11 +100,9 @@ describe('MCP Token Service', () => {
 
       await storeMcpToken(mockKV as unknown as KVNamespace, token, data);
 
-      expect(mockKV.put).toHaveBeenCalledWith(
-        'mcp:test-mcp-token',
-        JSON.stringify(data),
-        { expirationTtl: DEFAULT_MCP_TOKEN_TTL_SECONDS },
-      );
+      expect(mockKV.put).toHaveBeenCalledWith('mcp:test-mcp-token', JSON.stringify(data), {
+        expirationTtl: DEFAULT_MCP_TOKEN_TTL_SECONDS,
+      });
     });
 
     it('should respect custom TTL from env', async () => {
@@ -114,11 +121,9 @@ describe('MCP Token Service', () => {
         MCP_TOKEN_TTL_SECONDS: '3600',
       });
 
-      expect(mockKV.put).toHaveBeenCalledWith(
-        'mcp:test-token',
-        JSON.stringify(data),
-        { expirationTtl: 3600 },
-      );
+      expect(mockKV.put).toHaveBeenCalledWith('mcp:test-token', JSON.stringify(data), {
+        expirationTtl: 3600,
+      });
     });
   });
 

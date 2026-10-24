@@ -86,13 +86,11 @@ vi.mock('../../src/middleware/rate-limit', async () => {
   const actual = await vi.importActual('../../src/middleware/rate-limit');
   return {
     ...actual,
-    checkRateLimit: vi
-      .fn()
-      .mockResolvedValue({
-        allowed: true,
-        remaining: 9,
-        resetAt: Math.floor(Date.now() / 1000) + 60,
-      }),
+    checkRateLimit: vi.fn().mockResolvedValue({
+      allowed: true,
+      remaining: 9,
+      resetAt: Math.floor(Date.now() / 1000) + 60,
+    }),
   };
 });
 

@@ -86,11 +86,14 @@ describe('markTaskFailedIfNonTerminal', () => {
       );
 
       expect(transitioned).toBe(true);
-      expect(sqlite.prepare('SELECT status, error_message FROM tasks WHERE id = ?').get('task-123'))
-        .toEqual({ status: 'failed', error_message: 'Session creation failed: DO unavailable' });
+      expect(
+        sqlite.prepare('SELECT status, error_message FROM tasks WHERE id = ?').get('task-123')
+      ).toEqual({ status: 'failed', error_message: 'Session creation failed: DO unavailable' });
       expect(
         sqlite
-          .prepare('SELECT from_status, to_status, reason FROM task_status_events WHERE task_id = ?')
+          .prepare(
+            'SELECT from_status, to_status, reason FROM task_status_events WHERE task_id = ?'
+          )
           .get('task-123')
       ).toEqual({
         from_status: status,
@@ -114,8 +117,9 @@ describe('markTaskFailedIfNonTerminal', () => {
     );
 
     expect(transitioned).toBe(false);
-    expect(sqlite.prepare('SELECT status, error_message FROM tasks WHERE id = ?').get('task-123'))
-      .toEqual({ status, error_message: null });
+    expect(
+      sqlite.prepare('SELECT status, error_message FROM tasks WHERE id = ?').get('task-123')
+    ).toEqual({ status, error_message: null });
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM task_status_events').get()).toEqual({
       count: 0,
     });
@@ -149,7 +153,9 @@ describe('markTaskFailedIfNonTerminal', () => {
         status: expectedTransition ? 'failed' : winningStatus,
       });
       expect(
-        sqlite.prepare('SELECT from_status FROM task_status_events WHERE task_id = ?').get('task-123')
+        sqlite
+          .prepare('SELECT from_status FROM task_status_events WHERE task_id = ?')
+          .get('task-123')
       ).toEqual(expectedTransition ? { from_status: winningStatus } : undefined);
     }
   );

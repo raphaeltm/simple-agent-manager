@@ -1,4 +1,4 @@
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GcpApiError, sanitizeGcpError } from '../../src/services/gcp-errors';
 
@@ -42,7 +42,7 @@ describe('runGcpDeploySetup', () => {
     // Mock responses in order:
     // 1. getProjectNumber
     mockFetch.mockResolvedValueOnce(
-      mockGcpResponse({ projectId: 'my-project', projectNumber: '123456789' }),
+      mockGcpResponse({ projectId: 'my-project', projectNumber: '123456789' })
     );
     // 2. enableApis (returns done operation)
     mockFetch.mockResolvedValueOnce(mockGcpResponse({ name: 'operations/op1', done: true }));
@@ -52,16 +52,14 @@ describe('runGcpDeploySetup', () => {
     mockFetch.mockResolvedValueOnce(mockGcpResponse({ name: 'operations/op3', done: true }));
     // 5. createServiceAccount
     mockFetch.mockResolvedValueOnce(
-      mockGcpResponse({ email: 'sam-deployer@my-project.iam.gserviceaccount.com' }),
+      mockGcpResponse({ email: 'sam-deployer@my-project.iam.gserviceaccount.com' })
     );
     // 6. grantWifUserOnSa - getIamPolicy
     mockFetch.mockResolvedValueOnce(mockGcpResponse({ bindings: [], etag: 'abc' }));
     // 7. grantWifUserOnSa - setIamPolicy
     mockFetch.mockResolvedValueOnce(mockGcpResponse({ bindings: [], etag: 'def' }));
     // 8. grantProjectRoles - getIamPolicy
-    mockFetch.mockResolvedValueOnce(
-      mockGcpResponse({ bindings: [], etag: 'ghi', version: 3 }),
-    );
+    mockFetch.mockResolvedValueOnce(mockGcpResponse({ bindings: [], etag: 'ghi', version: 3 }));
     // 9. grantProjectRoles - setIamPolicy
     mockFetch.mockResolvedValueOnce(mockGcpResponse({ bindings: [], etag: 'jkl' }));
 
@@ -70,7 +68,7 @@ describe('runGcpDeploySetup', () => {
       'my-project',
       mockEnv(),
       (step, status) => progressSteps.push({ step, status }),
-      'sam-project-123',
+      'sam-project-123'
     );
 
     // Verify result
@@ -82,9 +80,7 @@ describe('runGcpDeploySetup', () => {
     expect(result.wifProviderId).toBe('sam-oidc');
 
     // Verify all progress steps completed
-    const completedSteps = progressSteps
-      .filter((s) => s.status === 'done')
-      .map((s) => s.step);
+    const completedSteps = progressSteps.filter((s) => s.status === 'done').map((s) => s.step);
     expect(completedSteps).toEqual([
       'get_project_number',
       'enable_apis',
@@ -112,14 +108,14 @@ describe('runGcpDeploySetup', () => {
     const oidcProviderCall = mockFetch.mock.calls[3];
     const oidcBody = JSON.parse(oidcProviderCall![1]!.body as string);
     expect(oidcBody.attributeCondition).toBe(
-      "assertion.iss == 'https://api.example.com' && assertion.project_id == 'sam-project-123'",
+      "assertion.iss == 'https://api.example.com' && assertion.project_id == 'sam-project-123'"
     );
 
     // Verify IAM binding uses subject-scoped principal (not wildcard)
     const setIamCall = mockFetch.mock.calls[6];
     const iamBody = JSON.parse(setIamCall![1]!.body as string);
     const wifBinding = iamBody.policy.bindings.find(
-      (b: { role: string }) => b.role === 'roles/iam.workloadIdentityUser',
+      (b: { role: string }) => b.role === 'roles/iam.workloadIdentityUser'
     );
     expect(wifBinding.members[0]).toContain('subject/project:sam-project-123');
     expect(wifBinding.members[0]).not.toContain('/*');
@@ -128,21 +124,23 @@ describe('runGcpDeploySetup', () => {
     const grantRolesSetIamCall = mockFetch.mock.calls[8];
     const grantRolesBody = JSON.parse(grantRolesSetIamCall![1]!.body as string);
     const ownerBinding = grantRolesBody.policy.bindings.find(
-      (b: { role: string }) => b.role === 'roles/owner',
+      (b: { role: string }) => b.role === 'roles/owner'
     );
     expect(ownerBinding).toBeDefined();
-    expect(ownerBinding.members).toContain(`serviceAccount:sam-deployer@my-project.iam.gserviceaccount.com`);
+    expect(ownerBinding.members).toContain(
+      `serviceAccount:sam-deployer@my-project.iam.gserviceaccount.com`
+    );
   });
 
   it('uses configurable env vars for pool/provider/sa IDs', async () => {
     // Mock all responses as before
+    mockFetch.mockResolvedValueOnce(mockGcpResponse({ projectId: 'p1', projectNumber: '111' }));
+    mockFetch.mockResolvedValueOnce(mockGcpResponse({ done: true }));
+    mockFetch.mockResolvedValueOnce(mockGcpResponse({ done: true }));
+    mockFetch.mockResolvedValueOnce(mockGcpResponse({ done: true }));
     mockFetch.mockResolvedValueOnce(
-      mockGcpResponse({ projectId: 'p1', projectNumber: '111' }),
+      mockGcpResponse({ email: 'custom@p1.iam.gserviceaccount.com' })
     );
-    mockFetch.mockResolvedValueOnce(mockGcpResponse({ done: true }));
-    mockFetch.mockResolvedValueOnce(mockGcpResponse({ done: true }));
-    mockFetch.mockResolvedValueOnce(mockGcpResponse({ done: true }));
-    mockFetch.mockResolvedValueOnce(mockGcpResponse({ email: 'custom@p1.iam.gserviceaccount.com' }));
     mockFetch.mockResolvedValueOnce(mockGcpResponse({ bindings: [], etag: 'a' }));
     mockFetch.mockResolvedValueOnce(mockGcpResponse({ etag: 'b' }));
     mockFetch.mockResolvedValueOnce(mockGcpResponse({ bindings: [], etag: 'c' }));
@@ -155,7 +153,7 @@ describe('runGcpDeploySetup', () => {
         GCP_DEPLOY_WIF_POOL_ID: 'custom-pool',
         GCP_DEPLOY_WIF_PROVIDER_ID: 'custom-provider',
         GCP_DEPLOY_SERVICE_ACCOUNT_ID: 'custom',
-      }),
+      })
     );
 
     expect(result.wifPoolId).toBe('custom-pool');
@@ -166,7 +164,7 @@ describe('runGcpDeploySetup', () => {
   it('propagates GcpApiError when getProjectNumber fails', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const rawBody = JSON.stringify({
-      error: { code: 403, message: "Permission denied on projects/secret-project-id" },
+      error: { code: 403, message: 'Permission denied on projects/secret-project-id' },
     });
     mockFetch.mockResolvedValueOnce(mockGcpResponse(JSON.parse(rawBody), 403));
 
@@ -194,7 +192,11 @@ describe('runGcpDeploySetup', () => {
     mockFetch.mockResolvedValueOnce(mockGcpResponse({ done: true }));
     // 3. createWifPool fails with 403
     const rawBody = JSON.stringify({
-      error: { code: 403, message: "Permission 'iam.workloadIdentityPools.create' denied on 'projects/999/locations/global'" },
+      error: {
+        code: 403,
+        message:
+          "Permission 'iam.workloadIdentityPools.create' denied on 'projects/999/locations/global'",
+      },
     });
     mockFetch.mockResolvedValueOnce(mockGcpResponse(JSON.parse(rawBody), 403));
 

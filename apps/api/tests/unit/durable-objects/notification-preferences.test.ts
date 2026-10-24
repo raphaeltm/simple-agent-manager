@@ -304,14 +304,10 @@ describe('NotificationService isNotificationEnabled resolution', () => {
     await service.updatePreference('user-1', 'task_complete', 'in_app', true, 'proj-1');
 
     // Within proj-1 the type is explicitly enabled
-    expect(
-      await service.isNotificationEnabled('user-1', 'task_complete', 'proj-1')
-    ).toBe(true);
+    expect(await service.isNotificationEnabled('user-1', 'task_complete', 'proj-1')).toBe(true);
 
     // Outside proj-1 the wildcard global disable still applies
-    expect(
-      await service.isNotificationEnabled('user-1', 'task_complete', 'proj-2')
-    ).toBe(false);
+    expect(await service.isNotificationEnabled('user-1', 'task_complete', 'proj-2')).toBe(false);
 
     const result = await service.createNotification('user-1', {
       type: 'task_complete',

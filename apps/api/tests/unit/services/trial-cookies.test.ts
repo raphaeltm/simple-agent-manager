@@ -113,10 +113,7 @@ describe('trial cookies — claim token', () => {
     const token = await signClaimToken(basePayload, SECRET);
     const [, sig] = token.split('.');
     // Swap in a different but validly-base64url-encoded body; signature won't match.
-    const otherToken = await signClaimToken(
-      { ...basePayload, trialId: 'trial_different' },
-      SECRET
-    );
+    const otherToken = await signClaimToken({ ...basePayload, trialId: 'trial_different' }, SECRET);
     const [otherBody] = otherToken.split('.');
     const mutated = `${otherBody}.${sig}`;
     const result = await verifyClaimToken(mutated, SECRET, 1_500_000);

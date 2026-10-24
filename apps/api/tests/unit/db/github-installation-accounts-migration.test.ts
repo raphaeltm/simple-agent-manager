@@ -33,11 +33,13 @@ describe('github_installation_accounts migration', () => {
     db.exec(readMigration('0052_github_installation_accounts.sql'));
 
     const rows = db
-      .prepare(`
+      .prepare(
+        `
         SELECT installation_id, account_type, account_name, normalized_account_name, uninstalled_at
         FROM github_installation_accounts
         ORDER BY installation_id
-      `)
+      `
+      )
       .all();
 
     expect(rows).toEqual([
@@ -81,11 +83,13 @@ describe('github_installation_accounts migration', () => {
     db.exec(readMigration('0052_github_installation_accounts.sql'));
 
     const beforeRepair = db
-      .prepare(`
+      .prepare(
+        `
         SELECT account_type, account_name, normalized_account_name
         FROM github_installation_accounts
         WHERE installation_id = '120081765'
-      `)
+      `
+      )
       .get();
 
     expect(beforeRepair).toEqual({
@@ -97,11 +101,13 @@ describe('github_installation_accounts migration', () => {
     db.exec(readMigration('0053_github_installation_accounts_org_preference.sql'));
 
     const afterRepair = db
-      .prepare(`
+      .prepare(
+        `
         SELECT account_type, account_name, normalized_account_name, uninstalled_at
         FROM github_installation_accounts
         WHERE installation_id = '120081765'
-      `)
+      `
+      )
       .get();
 
     expect(afterRepair).toEqual({

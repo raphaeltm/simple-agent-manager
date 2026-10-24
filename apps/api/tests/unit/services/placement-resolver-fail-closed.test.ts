@@ -13,10 +13,8 @@ vi.mock('../../../src/services/provider-credentials', () => ({
   resolveCredentialSource: mocks.resolveCredentialSource,
 }));
 
-const {
-  resolveTaskStartPlacement,
-  resolveTaskStartPlacementCredentialAttributionFromPlacement,
-} = await import('../../../src/services/placement-resolver');
+const { resolveTaskStartPlacement, resolveTaskStartPlacementCredentialAttributionFromPlacement } =
+  await import('../../../src/services/placement-resolver');
 
 describe('task-start placement capacity pool failure handling', () => {
   beforeEach(() => {

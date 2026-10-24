@@ -73,7 +73,9 @@ describe('parseReceivePackResult', () => {
   });
 
   it('treats "ng <ref>" as failure', () => {
-    const r = parseReceivePackResult('000eunpack ok\n0028ng refs/heads/main permission denied\n0000');
+    const r = parseReceivePackResult(
+      '000eunpack ok\n0028ng refs/heads/main permission denied\n0000'
+    );
     expect(r.ok).toBe(false);
     expect(r.detail).toContain('ng refs/heads/main');
   });
@@ -117,9 +119,7 @@ describe.runIf(hasGit)('buildSeedPack against real git receive-pack', () => {
     expect(parseReceivePackResult(result.toString('latin1')).ok).toBe(true);
 
     // The ref now exists and points at our commit.
-    const ref = execFileSync('git', ['-C', bare, 'rev-parse', 'refs/heads/main'])
-      .toString()
-      .trim();
+    const ref = execFileSync('git', ['-C', bare, 'rev-parse', 'refs/heads/main']).toString().trim();
     expect(ref).toBe(commitOid);
 
     // The README content round-trips exactly.
@@ -127,7 +127,9 @@ describe.runIf(hasGit)('buildSeedPack against real git receive-pack', () => {
     expect(readme).toBe(buildReadmeContent('Seed Test Project', 'Validated against real git'));
 
     // The commit message and single-file tree are as expected.
-    const tree = execFileSync('git', ['-C', bare, 'ls-tree', '--name-only', 'main']).toString().trim();
+    const tree = execFileSync('git', ['-C', bare, 'ls-tree', '--name-only', 'main'])
+      .toString()
+      .trim();
     expect(tree).toBe('README.md');
   });
 
@@ -138,7 +140,9 @@ describe.runIf(hasGit)('buildSeedPack against real git receive-pack', () => {
     writeFileSync(requestFile, Buffer.from(request));
     execFileSync('sh', ['-c', `git receive-pack --stateless-rpc "${bare}" < "${requestFile}"`]);
 
-    const ref = execFileSync('git', ['-C', bare, 'rev-parse', 'refs/heads/trunk']).toString().trim();
+    const ref = execFileSync('git', ['-C', bare, 'rev-parse', 'refs/heads/trunk'])
+      .toString()
+      .trim();
     expect(ref).toBe(commitOid);
   });
 });

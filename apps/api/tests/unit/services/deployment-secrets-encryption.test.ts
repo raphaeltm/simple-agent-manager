@@ -48,7 +48,7 @@ describe('deployment secrets — encryption behavioral properties', () => {
       const key = generateEncryptionKey();
       const plaintext = 'repeated-secret';
       const ivs = await Promise.all(
-        Array.from({ length: 10 }, () => encrypt(plaintext, key).then((r) => r.iv)),
+        Array.from({ length: 10 }, () => encrypt(plaintext, key).then((r) => r.iv))
       );
       const unique = new Set(ivs);
       // All 10 IVs should be distinct (probability of collision is negligible for 96-bit random IVs)
@@ -68,7 +68,8 @@ describe('deployment secrets — encryption behavioral properties', () => {
     it('preserves a secret containing special characters', async () => {
       const key = generateEncryptionKey();
       // Connection strings often contain slashes, colons, @, and query params
-      const plaintext = 'postgres://user:p@ssw0rd!@host:5432/mydb?sslmode=require&application_name=sam';
+      const plaintext =
+        'postgres://user:p@ssw0rd!@host:5432/mydb?sslmode=require&application_name=sam';
       const { ciphertext, iv } = await encrypt(plaintext, key);
       const { decrypt } = await import('../../../src/services/encryption');
       const result = await decrypt(ciphertext, iv, key);

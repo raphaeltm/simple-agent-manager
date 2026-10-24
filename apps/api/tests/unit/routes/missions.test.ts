@@ -31,10 +31,12 @@ const BASE_URL = 'https://api.test.example.com';
 const ROUTE_PATH = '/api/projects/:projectId/missions';
 const REQUEST_PATH = '/api/projects/test-project-id/missions';
 
-function makeMockD1(overrides: {
-  prepareResult?: Record<string, unknown>[] | null;
-  firstResult?: Record<string, unknown> | null;
-} = {}) {
+function makeMockD1(
+  overrides: {
+    prepareResult?: Record<string, unknown>[] | null;
+    firstResult?: Record<string, unknown> | null;
+  } = {}
+) {
   const mockFirst = vi.fn().mockResolvedValue(overrides.firstResult ?? null);
   const mockAll = vi.fn().mockResolvedValue({
     results: overrides.prepareResult ?? [],
@@ -86,7 +88,7 @@ describe('Mission REST routes', () => {
       const res = await app.fetch(new Request(`${BASE_URL}${REQUEST_PATH}`));
       expect(res.status).toBe(200);
 
-      const body = await res.json() as { missions: unknown[]; hasMore: boolean };
+      const body = (await res.json()) as { missions: unknown[]; hasMore: boolean };
       expect(body.missions).toEqual([]);
       expect(body.hasMore).toBe(false);
     });
@@ -110,7 +112,10 @@ describe('Mission REST routes', () => {
       const res = await app.fetch(new Request(`${BASE_URL}${REQUEST_PATH}`));
       expect(res.status).toBe(200);
 
-      const body = await res.json() as { missions: Array<{ id: string; projectId: string; title: string }>; hasMore: boolean };
+      const body = (await res.json()) as {
+        missions: Array<{ id: string; projectId: string; title: string }>;
+        hasMore: boolean;
+      };
       expect(body.missions).toHaveLength(1);
       expect(body.missions[0]!.id).toBe('mission-1');
       expect(body.missions[0]!.projectId).toBe('test-project-id');
@@ -121,9 +126,7 @@ describe('Mission REST routes', () => {
       const env = makeEnv({ prepareResult: [] });
       const app = createApp(env);
 
-      const res = await app.fetch(
-        new Request(`${BASE_URL}${REQUEST_PATH}?status=active`),
-      );
+      const res = await app.fetch(new Request(`${BASE_URL}${REQUEST_PATH}?status=active`));
       expect(res.status).toBe(200);
       // Verify the query was built with the status filter
       expect(env.DATABASE.prepare).toHaveBeenCalled();
@@ -133,9 +136,7 @@ describe('Mission REST routes', () => {
       const env = makeEnv({ prepareResult: [] });
       const app = createApp(env);
 
-      const res = await app.fetch(
-        new Request(`${BASE_URL}${REQUEST_PATH}?limit=5&offset=10`),
-      );
+      const res = await app.fetch(new Request(`${BASE_URL}${REQUEST_PATH}?limit=5&offset=10`));
       expect(res.status).toBe(200);
     });
   });
@@ -147,9 +148,7 @@ describe('Mission REST routes', () => {
       const env = makeEnv({ firstResult: null, prepareResult: [] });
       const app = createApp(env);
 
-      const res = await app.fetch(
-        new Request(`${BASE_URL}${REQUEST_PATH}/nonexistent`),
-      );
+      const res = await app.fetch(new Request(`${BASE_URL}${REQUEST_PATH}/nonexistent`));
       // The route throws errors.notFound which should result in 404
       expect(res.status).toBe(404);
     });
@@ -195,12 +194,12 @@ describe('Mission REST routes', () => {
       const env = { ...makeEnv(), DATABASE: mockDb } as unknown as Env;
       const app = createApp(env);
 
-      const res = await app.fetch(
-        new Request(`${BASE_URL}${REQUEST_PATH}/mission-1`),
-      );
+      const res = await app.fetch(new Request(`${BASE_URL}${REQUEST_PATH}/mission-1`));
       expect(res.status).toBe(200);
 
-      const body = await res.json() as { mission: { id: string; taskSummary: Record<string, number> } };
+      const body = (await res.json()) as {
+        mission: { id: string; taskSummary: Record<string, number> };
+      };
       expect(body.mission.id).toBe('mission-1');
       expect(body.mission.taskSummary).toEqual({ completed: 3, running: 1 });
     });
@@ -213,9 +212,7 @@ describe('Mission REST routes', () => {
       const env = makeEnv({ firstResult: null });
       const app = createApp(env);
 
-      const res = await app.fetch(
-        new Request(`${BASE_URL}${REQUEST_PATH}/nonexistent/state`),
-      );
+      const res = await app.fetch(new Request(`${BASE_URL}${REQUEST_PATH}/nonexistent/state`));
       expect(res.status).toBe(404);
     });
 
@@ -228,15 +225,16 @@ describe('Mission REST routes', () => {
       ]);
       const app = createApp(env);
 
-      const res = await app.fetch(
-        new Request(`${BASE_URL}${REQUEST_PATH}/mission-1/state`),
-      );
+      const res = await app.fetch(new Request(`${BASE_URL}${REQUEST_PATH}/mission-1/state`));
       expect(res.status).toBe(200);
 
-      const body = await res.json() as { entries: Array<{ id: string }> };
+      const body = (await res.json()) as { entries: Array<{ id: string }> };
       expect(body.entries).toHaveLength(1);
       expect(mockProjectDataService.getMissionStateEntries).toHaveBeenCalledWith(
-        env, 'test-project-id', 'mission-1', null,
+        env,
+        'test-project-id',
+        'mission-1',
+        null
       );
     });
 
@@ -247,11 +245,12 @@ describe('Mission REST routes', () => {
       mockProjectDataService.getMissionStateEntries.mockResolvedValue([]);
       const app = createApp(env);
 
-      await app.fetch(
-        new Request(`${BASE_URL}${REQUEST_PATH}/mission-1/state?entryType=fact`),
-      );
+      await app.fetch(new Request(`${BASE_URL}${REQUEST_PATH}/mission-1/state?entryType=fact`));
       expect(mockProjectDataService.getMissionStateEntries).toHaveBeenCalledWith(
-        env, 'test-project-id', 'mission-1', 'fact',
+        env,
+        'test-project-id',
+        'mission-1',
+        'fact'
       );
     });
   });
@@ -263,9 +262,7 @@ describe('Mission REST routes', () => {
       const env = makeEnv({ firstResult: null });
       const app = createApp(env);
 
-      const res = await app.fetch(
-        new Request(`${BASE_URL}${REQUEST_PATH}/nonexistent/handoffs`),
-      );
+      const res = await app.fetch(new Request(`${BASE_URL}${REQUEST_PATH}/nonexistent/handoffs`));
       expect(res.status).toBe(404);
     });
 
@@ -278,15 +275,15 @@ describe('Mission REST routes', () => {
       ]);
       const app = createApp(env);
 
-      const res = await app.fetch(
-        new Request(`${BASE_URL}${REQUEST_PATH}/mission-1/handoffs`),
-      );
+      const res = await app.fetch(new Request(`${BASE_URL}${REQUEST_PATH}/mission-1/handoffs`));
       expect(res.status).toBe(200);
 
-      const body = await res.json() as { handoffs: Array<{ id: string }> };
+      const body = (await res.json()) as { handoffs: Array<{ id: string }> };
       expect(body.handoffs).toHaveLength(1);
       expect(mockProjectDataService.getHandoffPackets).toHaveBeenCalledWith(
-        env, 'test-project-id', 'mission-1',
+        env,
+        'test-project-id',
+        'mission-1'
       );
     });
   });

@@ -20,17 +20,21 @@ function makeTestEnv(overrides?: Partial<Env>): Env {
 
 describe('local forward token', () => {
   it('round-trips required narrow claims', async () => {
-    const { signLocalForwardToken, verifyLocalForwardToken } = await import('../../../src/services/jwt');
+    const { signLocalForwardToken, verifyLocalForwardToken } =
+      await import('../../../src/services/jwt');
     const env = makeTestEnv();
 
-    const { token } = await signLocalForwardToken({
-      userId: 'user-1',
-      workspaceId: 'ws-1',
-      nodeId: 'node-1',
-      remotePort: 5173,
-      mode: 'http',
-      localAuthority: 'localhost:5173',
-    }, env);
+    const { token } = await signLocalForwardToken(
+      {
+        userId: 'user-1',
+        workspaceId: 'ws-1',
+        nodeId: 'node-1',
+        remotePort: 5173,
+        mode: 'http',
+        localAuthority: 'localhost:5173',
+      },
+      env
+    );
     const payload = await verifyLocalForwardToken(token, env);
 
     expect(payload).toMatchObject({
@@ -45,17 +49,21 @@ describe('local forward token', () => {
   });
 
   it('uses local-forward audience isolated from port-access verification', async () => {
-    const { signLocalForwardToken, verifyPortAccessToken } = await import('../../../src/services/jwt');
+    const { signLocalForwardToken, verifyPortAccessToken } =
+      await import('../../../src/services/jwt');
     const env = makeTestEnv();
 
-    const { token } = await signLocalForwardToken({
-      userId: 'user-1',
-      workspaceId: 'ws-1',
-      nodeId: 'node-1',
-      remotePort: 5173,
-      mode: 'http',
-      localAuthority: 'localhost:5173',
-    }, env);
+    const { token } = await signLocalForwardToken(
+      {
+        userId: 'user-1',
+        workspaceId: 'ws-1',
+        nodeId: 'node-1',
+        remotePort: 5173,
+        mode: 'http',
+        localAuthority: 'localhost:5173',
+      },
+      env
+    );
 
     await expect(verifyPortAccessToken(token, env)).rejects.toThrow();
   });
@@ -64,14 +72,17 @@ describe('local forward token', () => {
     const { signLocalForwardToken } = await import('../../../src/services/jwt');
     const env = makeTestEnv({ LOCAL_FORWARD_TOKEN_EXPIRY_MS: '30000' });
 
-    const { token } = await signLocalForwardToken({
-      userId: 'user-1',
-      workspaceId: 'ws-1',
-      nodeId: 'node-1',
-      remotePort: 5173,
-      mode: 'http',
-      localAuthority: '127.0.0.1:5173',
-    }, env);
+    const { token } = await signLocalForwardToken(
+      {
+        userId: 'user-1',
+        workspaceId: 'ws-1',
+        nodeId: 'node-1',
+        remotePort: 5173,
+        mode: 'http',
+        localAuthority: '127.0.0.1:5173',
+      },
+      env
+    );
 
     const claims = decodeJwt(token);
     expect((claims.exp as number) - (claims.iat as number)).toBe(30);

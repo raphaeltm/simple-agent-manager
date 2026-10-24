@@ -60,11 +60,18 @@ function fakeCloudflareZone(options?: {
       if (store.has(body.name)) {
         // Cloudflare enforces uniqueness; the loser gets 81058.
         return new Response(
-          JSON.stringify({ errors: [{ code: 81058, message: 'An identical record already exists.' }] }),
+          JSON.stringify({
+            errors: [{ code: 81058, message: 'An identical record already exists.' }],
+          }),
           { status: 400 }
         );
       }
-      const rec = { id: `${prefix}-${nextId++}`, name: body.name, type: 'A', content: body.content };
+      const rec = {
+        id: `${prefix}-${nextId++}`,
+        name: body.name,
+        type: 'A',
+        content: body.content,
+      };
       store.set(body.name, rec);
       return new Response(JSON.stringify({ result: { id: rec.id } }), { status: 200 });
     }
@@ -105,13 +112,17 @@ describe('upsertAppRouteDNSRecord', () => {
   });
 
   it('creates grey-cloud A records for HTTP-01 ACME', async () => {
-    const fetchMock = vi.fn()
+    const fetchMock = vi
+      .fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-new' } }), { status: 200 }));
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ result: { id: 'dns-new' } }), { status: 200 })
+      );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()))
-      .resolves.toBe('dns-new');
+    await expect(
+      upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env())
+    ).resolves.toBe('dns-new');
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const [, createInit] = fetchMock.mock.calls[1]!;
@@ -125,15 +136,32 @@ describe('upsertAppRouteDNSRecord', () => {
   });
 
   it('updates existing app route records idempotently', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        result: [{ id: 'dns-existing', name: 'r1-web.apps.example.com', type: 'A', content: '198.51.100.2', proxied: false }],
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-existing' } }), { status: 200 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: [
+              {
+                id: 'dns-existing',
+                name: 'r1-web.apps.example.com',
+                type: 'A',
+                content: '198.51.100.2',
+                proxied: false,
+              },
+            ],
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ result: { id: 'dns-existing' } }), { status: 200 })
+      );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()))
-      .resolves.toBe('dns-existing');
+    await expect(
+      upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env())
+    ).resolves.toBe('dns-existing');
 
     const [url, updateInit] = fetchMock.mock.calls[1]!;
     expect(String(url)).toContain('/dns_records/dns-existing');
@@ -156,23 +184,45 @@ describe('upsertAppRouteDNSRecord', () => {
   describe('concurrent create race (Cloudflare duplicate-record codes)', () => {
     for (const code of [81057, 81058]) {
       it(`recovers when a concurrent caller wins the create (code ${code})`, async () => {
-        const fetchMock = vi.fn()
+        const fetchMock = vi
+          .fn()
           // 1. our lookup: nothing yet
           .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
           // 2. our create: the other caller got there first
-          .mockResolvedValueOnce(new Response(JSON.stringify({
-            errors: [{ code, message: 'An identical record already exists.' }],
-          }), { status: 400 }))
+          .mockResolvedValueOnce(
+            new Response(
+              JSON.stringify({
+                errors: [{ code, message: 'An identical record already exists.' }],
+              }),
+              { status: 400 }
+            )
+          )
           // 3. re-resolve: now we can see the winner's record
-          .mockResolvedValueOnce(new Response(JSON.stringify({
-            result: [{ id: 'dns-winner', name: 'r1-web.apps.example.com', type: 'A', content: '203.0.113.10', proxied: false }],
-          }), { status: 200 }))
+          .mockResolvedValueOnce(
+            new Response(
+              JSON.stringify({
+                result: [
+                  {
+                    id: 'dns-winner',
+                    name: 'r1-web.apps.example.com',
+                    type: 'A',
+                    content: '203.0.113.10',
+                    proxied: false,
+                  },
+                ],
+              }),
+              { status: 200 }
+            )
+          )
           // 4. update it in place
-          .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-winner' } }), { status: 200 }));
+          .mockResolvedValueOnce(
+            new Response(JSON.stringify({ result: { id: 'dns-winner' } }), { status: 200 })
+          );
         vi.stubGlobal('fetch', fetchMock);
 
-        await expect(upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()))
-          .resolves.toBe('dns-winner');
+        await expect(
+          upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env())
+        ).resolves.toBe('dns-winner');
 
         expect(fetchMock).toHaveBeenCalledTimes(4);
         const [retryUrl, retryInit] = fetchMock.mock.calls[3]!;
@@ -193,20 +243,41 @@ describe('upsertAppRouteDNSRecord', () => {
     // would reinstate the 500-wedge this function exists to remove. It converges the
     // first match and records the anomaly instead (rule 75 §1 vs §8).
     it('converges the first match and records the anomaly when the zone holds several', async () => {
-      const fetchMock = vi.fn()
-        .mockResolvedValueOnce(new Response(JSON.stringify({
-          result: [
-            { id: 'dns-current', name: 'r1-web.apps.example.com', type: 'A', content: '203.0.113.10', proxied: false },
-            { id: 'dns-stale-migration', name: 'r1-web.apps.example.com', type: 'A', content: '198.51.100.7', proxied: false },
-          ],
-        }), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-current' } }), { status: 200 }));
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              result: [
+                {
+                  id: 'dns-current',
+                  name: 'r1-web.apps.example.com',
+                  type: 'A',
+                  content: '203.0.113.10',
+                  proxied: false,
+                },
+                {
+                  id: 'dns-stale-migration',
+                  name: 'r1-web.apps.example.com',
+                  type: 'A',
+                  content: '198.51.100.7',
+                  proxied: false,
+                },
+              ],
+            }),
+            { status: 200 }
+          )
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ result: { id: 'dns-current' } }), { status: 200 })
+        );
       vi.stubGlobal('fetch', fetchMock);
 
       // Liveness: the upsert still succeeds, which is the whole point — a stale
       // sibling record must not wedge the deployment.
-      await expect(upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()))
-        .resolves.toBe('dns-current');
+      await expect(
+        upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env())
+      ).resolves.toBe('dns-current');
       expect(fetchMock.mock.calls[1]![1].method).toBe('PUT');
 
       // And the anomaly is recorded with both record ids so the stale one is findable.
@@ -222,16 +293,36 @@ describe('upsertAppRouteDNSRecord', () => {
 
     // Control: a single match must NOT log the anomaly, or the warning is noise.
     it('does not record an anomaly for the ordinary single-record case', async () => {
-      const fetchMock = vi.fn()
-        .mockResolvedValueOnce(new Response(JSON.stringify({
-          result: [{ id: 'dns-only', name: 'r1-web.apps.example.com', type: 'A', content: '198.51.100.2', proxied: false }],
-        }), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-only' } }), { status: 200 }));
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              result: [
+                {
+                  id: 'dns-only',
+                  name: 'r1-web.apps.example.com',
+                  type: 'A',
+                  content: '198.51.100.2',
+                  proxied: false,
+                },
+              ],
+            }),
+            { status: 200 }
+          )
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ result: { id: 'dns-only' } }), { status: 200 })
+        );
       vi.stubGlobal('fetch', fetchMock);
 
-      await expect(upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()))
-        .resolves.toBe('dns-only');
-      expect(warnSpy).not.toHaveBeenCalledWith('dns.app_route_ambiguous_records', expect.anything());
+      await expect(
+        upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env())
+      ).resolves.toBe('dns-only');
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        'dns.app_route_ambiguous_records',
+        expect.anything()
+      );
     });
 
     // Discriminating control for the `!existing` guard specifically. Without this,
@@ -239,18 +330,38 @@ describe('upsertAppRouteDNSRecord', () => {
     // tolerance to the update path — leaves the whole suite green. Rule 75 §4 makes
     // create-path-only a hard requirement; this is what enforces it.
     it('does NOT retry when the UPDATE path returns a duplicate code', async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         // lookup finds an existing record, so this is the PUT path
-        .mockResolvedValueOnce(new Response(JSON.stringify({
-          result: [{ id: 'dns-existing', name: 'r1-web.apps.example.com', type: 'A', content: '198.51.100.2', proxied: false }],
-        }), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify({
-          errors: [{ code: 81058, message: 'An identical record already exists.' }],
-        }), { status: 400 }));
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              result: [
+                {
+                  id: 'dns-existing',
+                  name: 'r1-web.apps.example.com',
+                  type: 'A',
+                  content: '198.51.100.2',
+                  proxied: false,
+                },
+              ],
+            }),
+            { status: 200 }
+          )
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              errors: [{ code: 81058, message: 'An identical record already exists.' }],
+            }),
+            { status: 400 }
+          )
+        );
       vi.stubGlobal('fetch', fetchMock);
 
-      await expect(upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()))
-        .rejects.toThrow('An identical record already exists.');
+      await expect(
+        upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env())
+      ).rejects.toThrow('An identical record already exists.');
 
       // Exactly one lookup + one PUT. A third call would mean the update path retried.
       expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -260,15 +371,27 @@ describe('upsertAppRouteDNSRecord', () => {
     // Discriminating control: a different-type collision is a real
     // misconfiguration. Retrying cannot fix it, so it must still surface.
     it('still throws on a different-type collision (81053), which retrying cannot fix', async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify({
-          errors: [{ code: 81053, message: 'An A, AAAA, or CNAME record with that host already exists.' }],
-        }), { status: 400 }));
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              errors: [
+                {
+                  code: 81053,
+                  message: 'An A, AAAA, or CNAME record with that host already exists.',
+                },
+              ],
+            }),
+            { status: 400 }
+          )
+        );
       vi.stubGlobal('fetch', fetchMock);
 
-      await expect(upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()))
-        .rejects.toThrow('An A, AAAA, or CNAME record with that host already exists.');
+      await expect(
+        upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env())
+      ).rejects.toThrow('An A, AAAA, or CNAME record with that host already exists.');
 
       // No retry attempted.
       expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -276,15 +399,22 @@ describe('upsertAppRouteDNSRecord', () => {
 
     // Discriminating control: unrelated failures must not be swallowed.
     it('still throws on an unrelated create failure (auth error)', async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify({
-          errors: [{ code: 10000, message: 'Authentication error' }],
-        }), { status: 403 }));
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              errors: [{ code: 10000, message: 'Authentication error' }],
+            }),
+            { status: 403 }
+          )
+        );
       vi.stubGlobal('fetch', fetchMock);
 
-      await expect(upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()))
-        .rejects.toThrow('Authentication error');
+      await expect(
+        upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env())
+      ).rejects.toThrow('Authentication error');
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
@@ -293,28 +423,43 @@ describe('upsertAppRouteDNSRecord', () => {
     // would fail the whole error entry, get swallowed by the parse catch, and
     // replace Cloudflare's real message with a generic fallback — degrading errors
     // for every caller of readCloudflareError, not just this one.
-    for (const [label, code] of [['null', null], ['stringified', '81058']] as const) {
+    for (const [label, code] of [
+      ['null', null],
+      ['stringified', '81058'],
+    ] as const) {
       it(`preserves the real Cloudflare message when code is ${label}`, async () => {
-        const fetchMock = vi.fn()
+        const fetchMock = vi
+          .fn()
           .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-          .mockResolvedValueOnce(new Response(JSON.stringify({
-            errors: [{ code, message: 'Rate limited by Cloudflare' }],
-          }), { status: 429 }));
+          .mockResolvedValueOnce(
+            new Response(
+              JSON.stringify({
+                errors: [{ code, message: 'Rate limited by Cloudflare' }],
+              }),
+              { status: 429 }
+            )
+          );
         vi.stubGlobal('fetch', fetchMock);
 
         // Real message survives, and a non-numeric code is never treated as retryable.
-        await expect(upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()))
-          .rejects.toThrow('Rate limited by Cloudflare');
+        await expect(
+          upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env())
+        ).rejects.toThrow('Rate limited by Cloudflare');
         expect(fetchMock).toHaveBeenCalledTimes(2);
       });
     }
 
     // Bounded: a record that keeps duplicating must not loop forever.
     it('retries at most once, then surfaces the duplicate error', async () => {
-      const duplicate = () => new Response(JSON.stringify({
-        errors: [{ code: 81058, message: 'An identical record already exists.' }],
-      }), { status: 400 });
-      const fetchMock = vi.fn()
+      const duplicate = () =>
+        new Response(
+          JSON.stringify({
+            errors: [{ code: 81058, message: 'An identical record already exists.' }],
+          }),
+          { status: 400 }
+        );
+      const fetchMock = vi
+        .fn()
         .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
         .mockResolvedValueOnce(duplicate())
         // re-resolve still sees nothing (winner deleted it again)
@@ -322,8 +467,9 @@ describe('upsertAppRouteDNSRecord', () => {
         .mockResolvedValueOnce(duplicate());
       vi.stubGlobal('fetch', fetchMock);
 
-      await expect(upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()))
-        .rejects.toThrow('An identical record already exists.');
+      await expect(
+        upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env())
+      ).rejects.toThrow('An identical record already exists.');
 
       expect(fetchMock).toHaveBeenCalledTimes(4);
     });
@@ -391,10 +537,16 @@ describe('deleteAppRouteDNSRecord', () => {
   });
 
   it('finds the record by name and deletes it', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        result: [{ id: 'dns-1', name: 'r1-web.apps.example.com', type: 'A' }],
-      }), { status: 200 }))
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: [{ id: 'dns-1', name: 'r1-web.apps.example.com', type: 'A' }],
+          }),
+          { status: 200 }
+        )
+      )
       .mockResolvedValueOnce(new Response(null, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -406,7 +558,8 @@ describe('deleteAppRouteDNSRecord', () => {
   });
 
   it('is a no-op when no matching record exists', async () => {
-    const fetchMock = vi.fn()
+    const fetchMock = vi
+      .fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -415,10 +568,16 @@ describe('deleteAppRouteDNSRecord', () => {
   });
 
   it('tolerates a record deleted concurrently (404 on delete)', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        result: [{ id: 'dns-gone', name: 'r1-web.apps.example.com', type: 'A' }],
-      }), { status: 200 }))
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: [{ id: 'dns-gone', name: 'r1-web.apps.example.com', type: 'A' }],
+          }),
+          { status: 200 }
+        )
+      )
       .mockResolvedValueOnce(new Response(null, { status: 404 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -432,11 +591,17 @@ describe('cleanupAppRouteDNSRecords', () => {
   });
 
   it('deletes every matching record and returns the count actually removed', async () => {
-    const fetchMock = vi.fn()
+    const fetchMock = vi
+      .fn()
       // hostname 1: found + deleted
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        result: [{ id: 'dns-1', name: 'r1-web-3000-env.apps.example.com', type: 'A' }],
-      }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: [{ id: 'dns-1', name: 'r1-web-3000-env.apps.example.com', type: 'A' }],
+          }),
+          { status: 200 }
+        )
+      )
       .mockResolvedValueOnce(new Response(null, { status: 200 }))
       // hostname 2: not found (no-op)
       .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }));
@@ -444,26 +609,32 @@ describe('cleanupAppRouteDNSRecords', () => {
 
     const deleted = await cleanupAppRouteDNSRecords(
       ['r1-web-3000-env.apps.example.com', 'r2-api-8081-env.apps.example.com'],
-      env(),
+      env()
     );
 
     expect(deleted).toBe(1);
   });
 
   it('skips a failing record and continues deleting the rest', async () => {
-    const fetchMock = vi.fn()
+    const fetchMock = vi
+      .fn()
       // hostname 1: search fails -> error swallowed, count unaffected
       .mockResolvedValueOnce(new Response('boom', { status: 500 }))
       // hostname 2: found + deleted
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        result: [{ id: 'dns-2', name: 'r2-api-8081-env.apps.example.com', type: 'A' }],
-      }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: [{ id: 'dns-2', name: 'r2-api-8081-env.apps.example.com', type: 'A' }],
+          }),
+          { status: 200 }
+        )
+      )
       .mockResolvedValueOnce(new Response(null, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     const deleted = await cleanupAppRouteDNSRecords(
       ['r1-web-3000-env.apps.example.com', 'r2-api-8081-env.apps.example.com'],
-      env(),
+      env()
     );
 
     expect(deleted).toBe(1);
@@ -498,11 +669,16 @@ describe('createNodeBackendDNSRecord', () => {
   };
 
   it('creates the orange-clouded backend record on the happy path', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-node' } }), { status: 200 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ result: { id: 'dns-node' } }), { status: 200 })
+      );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env())).resolves.toBe('dns-node');
+    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env())).resolves.toBe(
+      'dns-node'
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toMatchObject({
       type: 'A',
@@ -512,34 +688,57 @@ describe('createNodeBackendDNSRecord', () => {
   });
 
   it('resolves the winner when a concurrent caller already created it', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        errors: [{ code: 81058, message: 'An identical record already exists.' }],
-      }), { status: 400 }))
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            errors: [{ code: 81058, message: 'An identical record already exists.' }],
+          }),
+          { status: 400 }
+        )
+      )
       // lookup by the full backend hostname finds the winner, same IP
       .mockResolvedValueOnce(new Response(JSON.stringify({ result: [WINNER] }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     // Returning the id is what lets the caller persist backend_dns_record_id,
     // which is what stops the forever-retry and the delete-time orphan.
-    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env())).resolves.toBe('dns-winner');
+    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env())).resolves.toBe(
+      'dns-winner'
+    );
     expect(String(fetchMock.mock.calls[1]![0])).toContain('name=node-1.vm.example.com');
     // Content already matches, so no corrective PATCH.
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('converges the IP when the winning record points elsewhere (81057)', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        errors: [{ code: 81057, message: 'Record already exists.' }],
-      }), { status: 400 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        result: [{ ...WINNER, id: 'dns-stale', content: '198.51.100.9' }],
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-stale' } }), { status: 200 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            errors: [{ code: 81057, message: 'Record already exists.' }],
+          }),
+          { status: 400 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: [{ ...WINNER, id: 'dns-stale', content: '198.51.100.9' }],
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ result: { id: 'dns-stale' } }), { status: 200 })
+      );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env())).resolves.toBe('dns-stale');
+    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env())).resolves.toBe(
+      'dns-stale'
+    );
     const [updateUrl, updateInit] = fetchMock.mock.calls[2]!;
     expect(String(updateUrl)).toContain('/dns_records/dns-stale');
     expect(JSON.parse(updateInit.body)).toMatchObject({ content: '203.0.113.10' });
@@ -547,59 +746,90 @@ describe('createNodeBackendDNSRecord', () => {
 
   // Control: an unrelated failure must still surface, with no lookup attempted.
   it('still throws on an unrelated create failure', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        errors: [{ code: 10000, message: 'Authentication error' }],
-      }), { status: 403 }));
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          errors: [{ code: 10000, message: 'Authentication error' }],
+        }),
+        { status: 403 }
+      )
+    );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env()))
-      .rejects.toThrow('Authentication error');
+    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env())).rejects.toThrow(
+      'Authentication error'
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   // Control: 81053 is a different-type collision, not a lost race. Retrying cannot
   // fix it, so it must surface with no lookup attempted.
   it('still throws on a different-type collision (81053)', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        errors: [{ code: 81053, message: 'An A, AAAA, or CNAME record with that host already exists.' }],
-      }), { status: 400 }));
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          errors: [
+            { code: 81053, message: 'An A, AAAA, or CNAME record with that host already exists.' },
+          ],
+        }),
+        { status: 400 }
+      )
+    );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env()))
-      .rejects.toThrow('An A, AAAA, or CNAME record with that host already exists.');
+    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env())).rejects.toThrow(
+      'An A, AAAA, or CNAME record with that host already exists.'
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   // A failed lookup must not mask the original conflict with a confusing error.
   it('surfaces the original conflict when the winner cannot be resolved', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        errors: [{ code: 81058, message: 'An identical record already exists.' }],
-      }), { status: 400 }))
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            errors: [{ code: 81058, message: 'An identical record already exists.' }],
+          }),
+          { status: 400 }
+        )
+      )
       .mockResolvedValueOnce(new Response('boom', { status: 500 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env()))
-      .rejects.toThrow('An identical record already exists.');
+    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env())).rejects.toThrow(
+      'An identical record already exists.'
+    );
   });
 
   // Control for the `requireUnique` lookup. Cloudflare permits several A records for
   // one name (round-robin), and adopting "the first" would persist one id while
   // orphaning the rest. An ambiguous zone must surface the original conflict.
   it('surfaces the original conflict when the zone holds more than one matching record', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        errors: [{ code: 81058, message: 'An identical record already exists.' }],
-      }), { status: 400 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        result: [WINNER, { ...WINNER, id: 'dns-second', content: '198.51.100.9' }],
-      }), { status: 200 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            errors: [{ code: 81058, message: 'An identical record already exists.' }],
+          }),
+          { status: 400 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: [WINNER, { ...WINNER, id: 'dns-second', content: '198.51.100.9' }],
+          }),
+          { status: 200 }
+        )
+      );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env()))
-      .rejects.toThrow('An identical record already exists.');
+    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env())).rejects.toThrow(
+      'An identical record already exists.'
+    );
   });
 
   // `recoverExisting` is the durable provisioning retry path. It refuses a
@@ -610,63 +840,96 @@ describe('createNodeBackendDNSRecord', () => {
   // allocation at this node's IP (rules 63 / 71).
   describe('recoverExisting (durable provisioning retry)', () => {
     it('adopts the winner when its identity matches the recovered allocation', async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         // pre-check lookup: nothing yet
         .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
         // our create loses the race
-        .mockResolvedValueOnce(new Response(JSON.stringify({
-          errors: [{ code: 81058, message: 'An identical record already exists.' }],
-        }), { status: 400 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              errors: [{ code: 81058, message: 'An identical record already exists.' }],
+            }),
+            { status: 400 }
+          )
+        )
         // conflict lookup: the winner is exactly our allocation
         .mockResolvedValueOnce(new Response(JSON.stringify({ result: [WINNER] }), { status: 200 }));
       vi.stubGlobal('fetch', fetchMock);
 
-      await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env(), undefined, true))
-        .resolves.toBe('dns-winner');
+      await expect(
+        createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env(), undefined, true)
+      ).resolves.toBe('dns-winner');
       // Three calls: no corrective PATCH on the durable path.
       expect(fetchMock).toHaveBeenCalledTimes(3);
     });
 
     it('refuses a winner whose IP differs instead of repointing it', async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify({
-          errors: [{ code: 81057, message: 'Record already exists.' }],
-        }), { status: 400 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify({
-          result: [{ ...WINNER, content: '198.51.100.9' }],
-        }), { status: 200 }));
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              errors: [{ code: 81057, message: 'Record already exists.' }],
+            }),
+            { status: 400 }
+          )
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              result: [{ ...WINNER, content: '198.51.100.9' }],
+            }),
+            { status: 200 }
+          )
+        );
       vi.stubGlobal('fetch', fetchMock);
 
-      await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env(), undefined, true))
-        .rejects.toThrow('Existing backend DNS identity differs from the recovered allocation');
+      await expect(
+        createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env(), undefined, true)
+      ).rejects.toThrow('Existing backend DNS identity differs from the recovered allocation');
       // No PATCH: the durable path must not converge a foreign allocation.
       expect(fetchMock).toHaveBeenCalledTimes(3);
     });
 
     it('refuses a grey-clouded winner, which would break the Worker-to-VM path', async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify({
-          errors: [{ code: 81058, message: 'An identical record already exists.' }],
-        }), { status: 400 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify({
-          result: [{ ...WINNER, proxied: false }],
-        }), { status: 200 }));
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              errors: [{ code: 81058, message: 'An identical record already exists.' }],
+            }),
+            { status: 400 }
+          )
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              result: [{ ...WINNER, proxied: false }],
+            }),
+            { status: 200 }
+          )
+        );
       vi.stubGlobal('fetch', fetchMock);
 
-      await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env(), undefined, true))
-        .rejects.toThrow('Existing backend DNS identity differs from the recovered allocation');
+      await expect(
+        createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env(), undefined, true)
+      ).rejects.toThrow('Existing backend DNS identity differs from the recovered allocation');
     });
 
     // Liveness control: the pre-check path still short-circuits before any create.
     it('still short-circuits on the pre-check when the record already exists', async () => {
-      const fetchMock = vi.fn()
+      const fetchMock = vi
+        .fn()
         .mockResolvedValueOnce(new Response(JSON.stringify({ result: [WINNER] }), { status: 200 }));
       vi.stubGlobal('fetch', fetchMock);
 
-      await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env(), undefined, true))
-        .resolves.toBe('dns-winner');
+      await expect(
+        createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env(), undefined, true)
+      ).resolves.toBe('dns-winner');
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
@@ -678,16 +941,20 @@ describe('createNodeBackendDNSRecord', () => {
     const controller = new AbortController();
     const fetchMock = vi.fn(async (_url: any, init: any) => {
       if ((init?.method ?? 'GET') === 'POST') {
-        return new Response(JSON.stringify({
-          errors: [{ code: 81058, message: 'An identical record already exists.' }],
-        }), { status: 400 });
+        return new Response(
+          JSON.stringify({
+            errors: [{ code: 81058, message: 'An identical record already exists.' }],
+          }),
+          { status: 400 }
+        );
       }
       controller.abort(new Error('provider request cancelled'));
       throw controller.signal.reason;
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env(), controller.signal))
-      .rejects.toThrow('provider request cancelled');
+    await expect(
+      createNodeBackendDNSRecord('NODE-1', '203.0.113.10', env(), controller.signal)
+    ).rejects.toThrow('provider request cancelled');
   });
 });

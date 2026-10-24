@@ -95,11 +95,10 @@ function workspaceRow(status: string, nodeId: string | null = 'node-1') {
 }
 
 async function getPorts() {
-  return app.request(
-    '/api/workspaces/workspace-1/ports',
-    {},
-    { DATABASE: {}, BASE_DOMAIN: 'example.com' } as Env
-  );
+  return app.request('/api/workspaces/workspace-1/ports', {}, {
+    DATABASE: {},
+    BASE_DOMAIN: 'example.com',
+  } as Env);
 }
 
 describe('workspace ports API readiness contract', () => {
@@ -132,20 +131,23 @@ describe('workspace ports API readiness contract', () => {
     ['deleted', 200, false],
     ['creating', 202, true],
     ['provisioning', 202, true],
-  ])('maps workspace status %s to structured readiness state', async (status, expectedStatus, retryable) => {
-    mocks.workspaceRows = [workspaceRow(status)];
+  ])(
+    'maps workspace status %s to structured readiness state',
+    async (status, expectedStatus, retryable) => {
+      mocks.workspaceRows = [workspaceRow(status)];
 
-    const response = await getPorts();
+      const response = await getPorts();
 
-    expect(response.status).toBe(expectedStatus);
-    await expect(response.json()).resolves.toMatchObject({
-      ports: [],
-      state: ['creating', 'provisioning'].includes(status) ? 'not_ready' : status,
-      workspaceStatus: status,
-      retryable,
-    });
-    expect(mocks.getWorkspacePortsOnNode).not.toHaveBeenCalled();
-  });
+      expect(response.status).toBe(expectedStatus);
+      await expect(response.json()).resolves.toMatchObject({
+        ports: [],
+        state: ['creating', 'provisioning'].includes(status) ? 'not_ready' : status,
+        workspaceStatus: status,
+        retryable,
+      });
+      expect(mocks.getWorkspacePortsOnNode).not.toHaveBeenCalled();
+    }
+  );
 
   it('preserves successful running workspace port responses', async () => {
     const response = await getPorts();
@@ -197,9 +199,7 @@ describe('workspace ports API readiness contract', () => {
   });
 
   it('does not hide unexpected node-agent failures as readiness', async () => {
-    mocks.getWorkspacePortsOnNode.mockRejectedValue(
-      new mocks.NodeAgentHttpError(500, 'boom')
-    );
+    mocks.getWorkspacePortsOnNode.mockRejectedValue(new mocks.NodeAgentHttpError(500, 'boom'));
 
     const response = await getPorts();
 

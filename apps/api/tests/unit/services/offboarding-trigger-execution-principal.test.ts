@@ -42,9 +42,7 @@ interface Fixture {
 
 function seedMember(sqlite: Database.Database, userId: string, role: string): void {
   sqlite
-    .prepare(
-      `INSERT INTO users (id, email, role, status) VALUES (?, ?, 'user', 'active')`
-    )
+    .prepare(`INSERT INTO users (id, email, role, status) VALUES (?, ?, 'user', 'active')`)
     .run(userId, `${userId}@example.com`);
   sqlite
     .prepare(
@@ -503,10 +501,12 @@ describe('offboarding follows the effective trigger execution principal', () => 
       const other = storedTrigger(fixture.sqlite, 'trigger-other');
       expect(other.execution_user_id).toBe('user-b');
       expect(other.status).toBe('active');
-      expect(resolveTriggerExecutionUserId({
-        executionUserId: other.execution_user_id,
-        userId: other.user_id,
-      } as never)).toBe('user-b');
+      expect(
+        resolveTriggerExecutionUserId({
+          executionUserId: other.execution_user_id,
+          userId: other.user_id,
+        } as never)
+      ).toBe('user-b');
     } finally {
       fixture.sqlite.close();
     }

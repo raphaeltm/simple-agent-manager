@@ -363,13 +363,19 @@ describe('reuse selection agrees with final authority admission', () => {
     seedNode(pool, { capacity_pool_revision: 3 });
     seedNode(pool, { id: 'node-2' });
 
-    expect(await reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).toBe(false);
+    expect(await reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).toBe(
+      false
+    );
     const selected = await findNodeWithCapacity(reuseState(pool), {
       env: envFor(database),
     } as TaskRunnerContext);
     expect(selected?.nodeId).toBe('node-2');
     expect(
-      await reserveWorkspacePlacement(database, placementInput(pool, { nodeId: 'node-2' }), ADMISSION_POLICY)
+      await reserveWorkspacePlacement(
+        database,
+        placementInput(pool, { nodeId: 'node-2' }),
+        ADMISSION_POLICY
+      )
     ).toBe(true);
   });
 
@@ -426,7 +432,9 @@ describe('current effective pool authority at final admission', () => {
     const pool = seedPool('user');
     seedNode(pool);
 
-    await expect(reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).resolves.toBe(true);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(true);
   });
 
   it('rejects a user-pool node once a configured-empty project default pool outranks it', async () => {
@@ -436,7 +444,9 @@ describe('current effective pool authority at final admission', () => {
     // Introduced AFTER the plan was resolved — the exact race the guard exists for.
     seedConfiguredEmptyProjectDefaultPool();
 
-    await expect(reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(false);
     expect(
       (db().prepare('SELECT COUNT(*) AS count FROM workspaces').get() as { count: number }).count
     ).toBe(0);
@@ -447,7 +457,9 @@ describe('current effective pool authority at final admission', () => {
     const pool = seedPool('installation');
     seedNode(pool);
 
-    await expect(reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).resolves.toBe(true);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(true);
   });
 
   it('rejects an installation-pool node once a user default pool outranks it', async () => {
@@ -459,7 +471,9 @@ describe('current effective pool authority at final admission', () => {
     seedNode(pool);
     seedPool('user');
 
-    await expect(reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(false);
     expect(
       (db().prepare('SELECT COUNT(*) AS count FROM workspaces').get() as { count: number }).count
     ).toBe(0);
@@ -472,7 +486,9 @@ describe('current effective pool authority at final admission', () => {
 
     db().exec(`UPDATE capacity_pools SET is_default = 0 WHERE id = '${pool.poolId}'`);
 
-    await expect(reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(false);
   });
 
   it('keeps admitting a project-pool node — nothing outranks the project scope', async () => {
@@ -482,7 +498,9 @@ describe('current effective pool authority at final admission', () => {
     // A user default pool is LOWER precedence and must not disturb a project plan.
     seedPool('user');
 
-    await expect(reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).resolves.toBe(true);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(true);
   });
 
   it('preserves same-user/same-project isolation for project-pool nodes', async () => {
@@ -500,7 +518,11 @@ describe('current effective pool authority at final admission', () => {
     `);
 
     await expect(
-      reserveWorkspacePlacement(database, placementInput(pool, { projectId: 'project-2' }), ADMISSION_POLICY)
+      reserveWorkspacePlacement(
+        database,
+        placementInput(pool, { projectId: 'project-2' }),
+        ADMISSION_POLICY
+      )
     ).resolves.toBe(false);
   });
 
@@ -509,7 +531,9 @@ describe('current effective pool authority at final admission', () => {
     const pool = seedPool('user');
     seedNode(pool, { user_id: 'user-2' });
 
-    await expect(reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(false);
   });
 
   it('keeps the composed reservation statement inside the D1 bind ceiling', async () => {
@@ -566,7 +590,9 @@ describe('legacy unpooled nodes follow the same effective-pool chain', () => {
     const database = createDb();
     seedNode(null);
 
-    await expect(reserveWorkspacePlacement(database, placementInput(null), ADMISSION_POLICY)).resolves.toBe(true);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(null), ADMISSION_POLICY)
+    ).resolves.toBe(true);
   });
 
   it('stops admitting a legacy unpooled node once any default pool governs the caller', async () => {
@@ -574,6 +600,8 @@ describe('legacy unpooled nodes follow the same effective-pool chain', () => {
     seedNode(null);
     seedPool('user');
 
-    await expect(reserveWorkspacePlacement(database, placementInput(null), ADMISSION_POLICY)).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(null), ADMISSION_POLICY)
+    ).resolves.toBe(false);
   });
 });

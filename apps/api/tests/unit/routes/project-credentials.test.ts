@@ -552,7 +552,7 @@ describe('getDecryptedAgentKey — resolution order', () => {
       'u1',
       'claude-code',
       'test-key',
-      'p1',
+      'p1'
     );
 
     expect(result).toMatchObject({

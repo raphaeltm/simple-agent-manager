@@ -1,5 +1,6 @@
+import Database from 'better-sqlite3';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 
@@ -29,6 +30,14 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+/** The idea store this route validates against; seeded per test with real SQLite. */
+const ideaDb = vi.hoisted(() => ({
+  current: null as {
+    prepare: (sql: string) => { get: (...args: unknown[]) => unknown };
+    close: () => void;
+  } | null,
+}));
+
 vi.mock('drizzle-orm/d1', () => ({ drizzle: mocks.drizzle }));
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
@@ -51,11 +60,31 @@ const ROUTE_PATH = '/api/projects/:projectId/sessions';
 const REQUEST_PATH = '/api/projects/project-1/sessions/start';
 
 function makeEnv(): Env {
+  const sqlite = ideaDb.current;
   return {
-    DATABASE: {} as never,
+    DATABASE: (sqlite
+      ? {
+          prepare: (sql: string) => ({
+            bind: (...args: unknown[]) => ({
+              first: async () => sqlite.prepare(sql).get(...args) ?? null,
+            }),
+          }),
+        }
+      : {}) as never,
     DEFAULT_TASK_AGENT_TYPE: 'opencode',
     MAX_TASK_MESSAGE_LENGTH: '16000',
   } as Env;
+}
+
+/** Real SQL, so the project predicate in the idea gate is actually evaluated. */
+function seedIdeas(): void {
+  const sqlite = new Database(':memory:');
+  sqlite.exec('CREATE TABLE tasks(id TEXT PRIMARY KEY, project_id TEXT, title TEXT, status TEXT)');
+  const insert = sqlite.prepare('INSERT INTO tasks VALUES (?, ?, ?, ?)');
+  insert.run('idea-open', 'project-1', 'Retry failed webhook deliveries', 'draft');
+  insert.run('idea-done', 'project-1', 'Already shipped', 'completed');
+  insert.run('idea-foreign', 'project-2', 'Another project idea', 'draft');
+  ideaDb.current = sqlite;
 }
 
 function makeApp() {
@@ -270,5 +299,62 @@ describe('chatStartRoutes', () => {
 
     expect(res.status).toBe(409);
     expect(mocks.instant.acceptInstantSession).not.toHaveBeenCalled();
+  });
+
+  describe('sourceIdeaId', () => {
+    beforeEach(() => seedIdeas());
+    afterEach(() => {
+      ideaDb.current?.close();
+      ideaDb.current = null;
+    });
+
+    function start(body: Record<string, unknown>) {
+      return makeApp().request(
+        `${BASE_URL}${REQUEST_PATH}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: 'hello', agentProfileId: 'profile-1', ...body }),
+        },
+        makeEnv()
+      );
+    }
+
+    // The link itself is written inside `acceptInstantSession`
+    // (instant-session-idea-link.test.ts). What this route owes it is a validated id.
+    it('passes a validated open idea through to the Instant acceptance', async () => {
+      const res = await start({ sourceIdeaId: 'idea-open' });
+      expect(res.status).toBe(202);
+      expect(mocks.instant.acceptInstantSession).toHaveBeenCalledWith(
+        db,
+        expect.anything(),
+        expect.objectContaining({ sourceIdeaId: 'idea-open' })
+      );
+    });
+
+    it('passes null when the start did not come from an idea', async () => {
+      const res = await start({});
+      expect(res.status).toBe(202);
+      expect(mocks.instant.acceptInstantSession.mock.calls[0]?.[2]).toMatchObject({
+        sourceIdeaId: null,
+      });
+    });
+
+    it('404s an idea from another project before anything is created', async () => {
+      const res = await start({ sourceIdeaId: 'idea-foreign' });
+      expect(res.status).toBe(404);
+      expect(mocks.instant.acceptInstantSession).not.toHaveBeenCalled();
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    it('409s a done idea before anything is created', async () => {
+      const res = await start({ sourceIdeaId: 'idea-done' });
+      expect(res.status).toBe(409);
+      expect(await res.json<{ message: string }>()).toMatchObject({
+        message: expect.stringMatching(/idea is done/i),
+      });
+      expect(mocks.instant.acceptInstantSession).not.toHaveBeenCalled();
+      expect(db.insert).not.toHaveBeenCalled();
+    });
   });
 });

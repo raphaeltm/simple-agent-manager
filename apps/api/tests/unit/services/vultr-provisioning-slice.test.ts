@@ -73,10 +73,8 @@ function makeVultrCredentialDbMock(vultrRow: Record<string, unknown>) {
       leftJoin: () => builder,
       limit: () => Promise.resolve(rowsFor(table, true)),
       // Thenable: `await db.select().from(x).where(y)` (no `.limit`) resolves here.
-      then: (
-        resolve: (value: unknown[]) => unknown,
-        reject: (reason?: unknown) => unknown,
-      ) => Promise.resolve(rowsFor(table, false)).then(resolve, reject),
+      then: (resolve: (value: unknown[]) => unknown, reject: (reason?: unknown) => unknown) =>
+        Promise.resolve(rowsFor(table, false)).then(resolve, reject),
     };
     return builder;
   };
@@ -113,13 +111,15 @@ function makeVultrFetchMock(calls: RecordedCall[]) {
     });
 
     if (method === 'GET' && u.includes('/v2/os')) {
-      return Promise.resolve(new Response(
-        JSON.stringify({
-          os: [{ id: 1743, name: 'Ubuntu 24.04 LTS x64', arch: 'x64', family: 'ubuntu' }],
-          meta: { total: 1, links: { next: '', prev: '' } },
-        }),
-        { status: 200 },
-      ));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            os: [{ id: 1743, name: 'Ubuntu 24.04 LTS x64', arch: 'x64', family: 'ubuntu' }],
+            meta: { total: 1, links: { next: '', prev: '' } },
+          }),
+          { status: 200 }
+        )
+      );
     }
     const pendingInstance = {
       id: 'i-slice-1',
@@ -134,13 +134,19 @@ function makeVultrFetchMock(calls: RecordedCall[]) {
       tags: [],
     };
     if (method === 'POST' && /\/v2\/instances$/.test(u)) {
-      return Promise.resolve(new Response(JSON.stringify({ instance: pendingInstance }), { status: 202 }));
+      return Promise.resolve(
+        new Response(JSON.stringify({ instance: pendingInstance }), { status: 202 })
+      );
     }
     if (method === 'GET' && /\/v2\/instances\/[^/?]+$/.test(u)) {
       // Poll always sees 0.0.0.0 → provider returns empty IP after the poll budget.
-      return Promise.resolve(new Response(JSON.stringify({ instance: pendingInstance }), { status: 200 }));
+      return Promise.resolve(
+        new Response(JSON.stringify({ instance: pendingInstance }), { status: 200 })
+      );
     }
-    return Promise.resolve(new Response(JSON.stringify({ error: 'not found', status: 404 }), { status: 404 }));
+    return Promise.resolve(
+      new Response(JSON.stringify({ error: 'not found', status: 404 }), { status: 404 })
+    );
   });
 }
 

@@ -81,11 +81,31 @@ describe('Fix C: Conversation-mode idle cleanup exemption', () => {
     // The fix adds `task.taskMode !== 'conversation'` to the condition.
     // This test verifies the decision logic.
     const testCases = [
-      { executionStep: 'awaiting_followup', workspaceId: 'ws-1', taskMode: 'task', shouldSchedule: true },
-      { executionStep: 'awaiting_followup', workspaceId: 'ws-1', taskMode: 'conversation', shouldSchedule: false },
-      { executionStep: 'awaiting_followup', workspaceId: null, taskMode: 'task', shouldSchedule: false },
+      {
+        executionStep: 'awaiting_followup',
+        workspaceId: 'ws-1',
+        taskMode: 'task',
+        shouldSchedule: true,
+      },
+      {
+        executionStep: 'awaiting_followup',
+        workspaceId: 'ws-1',
+        taskMode: 'conversation',
+        shouldSchedule: false,
+      },
+      {
+        executionStep: 'awaiting_followup',
+        workspaceId: null,
+        taskMode: 'task',
+        shouldSchedule: false,
+      },
       { executionStep: 'running', workspaceId: 'ws-1', taskMode: 'task', shouldSchedule: false },
-      { executionStep: 'awaiting_followup', workspaceId: 'ws-1', taskMode: undefined, shouldSchedule: true },
+      {
+        executionStep: 'awaiting_followup',
+        workspaceId: 'ws-1',
+        taskMode: undefined,
+        shouldSchedule: true,
+      },
     ];
 
     for (const tc of testCases) {
@@ -130,9 +150,7 @@ describe('Fix D: Coupled agent-workspace lifecycle on heartbeat timeout', () => 
     // Execute the alarm handler logic
     for (const entry of timedOut) {
       if (entry.workspaceId) {
-        const taskRow = await mockDbPrepare()
-          .bind(entry.workspaceId)
-          .first();
+        const taskRow = await mockDbPrepare().bind(entry.workspaceId).first();
 
         if (taskRow?.task_mode === 'conversation') {
           await stopWorkspace(entry.workspaceId);
@@ -175,7 +193,8 @@ describe('Fix D: Coupled agent-workspace lifecycle on heartbeat timeout', () => 
   });
 
   it('continues processing other entries when one workspace stop fails', async () => {
-    const stopWorkspace = vi.fn()
+    const stopWorkspace = vi
+      .fn()
       .mockRejectedValueOnce(new Error('D1 timeout'))
       .mockResolvedValueOnce(undefined);
 
@@ -241,9 +260,7 @@ describe('Fix B: IdleSuspendTimeout configuration', () => {
     ];
 
     for (const tc of testCases) {
-      const idleSuspendTimeout = tc.taskMode === 'conversation'
-        ? 0
-        : tc.defaultTimeout;
+      const idleSuspendTimeout = tc.taskMode === 'conversation' ? 0 : tc.defaultTimeout;
       expect(idleSuspendTimeout).toBe(tc.expected);
     }
   });

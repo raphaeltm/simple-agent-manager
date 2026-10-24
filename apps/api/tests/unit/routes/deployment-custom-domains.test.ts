@@ -118,10 +118,17 @@ vi.mock('../../../src/middleware/project-auth', () => ({
 }));
 
 vi.mock('../../../src/services/deployment-custom-domains', () => ({
-  customDomainExpectedTargetChanged: (domain: { verifiedCnameTarget?: string | null }, parent: { hostname: string } | null) =>
-    !!domain.verifiedCnameTarget && !!parent && domain.verifiedCnameTarget !== parent.hostname,
-  findRouteTargetForDomain: (routes: Array<{ service: string; containerPort: number }>, domain: { service: string; port: number }) =>
-    routes.find((route) => route.service === domain.service && route.containerPort === domain.port) ?? null,
+  customDomainExpectedTargetChanged: (
+    domain: { verifiedCnameTarget?: string | null },
+    parent: { hostname: string } | null
+  ) => !!domain.verifiedCnameTarget && !!parent && domain.verifiedCnameTarget !== parent.hostname,
+  findRouteTargetForDomain: (
+    routes: Array<{ service: string; containerPort: number }>,
+    domain: { service: string; port: number }
+  ) =>
+    routes.find(
+      (route) => route.service === domain.service && route.containerPort === domain.port
+    ) ?? null,
   getEnvironmentPublicRouteTargets: (...args: unknown[]) =>
     mockGetEnvironmentPublicRouteTargets(...args),
   recordCustomDomainEvent: (...args: unknown[]) => mockRecordCustomDomainEvent(...args),

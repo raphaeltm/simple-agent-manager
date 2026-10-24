@@ -268,9 +268,9 @@ describe('policy management identifiers survive de-duplication', () => {
 
     for (const policy of POLICIES) {
       // Recover the id the way an agent would, then assert it round-trips exactly.
-      const match = new RegExp(
-        `\\*\\*${escapeRegExp(policy.title)}\\*\\* \\(id: ([^)]+)\\)`,
-      ).exec(policies);
+      const match = new RegExp(`\\*\\*${escapeRegExp(policy.title)}\\*\\* \\(id: ([^)]+)\\)`).exec(
+        policies
+      );
       expect(match, `no id captured for ${policy.title}`).not.toBeNull();
       expect(match?.[1]).toBe(policy.id);
       expect(match?.[1]).toHaveLength(36);

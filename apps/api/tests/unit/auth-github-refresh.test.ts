@@ -20,14 +20,12 @@ describe('refreshGitHubAccessToken', () => {
   });
 
   it('throws when GitHub returns HTTP 200 with an OAuth error body', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        Response.json({
-          error: 'bad_refresh_token',
-          error_description: 'The refresh token is invalid',
-        })
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        error: 'bad_refresh_token',
+        error_description: 'The refresh token is invalid',
+      })
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(refreshGitHubAccessToken(env, 'refresh-token')).rejects.toThrow(

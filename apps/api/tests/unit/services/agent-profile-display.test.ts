@@ -16,7 +16,10 @@ describe('agent profile display resolution', () => {
       .mockReturnValueOnce(makeProfileQuery([{ id: 'profile-000', name: 'First Profile' }]))
       .mockReturnValueOnce(makeProfileQuery([{ id: 'profile-080', name: 'Last Profile' }]));
     const db = { select };
-    const hints = Array.from({ length: 81 }, (_, index) => `profile-${String(index).padStart(3, '0')}`);
+    const hints = Array.from(
+      { length: 81 },
+      (_, index) => `profile-${String(index).padStart(3, '0')}`
+    );
 
     const resolved = await resolveTaskAgentProfileHints(db, {
       hints,

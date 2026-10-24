@@ -10,7 +10,7 @@ import {
   ACP_SESSION_TERMINAL_STATUSES,
   ACP_SESSION_VALID_TRANSITIONS,
 } from '@simple-agent-manager/shared';
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 const ALL_STATUSES: AcpSessionStatus[] = [
   'pending',
@@ -32,11 +32,7 @@ describe('ACP Session State Machine', () => {
     });
 
     it('running can transition to completed, failed, or interrupted', () => {
-      expect(ACP_SESSION_VALID_TRANSITIONS.running).toEqual([
-        'completed',
-        'failed',
-        'interrupted',
-      ]);
+      expect(ACP_SESSION_VALID_TRANSITIONS.running).toEqual(['completed', 'failed', 'interrupted']);
     });
 
     it('terminal states have no valid transitions', () => {
@@ -60,12 +56,9 @@ describe('ACP Session State Machine', () => {
       ['running', 'completed'],
       ['running', 'failed'],
       ['running', 'interrupted'],
-    ] as [AcpSessionStatus, AcpSessionStatus][])(
-      'allows %s → %s',
-      (from, to) => {
-        expect(isValidTransition(from, to)).toBe(true);
-      }
-    );
+    ] as [AcpSessionStatus, AcpSessionStatus][])('allows %s → %s', (from, to) => {
+      expect(isValidTransition(from, to)).toBe(true);
+    });
 
     // Invalid backward transitions
     it.each([
@@ -75,12 +68,9 @@ describe('ACP Session State Machine', () => {
       ['completed', 'running'],
       ['failed', 'running'],
       ['interrupted', 'running'],
-    ] as [AcpSessionStatus, AcpSessionStatus][])(
-      'rejects %s → %s (backward)',
-      (from, to) => {
-        expect(isValidTransition(from, to)).toBe(false);
-      }
-    );
+    ] as [AcpSessionStatus, AcpSessionStatus][])('rejects %s → %s (backward)', (from, to) => {
+      expect(isValidTransition(from, to)).toBe(false);
+    });
 
     // Invalid skip transitions
     it.each([
@@ -88,12 +78,9 @@ describe('ACP Session State Machine', () => {
       ['pending', 'completed'],
       ['pending', 'failed'],
       ['pending', 'interrupted'],
-    ] as [AcpSessionStatus, AcpSessionStatus][])(
-      'rejects %s → %s (skip)',
-      (from, to) => {
-        expect(isValidTransition(from, to)).toBe(false);
-      }
-    );
+    ] as [AcpSessionStatus, AcpSessionStatus][])('rejects %s → %s (skip)', (from, to) => {
+      expect(isValidTransition(from, to)).toBe(false);
+    });
 
     // Self-transitions
     it('rejects self-transitions for all states', () => {

@@ -383,37 +383,34 @@ describe('session sleep sweep', () => {
       'pending capture',
       "status = 'available', degradation = 'none', capture_generation = 'capture-1'",
     ],
-  ])(
-    'routes exhausted legacy failed %s to bounded cleanup',
-    async (_, setClause) => {
-      // The removed "repairable capture" exemption: a legacy row that spent its budget
-      // with no retry left was re-selected forever because it was degraded or had a
-      // capture in flight. Only raising SESSION_SLEEP_MAX_ATTEMPTS re-arms it now.
-      addDueSnapshot('snapshot-exhausted-repairable', 3);
-      sqlite
-        .prepare(
-          `UPDATE session_snapshots
+  ])('routes exhausted legacy failed %s to bounded cleanup', async (_, setClause) => {
+    // The removed "repairable capture" exemption: a legacy row that spent its budget
+    // with no retry left was re-selected forever because it was degraded or had a
+    // capture in flight. Only raising SESSION_SLEEP_MAX_ATTEMPTS re-arms it now.
+    addDueSnapshot('snapshot-exhausted-repairable', 3);
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots
          SET ${setClause}, sleep_status = 'failed', sleep_after = NULL
          WHERE id = 'snapshot-exhausted-repairable'`
-        )
-        .run();
-      mocks.sleepWorkspaceSession.mockResolvedValue(undefined);
+      )
+      .run();
+    mocks.sleepWorkspaceSession.mockResolvedValue(undefined);
 
-      const result = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'));
+    const result = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'));
 
-      expect(result).toMatchObject({ selected: 1, claimed: 0, fallbacks: 1, slept: 1 });
-      expect(mocks.runSessionSleepFallback).toHaveBeenCalledOnce();
-      expect(mocks.sleepWorkspaceSession).not.toHaveBeenCalled();
-      expect(
-        sqlite
-          .prepare(
-            `SELECT sleep_status, sleep_after, sleep_attempts
+    expect(result).toMatchObject({ selected: 1, claimed: 0, fallbacks: 1, slept: 1 });
+    expect(mocks.runSessionSleepFallback).toHaveBeenCalledOnce();
+    expect(mocks.sleepWorkspaceSession).not.toHaveBeenCalled();
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_after, sleep_attempts
            FROM session_snapshots WHERE id = 'snapshot-exhausted-repairable'`
-          )
-          .get()
-      ).toEqual({ sleep_status: 'failed', sleep_after: null, sleep_attempts: 3 });
-    }
-  );
+        )
+        .get()
+    ).toEqual({ sleep_status: 'failed', sleep_after: null, sleep_attempts: 3 });
+  });
 
   it('does not postpone an immediate terminal deadline when the idle checkpoint completes', async () => {
     addDueSnapshot('snapshot-terminal-deadline', 1);

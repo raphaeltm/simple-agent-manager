@@ -1,7 +1,11 @@
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../../src/middleware/error';
-import { GcpApiError, sanitizeGcpError, toSanitizedAppError } from '../../../src/services/gcp-errors';
+import {
+  GcpApiError,
+  sanitizeGcpError,
+  toSanitizedAppError,
+} from '../../../src/services/gcp-errors';
 
 /**
  * Tests for GCP error sanitization.
@@ -55,7 +59,8 @@ describe('sanitizeGcpError', () => {
       step: 'create_wif_pool',
       message: 'Failed to create WIF pool (403)',
       statusCode: 403,
-      rawBody: '{"error":{"code":403,"message":"Permission \'iam.workloadIdentityPools.create\' denied on \'projects/123456789/locations/global\'"}}',
+      rawBody:
+        '{"error":{"code":403,"message":"Permission \'iam.workloadIdentityPools.create\' denied on \'projects/123456789/locations/global\'"}}',
     });
 
     const sanitized = sanitizeGcpError(err, 'test');
@@ -96,7 +101,8 @@ describe('sanitizeGcpError', () => {
       step: 'grant_project_roles',
       message: 'Failed to set project IAM policy (429)',
       statusCode: 429,
-      rawBody: '{"error":{"code":429,"message":"Quota exceeded for quota group \'ReadGroup\' and limit \'Reads per minute\'"}}',
+      rawBody:
+        '{"error":{"code":429,"message":"Quota exceeded for quota group \'ReadGroup\' and limit \'Reads per minute\'"}}',
     });
 
     const sanitized = sanitizeGcpError(err, 'test');
@@ -120,7 +126,8 @@ describe('sanitizeGcpError', () => {
       step: 'sts_exchange',
       message: 'GCP STS token exchange failed (400)',
       statusCode: 400,
-      rawBody: '{"error":"invalid_grant","error_description":"The audience in the identity token does not match the expected audience //iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/sam-pool/providers/sam-oidc"}',
+      rawBody:
+        '{"error":"invalid_grant","error_description":"The audience in the identity token does not match the expected audience //iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/sam-pool/providers/sam-oidc"}',
     });
 
     const sanitized = sanitizeGcpError(err, 'test');
@@ -135,7 +142,8 @@ describe('sanitizeGcpError', () => {
       step: 'sa_impersonation',
       message: 'GCP SA impersonation failed (403)',
       statusCode: 403,
-      rawBody: '{"error":{"code":403,"message":"Permission \'iam.serviceAccounts.getAccessToken\' denied on resource (or it may not exist): projects/-/serviceAccounts/sam-vm@my-project.iam.gserviceaccount.com"}}',
+      rawBody:
+        '{"error":{"code":403,"message":"Permission \'iam.serviceAccounts.getAccessToken\' denied on resource (or it may not exist): projects/-/serviceAccounts/sam-vm@my-project.iam.gserviceaccount.com"}}',
     });
 
     const sanitized = sanitizeGcpError(err, 'test');
@@ -148,7 +156,8 @@ describe('sanitizeGcpError', () => {
       step: 'create_wif_pool',
       message: 'Failed to create WIF pool (409)',
       statusCode: 409,
-      rawBody: '{"error":{"code":409,"message":"Resource projects/123456789/locations/global/workloadIdentityPools/sam-pool already exists"}}',
+      rawBody:
+        '{"error":{"code":409,"message":"Resource projects/123456789/locations/global/workloadIdentityPools/sam-pool already exists"}}',
     });
 
     const sanitized = sanitizeGcpError(err, 'test');
@@ -162,7 +171,8 @@ describe('sanitizeGcpError', () => {
       step: 'enable_apis',
       message: 'Failed to enable APIs (500)',
       statusCode: 500,
-      rawBody: '{"error":{"code":500,"message":"Internal server error","details":[{"stack_trace":"at com.google.cloud..."}]}}',
+      rawBody:
+        '{"error":{"code":500,"message":"Internal server error","details":[{"stack_trace":"at com.google.cloud..."}]}}',
     });
 
     const sanitized = sanitizeGcpError(err, 'test');
@@ -254,14 +264,17 @@ describe('end-to-end sanitization: raw GCP errors produce safe output', () => {
       rawBody: JSON.stringify({
         error: {
           code: 403,
-          message: "Permission 'iam.workloadIdentityPools.create' denied on 'projects/123456789/locations/global'",
+          message:
+            "Permission 'iam.workloadIdentityPools.create' denied on 'projects/123456789/locations/global'",
           status: 'PERMISSION_DENIED',
-          details: [{
-            '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
-            reason: 'IAM_PERMISSION_DENIED',
-            domain: 'iam.googleapis.com',
-            metadata: { permission: 'iam.workloadIdentityPools.create' },
-          }],
+          details: [
+            {
+              '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+              reason: 'IAM_PERMISSION_DENIED',
+              domain: 'iam.googleapis.com',
+              metadata: { permission: 'iam.workloadIdentityPools.create' },
+            },
+          ],
         },
       }),
     });
@@ -284,7 +297,8 @@ describe('end-to-end sanitization: raw GCP errors produce safe output', () => {
       statusCode: 400,
       rawBody: JSON.stringify({
         error: 'invalid_grant',
-        error_description: 'The audience in the identity token does not match the expected audience //iam.googleapis.com/projects/987654321/locations/global/workloadIdentityPools/sam-deploy-pool/providers/sam-oidc',
+        error_description:
+          'The audience in the identity token does not match the expected audience //iam.googleapis.com/projects/987654321/locations/global/workloadIdentityPools/sam-deploy-pool/providers/sam-oidc',
       }),
     });
 
@@ -304,7 +318,8 @@ describe('end-to-end sanitization: raw GCP errors produce safe output', () => {
       rawBody: JSON.stringify({
         error: {
           code: 403,
-          message: "Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist): projects/-/serviceAccounts/sam-vm-manager@customer-project.iam.gserviceaccount.com",
+          message:
+            "Permission 'iam.serviceAccounts.getAccessToken' denied on resource (or it may not exist): projects/-/serviceAccounts/sam-vm-manager@customer-project.iam.gserviceaccount.com",
           status: 'PERMISSION_DENIED',
         },
       }),
@@ -320,22 +335,26 @@ describe('end-to-end sanitization: raw GCP errors produce safe output', () => {
   });
 
   it('uses key guidance for token exchange permission errors', () => {
-    const sanitized = sanitizeGcpError(new GcpApiError({
-      step: 'service_account_token',
-      message: 'token rejected',
-      statusCode: 403,
-    }));
+    const sanitized = sanitizeGcpError(
+      new GcpApiError({
+        step: 'service_account_token',
+        message: 'token rejected',
+        statusCode: 403,
+      })
+    );
 
     expect(sanitized).toContain('key status');
     expect(sanitized).not.toContain('roles/compute.instanceAdmin.v1');
   });
 
   it('uses Compute role guidance only for Compute verification errors', () => {
-    const sanitized = sanitizeGcpError(new GcpApiError({
-      step: 'service_account_compute_verify',
-      message: 'zone access rejected',
-      statusCode: 403,
-    }));
+    const sanitized = sanitizeGcpError(
+      new GcpApiError({
+        step: 'service_account_compute_verify',
+        message: 'zone access rejected',
+        statusCode: 403,
+      })
+    );
 
     expect(sanitized).toContain('roles/compute.instanceAdmin.v1');
     expect(sanitized).toContain('roles/compute.securityAdmin');
@@ -349,11 +368,19 @@ describe('end-to-end sanitization: raw GCP errors produce safe output', () => {
       rawBody: JSON.stringify({
         error: {
           code: 400,
-          message: "Policy update failed: bindings with condition are not allowed for role 'roles/compute.instanceAdmin.v1' because it is not supported by one of the resources in the policy",
-          details: [{
-            bindings: [{ role: 'roles/compute.instanceAdmin.v1', members: ['serviceAccount:sa@proj.iam.gserviceaccount.com'] }],
-            etag: 'BwYM/abc=',
-          }],
+          message:
+            "Policy update failed: bindings with condition are not allowed for role 'roles/compute.instanceAdmin.v1' because it is not supported by one of the resources in the policy",
+          details: [
+            {
+              bindings: [
+                {
+                  role: 'roles/compute.instanceAdmin.v1',
+                  members: ['serviceAccount:sa@proj.iam.gserviceaccount.com'],
+                },
+              ],
+              etag: 'BwYM/abc=',
+            },
+          ],
         },
       }),
     });

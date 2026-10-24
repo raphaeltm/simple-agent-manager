@@ -11,6 +11,12 @@ interface SkillSelectorProps {
   disabled?: boolean;
   compact?: boolean;
   id?: string;
+  /**
+   * Keep a blank line below the select when no skill is chosen, so picking one does not
+   * shift the layout. Right in the composer, where the selector sits in a fixed row; set
+   * it false inside a scrollable sheet, where the reserved line reads as a dead gap.
+   */
+  reserveDescriptionSpace?: boolean;
 }
 
 function formatResourceSummary(skill: AgentSkill | null) {
@@ -43,6 +49,7 @@ export const SkillSelector: FC<SkillSelectorProps> = ({
   disabled = false,
   compact = false,
   id,
+  reserveDescriptionSpace = true,
 }) => {
   const selected = selectedSkillId
     ? (skills.find((skill) => skill.id === selectedSkillId) ?? null)
@@ -81,11 +88,11 @@ export const SkillSelector: FC<SkillSelectorProps> = ({
           {selected.description || 'Skill selected'}
           {summary ? ` · ${summary}` : ''}
         </div>
-      ) : (
+      ) : reserveDescriptionSpace ? (
         <div aria-hidden="true" className="text-xs text-transparent">
           No skill selected
         </div>
-      )}
+      ) : null}
     </div>
   );
 };

@@ -24,9 +24,21 @@ import { profileSubtitle } from '../project-chat/profile-picker/model';
 import { ProfileAvatar } from '../project-chat/profile-picker/ProfileAvatar';
 import { ProfilePickerSheet } from '../project-chat/profile-picker/ProfilePickerSheet';
 import { SkillSelector } from '../skills/SkillSelector';
-import { type StartWorkRelatedCounts, useStartWork } from './useStartWork';
+import { type StartWorkRelatedCount, useStartWork } from './useStartWork';
 
 const NOTE_PLACEHOLDER = 'Your note is the only message you send. The idea goes along on its own.';
+/**
+ * Profile names are free text. Past this, a name used inside a label or a sentence wraps
+ * over several lines and takes the sheet over; the picker row above still shows the full
+ * name, so an ellipsis here loses nothing.
+ */
+const NAME_IN_COPY_MAX_CHARS = 28;
+
+function nameForCopy(name: string): string {
+  return name.length > NAME_IN_COPY_MAX_CHARS
+    ? `${name.slice(0, NAME_IN_COPY_MAX_CHARS - 1).trimEnd()}\u2026`
+    : name;
+}
 
 export interface StartWorkSheetProps {
   open: boolean;
@@ -114,8 +126,15 @@ function ModeBadge({ taskMode }: Readonly<{ taskMode: 'task' | 'conversation' }>
   );
 }
 
-function countLabel(count: number, approximate: boolean, one: string, many: string): string {
-  return `${count}${approximate ? '+' : ''} ${count === 1 && !approximate ? one : many}`;
+const COUNT_NOUNS: Record<StartWorkRelatedCount['kind'], [one: string, many: string]> = {
+  chats: ['earlier chat', 'earlier chats'],
+  files: ['file', 'files'],
+  pullRequests: ['pull request', 'pull requests'],
+};
+
+function countLabel({ kind, count, lowerBound }: StartWorkRelatedCount): string {
+  const [one, many] = COUNT_NOUNS[kind];
+  return `${count}${lowerBound ? '+' : ''} ${count === 1 && !lowerBound ? one : many}`;
 }
 
 /**
@@ -128,18 +147,8 @@ function countLabel(count: number, approximate: boolean, one: string, many: stri
 function StartsWith({
   profileName,
   related,
-}: Readonly<{ profileName: string; related: StartWorkRelatedCounts | null }>) {
-  const chips: string[] = [];
-  if (related) {
-    if (related.chats > 0)
-      chips.push(countLabel(related.chats, related.approximate, 'earlier chat', 'earlier chats'));
-    if (related.files > 0)
-      chips.push(countLabel(related.files, related.approximate, 'file', 'files'));
-    if (related.pullRequests > 0)
-      chips.push(
-        countLabel(related.pullRequests, related.approximate, 'pull request', 'pull requests')
-      );
-  }
+}: Readonly<{ profileName: string; related: StartWorkRelatedCount[] | null }>) {
+  const chips = (related ?? []).map(countLabel);
   return (
     <Field label={`${profileName} starts with`}>
       <ul className="m-0 flex list-none flex-wrap gap-1.5 p-0">
@@ -211,7 +220,7 @@ export function StartWorkSheet({
   const profile = work.selectedProfile;
   const taskMode = work.plan?.taskMode ?? 'task';
   const isTaskWork = taskMode === 'task';
-  const profileName = profile?.name ?? 'The agent';
+  const profileName = nameForCopy(profile?.name ?? 'The agent');
 
   const handleStart = () => {
     void work.start().then((result) => {
@@ -252,6 +261,7 @@ export function StartWorkSheet({
       >
         <div
           ref={dialogRef}
+          data-testid="start-work-sheet"
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
@@ -311,6 +321,7 @@ export function StartWorkSheet({
                   selectedSkillId={work.selectedSkill?.id ?? null}
                   onChange={work.setSelectedSkillId}
                   disabled={work.submitting}
+                  reserveDescriptionSpace={false}
                 />
               </Field>
             )}
@@ -368,6 +379,8 @@ export function StartWorkSheet({
       </div>
 
       <ProfilePickerSheet
+        // Opened from inside this dialog, so it must sit above it.
+        layer="above-dialog"
         open={profileSheet.open}
         anchor={profileSheet.anchor}
         projectId={projectId}

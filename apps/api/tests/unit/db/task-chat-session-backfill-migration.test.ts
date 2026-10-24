@@ -77,7 +77,13 @@ describe('0111_backfill_task_chat_session_id migration', () => {
       seedTask(sqlite, 'task-conflict-null', 'project-1', 'ws-conflict');
 
       seedWorkspace(sqlite, 'ws-cross-project-conflict', 'project-1', 'session-cross-conflict');
-      seedTask(sqlite, 'task-cross-conflict-owner', 'project-2', 'ws-other', 'session-cross-conflict');
+      seedTask(
+        sqlite,
+        'task-cross-conflict-owner',
+        'project-2',
+        'ws-other',
+        'session-cross-conflict'
+      );
       seedTask(sqlite, 'task-cross-conflict-null', 'project-1', 'ws-cross-project-conflict');
 
       seedWorkspace(sqlite, 'ws-project-mismatch', 'project-2', 'session-project-mismatch');

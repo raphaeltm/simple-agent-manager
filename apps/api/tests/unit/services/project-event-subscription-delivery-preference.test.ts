@@ -46,8 +46,6 @@ describe('resolveDeliveryPreference', () => {
     expect(resolveDeliveryPreference('runtime_steer', target).resolved).toBe(
       'recorded_not_injected'
     );
-    expect(resolveDeliveryPreference('spawn_task', target).resolved).toBe(
-      'recorded_not_injected'
-    );
+    expect(resolveDeliveryPreference('spawn_task', target).resolved).toBe('recorded_not_injected');
   });
 });

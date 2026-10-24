@@ -23,7 +23,7 @@ vi.mock('../../../src/services/tts', async (importOriginal) => {
   };
 });
 
-import { getAudioFromR2,synthesizeSpeech } from '../../../src/services/tts';
+import { getAudioFromR2, synthesizeSpeech } from '../../../src/services/tts';
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -33,7 +33,10 @@ function buildApp() {
   app.onError((err, c) => {
     const appError = err as { statusCode?: number; error?: string; message?: string };
     if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
-      return c.json({ error: appError.error, message: appError.message }, appError.statusCode as 400 | 500);
+      return c.json(
+        { error: appError.error, message: appError.message },
+        appError.statusCode as 400 | 500
+      );
     }
     return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
   });
@@ -80,14 +83,18 @@ describe('POST /api/tts/synthesize', () => {
       summarized: false,
     });
 
-    const res = await app.request('/api/tts/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Hello world', storageId: 'msg-123' }),
-    }, createEnv());
+    const res = await app.request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello world', storageId: 'msg-123' }),
+      },
+      createEnv()
+    );
 
     expect(res.status).toBe(200);
-    const body = await res.json() as { audioUrl: string; cached: boolean };
+    const body = (await res.json()) as { audioUrl: string; cached: boolean };
     expect(body.audioUrl).toBe('/api/tts/audio/msg-123');
     expect(body.cached).toBe(false);
   });
@@ -100,14 +107,18 @@ describe('POST /api/tts/synthesize', () => {
       summarized: false,
     });
 
-    const res = await app.request('/api/tts/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Hello world', storageId: 'msg-already-cached' }),
-    }, createEnv());
+    const res = await app.request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello world', storageId: 'msg-already-cached' }),
+      },
+      createEnv()
+    );
 
     expect(res.status).toBe(200);
-    const body = await res.json() as { cached: boolean };
+    const body = (await res.json()) as { cached: boolean };
     expect(body.cached).toBe(true);
   });
 
@@ -120,11 +131,15 @@ describe('POST /api/tts/synthesize', () => {
     });
 
     const env = createEnv();
-    await app.request('/api/tts/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Spoken words', storageId: 'msg-456' }),
-    }, env);
+    await app.request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Spoken words', storageId: 'msg-456' }),
+      },
+      env
+    );
 
     expect(synthesizeSpeech).toHaveBeenCalledWith(
       'Spoken words',
@@ -133,67 +148,87 @@ describe('POST /api/tts/synthesize', () => {
       env.R2,
       expect.any(Object),
       'test-user-id',
-      undefined,
+      undefined
     );
   });
 
   it('returns 400 when text is missing', async () => {
-    const res = await app.request('/api/tts/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ storageId: 'msg-123' }),
-    }, createEnv());
+    const res = await app.request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storageId: 'msg-123' }),
+      },
+      createEnv()
+    );
 
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string; message: string };
+    const body = (await res.json()) as { error: string; message: string };
     expect(body.error).toBe('BAD_REQUEST');
     expect(body.message).toContain('Missing required fields');
   });
 
   it('returns 400 when storageId is missing', async () => {
-    const res = await app.request('/api/tts/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Hello' }),
-    }, createEnv());
+    const res = await app.request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello' }),
+      },
+      createEnv()
+    );
 
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBe('BAD_REQUEST');
   });
 
   it('returns 400 when body is invalid JSON', async () => {
-    const res = await app.request('/api/tts/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: 'not-json',
-    }, createEnv());
+    const res = await app.request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'not-json',
+      },
+      createEnv()
+    );
 
     expect(res.status).toBe(400);
   });
 
   it('returns 400 when storageId contains path traversal characters', async () => {
-    const res = await app.request('/api/tts/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Hello', storageId: '../../../etc/passwd' }),
-    }, createEnv());
+    const res = await app.request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello', storageId: '../../../etc/passwd' }),
+      },
+      createEnv()
+    );
 
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string; message: string };
+    const body = (await res.json()) as { error: string; message: string };
     expect(body.error).toBe('BAD_REQUEST');
     expect(body.message).toContain('Invalid storageId format');
   });
 
   it('returns 400 when storageId contains special characters', async () => {
-    const res = await app.request('/api/tts/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Hello', storageId: 'msg 123' }),
-    }, createEnv());
+    const res = await app.request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello', storageId: 'msg 123' }),
+      },
+      createEnv()
+    );
 
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBe('BAD_REQUEST');
   });
 
@@ -205,66 +240,88 @@ describe('POST /api/tts/synthesize', () => {
       summarized: false,
     });
 
-    const res = await app.request('/api/tts/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Hello', storageId: 'msg_abc-123' }),
-    }, createEnv());
+    const res = await app.request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello', storageId: 'msg_abc-123' }),
+      },
+      createEnv()
+    );
 
     expect(res.status).toBe(200);
   });
 
   it('returns 400 when TTS is disabled via env var', async () => {
-    const res = await app.request('/api/tts/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Hello', storageId: 'msg-123' }),
-    }, createEnv({ TTS_ENABLED: 'false' } as any));
+    const res = await app.request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello', storageId: 'msg-123' }),
+      },
+      createEnv({ TTS_ENABLED: 'false' } as any)
+    );
 
     expect(res.status).toBe(400);
-    const body = await res.json() as { message: string };
+    const body = (await res.json()) as { message: string };
     expect(body.message).toContain('disabled');
   });
 
   it('returns 500 when synthesizeSpeech throws', async () => {
     vi.mocked(synthesizeSpeech).mockRejectedValue(new Error('Workers AI unavailable'));
 
-    const res = await app.request('/api/tts/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Hello', storageId: 'msg-err' }),
-    }, createEnv());
+    const res = await app.request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello', storageId: 'msg-err' }),
+      },
+      createEnv()
+    );
 
     expect(res.status).toBe(500);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBe('INTERNAL_ERROR');
   });
 
   it('returns 500 when TTS model returns empty audio', async () => {
     vi.mocked(synthesizeSpeech).mockRejectedValue(new Error('TTS model returned empty audio'));
 
-    const res = await app.request('/api/tts/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Hello', storageId: 'empty-audio' }),
-    }, createEnv());
+    const res = await app.request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello', storageId: 'empty-audio' }),
+      },
+      createEnv()
+    );
 
     expect(res.status).toBe(500);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBe('INTERNAL_ERROR');
   });
 
   it('surfaces error details to the client for debugging', async () => {
-    vi.mocked(synthesizeSpeech).mockRejectedValue(new Error('TTS model returned 503: Service Unavailable'));
+    vi.mocked(synthesizeSpeech).mockRejectedValue(
+      new Error('TTS model returned 503: Service Unavailable')
+    );
 
-    const res = await app.request('/api/tts/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'Hello', storageId: 'msg-error' }),
-    }, createEnv());
+    const res = await app.request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello', storageId: 'msg-error' }),
+      },
+      createEnv()
+    );
 
     expect(res.status).toBe(500);
-    const body = await res.json() as { message: string };
+    const body = (await res.json()) as { message: string };
     // Error details are surfaced to help users understand TTS failures
     expect(body.message).toContain('TTS synthesis failed');
     expect(body.message).toContain('TTS model returned 503');
@@ -352,7 +409,7 @@ describe('GET /api/tts/audio/:storageId', () => {
     const res = await app.request('/api/tts/audio/nonexistent', {}, createEnv());
 
     expect(res.status).toBe(404);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBe('NOT_FOUND');
   });
 
@@ -361,7 +418,7 @@ describe('GET /api/tts/audio/:storageId', () => {
     const res = await app.request('/api/tts/audio/..etc..passwd', {}, createEnv());
 
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBe('BAD_REQUEST');
   });
 
@@ -385,7 +442,7 @@ describe('GET /api/tts/audio/:storageId', () => {
       env.R2,
       'msg-lookup',
       'test-user-id',
-      expect.any(Object),
+      expect.any(Object)
     );
   });
 });

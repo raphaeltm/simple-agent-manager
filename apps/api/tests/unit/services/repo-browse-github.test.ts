@@ -48,7 +48,8 @@ describe('GitHubRepoBrowser.listTree', () => {
   it('maps blobs/trees, skips submodules, and surfaces truncation', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn()
+      vi
+        .fn()
         .mockResolvedValueOnce(Response.json({ object: { sha: 'sha-main' } }))
         .mockResolvedValueOnce(
           Response.json({
@@ -76,7 +77,10 @@ describe('GitHubRepoBrowser.listTree', () => {
       entries: [{ path: 'README.md', name: 'README.md', type: 'blob', size: 5 }],
       truncated: false,
     });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ object: { sha: 'sha-main' } })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(Response.json({ object: { sha: 'sha-main' } }))
+    );
 
     const res = await makeBrowser({ KV: kv as never }).listTree('main');
 
@@ -91,7 +95,8 @@ describe('GitHubRepoBrowser.listTree', () => {
     const kv = makeKv();
     vi.stubGlobal(
       'fetch',
-      vi.fn()
+      vi
+        .fn()
         .mockResolvedValueOnce(new Response(null, { status: 404 }))
         .mockResolvedValueOnce(Response.json({ sha: 'sha-commit' }))
         .mockResolvedValueOnce(Response.json({ tree: [], truncated: false }))
@@ -110,7 +115,8 @@ describe('GitHubRepoBrowser.listTree', () => {
     const kv = makeKv();
     vi.stubGlobal(
       'fetch',
-      vi.fn()
+      vi
+        .fn()
         .mockResolvedValueOnce(Response.json({ object: { sha: 'sha-main' } }))
         .mockResolvedValueOnce(Response.json({ tree: [], truncated: false }))
     );
@@ -125,9 +131,11 @@ describe('GitHubRepoBrowser.getFile', () => {
   it('inlines small text content (base64 → utf8)', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        Response.json({ type: 'file', size: 5, encoding: 'base64', content: btoa('hello') })
-      )
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ type: 'file', size: 5, encoding: 'base64', content: btoa('hello') })
+        )
     );
     const f = await makeBrowser().getFile('main', 'a.txt');
     expect(f).toMatchObject({ content: 'hello', isBinary: false, tooLarge: false, size: 5 });
@@ -137,7 +145,11 @@ describe('GitHubRepoBrowser.getFile', () => {
     const bin = btoa(String.fromCharCode(1, 0, 2, 3));
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(Response.json({ type: 'file', size: 4, encoding: 'base64', content: bin }))
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ type: 'file', size: 4, encoding: 'base64', content: bin })
+        )
     );
     const f = await makeBrowser().getFile('main', 'x.bin');
     expect(f.isBinary).toBe(true);
@@ -147,7 +159,11 @@ describe('GitHubRepoBrowser.getFile', () => {
   it('flags oversized files as tooLarge without inlining', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(Response.json({ type: 'file', size: 5, encoding: 'base64', content: btoa('hello') }))
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ type: 'file', size: 5, encoding: 'base64', content: btoa('hello') })
+        )
     );
     const f = await makeBrowser({ REPO_BROWSE_MAX_INLINE_BYTES: '2' }).getFile('main', 'big.txt');
     expect(f.tooLarge).toBe(true);
@@ -162,19 +178,41 @@ describe('GitHubRepoBrowser.compare', () => {
       vi.fn().mockResolvedValue(
         Response.json({
           files: [
-            { filename: 'a.ts', status: 'modified', additions: 2, deletions: 1, patch: '@@ -1 +1 @@' },
+            {
+              filename: 'a.ts',
+              status: 'modified',
+              additions: 2,
+              deletions: 1,
+              patch: '@@ -1 +1 @@',
+            },
             { filename: 'img.png', status: 'added', additions: 0, deletions: 0 }, // binary (no patch, 0/0)
             { filename: 'huge.txt', status: 'modified', additions: 500, deletions: 10 }, // patch omitted → truncated
-            { filename: 'new.ts', status: 'renamed', previous_filename: 'old.ts', additions: 0, deletions: 0, patch: '@@ x @@' },
+            {
+              filename: 'new.ts',
+              status: 'renamed',
+              previous_filename: 'old.ts',
+              additions: 0,
+              deletions: 0,
+              patch: '@@ x @@',
+            },
           ],
         })
       )
     );
     const res = await makeBrowser().compare('main', 'feat');
     const byPath = Object.fromEntries(res.files.map((f) => [f.path, f]));
-    expect(byPath['a.ts']).toMatchObject({ status: 'modified', patch: '@@ -1 +1 @@', isBinary: false, patchTruncated: false });
+    expect(byPath['a.ts']).toMatchObject({
+      status: 'modified',
+      patch: '@@ -1 +1 @@',
+      isBinary: false,
+      patchTruncated: false,
+    });
     expect(byPath['img.png']).toMatchObject({ status: 'added', isBinary: true, patch: null });
-    expect(byPath['huge.txt']).toMatchObject({ patchTruncated: true, isBinary: false, patch: null });
+    expect(byPath['huge.txt']).toMatchObject({
+      patchTruncated: true,
+      isBinary: false,
+      patch: null,
+    });
     expect(byPath['new.ts']).toMatchObject({ status: 'renamed', previousPath: 'old.ts' });
     expect(res.totalAdditions).toBe(502);
     expect(res.totalDeletions).toBe(11);
@@ -186,9 +224,11 @@ describe('GitHubRepoBrowser.getRawFile', () => {
   it('returns raw bytes and content-type', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(new Uint8Array([9, 8, 7]), { headers: { 'content-type': 'image/png' } })
-      )
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(new Uint8Array([9, 8, 7]), { headers: { 'content-type': 'image/png' } })
+        )
     );
     const { bytes, contentType } = await makeBrowser().getRawFile('main', 'x.png');
     expect(Array.from(bytes)).toEqual([9, 8, 7]);
@@ -214,7 +254,14 @@ describe('GitHubRepoBrowser edge cases', () => {
         Response.json({
           files: [
             { filename: 'a.ts', status: 'changed', additions: 1, deletions: 0, patch: '@@ x @@' },
-            { filename: 'b.ts', status: 'copied', previous_filename: 'c.ts', additions: 0, deletions: 0, patch: '@@ y @@' },
+            {
+              filename: 'b.ts',
+              status: 'copied',
+              previous_filename: 'c.ts',
+              additions: 0,
+              deletions: 0,
+              patch: '@@ y @@',
+            },
           ],
         })
       )

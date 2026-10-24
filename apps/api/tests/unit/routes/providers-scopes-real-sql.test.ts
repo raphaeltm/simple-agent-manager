@@ -455,9 +455,7 @@ describe('GET /api/providers/catalog scope filtering with real SQL', () => {
         }),
       ])
     );
-    expect(JSON.stringify(body)).not.toContain(
-      'cc-encrypted-token-for-cc-cred-other-project-user'
-    );
+    expect(JSON.stringify(body)).not.toContain('cc-encrypted-token-for-cc-cred-other-project-user');
   });
 
   it('deduplicates deterministic composable mirrors of legacy cloud credentials', async () => {

@@ -267,9 +267,7 @@ describe('node-lifecycle BYO gates', () => {
       const res = await appRequest('/api/nodes/node-1/heartbeat', { nodeId: 'node-1' });
 
       expect(res.status).toBe(200);
-      expect(state.updates).toContainEqual(
-        expect.objectContaining({ healthStatus: 'healthy' })
-      );
+      expect(state.updates).toContainEqual(expect.objectContaining({ healthStatus: 'healthy' }));
     });
 
     it('stores creatingWorkspaces even when no metrics payload is present', async () => {

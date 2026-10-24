@@ -1,4 +1,4 @@
-import { beforeEach,describe, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import {
   createInstrumentedLogger,
@@ -187,4 +187,3 @@ describe('credential-token redaction through the logging entry points', () => {
     });
   });
 });
-

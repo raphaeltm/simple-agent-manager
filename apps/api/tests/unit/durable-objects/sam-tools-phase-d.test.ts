@@ -16,7 +16,10 @@ import { findRelatedIdeas } from '../../../src/durable-objects/sam-session/tools
 import { getCiStatus } from '../../../src/durable-objects/sam-session/tools/get-ci-status';
 import { getOrchestratorStatus } from '../../../src/durable-objects/sam-session/tools/get-orchestrator-status';
 import { listIdeas } from '../../../src/durable-objects/sam-session/tools/list-ideas';
-import type { CollectedToolCall, ToolContext } from '../../../src/durable-objects/sam-session/types';
+import type {
+  CollectedToolCall,
+  ToolContext,
+} from '../../../src/durable-objects/sam-session/types';
 
 // Mock cloudflare:workers (vitest hoists vi.mock calls)
 vi.mock('cloudflare:workers', () => ({
@@ -47,11 +50,13 @@ vi.mock('../../../src/services/encryption', () => ({
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Create a mock D1Database that returns configurable results. */
-function mockD1(options: {
-  firstResult?: Record<string, unknown> | null;
-  allResults?: Record<string, unknown>[];
-  runChanges?: number;
-} = {}) {
+function mockD1(
+  options: {
+    firstResult?: Record<string, unknown> | null;
+    allResults?: Record<string, unknown>[];
+    runChanges?: number;
+  } = {}
+) {
   // Drizzle ORM calls stmt.bind(...).raw(true) to get row arrays, then maps to objects.
   // We must return arrays-of-arrays matching the column order Drizzle expects.
   const allResultArrays = (options.allResults ?? []).map((row) => Object.values(row));
@@ -74,12 +79,14 @@ function mockD1(options: {
   };
 }
 
-function buildCtx(overrides: {
-  dbFirstResult?: Record<string, unknown> | null;
-  dbAllResults?: Record<string, unknown>[];
-  dbRunChanges?: number;
-  userId?: string;
-} = {}): ToolContext & { _db: ReturnType<typeof mockD1> } {
+function buildCtx(
+  overrides: {
+    dbFirstResult?: Record<string, unknown> | null;
+    dbAllResults?: Record<string, unknown>[];
+    dbRunChanges?: number;
+    userId?: string;
+  } = {}
+): ToolContext & { _db: ReturnType<typeof mockD1> } {
   const db = mockD1({
     firstResult: overrides.dbFirstResult,
     allResults: overrides.dbAllResults,
@@ -266,7 +273,7 @@ describe('create_idea — success paths', () => {
     });
     const result = (await createIdea(
       { projectId: 'proj-1', title: 'My cool idea', description: 'Details here', priority: 3 },
-      ctx,
+      ctx
     )) as Record<string, unknown>;
 
     expect(result.ideaId).toBeDefined();
@@ -283,7 +290,7 @@ describe('create_idea — success paths', () => {
     });
     const result = (await createIdea(
       { projectId: 'proj-1', title: 'Test', priority: 99 },
-      ctx,
+      ctx
     )) as Record<string, unknown>;
     expect(result.priority).toBe(10);
   });
@@ -331,13 +338,19 @@ describe('get_orchestrator_status — error path', () => {
       dbAllResults: [{ id: 'proj-1' }],
     });
     // Override the orchestrator stub to throw
-    const orchStub = (ctx.env as Record<string, unknown>).PROJECT_ORCHESTRATOR as Record<string, unknown>;
+    const orchStub = (ctx.env as Record<string, unknown>).PROJECT_ORCHESTRATOR as Record<
+      string,
+      unknown
+    >;
     (orchStub.get as ReturnType<typeof vi.fn>).mockReturnValue({
       getStatus: vi.fn().mockRejectedValue(new Error('DO unavailable')),
       getSchedulingQueue: vi.fn().mockRejectedValue(new Error('DO unavailable')),
     });
 
-    const result = (await getOrchestratorStatus({ projectId: 'proj-1' }, ctx)) as Record<string, unknown>;
+    const result = (await getOrchestratorStatus({ projectId: 'proj-1' }, ctx)) as Record<
+      string,
+      unknown
+    >;
     expect(result.orchestrator).toBeNull();
     expect(result.note).toContain('not available');
   });
@@ -349,7 +362,13 @@ describe('SAM_TOOLS array', () => {
   it('contains all Phase D tool definitions', async () => {
     const { SAM_TOOLS } = await import('../../../src/durable-objects/sam-session/tools');
     const toolNames = SAM_TOOLS.map((t) => t.name);
-    for (const name of ['create_idea', 'list_ideas', 'find_related_ideas', 'get_ci_status', 'get_orchestrator_status']) {
+    for (const name of [
+      'create_idea',
+      'list_ideas',
+      'find_related_ideas',
+      'get_ci_status',
+      'get_orchestrator_status',
+    ]) {
       expect(toolNames).toContain(name);
     }
   });
@@ -398,7 +417,12 @@ describe('Phase D tool registration', () => {
   });
 
   it('original 4 tools still work', async () => {
-    for (const toolName of ['list_projects', 'get_project_status', 'search_tasks', 'search_conversation_history']) {
+    for (const toolName of [
+      'list_projects',
+      'get_project_status',
+      'search_tasks',
+      'search_conversation_history',
+    ]) {
       const toolCall: CollectedToolCall = {
         id: `orig-${toolName}`,
         name: toolName,

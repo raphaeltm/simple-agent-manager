@@ -1,6 +1,4 @@
-import {
-  DEFAULT_AI_MONTHLY_COST_CACHE_TTL_SECONDS,
-} from '@simple-agent-manager/shared';
+import { DEFAULT_AI_MONTHLY_COST_CACHE_TTL_SECONDS } from '@simple-agent-manager/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
@@ -101,9 +99,7 @@ describe('resolveMonthlyCostCacheTtlSeconds', () => {
   });
 
   it('caps excessively high values', () => {
-    expect(resolveMonthlyCostCacheTtlSeconds('999999999')).toBe(
-      MAX_MONTHLY_COST_CACHE_TTL_SECONDS
-    );
+    expect(resolveMonthlyCostCacheTtlSeconds('999999999')).toBe(MAX_MONTHLY_COST_CACHE_TTL_SECONDS);
   });
 });
 
@@ -122,10 +118,12 @@ describe('runMonthlyCostAggregation', () => {
   it('is disabled when AI_GATEWAY_ID is absent', async () => {
     const kv = createMockKV();
 
-    const result = await runMonthlyCostAggregation(makeEnv({
-      AI_GATEWAY_ID: undefined,
-      KV: kv,
-    }));
+    const result = await runMonthlyCostAggregation(
+      makeEnv({
+        AI_GATEWAY_ID: undefined,
+        KV: kv,
+      })
+    );
 
     expect(result).toEqual({ enabled: false, usersUpdated: 0, totalEntries: 0, errors: 0 });
     expect(mockIterateGatewayLogs).not.toHaveBeenCalled();
@@ -134,22 +132,26 @@ describe('runMonthlyCostAggregation', () => {
 
   it('aggregates per-user costs and writes current-month keys with a safe TTL', async () => {
     const kv = createMockKV();
-    mockIterateGatewayLogs.mockImplementation(async (
-      _env: Env,
-      _gatewayId: string,
-      _startDate: string,
-      visitor: (entry: AIGatewayLogEntry) => void
-    ) => {
-      visitor(makeGatewayEntry({ id: 'entry-1', cost: 0.1, metadata: { userId: 'user-a' } }));
-      visitor(makeGatewayEntry({ id: 'entry-2', cost: 0.25, metadata: { userId: 'user-a' } }));
-      visitor(makeGatewayEntry({ id: 'entry-3', cost: 0.2, metadata: { userId: 'user-b' } }));
-      visitor(makeGatewayEntry({ id: 'entry-4', cost: 9, metadata: null }));
-    });
+    mockIterateGatewayLogs.mockImplementation(
+      async (
+        _env: Env,
+        _gatewayId: string,
+        _startDate: string,
+        visitor: (entry: AIGatewayLogEntry) => void
+      ) => {
+        visitor(makeGatewayEntry({ id: 'entry-1', cost: 0.1, metadata: { userId: 'user-a' } }));
+        visitor(makeGatewayEntry({ id: 'entry-2', cost: 0.25, metadata: { userId: 'user-a' } }));
+        visitor(makeGatewayEntry({ id: 'entry-3', cost: 0.2, metadata: { userId: 'user-b' } }));
+        visitor(makeGatewayEntry({ id: 'entry-4', cost: 9, metadata: null }));
+      }
+    );
 
-    const result = await runMonthlyCostAggregation(makeEnv({
-      KV: kv,
-      AI_MONTHLY_COST_CACHE_TTL_SECONDS: '3600.9',
-    }));
+    const result = await runMonthlyCostAggregation(
+      makeEnv({
+        KV: kv,
+        AI_MONTHLY_COST_CACHE_TTL_SECONDS: '3600.9',
+      })
+    );
 
     expect(result).toEqual({ enabled: true, usersUpdated: 2, totalEntries: 4, errors: 0 });
     expect(kv._store.get('ai-monthly-cost:user-a:2026-06')).toBe('0.350000');
@@ -171,19 +173,23 @@ describe('runMonthlyCostAggregation', () => {
 
   it('falls back to the default TTL for invalid negative configuration', async () => {
     const kv = createMockKV();
-    mockIterateGatewayLogs.mockImplementation(async (
-      _env: Env,
-      _gatewayId: string,
-      _startDate: string,
-      visitor: (entry: AIGatewayLogEntry) => void
-    ) => {
-      visitor(makeGatewayEntry({ metadata: { userId: 'user-a' } }));
-    });
+    mockIterateGatewayLogs.mockImplementation(
+      async (
+        _env: Env,
+        _gatewayId: string,
+        _startDate: string,
+        visitor: (entry: AIGatewayLogEntry) => void
+      ) => {
+        visitor(makeGatewayEntry({ metadata: { userId: 'user-a' } }));
+      }
+    );
 
-    const result = await runMonthlyCostAggregation(makeEnv({
-      KV: kv,
-      AI_MONTHLY_COST_CACHE_TTL_SECONDS: '-1',
-    }));
+    const result = await runMonthlyCostAggregation(
+      makeEnv({
+        KV: kv,
+        AI_MONTHLY_COST_CACHE_TTL_SECONDS: '-1',
+      })
+    );
 
     expect(result.errors).toBe(0);
     expect(kv._ttlByKey.get('ai-monthly-cost:user-a:2026-06')).toBe(
@@ -193,19 +199,23 @@ describe('runMonthlyCostAggregation', () => {
 
   it('caps excessively high TTL configuration before writing to KV', async () => {
     const kv = createMockKV();
-    mockIterateGatewayLogs.mockImplementation(async (
-      _env: Env,
-      _gatewayId: string,
-      _startDate: string,
-      visitor: (entry: AIGatewayLogEntry) => void
-    ) => {
-      visitor(makeGatewayEntry({ metadata: { userId: 'user-a' } }));
-    });
+    mockIterateGatewayLogs.mockImplementation(
+      async (
+        _env: Env,
+        _gatewayId: string,
+        _startDate: string,
+        visitor: (entry: AIGatewayLogEntry) => void
+      ) => {
+        visitor(makeGatewayEntry({ metadata: { userId: 'user-a' } }));
+      }
+    );
 
-    const result = await runMonthlyCostAggregation(makeEnv({
-      KV: kv,
-      AI_MONTHLY_COST_CACHE_TTL_SECONDS: '999999999',
-    }));
+    const result = await runMonthlyCostAggregation(
+      makeEnv({
+        KV: kv,
+        AI_MONTHLY_COST_CACHE_TTL_SECONDS: '999999999',
+      })
+    );
 
     expect(result.errors).toBe(0);
     expect(kv._ttlByKey.get('ai-monthly-cost:user-a:2026-06')).toBe(
@@ -226,15 +236,17 @@ describe('runMonthlyCostAggregation', () => {
   it('counts per-user KV write failures without stopping other users', async () => {
     const failingKey = 'ai-monthly-cost:user-a:2026-06';
     const kv = createMockKV(new Set([failingKey]));
-    mockIterateGatewayLogs.mockImplementation(async (
-      _env: Env,
-      _gatewayId: string,
-      _startDate: string,
-      visitor: (entry: AIGatewayLogEntry) => void
-    ) => {
-      visitor(makeGatewayEntry({ id: 'entry-1', cost: 0.1, metadata: { userId: 'user-a' } }));
-      visitor(makeGatewayEntry({ id: 'entry-2', cost: 0.2, metadata: { userId: 'user-b' } }));
-    });
+    mockIterateGatewayLogs.mockImplementation(
+      async (
+        _env: Env,
+        _gatewayId: string,
+        _startDate: string,
+        visitor: (entry: AIGatewayLogEntry) => void
+      ) => {
+        visitor(makeGatewayEntry({ id: 'entry-1', cost: 0.1, metadata: { userId: 'user-a' } }));
+        visitor(makeGatewayEntry({ id: 'entry-2', cost: 0.2, metadata: { userId: 'user-b' } }));
+      }
+    );
 
     const result = await runMonthlyCostAggregation(makeEnv({ KV: kv }));
 

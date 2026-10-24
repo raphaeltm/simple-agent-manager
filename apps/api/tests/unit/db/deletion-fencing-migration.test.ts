@@ -85,10 +85,7 @@ describe('0137 deletion fencing migration', () => {
       sqlite.exec(`INSERT INTO nodes (id, status) VALUES ('legacy-running', 'running')`);
       sqlite.exec(
         readFileSync(
-          join(
-            process.cwd(),
-            'src/db/migrations/0142_node_provider_credential_fingerprint.sql'
-          ),
+          join(process.cwd(), 'src/db/migrations/0142_node_provider_credential_fingerprint.sql'),
           'utf8'
         )
       );
@@ -97,9 +94,7 @@ describe('0137 deletion fencing migration', () => {
         name: string;
       }>;
       const row = sqlite
-        .prepare(
-          'SELECT placement_credential_fingerprint AS fingerprint FROM nodes WHERE id = ?'
-        )
+        .prepare('SELECT placement_credential_fingerprint AS fingerprint FROM nodes WHERE id = ?')
         .get('legacy-running') as { fingerprint: string | null };
       expect(columns.map((column) => column.name)).toContain('placement_credential_fingerprint');
       expect(row.fingerprint).toBeNull();

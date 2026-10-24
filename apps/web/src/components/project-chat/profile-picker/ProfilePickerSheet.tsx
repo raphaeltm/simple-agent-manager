@@ -36,7 +36,20 @@ type ProfilePickerSheetProps = Readonly<{
   onClose: () => void;
   onNewProfile: () => void;
   onEditProfile?: () => void;
+  /**
+   * Where the sheet sits in the stacking order. `drawer` (the default) is right for the
+   * composer, where it is the only modal on screen. `above-dialog` is required when it
+   * opens from inside a dialog — the drawer level is BELOW the dialog level, so the
+   * default would render the picker behind the dialog that opened it: present and
+   * "visible" to a test, invisible to the person.
+   */
+  layer?: 'drawer' | 'above-dialog';
 }>;
+
+const LAYER_CLASSES = {
+  drawer: { backdrop: 'z-drawer-backdrop', sheet: 'z-drawer' },
+  'above-dialog': { backdrop: 'z-panel', sheet: 'z-panel' },
+} as const;
 
 function sheetLayout(isMobile: boolean, anchor: DOMRect | null) {
   if (isMobile) {
@@ -101,6 +114,7 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
   if (!open) return null;
 
   const layout = sheetLayout(isMobile, props.anchor);
+  const layer = LAYER_CLASSES[props.layer ?? 'drawer'];
   const setHidden = (change: UpdateProfilePickerRequest) => {
     props.onSetHidden(change).catch(() => undefined);
   };
@@ -109,7 +123,7 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
     // One root for backdrop and sheet, so isolating the page leaves the backdrop clickable.
     <div data-sam-modal-root="">
       <div
-        className="fixed inset-0 z-drawer-backdrop border-0 glass-backdrop-dim"
+        className={`fixed inset-0 border-0 glass-backdrop-dim ${layer.backdrop}`}
         onClick={onClose}
         aria-hidden="true"
       />
@@ -120,7 +134,7 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
         aria-label="Choose a profile"
         tabIndex={-1}
         style={layout.style}
-        className={`${layout.className} z-drawer flex flex-col overflow-hidden outline-none glass-modal glass-panel-container glass-composited`}
+        className={`${layout.className} ${layer.sheet} flex flex-col overflow-hidden outline-none glass-modal glass-panel-container glass-composited`}
       >
         {isMobile && (
           <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-border-default" />

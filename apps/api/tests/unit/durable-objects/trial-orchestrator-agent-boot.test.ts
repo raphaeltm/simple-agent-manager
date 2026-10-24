@@ -32,7 +32,7 @@ const { startDiscoveryAgentMock, resolveTrialRunnerConfigMock, emitTrialEventMoc
       provider: 'workers-ai' as const,
     })),
     emitTrialEventMock: vi.fn(async () => {}),
-  }),
+  })
 );
 vi.mock('../../../src/services/trial/trial-runner', () => ({
   emitTrialEvent: emitTrialEventMock,
@@ -79,9 +79,8 @@ vi.mock('../../../src/services/mcp-token', () => ({
   storeMcpToken: storeMcpTokenMock,
 }));
 
-const { handleDiscoveryAgentStart, handleProjectCreation } = await import(
-  '../../../src/durable-objects/trial-orchestrator/steps'
-);
+const { handleDiscoveryAgentStart, handleProjectCreation } =
+  await import('../../../src/durable-objects/trial-orchestrator/steps');
 
 type Storage = Map<string, unknown>;
 
@@ -335,7 +334,7 @@ describe('handleProjectCreation — default branch detection', () => {
       new Response(JSON.stringify({ default_branch: 'master' }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
-      }),
+      })
     );
 
     const ctx = makeCtx();
@@ -362,9 +361,7 @@ describe('handleProjectCreation — default branch detection', () => {
   });
 
   it('falls back to "main" when the probe fails (network error)', async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockRejectedValue(new Error('network down'));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'));
 
     const ctx = makeCtx();
     const advanced: string[] = [];
@@ -384,9 +381,9 @@ describe('handleProjectCreation — default branch detection', () => {
   });
 
   it('falls back to "main" when GitHub returns 404', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('Not Found', { status: 404 }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('Not Found', { status: 404 }));
 
     const ctx = makeCtx();
     const advanced: string[] = [];

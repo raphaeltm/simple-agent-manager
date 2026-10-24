@@ -183,9 +183,9 @@ describe('fresh VM absence proof through real provisioning and cleanup SQL', () 
     ).rejects.toThrow('Placement unavailable');
 
     expect(readNode(node.id)).toMatchObject({ status: 'creating', providerId: null });
-    expect(
-      sqlite.prepare('SELECT vm_location FROM nodes WHERE id = ?').get(node.id)
-    ).toEqual({ vm_location: 'fsn1' });
+    expect(sqlite.prepare('SELECT vm_location FROM nodes WHERE id = ?').get(node.id)).toEqual({
+      vm_location: 'fsn1',
+    });
   });
 
   it.each([

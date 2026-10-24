@@ -65,10 +65,7 @@ export function seedCloudCredential(
     );
 }
 
-export function seedPlatformCloudCredential(
-  sqlite: Database.Database,
-  id = 'platform-cloud-1'
-) {
+export function seedPlatformCloudCredential(sqlite: Database.Database, id = 'platform-cloud-1') {
   sqlite
     .prepare(
       `INSERT INTO platform_credentials (

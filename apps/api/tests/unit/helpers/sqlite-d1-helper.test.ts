@@ -121,14 +121,18 @@ describe('createSqliteD1WithBindLimit', () => {
   it('rejects a statement over the bind limit', () => {
     const ids = overLimit();
     expect(() =>
-      database.prepare(`SELECT id FROM widgets WHERE id IN (${placeholders(ids.length)})`).bind(...ids)
+      database
+        .prepare(`SELECT id FROM widgets WHERE id IN (${placeholders(ids.length)})`)
+        .bind(...ids)
     ).toThrow(/bind parameter limit exceeded/i);
   });
 
   it('accepts a statement exactly at the limit (owner-path control)', () => {
     const ids = atLimit();
     expect(() =>
-      database.prepare(`SELECT id FROM widgets WHERE id IN (${placeholders(ids.length)})`).bind(...ids)
+      database
+        .prepare(`SELECT id FROM widgets WHERE id IN (${placeholders(ids.length)})`)
+        .bind(...ids)
     ).not.toThrow();
   });
 
@@ -137,7 +141,9 @@ describe('createSqliteD1WithBindLimit', () => {
     const session = database.withSession('first-primary');
 
     expect(() =>
-      session.prepare(`SELECT id FROM widgets WHERE id IN (${placeholders(ids.length)})`).bind(...ids)
+      session
+        .prepare(`SELECT id FROM widgets WHERE id IN (${placeholders(ids.length)})`)
+        .bind(...ids)
     ).toThrow(/bind parameter limit exceeded/i);
 
     // Control: the same session still accepts a statement at the limit, so the assertion above

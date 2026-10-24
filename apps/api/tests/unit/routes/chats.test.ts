@@ -18,10 +18,7 @@ vi.mock('../../../src/middleware/auth', () => ({
 const { chatsRoutes } = await import('../../../src/routes/chats');
 
 /** Helper to build a mock D1 database that returns configurable results. */
-function makeMockD1(options: {
-  sessionsResults?: unknown[];
-  countResult?: { cnt: number };
-}) {
+function makeMockD1(options: { sessionsResults?: unknown[]; countResult?: { cnt: number } }) {
   const { sessionsResults = [], countResult = { cnt: 0 } } = options;
   return {
     prepare: vi.fn().mockReturnValue({

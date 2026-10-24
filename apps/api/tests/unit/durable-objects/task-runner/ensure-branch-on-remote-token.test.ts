@@ -95,7 +95,7 @@ function makeState(): TaskRunnerState {
   } as unknown as TaskRunnerState;
 }
 
-import { githubInstallations,projects } from '../../../../src/db/schema';
+import { githubInstallations, projects } from '../../../../src/db/schema';
 import { createAdminSettingsEnv } from '../../../helpers/admin-settings-env';
 import { createSchemaTables } from '../../../helpers/sqlite-d1';
 let fixture: ReturnType<typeof createAdminSettingsEnv>;

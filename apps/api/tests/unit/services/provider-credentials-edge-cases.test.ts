@@ -742,7 +742,6 @@ describe('exact credential binding — version-only generation proof', () => {
   });
 });
 
-
 describe('hasExactProviderCredentialGenerationProof', () => {
   it.each([
     ['fingerprint only', { credentialFingerprint: 'sha256:a', credentialVersion: null }, true],
@@ -751,7 +750,11 @@ describe('hasExactProviderCredentialGenerationProof', () => {
     ['neither', { credentialFingerprint: null, credentialVersion: null }, false],
     // Empty string must read as ABSENT here, matching exactCredentialGenerationMatches'
     // own truthiness check, or the two would disagree about what counts as proof.
-    ['empty-string fingerprint only', { credentialFingerprint: '', credentialVersion: null }, false],
+    [
+      'empty-string fingerprint only',
+      { credentialFingerprint: '', credentialVersion: null },
+      false,
+    ],
     [
       'empty-string fingerprint with version',
       { credentialFingerprint: '', credentialVersion: 1700000000000 },

@@ -54,10 +54,7 @@ function makeRedirectResponse(location = 'https://app.example.com/'): Response {
   });
 }
 
-function makeRequestWithFingerprint(
-  path: string,
-  signedCookie: string | null
-): Request {
+function makeRequestWithFingerprint(path: string, signedCookie: string | null): Request {
   const headers = new Headers();
   if (signedCookie) {
     headers.set('cookie', `sam_trial_fingerprint=${encodeURIComponent(signedCookie)}`);
@@ -181,9 +178,7 @@ describe('maybeAttachTrialClaimCookie — happy path', () => {
     const result = await maybeAttachTrialClaimCookie(env, req, resp);
     expect(result).not.toBe(resp);
     expect(result.status).toBe(302);
-    expect(result.headers.get('Location')).toBe(
-      'https://app.sammy.party/try/trial_zzz?claim=1'
-    );
+    expect(result.headers.get('Location')).toBe('https://app.sammy.party/try/trial_zzz?claim=1');
 
     // Set-Cookie must contain a claim cookie (sam_trial_claim=<token>...)
     const setCookie = result.headers.get('Set-Cookie');
