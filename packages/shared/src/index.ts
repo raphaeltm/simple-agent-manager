@@ -64,5 +64,6 @@ export type { MentionMatch } from './mentions';
 export { extractMentions, formatMentionName, getMentionQuery } from './mentions';
 export * from './message-cursor';
 export { canonicalProjectPullRequestUrl } from './pull-requests';
+export type { PullRequestRef, PullRequestState } from './types/pull-requests';
 export * from './secret-exec';
 export * from './workload-identity';

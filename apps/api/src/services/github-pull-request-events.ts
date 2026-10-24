@@ -6,7 +6,7 @@ import {
   upsertPullRequestSnapshot,
 } from '../operations/pull-request-core';
 import { resolveAdminSetting } from './admin-settings';
-import { findProjectsForGitHubRepository } from './github-project-event-producer';
+import { findProjectsForGitHubRepository } from './github-project-repositories';
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
