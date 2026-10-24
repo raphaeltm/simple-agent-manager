@@ -124,18 +124,29 @@ chat rows open it. Notifications open it too. The reader:
 
 ## Acceptance criteria
 
-- [ ] From the Comments page, opening a chat comment lands on the conversation with the
-      quoted passage highlighted and on screen (mobile and desktop)
-- [ ] An anchor on a later streamed chunk of an agent message still lands on that message
-- [ ] The thread is visible beside the conversation (desktop) / in a sheet (phone), and
-      reply, resolve, reopen and send to agent work from there
-- [ ] Scrolling up/down loads earlier/later messages without jumping; "Back to the comment"
-      returns to the passage
-- [ ] Previous/next comment works in inbox order
-- [ ] "Open in chat" opens the chat with the thread focused at the right message
-- [ ] A comment whose message is gone shows the stored quote and a clear message, no error
-- [ ] Cross-session and cross-project thread ids return 404 with no data
-- [ ] Works for archived (sharded) sessions
+- [x] From the Comments page, opening a chat comment lands on the conversation with the
+      quoted passage highlighted and on screen (mobile and desktop). Staging 2026-10-24 02:17Z,
+      desktop and phone; Playwright audit; `comment-reader.test.tsx`
+- [x] An anchor on a later streamed chunk of an agent message still lands on that message.
+      Staging anchor: 4th row of a 14-row reply; DO window tests; chat chunk-jump test
+- [x] The thread is visible beside the conversation (desktop) / in a sheet (phone), and
+      reply, resolve, reopen and send to agent work from there. Staging: panel, reply, phone
+      sheet. Resolve, reopen and send are covered in `comment-reader.test.tsx`
+- [x] Scrolling up/down loads earlier/later messages without jumping; "Back to the comment"
+      returns to the passage. Staging: earlier 0.2 px, later 0 px, back on screen; audits hold
+      the page response and measure mid-load
+- [x] Previous/next comment works in inbox order (`comment-reader-model.test.ts`,
+      `comment-reader.test.tsx`; staging header shows the position)
+- [x] "Open in chat" opens the chat with the thread focused at the right message. Staging:
+      desktop thread open and message on screen; phone message on screen. The phone failure-banner
+      overlap is pre-existing, see backlog `2026-10-24-chat-comment-link-under-failure-banner-on-phones.md`
+- [x] A comment whose message is gone shows the stored quote and a clear message, no error
+      (vertical slice, `comment-reader.test.tsx`, Playwright "message gone")
+- [x] Cross-session and cross-project thread ids return 404 with no data (vertical slice
+      attack + owner-control pairs; DO cross-session test)
+- [x] Works for archived (sharded) sessions: Workers-runtime tests compare the window across
+      root, compact archive and copied-back storage. Sessions with comments are never archived
+      today
 
 ## Implementation notes
 
@@ -159,6 +170,21 @@ chat rows open it. Notifications open it too. The reader:
   with 35 comments (fold into "+N more").
 - Notifications now link to the reader (`buildCommentActionUrl`); API reference, notifications
   guide, collaboration guide and admin settings guide updated.
+
+- Staging run 1 (3c067ba9e, 01:44Z): all checks passed except loading later messages moved the
+  view 8 px. The loading row was 8 px shorter than the button, and the scroll position is clamped
+  at the end of the conversation. Edge rows now share one height (a7e6060ae), and the audits hold
+  the page response and measure mid-load: red with exactly 8 px without the fix. The run also
+  showed a finished tool call as running: the window ended on the first of a parallel pair of
+  tool calls. Runs of tool rows are now never cut (f82042d63); the tool-run test is red without it.
+- Staging is shared through a claim queue on the `feature.linked-work` channel ("STAGING CLAIM
+  <item> <branch>" / "STAGING RELEASE <item>"). My first two deploys were unclaimed; run 3 was
+  claimed (seq 113), verified and released (seq 121). Check the channel before any staging deploy.
+- Staging run 3 (f82042d63, 02:17Z): every feature check passed. The only errors were 404s from
+  the chat page retrying a deleted workspace. That is pre-existing, filed as
+  `tasks/backlog/2026-10-24-chat-retries-deleted-workspace.md`.
+- Rebased onto main `a3404a848` (idea updates): registry and RPC overlaps were additive, and the
+  registry count is now 76.
 
 ## References
 
