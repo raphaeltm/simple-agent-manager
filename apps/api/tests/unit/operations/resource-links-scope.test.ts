@@ -22,10 +22,12 @@ import { recordLink } from '../../../src/operations/link-core';
 function fixture() {
   const db = new Database(':memory:');
   db.exec(`CREATE TABLE projects(id TEXT PRIMARY KEY,repository TEXT);
-    CREATE TABLE tasks(id TEXT PRIMARY KEY,project_id TEXT);
+    CREATE TABLE tasks(id TEXT PRIMARY KEY,project_id TEXT,status TEXT);
     CREATE TABLE project_files(id TEXT PRIMARY KEY,project_id TEXT);
     INSERT INTO projects VALUES ('own','owner/repo'),('other','else/repo'),('empty',NULL);
-    INSERT INTO tasks VALUES ('idea-own','own'),('idea-other','other'),('idea-empty','empty');
+    INSERT INTO tasks VALUES
+      ('idea-own','own','draft'),('idea-other','other','draft'),
+      ('idea-empty','empty','draft'),('ordinary-task','own','ready');
     INSERT INTO project_files VALUES ('file-own','own'),('file-other','other');`);
   const d1 = {
     prepare: (sql: string) => ({
@@ -57,6 +59,35 @@ describe('resource links enforce final project predicate in real SQL', () => {
       expect(writes).toHaveBeenCalledTimes(1);
       await expect(recordLink(env, 'own', { ...input, targetId: 'file-other' })).rejects.toThrow();
       await expect(recordLink(env, 'own', { ...input, sourceId: 'idea-other' })).rejects.toThrow();
+      expect(writes).toHaveBeenCalledTimes(1);
+    } finally {
+      db.close();
+    }
+  });
+  it('rejects an ordinary task as an idea while accepting a draft idea', async () => {
+    const { db, env } = fixture();
+    try {
+      const input = {
+        sourceKind: 'idea' as const,
+        sourceId: 'ordinary-task',
+        targetKind: 'file' as const,
+        targetId: 'file-own',
+        relation: 'linked' as const,
+        origin: 'explicit' as const,
+        context: null,
+      };
+      await expect(recordLink(env, 'own', input)).rejects.toThrow('Resource');
+      await expect(
+        recordLink(env, 'own', {
+          ...input,
+          sourceId: 'idea-own',
+          targetKind: 'idea',
+          targetId: 'ordinary-task',
+          relation: 'related',
+        })
+      ).rejects.toThrow('Resource');
+      expect(writes).not.toHaveBeenCalled();
+      await recordLink(env, 'own', { ...input, sourceId: 'idea-own' });
       expect(writes).toHaveBeenCalledTimes(1);
     } finally {
       db.close();

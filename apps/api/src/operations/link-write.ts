@@ -8,6 +8,7 @@ import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
 import * as projectData from '../services/project-data';
+import { ideaTaskPredicateSql } from './idea-core';
 
 const PAIRS: Record<string, readonly LinkRelation[]> = {
   'session:idea': ['created', 'edited', 'read', 'works_on', 'discusses', 'linked'],
@@ -81,7 +82,10 @@ export async function validateEntity(
   }
   if (kind === 'idea' || kind === 'file') {
     const table = kind === 'idea' ? 'tasks' : 'project_files';
-    const found = await env.DATABASE.prepare(`SELECT id FROM ${table} WHERE id=? AND project_id=?`)
+    const ideaPredicate = kind === 'idea' ? ` AND ${ideaTaskPredicateSql('tasks')}` : '';
+    const found = await env.DATABASE.prepare(
+      `SELECT id FROM ${table} WHERE id=? AND project_id=?${ideaPredicate}`
+    )
       .bind(id, projectId)
       .first();
     if (!found) throw errors.notFound('Resource');
