@@ -3,6 +3,8 @@ import type {
   IdeaDerivedStatus,
   IdeaHumanTransition,
   IdeaListItem,
+  IdeaPullRequest,
+  LinkRelation,
 } from '@simple-agent-manager/shared';
 
 import { request } from './client';
@@ -24,6 +26,9 @@ export interface IdeasListResponse {
 export interface IdeaLinkedSession {
   sessionId: string;
   topic: string | null;
+  /** Every relation recorded between the idea and this chat. */
+  relations: LinkRelation[];
+  /** True when at least one of those relations is a strong one. */
   strong: boolean;
   sessionStatus: string;
   taskId: string | null;
@@ -48,7 +53,7 @@ export interface IdeaDetail {
   filedByAgent: boolean;
   filedBy: string | null;
   sessions: IdeaLinkedSession[];
-  pullRequests: NonNullable<IdeaDerivedStatus['pullRequest']>[];
+  pullRequests: IdeaPullRequest[];
 }
 
 export function listProjectIdeas(

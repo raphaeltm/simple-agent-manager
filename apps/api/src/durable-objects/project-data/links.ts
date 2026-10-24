@@ -243,6 +243,70 @@ export function listLinksForTargets(
   );
 }
 
+/** A file or pull request an idea owns, found through a batched list-page read. */
+export interface IdeaAssetLink {
+  ideaId: string;
+  /** `file` carries a project file id; `pr` carries the pull request URL. */
+  targetKind: 'file' | 'pr';
+  targetId: string;
+  lastAt: number;
+}
+
+/**
+ * The files and pull requests each of `ideaIds` owns, in one query.
+ *
+ * "Owns" is the program's strength rule: an idea's own explicit links, plus the links of the
+ * sessions strongly linked to it. A session that merely read or discussed an idea never pulls
+ * its files or pull requests in, which is why the session join filters on the strong
+ * relations rather than on any link at all.
+ *
+ * Rows are distinct per idea and target, so a file two sessions both uploaded counts once,
+ * and the per-idea cap applies to distinct targets rather than to raw link rows. A group that
+ * reaches the cap is a lower bound, and the caller discloses that rather than rounding it off
+ * (rule 65).
+ */
+export function listIdeaAssetLinksForTargets(
+  sql: SqlStorage,
+  ideaIds: string[],
+  perTargetCap: number,
+  maxTargets: number
+): IdeaAssetLink[] {
+  if (ideaIds.length > maxTargets) throw new Error('Too many target ids');
+  if (!ideaIds.length) return [];
+  const cap = Math.max(1, Math.floor(perTargetCap));
+  return sql
+    .exec(
+      `WITH targets(id) AS (SELECT value FROM json_each(?)),
+    strong AS (
+      SELECT l.target_id AS idea_id, l.source_id AS session_id FROM resource_links l
+      JOIN targets t ON t.id = l.target_id
+      WHERE l.source_kind='session' AND l.target_kind='idea' AND l.relation IN ${STRONG_SQL}
+    ),
+    assets AS (
+      SELECT t.id AS idea_id, l.target_kind, l.target_id, l.last_at FROM resource_links l
+      JOIN targets t ON t.id = l.source_id
+      WHERE l.source_kind='idea' AND l.target_kind IN ('file','pr')
+      UNION ALL
+      SELECT s.idea_id, l.target_kind, l.target_id, l.last_at FROM resource_links l
+      JOIN strong s ON s.session_id = l.source_id
+      WHERE l.source_kind='session' AND l.target_kind IN ('file','pr')
+    ),
+    distinctAssets AS (
+      SELECT idea_id, target_kind, target_id, MAX(last_at) AS last_at FROM assets
+      GROUP BY idea_id, target_kind, target_id
+    )
+    SELECT idea_id AS ideaId, target_kind AS targetKind, target_id AS targetId,
+      last_at AS lastAt FROM (
+      SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY idea_id, target_kind ORDER BY last_at DESC, target_id DESC) AS rowNumber
+      FROM distinctAssets
+    ) WHERE rowNumber<=? ORDER BY ideaId, targetKind, rowNumber`,
+      JSON.stringify(ideaIds),
+      cap
+    )
+    .toArray() as unknown as IdeaAssetLink[];
+}
+
 /** One RPC returns direct links, strong-session edges and session display data. */
 export function getLinkSnapshot(
   sql: SqlStorage,

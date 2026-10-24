@@ -92,7 +92,10 @@ import type {
   GroupedFtsWallRecoveryRequest,
   GroupedFtsWallRecoveryResult,
 } from '../durable-objects/project-data/grouped-fts-wall-recovery';
-import type { IdeaWorkSnapshot } from '../durable-objects/project-data/idea-work';
+import type {
+  IdeaWorkLinkCaps,
+  IdeaWorkSnapshot,
+} from '../durable-objects/project-data/idea-work';
 import type { SearchResult } from '../durable-objects/project-data/message-search';
 import {
   AgentMessageRecipientUnavailableError,
@@ -2370,11 +2373,12 @@ export async function getResourceLinkSnapshot(
 export async function getIdeaWorkSnapshots(
   env: Env,
   projectId: string,
-  ideaIds: readonly string[]
+  ideaIds: readonly string[],
+  caps: IdeaWorkLinkCaps
 ): Promise<Record<string, IdeaWorkSnapshot>> {
   if (ideaIds.length === 0) return {};
   const stub = await getStub(env, projectId);
-  return stub.getIdeaWorkSnapshots([...ideaIds]);
+  return stub.getIdeaWorkSnapshots([...ideaIds], caps);
 }
 
 // =========================================================================

@@ -24,16 +24,24 @@ import { toOperationHttpError } from '../operations/errors';
 import { createIdea } from '../operations/idea-core';
 import {
   getIdeaWithDerivedStatus,
-  type IdeaPullRequestStateReader,
+  type IdeaPullRequestRefresh,
   listIdeasWithDerivedStatus,
 } from '../operations/idea-list-core';
 import { acknowledgeIdeaMerge, applyIdeaStatusTransition } from '../operations/idea-transitions';
-import { type OperationContext, webOperationContext } from '../operations/types';
+import { webOperationContext } from '../operations/types';
 import { jsonValidator } from '../schemas';
 
 export const ideaRoutes = new Hono<{ Bindings: Env }>();
 
-ideaRoutes.use('/*', requireAuth(), requireApproved());
+/**
+ * Session auth, per route rather than as `use('/*', …)`.
+ *
+ * `ideaUpdateRoutes` is mounted at the same base path, and Hono merges subrouters mounted at
+ * the same path: a wildcard here would run on its routes too (`apps/api/.claude/rules/06-api-patterns.md`,
+ * program decision 11). Both routers happen to want the same two middlewares today, which is
+ * exactly why the leak would be invisible until one of them did not.
+ */
+const session = [requireAuth(), requireApproved()] as const;
 
 const UpdateIdeaStatusSchema = v.object({
   // Built from the shared list rather than repeating it, so the schema and
@@ -47,39 +55,22 @@ const CreateIdeaSchema = v.object({
 });
 
 /**
-/**
  * How much each read may spend on pull request state.
  *
  * The list reads a whole page — up to `openLimit` ideas — so it must never ask anyone to call
  * GitHub: one refresh per idea would be a hundred calls for one page view. Only the
- * single-idea read may ask, and only for its own pull requests. Exported so a test can pin
- * the choice rather than trusting the call sites to stay right.
+ * single-idea read may ask, and only for its own pull requests (program decision 4). Exported
+ * so a test can pin the choice rather than trusting the call sites to stay right.
  */
 export const IDEA_PULL_REQUEST_REFRESH = {
   list: 'none',
   detail: 'single',
-} as const satisfies Record<string, 'single' | 'none'>;
-
-/**
- * Stored pull request state for the URLs an idea's work produced.
- *
- * T2 owns pull request state (`operations/pull-request-core.ts`); this is only the adapter
- * that reshapes its answer for the Ideas reads. Until that operation is on `main` the Ideas
- * pages show state-free pull requests, which is why T8 does not merge before it — see the
- * `feature.linked-work` channel and idea 01M5NG5KPW7PXY272F2SVCB1SN.
- */
-function pullRequestStateReader(
-  _ctx: OperationContext,
-  _projectId: string,
-  _refresh: (typeof IDEA_PULL_REQUEST_REFRESH)[keyof typeof IDEA_PULL_REQUEST_REFRESH]
-): IdeaPullRequestStateReader {
-  return async () => ({});
-}
+} as const satisfies Record<string, IdeaPullRequestRefresh>;
 
 /**
  * GET / — the Ideas list, with each idea's derived state, counts and needs-you reason.
  */
-ideaRoutes.get('/', async (c) => {
+ideaRoutes.get('/', ...session, async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -90,12 +81,7 @@ ideaRoutes.get('/', async (c) => {
   const closedLimit = parsePositiveInt(c.req.query('closedLimit'), 0) || undefined;
 
   try {
-    const result = await listIdeasWithDerivedStatus(ctx, {
-      projectId,
-      openLimit,
-      closedLimit,
-      readPullRequestStates: pullRequestStateReader(ctx, projectId, IDEA_PULL_REQUEST_REFRESH.list),
-    });
+    const result = await listIdeasWithDerivedStatus(ctx, { projectId, openLimit, closedLimit });
     return c.json(result);
   } catch (error) {
     throw toOperationHttpError(error);
@@ -108,7 +94,7 @@ ideaRoutes.get('/', async (c) => {
  * Goes through the same `createIdea` operation the MCP tools use, so an idea a person types
  * and an idea an agent files are the same kind of row (rule 24).
  */
-ideaRoutes.post('/', jsonValidator(CreateIdeaSchema), async (c) => {
+ideaRoutes.post('/', ...session, jsonValidator(CreateIdeaSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -125,7 +111,7 @@ ideaRoutes.post('/', jsonValidator(CreateIdeaSchema), async (c) => {
     const idea = await getIdeaWithDerivedStatus(ctx, {
       projectId,
       ideaId: created.ideaId,
-      readPullRequestStates: pullRequestStateReader(ctx, projectId, IDEA_PULL_REQUEST_REFRESH.list),
+      refresh: IDEA_PULL_REQUEST_REFRESH.list,
     });
     return c.json(idea, 201);
   } catch (error) {
@@ -136,7 +122,7 @@ ideaRoutes.post('/', jsonValidator(CreateIdeaSchema), async (c) => {
 /**
  * GET /:ideaId — one idea: the current plan, its derived state, its work and its counts.
  */
-ideaRoutes.get('/:ideaId', async (c) => {
+ideaRoutes.get('/:ideaId', ...session, async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const ideaId = requireRouteParam(c, 'ideaId');
@@ -149,11 +135,7 @@ ideaRoutes.get('/:ideaId', async (c) => {
     const idea = await getIdeaWithDerivedStatus(ctx, {
       projectId,
       ideaId,
-      readPullRequestStates: pullRequestStateReader(
-        ctx,
-        projectId,
-        IDEA_PULL_REQUEST_REFRESH.detail
-      ),
+      refresh: IDEA_PULL_REQUEST_REFRESH.detail,
     });
     return c.json(idea);
   } catch (error) {
@@ -167,7 +149,7 @@ ideaRoutes.get('/:ideaId', async (c) => {
  * The one server operation for idea transitions, shared with `update_idea` and the generic
  * task status route, so every surface agrees on what is allowed.
  */
-ideaRoutes.post('/:ideaId/status', jsonValidator(UpdateIdeaStatusSchema), async (c) => {
+ideaRoutes.post('/:ideaId/status', ...session, jsonValidator(UpdateIdeaStatusSchema), async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const ideaId = requireRouteParam(c, 'ideaId');
@@ -194,7 +176,7 @@ ideaRoutes.post('/:ideaId/status', jsonValidator(UpdateIdeaStatusSchema), async 
     const idea = await getIdeaWithDerivedStatus(ctx, {
       projectId,
       ideaId,
-      readPullRequestStates: pullRequestStateReader(ctx, projectId, IDEA_PULL_REQUEST_REFRESH.list),
+      refresh: IDEA_PULL_REQUEST_REFRESH.list,
     });
     return c.json(idea);
   } catch (error) {
@@ -209,7 +191,7 @@ ideaRoutes.post('/:ideaId/status', jsonValidator(UpdateIdeaStatusSchema), async 
  * It changes no status. It records that a person answered, so the question does not come
  * back every time the list is read.
  */
-ideaRoutes.post('/:ideaId/keep-open', async (c) => {
+ideaRoutes.post('/:ideaId/keep-open', ...session, async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const ideaId = requireRouteParam(c, 'ideaId');
@@ -228,7 +210,7 @@ ideaRoutes.post('/:ideaId/keep-open', async (c) => {
     const idea = await getIdeaWithDerivedStatus(ctx, {
       projectId,
       ideaId,
-      readPullRequestStates: pullRequestStateReader(ctx, projectId, IDEA_PULL_REQUEST_REFRESH.list),
+      refresh: IDEA_PULL_REQUEST_REFRESH.list,
     });
     return c.json(idea);
   } catch (error) {

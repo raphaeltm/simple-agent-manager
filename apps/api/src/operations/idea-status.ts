@@ -28,9 +28,10 @@ import type {
   IdeaDerivedState,
   IdeaDerivedStatus,
   IdeaNeedsYouState,
-  IdeaPullRequestSummary,
+  IdeaPullRequest,
   IdeaStatusSession,
   IdeaStatusSource,
+  LinkRelation,
 } from '@simple-agent-manager/shared';
 import { ideaNeedsYou } from '@simple-agent-manager/shared';
 
@@ -48,7 +49,9 @@ export const DEFAULT_IDEA_STATUS_NOTE_MAX_LENGTH = 280;
 export interface IdeaStatusLinkedSession {
   sessionId: string;
   topic: string | null;
-  /** True when at least one link relation between the idea and this session is strong. */
+  /** Every relation recorded between the idea and this chat. */
+  relations: LinkRelation[];
+  /** True when at least one of those relations is a strong one. */
   strong: boolean;
   /** The chat session's own status (`active`, `sleeping`, `stopped`, …). */
   sessionStatus: string;
@@ -75,7 +78,7 @@ export interface IdeaStatusInput {
    */
   mergeAcknowledgedAt?: string | null;
   sessions: readonly IdeaStatusLinkedSession[];
-  pullRequests: readonly IdeaPullRequestSummary[];
+  pullRequests: readonly IdeaPullRequest[];
 }
 
 /**
@@ -144,7 +147,7 @@ function status(
   statusSource: IdeaStatusSource,
   extra: {
     session?: IdeaStatusSession | null;
-    pullRequest?: IdeaPullRequestSummary | null;
+    pullRequest?: IdeaPullRequest | null;
     note?: string | null;
   } = {}
 ): IdeaDerivedStatus {
@@ -160,8 +163,8 @@ function status(
 
 /** The newest merged pull request, by merge time. */
 function newestMerged(
-  pullRequests: readonly IdeaPullRequestSummary[]
-): IdeaPullRequestSummary | null {
+  pullRequests: readonly IdeaPullRequest[]
+): IdeaPullRequest | null {
   const merged = pullRequests.filter((pr) => pr.state === 'merged');
   if (merged.length === 0) return null;
   return merged.reduce((best, pr) => ((pr.mergedAt ?? '') > (best.mergedAt ?? '') ? pr : best));
@@ -174,7 +177,7 @@ function newestMerged(
  * asks a question rather than silently swallowing one.
  */
 function isMergeAnswered(
-  merged: IdeaPullRequestSummary,
+  merged: IdeaPullRequest,
   acknowledgedAt: string | null | undefined
 ): boolean {
   if (!acknowledgedAt) return false;
@@ -183,7 +186,7 @@ function isMergeAnswered(
 }
 
 /** A ready-for-review pull request wins over a draft, which wins over nothing. */
-function bestOpen(pullRequests: readonly IdeaPullRequestSummary[]): IdeaPullRequestSummary | null {
+function bestOpen(pullRequests: readonly IdeaPullRequest[]): IdeaPullRequest | null {
   const open = pullRequests.filter((pr) => pr.state === 'open');
   if (open.length === 0) return null;
   return open.find((pr) => !pr.isDraft) ?? open[0] ?? null;
