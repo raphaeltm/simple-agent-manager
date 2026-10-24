@@ -20,7 +20,6 @@ import {
   type McpTokenData,
 } from './_helpers';
 import { buildEventingInstructions } from './instruction-eventing-guidance';
-import { buildInstructionIdeaSlice, type InstructionIdeaContext } from './instruction-idea-context';
 import {
   buildKnowledgeInstructions,
   buildPolicyInstructions,
@@ -30,6 +29,7 @@ import {
   type PolicyEntry,
   serializeRejection,
 } from './instruction-formatting';
+import { buildInstructionIdeaSlice, type InstructionIdeaContext } from './instruction-idea-context';
 
 export { handleRequestHumanInput } from './human-input-tool';
 

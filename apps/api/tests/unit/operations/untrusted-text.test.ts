@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  untrustedTextBlock,
   UNTRUSTED_TEXT_GUIDANCE,
+  untrustedTextBlock,
 } from '../../../src/operations/untrusted-text';
 
 describe('untrustedTextBlock', () => {

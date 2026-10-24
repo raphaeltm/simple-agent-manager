@@ -16,7 +16,7 @@ import type { LinkRelation } from '@simple-agent-manager/shared';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { listLinks } from '../../operations/link-core';
-import { untrustedTextBlock, type UntrustedTextBlock } from '../../operations/untrusted-text';
+import { type UntrustedTextBlock, untrustedTextBlock } from '../../operations/untrusted-text';
 import { resolveAdminSettingDetails } from '../../services/admin-settings';
 
 /** The relations Start work writes. `linked` is an explicit tag, not a work intent. */
