@@ -16,9 +16,8 @@ import {
   assertNoOverflow,
   makeMockProject,
   makeMockUser,
-  respondToAppShellRoute,
   screenshot as capture,
-  setupAuditRoutes,
+  setupProjectAuditRoutes,
 } from './audit-helpers';
 import { expandScrollContainers } from './automation-audit-helpers';
 
@@ -278,35 +277,25 @@ const STRESS_IDEAS = [
 
 async function setupIdeasMocks(page: Page, options: { items?: unknown[]; error?: boolean } = {}) {
   const items = options.items ?? NORMAL_IDEAS;
-  await page.addInitScript((userId) => {
-    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
-  }, MOCK_USER.user.id);
-
-  await setupAuditRoutes(page, (path, respond) => {
-    const shell = respondToAppShellRoute(path, respond, {
-      user: MOCK_USER,
-      projects: [makeMockProject()],
-    });
-    if (shell) return shell;
-
-    const match = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
-    if (!match) return undefined;
-    const sub = match[2] ?? '';
-    if (sub === '') return respond(200, makeMockProject());
-    if (sub === '/members') return respond(200, { members: [], accessRequests: [] });
-    if (sub.startsWith('/agent-profiles')) return respond(200, { items: [] });
-    if (sub.startsWith('/skills')) return respond(200, { items: [] });
-    if (sub.startsWith('/sessions')) return respond(200, { sessions: [], total: 0 });
-    if (sub.startsWith('/triggers')) return respond(200, { triggers: [] });
-    if (sub === '/ideas') {
-      if (options.error) return respond(500, { error: 'INTERNAL_ERROR', message: 'nope' });
-      return respond(200, {
-        items,
-        truncated: false,
-        totals: { open: items.length, done: 1, parked: 1 },
-      });
-    }
-    return undefined;
+  await setupProjectAuditRoutes(page, {
+    user: MOCK_USER,
+    project: makeMockProject(),
+    onProjectSubPath: (sub, respond) => {
+      if (sub === '/members') return respond(200, { members: [], accessRequests: [] });
+      if (sub.startsWith('/agent-profiles')) return respond(200, { items: [] });
+      if (sub.startsWith('/skills')) return respond(200, { items: [] });
+      if (sub.startsWith('/sessions')) return respond(200, { sessions: [], total: 0 });
+      if (sub.startsWith('/triggers')) return respond(200, { triggers: [] });
+      if (sub === '/ideas') {
+        if (options.error) return respond(500, { error: 'INTERNAL_ERROR', message: 'nope' });
+        return respond(200, {
+          items,
+          truncated: false,
+          totals: { open: items.length, done: 1, parked: 1 },
+        });
+      }
+      return undefined;
+    },
   });
 }
 

@@ -13,9 +13,8 @@ import {
   assertNoOverflow,
   makeMockProject,
   makeMockUser,
-  respondToAppShellRoute,
   screenshot as capture,
-  setupAuditRoutes,
+  setupProjectAuditRoutes,
 } from './audit-helpers';
 import { expandScrollContainers } from './automation-audit-helpers';
 
@@ -306,6 +305,91 @@ async function expectCappedRelatedTotal(page: Page) {
   await expect(page.getByText('16+', { exact: true })).toBeVisible();
 }
 
+/**
+ * Open Start work and capture it. Both viewports want exactly this; only the file name differs,
+ * and that difference is the whole point of running it twice.
+ */
+async function captureStartWorkSheet(page: Page, name: string) {
+  await setupIdeaMocks(page);
+  await openIdea(page);
+
+  const sheet = await openStartWork(page);
+  await expectSheetAsksTheTwoQuestions(sheet);
+
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+  await screenshot(page, name);
+}
+
+/** One row per derived state: the word the status card says, and the actions that follow from
+ * it in the order a reader meets them. `alsoShows` carries whatever else that state is the
+ * only one to prove.
+ */
+const IDEA_STATE_CASES: Array<{
+  state: DerivedState;
+  name: string;
+  status: string | null;
+  actions: Array<{ role: 'button' | 'link'; name: string }>;
+  alsoShows?: Array<string | RegExp>;
+}> = [
+  {
+    state: 'not-started',
+    name: 'an idea nobody has started: the plan, and one Start work',
+    status: 'Not started',
+    actions: [{ role: 'button', name: 'Start work' }],
+    alsoShows: ['Marcus Chen'],
+  },
+  {
+    state: 'working',
+    name: 'while work is running, the main button opens the chat',
+    status: 'In progress',
+    actions: [{ role: 'link', name: 'Open the chat' }],
+    alsoShows: [/From the linked chat/],
+  },
+  {
+    state: 'question',
+    name: 'a question clamps a long note and offers Answer',
+    status: 'Waiting for you',
+    actions: [{ role: 'link', name: 'Answer' }],
+  },
+  {
+    state: 'stuck',
+    name: 'stopped work shows what broke without pushing the page sideways',
+    status: 'Stopped',
+    // Reading the failure leads; retrying is the quieter half.
+    actions: [
+      { role: 'link', name: 'See what happened' },
+      { role: 'button', name: 'Try again…' },
+    ],
+  },
+  {
+    state: 'review',
+    name: 'in review, the main button is Review PR #482',
+    status: 'In review',
+    // The chat that produced the pull request is the next thing you reach for.
+    actions: [
+      { role: 'link', name: 'Review PR #482' },
+      { role: 'link', name: 'Open the chat' },
+    ],
+    alsoShows: [/From GitHub/],
+  },
+  {
+    state: 'merged',
+    name: 'a merged pull request asks the question, with both answers',
+    status: null,
+    actions: [
+      { role: 'button', name: 'Mark done' },
+      { role: 'button', name: 'Keep open' },
+    ],
+  },
+  {
+    state: 'done',
+    name: 'a done idea says where it shipped and offers follow-up work',
+    status: 'Done',
+    actions: [{ role: 'button', name: 'Start follow-up work' }],
+  },
+];
+
 async function openStartWork(page: Page) {
   await page.getByRole('button', { name: 'Start work' }).click();
   const sheet = page.getByRole('dialog', { name: /Start work|Talk it through/i });
@@ -317,36 +401,26 @@ async function setupIdeaMocks(
   page: Page,
   options: { idea?: unknown; updates?: unknown[]; links?: unknown; updatesFail?: boolean } = {}
 ) {
-  await page.addInitScript((userId) => {
-    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
-  }, MOCK_USER.user.id);
-
-  await setupAuditRoutes(page, (path, respond) => {
-    const shell = respondToAppShellRoute(path, respond, {
-      user: MOCK_USER,
-      projects: [makeMockProject()],
-    });
-    if (shell) return shell;
-
-    const match = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
-    if (!match) return undefined;
-    const sub = match[2] ?? '';
-    if (sub === '') return respond(200, makeMockProject());
-    if (sub === '/members') return respond(200, { members: [], accessRequests: [] });
-    // The picker state must be matched before the list: both start with `/agent-profiles`.
-    if (sub.startsWith('/agent-profiles/picker'))
-      return respond(200, { hiddenProfileIds: [], usage: [], windowDays: 30 });
-    if (sub.startsWith('/agent-profiles')) return respond(200, { items: START_WORK_PROFILES });
-    if (sub.startsWith('/skills')) return respond(200, { items: [] });
-    if (sub.startsWith('/sessions')) return respond(200, { sessions: [], total: 0 });
-    if (sub.startsWith('/triggers')) return respond(200, { triggers: [] });
-    if (sub === `/ideas/${IDEA_ID}/updates`) {
-      if (options.updatesFail) return respond(500, { error: 'INTERNAL_ERROR', message: 'nope' });
-      return respond(200, { updates: options.updates ?? UPDATES, nextCursor: null });
-    }
-    if (sub === `/ideas/${IDEA_ID}/links`) return respond(200, options.links ?? LINKS);
-    if (sub === `/ideas/${IDEA_ID}`) return respond(200, options.idea ?? makeIdea('not-started'));
-    return undefined;
+  await setupProjectAuditRoutes(page, {
+    user: MOCK_USER,
+    project: makeMockProject(),
+    onProjectSubPath: (sub, respond) => {
+      if (sub === '/members') return respond(200, { members: [], accessRequests: [] });
+      // The picker state must be matched before the list: both start with `/agent-profiles`.
+      if (sub.startsWith('/agent-profiles/picker'))
+        return respond(200, { hiddenProfileIds: [], usage: [], windowDays: 30 });
+      if (sub.startsWith('/agent-profiles')) return respond(200, { items: START_WORK_PROFILES });
+      if (sub.startsWith('/skills')) return respond(200, { items: [] });
+      if (sub.startsWith('/sessions')) return respond(200, { sessions: [], total: 0 });
+      if (sub.startsWith('/triggers')) return respond(200, { triggers: [] });
+      if (sub === `/ideas/${IDEA_ID}/updates`) {
+        if (options.updatesFail) return respond(500, { error: 'INTERNAL_ERROR', message: 'nope' });
+        return respond(200, { updates: options.updates ?? UPDATES, nextCursor: null });
+      }
+      if (sub === `/ideas/${IDEA_ID}/links`) return respond(200, options.links ?? LINKS);
+      if (sub === `/ideas/${IDEA_ID}`) return respond(200, options.idea ?? makeIdea('not-started'));
+      return undefined;
+    },
   });
 }
 
@@ -439,94 +513,43 @@ async function assertLayoutIsSound(page: Page) {
 test.describe('Idea page — phone', () => {
   test.use({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
 
-  test('an idea nobody has started: the plan, and one Start work', async ({ page }) => {
-    await setupIdeaMocks(page);
-    await openIdea(page);
+  /*
+   * The states, as the matrix the page's design actually is: one status word and the actions
+   * that follow from it, in order.
+   *
+   * These were seven tests with identical bodies and different strings, which read as seven
+   * decisions when it is really one table — and which SonarCloud measured as 119 duplicated
+   * lines in this file alone. A table also makes a missing state obvious, which seven separate
+   * tests never did.
+   */
+  for (const idea of IDEA_STATE_CASES) {
+    test(idea.name, async ({ page }) => {
+      await setupIdeaMocks(page, { idea: makeIdea(idea.state) });
+      await openIdea(page);
 
-    await expect(page.getByText('Not started')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Start work' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Updates' })).toBeVisible();
-    await expect(page.getByText('Marcus Chen')).toBeVisible();
+      if (idea.status) await expect(page.getByText(idea.status)).toBeVisible();
+      for (const action of idea.actions) {
+        await expect(page.getByRole(action.role, { name: action.name })).toBeVisible();
+      }
+      /*
+       * Order, not just presence. "Both buttons are visible" passed happily while the stuck
+       * card's two were the wrong way round, so a case with more than one action pins the
+       * sequence a reader meets them in.
+       */
+      if (idea.actions.length > 1) {
+        await expectActionOrder(
+          page,
+          idea.actions.map((action) => action.name)
+        );
+      }
+      for (const text of idea.alsoShows ?? []) {
+        await expect(page.getByText(text)).toBeVisible();
+      }
 
-    await assertLayoutIsSound(page);
-    await screenshot(page, 'idea-page-not-started-phone');
-  });
-
-  test('while work is running, the main button opens the chat', async ({ page }) => {
-    await setupIdeaMocks(page, { idea: makeIdea('working') });
-    await openIdea(page);
-
-    await expect(page.getByText('In progress')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Open the chat' })).toBeVisible();
-    await expect(page.getByText(/From the linked chat/)).toBeVisible();
-
-    await assertLayoutIsSound(page);
-    await screenshot(page, 'idea-page-working-phone');
-  });
-
-  test('a question clamps a long note and offers Answer', async ({ page }) => {
-    await setupIdeaMocks(page, { idea: makeIdea('question') });
-    await openIdea(page);
-
-    await expect(page.getByText('Waiting for you')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Answer' })).toBeVisible();
-
-    await assertLayoutIsSound(page);
-    await screenshot(page, 'idea-page-question-phone');
-  });
-
-  test('stopped work shows what broke without pushing the page sideways', async ({ page }) => {
-    await setupIdeaMocks(page, { idea: makeIdea('stuck') });
-    await openIdea(page);
-
-    await expect(page.getByText('Stopped')).toBeVisible();
-    // Reading the failure leads; retrying is the quieter half. Asserted as order, because
-    // "both buttons are visible" passed happily while they were the wrong way round.
-    await expect(page.getByRole('link', { name: 'See what happened' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Try again…' })).toBeVisible();
-    await expectActionOrder(page, ['See what happened', 'Try again…']);
-
-    await assertLayoutIsSound(page);
-    await screenshot(page, 'idea-page-stuck-phone');
-  });
-
-  test('in review, the main button is Review PR #482', async ({ page }) => {
-    await setupIdeaMocks(page, { idea: makeIdea('review') });
-    await openIdea(page);
-
-    await expect(page.getByText('In review')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Review PR #482' })).toBeVisible();
-    await expect(page.getByText(/From GitHub/)).toBeVisible();
-    // The chat that produced the pull request is the next thing you reach for.
-    await expect(page.getByRole('link', { name: 'Open the chat' })).toBeVisible();
-    await expectActionOrder(page, ['Review PR #482', 'Open the chat']);
-
-    await assertLayoutIsSound(page);
-    await screenshot(page, 'idea-page-review-phone');
-  });
-
-  test('a merged pull request asks the question, with both answers', async ({ page }) => {
-    await setupIdeaMocks(page, { idea: makeIdea('merged') });
-    await openIdea(page);
-
-    await expect(page.getByRole('button', { name: 'Mark done' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Keep open' })).toBeVisible();
-    await expectActionOrder(page, ['Mark done', 'Keep open']);
-
-    await assertLayoutIsSound(page);
-    await screenshot(page, 'idea-page-merged-phone');
-  });
-
-  test('a done idea says where it shipped and offers follow-up work', async ({ page }) => {
-    await setupIdeaMocks(page, { idea: makeIdea('done') });
-    await openIdea(page);
-
-    await expect(page.getByText('Done')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Start follow-up work' })).toBeVisible();
-
-    await assertLayoutIsSound(page);
-    await screenshot(page, 'idea-page-done-phone');
-  });
+      await assertLayoutIsSound(page);
+      await screenshot(page, `idea-page-${idea.state}-phone`);
+    });
+  }
 
   test('holds up with a long title, many chats and capped Related counts', async ({ page }) => {
     await setupVolumeIdea(page);
@@ -581,15 +604,7 @@ test.describe('Idea page — phone', () => {
   });
 
   test('Start work opens the sheet, which fits a phone and names the idea', async ({ page }) => {
-    await setupIdeaMocks(page);
-    await openIdea(page);
-
-    const sheet = await openStartWork(page);
-    await expectSheetAsksTheTwoQuestions(sheet);
-
-    await assertNoOverflow(page);
-    await assertNoClippedOverflow(page);
-    await screenshot(page, 'idea-page-start-work-sheet-phone');
+    await captureStartWorkSheet(page, 'idea-page-start-work-sheet-phone');
   });
 
   test('a profile name far longer than the sheet still fits', async ({ page }) => {
@@ -653,15 +668,7 @@ test.describe('Idea page — laptop', () => {
   });
 
   test('Start work opens the sheet on a laptop too', async ({ page }) => {
-    await setupIdeaMocks(page);
-    await openIdea(page);
-
-    const sheet = await openStartWork(page);
-    await expectSheetAsksTheTwoQuestions(sheet);
-
-    await assertNoOverflow(page);
-    await assertNoClippedOverflow(page);
-    await screenshot(page, 'idea-page-start-work-sheet-desktop');
+    await captureStartWorkSheet(page, 'idea-page-start-work-sheet-desktop');
   });
 
   test('an idea nobody has started, in two columns', async ({ page }) => {

@@ -510,6 +510,50 @@ export function describeThemeAudit(
 }
 
 /**
+ * The whole mock preamble a project-scoped page audit needs: dismiss the first-run wizard,
+ * register the catch-all route, answer the app shell, then hand the spec the `/api/projects/:id`
+ * sub-path it actually cares about.
+ *
+ * `onProjectSubPath` receives `''` for the project itself and `/ideas/x` style suffixes
+ * otherwise, and returns `undefined` for anything it does not handle, which falls through to an
+ * empty 200 so an unmocked endpoint never hangs the page.
+ *
+ * Shared because the ideas audits had the same twelve-line preamble each, which is both a
+ * maintenance trap and what SonarCloud counts as duplication.
+ */
+export async function setupProjectAuditRoutes(
+  page: Page,
+  options: {
+    user: { user: { id: string } };
+    project: unknown;
+    commonSubPaths?: Record<string, unknown>;
+    onProjectSubPath: (
+      sub: string,
+      respond: AuditResponder,
+      route: Route
+    ) => Promise<void> | undefined;
+  }
+) {
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, options.user.user.id);
+
+  await setupAuditRoutes(page, (path, respond, route) => {
+    const shell = respondToAppShellRoute(path, respond, {
+      user: options.user,
+      projects: [options.project],
+    });
+    if (shell) return shell;
+
+    const match = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
+    if (!match) return undefined;
+    const sub = match[2] ?? '';
+    if (sub === '') return respond(200, options.project);
+    return options.onProjectSubPath(sub, respond, route);
+  });
+}
+
+/**
  * The app-shell endpoints every audited page loads before its own data.
  *
  * Auth, the project list, agents, active tasks, notifications, GitHub, credentials and nodes
