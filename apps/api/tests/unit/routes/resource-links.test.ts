@@ -46,8 +46,10 @@ describe('linked work REST reads', () => {
         schema.projectFiles,
         schema.taskPullRequestAssociations,
       ]);
-      db.exec(`INSERT INTO tasks(id,project_id,title,status) VALUES
-        ('idea-own','p1','Own','draft'),('idea-foreign','p2','Foreign','draft');
+      db.exec(`INSERT INTO tasks(id,project_id,title,status,is_idea) VALUES
+        ('idea-own','p1','Own','draft',1),('idea-foreign','p2','Foreign','draft',1),
+        -- Also a draft, and not an idea: the row only the is_idea flag can tell apart.
+        ('ordinary-draft','p1','Undispatched task','draft',0);
         INSERT INTO projects(id,repository) VALUES ('p1','owner/repo');
         INSERT INTO project_files(id,project_id,filename,directory) VALUES
         ('file-own','p1','own.md','/'),('file-foreign','p2','other.md','/')`);
@@ -73,6 +75,9 @@ describe('linked work REST reads', () => {
       });
       expect((await read('ideas/idea-foreign/links')).status).toBe(404);
       expect((await read('ideas/missing/links')).status).toBe(404);
+      // The case only `is_idea = 1` can refuse: an undispatched ordinary task is also a
+      // `draft` row, and `idea-own` above is the owner control.
+      expect((await read('ideas/ordinary-draft/links')).status).toBe(404);
       expect((await read('sessions/session-own/links')).status).toBe(200);
       expect((await read('sessions/missing/links')).status).toBe(404);
       expect((await read('library/file-own/links')).status).toBe(200);

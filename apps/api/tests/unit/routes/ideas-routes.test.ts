@@ -7,6 +7,7 @@
  * batched as the idea count grows, and that one project cannot read or change another's
  * ideas. Each attack case has an owner control beside it.
  */
+import type { LinkRelation } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,6 +22,8 @@ interface SnapshotSession {
   sessionStatus: string;
   sessionTaskId: string | null;
   lastActivityAt: number | null;
+  relations: LinkRelation[];
+  strong: boolean;
   linkedAt: number;
 }
 
@@ -60,9 +63,16 @@ interface IdeasListBody {
       state: string;
       needsYou: string | null;
       session: { sessionId: string; agentLabel: string | null } | null;
+      pullRequest: Record<string, unknown> | null;
       note: string | null;
     };
-    counts: { chats: number; pullRequests: number; files: number; updates: number };
+    counts: {
+      chats: number;
+      pullRequests: number;
+      files: number;
+      updates: number;
+      atLeast: string[];
+    };
     filedByAgent: boolean;
     filedBy: string | null;
     viaConnector: string | null;
@@ -138,10 +148,63 @@ describe('ideas routes', () => {
       );
   }
 
+  /** A project row, because pull request URLs are canonicalized against its repository. */
+  function seedProject(id: string, repository: string) {
+    sqlite
+      .prepare(
+        `INSERT INTO projects (id, user_id, installation_id, name, repository, repo_provider,
+           created_at, updated_at)
+         VALUES (?, 'u1', 'inst-1', ?, ?, 'github', '2026-10-01', '2026-10-01')`
+      )
+      .run(id, id, repository);
+  }
+
+  /** Stored pull request state, as T2's webhook and refresh paths write it. */
+  function seedPullRequestState(
+    projectId: string,
+    repository: string,
+    number: number,
+    overrides: {
+      state?: 'open' | 'closed' | 'merged';
+      isDraft?: number;
+      title?: string | null;
+      checksState?: string | null;
+      mergedAt?: string | null;
+      updatedAt?: string;
+    } = {}
+  ) {
+    sqlite
+      .prepare(
+        `INSERT INTO pull_requests (id, project_id, repository, number, url, state, is_draft,
+           title, checks_state, merged_at, created_at, updated_at, last_synced_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '2026-10-20T00:00:00.000Z', ?, ?)`
+      )
+      .run(
+        `pr-${projectId}-${number}`,
+        projectId,
+        repository,
+        number,
+        `https://github.com/${repository}/pull/${number}`,
+        overrides.state ?? 'open',
+        overrides.isDraft ?? 0,
+        overrides.title ?? `PR ${number}`,
+        overrides.checksState ?? null,
+        overrides.mergedAt ?? null,
+        overrides.updatedAt ?? '2026-10-22T00:00:00.000Z',
+        overrides.updatedAt ?? '2026-10-22T00:00:00.000Z'
+      );
+  }
+
   function snapshot(
     ideaId: string,
     sessions: Partial<SnapshotSession>[],
-    needsInput: Array<{ sessionId: string; question: string | null; askedAt: number }> = []
+    extra: {
+      needsInput?: Array<{ sessionId: string; question: string | null; askedAt: number }>;
+      fileIds?: string[];
+      pullRequestUrls?: string[];
+      updates?: number;
+      truncated?: Partial<{ sessions: boolean; files: boolean; pullRequests: boolean }>;
+    } = {}
   ) {
     return {
       [ideaId]: {
@@ -152,9 +215,21 @@ describe('ideas routes', () => {
           sessionStatus: session.sessionStatus ?? 'active',
           sessionTaskId: session.sessionTaskId ?? null,
           lastActivityAt: session.lastActivityAt ?? minutesAgo(5),
+          // The link store's own answer: a chat is strong because a relation says so.
+          relations: session.relations ?? ['works_on'],
+          strong: session.strong ?? true,
           linkedAt: session.linkedAt ?? minutesAgo(60),
         })),
-        needsInput,
+        needsInput: extra.needsInput ?? [],
+        fileIds: extra.fileIds ?? [],
+        pullRequestUrls: extra.pullRequestUrls ?? [],
+        updates: extra.updates ?? 0,
+        truncated: {
+          sessions: false,
+          files: false,
+          pullRequests: false,
+          ...(extra.truncated ?? {}),
+        },
       },
     };
   }
@@ -180,6 +255,21 @@ describe('ideas routes', () => {
 
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
+    sqlite
+      .prepare(
+        `INSERT INTO users (id, github_id, email, name, created_at, updated_at)
+         VALUES ('u1', 'gh-u1', 'u1@test', 'U1', '2026-10-01', '2026-10-01')`
+      )
+      .run();
+    sqlite
+      .prepare(
+        `INSERT INTO github_installations (id, user_id, installation_id, account_name, account_type,
+           created_at, updated_at)
+         VALUES ('inst-1', 'u1', '1', 'acme', 'User', '2026-10-01', '2026-10-01')`
+      )
+      .run();
+    seedProject('p1', 'acme/payments');
+    seedProject('p2', 'acme/other');
     queries = [];
     const d1 = createSqliteD1(sqlite);
     env = {
@@ -249,11 +339,11 @@ describe('ideas routes', () => {
     seedIdea('idea-1');
     seedWorkTask('work-1', { status: 'in_progress' });
     mocks.getIdeaWorkSnapshots.mockResolvedValue(
-      snapshot(
-        'idea-1',
-        [{ sessionId: 'sess-a', sessionTaskId: 'work-1' }],
-        [{ sessionId: 'sess-a', question: 'Cap retries at 3 days?', askedAt: minutesAgo(2) }]
-      )
+      snapshot('idea-1', [{ sessionId: 'sess-a', sessionTaskId: 'work-1' }], {
+        needsInput: [
+          { sessionId: 'sess-a', question: 'Cap retries at 3 days?', askedAt: minutesAgo(2) },
+        ],
+      })
     );
 
     const body = (await (await list()).json()) as IdeasListBody;
@@ -296,8 +386,134 @@ describe('ideas routes', () => {
 
     const body = (await (await list()).json()) as IdeasListBody;
     expect(body.items[0]?.counts.pullRequests).toBe(2);
-    // No stored state is wired yet (T2 owns it), so the idea cannot claim review or merged.
+    // Neither pull request has stored state, so the idea cannot claim review or merged — the
+    // control for the two tests above, which prove it does once the state exists.
     expect(body.items[0]?.derived.state).toBe('not-started');
+  });
+
+  it('reaches review from an open pull request the platform has stored', async () => {
+    seedIdea('idea-1');
+    seedWorkTask('work-1', {
+      status: 'completed',
+      outputPrUrl: 'https://github.com/acme/payments/pull/482',
+    });
+    seedPullRequestState('p1', 'acme/payments', 482, { checksState: 'failure' });
+    mocks.getIdeaWorkSnapshots.mockResolvedValue(
+      snapshot('idea-1', [{ sessionId: 'sess-a', sessionTaskId: 'work-1' }])
+    );
+
+    const body = (await (await list()).json()) as IdeasListBody;
+    expect(body.items[0]?.derived.state).toBe('review');
+    expect(body.items[0]?.derived.pullRequest).toMatchObject({
+      number: 482,
+      state: 'open',
+      checksState: 'failure',
+      source: 'task_output',
+    });
+  });
+
+  it('reaches merged, and needs a person, once that pull request is merged', async () => {
+    seedIdea('idea-1');
+    seedWorkTask('work-1', {
+      status: 'completed',
+      outputPrUrl: 'https://github.com/acme/payments/pull/482',
+    });
+    seedPullRequestState('p1', 'acme/payments', 482, {
+      state: 'merged',
+      mergedAt: '2026-10-22T09:00:00.000Z',
+    });
+    mocks.getIdeaWorkSnapshots.mockResolvedValue(
+      snapshot('idea-1', [{ sessionId: 'sess-a', sessionTaskId: 'work-1' }])
+    );
+
+    const body = (await (await list()).json()) as IdeasListBody;
+    expect(body.items[0]?.derived.state).toBe('merged');
+    expect(body.items[0]?.derived.needsYou).toBe('merged');
+  });
+
+  // Program decision 3: one pull request reached through three sources is one item.
+  it('collapses the same pull request reached from task output, an association and a link', async () => {
+    seedIdea('idea-1');
+    seedWorkTask('work-1', {
+      status: 'completed',
+      outputPrUrl: 'https://github.com/acme/payments/pull/482',
+    });
+    sqlite
+      .prepare(
+        `INSERT INTO task_pull_request_associations
+           (task_id, project_id, pr_url, disposition, reason, recorded_by_user_id, created_at)
+         VALUES ('work-1', 'p1', 'https://GITHUB.com/Acme/Payments/pull/482/', 'owned', 'test',
+                 'u1', '2026-10-22T00:00:00.000Z')`
+      )
+      .run();
+    seedPullRequestState('p1', 'acme/payments', 482);
+    mocks.getIdeaWorkSnapshots.mockResolvedValue(
+      snapshot('idea-1', [{ sessionId: 'sess-a', sessionTaskId: 'work-1' }], {
+        pullRequestUrls: ['https://github.com/acme/payments/pull/482'],
+      })
+    );
+
+    const body = (await (await list()).json()) as IdeasListBody;
+    expect(body.items[0]?.counts.pullRequests).toBe(1);
+    expect(body.items[0]?.derived.state).toBe('review');
+  });
+
+  // A link to a pull request in another repository is not this project's work, and must not
+  // be counted or able to move the idea.
+  it('drops a pull request that does not belong to the project’s repository', async () => {
+    seedIdea('idea-1');
+    seedWorkTask('work-1', { status: 'completed' });
+    mocks.getIdeaWorkSnapshots.mockResolvedValue(
+      snapshot('idea-1', [{ sessionId: 'sess-a', sessionTaskId: 'work-1' }], {
+        pullRequestUrls: ['https://github.com/someone/else/pull/1'],
+      })
+    );
+
+    const body = (await (await list()).json()) as IdeasListBody;
+    expect(body.items[0]?.counts.pullRequests).toBe(0);
+    expect(body.items[0]?.derived.state).toBe('not-started');
+  });
+
+  // The strength rule, through the route: a chat that only read the idea contributes nothing,
+  // and the chat that works on it still does.
+  it('ignores a weakly linked chat’s task and pull request', async () => {
+    seedIdea('idea-1');
+    seedWorkTask('reader-task', {
+      status: 'in_progress',
+      outputPrUrl: 'https://github.com/acme/payments/pull/900',
+    });
+    seedPullRequestState('p1', 'acme/payments', 900);
+    mocks.getIdeaWorkSnapshots.mockResolvedValue(
+      snapshot('idea-1', [
+        {
+          sessionId: 'sess-reader',
+          sessionTaskId: 'reader-task',
+          relations: ['read'],
+          strong: false,
+        },
+      ])
+    );
+
+    const body = (await (await list()).json()) as IdeasListBody;
+    // The chat is still listed — an empty response would satisfy the absence on its own.
+    expect(body.items[0]?.counts.chats).toBe(1);
+    expect(body.items[0]?.counts.pullRequests).toBe(0);
+    expect(body.items[0]?.derived.state).toBe('not-started');
+  });
+
+  it('counts the notes and files the link store reports, and says when a count is a minimum', async () => {
+    seedIdea('idea-1');
+    mocks.getIdeaWorkSnapshots.mockResolvedValue(
+      snapshot('idea-1', [{ sessionId: 'sess-a' }], {
+        fileIds: ['file-1', 'file-2'],
+        updates: 4,
+        truncated: { files: true },
+      })
+    );
+
+    const body = (await (await list()).json()) as IdeasListBody;
+    expect(body.items[0]?.counts).toMatchObject({ updates: 4, files: 2, chats: 1 });
+    expect(body.items[0]?.counts.atLeast).toEqual(['files']);
   });
 
   it('folds an automation-filed idea into its own group and names what filed it', async () => {
@@ -366,17 +582,33 @@ describe('ideas routes', () => {
 
   // A full page, not a comfortable number: the open cap is 100, so this is the most a single
   // request can ask for. The cost must still be a fixed handful of round trips rather than
-  // anything per idea (rule 60).
-  it('reads a full page of ideas without a query per idea', async () => {
-    for (let index = 0; index < 100; index += 1) seedIdea(`idea-${index}`);
+  // anything per idea (rule 60). The property asserted is the one that matters — the count
+  // does not move with the idea count — because a fixed expected number silently passes when
+  // a per-idea read is added alongside a removed one.
+  it('reads a full page of ideas at the same cost as one', async () => {
+    seedIdea('only');
+    // One warm-up read first: the link caps come from the admin settings registry, which
+    // caches per isolate, so a cold request costs two extra reads a deployed Worker pays
+    // once rather than per page.
+    await list();
     queries.length = 0;
+    expect((await list()).status).toBe(200);
+    const oneIdea = queries.length;
+
+    // 99 more, so the page is exactly the 100-idea open cap and nothing is truncated.
+    for (let index = 0; index < 99; index += 1) seedIdea(`idea-${index}`);
+    queries.length = 0;
+    mocks.snapshotCalls = [];
 
     const res = await list();
     expect(res.status).toBe(200);
     expect(((await res.json()) as IdeasListBody).items).toHaveLength(100);
-    // Three idea reads (open, closed, totals) and nothing per idea. The Durable Object is
-    // asked once, for every idea at the same time.
-    expect(queries).toHaveLength(3);
+    expect(queries).toHaveLength(oneIdea);
+    // Read-only GET budget (rule 60). Warm, the reads are: the open ideas, the finished
+    // ones, the totals and the project repository; cold adds the two admin-settings reads
+    // behind the link caps, and a page with pull requests adds T2's two.
+    expect(queries.length).toBeLessThanOrEqual(8);
+    // The Durable Object is asked once, for every idea at the same time.
     expect(mocks.snapshotCalls).toHaveLength(1);
     expect(mocks.snapshotCalls[0]).toHaveLength(100);
     // And the list never asks anyone to go and refresh a pull request: a page of 100 ideas
