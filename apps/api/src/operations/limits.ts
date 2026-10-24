@@ -1,9 +1,7 @@
 import type { Env } from '../env';
+import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from '../lib/idea-content-limit';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { OperationError } from './errors';
-
-/** Default maximum idea body length, shared with the agent read page default. */
-export const DEFAULT_IDEA_CONTENT_MAX_LENGTH = 65_536;
 
 export function clampOperationNumber(
   value: number,

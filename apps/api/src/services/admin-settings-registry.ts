@@ -7,7 +7,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
-import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from '../operations/limits';
+import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from '../lib/idea-content-limit';
 import {
   AGENT_EMAIL_SETTINGS,
   type AgentEmailSettingName,
