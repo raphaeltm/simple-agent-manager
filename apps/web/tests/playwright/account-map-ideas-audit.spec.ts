@@ -56,6 +56,7 @@ const map = {
   sessions,
   tasks: [],
   ideas,
+  ideaScan: { projectLimit: 10, candidateLimit: 100 },
   truncation: { projects: false, ideas: true, sessions: false, links: false },
   relationships: [
     ...sessions.map((session) => ({
@@ -122,7 +123,7 @@ test.describe('Account Map ideas', () => {
     const ideaNodes = page.locator('.react-flow__node-ideaNode');
     await expect(ideaNodes).toHaveCount(4);
     await expect(
-      page.getByText('Idea links are checked for recent projects and ideas only.')
+      page.getByText('Only the 100 newest ideas were checked for chat links.')
     ).toBeVisible();
     const ideaLink = page.locator('a[href="/projects/map-project/ideas/idea-1"]');
     await expect(ideaLink).toHaveAttribute('aria-label', `Open idea: ${longTitle}`);

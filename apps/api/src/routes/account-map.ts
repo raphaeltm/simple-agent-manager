@@ -394,6 +394,7 @@ accountMapRoutes.get('/', async (c) => {
       agentActivityState: t.agentActivityState,
     })),
     ideas: ideas.map(({ id, projectId, title, status }) => ({ id, projectId, title, status })),
+    ideaScan: { projectLimit: linkProjectCap, candidateLimit: ideaCap },
     truncation: {
       projects: projectCandidates.length > maxEntities,
       linkProjects: projectRows.length > linkProjectCap,

@@ -90,6 +90,7 @@ export interface AccountMapResponse {
     title: string;
     status: string;
   }>;
+  ideaScan?: { projectLimit: number; candidateLimit: number };
   truncation: {
     projects: boolean;
     linkProjects: boolean;

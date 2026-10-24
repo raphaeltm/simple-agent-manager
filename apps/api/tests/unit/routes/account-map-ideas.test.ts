@@ -177,6 +177,7 @@ describe('Account Map linked ideas', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as any;
     expect(body.truncation.ideas).toBe(true);
+    expect(body.ideaScan).toEqual({ projectLimit: 10, candidateLimit: 100 });
     expect(body.ideas).toContainEqual(expect.objectContaining({ id: 'idea-59' }));
     expect(body.relationships).toContainEqual(
       expect.objectContaining({ source: 'idea-59', target: 'chat-mine-a', type: 'idea_session' })
@@ -193,6 +194,7 @@ describe('Account Map linked ideas', () => {
     expect(body.projects).toHaveLength(11);
     expect(body.truncation.projects).toBe(false);
     expect(body.truncation.linkProjects).toBe(true);
+    expect(body.ideaScan.projectLimit).toBe(10);
   });
 
   it('keeps older project resources while bounding only its idea-link reads', async () => {

@@ -36,6 +36,7 @@ interface UseAccountMapDataResult {
     ideas: number;
   };
   truncation: AccountMapResponse['truncation'] | null;
+  ideaScan: AccountMapResponse['ideaScan'] | null;
   refresh: () => void;
   reorganize: () => void;
 }
@@ -263,6 +264,7 @@ export function useAccountMapData({
     isEmpty,
     stats,
     truncation: rawData?.truncation ?? null,
+    ideaScan: rawData?.ideaScan ?? null,
     refresh: fetchData,
     reorganize,
   };
