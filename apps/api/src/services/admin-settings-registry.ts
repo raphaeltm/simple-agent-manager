@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Declarative typed settings registry (data, like schema.ts); split by domain is tracked in idea 01M5NPWZYJ6XK8G1FK9KXEX813. See .claude/rules/18-file-size-limits.md
 /** Phase 1 only. Existing readers are wired here after the recovery wave releases integration. */
 import {
   DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS,
