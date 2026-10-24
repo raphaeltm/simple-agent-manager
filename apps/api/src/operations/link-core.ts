@@ -17,7 +17,7 @@ import type { Env } from '../env';
 import { errors } from '../middleware/error';
 import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
 import * as projectData from '../services/project-data';
-import { ideaTaskPredicateSql } from './idea-core';
+import { ideaTaskPredicateSql } from './idea-identity';
 import { limits, validateEntity } from './link-write';
 
 export { recordAutoLink, recordLink, removeLink } from './link-write';

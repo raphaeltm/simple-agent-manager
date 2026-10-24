@@ -63,7 +63,7 @@ function makeEnv(): Env {
     'INSERT INTO tasks (id, project_id, title, status) VALUES (?, ?, ?, ?)'
   );
   insert.run('idea-1', 'project-1', 'Tighten proxy', 'draft');
-  insert.run('idea-2', 'project-1', 'Split observability', 'ready');
+  insert.run('idea-2', 'project-1', 'Split observability', 'draft');
   insert.run('foreign-idea', 'project-2', 'Another project', 'draft');
   return { DATABASE: createSqliteD1(sqlite) } as Env;
 }
