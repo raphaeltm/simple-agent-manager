@@ -97,28 +97,6 @@ function prName(pullRequest: IdeaPullRequest): string {
   return `PR #${pullRequest.number}`;
 }
 
-/** "From GitHub, 2 minutes ago" — so nobody has to trust a label. */
-export function ideaSourceLabel(
-  source: IdeaDerivedStatus['source'],
-  now = Date.now()
-): string | null {
-  const origin =
-    source.origin === 'github'
-      ? 'From GitHub'
-      : source.origin === 'chat'
-        ? 'From the linked chat'
-        : source.origin === 'agent'
-          ? 'From the agent'
-          : source.origin === 'person'
-            ? 'Your decision'
-            : null;
-  if (!origin) return null;
-  if (!source.observedAt) return origin;
-  const when = relativeTime(source.observedAt, now);
-  const stale = source.stale ? ', may be out of date' : '';
-  return `${origin}, ${when}${stale}`;
-}
-
 /** "just now", "4 minutes ago", "3 days ago". */
 export function relativeTime(iso: string, now = Date.now()): string {
   const then = new Date(iso).getTime();
