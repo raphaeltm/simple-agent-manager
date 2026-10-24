@@ -27,6 +27,7 @@ const suffix = crypto.randomUUID();
 const owner = `idea-owner-${suffix}`;
 const member = `idea-member-${suffix}`;
 const viewer = `idea-viewer-${suffix}`;
+const outsider = `idea-outsider-${suffix}`;
 const project = `idea-project-${suffix}`;
 const foreignProject = `idea-foreign-${suffix}`;
 const idea = `idea-${suffix}`;
@@ -52,6 +53,7 @@ beforeAll(async () => {
   await seedUser(owner);
   await seedUser(member);
   await seedUser(viewer);
+  await seedUser(outsider);
   await seedInstallation(`idea-install-${suffix}`, owner);
   await seedProject(project, owner, `idea-install-${suffix}`);
   await seedProject(foreignProject, owner, `idea-install-${suffix}`);
@@ -204,6 +206,22 @@ describe('idea updates through real D1 and ProjectData SQLite', () => {
       body: JSON.stringify({ body: 'wrong project' }),
     });
     expect(foreignPost.status).toBe(404);
+  });
+
+  it('requires authentication and project membership through the combined routes app', async () => {
+    const url = `https://api.example.test/api/projects/${project}/ideas/${idea}/updates`;
+    const unauthenticated = await SELF.fetch(url);
+    expect(unauthenticated.status).toBe(401);
+
+    const outsiderCookie = await seedSignedInUser(outsider);
+    const outsiderRead = await SELF.fetch(url, { headers: { Cookie: outsiderCookie } });
+    expect(outsiderRead.status).toBe(404);
+    const outsiderWrite = await SELF.fetch(url, {
+      method: 'POST',
+      headers: { Cookie: outsiderCookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: 'outsider note' }),
+    });
+    expect(outsiderWrite.status).toBe(404);
   });
 
   it('enforces body and quote caps and sanitizes input before storage', async () => {

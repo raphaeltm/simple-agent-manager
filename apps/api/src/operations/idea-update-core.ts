@@ -4,12 +4,12 @@ import { resolveAdminSetting } from '../services/admin-settings';
 import * as projectData from '../services/project-data';
 import { formatOperationCursor, readOperationCursor } from './cursors';
 import { OperationError } from './errors';
-import { IDEA_TASK_PREDICATE_SQL } from './idea-identity';
+import { ideaTaskPredicateSql } from './idea-identity';
 import type { OperationContext } from './types';
 
 async function requireIdea(ctx: OperationContext, projectId: string, ideaId: string) {
   const row = await ctx.env.DATABASE.prepare(
-    `SELECT id FROM tasks WHERE id = ? AND project_id = ? AND ${IDEA_TASK_PREDICATE_SQL}`
+    `SELECT id FROM tasks WHERE id = ? AND project_id = ? AND ${ideaTaskPredicateSql()}`
   )
     .bind(ideaId, projectId)
     .first<{ id: string }>();

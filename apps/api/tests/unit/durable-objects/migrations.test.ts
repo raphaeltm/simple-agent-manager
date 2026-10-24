@@ -567,7 +567,8 @@ describe('DO Migrations', () => {
       // Shared session access grants (064): 2 (active by grantee, active by parent grant);
       // the one-active-grant-per-person index is CREATE UNIQUE INDEX and is not counted.
       // Shared session access expiry (065): 1 (unhandled grants by expiry).
-      expect(indexes).toHaveLength(133);
+      // Idea updates (068): two seek indexes (timeline and per-session throttle).
+      expect(indexes).toHaveLength(135);
       expect(indexes.some((query) => query.includes('idx_session_access_grants_expiry_due'))).toBe(
         true
       );

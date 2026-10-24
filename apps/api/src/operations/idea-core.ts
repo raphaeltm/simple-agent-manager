@@ -8,7 +8,7 @@ import { operationLink } from './connector-read-core';
 import { formatOperationCursor, readOperationCursor } from './cursors';
 import { OperationError } from './errors';
 import { addIdeaUpdate, validateIdeaUpdateNote } from './idea-update-core';
-export { IDEA_TASK_PREDICATE_SQL } from './idea-identity';
+export { ideaTaskPredicateSql } from './idea-identity';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 

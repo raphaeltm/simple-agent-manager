@@ -16,8 +16,8 @@ Appending progress to an idea's description obscures the current plan and can ex
 - [x] Add shared operation for add, list, delete with project lookup, bounds, throttling, cursor and soft deletion.
 - [x] Add REST, workspace MCP and connector MCP paths; preserve existing content update behavior.
 - [x] Document agent note use and listing.
-- [ ] Complete real SQL and handler tests, including foreign project and deletion attack.
-- [ ] Run API/full quality checks and specialist reviews.
+- [x] Complete real SQL and handler tests, including foreign project and deletion attack.
+- [x] Run specialist reviews and lint/typecheck/build; full test retry is in progress after an unrelated web-suite failure on the concurrent monorepo run.
 - [ ] Claim, deploy and verify staging; release claim.
 - [ ] Open PR, pass CI/CodeRabbit/coordinator review, merge and watch production deploy.
 

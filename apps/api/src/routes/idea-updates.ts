@@ -5,7 +5,7 @@ import * as v from 'valibot';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { requireRouteParam } from '../lib/route-helpers';
-import { getUserId, requireAuth } from '../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { AppError } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { OperationError, operationErrorHttpStatus } from '../operations/errors';
@@ -14,7 +14,6 @@ import type { OperationContext } from '../operations/types';
 import { jsonValidator } from '../schemas';
 
 const ideaUpdateRoutes = new Hono<{ Bindings: Env }>();
-ideaUpdateRoutes.use('*', requireAuth());
 
 function context(c: Context<{ Bindings: Env }>): OperationContext {
   return {
@@ -35,7 +34,7 @@ async function run<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-ideaUpdateRoutes.get('/:ideaId/updates', async (c) => {
+ideaUpdateRoutes.get('/:ideaId/updates', requireAuth(), requireApproved(), async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   await requireProjectAccess(drizzle(c.env.DATABASE, { schema }), projectId, getUserId(c));
   return c.json(
@@ -50,6 +49,8 @@ ideaUpdateRoutes.get('/:ideaId/updates', async (c) => {
 });
 ideaUpdateRoutes.post(
   '/:ideaId/updates',
+  requireAuth(),
+  requireApproved(),
   jsonValidator(v.object({ body: v.string(), quote: v.optional(v.string()) })),
   async (c) => {
     const projectId = requireRouteParam(c, 'projectId');
@@ -73,23 +74,28 @@ ideaUpdateRoutes.post(
     );
   }
 );
-ideaUpdateRoutes.delete('/:ideaId/updates/:updateId', async (c) => {
-  const projectId = requireRouteParam(c, 'projectId');
-  await requireProjectCapability(
-    drizzle(c.env.DATABASE, { schema }),
-    projectId,
-    getUserId(c),
-    'task:write'
-  );
-  return c.json(
-    await run(() =>
-      deleteIdeaUpdate(context(c), {
-        projectId,
-        ideaId: requireRouteParam(c, 'ideaId'),
-        updateId: requireRouteParam(c, 'updateId'),
-      })
-    )
-  );
-});
+ideaUpdateRoutes.delete(
+  '/:ideaId/updates/:updateId',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
+    const projectId = requireRouteParam(c, 'projectId');
+    await requireProjectCapability(
+      drizzle(c.env.DATABASE, { schema }),
+      projectId,
+      getUserId(c),
+      'task:write'
+    );
+    return c.json(
+      await run(() =>
+        deleteIdeaUpdate(context(c), {
+          projectId,
+          ideaId: requireRouteParam(c, 'ideaId'),
+          updateId: requireRouteParam(c, 'updateId'),
+        })
+      )
+    );
+  }
+);
 
 export { ideaUpdateRoutes };
