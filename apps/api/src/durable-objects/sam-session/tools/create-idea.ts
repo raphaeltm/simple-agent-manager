@@ -10,6 +10,7 @@ import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
+import { ideaTaskPredicateSql } from '../../../operations/idea-identity';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 const DEFAULT_TITLE_MAX_LENGTH = 200;
@@ -80,9 +81,11 @@ export async function createIdea(
     return { error: 'Project not found or not owned by you.' };
   }
 
-  // Enforce per-project limit
+  // Enforce per-project limit. Counts IDEAS, through the one shared predicate — before the
+  // flag existed this counted every `draft` row, which is also every undispatched ordinary
+  // task, so a project's idea quota could be spent by work that was never an idea.
   const countRow = await env.DATABASE.prepare(
-    "SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND status = 'draft'"
+    `SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND ${ideaTaskPredicateSql()}`
   )
     .bind(project.id)
     .first<{ cnt: number }>();

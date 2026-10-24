@@ -140,21 +140,43 @@ not a proxy: every rule reads the condition itself and carries its source), `76-
 An idea is `tasks.is_idea = 1`. Every path that creates one sets the flag; every path that
 creates an ordinary task leaves it 0. Verified by reading each INSERT, 2026-10-24:
 
-| Writer | Sets `is_idea` |
-| ------ | -------------- |
-| `operations/idea-core.ts:231` (`createIdea`, the REST and MCP path) | `1`, literal in the INSERT |
-| `durable-objects/sam-session/tools/create-idea.ts:97` (`/sam` `create_idea`) | `1`, literal in the INSERT |
-| `services/platform-feedback-incidents/user-report.ts:195` (Report an issue) | `1`, literal in the INSERT |
-| `services/platform-feedback-triage/runner.ts:309` (hourly triage) | `1`, literal in the INSERT |
-| `services/debug-agent.ts:748` (`saveDebugDiagnosisAsIdea`) | `isIdea: true` on the drizzle insert |
-| `services/report-issue.ts` | **Writes no task.** It delegates to `upsertUserReportIncident`, the row above; the only `tasks` INSERT for a user report is that one. |
-| `routes/tasks/crud.ts:128` (`POST /api/projects/:projectId/tasks`) | **`0`, deliberately.** An ordinary task also starts in `draft`, which is why the predicate is the flag; commented at the call site. |
+| Writer                                                                       | Sets `is_idea`                                                                                                                        |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `operations/idea-core.ts:231` (`createIdea`, the REST and MCP path)          | `1`, literal in the INSERT                                                                                                            |
+| `durable-objects/sam-session/tools/create-idea.ts:97` (`/sam` `create_idea`) | `1`, literal in the INSERT                                                                                                            |
+| `services/platform-feedback-incidents/user-report.ts:195` (Report an issue)  | `1`, literal in the INSERT                                                                                                            |
+| `services/platform-feedback-triage/runner.ts:309` (hourly triage)            | `1`, literal in the INSERT                                                                                                            |
+| `services/debug-agent.ts:748` (`saveDebugDiagnosisAsIdea`)                   | `isIdea: true` on the drizzle insert                                                                                                  |
+| `services/report-issue.ts`                                                   | **Writes no task.** It delegates to `upsertUserReportIncident`, the row above; the only `tasks` INSERT for a user report is that one. |
+| `routes/tasks/crud.ts:128` (`POST /api/projects/:projectId/tasks`)           | **`0`, deliberately.** An ordinary task also starts in `draft`, which is why the predicate is the flag; commented at the call site.   |
 
-Every other `tasks` INSERT in `apps/api/src` creates work that is already dispatched
-(`chat-start.ts`, `chat.ts`, `submit-task-implementation.ts`, `submit-instant-task.ts`,
-`session-task-repair.ts`, `reserved-task-submission-storage.ts`, `trial/trial-runner.ts`,
-`routes/mcp/dispatch-tool.ts`, `routes/mcp/orchestration-tools.ts`,
-`routes/workspaces/workspace-create.ts`) and leaves the column at its default.
+Every other `tasks` INSERT in `apps/api/src` creates work that is already dispatched and
+leaves the column at its default. The full list, from `INSERT INTO tasks` and
+`insert(schema.tasks)` across the tree: `routes/chat-start.ts`, `routes/chat.ts`,
+`services/submit-task-implementation.ts`, `services/submit-instant-task.ts`,
+`services/session-task-repair.ts`, `services/reserved-task-submission-storage.ts`,
+`services/trial/trial-runner.ts`, `routes/mcp/dispatch-tool.ts`,
+`routes/mcp/orchestration-tools.ts`, `routes/workspaces/workspace-create.ts`,
+`durable-objects/sam-session/tools/dispatch-task.ts` and
+`durable-objects/sam-session/tools/retry-subtask.ts`. The last two insert at
+`status = 'queued'`, so they were never idea-like under either definition.
+
+### Readers that had written their own predicate
+
+The narrowing broke three queries that identified an idea as `status = 'draft'` without
+asking the shared helper — correct before the flag, wrong after it, because an undispatched
+ordinary task is also a draft. All three now call `ideaTaskPredicateSql`:
+
+| Reader                                                                           | What it was doing                                                                                                |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `durable-objects/sam-session/tools/find-related-ideas.ts`                        | Served ordinary draft tasks to the agent as "related ideas", and hid every idea that had left `draft`            |
+| `durable-objects/sam-session/tools/create-idea.ts` (the per-project quota count) | Let unrelated draft tasks spend a project's idea quota — one line above the INSERT this work already had to edit |
+| `operations/connector-read-core.ts` (`projectGet`'s `ideaCount`)                 | Reported a count that was neither the old nor the new definition                                                 |
+
+Two more reads in `routes/mcp/idea-tools.ts` (the `link_idea` existence pre-check and the
+`list_linked_ideas` enrichment) were not wrong — the write path behind them already enforces
+the predicate — but went through it too, so an agent is never handed a non-idea row labelled
+as a linked idea.
 
 Migration `0207` backfills `is_idea = 1` for every row the old `status = 'draft'` definition
 covered, so nothing that was in anyone's Ideas list has left it.

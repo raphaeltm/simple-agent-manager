@@ -22,7 +22,11 @@ export function Panel({
 }: {
   children: ReactNode;
   className?: string;
-  tone?: 'danger' | 'warning';
+  /**
+   * The exceptions a panel may signal. `success` is the quietest of the three: the Ideas
+   * list's "a pull request merged — is this done?" card is a question, not an alarm.
+   */
+  tone?: 'danger' | 'warning' | 'success';
   label?: string;
 }) {
   const toneClass =
@@ -30,7 +34,9 @@ export function Panel({
       ? 'border-danger/35 bg-danger-tint'
       : tone === 'warning'
         ? 'border-warning/35 bg-warning-tint'
-        : 'glass-surface border-border-default';
+        : tone === 'success'
+          ? 'border-success/30 bg-success-tint'
+          : 'glass-surface border-border-default';
   return (
     <section aria-label={label} className={`min-w-0 rounded-xl border ${toneClass} ${className}`}>
       {children}

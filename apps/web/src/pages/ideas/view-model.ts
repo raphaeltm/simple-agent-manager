@@ -11,6 +11,7 @@
 import type {
   IdeaDerivedStatus,
   IdeaListItem,
+  IdeaNeedsYouState,
   IdeaPullRequest,
   IdeaStatusSession,
 } from '@simple-agent-manager/shared';
@@ -384,6 +385,32 @@ function stuckRemainder(note: string | null | undefined, lead: string | null): s
  * because they used to crowd out the ideas people care about. An agent-filed idea that needs
  * a person still surfaces in Needs you — the fold is about noise, not about hiding problems.
  */
+/**
+ * How urgent each Needs-you state is, lowest number first.
+ *
+ * "Needs you" is capped at three cards and then folds, so the order it is sliced in decides
+ * what a person sees. Recency is the wrong key for that: the server orders by `updated_at`,
+ * which has nothing to do with urgency, so a "a pull request merged — is this done?" card
+ * touched five minutes ago would push a chat that is blocked on an answer behind "N more
+ * need you" (rule 65 — a capped selection must rank by its purpose).
+ *
+ * An agent waiting on an answer is blocked right now. Stopped work is not blocked on anyone
+ * but is not progressing. A merged pull request is a decision that can wait, and the idea is
+ * already finished as far as the code is concerned.
+ */
+const IDEA_NEEDS_YOU_URGENCY: Record<IdeaNeedsYouState, number> = {
+  question: 0,
+  stuck: 1,
+  merged: 2,
+};
+
+/** Most urgent first; within one urgency, whatever order the server returned (recency). */
+export function byNeedsYouUrgency(a: IdeaListItem, b: IdeaListItem): number {
+  const left = IDEA_NEEDS_YOU_URGENCY[a.derived.needsYou ?? 'merged'];
+  const right = IDEA_NEEDS_YOU_URGENCY[b.derived.needsYou ?? 'merged'];
+  return left - right;
+}
+
 export function groupIdeas(items: readonly IdeaListItem[]): IdeaGroups {
   const groups: IdeaGroups = {
     needsYou: [],
@@ -403,6 +430,8 @@ export function groupIdeas(items: readonly IdeaListItem[]): IdeaGroups {
     else if (state === 'working' || state === 'review') groups.inProgress.push(item);
     else if (!ideaNeedsYou(state)) groups.notStarted.push(item);
   }
+  // Stable sort, so ideas of equal urgency keep the server's recency order.
+  groups.needsYou.sort(byNeedsYouUrgency);
   return groups;
 }
 

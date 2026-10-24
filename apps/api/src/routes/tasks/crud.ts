@@ -722,6 +722,11 @@ crudRoutes.post(
     await requireProjectCapability(db, projectId, userId, 'task:write');
     const task = await requireProjectTaskById(db, projectId, taskId);
 
+    // Reachable for an idea only if that idea is ALREADY `ready`. Nothing can put one there
+    // any more: the idea transition table no longer offers `draft -> ready`, because ideas
+    // are not run in place — Start work creates a new linked task instead. Rows that reached
+    // `ready` before that keep this path rather than being stranded with no way to run
+    // (`operations/idea-transitions.ts`, rule 71).
     if (task.status !== 'ready') {
       throw errors.conflict('Only ready tasks can be delegated');
     }

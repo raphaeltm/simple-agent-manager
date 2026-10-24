@@ -32,7 +32,6 @@ import type {
   PullRequestRef,
 } from '@simple-agent-manager/shared';
 import type { LinkRelation } from '@simple-agent-manager/shared';
-import { canonicalProjectPullRequestUrl } from '@simple-agent-manager/shared';
 
 import type { IdeaWorkSnapshot } from '../durable-objects/project-data/idea-work';
 import { log } from '../lib/logger';
@@ -46,13 +45,11 @@ import {
   type IdeaListTotals,
   type IdeaRow,
   ideaSummary,
-  pullRequestNumber,
   readAgentProfileNames,
   readAssociatedPullRequests,
   readIdeaRow,
   readIdeaRows,
   readIdeaTotals,
-  readIdeaWorkLinkCaps,
   readProjectRepository,
   readSessionTasks,
   type SessionTaskRow,
@@ -60,6 +57,7 @@ import {
 } from './idea-list-reads';
 import { deriveIdeaStatus, type IdeaStatusLinkedSession } from './idea-status';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
+import { canonicalPullRequestRefs, resolveResourceLinkBatchCaps } from './link-core';
 import { getPullRequestStates } from './pull-request-core';
 import type { OperationContext } from './types';
 
@@ -147,26 +145,6 @@ function toLinkedSession(
   };
 }
 
-/**
- * A pull request reference, canonicalized against the project's repository.
- *
- * `canonicalProjectPullRequestUrl` is T2's canonicalizer (program decision 3): it rejects
- * other hosts and other repositories, and collapses the same pull request reached through
- * three different sources to one URL. A reference that does not canonicalize is dropped —
- * it is not a pull request in this project.
- */
-function toRef(
-  rawUrl: string,
-  repository: string,
-  source: PullRequestRef['source']
-): PullRequestRef | null {
-  const url = canonicalProjectPullRequestUrl(rawUrl, repository);
-  if (!url) return null;
-  const number = pullRequestNumber(url);
-  if (number === null) return null;
-  return { url, number, source };
-}
-
 interface CollectedEvidence {
   evidence: Map<string, IdeaEvidence>;
   /** The raw link snapshots, which carry the counts and what a cap truncated. */
@@ -185,7 +163,7 @@ async function collectEvidence(
   if (rows.length === 0) return { evidence, snapshots: {} };
 
   const [caps, repository] = await Promise.all([
-    readIdeaWorkLinkCaps(ctx),
+    resolveResourceLinkBatchCaps(ctx.env),
     readProjectRepository(ctx, projectId),
   ]);
 
@@ -251,19 +229,18 @@ async function collectEvidence(
         .filter((session) => session.strong && session.sessionTaskId)
         .map((session) => session.sessionTaskId as string)
     );
-    const candidates: Array<[string, PullRequestRef['source']]> = [];
+    const candidates: Array<{ url: string; source: PullRequestRef['source'] }> = [];
     for (const taskId of strongTaskIds) {
       const task = tasks.get(taskId);
-      if (task?.output_pr_url) candidates.push([task.output_pr_url, 'task_output']);
-      for (const url of associations.get(taskId) ?? []) candidates.push([url, 'pr_association']);
+      if (task?.output_pr_url) candidates.push({ url: task.output_pr_url, source: 'task_output' });
+      for (const url of associations.get(taskId) ?? [])
+        candidates.push({ url, source: 'pr_association' });
     }
-    for (const url of snapshot.pullRequestUrls) candidates.push([url, 'explicit_link']);
-    for (const [rawUrl, source] of candidates) {
-      const ref = toRef(rawUrl, repository, source);
-      if (!ref) continue;
-      if (!entry.pullRequestRefs.some((existing) => existing.url === ref.url)) {
-        entry.pullRequestRefs.push(ref);
-      }
+    for (const url of snapshot.pullRequestUrls) candidates.push({ url, source: 'explicit_link' });
+    // The same canonicalize-and-collapse the single-resource context reads use, so an idea's
+    // pull requests are the same set whichever page asked (program decision 3).
+    for (const ref of canonicalPullRequestRefs(candidates, repository)) {
+      entry.pullRequestRefs.push(ref);
       if (!allRefs.has(ref.url)) allRefs.set(ref.url, ref);
     }
   }
@@ -272,12 +249,12 @@ async function collectEvidence(
 
   let states: Awaited<ReturnType<typeof getPullRequestStates>> = {};
   try {
-    states = await getPullRequestStates(
-      ctx,
-      projectId,
-      [...allRefs.values()],
-      refresh === 'single' ? { refresh: 'single' } : {}
-    );
+    states = await getPullRequestStates(ctx, projectId, [...allRefs.values()], {
+      // The repository is already in hand from `readProjectRepository`, so this does not
+      // re-read the same one-row `projects` lookup (rule 60).
+      repository,
+      ...(refresh === 'single' ? { refresh: 'single' as const } : {}),
+    });
   } catch (error) {
     // Unknown pull request state degrades the derived status to what the chats alone say.
     // It must never fail the whole list.

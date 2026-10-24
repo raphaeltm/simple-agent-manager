@@ -123,7 +123,7 @@ function HowIdeasMove() {
     ['merged', 'Merged: you decide if it’s done'],
   ];
   return (
-    <Panel label="How ideas move" className="flex min-w-0 flex-col gap-3 p-4">
+    <Panel label="Ideas move on their own" className="flex min-w-0 flex-col gap-3 p-4">
       <p className="m-0 text-[15px] font-semibold text-fg-primary">Ideas move on their own</p>
       <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
         {steps.map(([state, text]) => (
@@ -346,15 +346,14 @@ export function IdeasListPage() {
     </>
   );
 
+  // One hint for both layouts. It used to be computed inline in the desktop branch only, so
+  // the phone — the surface this page is designed for first — was the one that never said
+  // there were more finished ideas than it was showing.
+  const doneHint =
+    totals && totals.done > groups.doneRecently.length ? `${totals.done} in total` : undefined;
+
   const done = (
-    <Rows
-      title="Done recently"
-      hint={
-        totals && totals.done > groups.doneRecently.length ? `${totals.done} in total` : undefined
-      }
-      items={groups.doneRecently}
-      projectId={projectId}
-    />
+    <Rows title="Done recently" hint={doneHint} items={groups.doneRecently} projectId={projectId} />
   );
 
   const filedByAgents =
@@ -386,7 +385,7 @@ export function IdeasListPage() {
           {groups.doneRecently.length > 0 && (
             <Disclosure
               title={`Done recently · ${groups.doneRecently.length}`}
-              hint="Finished and parked"
+              hint={doneHint ?? 'Finished and parked'}
               testId="ideas-done-recently"
             >
               <Panel className="overflow-hidden" label="Done recently">

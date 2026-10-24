@@ -6,10 +6,8 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
-import {
-  getSearchQueryLikePatterns,
-  normalizeSearchQuery,
-} from '../../../lib/search-query-limits';
+import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../../../lib/search-query-limits';
+import { ideaTaskPredicateSql } from '../../../operations/idea-identity';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 const DEFAULT_LIMIT = 10;
@@ -42,7 +40,7 @@ export const findRelatedIdeasDef: AnthropicToolDef = {
 
 export async function findRelatedIdeas(
   input: { projectId: string; query: string; limit?: number },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   const env = ctx.env as unknown as Env;
   const db = drizzle(env.DATABASE, { schema });
@@ -66,12 +64,7 @@ export async function findRelatedIdeas(
   const [project] = await db
     .select({ id: schema.projects.id })
     .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.id, input.projectId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
     .limit(1);
 
   if (!project) {
@@ -85,11 +78,12 @@ export async function findRelatedIdeas(
   const results = await env.DATABASE.prepare(
     `SELECT id, title, description, status, priority, updated_at
      FROM tasks
-     WHERE project_id = ? AND status = 'draft'
+     WHERE project_id = ? AND ${ideaTaskPredicateSql()}
        AND ${termConditions}
      ORDER BY updated_at DESC
-     LIMIT ?`,
-  ).bind(project.id, ...likePatterns.flatMap((pattern) => [pattern, pattern]), limit)
+     LIMIT ?`
+  )
+    .bind(project.id, ...likePatterns.flatMap((pattern) => [pattern, pattern]), limit)
     .all<{
       id: string;
       title: string;

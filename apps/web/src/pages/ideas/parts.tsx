@@ -226,10 +226,18 @@ export function IdeaActionControl({
   );
 }
 
-const TONE_PANEL: Record<IdeaTone, 'danger' | 'warning' | undefined> = {
+/**
+ * The card's tone, as the shared `Panel` names it.
+ *
+ * `info` maps to `success` rather than being left undefined and tinted from outside: the
+ * override used to be appended through `className` and won only because Tailwind happened to
+ * emit it after `Panel`'s own default border, which a content-order change or an edit to
+ * `Panel`'s template string could silently undo with no type error.
+ */
+const TONE_PANEL: Record<IdeaTone, 'danger' | 'warning' | 'success'> = {
   danger: 'danger',
   warning: 'warning',
-  info: undefined,
+  info: 'success',
 };
 
 /**
@@ -260,9 +268,7 @@ export function IdeaAttentionCard({
     <Panel
       tone={TONE_PANEL[attention.tone]}
       label={item.title}
-      className={`flex min-w-0 flex-col gap-1 px-4 pb-4 pt-1.5 ${
-        attention.tone === 'info' ? 'border-success/30 bg-success-tint' : ''
-      }`}
+      className="flex min-w-0 flex-col gap-1 px-4 pb-4 pt-1.5"
     >
       <Link
         to={ideaPath(projectId, item.ideaId)}

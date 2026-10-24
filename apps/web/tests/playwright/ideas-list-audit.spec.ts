@@ -470,9 +470,14 @@ test.describe('Ideas list — laptop', () => {
     await expect(page.getByText('Ideas move on their own')).toBeVisible();
     await expect(page.getByRole('heading', { name: /Done recently/ })).toBeVisible();
 
-    // The side column sits beside the main column, not under it.
+    // The side column sits beside the main column, not under it. Addressed by its accessible
+    // name, which is the string a screen reader announces — and must therefore be the string
+    // on screen, not a second wording nobody can see (WCAG 2.5.3).
     const main = await page.getByTestId('ideas-needs-you').boundingBox();
-    const side = await page.getByRole('region', { name: 'How ideas move' }).first().boundingBox();
+    const side = await page
+      .getByRole('region', { name: 'Ideas move on their own' })
+      .first()
+      .boundingBox();
     expect(main).not.toBeNull();
     expect(side).not.toBeNull();
     expect(side!.x).toBeGreaterThan(main!.x + main!.width - 1);
