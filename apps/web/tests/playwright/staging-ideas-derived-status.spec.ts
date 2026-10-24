@@ -261,8 +261,26 @@ test.describe('Ideas list on staging — laptop', () => {
 
     await openIdeas(page);
     await searchForThisRun(page);
-    // Back out of "Done recently" and into the open list.
-    await expect(page.getByRole('heading', { name: /Not started/ })).toBeVisible();
+
+    /*
+     * Back into the OPEN list — as "In progress", not "Not started".
+     *
+     * This assertion said "Not started" on the first attempt and failed, and the product was
+     * right: reopening only clears the human decision (`completed` → `draft`). The chat linked
+     * in the earlier test is still there and its conversation task is still `queued`, which is
+     * a LIVE status, so `deriveIdeaStatus` goes on to rule 4 and returns `working`. Verified in
+     * staging D1 rather than inferred — the chat task was still `queued` when the test failed.
+     *
+     * "Not started" would only be right if the idea had no live linked work, and asserting it
+     * here would have demanded that reopening silently unlink the chat.
+     */
+    await expect(page.getByRole('heading', { name: /In progress/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Done recently/ })).toBeHidden();
+    const reopenedRow = ideaRow(page);
+    await expect(reopenedRow).toContainText('In progress');
+    await expect(reopenedRow).not.toContainText('Done');
+    // And it still carries the work it was linked to, so reopening did not drop the link.
+    await expect(reopenedRow).toContainText(`is working in ${CHAT_TOPIC}`);
     await shot(page, 't8-ideas-reopened');
   });
 
