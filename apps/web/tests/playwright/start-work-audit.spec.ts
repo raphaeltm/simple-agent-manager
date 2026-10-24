@@ -147,6 +147,40 @@ function cappedList(total: number, lowerBound = false) {
   return { items: [], total, truncated: false, totalIsLowerBound: lowerBound };
 }
 
+/**
+ * The `IdeaDetail` the idea page reads, derived from the task-shaped fixture above.
+ *
+ * This spec drove `pages/IdeaDetailPage`, which read `/tasks/:id`. That page is gone and
+ * `/projects/:id/ideas/:ideaId` now serves `pages/ideas/IdeaPage`, which reads `/ideas/:id`
+ * with a derived status. Deriving rather than duplicating keeps `makeIdea({ title })` the one
+ * knob the tests below already turn.
+ */
+function ideaDetail(task: Record<string, unknown>) {
+  return {
+    ideaId: task['id'],
+    title: task['title'],
+    content: task['description'],
+    summary: task['description'],
+    status: task['status'],
+    createdAt: task['createdAt'],
+    updatedAt: task['updatedAt'],
+    derived: {
+      // Nothing has worked on it, which is the state that offers Start work.
+      state: 'not-started',
+      needsYou: null,
+      source: { origin: 'none', observedAt: null, stale: false },
+      session: null,
+      pullRequest: null,
+      note: null,
+    },
+    counts: { updates: 0, chats: 0, files: 0, pullRequests: 0 },
+    filedByAgent: false,
+    filedBy: null,
+    sessions: [],
+    pullRequests: [],
+  };
+}
+
 interface MockOptions {
   idea?: Record<string, unknown>;
   profiles?: Record<string, unknown>[];
@@ -211,6 +245,10 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       }
       if (subPath === '/skills') return respond(200, { items: skills });
       if (subPath.match(/^\/ideas\/[^/]+\/links$/)) return respond(200, links);
+      if (subPath.match(/^\/ideas\/[^/]+\/updates$/)) {
+        return respond(200, { updates: [], nextCursor: null });
+      }
+      if (subPath.match(/^\/ideas\/[^/]+$/)) return respond(200, ideaDetail(idea));
       if (subPath === '/tasks/submit') return respond(submitStatus, submitBody);
       if (subPath.match(/^\/tasks\/[^/]+\/sessions$/)) {
         return respond(200, { sessions: [], count: 0 });
@@ -231,7 +269,7 @@ async function openIdea(page: Page, title: string) {
 
 async function openSheet(page: Page, title = 'Retry failed webhook deliveries') {
   await openIdea(page, title);
-  await page.getByRole('button', { name: /Start work on this idea/i }).click();
+  await page.getByRole('button', { name: /^Start work$/ }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
 }
 
@@ -252,7 +290,7 @@ test.describe('Start work sheet', () => {
   test('idea page shows Start work, not Execute', async ({ page }) => {
     await setupMocks(page);
     await openIdea(page, 'Retry failed webhook deliveries');
-    await expect(page.getByRole('button', { name: /Start work on this idea/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Start work$/ })).toBeVisible();
     await expect(page.getByRole('button', { name: /execute/i })).toHaveCount(0);
     await screenshot(page, `start-work-${suffix(page)}-closed`);
     await assertNoOverflow(page);
@@ -426,7 +464,7 @@ test.describe('Start work sheet', () => {
     await expect(page.getByTestId('start-work-sheet')).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /Start work on this idea/i })).toBeFocused();
+    await expect(page.getByRole('button', { name: /^Start work$/ })).toBeFocused();
   });
 
   // Two stacked modals each register their own document-level Escape listener, and this

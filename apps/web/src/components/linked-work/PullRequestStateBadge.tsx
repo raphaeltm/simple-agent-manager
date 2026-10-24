@@ -35,8 +35,12 @@ const DRAFT_META: StateMeta = {
 /**
  * Checks are only worth a word while they can still change a decision.
  *
- * Which is also why they are dropped once a pull request is merged or closed — see
- * `checksLabel` below.
+ * Whether a DECIDED pull request still warrants them is the caller's call, through
+ * `showChecks`, not this component's. The chat surfaces deliberately keep them on a merged PR
+ * (`tests/unit/components/chat/session-linked-work.test.tsx` pins that); the idea page's Work
+ * rows deliberately drop them, because there the green "Checks passed" sat at equal weight
+ * beside the purple "Merged" and was the louder of the two. Both are defensible, so the
+ * disagreement is composed at the seam rather than settled here (`.claude/rules/67`).
  */
 const CHECKS_LABEL: Record<NonNullable<PullRequestState['checksState']>, string | null> = {
   pending: 'Checks running',
@@ -60,20 +64,7 @@ export function PullRequestStateBadge({
   if (!state) return null;
   // A draft PR is open, but "Draft" is the fact that decides whether anyone should look at it.
   const meta = state.state === 'open' && state.isDraft ? DRAFT_META : STATE_META[state.state];
-  /*
-   * Checks are suppressed on a merged or closed pull request.
-   *
-   * They cannot change the outcome any more, so a green "Checks passed" sitting at equal
-   * weight beside the purple "Merged" competes with the only fact that still matters. On the
-   * idea page's Work rows this was visibly the louder of the two. Decided here rather than at
-   * each call site because it is true of every surface that shows this badge: the chat's
-   * Related drawer, the chat header's pull-request row and the idea page all pass the default.
-   */
-  const checksAreStillLive = state.state === 'open';
-  const checksLabel =
-    showChecks && checksAreStillLive && state.checksState
-      ? CHECKS_LABEL[state.checksState]
-      : null;
+  const checksLabel = showChecks && state.checksState ? CHECKS_LABEL[state.checksState] : null;
 
   return (
     <>

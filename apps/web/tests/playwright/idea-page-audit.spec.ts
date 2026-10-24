@@ -6,7 +6,7 @@
  * stands and offers the one action that matches. Stress data pushes the plan, a verbose
  * failure, long chat topics and a long note through the same layout.
  */
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 
 import {
   assertNoClippedOverflow,
@@ -271,6 +271,40 @@ const START_WORK_PROFILES = [
  * more, so the person arrived at an empty chat with the idea dropped. A screenshot of the
  * page alone cannot see that, which is why the audit presses the button.
  */
+/**
+ * What the sheet must say, at either viewport: the idea it is about to start, who works on it
+ * and a note. Shared so the two viewport tests differ only in the screenshot they take.
+ */
+async function expectSheetAsksTheTwoQuestions(sheet: Locator) {
+  await expect(sheet.getByText('Retry failed webhook deliveries')).toBeVisible();
+  await expect(sheet.getByRole('button', { name: /Who works on it/i })).toBeVisible();
+  await expect(sheet.getByLabel('Note for the agent')).toBeVisible();
+}
+
+/** The volume case's setup, shared by its phone and laptop tests. */
+async function setupVolumeIdea(page: Page) {
+  await setupIdeaMocks(page, {
+    idea: makeIdea('review', {
+      title:
+        'Retry failed webhook deliveries with exponential backoff over a three-day window, matching Stripe',
+      sessions: MANY_SESSIONS,
+      counts: { updates: 4, chats: 9, files: 9, pullRequests: 1 },
+    }),
+    links: MANY_LINKS,
+  });
+  await openIdea(page);
+}
+
+/**
+ * The capped Related total.
+ *
+ * 9 files + 7 ideas, both reporting `totalIsLowerBound`, against the 10 rows on screen — so
+ * the pill must read "16+" rather than asserting a total the server declined to claim.
+ */
+async function expectCappedRelatedTotal(page: Page) {
+  await expect(page.getByText('16+', { exact: true })).toBeVisible();
+}
+
 async function openStartWork(page: Page) {
   await page.getByRole('button', { name: 'Start work' }).click();
   const sheet = page.getByRole('dialog', { name: /Start work|Talk it through/i });
@@ -500,29 +534,12 @@ test.describe('Idea page — phone', () => {
   });
 
   test('holds up with a long title, many chats and capped Related counts', async ({ page }) => {
-    await setupIdeaMocks(page, {
-      idea: makeIdea('review', {
-        title:
-          'Retry failed webhook deliveries with exponential backoff over a three-day window, matching Stripe',
-        sessions: MANY_SESSIONS,
-        counts: { updates: 4, chats: 9, files: 9, pullRequests: 1 },
-      }),
-      links: MANY_LINKS,
-    });
-    await openIdea(page);
+    await setupVolumeIdea(page);
 
     // The header's own long title, which only the list used to exercise.
-    await expect(
-      page.getByRole('heading', { name: /matching Stripe/ }).first()
-    ).toBeVisible();
-    /*
-     * A bounded read can only establish a minimum, so Related must say "16+" rather than
-     * asserting a total the server declined to claim: 9 files + 7 ideas, both lower bounds,
-     * against the 10 rows actually on screen.
-     */
-    const related = page.getByRole('region', { name: 'Related' });
-    await expect(related).toBeVisible();
-    await expect(page.getByText('16+', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /matching Stripe/ }).first()).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Related' })).toBeVisible();
+    await expectCappedRelatedTotal(page);
 
     await assertLayoutIsSound(page);
     await screenshot(page, 'idea-page-many-phone');
@@ -573,11 +590,7 @@ test.describe('Idea page — phone', () => {
     await openIdea(page);
 
     const sheet = await openStartWork(page);
-    // It must name the idea it is about to start, and offer the two things the design asks
-    // for: who works on it, and a note.
-    await expect(sheet.getByText('Retry failed webhook deliveries')).toBeVisible();
-    await expect(sheet.getByRole('button', { name: /Who works on it/i })).toBeVisible();
-    await expect(sheet.getByLabel('Note for the agent')).toBeVisible();
+    await expectSheetAsksTheTwoQuestions(sheet);
 
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
@@ -649,8 +662,7 @@ test.describe('Idea page — laptop', () => {
     await openIdea(page);
 
     const sheet = await openStartWork(page);
-    await expect(sheet.getByText('Retry failed webhook deliveries')).toBeVisible();
-    await expect(sheet.getByLabel('Note for the agent')).toBeVisible();
+    await expectSheetAsksTheTwoQuestions(sheet);
 
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
@@ -670,18 +682,9 @@ test.describe('Idea page — laptop', () => {
   });
 
   test('a long title, many chats and capped counts in two columns', async ({ page }) => {
-    await setupIdeaMocks(page, {
-      idea: makeIdea('review', {
-        title:
-          'Retry failed webhook deliveries with exponential backoff over a three-day window, matching Stripe',
-        sessions: MANY_SESSIONS,
-        counts: { updates: 4, chats: 9, files: 9, pullRequests: 1 },
-      }),
-      links: MANY_LINKS,
-    });
-    await openIdea(page);
+    await setupVolumeIdea(page);
 
-    await expect(page.getByText('16+', { exact: true })).toBeVisible();
+    await expectCappedRelatedTotal(page);
     await assertLayoutIsSound(page);
     await screenshot(page, 'idea-page-many-desktop');
   });

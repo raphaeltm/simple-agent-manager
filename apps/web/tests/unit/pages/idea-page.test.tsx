@@ -527,6 +527,35 @@ describe('IdeaPage', () => {
     );
   });
 
+  /*
+   * Checks on a DECIDED pull request are dropped on this page, and only on this page.
+   *
+   * The chat surfaces keep them — `components/chat/session-linked-work.test.tsx` pins that —
+   * so this is a call-site decision rather than a change to the shared badge. The control is
+   * the review-state test above, which asserts an OPEN pull request still shows "Checks
+   * passed": without it, this would also pass if checks were never rendered anywhere.
+   */
+  it('drops the checks word once the pull request is merged', async () => {
+    mocks.getProjectIdea.mockResolvedValue(
+      idea({
+        derived: derived({ state: 'merged' }),
+        pullRequests: [
+          {
+            ...PULL_REQUEST,
+            state: 'merged' as const,
+            mergedAt: '2026-10-23T12:00:00.000Z',
+            checksState: 'success' as const,
+          },
+        ],
+      })
+    );
+    renderPage();
+
+    const work = await screen.findByRole('region', { name: 'Work' });
+    expect(within(work).getByText('Merged')).toBeInTheDocument();
+    expect(within(work).queryByText('Checks passed')).not.toBeInTheDocument();
+  });
+
   it('edits the plan through the task route and refreshes the page', async () => {
     renderPage();
     await userEvent.click(await screen.findByRole('button', { name: 'Edit' }));

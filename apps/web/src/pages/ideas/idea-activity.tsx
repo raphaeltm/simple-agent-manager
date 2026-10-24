@@ -118,7 +118,20 @@ export function IdeaWork({ idea, projectId }: { idea: IdeaDetail; projectId: str
                 }
                 title={pullRequest.title ?? `Pull request #${pullRequest.number}`}
                 meta={`PR #${pullRequest.number}`}
-                trailing={<PullRequestStateBadge state={pullRequest} />}
+                /*
+                 * Checks only while the pull request can still change. Once it is merged or
+                 * closed they cannot alter the outcome, and on this row the green "Checks
+                 * passed" sat at equal weight beside the purple "Merged" and read louder than
+                 * it (ui-ux-specialist, 2026-10-24). The chat surfaces keep them on a decided
+                 * PR on purpose, which is why this is a prop here rather than a change to the
+                 * shared badge (`.claude/rules/67`).
+                 */
+                trailing={
+                  <PullRequestStateBadge
+                    state={pullRequest}
+                    showChecks={pullRequest.state === 'open'}
+                  />
+                }
                 href={pullRequest.url}
               />
             ))}

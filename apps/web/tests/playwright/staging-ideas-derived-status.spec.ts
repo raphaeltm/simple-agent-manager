@@ -549,36 +549,89 @@ test.describe('Ideas list on staging — laptop', () => {
   /*
    * The idea page itself, which is what PR2 ships, driven as a person drives it.
    *
-   * Start work is a BUTTON here, not a link. It was a link to `/chat?executeIdea=<id>` whose
-   * reader had already been removed, so pressing it opened an empty chat with the idea
-   * dropped. A page-load check cannot see that; pressing it can.
+   * Two pages, because the page's whole design is that the one primary action follows the
+   * state. The run's own idea has a linked chat by now, so it is `working` and its action is
+   * "Open the chat"; a freshly filed idea is `not-started` and its action is "Start work".
+   * Asserting only one of them would leave the other free to show the wrong button.
+   *
+   * The first draft of this test asserted "Start work" on the run's idea and failed on
+   * staging — correctly. The page was right and the assumption was wrong: an idea someone is
+   * already working on should not invite you to start work on it again.
    */
-  test('the idea page renders on staging and Start work opens the sheet', async ({ page }) => {
+  test('the idea page shows the action its state calls for, and Start work opens the sheet', async ({
+    page,
+  }) => {
     await stagingLogin(page);
+
+    // 1. The idea this run linked a chat to: in progress, so the action is the chat.
     await page.goto(`${STAGING_APP}/projects/${PROJECT_ID}/ideas/${created.ideaId}`);
     await dismissStagingOnboarding(page);
-
     await expect(page.getByRole('heading', { name: new RegExp(RUN) })).toBeVisible({
       timeout: 30_000,
     });
-    // The status card and its one primary action, from real derived state.
-    await expect(page.getByRole('region', { name: 'Status' })).toBeVisible();
-    const startWork = page.getByRole('button', { name: 'Start work' });
-    await expect(startWork).toBeVisible();
-    expect(await startWork.getAttribute('href')).toBeNull();
-
-    await startWork.click();
-    const sheet = page.getByRole('dialog', { name: /Start work|Talk it through/i });
-    await expect(sheet).toBeVisible({ timeout: 20_000 });
-    // It must name the idea it is about to start.
-    await expect(sheet.getByText(new RegExp(RUN))).toBeVisible();
-
+    const status = page.getByRole('region', { name: 'Status' });
+    await expect(status).toBeVisible();
+    await expect(status.getByText('In progress')).toBeVisible();
+    await expect(status.getByRole('link', { name: 'Open the chat' })).toBeVisible();
+    // Start work is NOT offered here, which is the point of a state-dependent action.
+    await expect(page.getByRole('button', { name: 'Start work' })).toHaveCount(0);
+    /*
+     * And the Work section carries the real chat — the route -> Durable Object hop read on the
+     * page a person sees, not just through the list.
+     */
+    const work = page.getByRole('region', { name: 'Work' });
+    await expect(work.getByRole('link', { name: new RegExp(RUN) })).toBeVisible();
     await assertNoOverflow(page);
-    await stagingShot(page, 't8-pr2-idea-page-start-work');
+    await stagingShot(page, 't8-pr2-idea-page-in-progress');
 
-    // Close without starting: this test proves the entry point, not a second workspace.
-    await sheet.getByRole('button', { name: 'Cancel' }).click();
-    await expect(sheet).toBeHidden();
+    // 2. A fresh idea: nothing has worked on it, so the action is Start work.
+    const fresh = await api(page, 'POST', `/api/projects/${PROJECT_ID}/ideas`, {
+      title: `T8 staging idea page ${RUN}`,
+      content: 'Filed to exercise the idea page in its not-started state.',
+    });
+    expect(fresh.status(), await fresh.text()).toBe(201);
+    const freshId = ((await fresh.json()) as { ideaId: string }).ideaId;
+
+    try {
+      await page.goto(`${STAGING_APP}/projects/${PROJECT_ID}/ideas/${freshId}`);
+      await dismissStagingOnboarding(page);
+      await expect(page.getByRole('heading', { name: /T8 staging idea page/ })).toBeVisible({
+        timeout: 30_000,
+      });
+
+      const startWork = page.getByRole('button', { name: 'Start work' });
+      await expect(startWork).toBeVisible();
+      /*
+       * The regression this PR exists for: Start work must not be a link. It was one, to
+       * `/chat?executeIdea=<id>`, whose reader had already been removed — so pressing it
+       * opened an empty chat with the idea dropped. A page-load check cannot see that.
+       */
+      expect(await startWork.getAttribute('href')).toBeNull();
+
+      await startWork.click();
+      const sheet = page.getByRole('dialog', { name: /Start work|Talk it through/i });
+      await expect(sheet).toBeVisible({ timeout: 20_000 });
+      // It must name the idea it is about to start.
+      await expect(sheet.getByText(/T8 staging idea page/)).toBeVisible();
+
+      await assertNoOverflow(page);
+      await stagingShot(page, 't8-pr2-idea-page-start-work');
+
+      // Close without starting: this proves the entry point, not a second workspace.
+      await sheet.getByRole('button', { name: 'Cancel' }).click();
+      await expect(sheet).toBeHidden();
+    } finally {
+      /*
+       * Delete here rather than in afterAll, so a failure above still cleans up. Through
+       * `/tasks/:id`, which is the path the cleanup block below already proves works for an
+       * idea — an idea IS a task row, and there is no separate idea delete route.
+       */
+      const deleted = await api(page, 'DELETE', `/api/projects/${PROJECT_ID}/tasks/${freshId}`);
+      expect([200, 204, 404], await deleted.text()).toContain(deleted.status());
+      // Re-read rather than trust the delete's own answer.
+      const gone = await api(page, 'GET', `/api/projects/${PROJECT_ID}/ideas/${freshId}`);
+      expect(gone.status(), `re-read ${freshId} after delete`).toBe(404);
+    }
   });
 
   test.afterAll(async ({ browser }) => {
