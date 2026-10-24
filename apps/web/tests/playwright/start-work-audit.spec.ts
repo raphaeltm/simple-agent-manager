@@ -7,6 +7,7 @@
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
 
+import { makeIdeaDetail } from '../test-utils/idea-fixtures';
 import {
   assertNoClippedOverflow,
   assertNoOverflow,
@@ -153,32 +154,17 @@ function cappedList(total: number, lowerBound = false) {
  * This spec drove `pages/IdeaDetailPage`, which read `/tasks/:id`. That page is gone and
  * `/projects/:id/ideas/:ideaId` now serves `pages/ideas/IdeaPage`, which reads `/ideas/:id`
  * with a derived status. Deriving rather than duplicating keeps `makeIdea({ title })` the one
- * knob the tests below already turn.
+ * knob the tests below already turn, and the shape itself comes from the shared factory.
  */
 function ideaDetail(task: Record<string, unknown>) {
-  return {
-    ideaId: task['id'],
-    title: task['title'],
-    content: task['description'],
-    summary: task['description'],
-    status: task['status'],
-    createdAt: task['createdAt'],
-    updatedAt: task['updatedAt'],
-    derived: {
-      // Nothing has worked on it, which is the state that offers Start work.
-      state: 'not-started',
-      needsYou: null,
-      source: { origin: 'none', observedAt: null, stale: false },
-      session: null,
-      pullRequest: null,
-      note: null,
-    },
-    counts: { updates: 0, chats: 0, files: 0, pullRequests: 0 },
-    filedByAgent: false,
-    filedBy: null,
-    sessions: [],
-    pullRequests: [],
-  };
+  return makeIdeaDetail({
+    ideaId: task['id'] as string,
+    title: task['title'] as string,
+    content: task['description'] as string,
+    summary: task['description'] as string,
+    createdAt: task['createdAt'] as string,
+    updatedAt: task['updatedAt'] as string,
+  });
 }
 
 interface MockOptions {

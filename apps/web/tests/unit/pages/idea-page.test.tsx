@@ -4,13 +4,12 @@
  * The rule the old page broke is the one asserted hardest here: there is exactly one primary
  * action, and it follows the state instead of staying "Execute" forever.
  */
-import type { IdeaDerivedStatus } from '@simple-agent-manager/shared';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { IdeaDetail } from '../../../src/lib/api';
+import { makeDerived, makeIdeaDetail } from '../../test-utils/idea-fixtures';
 import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
@@ -65,18 +64,6 @@ vi.mock('../../../src/hooks/useToast', () => ({ useToast: () => mocks.toast }));
 
 import { IdeaPage } from '../../../src/pages/ideas/IdeaPage';
 
-function derived(overrides: Partial<IdeaDerivedStatus> = {}): IdeaDerivedStatus {
-  return {
-    state: 'not-started',
-    needsYou: null,
-    source: { origin: 'none', observedAt: null, stale: false },
-    session: null,
-    pullRequest: null,
-    note: null,
-    ...overrides,
-  };
-}
-
 const SESSION = {
   sessionId: 'sess-live',
   topic: 'Building retries',
@@ -99,25 +86,6 @@ const PULL_REQUEST = {
   stale: false,
 };
 
-function idea(overrides: Partial<IdeaDetail> = {}): IdeaDetail {
-  return {
-    ideaId: 'idea-1',
-    title: 'Retry failed webhook deliveries',
-    content: '# What we want\n\n- Retry with exponential backoff for up to 3 days.',
-    summary: 'Retry with exponential backoff for up to 3 days.',
-    status: 'draft',
-    createdAt: '2026-10-14T00:00:00.000Z',
-    updatedAt: '2026-10-20T00:00:00.000Z',
-    derived: derived(),
-    counts: { updates: 0, chats: 0, files: 0, pullRequests: 0 },
-    filedByAgent: false,
-    filedBy: null,
-    sessions: [],
-    pullRequests: [],
-    ...overrides,
-  };
-}
-
 function renderPage() {
   return renderWithQuery(
     <MemoryRouter>
@@ -130,7 +98,7 @@ describe('IdeaPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.isMobile = false;
-    mocks.getProjectIdea.mockResolvedValue(idea());
+    mocks.getProjectIdea.mockResolvedValue(makeIdeaDetail());
     mocks.listIdeaUpdates.mockResolvedValue({ updates: [], nextCursor: null });
     mocks.getIdeaLinks.mockResolvedValue({
       sessions: { items: [], total: 0, truncated: false },
@@ -138,8 +106,8 @@ describe('IdeaPage', () => {
       pullRequests: { items: [], total: 0, truncated: false },
       relatedIdeas: { items: [], total: 0, truncated: false },
     });
-    mocks.setProjectIdeaStatus.mockResolvedValue(idea({ status: 'completed' }));
-    mocks.keepProjectIdeaOpen.mockResolvedValue(idea());
+    mocks.setProjectIdeaStatus.mockResolvedValue(makeIdeaDetail({ status: 'completed' }));
+    mocks.keepProjectIdeaOpen.mockResolvedValue(makeIdeaDetail());
     mocks.postIdeaUpdate.mockResolvedValue({ update: {} });
     mocks.updateProjectTask.mockResolvedValue({});
   });
@@ -185,7 +153,7 @@ describe('IdeaPage', () => {
 
     it('opens the chat while work is running', async () => {
       mocks.getProjectIdea.mockResolvedValue(
-        idea({ derived: derived({ state: 'working', session: SESSION }) })
+        makeIdeaDetail({ derived: makeDerived({ state: 'working', session: SESSION }) })
       );
       renderPage();
       expect(await screen.findByRole('link', { name: 'Open the chat' })).toHaveAttribute(
@@ -197,8 +165,8 @@ describe('IdeaPage', () => {
 
     it('answers the question while one is open, and says who asked', async () => {
       mocks.getProjectIdea.mockResolvedValue(
-        idea({
-          derived: derived({
+        makeIdeaDetail({
+          derived: makeDerived({
             state: 'question',
             needsYou: 'question',
             session: SESSION,
@@ -218,7 +186,7 @@ describe('IdeaPage', () => {
 
     it('reviews the pull request while one is open, in a new tab', async () => {
       mocks.getProjectIdea.mockResolvedValue(
-        idea({ derived: derived({ state: 'review', pullRequest: PULL_REQUEST }) })
+        makeIdeaDetail({ derived: makeDerived({ state: 'review', pullRequest: PULL_REQUEST }) })
       );
       renderPage();
       const link = await screen.findByRole('link', { name: 'Review PR #482' });
@@ -239,8 +207,8 @@ describe('IdeaPage', () => {
      */
     it('refuses to make a javascript: pull-request URL clickable', async () => {
       mocks.getProjectIdea.mockResolvedValue(
-        idea({
-          derived: derived({
+        makeIdeaDetail({
+          derived: makeDerived({
             state: 'review',
             // eslint-disable-next-line no-script-url -- the stored value under test
             pullRequest: { ...PULL_REQUEST, url: 'javascript:alert(document.cookie)' },
@@ -259,8 +227,8 @@ describe('IdeaPage', () => {
 
     it('asks you to decide once a pull request merged, with both answers', async () => {
       mocks.getProjectIdea.mockResolvedValue(
-        idea({
-          derived: derived({
+        makeIdeaDetail({
+          derived: makeDerived({
             state: 'merged',
             needsYou: 'merged',
             pullRequest: { ...PULL_REQUEST, state: 'merged', mergedAt: '2026-10-23T08:00:00.000Z' },
@@ -273,7 +241,7 @@ describe('IdeaPage', () => {
     });
 
     it('offers follow-up work on a done idea', async () => {
-      mocks.getProjectIdea.mockResolvedValue(idea({ derived: derived({ state: 'done' }) }));
+      mocks.getProjectIdea.mockResolvedValue(makeIdeaDetail({ derived: makeDerived({ state: 'done' }) }));
       renderPage();
       // Also a `start-work` action, so also the sheet rather than a link.
       expect(
@@ -285,7 +253,7 @@ describe('IdeaPage', () => {
 
   it('marks the idea done through the server and refreshes rather than reloading', async () => {
     mocks.getProjectIdea.mockResolvedValue(
-      idea({ derived: derived({ state: 'merged', needsYou: 'merged', pullRequest: PULL_REQUEST }) })
+      makeIdeaDetail({ derived: makeDerived({ state: 'merged', needsYou: 'merged', pullRequest: PULL_REQUEST }) })
     );
     renderPage();
     await userEvent.click(await screen.findByRole('button', { name: 'Mark done' }));
@@ -301,8 +269,8 @@ describe('IdeaPage', () => {
   // of them are one `keep-open` typo apart, and a mislabelled one shipped: "Park" on a
   // not-started idea marked it done, because nothing had ever clicked it.
   it('parks an idea nobody has started, rather than marking it done', async () => {
-    mocks.getProjectIdea.mockResolvedValue(idea({ derived: derived({ state: 'not-started' }) }));
-    mocks.setProjectIdeaStatus.mockResolvedValue(idea({ status: 'cancelled' }));
+    mocks.getProjectIdea.mockResolvedValue(makeIdeaDetail({ derived: makeDerived({ state: 'not-started' }) }));
+    mocks.setProjectIdeaStatus.mockResolvedValue(makeIdeaDetail({ status: 'cancelled' }));
     renderPage();
     await userEvent.click(await screen.findByRole('button', { name: 'Park' }));
 
@@ -316,9 +284,9 @@ describe('IdeaPage', () => {
 
   it('reopens a parked idea instead of only acknowledging a merge', async () => {
     mocks.getProjectIdea.mockResolvedValue(
-      idea({ status: 'cancelled', derived: derived({ state: 'parked' }) })
+      makeIdeaDetail({ status: 'cancelled', derived: makeDerived({ state: 'parked' }) })
     );
-    mocks.setProjectIdeaStatus.mockResolvedValue(idea({ status: 'draft' }));
+    mocks.setProjectIdeaStatus.mockResolvedValue(makeIdeaDetail({ status: 'draft' }));
     renderPage();
     await userEvent.click(await screen.findByRole('button', { name: 'Reopen' }));
 
@@ -330,9 +298,9 @@ describe('IdeaPage', () => {
 
   it('reopens a done idea instead of only acknowledging a merge', async () => {
     mocks.getProjectIdea.mockResolvedValue(
-      idea({ status: 'completed', derived: derived({ state: 'done' }) })
+      makeIdeaDetail({ status: 'completed', derived: makeDerived({ state: 'done' }) })
     );
-    mocks.setProjectIdeaStatus.mockResolvedValue(idea({ status: 'draft' }));
+    mocks.setProjectIdeaStatus.mockResolvedValue(makeIdeaDetail({ status: 'draft' }));
     renderPage();
     await userEvent.click(await screen.findByRole('button', { name: 'Reopen' }));
 
@@ -344,7 +312,7 @@ describe('IdeaPage', () => {
 
   it('keeps the idea open without changing its status', async () => {
     mocks.getProjectIdea.mockResolvedValue(
-      idea({ derived: derived({ state: 'merged', needsYou: 'merged', pullRequest: PULL_REQUEST }) })
+      makeIdeaDetail({ derived: makeDerived({ state: 'merged', needsYou: 'merged', pullRequest: PULL_REQUEST }) })
     );
     renderPage();
     await userEvent.click(await screen.findByRole('button', { name: 'Keep open' }));
@@ -356,7 +324,7 @@ describe('IdeaPage', () => {
   describe('Work', () => {
     it('lists each chat with who worked and what came of it', async () => {
       mocks.getProjectIdea.mockResolvedValue(
-        idea({
+        makeIdeaDetail({
           sessions: [
             {
               sessionId: 'sess-failed',
@@ -537,8 +505,8 @@ describe('IdeaPage', () => {
    */
   it('drops the checks word once the pull request is merged', async () => {
     mocks.getProjectIdea.mockResolvedValue(
-      idea({
-        derived: derived({ state: 'merged' }),
+      makeIdeaDetail({
+        derived: makeDerived({ state: 'merged' }),
         pullRequests: [
           {
             ...PULL_REQUEST,

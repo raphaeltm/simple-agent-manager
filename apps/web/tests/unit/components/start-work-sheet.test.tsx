@@ -7,16 +7,13 @@
  * what broke Start work before was never the sheet, it was the page's way in. Mounting the
  * sheet itself would keep passing through exactly that failure.
  */
-import type {
-  AgentProfile,
-  AgentSkill,
-  IdeaDerivedStatus,
-} from '@simple-agent-manager/shared';
+import type { AgentProfile, AgentSkill } from '@simple-agent-manager/shared';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { emptyIdeaLinks, makeDerived, makeIdeaDetail } from '../../test-utils/idea-fixtures';
 import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
@@ -67,39 +64,7 @@ vi.mock('../../../src/hooks/useToast', () => ({
 }));
 vi.mock('../../../src/hooks/useQueryScope', () => ({ useQueryScope: () => 'user-1' }));
 
-import type { IdeaDetail } from '../../../src/lib/api';
 import { IdeaPage } from '../../../src/pages/ideas/IdeaPage';
-
-function derived(overrides: Partial<IdeaDerivedStatus> = {}): IdeaDerivedStatus {
-  return {
-    state: 'not-started',
-    needsYou: null,
-    source: { origin: 'none', observedAt: null, stale: false },
-    session: null,
-    pullRequest: null,
-    note: null,
-    ...overrides,
-  };
-}
-
-function makeIdea(overrides: Partial<IdeaDetail> = {}): IdeaDetail {
-  return {
-    ideaId: 'idea-1',
-    title: 'Retry failed webhook deliveries',
-    content: 'Use the 3-day window.',
-    summary: 'Use the 3-day window.',
-    status: 'draft',
-    createdAt: '2026-10-24T00:00:00Z',
-    updatedAt: '2026-10-24T00:00:00Z',
-    derived: derived(),
-    counts: { updates: 0, chats: 0, files: 0, pullRequests: 0 },
-    filedByAgent: false,
-    filedBy: null,
-    sessions: [],
-    pullRequests: [],
-    ...overrides,
-  };
-}
 
 function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
   return {
@@ -154,11 +119,6 @@ function makeSkill(overrides: Partial<AgentSkill> = {}): AgentSkill {
   } as AgentSkill;
 }
 
-function emptyLinks() {
-  const empty = { items: [], total: 0, truncated: false, totalIsLowerBound: false };
-  return { sessions: empty, files: empty, pullRequests: empty, relatedIdeas: empty };
-}
-
 function renderIdeaDetail() {
   return renderWithQuery(
     <MemoryRouter initialEntries={['/projects/proj-test/ideas/idea-1']}>
@@ -181,7 +141,7 @@ async function openSheet() {
 describe('Start work sheet', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getProjectIdea.mockResolvedValue(makeIdea());
+    mocks.getProjectIdea.mockResolvedValue(makeIdeaDetail());
     mocks.listIdeaUpdates.mockResolvedValue({ updates: [], nextCursor: null });
     mocks.listAgentProfiles.mockResolvedValue([makeProfile(), CHAT_PROFILE]);
     mocks.getProfilePickerState.mockResolvedValue({
@@ -191,7 +151,7 @@ describe('Start work sheet', () => {
     });
     mocks.updateProfilePicker.mockResolvedValue(undefined);
     mocks.listSkills.mockResolvedValue([]);
-    mocks.getIdeaLinks.mockResolvedValue(emptyLinks());
+    mocks.getIdeaLinks.mockResolvedValue(emptyIdeaLinks());
     mocks.submitTask.mockResolvedValue({
       taskId: 'task-new',
       sessionId: 'session-new',
@@ -264,7 +224,7 @@ describe('Start work sheet', () => {
 
   it("shows the idea's linked work as counts", async () => {
     mocks.getIdeaLinks.mockResolvedValue({
-      ...emptyLinks(),
+      ...emptyIdeaLinks(),
       sessions: { items: [], total: 2, truncated: false, totalIsLowerBound: false },
       files: { items: [], total: 1, truncated: false, totalIsLowerBound: false },
       pullRequests: { items: [], total: 3, truncated: false, totalIsLowerBound: true },
@@ -303,7 +263,7 @@ describe('Start work sheet', () => {
 
   it.each([['done'], ['parked']])('hides Start work for a %s idea', async (status) => {
     mocks.getProjectIdea.mockResolvedValue(
-      makeIdea({ derived: derived({ state: status as never }) })
+      makeIdeaDetail({ derived: makeDerived({ state: status as never }) })
     );
     renderIdeaDetail();
     await screen.findByRole('heading', { name: /Retry failed webhook deliveries/i });
