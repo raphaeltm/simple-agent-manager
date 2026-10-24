@@ -28,11 +28,42 @@ export function ideaTaskPredicateSql(alias = 'tasks'): string {
   return `${alias}.status = 'draft'`;
 }
 
+/** The status an open idea holds. Start work is only offered for an open idea. */
+const OPEN_IDEA_STATUS = 'draft';
+
 /** Statuses an idea can hold once it has left draft, and what to call them to a person. */
 const CLOSED_IDEA_LABEL: Record<string, string> = {
   completed: 'done',
   cancelled: 'parked',
 };
+
+/** What the admission check decided, so the matrix can be tested without a database. */
+export type WorkStartAdmission =
+  { outcome: 'open' } | { outcome: 'closed'; label: string } | { outcome: 'not-an-open-idea' };
+
+/**
+ * Two independent questions, deliberately kept independent: is this row an idea, and is that
+ * idea open?
+ *
+ * Today they happen to be the same SQL test, because `ideaTaskPredicateSql` is
+ * `status = 'draft'`. T8's migration widens it to `(status = 'draft' OR is_idea = 1)` so an
+ * idea stays an idea after it is marked done. If openness were inferred from the predicate —
+ * `if (!isIdea) …` — that widening would silently make a DONE idea startable, with nothing in
+ * T8's diff to show it. So openness is tested on `status` directly and the predicate is only
+ * ever asked whether the row is an idea at all.
+ *
+ * One case is genuinely ambiguous until T8 lands: a completed or cancelled row that is NOT an
+ * idea is indistinguishable from a completed or cancelled idea, because the only discriminator
+ * today IS the status. Those rows get the 409 rather than the 404 they will get afterwards.
+ * It is the safe direction — the caller is already authorized for this project, and the start
+ * is refused either way.
+ */
+export function classifyWorkStartIdea(status: string, isIdea: boolean): WorkStartAdmission {
+  if (isIdea && status === OPEN_IDEA_STATUS) return { outcome: 'open' };
+  const label = CLOSED_IDEA_LABEL[status];
+  if (label) return { outcome: 'closed', label };
+  return { outcome: 'not-an-open-idea' };
+}
 
 export interface WorkStartIdea {
   ideaId: string;
@@ -43,10 +74,10 @@ export interface WorkStartIdea {
  * Resolves an open idea in this project, or throws.
  *
  * The project scope lives in the SQL predicate, not only in a caller's check, so a
- * cross-project id cannot be read back at all (rule 11). A row that exists in the project
- * but is not an open idea is distinguished from one that does not exist: a done or parked
- * idea gets a 409 the person can act on, while anything else — an ordinary task, another
- * project's row, a typo — gets the same non-disclosing 404.
+ * cross-project id cannot be read back at all (rule 11). Another project's id, a typo and an
+ * ordinary open task all get the same non-disclosing 404. A done or parked idea gets a 409
+ * the person can act on instead — see `classifyWorkStartIdea` for the one row shape that is
+ * ambiguous until T8's `tasks.is_idea` column exists.
  */
 export async function requireOpenIdeaForWorkStart(
   env: Env,
@@ -62,12 +93,10 @@ export async function requireOpenIdeaForWorkStart(
     .bind(id, projectId)
     .first<{ id: string; title: string; status: string; is_idea: number }>();
   if (!row) throw errors.notFound('Idea');
-  if (!row.is_idea) {
-    const closed = CLOSED_IDEA_LABEL[row.status];
-    if (closed)
-      throw errors.conflict(`That idea is ${closed}. Reopen it before starting work on it.`);
-    throw errors.notFound('Idea');
-  }
+  const admission = classifyWorkStartIdea(row.status, row.is_idea === 1);
+  if (admission.outcome === 'closed')
+    throw errors.conflict(`That idea is ${admission.label}. Reopen it before starting work on it.`);
+  if (admission.outcome !== 'open') throw errors.notFound('Idea');
   return { ideaId: row.id, title: row.title };
 }
 

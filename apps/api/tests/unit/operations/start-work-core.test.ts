@@ -14,6 +14,7 @@ vi.mock('../../../src/operations/link-core', () => ({ recordLink: recordLinkMock
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import {
+  classifyWorkStartIdea,
   ideaTaskPredicateSql,
   recordWorkStartIdeaLink,
   requireOpenIdeaForWorkStart,
@@ -114,6 +115,40 @@ describe('requireOpenIdeaForWorkStart', () => {
     } finally {
       db.close();
     }
+  });
+});
+
+describe('classifyWorkStartIdea', () => {
+  // The whole matrix, including the shapes that only exist AFTER T8 widens
+  // `ideaTaskPredicateSql` to `(status = 'draft' OR is_idea = 1)`. The row that matters is
+  // ('completed', true): a done idea that still reads as an idea. If openness were inferred
+  // from the predicate rather than read from the status, that row would be admitted and a
+  // done idea would become startable — and nothing in T8's diff would say so.
+  const cases: Array<[string, boolean, string]> = [
+    ['draft', true, 'open'],
+    ['draft', false, 'not-an-open-idea'],
+    ['completed', true, 'closed'],
+    ['cancelled', true, 'closed'],
+    ['completed', false, 'closed'],
+    ['cancelled', false, 'closed'],
+    ['in_progress', true, 'not-an-open-idea'],
+    ['in_progress', false, 'not-an-open-idea'],
+    ['ready', false, 'not-an-open-idea'],
+    ['failed', false, 'not-an-open-idea'],
+  ];
+
+  for (const [status, isIdea, outcome] of cases) {
+    it(`treats status=${status} is_idea=${isIdea} as ${outcome}`, () => {
+      expect(classifyWorkStartIdea(status, isIdea).outcome).toBe(outcome);
+    });
+  }
+
+  it('names the closed state the way a person would say it', () => {
+    expect(classifyWorkStartIdea('completed', true)).toEqual({ outcome: 'closed', label: 'done' });
+    expect(classifyWorkStartIdea('cancelled', true)).toEqual({
+      outcome: 'closed',
+      label: 'parked',
+    });
   });
 });
 
