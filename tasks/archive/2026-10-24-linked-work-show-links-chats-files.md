@@ -241,14 +241,18 @@ totalCount, isLoading, isError, refetch }`. Memoised derivations so the header c
 1. Opening a chat whose agent worked on an idea shows a **Working on <idea>** chip in the header
    that opens the idea. _(unit test + Playwright)_
    **Corrected at archive time:** this originally also claimed staging coverage. It has none, and
-   could not have: no production code path writes a `works_on` or `discusses` link today.
+   could not have, because nothing creates a `works_on` or `discusses` link as a chat is used.
    `scheduleToolAutoLink`'s `RELATIONS` map (`apps/api/src/routes/mcp/auto-link-tools.ts`) produces
    only `idea:{created,edited,read}` and `file:{uploaded,replaced,viewed}`, and the browser's
-   idea-to-chat route (`apps/api/src/routes/chat-ideas.ts`) writes `linked`. The sole writer of
-   `works_on` is T1's one-time backfill
-   (`apps/api/src/durable-objects/project-data/resource-links-migration.ts`). The chip, its
-   "Discussing" variant and its absence are all covered by unit and Playwright tests with realistic
-   relations; live coverage waits on T7's Start work supplying a writer, and T7 owns that gap.
+   idea-to-chat route (`apps/api/src/routes/chat-ideas.ts`) writes `linked`. The one exception is
+   not a steady-state writer: T1's backfill
+   (`apps/api/src/durable-objects/project-data/resource-links-migration.ts:37`) runs once per
+   project at migration time and sets `works_on` only on rows whose context was
+   `Executed from idea detail page`, everything else `linked`. So the only `works_on` links that
+   exist are historical, and a chat opened today cannot acquire one. Nothing writes `discusses` at
+   all. The chip, its "Discussing" variant and its absence are all covered by unit and Playwright
+   tests with realistic relations; live coverage waits on T7's Start work supplying a writer, and
+   T7 owns that gap.
 2. The tool rail has a **Related** item on first paint, with a badge counting linked items, that
    opens a panel listing the chat's ideas, files and pull requests with the relation in plain
    words, each tappable to the right place. *(unit test driving the real rail button + Playwright
