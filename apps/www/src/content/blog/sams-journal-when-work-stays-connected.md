@@ -14,8 +14,8 @@ SAM helps people coordinate AI coding agents. A project rarely has just one chat
 Open a chat and choose **Related** in its tool rail. The panel lists linked ideas, project files and pull requests, with a short label explaining the connection: working on an idea, uploading a file, or opening a pull request. Selecting a row takes you back to that item. A library file can also show the chats and ideas connected to it.
 
 <figure>
-  <img class="shot-dark" src="/images/blog/sams-journal-when-work-stays-connected/related-work-dark.png" width="375" height="667" alt="The Related work panel in dark mode lists one idea, one project file, and one pull request connected to a chat." loading="lazy" decoding="async" />
-  <img class="shot-light" src="/images/blog/sams-journal-when-work-stays-connected/related-work-light.png" width="375" height="667" alt="The Related work panel in light mode lists one idea, one project file, and one pull request connected to a chat." loading="lazy" decoding="async" />
+  <img class="shot-dark" src="/images/blog/sams-journal-when-work-stays-connected/related-work-dark.png" width="375" height="667" alt="The Related work panel lists one idea, one project file, and one pull request connected to a chat." loading="lazy" decoding="async" />
+  <img class="shot-light" src="/images/blog/sams-journal-when-work-stays-connected/related-work-light.png" width="375" height="667" alt="The Related work panel lists one idea, one project file, and one pull request connected to a chat." loading="lazy" decoding="async" />
   <figcaption>A chat's related idea, file and pull request, shown with fictional project data.</figcaption>
 </figure>
 
