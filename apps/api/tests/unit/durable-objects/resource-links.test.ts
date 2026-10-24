@@ -170,6 +170,39 @@ describe('resource links real SQLite', () => {
       db.close();
     }
   });
+  it('trims a lowered weak target cap on the next new insert when excess fits the batch', () => {
+    const { db, sql, migration } = setup();
+    try {
+      migration.run(sql);
+      const insert = db.prepare(`INSERT INTO resource_links
+        (id,source_kind,source_id,target_kind,target_id,relation,origin,first_at,last_at,hit_count)
+        VALUES (?,'session',?,'idea','idea1','read','auto',1,1,1)`);
+      for (let index = 0; index < 3; index++) insert.run(`existing-${index}`, `reader-${index}`);
+      const input = {
+        sourceKind: 'session' as const,
+        sourceId: 's1',
+        targetKind: 'idea' as const,
+        targetId: 'idea1',
+        relation: 'read' as const,
+        origin: 'auto' as const,
+        context: null,
+      };
+      recordLink(sql, input, { ...limits, weakPerTarget: 2 }, 0, 2);
+      expect(
+        db
+          .prepare(
+            `SELECT COUNT(*) AS count FROM resource_links
+        WHERE target_kind='idea' AND target_id='idea1'`
+          )
+          .get()
+      ).toEqual({ count: 2 });
+      expect(db.prepare('SELECT link_count FROM resource_link_meta WHERE id=1').get()).toEqual({
+        link_count: 2,
+      });
+    } finally {
+      db.close();
+    }
+  });
   it('retains older strong work and its assets ahead of newer weak reads', () => {
     const { db, sql, migration } = setup();
     try {
