@@ -9,7 +9,11 @@ import type { IdeaContext } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { FileText, History, Lightbulb } from 'lucide-react';
 
-import { describeRelations, LinkedWorkRow } from '../../components/linked-work';
+import {
+  describeRelations,
+  formatCappedTotal,
+  LinkedWorkRow,
+} from '../../components/linked-work';
 import { RenderedMarkdown } from '../../components/MarkdownRenderer';
 import type { IdeaDetail } from '../../lib/api';
 import { projectIdeaPath, projectLibraryFilePath } from '../../lib/project-routes';
@@ -182,10 +186,17 @@ export function IdeaRelated({
   const files = links.files.items;
   const ideas = links.relatedIdeas.items;
   const rendered = files.length + ideas.length;
-  const count =
-    links.files.totalIsLowerBound || links.relatedIdeas.totalIsLowerBound
-      ? `${links.files.total + links.relatedIdeas.total}+`
-      : String(links.files.total + links.relatedIdeas.total);
+  /*
+   * Through `formatCappedTotal`, not a restatement of it. Related merges two capped lists into
+   * one number, which that helper does not do directly — but the "+" convention is program
+   * decision 9's and belongs in one place, so merge the totals and let it render them. The
+   * first cut inlined the same expression here, which left this the one copy that would not
+   * follow if the convention ever changed (architecture-reviewer, 2026-10-24).
+   */
+  const count = formatCappedTotal({
+    total: links.files.total + links.relatedIdeas.total,
+    totalIsLowerBound: links.files.totalIsLowerBound || links.relatedIdeas.totalIsLowerBound,
+  });
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <SectionTitle title="Related" count={count} hint="Linked automatically as agents work" />

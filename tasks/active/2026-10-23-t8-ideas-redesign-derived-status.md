@@ -125,12 +125,21 @@ not a proxy: every rule reads the condition itself and carries its source), `76-
 
 ### PR2 — the idea page
 
-- [x] `GET /api/projects/:projectId/ideas/:ideaId` returns idea + derived status + Work + Related
-      (T1 `IdeaContext`, T2 PR state with `refresh: 'single'`).
+- [x] `GET /api/projects/:projectId/ideas/:ideaId` returns idea + derived status + Work
+      (T2 PR state with `refresh: 'single'`). **Related comes from T1's separate
+      `GET .../ideas/:ideaId/links`**, which the page calls alongside it — the original wording
+      said one endpoint served both, which was never true (task-completion-validator, LOW).
 - [x] `apps/web/src/pages/ideas/IdeaPage.tsx` (+ parts): status card with the one status-dependent
       primary action, "The idea" (markdown, the current plan), Work, Updates (T3 notes + composer +
-      quote + derived lifecycle entries), Related. Desktop two columns; the conversations drawer and
-      mobile FAB go away.
+      quote), Related. Desktop two columns; the conversations drawer and mobile FAB go away.
+      **Scope dropped, and this item was checked off anyway:** the original text ended "...+ quote
+      + derived lifecycle entries". There are no lifecycle entries. `IdeaUpdateNote.authorKind` is
+      `'user' | 'agent'` with no system kind, `idea-activity.tsx` synthesises nothing, and no
+      status mutation posts one — so Updates shows authored notes only, and the timeline never
+      says "Marked done on ...". Tracked in
+      `tasks/backlog/2026-10-24-idea-updates-lifecycle-entries.md` rather than left implied
+      (rule 09: a finding must become a checklist item or an explicit deferral; I did neither
+      until the validator caught it).
 - [x] Keep Start work (T7) wired; whichever of T7/T8 merges second does the wiring. **T8 merged
       second, and the wiring was worse than missing — see the three findings below.**
 - [x] Tests: status-dependent primary action per state, Updates composer through the real POST,
@@ -191,6 +200,42 @@ four items, and `cappedList` in `lib/api/links.ts` discards a total smaller than
 in favour of the row count — the one number that is certainly true. So the assertion would have
 been measuring the normaliser. The fixture's totals are now all >= `items.length`, and the
 comment says why, because the next person to write one will reach for a small number too.
+
+### What the three post-merge reviews found (2026-10-24)
+
+The coordinator required `task-completion-validator`, `architecture-reviewer` and
+`performance-reviewer` before merge (seq 275/279). That message was published at 16:55:42Z and
+SAM delivered it to my session at 18:07:06Z, after I merged at ~17:46Z — so I ran them against
+the merged commit instead. The sequence explains itself; it does not make the condition met at
+the time it was meant to be.
+
+| Reviewer                   | Verdict                                                      |
+| -------------------------- | ------------------------------------------------------------ |
+| `task-completion-validator` | No CRITICAL/HIGH. 2 MEDIUM, 2 LOW                            |
+| `architecture-reviewer`     | Sound. 1 MEDIUM, no CRITICAL/HIGH                            |
+| `performance-reviewer`      | Within budget. 2 LOW (both pre-existing), 1 INFO             |
+
+The validator did something I had only asserted: it **reverted each fix itself** and counted the
+reddened tests. Findings 6, 7, 8 and 10's discriminating claims (13 / 10 / 3-of-21 / 1-plus-
+control) are exact.
+
+**The finding that matters most is mine, not the code's.** The Updates checklist item said
+"derived lifecycle entries" and was checked off; they do not exist. See the checklist above and
+`tasks/backlog/2026-10-24-idea-updates-lifecycle-entries.md`. Checking an item off while part of
+its stated scope silently disappears is exactly the pattern rule 09's validator exists to catch,
+and running that validator before merge — as the coordinator asked — is what would have caught
+it before rather than after.
+
+Also fixed in the follow-up: `idea-sections.tsx` restated `formatCappedTotal`'s body instead of
+calling it, leaving the one copy of program decision 9's "+" convention that would not follow if
+the convention changed (architecture-reviewer, MEDIUM).
+
+Deferred with reasons rather than silently: the performance LOWs are both pre-existing and
+outside this diff (a data-dependent worst case of 9 vs the ≤8 read budget on `collectEvidence`,
+and a duplicate idea read between `requireOpenIdeaForWorkStart` and `recordLink`'s
+`validateEntity`); and the validator's LOW that the new staging idea-page coverage is
+desktop-only. The phone case is covered locally at 375x667 against mocks; extending it on
+staging needs a staging claim, and I had already released it to the agents queued behind me.
 
 ### Finding 11 — I guessed twice at a measurement that was one query away
 
