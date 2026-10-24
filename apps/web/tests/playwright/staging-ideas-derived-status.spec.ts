@@ -57,9 +57,23 @@ interface Created {
   sessionId: string;
   /** The conversation task `POST /sessions` creates alongside the chat. */
   sessionTaskId: string;
+  /** An ordinary `POST /tasks` draft: is_idea = 0, the discriminator's negative case. */
+  ordinaryTaskId: string;
+  /** A second idea, used to prove Start work still accepts a real one. */
+  startWorkIdeaId: string;
+  startWorkSessionId: string;
+  startWorkTaskId: string;
 }
 
-const created: Created = { ideaId: '', sessionId: '', sessionTaskId: '' };
+const created: Created = {
+  ideaId: '',
+  sessionId: '',
+  sessionTaskId: '',
+  ordinaryTaskId: '',
+  startWorkIdeaId: '',
+  startWorkSessionId: '',
+  startWorkTaskId: '',
+};
 
 async function api(page: Page, method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown) {
   const res = await page.request.fetch(`${STAGING_API}${path}`, {
@@ -310,6 +324,60 @@ test.describe('Ideas list on staging — laptop', () => {
     expect(await res.text()).toContain('Invalid status transition');
   });
 
+  /*
+   * T7's Start work, against the narrowed idea definition this PR ships (coordinator, seq 236).
+   *
+   * `requireOpenIdeaForWorkStart` selects `ideaTaskPredicateSql('tasks')`, which this PR
+   * changed from `status = 'draft'` to `is_idea = 1`. If that narrowing were wrong, Start work
+   * would stop working for real ideas — so the acceptance below is the half that matters most,
+   * and it is checked on deployed code rather than in a fixture.
+   *
+   * The gate runs BEFORE any effects (`routes/chat-start.ts`), so both refusals cost nothing:
+   * no session, no container, no branch. Only the acceptance provisions, and it provisions an
+   * Instant container (the route 409s a VM runtime outright), which this test stops again.
+   */
+  test('Start work accepts a POST /ideas idea and refuses an ordinary draft', async ({ page }) => {
+    // 1. An ordinary task, created through the route that deliberately writes is_idea = 0.
+    const ordinary = await api(page, 'POST', `/api/projects/${PROJECT_ID}/tasks`, {
+      title: `T8 staging ordinary draft ${RUN}`,
+      description: 'Not an idea. Created to prove the discriminator on deployed code.',
+    });
+    expect(ordinary.status(), await ordinary.text()).toBe(201);
+    created.ordinaryTaskId = ((await ordinary.json()) as { id: string }).id;
+
+    // Draft, same project — under the OLD `status = 'draft'` rule this was indistinguishable
+    // from an idea and Start work would have accepted it. Now it is a non-disclosing 404.
+    const refused = await api(page, 'POST', `/api/projects/${PROJECT_ID}/sessions/start`, {
+      message: 'Start work on this.',
+      sourceIdeaId: created.ordinaryTaskId,
+    });
+    expect(refused.status(), await refused.text()).toBe(404);
+
+    // 2. The owner control: a real idea is accepted. Without this, the 404 above would also
+    //    pass if Start work were broken for everything.
+    const idea = await api(page, 'POST', `/api/projects/${PROJECT_ID}/ideas`, {
+      title: `T8 staging start-work ${RUN}`,
+      content: 'Exercises Start work against the is_idea definition.',
+    });
+    expect(idea.status(), await idea.text()).toBe(201);
+    created.startWorkIdeaId = ((await idea.json()) as { ideaId: string }).ideaId;
+
+    const started = await api(page, 'POST', `/api/projects/${PROJECT_ID}/sessions/start`, {
+      message: 'Say hello and stop. This is a staging verification run.',
+      sourceIdeaId: created.startWorkIdeaId,
+    });
+    // 409 means the project default resolves to a VM profile, which this route refuses by
+    // design — that is a profile fact, not a failure of the idea gate, and the gate has
+    // already run by then. Anything else must be a clean start.
+    expect([201, 202, 409]).toContain(started.status());
+    if (started.status() !== 409) {
+      const startedBody = (await started.json()) as { sessionId?: string; taskId?: string };
+      created.startWorkSessionId = startedBody.sessionId ?? '';
+      created.startWorkTaskId = startedBody.taskId ?? '';
+      expect(created.startWorkTaskId).not.toBe('');
+    }
+  });
+
   test('cleans up everything it created, and proves it', async ({ page }) => {
     if (created.sessionId) {
       await api(
@@ -327,6 +395,11 @@ test.describe('Ideas list on staging — laptop', () => {
         `/api/projects/${PROJECT_ID}/tasks/${created.sessionTaskId}`
       );
       expect([200, 204]).toContain(deletedChat.status());
+    }
+    for (const id of [created.startWorkTaskId, created.startWorkIdeaId, created.ordinaryTaskId]) {
+      if (!id) continue;
+      const gone = await api(page, 'DELETE', `/api/projects/${PROJECT_ID}/tasks/${id}`);
+      expect([200, 204, 404]).toContain(gone.status());
     }
     if (created.ideaId) {
       const deleted = await api(
