@@ -433,6 +433,31 @@ test.describe('Ideas list — phone', () => {
     await screenshot(page, 'ideas-new-idea-dialog-phone');
   });
 
+  /*
+   * The phone half of the empty-main-column fix. It matters more here than on the laptop:
+   * the done ideas live in a COLLAPSED fold, so an empty main column means the screen above
+   * the fold is blank with no indication that the thing searched for is one tap away.
+   */
+  test('says where the matches are when the main column has none', async ({ page }) => {
+    await setupIdeasMocks(page, {
+      items: [
+        makeIdea({ ideaId: 'done-1', title: 'Retry webhook deliveries', state: 'done' }),
+        makeIdea({ ideaId: 'open-1', title: 'Something else entirely', state: 'not-started' }),
+      ],
+    });
+    await openIdeas(page);
+
+    await page.getByPlaceholder('Search ideas').fill('Retry webhook');
+
+    await expect(page.getByText(/Nothing open matches/)).toBeVisible();
+    await expect(page.getByText(/under Done recently/)).toBeVisible();
+    // Liveness (rule 62): the match really is reachable, in the fold, rather than gone.
+    await expect(page.getByTestId('ideas-done-recently')).toContainText('Retry webhook deliveries');
+
+    await assertLayoutIsSound(page);
+    await screenshot(page, 'ideas-empty-main-column-phone');
+  });
+
   test('a failed read offers a retry rather than an empty page', async ({ page }) => {
     await setupIdeasMocks(page, { error: true });
     await page.goto(IDEAS_URL);
