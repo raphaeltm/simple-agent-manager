@@ -30,6 +30,10 @@ export type AdminSettingName =
   | `connector.${ConnectorSettingKey}`
   | AgentEmailSettingName
   | 'chat.profileUsageWindowDays'
+  | 'collaboration.ideaUpdateBodyMaxLength'
+  | 'collaboration.ideaUpdateQuoteMaxLength'
+  | 'collaboration.ideaUpdatePageSize'
+  | 'collaboration.ideaAgentNoteMinIntervalSeconds'
   | 'collaboration.commentMentionsMax'
   | 'collaboration.commentNotificationWindowSeconds'
   | 'collaboration.sessionAccessMaxGrants'
@@ -84,6 +88,12 @@ export const DEFAULT_PROFILE_USAGE_WINDOW_DAYS = 30;
 /** Collaboration defaults (idea 01M59MYE4GY91BWTE8TZF1ZB5D); admins can change them at runtime. */
 export const DEFAULT_SESSION_ACCESS_MAX_GRANTS = 10;
 export const DEFAULT_COMMENT_MENTIONS_MAX = 10;
+export const IDEA_UPDATE_DEFAULTS = Object.freeze({
+  bodyMaxLength: 8_000,
+  quoteMaxLength: 1_000,
+  pageSize: 30,
+  agentMinIntervalSeconds: 60,
+});
 // A fresh watch performs up to 13 D1 reads and 3 cold ProjectData RPCs.
 // Keep one refresh at most 400 caller I/O operations, plus fixed alarm setup.
 export const MAX_SAM_OPERATOR_EVENT_PAGE_SIZE = 25;
@@ -337,6 +347,34 @@ const definitions: AdminSettingDefinition[] = [
     'Collaboration',
     'Maximum people one comment can @mention.',
     { min: 1, max: 50 }
+  ),
+  integerDefinition(
+    'collaboration.ideaUpdateBodyMaxLength',
+    IDEA_UPDATE_DEFAULTS.bodyMaxLength,
+    'Collaboration',
+    'Maximum characters in an idea update.',
+    { min: 100, max: 16_000 }
+  ),
+  integerDefinition(
+    'collaboration.ideaUpdateQuoteMaxLength',
+    IDEA_UPDATE_DEFAULTS.quoteMaxLength,
+    'Collaboration',
+    'Maximum characters in a quoted excerpt on an idea update.',
+    { min: 0, max: 4_000 }
+  ),
+  integerDefinition(
+    'collaboration.ideaUpdatePageSize',
+    IDEA_UPDATE_DEFAULTS.pageSize,
+    'Collaboration',
+    'Number of idea updates returned per page.',
+    { min: 1, max: 100 }
+  ),
+  integerDefinition(
+    'collaboration.ideaAgentNoteMinIntervalSeconds',
+    IDEA_UPDATE_DEFAULTS.agentMinIntervalSeconds,
+    'Collaboration',
+    'Minimum seconds between notes from one agent session on one idea.',
+    { min: 1, max: 86_400 }
   ),
   ...AGENT_EMAIL_SETTINGS.map((setting) =>
     integerDefinition(

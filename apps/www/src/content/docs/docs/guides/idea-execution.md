@@ -17,6 +17,10 @@ Type your description in the project chat input and submit. Submitting a message
 
 The **Ideas** board holds work you've drafted but not started yet. Once an idea is executing or done, you follow it in the chat session list. You can also start a saved idea from its detail page with the **Execute** button.
 
+### Keep the plan current with Updates
+
+An idea's text is its current plan. Post progress, findings, and decisions as updates through the API or agent tools so earlier notes do not obscure the plan. Agents can post an update with `update_idea` using `note` and an optional `quote`, then read updates with `list_idea_updates`. Post a note separately from editing the plan; a note by itself leaves the idea text unchanged. Updates carry the author's name and, for agent notes, the source chat. The author or a project owner or admin can remove an update.
+
 ### Execution Options
 
 Before you send, you can optionally choose:
@@ -121,17 +125,18 @@ Running agents can spawn follow-up work within the same project using MCP tools.
 
 An agent running inside a workspace has access to MCP tools that provide project awareness:
 
-| Tool                  | Purpose                                                                                                                                                 |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dispatch_task`       | Spawn work using the selected profile runtime or an explicit runtime override                                                                           |
-| `create_idea`         | Create a new idea                                                                                                                                       |
-| `update_idea`         | Update an idea's title, content, priority, or status                                                                                                    |
-| `list_ideas`          | View existing ideas                                                                                                                                     |
-| `get_idea`            | Read idea details                                                                                                                                       |
-| `search_ideas`        | Search ideas by keyword                                                                                                                                 |
-| `update_task_status`  | Report progress                                                                                                                                         |
-| `complete_task`       | Mark the current work as done; pass the pull request URL as `evidence.prUrl` so it is saved on the task, alongside any structured verification evidence |
-| `request_human_input` | Ask the user for a decision                                                                                                                             |
+| Tool                  | Purpose                                                                                                                                                                                                                    |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dispatch_task`       | Spawn work using the selected profile runtime or an explicit runtime override                                                                                                                                              |
+| `create_idea`         | Create a new idea                                                                                                                                                                                                          |
+| `update_idea`         | Change the current plan, title, priority, or status; use `note` for progress, findings, and decisions without changing the plan. An optional `quote` points to a passage. Existing `content` append behavior is unchanged. |
+| `list_idea_updates`   | Read the idea's updates newest first, using `nextCursor` for older notes.                                                                                                                                                  |
+| `list_ideas`          | View existing ideas                                                                                                                                                                                                        |
+| `get_idea`            | Read idea details                                                                                                                                                                                                          |
+| `search_ideas`        | Search ideas by keyword                                                                                                                                                                                                    |
+| `update_task_status`  | Report progress                                                                                                                                                                                                            |
+| `complete_task`       | Mark the current work as done; pass the pull request URL as `evidence.prUrl` so it is saved on the task, alongside any structured verification evidence                                                                    |
+| `request_human_input` | Ask the user for a decision                                                                                                                                                                                                |
 
 `dispatch_task` accepts an optional `runtime` value of `vm` or `cf-container`. Container dispatch starts an [Instant](/docs/guides/instant-sessions/) task without VM sizing or cloud credentials — but only when asked: dispatch defaults to a VM unless `cf-container` is set explicitly or comes from the dispatching profile. Explicit VM-only options such as `vmSize`, `provider`, `vmLocation`, `workspaceProfile`, and `devcontainerConfigName` cannot be combined with a container runtime; choose `runtime: "vm"` or remove those options.
 

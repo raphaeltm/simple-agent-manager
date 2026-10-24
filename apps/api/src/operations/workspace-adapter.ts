@@ -9,6 +9,7 @@ import {
   samIdeaGet,
   samIdeasSearch,
   samIdeaUpdate,
+  samIdeaUpdatesList,
   samKnowledgeSearch,
   samProfilesList,
   samTaskGet,
@@ -28,6 +29,7 @@ const workspaceOperations: Record<string, (typeof platformOperations)[number]> =
   get_idea: samIdeaGet,
   create_idea: samIdeaCreate,
   update_idea: samIdeaUpdate,
+  list_idea_updates: samIdeaUpdatesList,
   search_knowledge: samKnowledgeSearch,
   list_agent_profiles: samProfilesList,
 };
@@ -53,7 +55,12 @@ export async function runWorkspaceOperation(
       userId: token.userId,
       via: 'workspace-agent',
       scopes: new Set(['sam.read', 'sam.write']),
-      workspace: { workspaceId: token.workspaceId, taskId: token.taskId, projectId },
+      workspace: {
+        workspaceId: token.workspaceId,
+        taskId: token.taskId,
+        projectId,
+        agentSessionId: token.agentSessionId,
+      },
     },
   };
   const operation = workspaceOperations[name];

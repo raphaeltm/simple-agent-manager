@@ -207,6 +207,15 @@ export async function handleUpdateIdea(
   return runWorkspaceOperation('update_idea', requestId, params, tokenData, env);
 }
 
+export async function handleListIdeaUpdates(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env
+): Promise<JsonRpcResponse> {
+  return runWorkspaceOperation('list_idea_updates', requestId, params, tokenData, env);
+}
+
 export async function handleGetIdea(
   requestId: string | number | null,
   params: Record<string, unknown>,

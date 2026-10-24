@@ -16,7 +16,7 @@ export interface Actor {
   clientId?: string;
   clientName?: string;
   scopes: ReadonlySet<OperationScope>;
-  workspace?: { workspaceId: string; taskId?: string; projectId: string };
+  workspace?: { workspaceId: string; taskId?: string; projectId: string; agentSessionId?: string };
 }
 
 export interface OperationContext {

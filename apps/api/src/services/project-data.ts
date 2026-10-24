@@ -2233,6 +2233,40 @@ export async function markAgentCompleted(
 // Session–Idea Linking (many-to-many)
 // =========================================================================
 
+export async function addIdeaUpdate(
+  env: Env,
+  projectId: string,
+  input: import('@simple-agent-manager/shared').IdeaUpdateNote,
+  minAgentIntervalMs: number
+) {
+  const stub = await getStub(env, projectId);
+  return stub.addIdeaUpdate(input, minAgentIntervalMs);
+}
+
+export async function listIdeaUpdates(
+  env: Env,
+  projectId: string,
+  ideaId: string,
+  cursor: { createdAt: string; id: string } | null,
+  limit: number
+) {
+  const stub = await getStub(env, projectId);
+  return stub.listIdeaUpdates(ideaId, cursor, limit);
+}
+
+export async function deleteIdeaUpdate(
+  env: Env,
+  projectId: string,
+  ideaId: string,
+  updateId: string,
+  actorUserId: string,
+  canModerate: boolean,
+  now: string
+) {
+  const stub = await getStub(env, projectId);
+  return stub.deleteIdeaUpdate(ideaId, updateId, actorUserId, canModerate, now);
+}
+
 export async function linkSessionIdea(
   env: Env,
   projectId: string,

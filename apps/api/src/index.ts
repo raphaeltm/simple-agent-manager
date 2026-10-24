@@ -111,6 +111,7 @@ import { gcpRoutes } from './routes/gcp';
 import { githubRoutes } from './routes/github';
 import { gitlabRoutes } from './routes/gitlab';
 import { googleAuthRoutes } from './routes/google-auth';
+import { ideaUpdateRoutes } from './routes/idea-updates';
 import {
   handleInteractivePreviewRequest,
   isInteractivePreviewRequest,
@@ -856,6 +857,7 @@ app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRout
 app.route('/api/projects/:projectId/cli', cliProjectMetadataRoutes);
 app.route('/api/projects/:projectId/sessions', chatStartRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
+app.route('/api/projects/:projectId/ideas', ideaUpdateRoutes);
 app.route('/api/projects/:projectId/comments', projectCommentRoutes);
 app.route('/api/projects/:projectId/event-subscriptions', projectEventSubscriptionRoutes);
 app.route('/api/projects/:projectId/schedules', projectScheduleRoutes);

@@ -1,3 +1,5 @@
+import type { IdeaUpdateNote } from '@simple-agent-manager/shared';
+
 import { log } from '../lib/logger';
 import { sanitizeUserInput } from '../lib/sanitize-user-input';
 import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../lib/search-query-limits';
@@ -5,6 +7,8 @@ import { ulid } from '../lib/ulid';
 import { operationLink } from './connector-read-core';
 import { formatOperationCursor, readOperationCursor } from './cursors';
 import { OperationError } from './errors';
+import { addIdeaUpdate, validateIdeaUpdateNote } from './idea-update-core';
+export { IDEA_TASK_PREDICATE_SQL } from './idea-identity';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 
@@ -31,6 +35,15 @@ export type IdeaUpdateInput = {
   append?: boolean;
   priority?: number;
   status?: string;
+  note?: string;
+  quote?: string;
+};
+export type IdeaUpdateResult = {
+  updated: true;
+  ideaId: string;
+  updatedFields: string[];
+  note?: IdeaUpdateNote;
+  link?: string;
 };
 
 function normalizedIdeaQuery(query: unknown, ctx: OperationContext) {
@@ -280,7 +293,10 @@ export function validateIdeaStatusTransition(
   return null;
 }
 
-export async function prepareIdeaUpdate(ctx: OperationContext, input: IdeaUpdateInput) {
+export async function prepareIdeaUpdate(
+  ctx: OperationContext,
+  input: IdeaUpdateInput
+): Promise<() => Promise<IdeaUpdateResult>> {
   const limits = getPlatformOperationLimits(ctx.env);
   const ideaId = typeof input.ideaId === 'string' ? input.ideaId.trim() : '';
   if (!ideaId) throw new OperationError('invalid_input', 'ideaId is required');
@@ -296,6 +312,31 @@ export async function prepareIdeaUpdate(ctx: OperationContext, input: IdeaUpdate
       priority: number;
     }>();
   if (!existing) throw new OperationError('not_found', `Idea not found in this project: ${ideaId}`);
+  if (input.quote !== undefined && input.note === undefined)
+    throw new OperationError('invalid_input', 'quote requires note');
+  if (input.note !== undefined) {
+    const note = input.note;
+    if (
+      input.title !== undefined ||
+      input.content !== undefined ||
+      input.priority !== undefined ||
+      input.status !== undefined
+    )
+      throw new OperationError(
+        'invalid_input',
+        'Post a note separately from editing the current plan'
+      );
+    await validateIdeaUpdateNote(ctx, note, input.quote);
+    return async () => {
+      const { update } = await addIdeaUpdate(ctx, {
+        projectId: input.projectId,
+        ideaId,
+        body: note,
+        quote: input.quote,
+      });
+      return { updated: true, ideaId, updatedFields: [], note: update };
+    };
+  }
   if (!(existing.status in IDEA_STATUS_TRANSITIONS))
     throw new OperationError(
       'conflict',
@@ -368,7 +409,7 @@ export async function prepareIdeaUpdate(ctx: OperationContext, input: IdeaUpdate
     }
     const updatedFields = updates
       .filter((update) => !update.startsWith('updated_at'))
-      .map((update) => update.split(' = ')[0]);
+      .map((update) => update.slice(0, update.indexOf(' = ')));
     log.info('mcp.update_idea', {
       ideaId,
       projectId: input.projectId,

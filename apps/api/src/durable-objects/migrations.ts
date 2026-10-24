@@ -2534,6 +2534,31 @@ export const MIGRATIONS: Migration[] = [
       sql.exec('ALTER TABLE project_schedules ADD COLUMN shared_access_grant_id TEXT');
     },
   },
+  {
+    name: '068-idea-updates',
+    run(sql) {
+      sql.exec(`CREATE TABLE idea_updates (
+        id TEXT PRIMARY KEY,
+        idea_id TEXT NOT NULL,
+        author_kind TEXT NOT NULL CHECK (author_kind IN ('user', 'agent')),
+        author_user_id TEXT,
+        author_name TEXT,
+        session_id TEXT,
+        session_topic TEXT,
+        body TEXT NOT NULL,
+        quote TEXT,
+        created_at TEXT NOT NULL,
+        edited_at TEXT,
+        deleted_at TEXT
+      )`);
+      sql.exec(
+        'CREATE INDEX idx_idea_updates_idea_created ON idea_updates(idea_id, created_at DESC, id DESC)'
+      );
+      sql.exec(
+        "CREATE INDEX idx_idea_updates_agent_interval ON idea_updates(session_id, idea_id, created_at DESC) WHERE author_kind = 'agent'"
+      );
+    },
+  },
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
   // that ran it keep an unused `message_upload_parts` table, since DO migrations
   // never drop tables, so neither that migration name nor that table name may be reused.

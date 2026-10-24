@@ -13,6 +13,7 @@ import {
   type AcpSessionStatus,
   type CheckpointEpisodeTransitionInput,
   type CreateCheckpointEpisodeInput,
+  type IdeaUpdateNote,
   MAILBOX_DEFAULTS,
   type MessageCommentThread,
   type MessageCommentThreadEventReason,
@@ -58,6 +59,7 @@ import { stopTimedOutConversationWorkspaces } from './conversation-timeout';
 import * as durability from './durability-foundation';
 import * as groupedFtsCleanup from './grouped-fts-cleanup';
 import * as groupedFtsWallRecovery from './grouped-fts-wall-recovery';
+import * as ideaUpdates from './idea-updates';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
@@ -2233,6 +2235,21 @@ export class ProjectData extends DurableObject<Env> {
   }
   getSessionsForIdea(taskId: string) {
     return ideas.getSessionsForIdea(this.sql, taskId);
+  }
+  addIdeaUpdate(input: IdeaUpdateNote, minAgentIntervalMs: number) {
+    return ideaUpdates.addIdeaUpdate(this.sql, input, minAgentIntervalMs);
+  }
+  listIdeaUpdates(ideaId: string, cursor: { createdAt: string; id: string } | null, limit: number) {
+    return ideaUpdates.listIdeaUpdates(this.sql, ideaId, cursor, limit);
+  }
+  deleteIdeaUpdate(
+    ideaId: string,
+    updateId: string,
+    actorUserId: string,
+    canModerate: boolean,
+    now: string
+  ) {
+    return ideaUpdates.deleteIdeaUpdate(this.sql, ideaId, updateId, actorUserId, canModerate, now);
   }
 
   async cacheCommands(
