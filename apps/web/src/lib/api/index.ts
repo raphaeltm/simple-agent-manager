@@ -385,12 +385,13 @@ export {
   updateFileTags,
   uploadLibraryFile,
 } from './library';
-export { emptyCappedList, getIdeaLinks, normalizeIdeaContext } from './links';
 export {
   emptyCappedList,
+  getIdeaLinks,
   getLibraryFileLinks,
   getSessionLinks,
   normalizeFileContext,
+  normalizeIdeaContext,
   normalizeSessionContext,
 } from './links';
 export {
