@@ -97,8 +97,12 @@ function seedProject(id: string, userId: string, activity: number) {
     .run(id, userId, id, activity);
 }
 function seedIdea(id: string, projectId: string, updatedAt: string) {
+  // `is_idea = 1` is what makes a row an idea now, not `status = 'draft'` (program decision
+  // 16, migration 0207). The column is NOT NULL DEFAULT 0, so an idea fixture has to say so.
   sqlite
-    .prepare('INSERT INTO tasks (id,project_id,title,status,updated_at) VALUES (?,?,?,?,?)')
+    .prepare(
+      'INSERT INTO tasks (id,project_id,title,status,is_idea,updated_at) VALUES (?,?,?,?,1,?)'
+    )
     .run(id, projectId, id, 'draft', updatedAt);
 }
 
@@ -118,7 +122,15 @@ describe('Account Map linked ideas', () => {
     seedIdea('idea-foreign', 'theirs', '2026-10-24T05:00:00Z');
     sqlite
       .prepare(
-        "INSERT INTO tasks (id,project_id,title,status,updated_at) VALUES ('ordinary','mine-a','Ordinary task','ready','2026-10-24T06:00:00Z')"
+        "INSERT INTO tasks (id,project_id,title,status,is_idea,updated_at) VALUES ('ordinary','mine-a','Ordinary task','ready',0,'2026-10-24T06:00:00Z')"
+      )
+      .run();
+    // The discriminating row: draft, owner's own project, excluded only by the flag. The
+    // `ready` row above is excluded by its status too, so it passes under either definition
+    // and cannot tell them apart.
+    sqlite
+      .prepare(
+        "INSERT INTO tasks (id,project_id,title,status,is_idea,updated_at) VALUES ('ordinary-draft','mine-a','Ordinary draft task','draft',0,'2026-10-24T07:00:00Z')"
       )
       .run();
 
