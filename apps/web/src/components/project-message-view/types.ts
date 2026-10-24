@@ -236,7 +236,9 @@ export function chatMessagesToConversationItems(
         ...(attribution ? { attribution } : {}),
       });
     } else if (msg.role === 'assistant') {
-      // Merge consecutive assistant chunks into one item
+      // Merge consecutive assistant chunks into one item. The merged roles are
+      // MERGED_MESSAGE_ROLES (shared), which the comment context window and
+      // mergedRowAliases also use: change them together.
       const last = acc[acc.length - 1];
       if (last?.kind === 'agent_message') {
         (last as { text: string }).text += msg.content;

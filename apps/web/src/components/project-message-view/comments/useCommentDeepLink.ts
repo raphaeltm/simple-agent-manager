@@ -5,8 +5,10 @@ import { useLocation, useNavigate } from 'react-router';
  * Query parameters of a comment deep link into a project chat:
  * `?commentThread=<threadId>&commentMessage=<messageId>[&commentAt=<ms>]`.
  *
- * Comment notifications carry `commentThread` + `commentMessage` (`actionUrl`); the project
- * Comments page carries `commentMessage` + `commentAt`.
+ * The comment reader's "Open in chat" sets all three (`openInChatPath`), `commentAt` being the
+ * commented message's own time. Comment notifications and the Comments page open the reader
+ * instead (`buildCommentActionUrl`, `commentReaderPath`); notifications sent before that carry
+ * `commentThread` + `commentMessage` only.
  */
 const COMMENT_THREAD_PARAM = 'commentThread';
 const COMMENT_MESSAGE_PARAM = 'commentMessage';

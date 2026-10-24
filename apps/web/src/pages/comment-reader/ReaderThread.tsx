@@ -7,7 +7,7 @@
  */
 import { Avatar } from '@simple-agent-manager/ui';
 import { ChevronUp } from 'lucide-react';
-import { forwardRef } from 'react';
+import { forwardRef, useRef } from 'react';
 
 import {
   authorDisplayName,
@@ -131,6 +131,9 @@ export function ReaderThreadPanel({
   );
 }
 
+/** Vertical travel, in px, that counts as a swipe on the sheet's handle rather than a tap. */
+const SWIPE_PX = 24;
+
 /**
  * Phone: a sheet over the bottom of the conversation. Collapsed, it shows who moved last and
  * what they said, so the passage and the comment are on one screen; open, the whole thread.
@@ -157,6 +160,8 @@ export const ReaderThreadSheet = forwardRef<
   ref
 ) {
   const latest = latestEntry(thread);
+  // Swipe up opens the sheet and down closes it, as the handle suggests; a tap toggles.
+  const touchStartY = useRef<number | null>(null);
   return (
     <section
       ref={ref}
@@ -168,7 +173,18 @@ export const ReaderThreadSheet = forwardRef<
       <button
         type="button"
         onClick={() => onOpenChange(!open)}
+        onTouchStart={(event) => {
+          touchStartY.current = event.touches[0]?.clientY ?? null;
+        }}
+        onTouchEnd={(event) => {
+          const start = touchStartY.current;
+          const end = event.changedTouches[0]?.clientY;
+          touchStartY.current = null;
+          if (start === null || end === undefined || Math.abs(end - start) < SWIPE_PX) return;
+          onOpenChange(end < start);
+        }}
         aria-expanded={open}
+        aria-label={open ? 'Hide the thread' : `Show the whole thread. ${summary}`}
         className="flex w-full shrink-0 flex-col gap-1.5 px-4 pt-2 pb-2 text-left focus-visible:outline focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-focus-ring"
       >
         <span aria-hidden="true" className="mx-auto mb-1 h-1 w-10 rounded-full bg-border-default" />
@@ -195,7 +211,6 @@ export const ReaderThreadSheet = forwardRef<
             {latest.body}
           </span>
         )}
-        <span className="sr-only">{open ? 'Hide the thread' : 'Show the whole thread'}</span>
       </button>
       {open ? (
         <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pt-1 pb-4">

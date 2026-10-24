@@ -59,6 +59,7 @@ export * from './runtime-validation';
 export * from './resource-requirements';
 
 // Chat message pagination cursors (web client ↔ API contract)
+export { MERGED_MESSAGE_ROLES } from './chat-message-merge';
 export * from './github-trigger-contract';
 export type { MentionMatch } from './mentions';
 export { extractMentions, formatMentionName, getMentionQuery } from './mentions';

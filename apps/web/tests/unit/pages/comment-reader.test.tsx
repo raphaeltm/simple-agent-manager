@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   listMessageComments: vi.fn(),
   listProjectComments: vi.fn(),
   createMessageCommentReply: vi.fn(),
+  resolveMessageCommentThread: vi.fn(),
   listChatMessages: vi.fn(),
 }));
 
@@ -24,6 +25,7 @@ vi.mock('../../../src/lib/api/comments', async (importOriginal) => ({
   listMessageComments: mocks.listMessageComments,
   listProjectComments: mocks.listProjectComments,
   createMessageCommentReply: mocks.createMessageCommentReply,
+  resolveMessageCommentThread: mocks.resolveMessageCommentThread,
 }));
 
 vi.mock('../../../src/lib/api/sessions', async (importOriginal) => ({
@@ -239,6 +241,38 @@ describe('comment reader', () => {
     expect(screen.getByText('1 of 3')).toBeInTheDocument();
   });
 
+  it('links back to the previous comment from a later one', async () => {
+    const older = makeThread('thread-2', { createdAt: 500, body: 'Older question' });
+    mocks.listProjectComments.mockResolvedValue(inboxOf([older, THREAD]));
+    mocks.getMessageCommentContext.mockResolvedValue(context({ thread: older }));
+    renderAt(`/projects/${PROJECT}/comments/${SESSION}/thread-2`);
+
+    const previous = await screen.findByRole('link', { name: 'Previous comment' });
+    await waitFor(() =>
+      expect(previous).toHaveAttribute('href', `/projects/${PROJECT}/comments/${SESSION}/thread-1`)
+    );
+    expect(screen.getByLabelText('Next comment')).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('resolves the thread from the reader', async () => {
+    // The server keeps the resolve: the list refetched after it returns the resolved thread.
+    mocks.resolveMessageCommentThread.mockImplementation(async () => {
+      const resolved = { ...THREAD, status: 'resolved' as const };
+      mocks.listMessageComments.mockResolvedValue({ comments: [resolved] });
+      return { comment: resolved };
+    });
+    renderAt(READER_PATH);
+    fireEvent.click(await screen.findByRole('button', { name: /Show the whole thread/ }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Resolve' }));
+
+    await waitFor(() =>
+      expect(mocks.resolveMessageCommentThread).toHaveBeenCalledWith(PROJECT, SESSION, 'thread-1')
+    );
+    // As in the chat, a thread just resolved folds away behind "Show resolved thread".
+    expect(await screen.findByRole('button', { name: /Show resolved thread/ })).toBeInTheDocument();
+  });
+
   it('replies from the phone sheet and refreshes the Comments page list', async () => {
     mocks.createMessageCommentReply.mockResolvedValue({
       comment: { ...THREAD, replies: [] },
@@ -303,6 +337,44 @@ describe('comment reader', () => {
     for (const link of screen.getAllByRole('link', { name: 'Back to comments' })) {
       expect(link).toHaveAttribute('href', `/projects/${PROJECT}/comments`);
     }
+    // The session's cached comment list still has the thread; it must not offer actions on a
+    // comment the page has just said is gone.
+    await waitFor(() => expect(mocks.listMessageComments).toHaveBeenCalled());
+    expect(screen.queryByRole('region', { name: 'Comment thread' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reply…' })).toBeNull();
+  });
+
+  it('offers no thread actions when the conversation fails to load', async () => {
+    mocks.getMessageCommentContext.mockRejectedValue(
+      new ApiClientError('INTERNAL_ERROR', 'Something went wrong on the server', 500)
+    );
+    renderAt(READER_PATH);
+
+    expect(await screen.findByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    await waitFor(() => expect(mocks.listMessageComments).toHaveBeenCalled());
+    expect(screen.queryByRole('region', { name: 'Comment thread' })).toBeNull();
+  });
+
+  it('opens the sheet with an upward swipe on its handle and closes it with a downward one', async () => {
+    renderAt(READER_PATH);
+    const handle = await screen.findByRole('button', { name: /Show the whole thread/ });
+
+    fireEvent.touchStart(handle, { touches: [{ clientY: 600 }] });
+    fireEvent.touchEnd(handle, { changedTouches: [{ clientY: 520 }] });
+    const close = await screen.findByRole('button', { name: 'Hide the thread' });
+    expect(close).toHaveAttribute('aria-expanded', 'true');
+
+    // A small movement is a tap, not a swipe, and does not close it.
+    fireEvent.touchStart(close, { touches: [{ clientY: 300 }] });
+    fireEvent.touchEnd(close, { changedTouches: [{ clientY: 310 }] });
+    expect(screen.getByRole('button', { name: 'Hide the thread' })).toBeInTheDocument();
+
+    fireEvent.touchStart(close, { touches: [{ clientY: 300 }] });
+    fireEvent.touchEnd(close, { changedTouches: [{ clientY: 380 }] });
+    expect(await screen.findByRole('button', { name: /Show the whole thread/ })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
   });
 
   it('shows the thread beside the conversation on a desktop, and keeps the conversation mounted across the breakpoint', async () => {

@@ -33,8 +33,8 @@ export function useProjectMessageCommentUi({
   projectId: string;
   onRequestCommentSurface?: () => void;
   /**
-   * A thread to open focused, from a route-level deep link (`?commentThread=` on a comment
-   * notification). Latched: it may be cleared from the URL before the threads have loaded.
+   * A thread to open focused, from a route-level deep link (`?commentThread=`, set by the
+   * comment reader's "Open in chat" and by older comment notifications). Latched: it may be cleared from the URL before the threads have loaded.
    */
   focusCommentThreadId?: string | null;
 }) {

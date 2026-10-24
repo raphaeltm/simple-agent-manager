@@ -133,8 +133,10 @@ chatCommentRoutes.get('/:sessionId/comments', async (c) => {
  * many streamed rows) plus `collaboration.commentContextMessages` messages each side. Earlier
  * and later pages come from `GET .../messages` with cursors from the first and last rows.
  *
- * Round trips: membership (D1), session access + thread (one ProjectData RPC each, in
- * parallel), the two cached settings, and one RPC to the object that owns the transcript.
+ * Round trips (rule 60, read-only GET ≤ 8): membership (D1), session access + thread (one
+ * ProjectData RPC each, in parallel), and one RPC to the object that owns the transcript;
+ * plus at most one D1 read to fill the per-isolate admin-settings cache, and one to find
+ * the transcript's owner when archive routing is on. Five typical, seven worst case.
  */
 chatCommentRoutes.get('/:sessionId/comments/:threadId/context', async (c) => {
   const userId = getUserId(c);

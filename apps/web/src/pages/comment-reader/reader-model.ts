@@ -65,7 +65,7 @@ export function commentNavigation(
 }
 
 export function commentReaderPath(projectId: string, sessionId: string, threadId: string): string {
-  return `/projects/${projectId}/comments/${encodeURIComponent(sessionId)}/${encodeURIComponent(threadId)}`;
+  return `/projects/${encodeURIComponent(projectId)}/comments/${encodeURIComponent(sessionId)}/${encodeURIComponent(threadId)}`;
 }
 
 /**
@@ -80,5 +80,5 @@ export function openInChatPath(
 ): string {
   const params = new URLSearchParams({ commentThread: threadId, commentMessage: anchor.messageId });
   if (anchor.createdAt !== null) params.set('commentAt', String(anchor.createdAt));
-  return `/projects/${projectId}/chat/${encodeURIComponent(sessionId)}?${params.toString()}`;
+  return `/projects/${encodeURIComponent(projectId)}/chat/${encodeURIComponent(sessionId)}?${params.toString()}`;
 }

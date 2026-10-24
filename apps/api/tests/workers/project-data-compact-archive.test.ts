@@ -196,8 +196,19 @@ describe('compact R2 archive rollout', () => {
       );
       expect(context).toMatchObject({ found: true, hasMoreBefore: true, hasMoreAfter: true });
       expect(context.messages.map((message) => message.id)).toEqual(ids.slice(98, 103));
-      if (originalContext === undefined) originalContext = context;
-      else expect(context).toEqual(originalContext);
+      // Compact mode, as the route reads it: tool output stripped to a size, in every store.
+      const toolContext = await projectDataService.getMessageContextWindow(
+        testEnv,
+        projectId,
+        sessionId,
+        { messageId: String(ids[199]), messagesEachSide: 1, maxRows: 10, compact: true }
+      );
+      const toolRow = toolContext.messages.find((message) => message.id === ids[199]);
+      expect(toolRow?.toolMetadata).toMatchObject({ contentSize: expect.any(Number) });
+      expect(toolRow?.toolMetadata).not.toHaveProperty('content');
+      const both = { context, toolContext };
+      if (originalContext === undefined) originalContext = both;
+      else expect(both).toEqual(originalContext);
     };
     const verifyMcpReads = async () => {
       const history = await mcpRead('get_session_messages', { projectId, sessionId, limit: 300 });

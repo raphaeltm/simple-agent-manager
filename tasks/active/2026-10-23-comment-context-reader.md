@@ -38,7 +38,7 @@ Why today's jump is unreliable (code reading, audit 2026-10-23):
 Server facts:
 
 - Threads live in the project root ProjectData DO (`comments.ts`); `getCommentThread(sql,
-  sessionId, threadId)` is scoped by session. Comments cannot be created on an archived
+sessionId, threadId)` is scoped by session. Comments cannot be created on an archived
   session, but a commented session can be archived later, so messages must be read through
   the archive-aware owner (`resolveExactReadOwnerIfArchiveEnabled`; root source, archive
   target, or compact archive target backed by R2 chunks).
@@ -119,6 +119,8 @@ chat rows open it. Notifications open it too. The reader:
 
 - [x] `apps/www/src/content/docs/docs/guides/collaboration.md` — reading a comment in context
 - [x] `apps/www/src/content/docs/docs/guides/admin-settings.md` — two new settings
+- [x] `apps/www/src/content/docs/docs/guides/notifications.md`, `reference/api.md`,
+      `recent-product-changes.md`, and `.claude/skills/api-reference/SKILL.md`
 
 ## Acceptance criteria
 

@@ -155,7 +155,7 @@ type BackendThreadResponse = {
 };
 
 function sessionCommentsEndpoint(projectId: string, sessionId: string): string {
-  return `/api/projects/${projectId}/sessions/${sessionId}/comments`;
+  return `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/comments`;
 }
 
 /**

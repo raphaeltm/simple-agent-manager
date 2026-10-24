@@ -76,8 +76,11 @@ export function ReaderHeader({
         {subtitle && <p className="m-0 truncate text-xs text-fg-muted">{subtitle}</p>}
       </div>
       {position !== null && (
-        <span className="hidden shrink-0 px-1 text-xs text-fg-muted tabular-nums sm:inline">
-          {position} of {total}
+        <span className="shrink-0 px-1 text-xs text-fg-muted tabular-nums">
+          <span className="sr-only sm:not-sr-only">
+            <span className="sr-only">Comment </span>
+            {position} of {total}
+          </span>
         </span>
       )}
       <IconLink to={previousTo} label="Previous comment">

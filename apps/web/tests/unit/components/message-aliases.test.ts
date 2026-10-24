@@ -3,6 +3,7 @@
  * (`chatMessagesToConversationItems` → `groupToolCallItems`), so a change to how rows merge
  * shows up here rather than as a comment that no longer lands.
  */
+import { MERGED_MESSAGE_ROLES } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -89,5 +90,22 @@ describe('mergedRowAliases', () => {
     expect(group?.kind).toBe('tool_call_group');
     expect(renderedItemIds(items).has('th1')).toBe(true);
     expect(aliases.get('th2')).toBe('th1');
+  });
+});
+
+describe('MERGED_MESSAGE_ROLES', () => {
+  it('names exactly the roles whose consecutive rows the chat shows as one message', () => {
+    for (const role of ['user', 'assistant', 'thinking', 'system', 'tool']) {
+      // Two different tool calls are two items; only a streamed merge joins rows.
+      const meta = (call: string) => (role === 'tool' ? { toolCallId: call, title: call } : null);
+      const items = chatMessagesToConversationItems([
+        row(`${role}-1`, role, 'one ', meta('call-1')),
+        row(`${role}-2`, role, 'two', meta('call-2')),
+      ]);
+      expect({ role, merged: items.length === 1 }).toEqual({
+        role,
+        merged: MERGED_MESSAGE_ROLES.has(role),
+      });
+    }
   });
 });

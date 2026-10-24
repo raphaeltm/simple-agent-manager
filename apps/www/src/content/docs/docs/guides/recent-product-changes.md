@@ -9,6 +9,11 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ### For everyone
 
+- **Read a comment where it was made.** Opening a chat comment from the **Comments** page, or from
+  a comment or mention notification, now shows the conversation opened on the words the comment
+  is about, highlighted, with the thread beside it on a desktop or in a sheet on a phone. Scroll
+  for more of the chat, step to the next comment, or open the chat itself at that message.
+  → [Read a comment in its conversation](/docs/guides/collaboration/#read-a-comment-in-its-conversation)
 - **Agents can call other AI models.** Agents can now call Cloudflare-hosted models while they work,
   for example asking a decision model a yes/no question, extracting fields from a log, or
   transcribing a recording. Cheap decision, extraction and classifier models are on by default.

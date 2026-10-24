@@ -16,9 +16,14 @@
  *
  * Reads run in this object against its own SQLite (or compact archive chunks), so the extra
  * pages a long agent reply needs cost no network round trip. Each side is bounded by
- * `maxRows` rows and half the RPC size budget, and reports whether more exists.
+ * `maxRows` rows and half of the RPC size budget the anchored row leaves, and reports
+ * whether more exists.
  */
-import type { MessageCursor, MessagePosition } from '@simple-agent-manager/shared';
+import {
+  MERGED_MESSAGE_ROLES,
+  type MessageCursor,
+  type MessagePosition,
+} from '@simple-agent-manager/shared';
 
 import type { ProjectDataArchiveExactReadInput } from '../../project-data-archive/contract';
 import * as archiveSharding from './archive-sharding';
@@ -26,14 +31,8 @@ import * as compactArchive from './compact-archive';
 import * as messages from './messages';
 import type { Env } from './types';
 
-/** Roles whose consecutive rows the chat merges into one displayed message. */
-const MERGED_ROLES: ReadonlySet<string> = new Set(['assistant', 'thinking']);
-
 /** Rows per page read inside one side's scan; the side's own `maxRows` caps the total. */
 const SCAN_PAGE_ROWS = 250;
-
-/** Each side may use half the DO RPC size budget, so the whole window stays under it. */
-const SIDE_BYTE_BUDGET = messages.RPC_SIZE_BUDGET_BYTES / 2;
 
 export interface MessageContextRequest {
   messageId: string;
@@ -103,13 +102,14 @@ async function scanSide(
   reader: MessageContextReader,
   anchor: { role: string | null; position: MessagePosition },
   side: 'before' | 'after',
-  request: MessageContextRequest
+  request: MessageContextRequest,
+  byteBudget: number
 ): Promise<{ rows: Record<string, unknown>[]; hasMore: boolean }> {
   const rows: Record<string, unknown>[] = [];
   let bytes = 0;
   // The displayed message being read: the anchored one first. `openRole` is the role its
   // further rows would carry, or null when a message is a single row.
-  let openRole = anchor.role !== null && MERGED_ROLES.has(anchor.role) ? anchor.role : null;
+  let openRole = anchor.role !== null && MERGED_MESSAGE_ROLES.has(anchor.role) ? anchor.role : null;
   let messagesRead = 0;
   let cursor = anchor.position;
 
@@ -128,10 +128,10 @@ async function scanSide(
       if (!continuesMessage) {
         if (messagesRead >= request.messagesEachSide) return { rows, hasMore: true };
         messagesRead += 1;
-        openRole = role !== null && MERGED_ROLES.has(role) ? role : null;
+        openRole = role !== null && MERGED_MESSAGE_ROLES.has(role) ? role : null;
       }
       bytes += formattedRowBytes(row);
-      if (bytes > SIDE_BYTE_BUDGET) return { rows, hasMore: true };
+      if (bytes > byteBudget) return { rows, hasMore: true };
       rows.push(row);
     }
     if (!page.hasMore) return { rows, hasMore: false };
@@ -152,9 +152,14 @@ export async function readMessageContextWindow(
   const position = anchorRow ? rowPosition(anchorRow) : null;
   if (!anchorRow || !position) return NOT_FOUND;
   const anchor = { role: rowRole(anchorRow), position };
+  // The anchored row always ships; each side gets half of what the RPC budget has left.
+  const sideBudget = Math.max(
+    0,
+    (messages.RPC_SIZE_BUDGET_BYTES - formattedRowBytes(anchorRow)) / 2
+  );
   const [before, after] = await Promise.all([
-    scanSide(reader, anchor, 'before', request),
-    scanSide(reader, anchor, 'after', request),
+    scanSide(reader, anchor, 'before', request, sideBudget),
+    scanSide(reader, anchor, 'after', request, sideBudget),
   ]);
   return {
     found: true,

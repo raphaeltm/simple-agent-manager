@@ -25,6 +25,8 @@ const VIEWER = 'user-1';
 const harness = vi.hoisted(() => ({
   storages: new Map<string, SqlStorage>(),
   capabilityError: null as Error | null,
+  /** Stands in for a broken session predicate in the thread lookup. */
+  threadOverride: null as Record<string, unknown> | null,
 }));
 
 vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn(() => ({})) }));
@@ -77,7 +79,7 @@ vi.mock('../../src/services/project-data', async () => {
       };
     },
     getCommentThread: async (_env: Env, projectId: string, sessionId: string, threadId: string) =>
-      comments.getCommentThread(sqlFor(projectId), sessionId, threadId),
+      harness.threadOverride ?? comments.getCommentThread(sqlFor(projectId), sessionId, threadId),
     getMessageContextWindow: async (
       env: Env,
       projectId: string,
@@ -176,6 +178,7 @@ describe('GET comment context — vertical slice', () => {
     vi.clearAllMocks();
     harness.storages.clear();
     harness.capabilityError = null;
+    harness.threadOverride = null;
     databases = [];
     settings = createAdminSettingsEnv();
     for (const projectId of [PROJECT_A, PROJECT_B]) {
@@ -305,6 +308,22 @@ describe('GET comment context — vertical slice', () => {
     expect(attackBody).not.toContain('returns 500');
 
     // Owner control: the same thread through its own session.
+    expect((await getContext(PROJECT_A, 'session-1', threadId)).status).toBe(200);
+  });
+
+  it('refuses a thread the lookup returned for another session, and serves it in its own session', async () => {
+    seedConversation(PROJECT_A, 'session-1');
+    seedConversation(PROJECT_A, 'session-2', VIEWER, 's2-');
+    const threadId = thread(PROJECT_A, 'session-1', 'a2', 'returns 500');
+    const victim = comments.getCommentThread(sqlOf(PROJECT_A), 'session-1', threadId);
+    // The lookup misbehaves and hands session-1's thread to a session-2 request.
+    harness.threadOverride = victim as unknown as Record<string, unknown>;
+
+    const attack = await getContext(PROJECT_A, 'session-2', threadId);
+    expect(attack.status).toBe(404);
+    expect(JSON.stringify(await attack.json())).not.toContain('returns 500');
+
+    // Owner control: the same thread, returned for its own session, is served.
     expect((await getContext(PROJECT_A, 'session-1', threadId)).status).toBe(200);
   });
 

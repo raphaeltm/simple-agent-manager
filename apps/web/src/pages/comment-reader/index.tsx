@@ -9,7 +9,6 @@
  */
 import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
-import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 
@@ -28,18 +27,13 @@ import {
   formatCommentedMessageLabel,
 } from '../../components/project-message-view/comments/commented-message-label';
 import { QuotedAnchor } from '../../components/project-message-view/comments/CommentPrimitives';
-import {
-  type CommentActions,
-  threadCallbacks,
-} from '../../components/project-message-view/comments/MessageCommentPanels';
+import { threadCallbacks } from '../../components/project-message-view/comments/MessageCommentPanels';
 import { useCommentsRailViewport } from '../../components/project-message-view/comments/useCommentsRailViewport';
 import { useMessageComments } from '../../components/project-message-view/comments/useMessageComments';
 import { useProjectCommentInbox } from '../../components/project-message-view/comments/useProjectCommentInbox';
 import { loadToolCallContent } from '../../components/project-message-view/load-tool-content';
 import { groupToolCallItems } from '../../components/project-message-view/tool-call-groups';
 import { chatMessagesToConversationItems } from '../../components/project-message-view/types';
-import { useQueryScope } from '../../hooks/useQueryScope';
-import { projectCommentQueryKeys } from '../../lib/query-options';
 import { useProjectContext } from '../ProjectContext';
 import {
   buildRowLocator,
@@ -71,8 +65,6 @@ export function ProjectCommentReader() {
   const { user } = useAuth();
   const viewerId = user?.id ?? null;
   const wide = useCommentsRailViewport();
-  const queryClient = useQueryClient();
-  const queryScope = useQueryScope();
 
   const transcript = useCommentReaderTranscript(projectId, sessionId, threadId);
   const messageComments = useMessageComments(projectId, sessionId, Boolean(sessionId));
@@ -153,35 +145,24 @@ export function ProjectCommentReader() {
     'Untitled chat';
   const subtitle = anchorItemId ? formatCommentedMessageLabel(describe(anchorItemId)) : null;
 
-  // Every comment surface invalidates the Comments page list it changes.
-  const invalidateInbox = useCallback(() => {
-    void queryClient.invalidateQueries({
-      queryKey: projectCommentQueryKeys.project(queryScope, projectId),
-    });
-  }, [projectId, queryClient, queryScope]);
   const canSendToAgent = context?.viewerAccess === 'owner' || context?.viewerAccess === 'grantee';
   const { createThread, reply, resolve, reopen, sendToAgent } = messageComments;
-  const callbacks = useMemo(() => {
-    const settle = <T,>(promise: Promise<T>) => promise.finally(invalidateInbox);
-    const actions: CommentActions = {
-      mentionProjectId: projectId,
-      createThread: (input) => settle(createThread(input)),
-      reply: (input) => settle(reply(input)),
-      resolve: (commentId) => settle(resolve(commentId)),
-      reopen: (commentId) => settle(reopen(commentId)),
-      sendToAgent: canSendToAgent ? (input) => settle(sendToAgent(input)) : undefined,
-    };
-    return threadCallbacks(actions, canSendToAgent);
-  }, [
-    canSendToAgent,
-    createThread,
-    invalidateInbox,
-    projectId,
-    reopen,
-    reply,
-    resolve,
-    sendToAgent,
-  ]);
+  // useMessageComments refreshes the Comments page list after every mutation, as in the chat.
+  const callbacks = useMemo(
+    () =>
+      threadCallbacks(
+        {
+          mentionProjectId: projectId,
+          createThread,
+          reply,
+          resolve,
+          reopen,
+          sendToAgent: canSendToAgent ? sendToAgent : undefined,
+        },
+        canSendToAgent
+      ),
+    [canSendToAgent, createThread, projectId, reopen, reply, resolve, sendToAgent]
+  );
 
   const selectThread = useCallback(
     (nextThreadId: string) => {
@@ -224,6 +205,9 @@ export function ProjectCommentReader() {
   // Opening another comment starts with its sheet collapsed again.
   useLayoutEffect(() => setSheet({ open: false, replying: false }), [threadId]);
 
+  // A comment the server says is gone, or that failed to load, offers no actions: a cached copy
+  // from the session's comment list must not contradict the message the page shows.
+  const showThread = !transcript.notFound && !transcript.error;
   const summary = thread
     ? lastActivitySummary(
         toInboxItem(thread, {
@@ -335,7 +319,8 @@ export function ProjectCommentReader() {
         />
         {body}
       </section>
-      {thread &&
+      {showThread &&
+        thread &&
         (wide ? (
           <ReaderThreadPanel
             thread={thread}

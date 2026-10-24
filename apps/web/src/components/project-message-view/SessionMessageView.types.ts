@@ -45,6 +45,6 @@ export interface ProjectMessageViewProps {
   onTargetMessageConsumed?: () => void;
   /** Changes whenever project realtime attention state changes for this session. */
   permissionRefreshSignal?: string | null;
-  /** Comment thread to open, from a notification deep link (`?commentThread=`). */
+  /** Comment thread to open, from a comment deep link (`?commentThread=`, see `useCommentDeepLink`). */
   focusCommentThreadId?: string | null;
 }

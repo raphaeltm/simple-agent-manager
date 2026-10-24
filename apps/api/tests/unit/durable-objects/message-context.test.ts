@@ -222,6 +222,43 @@ describe('message context window', () => {
     expect(window).toMatchObject({ hasMoreBefore: false, hasMoreAfter: false });
   });
 
+  it('stops a side at half the RPC size budget, before the row and message limits', async () => {
+    // Ten single-row messages of ~3 MB each (1.5M UTF-16 characters); half of the 30 MiB RPC
+    // budget holds five of them. Neither the row cap nor the message count is reached.
+    const large = 'x'.repeat(1_500_000);
+    seed([
+      { id: 'u0', role: 'user', content: 'Start' },
+      ...Array.from({ length: 10 }, (_, index) => ({
+        id: `big-${index + 1}`,
+        role: 'user',
+        content: large,
+      })),
+    ]);
+
+    const window = await read({ messageId: 'u0', messagesEachSide: 50, maxRows: 1_000 });
+
+    expect(ids(window.messages)).toEqual(['u0', 'big-1', 'big-2', 'big-3', 'big-4', 'big-5']);
+    expect(window).toMatchObject({ hasMoreBefore: false, hasMoreAfter: true });
+  });
+
+  it('counts the anchored row against the budget, so a large anchor shrinks both sides', async () => {
+    // A ~12 MB anchor leaves (30 MiB - 12 MB) / 2 ≈ 9.7 MB a side: three ~3 MB rows, not five.
+    const large = 'x'.repeat(1_500_000);
+    seed([
+      { id: 'anchor', role: 'user', content: 'y'.repeat(6_000_000) },
+      ...Array.from({ length: 10 }, (_, index) => ({
+        id: `big-${index + 1}`,
+        role: 'user',
+        content: large,
+      })),
+    ]);
+
+    const window = await read({ messageId: 'anchor', messagesEachSide: 50, maxRows: 1_000 });
+
+    expect(ids(window.messages)).toEqual(['anchor', 'big-1', 'big-2', 'big-3']);
+    expect(window).toMatchObject({ hasMoreAfter: true });
+  });
+
   it('reports a missing anchor without reading anything', async () => {
     seedConversation();
 

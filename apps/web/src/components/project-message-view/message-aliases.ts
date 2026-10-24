@@ -15,9 +15,9 @@
  * in place rather than into the latest item, are not aliased here (tool calls carry their own
  * `messageId` alias).
  */
-import type { DisplayItem } from './tool-call-groups';
+import { MERGED_MESSAGE_ROLES } from '@simple-agent-manager/shared';
 
-const MERGED_ROLES: ReadonlySet<string> = new Set(['assistant', 'thinking']);
+import type { DisplayItem } from './tool-call-groups';
 
 /** Ids of every rendered item, including the calls and thoughts inside tool-call groups. */
 export function renderedItemIds(items: readonly DisplayItem[]): Set<string> {
@@ -40,7 +40,7 @@ export function mergedRowAliases(
   for (const row of rows) {
     if (itemIds.has(row.id)) {
       latestItemId = row.id;
-    } else if (latestItemId !== null && MERGED_ROLES.has(row.role)) {
+    } else if (latestItemId !== null && MERGED_MESSAGE_ROLES.has(row.role)) {
       aliases.set(row.id, latestItemId);
     }
   }

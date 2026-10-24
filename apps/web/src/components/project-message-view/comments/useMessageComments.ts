@@ -17,6 +17,7 @@ import {
   applyMessageCommentRealtimeEventToQueryCache,
   messageCommentQueryKeys,
   messageCommentsQueryOptions,
+  projectCommentQueryKeys,
 } from '../../../lib/query-options';
 import { useAuth } from '../../AuthProvider';
 import {
@@ -78,6 +79,15 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
     [projectId, queryScope, sessionId]
   );
 
+  // Every mutation refreshes this session's threads and the project Comments page, which lists
+  // the same threads: a reply or resolve made here must not wait out the inbox's staleTime.
+  const invalidateAfterMutation = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey });
+    void queryClient.invalidateQueries({
+      queryKey: projectCommentQueryKeys.project(queryScope, projectId),
+    });
+  }, [projectId, queryClient, queryKey, queryScope]);
+
   const commentsQuery = useQuery({
     ...messageCommentsQueryOptions(queryScope, projectId, sessionId),
     enabled: enabled && Boolean(queryScope && projectId && sessionId),
@@ -135,9 +145,7 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
     onSuccess: (response) => {
       setComments((previous) => replaceThread(previous, response.comment));
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
-    },
+    onSettled: invalidateAfterMutation,
   });
 
   const replyMutation = useMutation({
@@ -181,9 +189,7 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
     onSuccess: (response) => {
       setComments((previous) => replaceThread(previous, response.comment));
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
-    },
+    onSettled: invalidateAfterMutation,
   });
 
   const resolveMutation = useMutation({
@@ -199,9 +205,7 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
     onSuccess: (response) => {
       setComments((previous) => replaceThread(previous, response.comment));
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
-    },
+    onSettled: invalidateAfterMutation,
   });
 
   const reopenMutation = useMutation({
@@ -217,9 +221,7 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
     onSuccess: (response) => {
       setComments((previous) => replaceThread(previous, response.comment));
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
-    },
+    onSettled: invalidateAfterMutation,
   });
 
   const sendMutation = useMutation({
@@ -238,9 +240,7 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
     onSuccess: (response) => {
       setComments((previous) => replaceThread(previous, response.comment));
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
-    },
+    onSettled: invalidateAfterMutation,
   });
 
   const applyRealtimeEvent = useCallback(

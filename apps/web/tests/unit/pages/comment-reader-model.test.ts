@@ -110,6 +110,14 @@ describe('commentNavigation', () => {
     expect(order).toEqual(['needs-new', 'needs-old', 'sent', 'mine-open', 'resolved']);
     expect(commentNavigation(items, VIEWER, 'sent')).toMatchObject({ position: 3, total: 5 });
     expect(commentNavigation(items, VIEWER, 'needs-new').previous).toBeNull();
+    // And back again: previous walks the same order in reverse.
+    const back: string[] = [];
+    let previousId: string | null = 'resolved';
+    while (previousId) {
+      back.push(previousId);
+      previousId = commentNavigation(items, VIEWER, previousId).previous?.thread.id ?? null;
+    }
+    expect(back).toEqual([...order].reverse());
   });
 
   it('skips library comments, which open in the library, and reports an unlisted comment', () => {

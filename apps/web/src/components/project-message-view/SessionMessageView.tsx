@@ -16,7 +16,6 @@ import { useProjectMessageCommentUi } from './comments/useProjectMessageCommentU
 import { ConversationPane } from './ConversationPane';
 import { FloatingHeader } from './FloatingHeader';
 import { loadToolCallContent } from './load-tool-content';
-import { mergedRowAliases } from './message-aliases';
 import { type ChatListContext, useFloatingHeaderHeight } from './MessageListScaffold';
 import { ProjectMessageViewDrawers } from './ProjectMessageViewDrawers';
 import { useSessionFocusHandoff } from './session-focus-handoff';
@@ -114,10 +113,6 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   const displayItems = useMemo<DisplayItem[]>(() => {
     return groupToolCallItems(chatMessagesToConversationItems(lc.messages, undeliveredList));
   }, [lc.messages, undeliveredList]);
-  const messageAliases = useMemo(
-    () => mergedRowAliases(lc.messages, displayItems),
-    [lc.messages, displayItems]
-  );
   // Owner and grantees drive the agent; every member can comment; the server enforces both.
   const viewer = resolveSessionViewerCapabilities(lc.session);
   const accessNoticeRef = useRef<HTMLDivElement>(null);
@@ -174,7 +169,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     listReady: Boolean(lc.session) && displayItems.length > 0,
     loadUntil: lc.loadUntil,
     loadingMore: lc.loadingMore,
-    messageAliases,
+    messages: lc.messages,
     targetMessageId,
     targetMessageTimestamp,
     onTargetMessageConsumed,

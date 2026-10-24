@@ -330,6 +330,9 @@ export function ReaderConversation({
       <div
         ref={scrollerRef}
         onScroll={onScroll}
+        // A scrollable region must be reachable by keyboard (WCAG 2.1.1, axe scrollable-region-focusable).
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+        tabIndex={0}
         data-reader-scroller=""
         role="region"
         aria-label="Conversation around the comment"
@@ -392,12 +395,12 @@ export function ReaderConversation({
           <button
             type="button"
             onClick={backToComment}
-            className="pointer-events-auto inline-flex min-h-9 items-center gap-1.5 rounded-full border border-border-default bg-surface px-3.5 text-sm font-medium text-fg-primary shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus-ring"
+            className="pointer-events-auto inline-flex min-h-8 items-center gap-1.5 rounded-full border border-border-default bg-surface px-3 text-xs font-medium text-fg-primary shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus-ring"
           >
             {placement === 'above' ? (
-              <ArrowUp size={14} aria-hidden="true" />
+              <ArrowUp size={13} aria-hidden="true" />
             ) : (
-              <ArrowDown size={14} aria-hidden="true" />
+              <ArrowDown size={13} aria-hidden="true" />
             )}
             Back to the comment
           </button>
