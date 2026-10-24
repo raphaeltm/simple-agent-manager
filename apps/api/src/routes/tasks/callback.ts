@@ -10,7 +10,6 @@ import { log } from '../../lib/logger';
 import { toTaskResponse } from '../../lib/mappers';
 import { requireRouteParam } from '../../lib/route-helpers';
 import { errors } from '../../middleware/error';
-import { ensurePullRequest, parseProjectPullRequestUrl } from '../../operations/pull-request-core';
 import { jsonValidator, UpdateTaskStatusSchema } from '../../schemas';
 import { verifyCallbackToken } from '../../services/jwt';
 import * as notificationService from '../../services/notification';
@@ -42,23 +41,13 @@ import {
   setTaskStatus,
   updateTaskExecutionStepFromCallback,
 } from './_helpers';
+import { prepareCallbackPullRequest, storeCallbackPullRequest } from './callback-pull-request';
 import { handleProviderLimitCallback } from './provider-limit-callback';
 
 /**
- * Task callback route — mounted BEFORE projectsRoutes in index.ts
- * to avoid the blanket requireAuth() middleware that validates browser session
- * cookies (not callback JWTs).
- *
- * Auth: Callback JWT via Bearer token, verified inline with verifyCallbackToken().
- *
- * This is the FOURTH instance of the Hono middleware scope leak fix pattern:
- * - 2026-03-12: workspace callback routes (post-mortem exists)
- * - 2026-03-25: deployment identity token route (post-mortem exists)
- * - 2026-03-25: node ACP heartbeat route (post-mortem exists)
- * - 2026-05-12: task callback route (this fix)
- *
- * See: .claude/rules/06-api-patterns.md (Hono middleware scoping)
- * See: docs/notes/2026-05-12-task-callback-middleware-leak-postmortem.md
+ * Task callbacks use workspace JWTs, not browser cookies. Mount this route before
+ * projectsRoutes to avoid its blanket requireAuth() middleware scope leak.
+ * See .claude/rules/06-api-patterns.md and the 2026-05-12 callback postmortem.
  */
 const taskCallbackRoute = new Hono<{ Bindings: Env }>();
 
@@ -147,57 +136,27 @@ taskCallbackRoute.post(
         stepUpdate.outputPrUrl = body.outputPrUrl?.trim() || null;
       }
 
-      const candidatePrUrl = stepUpdate.outputPrUrl;
-      let projectRepository: string | null = null;
-      if (candidatePrUrl) {
-        const [project] = await db
-          .select({ repository: schema.projects.repository })
-          .from(schema.projects)
-          .where(eq(schema.projects.id, projectId))
-          .limit(1);
-        if (project) {
-          projectRepository = project.repository;
-          const parsed = parseProjectPullRequestUrl(candidatePrUrl, project.repository);
-          if (parsed) {
-            stepUpdate.outputPrNumber = parsed.number;
-            if (
-              body.gitPushResult?.commitSha &&
-              body.gitPushResult.prUrl &&
-              parseProjectPullRequestUrl(body.gitPushResult.prUrl, project.repository)?.url ===
-                parsed.url
-            )
-              stepUpdate.outputCommitSha = body.gitPushResult.commitSha;
-            else if (
-              body.gitPushResult?.commitSha ||
-              parseProjectPullRequestUrl(task.outputPrUrl ?? '', project.repository)?.url !==
-                parsed.url
-            )
-              stepUpdate.outputCommitSha = null;
-          } else {
-            stepUpdate.outputPrNumber = null;
-            stepUpdate.outputCommitSha = null;
-          }
-        }
-      } else if (stepUpdate.outputPrUrl !== undefined) {
-        stepUpdate.outputPrNumber = null;
-        stepUpdate.outputCommitSha = null;
-      }
+      const projectRepository = await prepareCallbackPullRequest(
+        db,
+        projectId,
+        task,
+        body.gitPushResult,
+        stepUpdate
+      );
 
       const refreshed = await updateTaskExecutionStepFromCallback(db, task, stepUpdate, {
         env: c.env,
         expected: workspaceSnapshot,
       });
 
-      if (stepUpdate.outputPrUrl && projectRepository) {
-        await revalidateWorkspace();
-        const stored = await ensurePullRequest(
-          c.env,
-          projectId,
-          projectRepository,
-          stepUpdate.outputPrUrl
-        );
-        if (!stored) log.warn('task.callback.pr_repository_mismatch', { taskId, projectId });
-      }
+      await storeCallbackPullRequest(
+        c.env,
+        projectId,
+        taskId,
+        projectRepository,
+        stepUpdate.outputPrUrl,
+        revalidateWorkspace
+      );
 
       // Record activity event for execution step update
       c.executionCtx.waitUntil(
