@@ -622,6 +622,11 @@ export interface SubmitTaskRequest {
   attachments?: TaskAttachment[];
   /** Explicit resource requirements for this task. Overrides profile/project/platform defaults. */
   resourceRequirements?: ResourceRequirements;
+  /** An open idea in this project that this work starts from. The server validates it,
+   * then records the session → idea link (`works_on` for task mode, `discusses` for
+   * conversation mode) before the agent receives its first prompt. The idea is never
+   * injected into `message`; the agent reads it from `get_instructions`. */
+  sourceIdeaId?: string;
 }
 
 export interface SubmitTaskResponse {

@@ -341,6 +341,9 @@ export interface StartInstantChatSessionRequest {
   agentProfileId?: string;
   skillId?: string;
   parentTaskId?: string;
+  /** An open idea in this project this conversation starts from. The server links it
+   * (`discusses`) before the agent receives its first prompt. */
+  sourceIdeaId?: string;
 }
 
 export interface StartInstantChatSessionResponse {

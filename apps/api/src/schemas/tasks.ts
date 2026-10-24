@@ -80,6 +80,8 @@ export const SubmitTaskSchema = v.object({
   skillId: v.optional(v.string()),
   attachments: v.optional(v.array(TaskAttachmentSchema)),
   resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
+  /** An open idea in this project this work starts from; linked before the agent starts. */
+  sourceIdeaId: v.optional(v.string()),
 });
 
 export const CreateTaskSchema = v.object({

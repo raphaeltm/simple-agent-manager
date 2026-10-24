@@ -58,6 +58,7 @@ export type AdminSettingName =
   | 'operations.resourceLinkBatchTargetLimit'
   | 'operations.resourceLinkBatchPerTargetCap'
   | 'operations.resourceLinkContextMaxLength'
+  | 'operations.agentIdeaContextMaxLength'
   | 'operations.cronSweepsEnabled'
   | 'operations.doAlarmsEnabled'
   | 'operations.stalledTaskClassifierEnabled'
@@ -326,6 +327,13 @@ const definitions: AdminSettingDefinition[] = [
     'Operations',
     'Maximum length of an explicit relationship note.',
     { min: 1, max: 5000 }
+  ),
+  integerDefinition(
+    'operations.agentIdeaContextMaxLength',
+    20000,
+    'Operations',
+    'Maximum characters of a linked idea included in an agent session bootstrap.',
+    { min: 500, max: 200000 }
   ),
   integerDefinition(
     'operations.workloadIdentityTokenTtlSeconds',

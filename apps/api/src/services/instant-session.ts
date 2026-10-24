@@ -7,6 +7,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
+import { recordWorkStartIdeaLink } from '../operations/start-work-core';
 import { startSamAwareAgentSession } from './agent-session-bootstrap';
 import { explicitRuntimeAdapterSnapshot } from './canonical-vm-allocation';
 import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';
@@ -57,6 +58,13 @@ export interface LaunchInstantSessionInput {
   taskMode?: TaskMode;
   attachments?: TaskAttachment[];
   overrides?: AgentSessionOverrides;
+  /**
+   * An already-validated open idea this session starts from. `acceptInstantSession`
+   * records the session → idea link before it returns, which is before
+   * `continueInstantSessionLaunch` gives the agent its first prompt. A failure here
+   * fails acceptance: an unlinked chat working on an idea is invisible afterwards.
+   */
+  sourceIdeaId?: string | null;
 }
 
 export interface LaunchInstantSessionResult {
@@ -356,6 +364,13 @@ export async function acceptInstantSession(
     .update(schema.workspaces)
     .set({ chatSessionId, updatedAt: now })
     .where(eq(schema.workspaces.id, workspaceId));
+
+  if (input.sourceIdeaId)
+    await recordWorkStartIdeaLink(env, input.project.id, {
+      ideaId: input.sourceIdeaId,
+      sessionId: chatSessionId,
+      taskMode: input.taskMode ?? 'conversation',
+    });
 
   const containerId = node.id.toLowerCase();
   const nodeCallbackToken = await signNodeCallbackToken(node.id, env);

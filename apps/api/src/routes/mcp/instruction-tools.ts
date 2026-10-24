@@ -20,6 +20,7 @@ import {
   type McpTokenData,
 } from './_helpers';
 import { buildEventingInstructions } from './instruction-eventing-guidance';
+import { buildInstructionIdeaSlice, type InstructionIdeaContext } from './instruction-idea-context';
 import {
   buildKnowledgeInstructions,
   buildPolicyInstructions,
@@ -150,6 +151,10 @@ export async function handleGetInstructions(
     KNOWLEDGE_DEFAULTS.autoRetrievePerEntityLimit;
   const entityIndexLimit =
     parseInt(env.KNOWLEDGE_ENTITY_INDEX_LIMIT || '', 10) || KNOWLEDGE_DEFAULTS.entityIndexLimit;
+  // The chat this agent is attached to. Task contexts carry it on the task row; a
+  // conversation context carries it on the token.
+  const chatSessionId =
+    context.chatSessionId ?? context.task?.chatSessionId ?? tokenData.chatSessionId ?? null;
   let knowledgeContext: {
     entityName: string;
     entityType: string;
@@ -170,17 +175,20 @@ export async function handleGetInstructions(
   // entity index, which is what tells the agent the injected set is partial — if ranked
   // retrieval dies, the index alone still says what exists and how to fetch it, instead
   // of the pre-existing behaviour of silently injecting nothing at all.
-  const [knowledgeResult, entityIndexResult, policyResult] = await Promise.allSettled([
-    projectDataService.getAllHighConfidenceKnowledge(
-      env,
-      tokenData.projectId,
-      minConfidence,
-      highConfidenceLimit,
-      perEntityLimit
-    ),
-    projectDataService.getKnowledgeEntityIndex(env, tokenData.projectId, entityIndexLimit),
-    projectDataService.getActivePolicies(env, tokenData.projectId),
-  ]);
+  const [knowledgeResult, entityIndexResult, policyResult, ideaSliceResult] =
+    await Promise.allSettled([
+      projectDataService.getAllHighConfidenceKnowledge(
+        env,
+        tokenData.projectId,
+        minConfidence,
+        highConfidenceLimit,
+        perEntityLimit
+      ),
+      projectDataService.getKnowledgeEntityIndex(env, tokenData.projectId, entityIndexLimit),
+      projectDataService.getActivePolicies(env, tokenData.projectId),
+      // Already isolated internally; a failure degrades to "no idea block".
+      buildInstructionIdeaSlice(env, tokenData.projectId, chatSessionId),
+    ]);
 
   // Each slice is shape-checked, not just status-checked. `allSettled` only reports
   // whether the RPC threw; a fulfilled-but-malformed value (an older DO revision mid-deploy,
@@ -217,6 +225,17 @@ export async function handleGetInstructions(
         entityIndexResult.status === 'rejected'
           ? serializeRejection(entityIndexResult.reason)
           : 'malformed_result',
+    });
+  }
+
+  let ideaSlice: { idea: InstructionIdeaContext; instructions: string[] } | null = null;
+  if (ideaSliceResult.status === 'fulfilled') {
+    ideaSlice = ideaSliceResult.value ?? null;
+  } else {
+    log.warn('mcp.get_instructions.idea_context_failed', {
+      projectId: tokenData.projectId,
+      chatSessionId,
+      error: serializeRejection(ideaSliceResult.reason),
     });
   }
 
@@ -297,6 +316,9 @@ export async function handleGetInstructions(
           },
         }
       : {}),
+    // Present only when this chat was started from an idea (Start work). The content is
+    // wrapped in the untrusted-data envelope; see operations/untrusted-text.ts.
+    ...(ideaSlice ? { idea: ideaSlice.idea } : {}),
     project: {
       id: project.id,
       name: project.name,
@@ -330,6 +352,7 @@ export async function handleGetInstructions(
             agentMessageChannelsEnabled: resolveAgentMessageChannelsConfig(env).enabled,
           })
         : []),
+      ...(ideaSlice ? ideaSlice.instructions : []),
       ...knowledgeInstructions,
       ...policyInstructions,
       ...(project.repoProvider === 'artifacts'

@@ -46,6 +46,8 @@ export async function submitInstantTask(input: {
   credentialAttributionUserId: string;
   credentialAttributionProjectId: string | null;
   credentialAttributionSource: CredentialSource;
+  /** Already-validated open idea; `acceptInstantSession` links it before the agent starts. */
+  sourceIdeaId?: string | null;
 }): Promise<{ taskId: string; sessionId: string; branchName: string; status: 'queued' }> {
   const { db, env, taskId, project, userId, profile, message } = input;
   const now = new Date().toISOString();
@@ -130,6 +132,7 @@ export async function submitInstantTask(input: {
     agentType,
     agentProfileId: profile?.profileId,
     skillId: profile?.skillId ?? null,
+    sourceIdeaId: input.sourceIdeaId ?? null,
     branch: input.branchName,
     attachments: input.attachments,
     overrides: {

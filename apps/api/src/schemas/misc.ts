@@ -65,6 +65,8 @@ export const StartChatSessionSchema = v.object({
   skillId: v.optional(v.string()),
   parentTaskId: v.optional(v.string()),
   contextSummary: v.optional(v.string()),
+  /** An open idea in this project this conversation starts from; linked before the agent starts. */
+  sourceIdeaId: v.optional(v.string()),
 });
 
 export const LinkTaskToChatSchema = v.object({

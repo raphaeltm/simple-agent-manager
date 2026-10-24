@@ -13,6 +13,7 @@ import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
+import { requireOpenIdeaForWorkStart } from '../operations/start-work-core';
 import { jsonValidator, StartChatSessionSchema } from '../schemas';
 import { acceptInstantSession, continueInstantSessionLaunch } from '../services/instant-session';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
@@ -135,6 +136,13 @@ chatStartRoutes.post(
       throw errors.badRequest(`message must be ${maxMessageLength} characters or less`);
     }
 
+    // Before any effects: a closed, foreign-project or non-idea `sourceIdeaId` must be
+    // rejected with nothing created. `acceptInstantSession` records the link once the
+    // session exists, before the agent gets its first prompt.
+    const sourceIdea = body.sourceIdeaId
+      ? await requireOpenIdeaForWorkStart(c.env, projectId, body.sourceIdeaId)
+      : null;
+
     const resolvedProfile =
       body.agentProfileId || body.skillId
         ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, c.env)
@@ -233,6 +241,7 @@ chatStartRoutes.post(
       agentType,
       agentProfileId: resolvedProfile?.profileId ?? null,
       skillId: resolvedProfile?.skillId ?? null,
+      sourceIdeaId: sourceIdea?.ideaId ?? null,
       overrides: {
         model: resolvedProfile?.model ?? null,
         effort: resolvedProfile?.effort ?? null,

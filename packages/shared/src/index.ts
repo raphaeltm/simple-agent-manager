@@ -11,6 +11,9 @@ export * from './harness-capabilities';
 export * from './provider-presets';
 export * from './pull-requests';
 
+// What starting work on an idea will do (profile/skill capability resolution)
+export * from './work-start';
+
 // Model Catalog
 export * from './model-catalog';
 

@@ -29,6 +29,10 @@ import { markTaskSubmitOperation, type TaskSubmitOperation } from '../lib/task-s
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
+import {
+  recordWorkStartIdeaLink,
+  requireOpenIdeaForWorkStart,
+} from '../operations/start-work-core';
 import { requireRepositoryAccess } from '../routes/projects/_helpers';
 import { type SubmitTaskSchema } from '../schemas';
 import { validateAttachments } from '../services/attachment-upload';
@@ -280,6 +284,14 @@ export async function submitTaskImplementation(
     maxLength: branchMaxLength,
   });
 
+  // Validate `sourceIdeaId` before any task effects: a foreign-project, non-idea or
+  // closed idea must be rejected with nothing created. The link itself is written once
+  // the chat session exists, before the agent receives its first prompt (both runtimes).
+  setOperation('source_idea_validation');
+  const sourceIdea = body.sourceIdeaId
+    ? await requireOpenIdeaForWorkStart(env, projectId, body.sourceIdeaId)
+    : null;
+
   // Resolve agent profile if specified.
   // Precedence: explicit task field > profile value > project default > platform default.
   setOperation('profile_resolution');
@@ -351,6 +363,8 @@ export async function submitTaskImplementation(
       credentialAttributionUserId: instantAttribution.userId,
       credentialAttributionProjectId: instantAttribution.projectId,
       credentialAttributionSource: instantAttribution.source,
+      // Linked inside `acceptInstantSession`, before the agent's first prompt.
+      sourceIdeaId: sourceIdea?.ideaId ?? null,
     });
     const titleConfig = getTaskTitleConfig(env);
     schedulePostSubmitWork({
@@ -623,6 +637,32 @@ export async function submitTaskImplementation(
     await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Session creation failed: ${errorMsg}`);
     log.error('task_submit.session_failed', { taskId, projectId, error: errorMsg });
     throw err; // Re-throw to return 500 to the frontend
+  }
+
+  // The idea link must exist before the agent's first prompt. The TaskRunner DO started
+  // below is alarm-driven, so this is still well ahead of it, and a failure here aborts
+  // the start rather than leaving a chat that works on an idea without being linked to it.
+  if (sourceIdea) {
+    setOperation('source_idea_link');
+    try {
+      await recordWorkStartIdeaLink(env, projectId, {
+        ideaId: sourceIdea.ideaId,
+        sessionId,
+        taskMode,
+      });
+    } catch (err) {
+      if (samReservation) throw err;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Idea link failed: ${errorMsg}`);
+      await projectDataService.stopSession(env, projectId, sessionId).catch((e) => {
+        log.error('task_submit.orphaned_session_stop_failed', {
+          projectId,
+          sessionId,
+          error: String(e),
+        });
+      });
+      throw err;
+    }
   }
 
   schedulePostSubmitWork({
