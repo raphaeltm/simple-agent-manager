@@ -130,9 +130,11 @@ The app's Playwright suite already renders real pages against mocked APIs. Reuse
 
    ```bash
    pnpm --filter "@simple-agent-manager/web^..." build   # once, if packages/*/dist is missing
-   npx playwright install --with-deps chromium            # once, if Chromium is missing
+   pnpm --filter @simple-agent-manager/web exec playwright install --with-deps chromium # once, if browser or OS deps are missing
    npx playwright test <slug>.local --project="Desktop (1280x800)"
    ```
+
+   Run capture tests in the SAM VM workspace (for example, through `exec_with_secrets`), not a browser-disabled host shell. Lightweight SAM workspaces skip the repository devcontainer bootstrap, so do not assume it supplied Chromium's Linux system libraries. `install --with-deps` uses `sudo` to add those libraries as well as the browser binary. If system package installation is denied or needs approval, stop and report the exact command and target; do not retry with raw `apt-get`, change permissions, or substitute a mock screenshot.
 
 5. Compress the images: `pnpm --filter @simple-agent-manager/www compress:screenshots public/images/blog/<slug>`.
 6. Open every image and look at it. It must show the intended state, with nothing clipped, no onboarding or dev overlays, no page content bleeding through a panel, and no real data. Then delete the local spec.
