@@ -9,6 +9,7 @@
  * (rule 56).
  */
 import { expect, type Page, test } from '@playwright/test';
+import type { IdeaCounts, IdeaDerivedState } from '@simple-agent-manager/shared';
 
 import {
   assertNoClippedOverflow,
@@ -31,8 +32,7 @@ const MOCK_USER = makeMockUser({
   role: 'superadmin',
 });
 
-type DerivedState =
-  'not-started' | 'working' | 'review' | 'merged' | 'stuck' | 'question' | 'done' | 'parked';
+type DerivedState = IdeaDerivedState;
 
 interface IdeaOverrides {
   ideaId: string;
@@ -43,10 +43,11 @@ interface IdeaOverrides {
   agentLabel?: string | null;
   sessionTopic?: string | null;
   prNumber?: number;
-  counts?: { updates: number; chats: number; files: number; pullRequests: number };
+  counts?: Partial<IdeaCounts>;
   filedByAgent?: boolean;
   filedBy?: string | null;
   viaConnector?: string | null;
+  checksState?: 'pending' | 'success' | 'failure' | 'neutral' | null;
 }
 
 const NEEDS_YOU: DerivedState[] = ['question', 'stuck', 'merged'];
@@ -87,10 +88,12 @@ function makeIdea(overrides: IdeaOverrides) {
         ? {
             url: `https://github.com/northwind/payments/pull/${overrides.prNumber ?? 482}`,
             number: overrides.prNumber ?? 482,
+            // `source` comes from T2's PullRequestRef, which IdeaPullRequest extends.
+            source: 'task_output',
             state: state === 'review' ? 'open' : 'merged',
             isDraft: false,
             title: 'Retry failed webhook deliveries',
-            checksState: 'success',
+            checksState: overrides.checksState === undefined ? 'success' : overrides.checksState,
             mergedAt: state === 'review' ? null : '2026-10-23T08:00:00Z',
             updatedAt: '2026-10-23T11:58:00Z',
             stale: false,
@@ -98,7 +101,14 @@ function makeIdea(overrides: IdeaOverrides) {
         : null,
       note: overrides.note ?? null,
     },
-    counts: overrides.counts ?? { updates: 0, chats: 0, files: 0, pullRequests: 0 },
+    counts: {
+      updates: 0,
+      chats: 0,
+      files: 0,
+      pullRequests: 0,
+      atLeast: [],
+      ...(overrides.counts ?? {}),
+    },
     filedByAgent: overrides.filedByAgent ?? false,
     filedBy: overrides.filedBy ?? null,
     viaConnector: overrides.viaConnector ?? null,
@@ -221,6 +231,38 @@ const STRESS_IDEAS = [
     ideaId: 'idea-connector-long',
     title: 'Filed through a connector with a very long name',
     viaConnector: 'Claude Research 🧪 & planning '.repeat(6),
+  }),
+  // Counts the server could only establish a minimum for: a busy idea that hit the per-idea
+  // link cap reads "50+ files", not "50 files".
+  makeIdea({
+    ideaId: 'idea-capped-counts',
+    title: 'An idea with more linked work than one page can count',
+    state: 'working',
+    counts: {
+      updates: 137,
+      chats: 50,
+      files: 50,
+      pullRequests: 50,
+      atLeast: ['chats', 'files', 'pullRequests'],
+    },
+  }),
+  // A pull request whose checks are red, and one with no checks at all: the row says so
+  // rather than implying a green build.
+  makeIdea({
+    ideaId: 'idea-checks-failed',
+    title: 'Pull request with failing checks',
+    state: 'review',
+    prNumber: 601,
+    checksState: 'failure',
+    counts: { pullRequests: 1 },
+  }),
+  makeIdea({
+    ideaId: 'idea-checks-none',
+    title: 'Pull request with no checks reported',
+    state: 'review',
+    prNumber: 602,
+    checksState: null,
+    counts: { pullRequests: 1 },
   }),
   ...Array.from({ length: 24 }, (_, index) =>
     makeIdea({

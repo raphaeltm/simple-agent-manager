@@ -188,8 +188,11 @@ export function ideaCountsLine(counts: IdeaListItem['counts']): string | null {
   if (counts.updates > 0) parts.push(plural(counts.updates, 'update', atLeast.has('updates')));
   if (counts.chats > 0) parts.push(plural(counts.chats, 'chat', atLeast.has('chats')));
   if (counts.files > 0) parts.push(plural(counts.files, 'file', atLeast.has('files')));
+  // "PR", not "pull request": this line sits under a two-line title in a 340px side column,
+  // and the long label is what pushed it into truncating mid-word ("1 pull requ…"). The page
+  // already calls them PRs everywhere else ("PR #482 is open").
   if (counts.pullRequests > 0) {
-    parts.push(plural(counts.pullRequests, 'pull request', atLeast.has('pullRequests')));
+    parts.push(plural(counts.pullRequests, 'PR', atLeast.has('pullRequests')));
   }
   return parts.length > 0 ? parts.join(' · ') : null;
 }

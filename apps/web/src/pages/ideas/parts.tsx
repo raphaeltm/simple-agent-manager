@@ -329,7 +329,14 @@ export function IdeaRow({
       meta={
         <span className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="sr-only">{IDEA_STATE_LABELS[item.derived.state]}.</span>
-          {counts && <span className="min-w-0 truncate">{counts}</span>}
+          {/*
+            Wraps rather than truncates. Four counts at their widest — "137 updates · 50+
+            chats · 50+ files · 50+ PRs" — do not fit a 375px row or a 340px side column, and
+            truncating cut a count in half ("50+ …"), which is worse than a second line. The
+            content is short words and numbers, so there is nothing here that can refuse to
+            wrap the way a long unbroken title can.
+          */}
+          {counts && <span className="min-w-0">{counts}</span>}
           {item.viaConnector && <ConnectorChip clientName={item.viaConnector} />}
         </span>
       }

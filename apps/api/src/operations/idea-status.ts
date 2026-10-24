@@ -162,9 +162,7 @@ function status(
 }
 
 /** The newest merged pull request, by merge time. */
-function newestMerged(
-  pullRequests: readonly IdeaPullRequest[]
-): IdeaPullRequest | null {
+function newestMerged(pullRequests: readonly IdeaPullRequest[]): IdeaPullRequest | null {
   const merged = pullRequests.filter((pr) => pr.state === 'merged');
   if (merged.length === 0) return null;
   return merged.reduce((best, pr) => ((pr.mergedAt ?? '') > (best.mergedAt ?? '') ? pr : best));
