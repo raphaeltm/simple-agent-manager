@@ -59,8 +59,10 @@ function relations(root: JsonRecord): LinkRelation[] {
 /**
  * Normalises one capped list.
  *
- * `total` falls back to the number of surviving rows rather than to the server's claim, so a
- * body with `total: 9` and no `items` cannot render "9" above an empty list.
+ * A `total` above `items.length` is kept: that is what `truncated` means, and the capped
+ * lists exist precisely to report "more than you can see". A total that is absent, not a
+ * finite number, or SMALLER than the rows actually sent is incoherent, and falls back to the
+ * number of rows that survived parsing — the one count that is certainly true.
  */
 function cappedList<T>(value: unknown, parse: (row: JsonRecord) => T | null): CappedList<T> {
   if (!isJsonRecord(value)) return emptyCappedList<T>();
