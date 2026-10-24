@@ -3,6 +3,8 @@ import { Lightbulb } from 'lucide-react';
 import type { FC } from 'react';
 import { Link } from 'react-router';
 
+import { projectIdeaPath } from '../../../lib/project-routes';
+
 export interface IdeaNodeData {
   label: string;
   status: string;
@@ -25,7 +27,7 @@ export const IdeaNode: FC<NodeProps> = ({ id, data }) => {
       <Handle type="target" position={Position.Top} className="!bg-[#ffdd44] !w-2 !h-2" />
 
       <Link
-        to={`/projects/${encodeURIComponent(d.projectId)}/ideas/${encodeURIComponent(id)}`}
+        to={projectIdeaPath(d.projectId, id)}
         className="nodrag flex items-center gap-2 mb-1 rounded-sm focus-visible:outline-2 focus-visible:outline-focus-ring"
         aria-label={`Open idea: ${d.label || 'Idea'}`}
       >
