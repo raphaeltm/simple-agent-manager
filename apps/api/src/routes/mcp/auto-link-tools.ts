@@ -17,6 +17,17 @@ export function isAutoLinkTool(name: string): boolean {
   return name in RELATIONS;
 }
 
+function linkedResourceId(
+  name: string,
+  kind: 'idea' | 'file',
+  output: Record<string, unknown>,
+  args: Record<string, unknown>
+): unknown {
+  if (name === 'create_idea') return output['ideaId'];
+  if (name === 'upload_to_library') return output['fileId'];
+  return kind === 'idea' ? args['ideaId'] : args['fileId'];
+}
+
 /** Schedule after a successful real tool result, never on searches or failed calls. */
 export function scheduleToolAutoLink(
   name: string,
@@ -38,14 +49,7 @@ export function scheduleToolAutoLink(
     /* A successful tool may return prose. Inputs still identify existing resources. */
   }
   if (output['error']) return;
-  const id =
-    target[0] === 'idea'
-      ? name === 'create_idea'
-        ? output['ideaId']
-        : args['ideaId']
-      : name === 'upload_to_library'
-        ? output['fileId']
-        : args['fileId'];
+  const id = linkedResourceId(name, target[0], output, args);
   if (typeof id !== 'string' || !id) return;
   ctx.waitUntil(
     (async () => {

@@ -10,9 +10,11 @@ import {
   sanitizeUserInput,
 } from './_helpers';
 
+type McpRequestId = string | number | null;
+
 async function handle(
   unlink: boolean,
-  requestId: string | number | null,
+  requestId: McpRequestId,
   params: Record<string, unknown>,
   token: McpTokenData,
   env: Env
@@ -71,13 +73,13 @@ async function handle(
   }
 }
 export const handleLinkToIdea = (
-  requestId: string | number | null,
+  requestId: McpRequestId,
   params: Record<string, unknown>,
   token: McpTokenData,
   env: Env
 ) => handle(false, requestId, params, token, env);
 export const handleUnlinkFromIdea = (
-  requestId: string | number | null,
+  requestId: McpRequestId,
   params: Record<string, unknown>,
   token: McpTokenData,
   env: Env

@@ -197,24 +197,22 @@ async function contextData(env: Env, projectId: string, kind: LinkKind, id: stri
   };
 }
 
+function resourceEndpointId(link: ResourceLink, kind: LinkKind): string | null {
+  if (link.targetKind === kind) return link.targetId;
+  if (link.sourceKind === kind) return link.sourceId;
+  return null;
+}
+
 function toIdeas(
   data: Awaited<ReturnType<typeof contextData>>,
   links: ResourceLink[]
 ): LinkedIdea[] {
   return mergeRelations(
     links.flatMap((l) => {
-      const id = l.targetKind === 'idea' ? l.targetId : l.sourceKind === 'idea' ? l.sourceId : null;
+      const id = resourceEndpointId(l, 'idea');
       const row = id && data.ideas.get(id);
-      return row
-        ? [
-            {
-              ideaId: row.id,
-              title: row.title,
-              status: row.status,
-              relations: [l.relation],
-            } as LinkedIdea,
-          ]
-        : [];
+      if (!row) return [];
+      return [{ ideaId: row.id, title: row.title, status: row.status, relations: [l.relation] }];
     }),
     (i) => i.ideaId
   );
@@ -225,19 +223,18 @@ function toFiles(
 ): LinkedFile[] {
   return mergeRelations(
     links.flatMap((l) => {
-      const id = l.targetKind === 'file' ? l.targetId : l.sourceKind === 'file' ? l.sourceId : null;
+      const id = resourceEndpointId(l, 'file');
       const row = id && data.files.get(id);
-      return row
-        ? [
-            {
-              fileId: row.id,
-              filename: row.filename,
-              directory: row.directory,
-              relations: [l.relation],
-              bySessionId: l.sourceKind === 'session' ? l.sourceId : null,
-            } as LinkedFile,
-          ]
-        : [];
+      if (!row) return [];
+      return [
+        {
+          fileId: row.id,
+          filename: row.filename,
+          directory: row.directory,
+          relations: [l.relation],
+          bySessionId: l.sourceKind === 'session' ? l.sourceId : null,
+        },
+      ];
     }),
     (f) => f.fileId
   );
@@ -249,21 +246,19 @@ function toSessions(
   const rows = new Map(data.sessions.map((s) => [s.id, s]));
   return mergeRelations(
     links.flatMap((l) => {
-      const id =
-        l.sourceKind === 'session' ? l.sourceId : l.targetKind === 'session' ? l.targetId : null;
+      const id = resourceEndpointId(l, 'session');
       const row = id && rows.get(id);
-      return row
-        ? [
-            {
-              sessionId: row.id,
-              topic: row.topic,
-              status: row.status,
-              lastActivityAt: row.updatedAt,
-              taskId: row.taskId,
-              relations: [l.relation],
-            } as LinkedSession,
-          ]
-        : [];
+      if (!row) return [];
+      return [
+        {
+          sessionId: row.id,
+          topic: row.topic,
+          status: row.status,
+          lastActivityAt: row.updatedAt,
+          taskId: row.taskId,
+          relations: [l.relation],
+        },
+      ];
     }),
     (s) => s.sessionId
   );
@@ -316,6 +311,33 @@ function toPrs(
   return unique(refs, (r) => r.url);
 }
 
+function strongIdeaSessionIds(links: ResourceLink[], ideaId: string): string[] {
+  return links
+    .filter(
+      (link) =>
+        link.sourceKind === 'session' &&
+        link.targetKind === 'idea' &&
+        link.targetId === ideaId &&
+        isStrongLinkRelation(link.relation)
+    )
+    .map((link) => link.sourceId);
+}
+
+function relatedIdeaLinks(links: ResourceLink[], ideaId: string): ResourceLink[] {
+  return links
+    .filter((link) => link.relation === 'related')
+    .map((link) => {
+      const relatedId = link.sourceId === ideaId ? link.targetId : link.sourceId;
+      return {
+        ...link,
+        sourceKind: 'idea',
+        sourceId: relatedId,
+        targetKind: 'idea',
+        targetId: relatedId,
+      };
+    });
+}
+
 export async function getIdeaContext(
   env: Env,
   projectId: string,
@@ -323,44 +345,26 @@ export async function getIdeaContext(
 ): Promise<IdeaContext> {
   const data = await contextData(env, projectId, 'idea', ideaId);
   const direct = linkFor(data.links, 'idea', ideaId);
-  const strongIds = direct
-    .filter(
-      (l) =>
-        l.sourceKind === 'session' &&
-        l.targetKind === 'idea' &&
-        l.targetId === ideaId &&
-        isStrongLinkRelation(l.relation)
-    )
-    .map((l) => l.sourceId);
+  const strongIds = strongIdeaSessionIds(direct, ideaId);
+  const strongIdSet = new Set(strongIds);
   const assetLinks = data.links.filter(
     (l) =>
       (l.sourceKind === 'idea' && l.sourceId === ideaId) ||
-      (l.sourceKind === 'session' && strongIds.includes(l.sourceId))
+      (l.sourceKind === 'session' && strongIdSet.has(l.sourceId))
   );
   const prs = toPrs(data, assetLinks, strongIds);
   const storedPrCount = new Set(
     assetLinks.filter((l) => l.targetKind === 'pr').map((l) => l.targetId)
   ).size;
   const prIncomplete =
-    (data.totals?.strongSessions ?? 0) > new Set(strongIds).size ||
+    (data.totals?.strongSessions ?? 0) > strongIdSet.size ||
     (data.totals?.prs ?? 0) > storedPrCount;
   return {
     sessions: capped(toSessions(data, direct), data.cap, data.totals?.sessions),
     files: capped(toFiles(data, assetLinks), data.cap, data.totals?.files),
     pullRequests: capped(prs, data.cap, prs.length, prIncomplete),
     relatedIdeas: capped(
-      toIdeas(
-        data,
-        direct
-          .filter((l) => l.relation === 'related')
-          .map((l) => ({
-            ...l,
-            sourceKind: 'idea' as const,
-            sourceId: l.sourceId === ideaId ? l.targetId : l.sourceId,
-            targetKind: 'idea' as const,
-            targetId: l.sourceId === ideaId ? l.targetId : l.sourceId,
-          }))
-      ),
+      toIdeas(data, relatedIdeaLinks(direct, ideaId)),
       data.cap,
       data.totals?.ideas
     ),
@@ -388,20 +392,22 @@ export async function getFileContext(
   fileId: string
 ): Promise<FileContext> {
   const data = await contextData(env, projectId, 'file', fileId);
-  const strongSessionIds = data.links
-    .filter(
-      (l) =>
-        l.targetKind === 'file' &&
-        l.targetId === fileId &&
-        l.sourceKind === 'session' &&
-        isStrongLinkRelation(l.relation)
-    )
-    .map((l) => l.sourceId);
+  const strongSessionIds = new Set(
+    data.links
+      .filter(
+        (l) =>
+          l.targetKind === 'file' &&
+          l.targetId === fileId &&
+          l.sourceKind === 'session' &&
+          isStrongLinkRelation(l.relation)
+      )
+      .map((l) => l.sourceId)
+  );
   const ideaLinks = data.links.filter(
     (l) =>
       (l.sourceKind === 'idea' && l.targetKind === 'file' && l.targetId === fileId) ||
       (l.sourceKind === 'session' &&
-        strongSessionIds.includes(l.sourceId) &&
+        strongSessionIds.has(l.sourceId) &&
         l.targetKind === 'idea' &&
         isStrongLinkRelation(l.relation))
   );
@@ -428,18 +434,17 @@ export async function getIdeaSessionLinks(env: Env, projectId: string, ideaId: s
       .filter((l) => l.sourceKind === 'session' && l.targetKind === 'idea' && l.targetId === ideaId)
       .flatMap((l) => {
         const row = sessions.get(l.sourceId);
-        return row
-          ? [
-              {
-                sessionId: row.id,
-                topic: row.topic,
-                status: row.status,
-                context: l.context,
-                linkedAt: l.firstAt,
-                relation: l.relation,
-              },
-            ]
-          : [];
+        if (!row) return [];
+        return [
+          {
+            sessionId: row.id,
+            topic: row.topic,
+            status: row.status,
+            context: l.context,
+            linkedAt: l.firstAt,
+            relation: l.relation,
+          },
+        ];
       }),
     (s) => s.sessionId
   );

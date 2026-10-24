@@ -118,7 +118,7 @@ export async function recordLink(env: Env, projectId: string, input: LinkWrite):
           ?.slice(0, config.contextMaxLength)
           .split('')
           .map((ch) => {
-            const code = ch.charCodeAt(0);
+            const code = ch.codePointAt(0) ?? 0;
             return code < 32 || code === 127 ? ' ' : ch;
           })
           .join('') ?? null,

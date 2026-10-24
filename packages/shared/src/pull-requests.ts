@@ -3,7 +3,7 @@ export function canonicalProjectPullRequestUrl(
   value: string,
   projectRepository: string
 ): string | null {
-  const match = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/([0-9]+)\/?$/.exec(value);
+  const match = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)\/?$/.exec(value);
   if (!match || match[1]?.toLowerCase() !== projectRepository.toLowerCase()) return null;
   const number = Number(match[2]);
   if (!Number.isSafeInteger(number) || number < 1) return null;
