@@ -5,13 +5,21 @@
  * On first render of the commented message it finds the quote as a DOM range, paints it, and
  * scrolls the words (not the whole message) to `quoteRatio` of the visible height. If the
  * words cannot be found it says so and shows the message from its top. Scrolling near either
- * edge loads more; loading earlier keeps the view still. A "Back to the comment" pill appears
- * whenever the words are off screen.
+ * edge loads more; loading at either edge keeps the view still. A "Back to the comment" pill
+ * appears whenever the words are off screen.
  */
 import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import { Spinner } from '@simple-agent-manager/ui';
 import { ArrowDown, ArrowUp, MessageSquareQuote } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { AcpConversationItemView } from '../../components/project-message-view/AcpConversationItemView';
 import type { DisplayItem } from '../../components/project-message-view/tool-call-groups';
@@ -66,6 +74,15 @@ interface ReaderConversationProps {
   bottomInset: number;
 }
 
+/**
+ * Every state of an edge is one height. A shorter loading row would move the conversation:
+ * above it, everything below shifts up; at the bottom of a conversation scrolled to its end,
+ * the browser clamps the scroll position and everything in view drops.
+ */
+function EdgeRow({ children }: { children: ReactNode }) {
+  return <div className="flex min-h-12 items-center justify-center px-4">{children}</div>;
+}
+
 function Edge({
   side,
   hasMore,
@@ -79,25 +96,26 @@ function Edge({
 }) {
   if (loading) {
     return (
-      <div
-        className="flex items-center justify-center gap-2 py-3 text-xs text-fg-muted"
-        role="status"
-      >
-        <Spinner size="sm" />
-        {side === 'earlier' ? 'Loading earlier messages…' : 'Loading later messages…'}
-      </div>
+      <EdgeRow>
+        <span className="flex items-center gap-2 text-xs text-fg-muted" role="status">
+          <Spinner size="sm" />
+          {side === 'earlier' ? 'Loading earlier messages…' : 'Loading later messages…'}
+        </span>
+      </EdgeRow>
     );
   }
   if (!hasMore) {
     return (
-      <p className="m-0 px-4 py-3 text-center text-xs text-fg-muted">
-        {side === 'earlier' ? 'Start of the chat' : 'Latest message'}
-      </p>
+      <EdgeRow>
+        <p className="m-0 text-center text-xs text-fg-muted">
+          {side === 'earlier' ? 'Start of the chat' : 'Latest message'}
+        </p>
+      </EdgeRow>
     );
   }
   const Icon = side === 'earlier' ? ArrowUp : ArrowDown;
   return (
-    <div className="flex justify-center px-4 py-2">
+    <EdgeRow>
       <button
         type="button"
         onClick={onLoad}
@@ -107,7 +125,7 @@ function Edge({
         <Icon size={13} aria-hidden="true" />
         {side === 'earlier' ? 'Earlier messages' : 'Later messages'}
       </button>
-    </div>
+    </EdgeRow>
   );
 }
 

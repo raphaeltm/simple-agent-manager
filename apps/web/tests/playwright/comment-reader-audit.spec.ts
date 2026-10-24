@@ -179,6 +179,16 @@ interface Scenario {
   contextStatus?: number;
   inboxThreads?: ReturnType<typeof thread>[];
   viewerAccess?: 'owner' | 'grantee' | 'reader';
+  /** Earlier/later pages wait for this, so a test can look at the reader while one loads. */
+  holdPages?: Promise<void>;
+}
+
+function deferred() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
 }
 
 async function setupMocks(page: Page, scenario: Scenario = {}) {
@@ -243,6 +253,7 @@ async function setupMocks(page: Page, scenario: Scenario = {}) {
       return route.fulfill({ json: { comments: threads } });
     }
     if (pathname === `${sessionBase}/messages`) {
+      if (scenario.holdPages) await scenario.holdPages;
       // One page each way: the earlier or later rows, then nothing more.
       const rowsForPage = searchParams.has('after') ? scenario.laterRows : scenario.earlierRows;
       return route.fulfill({ json: { messages: rowsForPage ?? [], hasMore: false } });
@@ -350,7 +361,7 @@ test.describe('Comment reader', () => {
     await expectQuoteOnScreen(page, 'the ledger write happens before');
   });
 
-  test('loads earlier messages above without losing the comment', async ({ page }) => {
+  test('loads earlier messages above without moving what is in view', async ({ page }) => {
     const rows = conversation();
     seq = 100;
     const earlier = [
@@ -361,19 +372,31 @@ test.describe('Comment reader', () => {
         NOW - 5 * HOUR + MIN
       ),
     ];
-    await setupMocks(page, { rows, hasMoreBefore: true, earlierRows: earlier });
+    const page1 = deferred();
+    await setupMocks(page, {
+      rows,
+      hasMoreBefore: true,
+      earlierRows: earlier,
+      holdPages: page1.promise,
+    });
     await openReader(page);
     const earlierButton = page.getByRole('button', { name: 'Earlier messages' });
     await earlierButton.scrollIntoViewIfNeeded();
-    // What the reader is looking at must not move when older messages arrive above it.
+    // What the reader is looking at must not move while older messages load, nor when they
+    // arrive above it.
     const question = page.getByText('Why is the payments webhook retrying so much?');
     const before = await question.boundingBox();
     await earlierButton.click();
+    await expect(page.getByText('Loading earlier messages…')).toBeVisible();
+    const loading = await question.boundingBox();
+    page1.release();
     await expect(page.getByText('Earlier: can you look at the payments service?')).toBeAttached();
     await expect(page.getByText('Start of the chat')).toBeAttached();
     await page.waitForTimeout(300);
     const after = await question.boundingBox();
-    expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeLessThanOrEqual(2);
+    expect(before).not.toBeNull();
+    expect(Math.abs((loading?.y ?? 0) - (before?.y ?? 0))).toBeLessThanOrEqual(1);
+    expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeLessThanOrEqual(1);
     await checkLayout(page);
     await screenshot(page, 'comment-reader-earlier-loaded');
     // The comment is one tap away.
@@ -383,30 +406,50 @@ test.describe('Comment reader', () => {
     await expectQuoteOnScreen(page, 'the ledger write happens before');
   });
 
-  test('loads later messages below and keeps the comment in place', async ({ page }) => {
+  test('loads later messages below without moving what is in view', async ({ page }) => {
     const rows = conversation();
     seq = 200;
     const later = [
       row('u-9', 'user', 'Later: did the deploy go out?', NOW - 20 * MIN),
       ...streamed('a-9', 'Yes. The deploy finished and the retries stopped.', NOW - 19 * MIN),
     ];
-    await setupMocks(page, { rows, hasMoreAfter: true, laterRows: later });
+    const page1 = deferred();
+    await setupMocks(page, {
+      rows,
+      hasMoreAfter: true,
+      laterRows: later,
+      holdPages: page1.promise,
+    });
     await openReader(page);
-    const anchorRow = page.locator('[data-reader-anchor="true"]');
-    const before = await anchorRow.boundingBox();
+    // "Later messages" is at the very end of the conversation, which is where a reader is when
+    // they reach it. There the browser clamps the scroll position if the end gets shorter.
+    await page.locator('[data-reader-scroller]').evaluate((scroller) => {
+      scroller.scrollTop = scroller.scrollHeight;
+    });
+    await page.waitForTimeout(200);
+    const lastId = await page.locator('[data-reader-item]').last().getAttribute('data-reader-item');
+    const lastShown = page.locator(`[data-reader-item="${lastId}"]`);
+    const before = await lastShown.boundingBox();
     const laterButton = page.getByRole('button', { name: 'Later messages' });
     await laterButton.click();
+    await expect(page.getByText('Loading later messages…')).toBeVisible();
+    const loading = await lastShown.boundingBox();
+    page1.release();
     await expect(page.getByText('Later: did the deploy go out?')).toBeAttached();
     await expect(page.getByText('Latest message')).toBeAttached();
     await expect(laterButton).toHaveCount(0);
-    // Clicking scrolled the button into view; bring the comment back and check it is intact.
+    await page.waitForTimeout(300);
+    const after = await lastShown.boundingBox();
+    expect(before).not.toBeNull();
+    expect(Math.abs((loading?.y ?? 0) - (before?.y ?? 0))).toBeLessThanOrEqual(1);
+    expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeLessThanOrEqual(1);
+    await checkLayout(page);
+    await screenshot(page, 'comment-reader-later-loaded');
+    // The comment is one tap away.
     const back = page.getByRole('button', { name: 'Back to the comment' });
     if (await back.isVisible()) await back.click();
     await page.waitForTimeout(300);
     await expectQuoteOnScreen(page, 'the ledger write happens before');
-    expect(before).not.toBeNull();
-    await checkLayout(page);
-    await screenshot(page, 'comment-reader-later-loaded');
   });
 
   test('long title, long comment and an unbroken URL wrap without overflow', async ({ page }) => {
