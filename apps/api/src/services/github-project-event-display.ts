@@ -45,37 +45,33 @@ function displayUrlForEvent(
   event: GitHubWebhookEvent,
   payload: Record<string, unknown>
 ): string | null {
-  if (event.event === 'issue_comment') {
-    const commentUrl = stringValue(recordValue(payload.comment)?.html_url);
-    if (commentUrl) return commentUrl;
+  const key = displayPayloadKey(event.event);
+  const item = recordValue(payload[key]);
+  return (
+    stringValue(item?.html_url) ??
+    (event.event === 'check_run' ? stringValue(item?.details_url) : null) ??
+    stringValue(recordValue(payload.repository)?.html_url)
+  );
+}
+
+function displayPayloadKey(event: string): string {
+  switch (event) {
+    case 'issue_comment':
+    case 'pull_request_review_comment':
+      return 'comment';
+    case 'issues':
+      return 'issue';
+    case 'pull_request':
+      return 'pull_request';
+    case 'pull_request_review':
+      return 'review';
+    case 'check_run':
+      return 'check_run';
+    case 'workflow_run':
+      return 'workflow_run';
+    default:
+      return 'repository';
   }
-  if (event.event === 'issues') {
-    const issueUrl = stringValue(recordValue(payload.issue)?.html_url);
-    if (issueUrl) return issueUrl;
-  }
-  if (event.event === 'pull_request') {
-    const pullRequestUrl = stringValue(recordValue(payload.pull_request)?.html_url);
-    if (pullRequestUrl) return pullRequestUrl;
-  }
-  if (event.event === 'pull_request_review') {
-    const reviewUrl = stringValue(recordValue(payload.review)?.html_url);
-    if (reviewUrl) return reviewUrl;
-  }
-  if (event.event === 'pull_request_review_comment') {
-    const reviewCommentUrl = stringValue(recordValue(payload.comment)?.html_url);
-    if (reviewCommentUrl) return reviewCommentUrl;
-  }
-  if (event.event === 'check_run') {
-    const checkRunUrl =
-      stringValue(recordValue(payload.check_run)?.html_url) ??
-      stringValue(recordValue(payload.check_run)?.details_url);
-    if (checkRunUrl) return checkRunUrl;
-  }
-  if (event.event === 'workflow_run') {
-    const workflowRunUrl = stringValue(recordValue(payload.workflow_run)?.html_url);
-    if (workflowRunUrl) return workflowRunUrl;
-  }
-  return stringValue(recordValue(payload.repository)?.html_url) ?? null;
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {

@@ -43,6 +43,12 @@ export interface PullRequestSnapshot extends ParsedPullRequestUrl {
   updatedAt: string;
 }
 
+function refreshedState(pr: Record<string, unknown>): PullRequestState['state'] {
+  if (pr.merged === true) return 'merged';
+  if (pr.state === 'closed') return 'closed';
+  return 'open';
+}
+
 /** A URL-only writer creates a placeholder; it cannot overwrite webhook state. */
 export async function ensurePullRequest(
   env: Env,
@@ -244,7 +250,7 @@ async function refreshOne(
   await upsertPullRequestSnapshot(env, projectId, {
     ...ref,
     title: str(pr.title),
-    state: pr.merged === true ? 'merged' : pr.state === 'closed' ? 'closed' : 'open',
+    state: refreshedState(pr),
     isDraft: pr.draft === true,
     headRef: str(nested('head').ref),
     headSha: str(nested('head').sha),
@@ -305,18 +311,17 @@ export async function getPullRequestStates(
     const row = byUrl.get(parsed.url);
     const stale =
       !row?.last_synced_at || Date.now() - Date.parse(row.last_synced_at) > ttlSeconds * 1000;
-    result[parsed.url] =
-      row && row.last_synced_at
-        ? {
-            state: row.state,
-            isDraft: Boolean(row.is_draft),
-            title: row.title,
-            checksState: row.checks_state,
-            mergedAt: row.merged_at,
-            updatedAt: row.updated_at,
-            stale,
-          }
-        : null;
+    result[parsed.url] = row?.last_synced_at
+      ? {
+          state: row.state,
+          isDraft: Boolean(row.is_draft),
+          title: row.title,
+          checksState: row.checks_state,
+          mergedAt: row.merged_at,
+          updatedAt: row.updated_at,
+          stale,
+        }
+      : null;
     if (settings && stale && ctx.execCtx && scheduled < settings.cap) {
       scheduled++;
       ctx.execCtx.waitUntil(

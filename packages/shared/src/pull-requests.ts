@@ -3,7 +3,7 @@ export function canonicalProjectPullRequestUrl(
   value: string,
   projectRepository: string
 ): string | null {
-  const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/([1-9][0-9]*)\/?$/i.exec(
+  const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/([1-9]\d*)\/?$/i.exec(
     value.trim()
   );
   if (!match) return null;

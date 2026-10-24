@@ -6,7 +6,10 @@ import {
   upsertPullRequestSnapshot,
 } from '../operations/pull-request-core';
 import { resolveAdminSetting } from './admin-settings';
-import { findProjectsForGitHubRepository } from './github-project-repositories';
+import {
+  findProjectsForGitHubRepository,
+  type GitHubProjectCandidate,
+} from './github-project-repositories';
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -33,58 +36,77 @@ export async function ingestPullRequestWebhook(
   ).filter((project) => project.repository.toLowerCase() === repositoryFullName);
   if (projects.length === 0 || !repositoryFullName) return;
 
-  if (event === 'pull_request') {
-    const action = string(payload.action);
-    if (
-      !action ||
-      ![
-        'opened',
-        'edited',
-        'closed',
-        'reopened',
-        'synchronize',
-        'ready_for_review',
-        'converted_to_draft',
-      ].includes(action)
-    )
-      return;
-    const pr = record(payload.pull_request);
-    const head = record(pr?.head);
-    const base = record(pr?.base);
-    const author = record(pr?.user);
-    const number = typeof pr?.number === 'number' ? pr.number : null;
-    const updatedAt = string(pr?.updated_at);
-    const createdAt = string(pr?.created_at);
-    const url = string(pr?.html_url);
-    if (!number || !url || !updatedAt || !createdAt) return;
-    const parsed = parseProjectPullRequestUrl(url, repositoryFullName);
-    if (!parsed || parsed.number !== number) return;
-    const state =
-      action === 'closed' || pr?.state === 'closed'
-        ? pr?.merged === true
-          ? 'merged'
-          : 'closed'
-        : 'open';
-    const snapshot: PullRequestSnapshot = {
-      ...parsed,
-      state,
-      title: string(pr?.title),
-      isDraft: pr?.draft === true,
-      headRef: string(head?.ref),
-      headSha: string(head?.sha),
-      baseRef: string(base?.ref),
-      authorLogin: string(author?.login),
-      mergedAt: string(pr?.merged_at),
-      closedAt: string(pr?.closed_at),
-      createdAt,
-      updatedAt,
-    };
-    await Promise.all(
-      projects.map((project) => upsertPullRequestSnapshot(env, project.id, snapshot))
-    );
-    return;
-  }
+  if (event === 'pull_request')
+    await ingestLifecycleWebhook(env, repositoryFullName, projects, payload);
+  else await ingestChecksWebhook(env, event, repositoryFullName, projects, payload);
+}
 
+async function ingestLifecycleWebhook(
+  env: Env,
+  repositoryFullName: string,
+  projects: GitHubProjectCandidate[],
+  payload: Record<string, unknown>
+): Promise<void> {
+  const action = string(payload.action);
+  if (
+    !action ||
+    ![
+      'opened',
+      'edited',
+      'closed',
+      'reopened',
+      'synchronize',
+      'ready_for_review',
+      'converted_to_draft',
+    ].includes(action)
+  )
+    return;
+  const pr = record(payload.pull_request);
+  const head = record(pr?.head);
+  const base = record(pr?.base);
+  const author = record(pr?.user);
+  const number = typeof pr?.number === 'number' ? pr.number : null;
+  const updatedAt = string(pr?.updated_at);
+  const createdAt = string(pr?.created_at);
+  const url = string(pr?.html_url);
+  if (!number || !url || !updatedAt || !createdAt) return;
+  const parsed = parseProjectPullRequestUrl(url, repositoryFullName);
+  if (parsed?.number !== number) return;
+  const state = lifecycleState(action, pr);
+  const snapshot: PullRequestSnapshot = {
+    ...parsed,
+    state,
+    title: string(pr?.title),
+    isDraft: pr?.draft === true,
+    headRef: string(head?.ref),
+    headSha: string(head?.sha),
+    baseRef: string(base?.ref),
+    authorLogin: string(author?.login),
+    mergedAt: string(pr?.merged_at),
+    closedAt: string(pr?.closed_at),
+    createdAt,
+    updatedAt,
+  };
+  await Promise.all(
+    projects.map((project) => upsertPullRequestSnapshot(env, project.id, snapshot))
+  );
+}
+
+function lifecycleState(
+  action: string,
+  pr: Record<string, unknown> | null
+): PullRequestSnapshot['state'] {
+  if (action !== 'closed' && pr?.state !== 'closed') return 'open';
+  return pr?.merged === true ? 'merged' : 'closed';
+}
+
+async function ingestChecksWebhook(
+  env: Env,
+  event: string,
+  repositoryFullName: string,
+  projects: GitHubProjectCandidate[],
+  payload: Record<string, unknown>
+): Promise<void> {
   if (
     !['completed', 'created', 'requested', 'rerequested', 'in_progress'].includes(
       String(payload.action)
@@ -104,17 +126,7 @@ export async function ingestPullRequestWebhook(
     (event === 'check_run' && !checkName)
   )
     return;
-  const conclusion = string(check?.conclusion);
-  const checksState =
-    payload.action !== 'completed'
-      ? 'pending'
-      : conclusion === 'success'
-        ? 'success'
-        : conclusion === 'neutral' || conclusion === 'skipped'
-          ? 'neutral'
-          : conclusion === null
-            ? 'pending'
-            : 'failure';
+  const checksState = checkState(string(check?.conclusion), payload.action);
   const updatedAt =
     string(check?.completed_at) ?? string(check?.started_at) ?? new Date().toISOString();
   // A new run ID for the same app/name supersedes an earlier failed attempt.
@@ -168,4 +180,14 @@ export async function ingestPullRequestWebhook(
         log.warn('github.pr_checks_update_capped', { projectId: project.id });
     })
   );
+}
+
+function checkState(
+  conclusion: string | null,
+  action: unknown
+): 'pending' | 'success' | 'failure' | 'neutral' {
+  if (action !== 'completed' || conclusion === null) return 'pending';
+  if (conclusion === 'success') return 'success';
+  if (conclusion === 'neutral' || conclusion === 'skipped') return 'neutral';
+  return 'failure';
 }

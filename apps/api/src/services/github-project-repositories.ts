@@ -25,7 +25,7 @@ export async function findProjectsForGitHubRepository(
 
   const db = drizzle(env.DATABASE, { schema });
   const where = predicates.length === 1 ? predicates[0] : or(...predicates);
-  return db
+  return await db
     .select({
       id: schema.projects.id,
       name: schema.projects.name,

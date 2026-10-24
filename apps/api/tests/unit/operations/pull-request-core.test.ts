@@ -18,14 +18,6 @@ vi.mock('../../../src/services/github-app', () => ({ getInstallationToken: mocks
 vi.mock('../../../src/services/admin-settings', () => ({ resolveAdminSetting: mocks.setting }));
 
 describe('pull request state refresh', () => {
-  it('uses one canonical PR identity across case and trailing slash', () => {
-    expect(
-      canonicalProjectPullRequestUrl('https://github.com/Acme/Widget/pull/7/', 'acme/widget')
-    ).toBe('https://github.com/acme/widget/pull/7');
-    expect(
-      canonicalProjectPullRequestUrl('https://github.com/else/other/pull/7', 'acme/widget')
-    ).toBeNull();
-  });
   let sqlite: Database.Database;
   let env: Env;
   const originalFetch = globalThis.fetch;
@@ -73,6 +65,15 @@ describe('pull request state refresh', () => {
     globalThis.fetch = originalFetch;
     sqlite.close();
     vi.clearAllMocks();
+  });
+
+  it('uses one canonical PR identity across case and trailing slash', () => {
+    expect(
+      canonicalProjectPullRequestUrl('https://github.com/Acme/Widget/pull/7/', 'acme/widget')
+    ).toBe('https://github.com/acme/widget/pull/7');
+    expect(
+      canonicalProjectPullRequestUrl('https://github.com/else/other/pull/7', 'acme/widget')
+    ).toBeNull();
   });
 
   function githubPr(number: number) {
