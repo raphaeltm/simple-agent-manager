@@ -245,6 +245,8 @@ interface MockOptions {
   sessionLinksStatus?: number;
   /** Omits `task.outputPrUrl`, so the header PR row comes only from linked work. */
   withoutOutputPr?: boolean;
+  /** Seeds the persisted tool-strip mode. Defaults to `labels` so counts are readable. */
+  stripMode?: 'icons' | 'labels' | 'hidden';
 }
 
 function makeChatSession(options: MockOptions) {
@@ -326,12 +328,16 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
   const session = makeChatSession(options);
   const state = { activity: 'idle', activityAt: NOW, statusError: null, currentPlan: null };
 
-  await page.addInitScript((userId) => {
-    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
-    // Labels mode makes the Related badge render as a number rather than a dot, so the "N+"
-    // rendering is visible in the screenshots and assertable.
-    window.localStorage.setItem('sam-session-tool-strip-mode', 'labels');
-  }, MOCK_USER.user.id);
+  await page.addInitScript(
+    ({ userId, stripMode }) => {
+      window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+      // Labels mode makes the Related badge render as a number rather than a dot, so the "N+"
+      // rendering is visible in the screenshots and assertable. One case seeds `icons`, the
+      // real default, to cover the dot.
+      window.localStorage.setItem('sam-session-tool-strip-mode', stripMode);
+    },
+    { userId: MOCK_USER.user.id, stripMode: options.stripMode ?? 'labels' }
+  );
 
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
@@ -598,32 +604,77 @@ test.describe('Linked work — chat Related panel', () => {
     await expect(stateless.getByTestId('pr-state-badge')).toHaveCount(0);
   });
 
-  test('the open panel does not overlap the tool rail', async ({ page }) => {
+  /*
+   * The panel COVERS the tool rail rather than sitting beside it — that is the shape every
+   * sibling drawer uses (Resources, Automation, Timeline all render `md:right-0` at a higher
+   * z-index than the rail's `absolute inset-y-0 right-0`). So the relationship worth asserting
+   * is not "disjoint boxes", which would contradict the design; it is "the panel's right edge
+   * meets the rail's right edge, which is the viewport edge, and the panel starts at or before
+   * the rail does". Asserted as measured coordinates, because the tool-rail incident behind
+   * `apps/web/.claude/rules/17-ui-visual-testing.md` passed 36 assertions and a screenshot
+   * review and was only caught by comparing two numbers.
+   */
+  test('the open panel is flush with the viewport edge and covers the rail column', async ({
+    page,
+  }) => {
     await openChat(page);
-    const railBefore = await page.getByTestId('session-tool-rail').boundingBox();
+    const railBox = await page.getByTestId('session-tool-rail').boundingBox();
     await page.getByTestId('session-tool-related').click();
     const drawer = page.getByTestId('session-linked-work-drawer');
     await expect(drawer).toBeVisible();
 
     const drawerBox = await drawer.boundingBox();
     const viewport = page.viewportSize();
+    expect(railBox).not.toBeNull();
     expect(drawerBox).not.toBeNull();
     expect(viewport).not.toBeNull();
 
-    // Measured coordinates, not a screenshot: the panel's right edge meets the viewport edge,
-    // and it never starts left of 0 (`apps/web/.claude/rules/17-ui-visual-testing.md`).
-    expect(Math.round(drawerBox!.x + drawerBox!.width)).toBeLessThanOrEqual(viewport!.width + 1);
+    const drawerRight = drawerBox!.x + drawerBox!.width;
+    const railRight = railBox!.x + railBox!.width;
+
+    // Flush with the viewport edge, and never starting off-screen to the left.
+    expect(Math.round(drawerRight)).toBeLessThanOrEqual(viewport!.width + 1);
     expect(drawerBox!.x).toBeGreaterThanOrEqual(-1);
+    // The two right edges coincide: no sliver of rail is left peeking out beside the panel.
+    expect(Math.abs(drawerRight - railRight)).toBeLessThanOrEqual(1);
+    // And the panel starts at or before the rail, so the rail's column is fully inside it.
+    expect(drawerBox!.x).toBeLessThanOrEqual(railBox!.x + 1);
 
     if (viewport!.width >= 768) {
-      // On desktop the panel is a rail beside the conversation; it must cover the tool rail's
-      // column rather than sit beside a rail that has moved.
-      expect(railBefore).not.toBeNull();
+      // Desktop: a rail beside the conversation, not the whole screen.
       expect(drawerBox!.width).toBeLessThan(viewport!.width);
+      expect(drawerBox!.width).toBeGreaterThan(railBox!.width);
     } else {
-      // On a phone it is full screen.
+      // Phone: full screen.
       expect(Math.round(drawerBox!.width)).toBe(viewport!.width);
     }
+  });
+
+  test('in the default icons mode the badge is a dot, not a number that would not fit', async ({
+    page,
+  }) => {
+    // Every other case seeds `labels` mode so the count is readable. `icons` is the DEFAULT,
+    // and its badge is a 7px dot: a regression that rendered "13+" into a 46px icon column
+    // would be invisible to the rest of this file.
+    await openChat(page, { stripMode: 'icons' });
+    const related = page.getByTestId('session-tool-related');
+    await expect(related).toBeVisible();
+    await expect(related).toHaveText('');
+    // The count still reaches a screen reader through the accessible name.
+    await expect(related).toHaveAttribute('aria-label', /13 or more items/);
+
+    const badge = related.locator('span[aria-hidden="true"]').first();
+    const badgeBox = await badge.boundingBox();
+    const railBox = await page.getByTestId('session-tool-rail').boundingBox();
+    expect(badgeBox).not.toBeNull();
+    expect(railBox).not.toBeNull();
+    // Measured, not assumed: the dot sits inside the rail's column.
+    expect(badgeBox!.x + badgeBox!.width).toBeLessThanOrEqual(railBox!.x + railBox!.width + 1);
+    expect(badgeBox!.width).toBeLessThan(12);
+
+    await related.click();
+    await expect(page.getByTestId('session-linked-work-drawer')).toBeVisible();
+    await capture(page, 'linked-work-rail-icons-mode');
   });
 
   test('the header chip names the idea being worked on and opens it', async ({ page }) => {
@@ -632,7 +683,10 @@ test.describe('Linked work — chat Related panel', () => {
     await expect(chip).toBeVisible();
     await expect(chip).toContainText('Working on');
     await expect(chip).toHaveAttribute('href', `/projects/${PROJECT_ID}/ideas/idea-1`);
-    await expect(chip).toHaveAttribute('aria-label', /Working on the idea/);
+    await expect(chip).toHaveAttribute(
+      'aria-label',
+      /^Open the idea this chat is working on: Reconcile the supersession ledger/
+    );
     await capture(page, 'linked-work-header-chip');
   });
 

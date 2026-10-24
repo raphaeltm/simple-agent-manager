@@ -17,7 +17,14 @@ export function isAutomationKind(value: string | undefined): value is Automation
 }
 
 /** What starts a new automation; chosen on the first step of the create flow. */
-export const AUTOMATION_STARTS = ['schedule', 'once', 'github', 'webhook', 'email', 'event'] as const;
+export const AUTOMATION_STARTS = [
+  'schedule',
+  'once',
+  'github',
+  'webhook',
+  'email',
+  'event',
+] as const;
 export type AutomationStart = (typeof AUTOMATION_STARTS)[number];
 
 export function isAutomationStart(value: string | null | undefined): value is AutomationStart {
@@ -42,9 +49,13 @@ export function isWorkflowRunView(value: string | null | undefined): value is Wo
   return WORKFLOW_RUN_VIEWS.includes(value as WorkflowRunView);
 }
 
-/** A chat in the project: the chats that automations start, message or run as workflow steps. */
-export const projectChatPath = (projectId: string, sessionId: string) =>
-  `/projects/${encodeURIComponent(projectId)}/chat/${encodeURIComponent(sessionId)}`;
+/**
+ * A chat in the project: the chats that automations start, message or run as workflow steps.
+ *
+ * Re-exported from `project-routes.ts`, which is where it lives now that linked work links to
+ * chats too. Automation's own importers keep this path.
+ */
+export { projectChatPath } from './project-routes';
 
 /** Overview list filters; also the target of old `?section=` links. */
 export const OVERVIEW_FILTERS = ['all', 'scheduled', 'reacting', 'once', 'stopped'] as const;

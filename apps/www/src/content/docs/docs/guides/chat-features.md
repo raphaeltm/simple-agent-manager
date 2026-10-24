@@ -245,12 +245,15 @@ file's preview in the library, or the pull request on GitHub.
 
 | Words you'll see                        | What happened                                                   |
 | --------------------------------------- | --------------------------------------------------------------- |
-| **Working on**, **Created**, **Edited** | The agent is working on that idea, wrote it, or changed it      |
+| **Working on**, **Created**, **Edited** | The chat is the work on that idea, wrote it, or changed it      |
 | **Read**, **Discussed**                 | The idea came up, but the chat is not the work on it            |
 | **Uploaded**, **Replaced**              | The chat added that library file, or wrote a new version of it  |
 | **Viewed**                              | The chat read the file                                          |
-| **Opened**                              | The chat opened that pull request                               |
 | **Linked**, **Related**                 | Someone — a person or an agent — connected the two deliberately |
+
+Pull requests are the exception: a pull request row shows its number and its state rather than a
+relation, because SAM links a chat to a pull request through the task that opened it rather than
+through a word.
 
 A count next to a group is occasionally shown as `12+`. That means SAM stopped counting rather
 than guess: the lists are read within a bounded budget, so when a chat has more linked work than

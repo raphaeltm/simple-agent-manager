@@ -9,12 +9,20 @@
  */
 import type { SessionContext } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render as rtlRender, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render as rtlRender,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import type { ReactElement, ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProjectMessageView } from '../../../../src/components/project-message-view';
+import { linkedWorkQueryKeys } from '../../../../src/lib/query-options';
 
 // ---------------------------------------------------------------------------
 // Mocks — the chat shell's dependencies, plus the one endpoint under test.
@@ -105,9 +113,12 @@ vi.mock('react-virtuoso', () => ({
 // Fixtures
 // ---------------------------------------------------------------------------
 
+/** Matches the mocked `useAuth` below: every authenticated query key is scoped by it. */
+const VIEWER_ID = 'user-1';
 const PROJECT_ID = 'proj-1';
 const SESSION_ID = 'sess-1';
 const PR_URL = 'https://github.com/owner/repo/pull/2425';
+const SESSION_LINKS_KEY = linkedWorkQueryKeys.session(VIEWER_ID, PROJECT_ID, SESSION_ID);
 
 function cappedList<T>(
   items: T[],
@@ -208,14 +219,18 @@ function render(ui: ReactElement) {
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </MemoryRouter>
   );
-  return rtlRender(ui, { wrapper: Wrapper });
+  return { ...rtlRender(ui, { wrapper: Wrapper }), queryClient };
 }
 
+/** Returns the query client, so a test can drive a real refetch through a cache invalidation. */
 async function renderChat() {
-  render(<ProjectMessageView projectId={PROJECT_ID} sessionId={SESSION_ID} />);
+  const { queryClient } = render(
+    <ProjectMessageView projectId={PROJECT_ID} sessionId={SESSION_ID} />
+  );
   // Liveness: the rail rendered, so the page did not crash. Without this every "is absent"
   // assertion below would also pass on a blank page.
-  return screen.findByTestId('session-tool-related');
+  await screen.findByTestId('session-tool-related');
+  return queryClient;
 }
 
 /** Opens the Related panel through the production control, never through state. */
@@ -322,6 +337,82 @@ describe('chat linked work — the Related panel', () => {
     );
   });
 
+  it('shows a spinner only before the first result', async () => {
+    // A settled mock is past `isPending` before any assertion runs, so the spinner guard was
+    // previously unobservable. Hold the request open, assert, then release.
+    let release: (value: SessionContext) => void = () => undefined;
+    mockGetSessionLinks.mockReturnValue(
+      new Promise<SessionContext>((resolve) => {
+        release = resolve;
+      })
+    );
+    await renderChat();
+    const drawer = await openRelated();
+    expect(within(drawer).getByTestId('linked-work-loading')).toBeInTheDocument();
+    // Not the empty state: "nothing linked" and "not loaded yet" are different claims.
+    expect(within(drawer).queryByTestId('linked-work-empty')).toBeNull();
+
+    await act(async () => {
+      release(richContext());
+    });
+    await waitFor(() => expect(within(drawer).queryByTestId('linked-work-loading')).toBeNull());
+    expect(within(drawer).getByText('Linked work program')).toBeInTheDocument();
+  });
+
+  it('keeps the list on screen through a refetch, and through one that fails', async () => {
+    // The two halves of stale-while-revalidate (`apps/web/.claude/rules/48-...`):
+    // `isLoading` is `isPending`, not `isFetching`, so a refresh shows no spinner; and
+    // `isError` requires `data === undefined`, so a failed refresh does not replace what the
+    // user is already reading. A cache invalidation is how a refetch actually happens here —
+    // `refetchOnWindowFocus` is off app-wide.
+    const queryClient = await renderChat();
+    const drawer = await openRelated();
+    expect(await within(drawer).findByText('Linked work program')).toBeInTheDocument();
+    const firstRow = within(drawer).getAllByTestId('linked-work-idea')[0];
+
+    let release: (value: SessionContext) => void = () => undefined;
+    mockGetSessionLinks.mockReturnValue(
+      new Promise<SessionContext>((resolve) => {
+        release = resolve;
+      })
+    );
+    // Not awaited: `invalidateQueries` resolves only once the refetch settles, and this one is
+    // deliberately held open so the mid-refetch state can be observed.
+    void queryClient.invalidateQueries({ queryKey: SESSION_LINKS_KEY });
+    // Stop at the load-bearing midpoint and prove the system is in it before asserting
+    // (`.claude/rules/62`): waiting on the mock's call count alone returns before React has
+    // committed the fetching state, which made this assertion unfalsifiable.
+    await waitFor(() =>
+      expect(queryClient.getQueryState(SESSION_LINKS_KEY)?.fetchStatus).toBe('fetching')
+    );
+    // Mid-refetch: still the old list, no spinner, and the same DOM node (not a remount).
+    expect(within(drawer).queryByTestId('linked-work-loading')).toBeNull();
+    expect(within(drawer).getByText('Linked work program')).toBeInTheDocument();
+    expect(within(drawer).getAllByTestId('linked-work-idea')[0]).toBe(firstRow);
+    await act(async () => {
+      release(richContext());
+    });
+
+    // Now fail a refresh: the list must survive that too.
+    mockGetSessionLinks.mockRejectedValue(new Error('boom'));
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: SESSION_LINKS_KEY });
+    });
+    // Again, pin the state first: the query must actually BE in error before "the list is
+    // still there" means anything.
+    await waitFor(() => expect(queryClient.getQueryState(SESSION_LINKS_KEY)?.status).toBe('error'));
+    expect(queryClient.getQueryState(SESSION_LINKS_KEY)?.data).toBeDefined();
+    expect(within(drawer).getByText('Linked work program')).toBeInTheDocument();
+    expect(within(drawer).queryByTestId('linked-work-error')).toBeNull();
+  });
+
+  it('tells a screen reader when a group is showing only the most recent', async () => {
+    await renderChat();
+    const drawer = await openRelated();
+    // The PR fixture is `truncated: true`; the ideas and files lists are not.
+    expect(within(drawer).getAllByText('Showing the most recent only')).toHaveLength(1);
+  });
+
   it('explains what links are when nothing is linked', async () => {
     mockGetSessionLinks.mockResolvedValue(emptyContext());
     await renderChat();
@@ -357,6 +448,10 @@ describe('chat linked work — the header', () => {
     expect(chip).toHaveTextContent('Working on');
     expect(chip).toHaveTextContent('Linked work program');
     expect(chip).toHaveAttribute('href', `/projects/${PROJECT_ID}/ideas/idea-1`);
+    expect(chip).toHaveAttribute(
+      'aria-label',
+      'Open the idea this chat is working on: Linked work program'
+    );
   });
 
   it('says "Discussing" when the chat only discussed the idea', async () => {
@@ -375,6 +470,10 @@ describe('chat linked work — the header', () => {
     const chip = await screen.findByTestId('session-working-on-chip');
     expect(chip).toHaveTextContent('Discussing');
     expect(chip).toHaveTextContent('Something mentioned');
+    expect(chip).toHaveAttribute(
+      'aria-label',
+      'Open the idea this chat discusses: Something mentioned'
+    );
   });
 
   it('prefers the idea it works on over one it only discussed', async () => {
@@ -449,6 +548,62 @@ describe('chat linked work — the header', () => {
     expect(badge).toHaveTextContent('Merged');
     expect(badge).toHaveAttribute('data-state', 'merged');
     expect(screen.getAllByTestId('pr-checks-state')[0]).toHaveTextContent('Checks passed');
+  });
+
+  it('says so when a stored pull-request state may be out of date', async () => {
+    mockGetSessionLinks.mockResolvedValue({
+      ...emptyContext(),
+      pullRequests: cappedList([
+        {
+          url: PR_URL,
+          number: 2425,
+          source: 'task_output' as const,
+          bySessionId: SESSION_ID,
+          state: {
+            state: 'open' as const,
+            isDraft: false,
+            title: 'feat: linked work',
+            checksState: null,
+            mergedAt: null,
+            updatedAt: null,
+            stale: true,
+          },
+        },
+      ]),
+    });
+    await renderChat();
+    const drawer = await openRelated();
+    // Disclosed in the tooltip rather than a second pill competing with the state itself.
+    expect(within(drawer).getByTestId('pr-state-badge')).toHaveAttribute(
+      'title',
+      'Open — may be out of date'
+    );
+  });
+
+  it('does not claim a state is current when it is', async () => {
+    mockGetSessionLinks.mockResolvedValue({
+      ...emptyContext(),
+      pullRequests: cappedList([
+        {
+          url: PR_URL,
+          number: 2425,
+          source: 'task_output' as const,
+          bySessionId: SESSION_ID,
+          state: {
+            state: 'open' as const,
+            isDraft: false,
+            title: 'feat: linked work',
+            checksState: null,
+            mergedAt: null,
+            updatedAt: null,
+            stale: false,
+          },
+        },
+      ]),
+    });
+    await renderChat();
+    const drawer = await openRelated();
+    expect(within(drawer).getByTestId('pr-state-badge')).toHaveAttribute('title', 'Open');
   });
 
   it('keeps the link for a pull request URL it cannot parse, with no invented number', async () => {

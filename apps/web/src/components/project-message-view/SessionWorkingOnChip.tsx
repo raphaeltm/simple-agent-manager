@@ -1,6 +1,7 @@
 import { Lightbulb } from 'lucide-react';
 import { Link } from 'react-router';
 
+import { projectIdeaPath } from '../../lib/project-routes';
 import type { SessionWorkingOnIdea } from './useSessionLinkedWork';
 
 /**
@@ -23,7 +24,7 @@ export function SessionWorkingOnChip({
   const { idea, verb } = workingOn;
   return (
     <Link
-      to={`/projects/${projectId}/ideas/${encodeURIComponent(idea.ideaId)}`}
+      to={projectIdeaPath(projectId, idea.ideaId)}
       // `max-w-full` + `truncate`, not `shrink-0`: a 200-character idea title must give way
       // instead of pushing the chip row past the viewport. The row wraps, so on a phone the
       // chip gets a line of its own and may use all of it. The full title stays available as
@@ -34,7 +35,15 @@ export function SessionWorkingOnChip({
         borderColor: 'color-mix(in srgb, var(--sam-color-accent-primary) 40%, transparent)',
         backgroundColor: 'color-mix(in srgb, var(--sam-color-accent-primary) 10%, transparent)',
       }}
-      aria-label={`${verb} the idea ${idea.title} — open it`}
+      /*
+       * Leads with the action, because that is what a link's accessible name is for, and reads
+       * as a sentence for both verbs — "Discussing the idea X — open it" did not.
+       */
+      aria-label={
+        verb === 'Working on'
+          ? `Open the idea this chat is working on: ${idea.title}`
+          : `Open the idea this chat discusses: ${idea.title}`
+      }
       title={`${verb}: ${idea.title}`}
       data-testid="session-working-on-chip"
     >

@@ -41,7 +41,7 @@ export function SessionHeaderPullRequestRow({
             color:
               (idleCountdownMs ?? 0) < 5 * 60 * 1000
                 ? 'var(--sam-color-danger)'
-                : 'var(--sam-color-warning, #f59e0b)',
+                : 'var(--sam-color-warning)',
           }}
         >
           Cleanup in {formatCountdown(idleCountdownMs ?? 0)}

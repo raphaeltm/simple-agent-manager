@@ -1,15 +1,13 @@
 import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import { Spinner } from '@simple-agent-manager/ui';
-import { type FC, useCallback, useMemo, useRef, useState } from 'react';
+import { type FC, useCallback, useMemo, useRef } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
 
 import { useAcpPermissionInteractions } from '../../hooks/useAcpPermissionInteractions';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { useAuth } from '../AuthProvider';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
-import { type CommentInboxItem, countBuckets, toInboxItem } from './comments/comment-inbox';
 import { CommentableConversationItem } from './comments/CommentableConversationItem';
-import { buildCommentedMessageDescriber } from './comments/commented-message-label';
 import { DesktopCommentRail } from './comments/MessageCommentPanels';
 import { useMessageComments } from './comments/useMessageComments';
 import { useProjectMessageCommentUi } from './comments/useProjectMessageCommentUi';
@@ -32,8 +30,10 @@ import { useAcpPermissionPlacement } from './useAcpPermissionPlacement';
 import { useAnimatedUserMessages } from './useAnimatedUserMessages';
 import { useConversationJump } from './useConversationJump';
 import { useFilePanelAccessGate } from './useFilePanelAccessGate';
+import { useSessionCommentInbox } from './useSessionCommentInbox';
 import { useSessionLifecycle } from './useSessionLifecycle';
 import { useSessionLinkedWork } from './useSessionLinkedWork';
+import { useSessionOverlays } from './useSessionOverlays';
 import { useSessionTimeline } from './useSessionTimeline';
 import { useSessionTools } from './useSessionTools';
 import { useToolCallGroupRowState } from './useToolCallGroupRowState';
@@ -67,25 +67,31 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatLogRef = useRef<HTMLDivElement>(null);
   const [floatingHeaderRef, floatingHeaderHeight] = useFloatingHeaderHeight();
-  const [showTimeline, setShowTimeline] = useState(false);
-  const [showComments, setShowComments] = useState(false);
-  const [showAutomation, setShowAutomation] = useState(false);
-  const [showRelated, setShowRelated] = useState(false);
-  const [showResources, setShowResources] = useState(false);
-  const [showShare, setShowShare] = useState(false);
-  const openComments = useCallback(() => setShowComments(true), []);
-  const closeComments = useCallback(() => setShowComments(false), []);
-  // Stable identity matters: this feeds `useSessionTools`' memoized action array, and an
-  // inline arrow would rebuild it on every render (rule 64).
-  const openTimeline = useCallback(() => setShowTimeline(true), []);
-  const closeTimeline = useCallback(() => setShowTimeline(false), []);
-  const openResources = useCallback(() => setShowResources(true), []);
-  const openAutomation = useCallback(() => setShowAutomation(true), []);
-  const closeAutomation = useCallback(() => setShowAutomation(false), []);
-  const openRelated = useCallback(() => setShowRelated(true), []);
-  const closeRelated = useCallback(() => setShowRelated(false), []);
-  const openShare = useCallback(() => setShowShare(true), []);
-  const closeShare = useCallback(() => setShowShare(false), []);
+  /*
+   * The on-demand panels the tool rail opens. Their handlers must keep a stable identity:
+   * they feed `useSessionTools`' memoized action array, and an inline arrow would rebuild it
+   * on every render (rule 64). See `useSessionOverlays`.
+   */
+  const {
+    showTimeline,
+    openTimeline,
+    closeTimeline,
+    showComments,
+    openComments,
+    closeComments,
+    showResources,
+    openResources,
+    closeResources,
+    showAutomation,
+    openAutomation,
+    closeAutomation,
+    showRelated,
+    openRelated,
+    closeRelated,
+    showShare,
+    openShare,
+    closeShare,
+  } = useSessionOverlays();
 
   const messageComments = useMessageComments(projectId, sessionId, Boolean(projectId && sessionId));
   const { user } = useAuth();
@@ -126,35 +132,21 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     setFilePanel: lc.setFilePanel,
     accessNoticeRef,
   });
-  // One description per commented message ("the agent's reply", "Olivia's message"), shared by
-  // the drawer rows and the desktop rail so they cannot name the same message differently.
-  const ownerName = sessionOwnerLabel(lc.session);
-  const viewerIsOwner = viewer.viewerAccess === 'owner';
-  const describeCommentedMessage = useMemo(
-    () => buildCommentedMessageDescriber(displayItems, { ownerName, viewerIsOwner }),
-    [displayItems, ownerName, viewerIsOwner]
-  );
-
-  // One derivation feeds the header chip, the drawer, and the timeline, so the
-  // three can never disagree about how many comments are outstanding.
-  const commentInbox = useMemo<CommentInboxItem[]>(() => {
-    return messageComments.comments.map((thread) => {
-      const message = describeCommentedMessage(thread.anchor.messageId);
-      return toInboxItem(thread, {
-        kind: 'session',
-        sessionId,
-        sessionTopic: lc.session?.topic ?? 'This session',
-        messageId: thread.anchor.messageId,
-        messageDescription: message.loaded ? message.phrase : null,
-      });
-    });
-  }, [messageComments.comments, describeCommentedMessage, lc.session?.topic, sessionId]);
-
-  const commentCounts = useMemo(
-    () => countBuckets(commentInbox, viewerId),
-    [commentInbox, viewerId]
-  );
-  const unresolvedCommentCount = commentCounts.all - commentCounts.resolved;
+  // One derivation of the comment threads for the header chip, the drawer, the desktop rail
+  // and the timeline, so the four cannot disagree. See `useSessionCommentInbox`.
+  const comments = useSessionCommentInbox({
+    sessionId,
+    sessionTopic: lc.session?.topic,
+    comments: messageComments.comments,
+    displayItems,
+    ownerName: sessionOwnerLabel(lc.session),
+    viewerIsOwner: viewer.viewerAccess === 'owner',
+    viewerId,
+  });
+  const { describeCommentedMessage } = comments;
+  const commentInbox = comments.items;
+  const commentCounts = comments.counts;
+  const unresolvedCommentCount = comments.unresolvedCount;
 
   const timeline = useSessionTimeline(
     projectId,
@@ -463,7 +455,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
         onToggleTimelineContext={() => timeline.setShowContext(!timeline.showContext)}
         onCloseTimeline={closeTimeline}
         showResources={showResources}
-        onCloseResources={() => setShowResources(false)}
+        onCloseResources={closeResources}
         showComments={showMobileCommentsDrawer}
         commentItems={commentInbox}
         commentsLoading={messageComments.loading}

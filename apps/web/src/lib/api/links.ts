@@ -104,6 +104,9 @@ function parseFile(row: JsonRecord): LinkedFile | null {
     filename: str(row, 'filename') ?? 'Untitled file',
     directory: str(row, 'directory') ?? '/',
     relations: relations(row),
+    // Required by the shared `LinkedFile` type. No surface renders it yet: inside a chat's own
+    // Related panel every row is that chat's, so "which chat" adds nothing. The idea page is
+    // where it earns its place.
     bySessionId: str(row, 'bySessionId'),
   };
 }

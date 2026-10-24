@@ -20,6 +20,7 @@ import { ChevronDown, ChevronRight, Lightbulb, Link2, MessageSquare } from 'luci
 import { useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
+import { projectChatPath, projectIdeaPath } from '../../lib/project-routes';
 import { libraryFileLinksQueryOptions } from '../../lib/query-options';
 import {
   describeRelations,
@@ -125,7 +126,7 @@ export function FileLinkedWorkSection({
                   accent={CHAT_ACCENT}
                   title={linkedSessionLabel(session)}
                   meta={describeRelations(session.relations)}
-                  to={`/projects/${projectId}/chat/${encodeURIComponent(session.sessionId)}`}
+                  to={projectChatPath(projectId, session.sessionId)}
                   testId="file-linked-chat"
                 />
               ))}
@@ -148,7 +149,7 @@ export function FileLinkedWorkSection({
                   accent={IDEA_ACCENT}
                   title={idea.title}
                   meta={describeRelations(idea.relations)}
-                  to={`/projects/${projectId}/ideas/${encodeURIComponent(idea.ideaId)}`}
+                  to={projectIdeaPath(projectId, idea.ideaId)}
                   testId="file-linked-idea"
                 />
               ))}

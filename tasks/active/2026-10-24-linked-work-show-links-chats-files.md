@@ -30,11 +30,11 @@ behaviour (thin read glue only, announced on the channel first).
 
 ### T1's contract, read from `origin/sam/t1-link-store-automatic-gpszzz` @ 424a73876
 
-| Endpoint | Response | Notes |
-| --- | --- | --- |
-| `GET /api/projects/:projectId/sessions/:sessionId/links` | `SessionContext { ideas, files, pullRequests }` | `apps/api/src/routes/resource-links.ts` |
-| `GET /api/projects/:projectId/library/:fileId/links` | `FileContext { sessions, ideas }` | path is `/library/:fileId/links`, **not** `/library/files/...` (channel seq 37, confirmed by coordinator seq 39) |
-| `GET /api/projects/:projectId/ideas/:ideaId/links` | `IdeaContext` | T8's surface — **not consumed here**, so no dead client code is added for it |
+| Endpoint                                                 | Response                                        | Notes                                                                                                            |
+| -------------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `GET /api/projects/:projectId/sessions/:sessionId/links` | `SessionContext { ideas, files, pullRequests }` | `apps/api/src/routes/resource-links.ts`                                                                          |
+| `GET /api/projects/:projectId/library/:fileId/links`     | `FileContext { sessions, ideas }`               | path is `/library/:fileId/links`, **not** `/library/files/...` (channel seq 37, confirmed by coordinator seq 39) |
+| `GET /api/projects/:projectId/ideas/:ideaId/links`       | `IdeaContext`                                   | T8's surface — **not consumed here**, so no dead client code is added for it                                     |
 
 - Shared types live in `packages/shared/src/types/links.ts` (already on T1's branch):
   `LinkRelation`, `CappedList<T>`, `LinkedIdea`, `LinkedFile`, `LinkedSession`,
@@ -115,19 +115,19 @@ behaviour (thin read glue only, announced on the channel first).
 
 **Chat "Related" surface**
 
-| Variant | Why not / why |
-| --- | --- |
+| Variant                                                                      | Why not / why                                                                                                                                                                                                |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | A. New tool-rail action → drawer (desktop right rail, full-screen on mobile) | **Chosen.** Identical to Resources/Automation/Timeline, so it needs no new interaction vocabulary; discoverable on first paint in both viewports; survives session sleep like the other non-workspace tools. |
-| B. A section inside the Details disclosure | Rejected: the rail exists precisely because nine controls were hidden behind one 14px chevron. Burying a discovery surface repeats that mistake. |
-| C. A tab inside the Comments rail | Rejected: conflates "discussion about this chat" with "work related to this chat", and makes Related invisible unless you already opened comments. |
+| B. A section inside the Details disclosure                                   | Rejected: the rail exists precisely because nine controls were hidden behind one 14px chevron. Burying a discovery surface repeats that mistake.                                                             |
+| C. A tab inside the Comments rail                                            | Rejected: conflates "discussion about this chat" with "work related to this chat", and makes Related invisible unless you already opened comments.                                                           |
 
 **Library file "Linked" surface**
 
-| Variant | Why not / why |
-| --- | --- |
+| Variant                                                                                        | Why not / why                                                                                                                                                           |
+| ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A. Collapsible strip directly under the modal header, provenance in the collapsed summary line | **Chosen.** "Where did this come from?" is a header-level fact and is answered without a tap; costs one row; stacks naturally at 375px; leaves the comments slot alone. |
-| B. A second side panel beside comments | Rejected: on mobile the comments panel is a full-width overlay, so two panels fight for one slot and need mutual-exclusion state. |
-| C. Always-expanded block above the content | Rejected: permanently steals preview height on a phone for information most files do not have. |
+| B. A second side panel beside comments                                                         | Rejected: on mobile the comments panel is a full-width overlay, so two panels fight for one slot and need mutual-exclusion state.                                       |
+| C. Always-expanded block above the content                                                     | Rejected: permanently steals preview height on a phone for information most files do not have.                                                                          |
 
 Consequence of A: the strip renders **only when there is at least one link**. An explicitly-opened
 surface (the chat Related panel) earns an empty state that explains what links are; an
@@ -138,129 +138,150 @@ a preview modal is pure noise.
 
 ### Data layer
 
-- [ ] `apps/web/src/lib/api/links.ts`: `getSessionLinks(projectId, sessionId, { signal })` and
+- [x] `apps/web/src/lib/api/links.ts`: `getSessionLinks(projectId, sessionId, { signal })` and
       `getLibraryFileLinks(projectId, fileId, { signal })`, both hitting T1's exact paths and
       **normalising** the payload into safe `CappedList`s (an older API, a `404`-shaped body or a
       test catch-all returning `{}` must degrade to empty lists, never crash the chat header).
-- [ ] Export from `apps/web/src/lib/api/index.ts`.
-- [ ] `apps/web/src/lib/query-options/links.ts`: `linkedWorkQueryKeys` +
+- [x] Export from `apps/web/src/lib/api/index.ts`.
+- [x] `apps/web/src/lib/query-options/links.ts`: `linkedWorkQueryKeys` +
       `sessionLinksQueryOptions(queryScope, projectId, sessionId)` +
       `libraryFileLinksQueryOptions(queryScope, projectId, fileId)`, identity-scoped
       `['auth', scope, 'linked-work', …]`. Re-export from the barrel. **Not** added to
       `PERSISTED_QUERY_OPERATIONS` (chat-derived free text).
-- [ ] `apps/web/src/components/project-message-view/useSessionLinkedWork.ts`: one hook owning the
+- [x] `apps/web/src/components/project-message-view/useSessionLinkedWork.ts`: one hook owning the
       session query, returning `{ ideas, files, pullRequests, workingOn, primaryPullRequest,
-      totalCount, isLoading, isError, refetch }`. Memoised derivations so the header chip, the rail
+  totalCount, isLoading, isError, refetch }`. Memoised derivations so the header chip, the rail
       badge and the drawer all read one object identity (rule 64).
 
 ### Shared presentation
 
-- [ ] `apps/web/src/components/chat/linked-work/relation-labels.ts`: `LinkRelation` → plain words
+- [x] `apps/web/src/components/chat/linked-work/relation-labels.ts`: `LinkRelation` → plain words
       ("Working on", "Created", "Edited", "Read", "Uploaded", "Replaced", "Viewed", "Opened",
       "Linked", "Mentioned", "Related"), a `describeRelations()` that joins several, and a
       `formatCappedTotal()` that renders `N+` when `totalIsLowerBound` (program decision 9).
       Exhaustive `Record<LinkRelation, string>` so a new relation is a typecheck failure
       (rule 79).
-- [ ] `apps/web/src/components/chat/linked-work/LinkedWorkRow.tsx`: the Work/Related row from the
+- [x] `apps/web/src/components/chat/linked-work/LinkedWorkRow.tsx`: the Work/Related row from the
       approved design language — tinted icon box, two lines (title; relation in plain words),
       chevron; renders as `<Link>` or `<a>`; `line-clamp` + `break-words` so a 200-char title
       cannot overflow.
-- [ ] `apps/web/src/components/chat/linked-work/PullRequestStateBadge.tsx`: Open / Merged / Closed
+- [x] `apps/web/src/components/chat/linked-work/PullRequestStateBadge.tsx`: Open / Merged / Closed
       / Draft pill plus the checks dot, rendering **nothing** when `state` is `null` (pre-T2) so no
       placeholder lies about an unknown state. Not colour-only: each state carries its own glyph
       and word.
 
 ### Chat
 
-- [ ] Add `related` to `SessionToolId` / `buildSessionToolActions` (group `workspace`, icon
+- [x] Add `related` to `SessionToolId` / `buildSessionToolActions` (group `workspace`, icon
       `Link2`, hint "See the ideas, files and pull requests related to this chat", badge = total
       linked items) behind `hasRelatedHandler`.
-- [ ] `useSessionTools`: new `onOpenRelated` input + dispatch case + `relatedCount` /
+- [x] `useSessionTools`: new `onOpenRelated` input + dispatch case + `relatedCount` /
       `relatedCountIsLowerBound` inputs threaded into the memo deps.
-- [ ] `SessionLinkedWorkDrawer.tsx` (`components/chat/`): desktop right rail / mobile full-screen,
+- [x] `SessionLinkedWorkDrawer.tsx` (`components/chat/`): desktop right rail / mobile full-screen,
       `createPortal`, `useDialogFocusTrap`, grouped sections (Ideas, Files, Pull requests) with
       counts, `N+` where flagged, a first-load spinner only, an error state with Retry, and an
       empty state that explains what links are.
-- [ ] Register it lazily in `SessionMessageViewDialogs.tsx`; own `showRelated` state and stable
+- [x] Register it lazily in `SessionMessageViewDialogs.tsx`; own `showRelated` state and stable
       open/close callbacks in `SessionMessageView.tsx`.
-- [ ] `SessionWorkingOnChip.tsx`: header chip, "Working on <idea>" for `works_on`, "Discussing
+- [x] `SessionWorkingOnChip.tsx`: header chip, "Working on <idea>" for `works_on`, "Discussing
       <idea>" when only `discusses`; links to the idea; hidden when neither exists.
-- [ ] `SessionHeader.tsx`: render the chip in the existing chip row, and give "View PR" its state
+- [x] `SessionHeader.tsx`: render the chip in the existing chip row, and give "View PR" its state
       badge (and a PR number), resolving the primary PR from `taskEmbed.outputPrUrl` when present
       and otherwise from the linked PR list. Thread `linkedWork` from `SessionMessageView` through
       `FloatingHeader`.
 
 ### Library
 
-- [ ] `apps/web/src/components/library/FileLinkedWorkSection.tsx`: the collapsible strip. Collapsed
+- [x] `apps/web/src/components/library/FileLinkedWorkSection.tsx`: the collapsible strip. Collapsed
       summary = provenance in plain words ("From <chat>" / "Uploaded by <chat>", "+N more");
       expanded = `LinkedWorkRow`s for the chats (upload/replace first, then views) and the ideas it
       belongs to. Renders `null` when there is nothing to show or while the first load is in
       flight.
-- [ ] Mount it in `FilePreviewModal.tsx` with a ≤5-line diff (rule 18 — the file is already at
+- [x] Mount it in `FilePreviewModal.tsx` with a ≤5-line diff (rule 18 — the file is already at
       490 lines).
 
 ### Docs (same PR, rule 01)
 
-- [ ] `apps/www/src/content/docs/docs/guides/chat-features.md`: a **Related** row in the tool-rail
+- [x] `apps/www/src/content/docs/docs/guides/chat-features.md`: a **Related** row in the tool-rail
       table, a short `### Related work` subsection (what gets linked, what the words mean, `N+`),
       and a note that the header shows the idea being worked on and the PR's state.
-- [ ] Same file's **Document Cards** section: the file preview's **Linked** strip.
-- [ ] Every behavioural claim cites the code path or is written as what the user sees, never as
+- [x] Same file's **Document Cards** section: the file preview's **Linked** strip.
+- [x] Every behavioural claim cites the code path or is written as what the user sees, never as
       intended-but-unbuilt behaviour.
 
 ### Tests
 
-- [ ] `apps/web/tests/unit/components/chat/session-linked-work.test.tsx` — renders the **real**
-      `ProjectMessageView`, with the links endpoint mocked at the API module, and:
-      - clicks the real `session-tool-related` rail button and asserts the drawer lists the ideas,
-        files and PRs with their plain-words relations (rule 62: enter through the real trigger);
-      - asserts the header "Working on" chip appears for a `works_on` link and links to the idea;
-      - asserts `N+` renders when `totalIsLowerBound` is true and a plain `N` when it is false;
-      - asserts a PR with `state: null` renders with **no** state pill (pre-T2) and a PR with a
-        state renders Open/Merged/Closed (post-T2) — the forward-compatibility proof;
-      - asserts the empty state explains what links are, **paired with a positive-render
-        assertion** so a crashed page cannot pass (rule 62 #5);
-      - asserts the error state offers Retry;
-      - asserts a `{}` / malformed payload degrades to the empty state instead of throwing.
-- [ ] `apps/web/tests/unit/components/library/file-linked-work.test.tsx` — renders the real
+- [x] `apps/web/tests/unit/components/chat/session-linked-work.test.tsx` — renders the **real**
+      `ProjectMessageView`, with the links endpoint mocked at the API module, and: - clicks the real `session-tool-related` rail button and asserts the drawer lists the ideas,
+      files and PRs with their plain-words relations (rule 62: enter through the real trigger); - asserts the header "Working on" chip appears for a `works_on` link and links to the idea; - asserts `N+` renders when `totalIsLowerBound` is true and a plain `N` when it is false; - asserts a PR with `state: null` renders with **no** state pill (pre-T2) and a PR with a
+      state renders Open/Merged/Closed (post-T2) — the forward-compatibility proof; - asserts the empty state explains what links are, **paired with a positive-render
+      assertion** so a crashed page cannot pass (rule 62 #5); - asserts the error state offers Retry; - asserts a `{}` / malformed payload degrades to the empty state instead of throwing.
+- [x] `apps/web/tests/unit/components/library/file-linked-work.test.tsx` — renders the real
       `FilePreviewModal`, asserts the collapsed provenance summary, expands it through the real
       disclosure button, asserts the rows and their links, and asserts the strip is absent (with a
       positive control) when there are no links.
-- [ ] `apps/web/tests/unit/lib/linked-work-labels.test.ts` — relation labels are exhaustive,
+- [x] `apps/web/tests/unit/lib/linked-work-labels.test.ts` — relation labels are exhaustive,
       `formatCappedTotal` renders `N+` only when flagged, provenance ordering puts
       uploaded/replaced before viewed.
-- [ ] Discrimination proof: delete each new guard once, confirm exactly the intended test reddens,
+- [x] Discrimination proof: delete each new guard once, confirm exactly the intended test reddens,
       restore. Record which test reddened for which guard in the PR.
-- [ ] `apps/web/tests/playwright/session-linked-work-audit.spec.ts` + the file-preview case:
+- [x] `apps/web/tests/playwright/session-linked-work-audit.spec.ts` + the file-preview case:
       375x667 and 1280x800, stress data (200+ char idea titles, 30+ items, every relation, PRs in
       every state including draft and `state: null`, empty, error), `assertNoOverflow` +
       `assertNoClippedOverflow`, and **measured-coordinate** assertions that the open drawer's
       right edge sits at the viewport edge and does not overlap the tool rail
       (rule 17's measured-coordinate requirement). No conditional assertions without an else.
-- [ ] Add the two new endpoints to the existing chat audit specs' mock handlers so their catch-all
-      `{}` is not what exercises the feature.
+- [x] Add the two new endpoints to the existing chat audit specs' mock handlers so their catch-all
+      `{}` is not what exercises the feature. Done for `session-tool-rail-audit.spec.ts`, the
+      spec that owns the rail and the header: it now serves a `works_on` idea and a pull request,
+      so its long-topic overflow cases also exercise the header chip. 106 cases still pass.
 
 ## Acceptance criteria
 
 1. Opening a chat whose agent worked on an idea shows a **Working on <idea>** chip in the header
-   that opens the idea. *(unit test + Playwright + staging)*
+   that opens the idea. _(unit test + Playwright + staging)_
 2. The tool rail has a **Related** item on first paint, with a badge counting linked items, that
    opens a panel listing the chat's ideas, files and pull requests with the relation in plain
    words, each tappable to the right place. *(unit test driving the real rail button + Playwright
-   + staging)*
-3. A capped list whose `totalIsLowerBound` is true renders `N+`. *(unit test, both branches)*
+   - staging)*
+3. A capped list whose `totalIsLowerBound` is true renders `N+`. _(unit test, both branches)_
 4. A pull request renders without a state pill while `state` is `null`, and renders
-   Open / Merged / Closed / Draft plus its checks when state is present. *(unit test, both
-   branches)*
+   Open / Merged / Closed / Draft plus its checks when state is present. _(unit test, both
+   branches)_
 5. A library file preview says where the file came from and which ideas it belongs to, from the
    links endpoint only — never from client-supplied `uploadSessionId` / `uploadTaskId`.
-   *(unit test + Playwright + staging)*
-6. No horizontal overflow or clipping at 375x667 or 1280x800 with stress data, and the open drawer
-   does not overlap the tool rail — asserted as measured coordinates. *(Playwright)*
-7. Rendering never unmounts on a refetch; spinners gate only the first load. *(rule 48; unit test)*
+   _(unit test + Playwright + staging)_
+6. No horizontal overflow or clipping at 375x667 or 1280x800 with stress data, and the open
+   drawer's right edge coincides with the tool rail's right edge at the viewport edge, with the
+   rail's column fully inside the panel — asserted as measured coordinates.
+   **Corrected during review:** this criterion originally said the drawer "does not overlap the
+   tool rail". That is the wrong claim: every sibling drawer deliberately COVERS the rail at a
+   higher z-index, so disjoint boxes would contradict the design. The assertion now proves the
+   relationship that is actually intended. _(Playwright)_
+7. Rendering never unmounts on a refetch; spinners gate only the first load. _(rule 48; unit test)_
 8. Public docs describe all of the above in the same PR.
 9. Verified end-to-end on staging as a user, on a phone-sized and a desktop-sized viewport.
+
+## Review outcome (2026-10-24)
+
+Eight local specialist reviewers ran against this branch. Findings and what was done:
+
+| Reviewer                  | Status    | Outcome                                                                                                                                                                                                                                                                                            |
+| ------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| task-completion-validator | ADDRESSED | Two HIGH: no test for acceptance criterion 7 (no unmount on refetch), and criterion 6's rail-overlap claim not asserted as measured coordinates. Both fixed; one MEDIUM (existing audit specs' mocks) done; the checklist and criterion 6's wording corrected above.                               |
+| ui-ux-specialist          | PASS      | All five rubric scores 4-5. Two non-blocking notes: the chip's "Discussing" accessible name read awkwardly (reworded), and the app-wide translucency of every full-screen chat drawer on a phone (not a T4 regression; filed as `tasks/backlog/2026-10-24-chat-drawer-translucency-on-phones.md`). |
+| architecture-reviewer     | ADDRESSED | `SessionMessageView.tsx` crossed 500 lines; split by extracting `useSessionOverlays` and `useSessionCommentInbox` (now 498). Normaliser's defensiveness confirmed load-bearing, not speculative.                                                                                                   |
+| performance-reviewer      | PASS      | One request per chat open and per file preview, shared by all consumers through one cache entry; no refetch loop; no new initial-bundle weight.                                                                                                                                                    |
+| security-auditor          | PASS      | No CRITICAL/HIGH. Confirmed the branch FIXES a pre-existing unsanitised `href` on the header's View PR.                                                                                                                                                                                            |
+| constitution-validator    | ADDRESSED | One HIGH: the chat path reimplemented the existing `projectChatPath` helper. Fixed by moving it to `lib/project-routes.ts` and adding `projectIdeaPath` / `projectLibraryFilePath`, which also removed three inline copies. Dead `#f59e0b` fallback dropped.                                       |
+| doc-sync-validator        | ADDRESSED | One MEDIUM: the guide documented an **Opened** relation word that no pull-request row can render (PR rows carry no relations). Removed, and the docs now say what a PR row actually shows.                                                                                                         |
+| test-engineer             | ADDRESSED | Five guards had no discriminating test (`isLoading`, `isError`, the `truncated` note, the badge's `stale` title, the icons-mode badge) plus the row's unused `timestamp`/`secondaryMeta` and the badge's `showChecks`. All now covered; each reverted once to prove it reddens.                    |
+
+Two mutants initially failed to redden and were made faithful before being trusted:
+
+- `isLoading: isFetching` was neutralised by the memo's dep list until the dep was added too.
+- Both Playwright mutants were masked by a stale `vite preview` server; the preview must be
+  killed before a source mutation can reach the browser. Worth knowing for the next audit.
 
 ## References
 

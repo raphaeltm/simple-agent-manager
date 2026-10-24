@@ -232,6 +232,49 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       await route.fulfill({ json: messages });
       return;
     }
+    /*
+     * Linked work, with real data rather than the catch-all's `{}`.
+     *
+     * The header's "Working on" chip and the rail's Related badge both read this, so without a
+     * fixture here this file would only ever exercise the degrades-to-empty path — and its
+     * overflow assertions, which are the point of the file, would never see the chip the header
+     * grows when a chat is linked to an idea with a long title.
+     */
+    if (pathname === `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/links`) {
+      await route.fulfill({
+        json: {
+          ideas: {
+            items: [
+              {
+                ideaId: 'idea-rail-1',
+                title: options.long ? LONG_TOPIC : 'Layered resource management',
+                status: 'draft',
+                relations: ['works_on'],
+              },
+            ],
+            total: 1,
+            truncated: false,
+            totalIsLowerBound: false,
+          },
+          files: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+          pullRequests: {
+            items: [
+              {
+                url: 'https://github.com/testuser/test-repo/pull/1974',
+                number: 1974,
+                source: 'task_output',
+                bySessionId: SESSION_ID,
+                state: null,
+              },
+            ],
+            total: 1,
+            truncated: false,
+            totalIsLowerBound: false,
+          },
+        },
+      });
+      return;
+    }
 
     if (pathname === resourceTimelinePath) {
       await route.fulfill({ json: resources.index });

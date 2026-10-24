@@ -12,6 +12,7 @@ import { FileText, GitPullRequest, Lightbulb, Link2, X } from 'lucide-react';
 import { useRef } from 'react';
 import { createPortal } from 'react-dom';
 
+import { projectIdeaPath, projectLibraryFilePath } from '../../lib/project-routes';
 import {
   describeRelations,
   formatCappedTotal,
@@ -77,7 +78,7 @@ function LinkedWorkSections({
               accent={IDEA_ACCENT}
               title={idea.title}
               meta={describeRelations(idea.relations)}
-              to={`/projects/${projectId}/ideas/${encodeURIComponent(idea.ideaId)}`}
+              to={projectIdeaPath(projectId, idea.ideaId)}
               testId="linked-work-idea"
             />
           ))}
@@ -98,8 +99,7 @@ function LinkedWorkSections({
               accent={FILE_ACCENT}
               title={file.filename}
               meta={metaLine(describeRelations(file.relations), file.directory)}
-              // The library page opens a preview straight from the URL.
-              to={`/projects/${projectId}/library?preview=${encodeURIComponent(file.fileId)}`}
+              to={projectLibraryFilePath(projectId, file.fileId)}
               testId="linked-work-file"
             />
           ))}
@@ -215,9 +215,13 @@ export function SessionLinkedWorkDrawer({
           {/* Spinner only before the first result. A refetch keeps the list on screen
               (`apps/web/.claude/rules/48-stale-while-revalidate-ui.md`). */}
           {linkedWork.isLoading ? (
-            <div role="status" className="flex items-center justify-center py-10">
+            // `Spinner` is its own `role="status"` region, so this wrapper must not be a
+            // second one — two status regions for one load announce twice.
+            <div
+              className="flex items-center justify-center py-10"
+              data-testid="linked-work-loading"
+            >
               <Spinner size="sm" />
-              <span className="sr-only">Loading related work</span>
             </div>
           ) : linkedWork.isError ? (
             <ErrorState onRetry={linkedWork.refetch} />
