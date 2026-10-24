@@ -252,10 +252,18 @@ test('a real release applies end to end, exercising both DNS create paths and th
   // The page has its own browser context. Give it the session `api` signed in with rather
   // than signing in again: token-login is rate limited.
   await page.context().addCookies((await api.storageState()).cookies);
+  // A fresh context opens the first-run account setup, a modal over the whole page.
+  const session = (await (await api.get(`${STAGING_API}/api/auth/get-session`)).json()) as {
+    user?: { id?: string };
+  };
+  await page.addInitScript((uid) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${uid}`, 'true');
+  }, session.user?.id ?? '');
   await page.goto(`${STAGING_APP}/projects/${projectId}/deployments/${envId}`, {
     waitUntil: 'domcontentloaded',
   });
-  await expect(page.getByRole('heading', { name: ENV_NAME })).toBeVisible();
+  // A cold first load on staging fetches the session, project and environment in turn.
+  await expect(page.getByRole('heading', { name: ENV_NAME })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('Running version 1.')).toBeVisible();
   await expect(
     page.getByRole('region', { name: 'Recent deploys' }).getByText('v1', { exact: true })
