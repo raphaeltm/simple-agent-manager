@@ -265,6 +265,21 @@ describe('comment reader', () => {
     );
   });
 
+  it('offers Send to agent only to someone who can drive the chat', async () => {
+    mocks.getMessageCommentContext.mockResolvedValue(context({ viewerAccess: 'reader' }));
+    const reader = renderAt(READER_PATH);
+    fireEvent.click(await screen.findByRole('button', { name: /Show the whole thread/ }));
+    expect(await screen.findByRole('button', { name: 'Resolve' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send to agent' })).toBeNull();
+    reader.unmount();
+
+    // Control: the chat's owner gets it on the same thread.
+    mocks.getMessageCommentContext.mockResolvedValue(context({ viewerAccess: 'owner' }));
+    renderAt(READER_PATH);
+    fireEvent.click(await screen.findByRole('button', { name: /Show the whole thread/ }));
+    expect(await screen.findByRole('button', { name: 'Send to agent' })).toBeInTheDocument();
+  });
+
   it('says so when the commented message is gone, and still shows the comment', async () => {
     mocks.getMessageCommentContext.mockResolvedValue(
       context({ anchor: { messageId: 'a2', found: false }, messages: [] })
