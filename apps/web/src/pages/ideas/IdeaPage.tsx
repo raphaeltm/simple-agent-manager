@@ -159,6 +159,18 @@ export function IdeaPage() {
    * the work did rather than only what someone wrote about it.
    */
   const timeline = ideaTimeline(idea, idea.updates.items);
+  /*
+   * The count is what the TIMELINE holds, not what the notes table holds.
+   *
+   * `idea.updates.total` counts notes only, so it read "3" beside six visible rows once
+   * lifecycle entries joined the list. Lifecycle entries are derived from the whole payload
+   * rather than paged, so they are exact; the notes can be truncated, and a "+" says so
+   * instead of asserting a total the slice cannot support (program decision 9).
+   */
+  const lifecycleCount = timeline.filter((entry) => entry.kind === 'lifecycle').length;
+  const timelineTotal = `${idea.updates.total + lifecycleCount}${
+    idea.updates.nextCursor ? '+' : ''
+  }`;
 
   const header = (
     <PageHeader title={idea.title} back={{ label: 'Ideas', to: `/projects/${projectId}/ideas` }} />
@@ -171,7 +183,7 @@ export function IdeaPage() {
   const updates = (
     <IdeaUpdates
       entries={timeline}
-      total={idea.updates.total}
+      total={timelineTotal}
       projectId={projectId}
       onPost={(body) => postUpdate.mutate(body)}
       posting={postUpdate.isPending}

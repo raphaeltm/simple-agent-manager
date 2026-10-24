@@ -40,6 +40,12 @@ const PLAN = `When a merchant's endpoint is down we drop the webhook after one f
 
 **Out of scope:** the refunds webhook path, which is a separate service.`;
 
+/*
+ * `linkedAt` is when the chat was first linked to the idea — the clock the Updates timeline
+ * dates "Work started in <chat>" from. Deliberately earlier than `lastActivityAt`, because the
+ * two are different clocks and using the latter would redate the entry to the chat's most
+ * recent message.
+ */
 const SESSIONS = [
   {
     sessionId: 'sess-build',
@@ -51,6 +57,7 @@ const SESSIONS = [
     taskErrorMessage: null,
     agentLabel: 'Opus 5.5',
     lastActivityAt: Date.parse('2026-10-23T11:50:00Z'),
+    linkedAt: Date.parse('2026-10-23T11:50:00Z') - 6 * 60 * 60 * 1000,
     needsInput: null,
   },
   {
@@ -63,6 +70,7 @@ const SESSIONS = [
     taskErrorMessage: null,
     agentLabel: 'Brainstormer',
     lastActivityAt: Date.parse('2026-10-18T09:00:00Z'),
+    linkedAt: Date.parse('2026-10-18T09:00:00Z') - 6 * 60 * 60 * 1000,
     needsInput: null,
   },
   {
@@ -76,6 +84,7 @@ const SESSIONS = [
       'pnpm test failed. The suite went red in packages/api/tests/unit/delivery/retry-schedule.test.ts because the fixture still assumes a five-attempt cap, and this message is long on purpose so the row has to clamp it rather than push the page sideways.',
     agentLabel: 'Codex',
     lastActivityAt: Date.parse('2026-10-20T14:00:00Z'),
+    linkedAt: Date.parse('2026-10-20T14:00:00Z') - 6 * 60 * 60 * 1000,
     needsInput: null,
   },
 ];
@@ -143,6 +152,9 @@ function makeIdea(state: DerivedState, overrides: Record<string, unknown> = {}) 
             : null,
     },
     counts: { updates: 4, chats: 3, files: 1, pullRequests: pullRequest ? 1 : 0 },
+    // The detail response carries the newest Updates slice, so the page makes one request per
+    // poll rather than two. The page reads `idea.updates`, so a fixture without it crashes.
+    updates: { items: UPDATES, total: UPDATES.length, nextCursor: null },
     filedByAgent: false,
     filedBy: null,
     sessions: SESSIONS,
@@ -399,7 +411,13 @@ async function openStartWork(page: Page) {
 
 async function setupIdeaMocks(
   page: Page,
-  options: { idea?: unknown; updates?: unknown[]; links?: unknown; updatesFail?: boolean } = {}
+  options: {
+    idea?: unknown;
+    updates?: unknown[];
+    links?: unknown;
+    updatesFail?: boolean;
+    ideaFails?: boolean;
+  } = {}
 ) {
   await setupProjectAuditRoutes(page, {
     user: MOCK_USER,
@@ -418,7 +436,12 @@ async function setupIdeaMocks(
         return respond(200, { updates: options.updates ?? UPDATES, nextCursor: null });
       }
       if (sub === `/ideas/${IDEA_ID}/links`) return respond(200, options.links ?? LINKS);
-      if (sub === `/ideas/${IDEA_ID}`) return respond(200, options.idea ?? makeIdea('not-started'));
+      if (sub === `/ideas/${IDEA_ID}`) {
+        if (options.ideaFails) {
+          return respond(500, { error: 'INTERNAL_ERROR', message: 'nope' });
+        }
+        return respond(200, options.idea ?? makeIdea('not-started'));
+      }
       return undefined;
     },
   });
@@ -572,6 +595,7 @@ test.describe('Idea page — phone', () => {
         counts: { updates: 0, chats: 0, files: 0, pullRequests: 0 },
         sessions: [],
         pullRequests: [],
+        updates: { items: [], total: 0, nextCursor: null },
       },
       updates: [],
       links: {
@@ -585,22 +609,31 @@ test.describe('Idea page — phone', () => {
 
     await expect(page.getByText(/No plan written yet/)).toBeVisible();
     await expect(page.getByText(/Nothing has worked on this yet/)).toBeVisible();
-    await expect(page.getByText(/No updates yet/)).toBeVisible();
+    await expect(page.getByText(/Nothing yet/)).toBeVisible();
 
     await assertLayoutIsSound(page);
     await screenshot(page, 'idea-page-empty-phone');
   });
 
-  test('the updates failing does not take the rest of the page with it', async ({ page }) => {
-    await setupIdeaMocks(page, { updatesFail: true });
-    await openIdea(page);
+  /*
+   * Updates has no failure of its own any more.
+   *
+   * The notes arrive with the idea, so there is no longer a half-loaded page where the plan
+   * renders beside a broken timeline — which is a better outcome than the one this test used
+   * to capture. What a person gets when the read fails is the page's own load error, so that
+   * is what is captured.
+   */
+  test('a failed read offers a retry rather than a half-rendered page', async ({ page }) => {
+    await setupIdeaMocks(page, { ideaFails: true });
+    await page.goto(IDEA_URL);
 
-    await expect(page.getByText('Could not load the updates.')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'The idea' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Work' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Try again/i })).toBeVisible();
+    // Not a blank screen, and not a page with some sections and not others.
+    await expect(page.getByRole('heading', { name: 'The idea' })).toHaveCount(0);
 
-    await assertLayoutIsSound(page);
-    await screenshot(page, 'idea-page-updates-error-phone');
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'idea-page-load-error-phone');
   });
 
   test('Start work opens the sheet, which fits a phone and names the idea', async ({ page }) => {

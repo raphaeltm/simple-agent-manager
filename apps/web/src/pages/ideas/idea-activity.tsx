@@ -271,8 +271,11 @@ export function IdeaUpdates({
 }: {
   /** Notes and lifecycle events, already merged and newest first. */
   entries: IdeaTimelineEntry[] | undefined;
-  /** The whole timeline's size, which can exceed what `entries` shows. */
-  total: number | undefined;
+  /**
+   * The whole timeline's size. A string so a truncated notes page can say "N+" rather than
+   * assert a total it cannot support.
+   */
+  total: number | string | undefined;
   projectId: string;
   onPost: (body: string) => void;
   posting: boolean;

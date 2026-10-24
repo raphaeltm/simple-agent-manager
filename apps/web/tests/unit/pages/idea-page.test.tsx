@@ -483,6 +483,36 @@ describe('IdeaPage', () => {
     });
 
     /*
+     * The count is the timeline's, not the notes table's.
+     *
+     * It read "3" beside six rows when lifecycle entries joined the list and the pill still
+     * counted notes. Lifecycle entries are exact (derived from the whole payload); the notes
+     * can be truncated, and the "+" says so rather than asserting a total the slice cannot
+     * support.
+     */
+    it('counts the whole timeline, and says so with a + when notes are truncated', async () => {
+      mocks.getProjectIdea.mockResolvedValue(
+        makeIdeaDetail({
+          sessions: [
+            {
+              ...SESSION,
+              strong: true,
+              relations: ['works_on'],
+              linkedAt: Date.parse('2026-10-20T09:00:00.000Z'),
+            },
+          ],
+          updates: { items: [], total: 7, nextCursor: 'more' },
+        })
+      );
+      renderPage();
+
+      const updates = await screen.findByRole('region', { name: 'Updates' });
+      expect(updates).toBeInTheDocument();
+      // 7 notes + 1 derived lifecycle entry, and more notes behind the cursor.
+      expect(await screen.findByText('8+', { exact: true })).toBeInTheDocument();
+    });
+
+    /*
      * The discriminating control: a chat that only READ the idea did not start work on it, and
      * a pull request that is still open has not merged. Without this, "render every session and
      * every PR" would pass the test above.
