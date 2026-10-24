@@ -486,6 +486,41 @@ test.describe('Ideas list — laptop', () => {
     await screenshot(page, 'ideas-list-desktop');
   });
 
+  /*
+   * The main column is empty while the search HAS a match — found by looking at a staging
+   * screenshot at this width, where it was a third of the page rendered as a blank void.
+   *
+   * The guard was `filtered.length === 0`, which asks "did the search match anything". The main
+   * column's question is "do I have anything to show", and the two differ exactly when every
+   * match lives somewhere else: Done recently (the side column here, a fold on the phone) or
+   * Filed by agents. One done idea matching the search gives `filtered.length === 1`, so the
+   * panel was suppressed and nothing at all rendered (rule 74 — a gate keyed on a correlated
+   * signal).
+   */
+  test('says where the matches are when the main column has none', async ({ page }) => {
+    await setupIdeasMocks(page, {
+      items: [
+        makeIdea({ ideaId: 'done-1', title: 'Retry webhook deliveries', state: 'done' }),
+        makeIdea({ ideaId: 'open-1', title: 'Something else entirely', state: 'not-started' }),
+      ],
+    });
+    await openIdeas(page);
+
+    await page.getByPlaceholder('Search ideas').fill('Retry webhook');
+
+    // The match is real and visible — in Done recently.
+    await expect(page.getByRole('heading', { name: /Done recently/ })).toBeVisible();
+    await expect(page.getByText('Retry webhook deliveries').first()).toBeVisible();
+
+    // And the main column says so rather than rendering nothing. The liveness half of the
+    // assertion (rule 62): a blank page would also satisfy "no open ideas are listed".
+    await expect(page.getByText(/Nothing open matches/)).toBeVisible();
+    await expect(page.getByText(/under Done recently/)).toBeVisible();
+
+    await assertLayoutIsSound(page);
+    await screenshot(page, 'ideas-empty-main-column-desktop');
+  });
+
   test('holds up under stress data', async ({ page }) => {
     await setupIdeasMocks(page, { items: STRESS_IDEAS });
     await openIdeas(page);

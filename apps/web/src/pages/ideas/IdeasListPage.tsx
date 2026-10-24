@@ -328,6 +328,43 @@ export function IdeasListPage() {
     );
   }
 
+  /*
+   * Whether the MAIN column has anything to render — which is not the same question as
+   * "did the search match anything".
+   *
+   * This used to be `filtered.length === 0`. That is a different condition that merely
+   * correlates with this one (rule 74): a search matching exactly one DONE idea has
+   * `filtered.length === 1`, so the panel was suppressed — while the match itself rendered in
+   * the side column (or the phone's fold), leaving the main column a blank void with nothing
+   * in it at all. Found by looking at the staging screenshot at 1280, where it is a third of
+   * the page. The same hole swallowed a search matching only agent-filed ideas.
+   */
+  const mainColumnEmpty =
+    groups.needsYou.length === 0 &&
+    groups.inProgress.length === 0 &&
+    groups.notStarted.length === 0;
+
+  /*
+   * Three distinct situations, three messages. Saying "no ideas match" when the idea is right
+   * there in Done recently would be worse than saying nothing.
+   */
+  const emptyMainMessage = (() => {
+    if (filtered.length === 0) return `No ideas match “${search}”.`;
+    const elsewhere = [
+      groups.doneRecently.length > 0 ? 'Done recently' : null,
+      groups.filedByAgents.length > 0 ? 'Filed by agents' : null,
+    ].filter((name): name is string => name !== null);
+    const where = elsewhere.join(' and ');
+    if (search.trim().length > 0) {
+      return where
+        ? `Nothing open matches “${search}” — what matched is under ${where}.`
+        : `Nothing open matches “${search}”.`;
+    }
+    return where
+      ? `Nothing is open right now. Everything is under ${where}.`
+      : 'Nothing is open right now.';
+  })();
+
   const main = (
     <>
       <NeedsYou items={groups.needsYou} projectId={projectId} handlers={handlers} />
@@ -338,9 +375,9 @@ export function IdeasListPage() {
         items={groups.notStarted}
         projectId={projectId}
       />
-      {filtered.length === 0 && (
+      {mainColumnEmpty && (
         <Panel className="px-4 py-8 text-center" label="No matches">
-          <p className="m-0 text-sm text-fg-muted">No ideas match “{search}”.</p>
+          <p className="m-0 text-sm text-fg-muted">{emptyMainMessage}</p>
         </Panel>
       )}
     </>
