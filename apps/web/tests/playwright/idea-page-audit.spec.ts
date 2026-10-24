@@ -657,6 +657,18 @@ test.describe('Idea page — laptop', () => {
     await screenshot(page, 'idea-page-start-work-sheet-desktop');
   });
 
+  test('an idea nobody has started, in two columns', async ({ page }) => {
+    await setupIdeaMocks(page);
+    await openIdea(page);
+
+    // The most common state, and the one Start work is reached from, at the wider viewport.
+    await expect(page.getByText('Not started')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start work' })).toBeVisible();
+
+    await assertLayoutIsSound(page);
+    await screenshot(page, 'idea-page-not-started-desktop');
+  });
+
   test('a long title, many chats and capped counts in two columns', async ({ page }) => {
     await setupIdeaMocks(page, {
       idea: makeIdea('review', {
