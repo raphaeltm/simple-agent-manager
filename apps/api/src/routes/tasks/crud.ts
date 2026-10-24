@@ -21,6 +21,7 @@ import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedWorkspace, requireProjectCapability } from '../../middleware/project-auth';
+import { getIdeaSessionLinks } from '../../operations/link-core';
 import {
   CreateTaskDependencySchema,
   CreateTaskSchema,
@@ -991,7 +992,7 @@ crudRoutes.get('/:taskId/sessions', requireAuth(), requireApproved(), async (c) 
 
   await requireProjectCapability(db, projectId, userId, 'task:read');
 
-  const sessions = await projectDataService.getSessionsForIdea(c.env, projectId, taskId);
+  const sessions = await getIdeaSessionLinks(c.env, projectId, taskId);
 
   return c.json({ sessions, count: sessions.length });
 });

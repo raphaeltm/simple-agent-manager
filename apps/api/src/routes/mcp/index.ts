@@ -26,6 +26,7 @@ import {
   MCP_TOOLS,
   METHOD_NOT_FOUND,
 } from './_helpers';
+import { isAutoLinkTool, scheduleToolAutoLink } from './auto-link-tools';
 import {
   handleCreateMessageCommentThread,
   handleGetMessageCommentThread,
@@ -359,7 +360,19 @@ mcpRoutes.post('/', async (c) => {
           default: {
             // One-line tools are dispatched from the shared handler table.
             const handler = toolName ? MCP_TOOL_HANDLERS.get(toolName) : undefined;
-            if (handler) return c.json(await handler(requestId, toolArgs, tokenData, c.env));
+            if (handler) {
+              const response = await handler(requestId, toolArgs, tokenData, c.env);
+              if (toolName && isAutoLinkTool(toolName) && !response.error) {
+                let executionCtx: { waitUntil(promise: Promise<unknown>): void } | null = null;
+                try {
+                  executionCtx = c.executionCtx;
+                } catch {
+                  log.warn('resource_links.wait_until_unavailable', { tool: toolName });
+                }
+                scheduleToolAutoLink(toolName, response, toolArgs, tokenData, c.env, executionCtx);
+              }
+              return c.json(response);
+            }
             return c.json(jsonRpcError(requestId, METHOD_NOT_FOUND, `Unknown tool: ${toolName}`));
           }
         }

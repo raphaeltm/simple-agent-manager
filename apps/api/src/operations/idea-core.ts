@@ -266,7 +266,7 @@ export function prepareIdeaCreate(ctx: OperationContext, input: IdeaCreateInput)
       contentLength: content?.length ?? 0,
       priority,
       status: 'draft',
-      message: 'Idea created. Use link_idea to associate it with the current session.',
+      message: 'Idea created.',
       ...(ctx.actor.via !== 'workspace-agent'
         ? { link: `${operationLink(ctx, input.projectId)}/ideas/${encodeURIComponent(ideaId)}` }
         : {}),

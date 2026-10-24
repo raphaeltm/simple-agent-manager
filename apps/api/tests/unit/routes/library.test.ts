@@ -106,6 +106,39 @@ describe('library routes', () => {
   });
 
   describe('POST /upload', () => {
+    it('ignores forged agent provenance on a human upload', async () => {
+      mockUploadFile.mockResolvedValue({ id: 'file-123' });
+      mockGetUploadMaxBytes.mockReturnValue(1024);
+      const { app, env } = makeApp(makeEnv());
+      const formData = new FormData();
+      formData.append('file', new File(['hello'], 'report.txt'));
+      formData.append('uploadSource', 'agent');
+      formData.append('uploadSessionId', 'foreign-session');
+      formData.append('uploadTaskId', 'foreign-task');
+      const response = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/upload`, {
+          method: 'POST',
+          body: formData,
+        }),
+        env
+      );
+      expect(response.status).toBe(201);
+      expect(mockUploadFile).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        'test-project-id',
+        'test-user-id',
+        'report.txt',
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ uploadSource: 'user' })
+      );
+      const options = mockUploadFile.mock.calls[0]?.[9] as Record<string, unknown>;
+      expect(options).not.toHaveProperty('uploadSessionId');
+      expect(options).not.toHaveProperty('uploadTaskId');
+    });
     it('returns 201 on successful upload', async () => {
       const mockFile = {
         id: 'file-123',

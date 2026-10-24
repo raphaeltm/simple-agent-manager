@@ -12,6 +12,7 @@ import { MAILBOX_DEFAULTS } from '@simple-agent-manager/shared';
 
 import { log } from '../lib/logger';
 import { migrateProjectSchedules } from './project-data/project-event-schedules-schema';
+import { migrateResourceLinks } from './project-data/resource-links-migration';
 import { parseMigrationName } from './project-data/row-schemas';
 
 export interface Migration {
@@ -2534,6 +2535,7 @@ export const MIGRATIONS: Migration[] = [
       sql.exec('ALTER TABLE project_schedules ADD COLUMN shared_access_grant_id TEXT');
     },
   },
+  { name: '067-resource-links', run: migrateResourceLinks },
   {
     name: '068-idea-updates',
     run(sql) {

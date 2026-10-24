@@ -34,6 +34,7 @@ import {
   type JsonRpcResponse,
   jsonRpcSuccess,
   type McpTokenData,
+  resolveSessionId,
 } from './_helpers';
 import { getEncryptionKey, requireWorkspaceId } from './library-tool-helpers';
 
@@ -301,6 +302,7 @@ export async function handleUploadToLibrary(
 
     const mimeType = contentType;
 
+    const uploadSessionId = await resolveSessionId(env, tokenData.workspaceId);
     // Upload to library (will throw 409 on duplicate filename in same directory)
     const result = await uploadFile(
       db,
@@ -316,7 +318,7 @@ export async function handleUploadToLibrary(
         description,
         tags,
         uploadSource: 'agent',
-        uploadSessionId: tokenData.taskId, // task context doubles as session context for agents
+        uploadSessionId: uploadSessionId ?? undefined,
         uploadTaskId: tokenData.taskId,
         tagSource: 'agent',
         directory,

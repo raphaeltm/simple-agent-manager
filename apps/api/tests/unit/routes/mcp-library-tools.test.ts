@@ -356,6 +356,7 @@ describe('MCP Library Tools', () => {
     it('uploads file from workspace to library', async () => {
       // Mock workspace lookup
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
+      mockD1._stmt.first.mockResolvedValueOnce({chat_session_id:'session-001'});
 
       // Mock VM agent download
       mockFetch.mockResolvedValueOnce(new Response('file content', {
@@ -397,7 +398,7 @@ describe('MCP Library Tools', () => {
         expect.any(ArrayBuffer),
         expect.objectContaining({
           uploadSource: 'agent',
-          uploadSessionId: 'task-001',
+          uploadSessionId: 'session-001',
           uploadTaskId: 'task-001',
           tagSource: 'agent',
           tags: ['notes', 'draft'],
@@ -515,8 +516,9 @@ describe('MCP Library Tools', () => {
       expect(result.error!.message).toContain('already exists');
     });
 
-    it('verifies uploadSessionId is set from taskId', async () => {
+    it('sets uploadSessionId from the authenticated workspace session', async () => {
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
+      mockD1._stmt.first.mockResolvedValueOnce({chat_session_id:'session-001'});
       mockFetch.mockResolvedValueOnce(new Response('data', {
         status: 200,
         headers: { 'Content-Type': 'text/plain' },
@@ -529,7 +531,7 @@ describe('MCP Library Tools', () => {
         expect.anything(), expect.anything(), expect.anything(),
         mockEnv, 'proj-001', 'user-001', 'a.txt', 'text/plain', expect.any(ArrayBuffer),
         expect.objectContaining({
-          uploadSessionId: 'task-001',
+          uploadSessionId: 'session-001',
           uploadTaskId: 'task-001',
         }),
       );

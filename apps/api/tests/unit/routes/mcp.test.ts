@@ -50,6 +50,20 @@ vi.mock('../../../src/services/agent-activity', () => ({
   listAgentActivityTasks: agentActivityMocks.listAgentActivityTasks,
 }));
 
+vi.mock('../../../src/services/admin-settings', async (original) => ({
+  ...(await original<typeof import('../../../src/services/admin-settings')>()),
+  resolveAdminSettingDetailsMany: vi
+    .fn()
+    .mockResolvedValue([
+      { value: 300000 },
+      { value: 100 },
+      { value: 100 },
+      { value: 100000 },
+      { value: 50 },
+      { value: 500 },
+    ]),
+}));
+
 vi.mock('../../../src/routes/mcp/deployment-tools', async () => {
   const actual = await vi.importActual<typeof import('../../../src/routes/mcp/deployment-tools')>(
     '../../../src/routes/mcp/deployment-tools'
@@ -402,6 +416,9 @@ const mockDoStub = {
   ),
   linkSessionIdea: vi.fn(),
   unlinkSessionIdea: vi.fn(),
+  recordResourceLink: vi.fn().mockResolvedValue('written'),
+  removeResourceLink: vi.fn().mockResolvedValue(undefined),
+  listResourceLinks: vi.fn().mockResolvedValue([]),
   getIdeasForSession: vi.fn().mockReturnValue([]),
   getSessionsForIdea: vi.fn().mockReturnValue([]),
   updateSessionTopic: vi.fn().mockResolvedValue(true),
@@ -5093,7 +5110,9 @@ describe('MCP Routes', () => {
     it('should link idea successfully', async () => {
       mockD1._stmt.first
         .mockResolvedValueOnce({ chat_session_id: 'sess-1' })
-        .mockResolvedValueOnce({ id: 'task-1', title: 'Fix auth bug' });
+        .mockResolvedValueOnce({ id: 'task-1', title: 'Fix auth bug' })
+        .mockResolvedValueOnce({ id: 'task-1' });
+      mockDoStub.getSession.mockResolvedValueOnce({ id: 'sess-1' });
 
       const res = await mcpRequest(
         app,
@@ -5109,10 +5128,14 @@ describe('MCP Routes', () => {
       expect(data.linked).toBe(true);
       expect(data.taskTitle).toBe('Fix auth bug');
       expect(data.context).toBe('discussing auth');
-      expect(mockDoStub.linkSessionIdea).toHaveBeenCalledWith(
-        'sess-1',
-        'task-1',
-        'discussing auth'
+      expect(mockDoStub.recordResourceLink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceId: 'sess-1',
+          targetId: 'task-1',
+          relation: 'linked',
+          context: 'discussing auth',
+        }),
+        expect.any(Object)
       );
     });
   });
@@ -5138,7 +5161,10 @@ describe('MCP Routes', () => {
     });
 
     it('should unlink idea successfully', async () => {
-      mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
+      mockD1._stmt.first
+        .mockResolvedValueOnce({ chat_session_id: 'sess-1' })
+        .mockResolvedValueOnce({ id: 'task-1' });
+      mockDoStub.getSession.mockResolvedValueOnce({ id: 'sess-1' });
 
       const res = await mcpRequest(
         app,
@@ -5152,7 +5178,13 @@ describe('MCP Routes', () => {
       const body = await res.json();
       const data = JSON.parse(body.result.content[0].text);
       expect(data.unlinked).toBe(true);
-      expect(mockDoStub.unlinkSessionIdea).toHaveBeenCalledWith('sess-1', 'task-1');
+      expect(mockDoStub.removeResourceLink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceId: 'sess-1',
+          targetId: 'task-1',
+          relation: 'linked',
+        })
+      );
     });
   });
 
@@ -5180,7 +5212,8 @@ describe('MCP Routes', () => {
 
     it('should return empty list when no ideas linked', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
-      mockDoStub.getIdeasForSession.mockReturnValue([]);
+      mockDoStub.getSession.mockResolvedValueOnce({ id: 'sess-1' });
+      mockDoStub.listResourceLinks.mockResolvedValueOnce([]);
 
       const res = await mcpRequest(
         app,
@@ -5199,8 +5232,30 @@ describe('MCP Routes', () => {
 
     it('should return enriched ideas with task details', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
-      mockDoStub.getIdeasForSession.mockReturnValue([
-        { taskId: 'task-1', context: 'auth discussion', createdAt: 1000 },
+      mockDoStub.getSession.mockResolvedValueOnce({ id: 'sess-1' });
+      mockDoStub.listResourceLinks.mockResolvedValueOnce([
+        {
+          sourceKind: 'session',
+          sourceId: 'sess-1',
+          targetKind: 'idea',
+          targetId: 'task-1',
+          relation: 'linked',
+          origin: 'explicit',
+          context: 'auth discussion',
+          firstAt: 1000,
+          lastAt: 1000,
+        },
+        {
+          sourceKind: 'session',
+          sourceId: 'sess-1',
+          targetKind: 'idea',
+          targetId: 'task-1',
+          relation: 'read',
+          origin: 'auto',
+          context: null,
+          firstAt: 1001,
+          lastAt: 1001,
+        },
       ]);
       // D1 batch query for task details
       mockD1._stmt.all.mockResolvedValueOnce({
@@ -5401,7 +5456,7 @@ describe('MCP Routes', () => {
       const data = JSON.parse(body.result.content[0].text);
       expect(data.ideaId).toBeDefined();
       expect(data.contentLength).toBeGreaterThan(0);
-      expect(data.message).toContain('link_idea');
+      expect(data.message).toBe('Idea created.');
     });
 
     it('should create an idea with priority', async () => {

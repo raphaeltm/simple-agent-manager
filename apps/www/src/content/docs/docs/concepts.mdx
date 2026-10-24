@@ -127,7 +127,9 @@ SAM leaves commits, pushes and pull requests to the agent; turn end and task com
 
 ### Linking Ideas to Conversations
 
-Ideas can be linked to chat sessions, creating a many-to-many association. This lets you track which conversations led to which ideas, and pull in idea context during a chat. Agents can manage these links using MCP tools (`link_idea`, `unlink_idea`, `find_related_ideas`).
+SAM records project-scoped relationships as agents create, edit, or read ideas and upload, replace, or view library files in a chat. Reading an idea or viewing a file creates a weaker relationship than creating or editing it. Explicit `link_idea` and `unlink_idea` tools manage chat-to-idea links. Agents can also use `link_to_idea` and `unlink_from_idea` to connect a file, pull request, or related idea when the work happened outside those automatic paths. Search and list tools do not create relationships.
+
+The idea, chat, and library file link endpoints return related work with totals and truncation flags. An idea includes files and pull requests explicitly linked to it and those belonging to chats strongly linked to it. A chat that only read an idea does not contribute its files or pull requests to that idea.
 
 ### Agent-to-Agent Dispatch
 

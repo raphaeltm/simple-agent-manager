@@ -156,6 +156,7 @@ import { workspaceResourceHistoryCallbackRoute } from './routes/projects/workspa
 import { providersRoutes } from './routes/providers';
 import { reportIssueRoutes } from './routes/report-issue';
 import { resolutionStatusRoute } from './routes/resolution-status';
+import { resourceLinkRoutes } from './routes/resource-links';
 import { samRoutes } from './routes/sam';
 import { setupRoutes } from './routes/setup';
 import { skillRuntimeRoutes } from './routes/skill-runtime';
@@ -866,6 +867,7 @@ app.route('/api/projects/:projectId/event-channels', projectEventChannelRoutes);
 app.route('/api/projects/:projectId/cached-commands', cachedCommandRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/library', libraryRoutes);
+app.route('/api/projects/:projectId', resourceLinkRoutes);
 app.route('/api/projects/:projectId/library', libraryCommentRoutes);
 app.route('/api/projects/:projectId/agent-profiles/:profileId/runtime', profileRuntimeRoutes);
 app.route('/api/projects/:projectId/agent-profiles', agentProfileRoutes);

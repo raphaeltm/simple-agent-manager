@@ -2314,6 +2314,54 @@ export async function getSessionsForIdea(
   return stub.getSessionsForIdea(taskId);
 }
 
+export async function recordResourceLink(
+  env: Env,
+  projectId: string,
+  input: import('../durable-objects/project-data/links').LinkWrite,
+  limits: import('../durable-objects/project-data/links').LinkLimits
+) {
+  return (await getStub(env, projectId)).recordResourceLink(input, limits);
+}
+
+export async function removeResourceLink(
+  env: Env,
+  projectId: string,
+  input: import('../durable-objects/project-data/links').LinkRemove
+) {
+  return (await getStub(env, projectId)).removeResourceLink(input);
+}
+
+export async function listResourceLinks(
+  env: Env,
+  projectId: string,
+  kind: import('@simple-agent-manager/shared').LinkKind,
+  id: string,
+  cap: number
+) {
+  return (await getStub(env, projectId)).listResourceLinks(kind, id, cap);
+}
+
+export async function listLinksForTargets(
+  env: Env,
+  projectId: string,
+  kind: import('@simple-agent-manager/shared').LinkKind,
+  ids: string[],
+  perTargetCap: number,
+  maxTargets: number
+) {
+  return (await getStub(env, projectId)).listLinksForTargets(kind, ids, perTargetCap, maxTargets);
+}
+
+export async function getResourceLinkSnapshot(
+  env: Env,
+  projectId: string,
+  kind: import('@simple-agent-manager/shared').LinkKind,
+  id: string,
+  cap: number
+) {
+  return (await getStub(env, projectId)).getResourceLinkSnapshot(kind, id, cap);
+}
+
 // =========================================================================
 // Idle Cleanup Schedule
 // =========================================================================

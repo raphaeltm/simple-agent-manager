@@ -1,0 +1,606 @@
+import type {
+  CappedList,
+  FileContext,
+  IdeaContext,
+  LinkedFile,
+  LinkedIdea,
+  LinkedPullRequest,
+  LinkedSession,
+  LinkKind,
+  LinkRelation,
+  SessionContext,
+} from '@simple-agent-manager/shared';
+import { canonicalProjectPullRequestUrl, isStrongLinkRelation } from '@simple-agent-manager/shared';
+
+import type {
+  LinkLimits,
+  LinkRemove,
+  LinkWrite,
+  ResourceLink,
+} from '../durable-objects/project-data/links';
+import { resolveStorageSafetyConfig } from '../durable-objects/project-data/storage-safety';
+import type { Env } from '../env';
+import { log } from '../lib/logger';
+import { errors } from '../middleware/error';
+import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
+import * as projectData from '../services/project-data';
+
+const PAIRS: Record<string, readonly LinkRelation[]> = {
+  'session:idea': ['created', 'edited', 'read', 'works_on', 'discusses', 'linked'],
+  'session:file': ['uploaded', 'replaced', 'viewed'],
+  'session:pr': ['opened'],
+  'idea:idea': ['related'],
+  'idea:file': ['linked'],
+  'idea:pr': ['linked'],
+};
+const SETTING_NAMES = [
+  'operations.resourceLinkTouchIntervalMs',
+  'operations.resourceLinkWeakPerTarget',
+  'operations.resourceLinkWeakCleanupBatchSize',
+  'operations.resourceLinkProjectCap',
+  'operations.resourceLinkListCap',
+  'operations.resourceLinkContextMaxLength',
+] as const;
+
+async function limits(env: Env) {
+  const settings = await resolveAdminSettingDetailsMany(env, [...SETTING_NAMES]);
+  const values = settings.map((s) => Number(s.value));
+  const [
+    touchIntervalMs,
+    weakPerTarget,
+    weakCleanupBatchSize,
+    projectCap,
+    listCap,
+    contextMaxLength,
+  ] = values;
+  if (
+    touchIntervalMs === undefined ||
+    weakPerTarget === undefined ||
+    weakCleanupBatchSize === undefined ||
+    projectCap === undefined ||
+    listCap === undefined ||
+    contextMaxLength === undefined ||
+    [
+      touchIntervalMs,
+      weakPerTarget,
+      weakCleanupBatchSize,
+      projectCap,
+      listCap,
+      contextMaxLength,
+    ].some((v) => !Number.isFinite(v))
+  )
+    throw errors.internal('Resource link settings unavailable');
+  const storage = resolveStorageSafetyConfig(env);
+  return {
+    write: {
+      touchIntervalMs,
+      weakPerTarget,
+      weakCleanupBatchSize,
+      projectCap,
+      storageHighWaterBytes: storage.limitBytes * storage.warningRatio,
+    } satisfies LinkLimits,
+    listCap,
+    contextMaxLength,
+  };
+}
+
+async function validateEntity(
+  env: Env,
+  projectId: string,
+  kind: LinkKind,
+  id: string
+): Promise<string> {
+  if (!id.trim()) throw errors.badRequest('Resource id is required');
+  if (kind === 'session') {
+    if (!(await projectData.getSession(env, projectId, id))) throw errors.notFound('Resource');
+    return id;
+  }
+  if (kind === 'idea' || kind === 'file') {
+    const table = kind === 'idea' ? 'tasks' : 'project_files';
+    const found = await env.DATABASE.prepare(`SELECT id FROM ${table} WHERE id=? AND project_id=?`)
+      .bind(id, projectId)
+      .first();
+    if (!found) throw errors.notFound('Resource');
+    return id;
+  }
+  const project = await env.DATABASE.prepare('SELECT repository FROM projects WHERE id=?')
+    .bind(projectId)
+    .first<{ repository: string | null }>();
+  const canonical = project?.repository
+    ? canonicalProjectPullRequestUrl(id, project.repository)
+    : null;
+  if (!canonical) throw errors.notFound('Resource');
+  return canonical;
+}
+
+export async function recordLink(env: Env, projectId: string, input: LinkWrite): Promise<void> {
+  if (!PAIRS[`${input.sourceKind}:${input.targetKind}`]?.includes(input.relation))
+    throw errors.badRequest('Invalid relationship');
+  const [sourceId, targetId] = await Promise.all([
+    validateEntity(env, projectId, input.sourceKind, input.sourceId),
+    validateEntity(env, projectId, input.targetKind, input.targetId),
+  ]);
+  const config = await limits(env);
+  await projectData.recordResourceLink(
+    env,
+    projectId,
+    {
+      ...input,
+      sourceId,
+      targetId,
+      origin: 'explicit',
+      context:
+        input.context
+          ?.slice(0, config.contextMaxLength)
+          .split('')
+          .map((ch) => {
+            const code = ch.charCodeAt(0);
+            return code < 32 || code === 127 ? ' ' : ch;
+          })
+          .join('') ?? null,
+    },
+    config.write
+  );
+}
+
+/** Call from waitUntil after the original tool succeeds. Failure is observable, not user-facing. */
+export async function recordAutoLink(env: Env, projectId: string, input: LinkWrite): Promise<void> {
+  try {
+    if (!input.sourceId) return;
+    if (!PAIRS[`${input.sourceKind}:${input.targetKind}`]?.includes(input.relation)) return;
+    const targetId = await validateEntity(env, projectId, input.targetKind, input.targetId);
+    const config = await limits(env);
+    const result = await projectData.recordResourceLink(
+      env,
+      projectId,
+      { ...input, targetId, origin: 'auto', context: null },
+      config.write
+    );
+    if (result !== 'written')
+      log.warn('resource_links.weak_skipped', {
+        projectId,
+        sourceId: input.sourceId,
+        targetId: input.targetId,
+        reason: result,
+      });
+  } catch (error) {
+    log.warn('resource_links.auto_failed', {
+      projectId,
+      sourceId: input.sourceId,
+      targetId: input.targetId,
+      error: String(error),
+    });
+  }
+}
+
+export async function removeLink(env: Env, projectId: string, input: LinkRemove): Promise<void> {
+  const [sourceId, targetId] = await Promise.all([
+    validateEntity(env, projectId, input.sourceKind, input.sourceId),
+    validateEntity(env, projectId, input.targetKind, input.targetId),
+  ]);
+  await projectData.removeResourceLink(env, projectId, { ...input, sourceId, targetId });
+}
+
+export async function listLinks(env: Env, projectId: string, kind: LinkKind, id: string) {
+  await validateEntity(env, projectId, kind, id);
+  const config = await limits(env);
+  return projectData.listResourceLinks(env, projectId, kind, id, config.listCap);
+}
+
+/** Internal list-page seam: the caller supplies IDs already selected from this project. */
+export async function listLinksForTargets(
+  env: Env,
+  projectId: string,
+  kind: LinkKind,
+  ids: string[]
+) {
+  const [targetLimit, perTargetCap] = await resolveAdminSettingDetailsMany(env, [
+    'operations.resourceLinkBatchTargetLimit',
+    'operations.resourceLinkBatchPerTargetCap',
+  ]);
+  const maxTargets = Number(targetLimit?.value);
+  const cap = Number(perTargetCap?.value);
+  if (!Number.isInteger(maxTargets) || !Number.isInteger(cap) || maxTargets < 1 || cap < 1)
+    throw errors.internal('Resource link batch settings unavailable');
+  return projectData.listLinksForTargets(env, projectId, kind, ids, cap, maxTargets);
+}
+
+type IdeaRow = { id: string; title: string; status: string };
+type FileRow = { id: string; filename: string; directory: string };
+type PrRow = { chatSessionId: string | null; outputPrUrl: string | null };
+type AssociationRow = { chatSessionId: string | null; prUrl: string };
+type ProjectRow = { repository: string };
+
+function capped<T>(
+  items: T[],
+  cap: number,
+  total = items.length,
+  incomplete = false
+): CappedList<T> {
+  const count = Math.max(items.length, total);
+  return {
+    items: items.slice(0, cap),
+    total: count,
+    truncated: incomplete || count > cap,
+    totalIsLowerBound: incomplete,
+  };
+}
+function linkFor(links: ResourceLink[], kind: LinkKind, id: string) {
+  return links.filter(
+    (l) =>
+      (l.sourceKind === kind && l.sourceId === id) || (l.targetKind === kind && l.targetId === id)
+  );
+}
+function sorted(links: ResourceLink[]) {
+  return [...links].sort(
+    (a, b) =>
+      Number(isStrongLinkRelation(b.relation)) - Number(isStrongLinkRelation(a.relation)) ||
+      b.lastAt - a.lastAt
+  );
+}
+function unique<T>(items: T[], key: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const id = key(item);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+function mergeRelations<T extends { relations: LinkRelation[] }>(
+  items: T[],
+  key: (item: T) => string
+): T[] {
+  const map = new Map<string, T>();
+  for (const item of items) {
+    const id = key(item);
+    const current = map.get(id);
+    if (current) {
+      for (const relation of item.relations)
+        if (!current.relations.includes(relation)) current.relations.push(relation);
+    } else map.set(id, item);
+  }
+  return [...map.values()];
+}
+
+/** One DO RPC, then one batch of all display and PR-reference reads. */
+async function contextData(env: Env, projectId: string, kind: LinkKind, id: string) {
+  const config = await limits(env);
+  const snapshot = await projectData.getResourceLinkSnapshot(
+    env,
+    projectId,
+    kind,
+    id,
+    config.listCap
+  );
+  if (!snapshot.exists) throw errors.notFound('Resource');
+  const links = sorted(snapshot.links);
+  const ideaIds = [
+    ...new Set([
+      ...links.flatMap((l) => [
+        ...(l.sourceKind === 'idea' ? [l.sourceId] : []),
+        ...(l.targetKind === 'idea' ? [l.targetId] : []),
+      ]),
+      ...(kind === 'idea' ? [id] : []),
+    ]),
+  ];
+  const fileIds = [
+    ...new Set([
+      ...links.flatMap((l) => [
+        ...(l.sourceKind === 'file' ? [l.sourceId] : []),
+        ...(l.targetKind === 'file' ? [l.targetId] : []),
+      ]),
+      ...(kind === 'file' ? [id] : []),
+    ]),
+  ];
+  const sessionIds = [
+    ...new Set([...snapshot.sessions.map((s) => s.id), ...(kind === 'session' ? [id] : [])]),
+  ];
+  const statements: D1PreparedStatement[] = [];
+  const groups: Array<'ideas' | 'files' | 'outputs' | 'associations' | 'projects'> = [];
+  const add = (group: (typeof groups)[number], prefix: string, ids: string[], suffix = '') => {
+    statements.push(
+      env.DATABASE.prepare(`${prefix} (SELECT value FROM json_each(?)) ${suffix}`).bind(
+        projectId,
+        JSON.stringify(ids)
+      )
+    );
+    groups.push(group);
+  };
+  add('ideas', 'SELECT id,title,status FROM tasks WHERE project_id=? AND id IN', ideaIds);
+  add(
+    'files',
+    'SELECT id,filename,directory FROM project_files WHERE project_id=? AND id IN',
+    fileIds
+  );
+  add(
+    'outputs',
+    'SELECT chat_session_id AS chatSessionId,output_pr_url AS outputPrUrl FROM tasks\n      WHERE project_id=? AND chat_session_id IN',
+    sessionIds,
+    'AND output_pr_url IS NOT NULL'
+  );
+  add(
+    'associations',
+    'SELECT t.chat_session_id AS chatSessionId,a.pr_url AS prUrl\n      FROM task_pull_request_associations a JOIN tasks t ON t.id=a.task_id AND t.project_id=a.project_id\n      WHERE a.project_id=? AND t.chat_session_id IN',
+    sessionIds
+  );
+  statements.push(
+    env.DATABASE.prepare('SELECT repository FROM projects WHERE id=?').bind(projectId)
+  );
+  groups.push('projects');
+  const results = await env.DATABASE.batch(statements);
+  const collected = {
+    ideas: [] as IdeaRow[],
+    files: [] as FileRow[],
+    outputs: [] as PrRow[],
+    associations: [] as AssociationRow[],
+    projects: [] as ProjectRow[],
+  };
+  results.forEach((result, index) => {
+    const group = groups[index];
+    if (group) (collected[group] as unknown[]).push(...(result?.results ?? []));
+  });
+  const ideaMap = new Map(collected.ideas.map((r) => [r.id, r]));
+  const fileMap = new Map(collected.files.map((r) => [r.id, r]));
+  if ((kind === 'idea' && !ideaMap.has(id)) || (kind === 'file' && !fileMap.has(id)))
+    throw errors.notFound('Resource');
+  return {
+    links,
+    sessions: snapshot.sessions,
+    ideas: ideaMap,
+    files: fileMap,
+    outputs: collected.outputs,
+    associations: collected.associations,
+    repository: collected.projects[0]?.repository ?? '',
+    cap: config.listCap,
+    totals: snapshot.totals,
+  };
+}
+
+function toIdeas(
+  data: Awaited<ReturnType<typeof contextData>>,
+  links: ResourceLink[]
+): LinkedIdea[] {
+  return mergeRelations(
+    links.flatMap((l) => {
+      const id = l.targetKind === 'idea' ? l.targetId : l.sourceKind === 'idea' ? l.sourceId : null;
+      const row = id && data.ideas.get(id);
+      return row
+        ? [
+            {
+              ideaId: row.id,
+              title: row.title,
+              status: row.status,
+              relations: [l.relation],
+            } as LinkedIdea,
+          ]
+        : [];
+    }),
+    (i) => i.ideaId
+  );
+}
+function toFiles(
+  data: Awaited<ReturnType<typeof contextData>>,
+  links: ResourceLink[]
+): LinkedFile[] {
+  return mergeRelations(
+    links.flatMap((l) => {
+      const id = l.targetKind === 'file' ? l.targetId : l.sourceKind === 'file' ? l.sourceId : null;
+      const row = id && data.files.get(id);
+      return row
+        ? [
+            {
+              fileId: row.id,
+              filename: row.filename,
+              directory: row.directory,
+              relations: [l.relation],
+              bySessionId: l.sourceKind === 'session' ? l.sourceId : null,
+            } as LinkedFile,
+          ]
+        : [];
+    }),
+    (f) => f.fileId
+  );
+}
+function toSessions(
+  data: Awaited<ReturnType<typeof contextData>>,
+  links: ResourceLink[]
+): LinkedSession[] {
+  const rows = new Map(data.sessions.map((s) => [s.id, s]));
+  return mergeRelations(
+    links.flatMap((l) => {
+      const id =
+        l.sourceKind === 'session' ? l.sourceId : l.targetKind === 'session' ? l.targetId : null;
+      const row = id && rows.get(id);
+      return row
+        ? [
+            {
+              sessionId: row.id,
+              topic: row.topic,
+              status: row.status,
+              lastActivityAt: row.updatedAt,
+              taskId: row.taskId,
+              relations: [l.relation],
+            } as LinkedSession,
+          ]
+        : [];
+    }),
+    (s) => s.sessionId
+  );
+}
+function toPrs(
+  data: Awaited<ReturnType<typeof contextData>>,
+  links: ResourceLink[],
+  sessionIds: string[]
+): LinkedPullRequest[] {
+  const refs: LinkedPullRequest[] = [];
+  for (const l of links)
+    if (l.targetKind === 'pr') {
+      const url = canonicalProjectPullRequestUrl(l.targetId, data.repository);
+      const number = Number(/\/pull\/(\d+)$/.exec(url ?? '')?.[1]);
+      if (url && number)
+        refs.push({
+          url,
+          number,
+          source: 'explicit_link',
+          state: null,
+          bySessionId: l.sourceKind === 'session' ? l.sourceId : null,
+        });
+    }
+  for (const row of data.outputs)
+    if (row.chatSessionId && sessionIds.includes(row.chatSessionId) && row.outputPrUrl) {
+      const url = canonicalProjectPullRequestUrl(row.outputPrUrl, data.repository);
+      const number = Number(/\/pull\/(\d+)$/.exec(url ?? '')?.[1]);
+      if (url && number)
+        refs.push({
+          url,
+          number,
+          source: 'task_output',
+          state: null,
+          bySessionId: row.chatSessionId,
+        });
+    }
+  for (const row of data.associations)
+    if (row.chatSessionId && sessionIds.includes(row.chatSessionId)) {
+      const url = canonicalProjectPullRequestUrl(row.prUrl, data.repository);
+      const number = Number(/\/pull\/(\d+)$/.exec(url ?? '')?.[1]);
+      if (url && number)
+        refs.push({
+          url,
+          number,
+          source: 'pr_association',
+          state: null,
+          bySessionId: row.chatSessionId,
+        });
+    }
+  return unique(refs, (r) => r.url);
+}
+
+export async function getIdeaContext(
+  env: Env,
+  projectId: string,
+  ideaId: string
+): Promise<IdeaContext> {
+  const data = await contextData(env, projectId, 'idea', ideaId);
+  const direct = linkFor(data.links, 'idea', ideaId);
+  const strongIds = direct
+    .filter(
+      (l) =>
+        l.sourceKind === 'session' &&
+        l.targetKind === 'idea' &&
+        l.targetId === ideaId &&
+        isStrongLinkRelation(l.relation)
+    )
+    .map((l) => l.sourceId);
+  const assetLinks = data.links.filter(
+    (l) =>
+      (l.sourceKind === 'idea' && l.sourceId === ideaId) ||
+      (l.sourceKind === 'session' && strongIds.includes(l.sourceId))
+  );
+  const prs = toPrs(data, assetLinks, strongIds);
+  const storedPrCount = new Set(
+    assetLinks.filter((l) => l.targetKind === 'pr').map((l) => l.targetId)
+  ).size;
+  const prIncomplete =
+    (data.totals?.strongSessions ?? 0) > new Set(strongIds).size ||
+    (data.totals?.prs ?? 0) > storedPrCount;
+  return {
+    sessions: capped(toSessions(data, direct), data.cap, data.totals?.sessions),
+    files: capped(toFiles(data, assetLinks), data.cap, data.totals?.files),
+    pullRequests: capped(prs, data.cap, prs.length, prIncomplete),
+    relatedIdeas: capped(
+      toIdeas(
+        data,
+        direct
+          .filter((l) => l.relation === 'related')
+          .map((l) => ({
+            ...l,
+            sourceKind: 'idea' as const,
+            sourceId: l.sourceId === ideaId ? l.targetId : l.sourceId,
+            targetKind: 'idea' as const,
+            targetId: l.sourceId === ideaId ? l.targetId : l.sourceId,
+          }))
+      ),
+      data.cap,
+      data.totals?.ideas
+    ),
+  };
+}
+export async function getSessionContext(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<SessionContext> {
+  const data = await contextData(env, projectId, 'session', sessionId);
+  const prs = toPrs(data, data.links, [sessionId]);
+  const storedPrCount = new Set(
+    data.links.filter((l) => l.targetKind === 'pr').map((l) => l.targetId)
+  ).size;
+  return {
+    ideas: capped(toIdeas(data, data.links), data.cap, data.totals?.ideas),
+    files: capped(toFiles(data, data.links), data.cap, data.totals?.files),
+    pullRequests: capped(prs, data.cap, prs.length, (data.totals?.prs ?? 0) > storedPrCount),
+  };
+}
+export async function getFileContext(
+  env: Env,
+  projectId: string,
+  fileId: string
+): Promise<FileContext> {
+  const data = await contextData(env, projectId, 'file', fileId);
+  const strongSessionIds = data.links
+    .filter(
+      (l) =>
+        l.targetKind === 'file' &&
+        l.targetId === fileId &&
+        l.sourceKind === 'session' &&
+        isStrongLinkRelation(l.relation)
+    )
+    .map((l) => l.sourceId);
+  const ideaLinks = data.links.filter(
+    (l) =>
+      (l.sourceKind === 'idea' && l.targetKind === 'file' && l.targetId === fileId) ||
+      (l.sourceKind === 'session' &&
+        strongSessionIds.includes(l.sourceId) &&
+        l.targetKind === 'idea' &&
+        isStrongLinkRelation(l.relation))
+  );
+  return {
+    sessions: capped(toSessions(data, data.links), data.cap, data.totals?.sessions),
+    ideas: capped(toIdeas(data, ideaLinks), data.cap, data.totals?.ideas),
+  };
+}
+
+/** Compatibility shape for the existing Ideas Conversations endpoint. */
+export async function getIdeaSessionLinks(env: Env, projectId: string, ideaId: string) {
+  await validateEntity(env, projectId, 'idea', ideaId);
+  const config = await limits(env);
+  const snapshot = await projectData.getResourceLinkSnapshot(
+    env,
+    projectId,
+    'idea',
+    ideaId,
+    config.listCap
+  );
+  const sessions = new Map(snapshot.sessions.map((s) => [s.id, s]));
+  return unique(
+    sorted(snapshot.links)
+      .filter((l) => l.sourceKind === 'session' && l.targetKind === 'idea' && l.targetId === ideaId)
+      .flatMap((l) => {
+        const row = sessions.get(l.sourceId);
+        return row
+          ? [
+              {
+                sessionId: row.id,
+                topic: row.topic,
+                status: row.status,
+                context: l.context,
+                linkedAt: l.firstAt,
+                relation: l.relation,
+              },
+            ]
+          : [];
+      }),
+    (s) => s.sessionId
+  );
+}

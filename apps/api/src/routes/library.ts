@@ -117,9 +117,6 @@ libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
         .map((t) => t.trim())
         .filter(Boolean)
     : undefined;
-  const uploadSource = (formData['uploadSource'] as string) || 'user';
-  const uploadSessionId = formData['uploadSessionId'] as string | undefined;
-  const uploadTaskId = formData['uploadTaskId'] as string | undefined;
   const directory = formData['directory'] as string | undefined;
 
   const data = await file.arrayBuffer();
@@ -138,9 +135,9 @@ libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
     {
       description,
       tags,
-      uploadSource: uploadSource === 'agent' ? 'agent' : 'user',
-      uploadSessionId,
-      uploadTaskId,
+      // A browser upload has user provenance. Agent/task identities must come from
+      // authenticated server context, never from multipart fields supplied by a client.
+      uploadSource: 'user',
       directory,
     }
   );

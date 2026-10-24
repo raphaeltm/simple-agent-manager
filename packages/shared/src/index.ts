@@ -9,6 +9,7 @@ export * from './harness-capabilities';
 
 // Provider Presets
 export * from './provider-presets';
+export * from './pull-requests';
 
 // Model Catalog
 export * from './model-catalog';

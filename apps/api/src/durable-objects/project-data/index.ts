@@ -64,6 +64,7 @@ import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
 import * as libraryFileComments from './library-file-comments';
+import * as links from './links';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messagePersistence from './message-persistence';
@@ -2250,6 +2251,34 @@ export class ProjectData extends DurableObject<Env> {
     now: string
   ) {
     return ideaUpdates.deleteIdeaUpdate(this.sql, ideaId, updateId, actorUserId, canModerate, now);
+  }
+  recordResourceLink(input: links.LinkWrite, limits: links.LinkLimits) {
+    return links.recordLink(this.sql, input, limits, this.sql.databaseSize);
+  }
+  removeResourceLink(input: Parameters<typeof links.removeLink>[1]) {
+    return links.removeLink(this.sql, input);
+  }
+  listResourceLinks(
+    kind: import('@simple-agent-manager/shared').LinkKind,
+    id: string,
+    cap: number
+  ) {
+    return links.listLinks(this.sql, kind, id, cap);
+  }
+  listLinksForTargets(
+    kind: import('@simple-agent-manager/shared').LinkKind,
+    ids: string[],
+    perTargetCap: number,
+    maxTargets: number
+  ) {
+    return links.listLinksForTargets(this.sql, kind, ids, perTargetCap, maxTargets);
+  }
+  getResourceLinkSnapshot(
+    kind: import('@simple-agent-manager/shared').LinkKind,
+    id: string,
+    cap: number
+  ) {
+    return links.getLinkSnapshot(this.sql, kind, id, cap);
   }
 
   async cacheCommands(

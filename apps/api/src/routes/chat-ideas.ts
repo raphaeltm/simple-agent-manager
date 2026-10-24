@@ -13,8 +13,8 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
+import { listLinks, recordLink, removeLink } from '../operations/link-core';
 import { LinkTaskToChatSchema, parseOptionalBody } from '../schemas';
-import * as projectDataService from '../services/project-data';
 
 const chatIdeaRoutes = new Hono<{ Bindings: Env }>();
 
@@ -30,7 +30,12 @@ chatIdeaRoutes.get('/:sessionId/ideas', async (c) => {
 
   await requireProjectAccess(db, projectId, userId);
 
-  const links = await projectDataService.getIdeasForSession(c.env, projectId, sessionId);
+  const links = (await listLinks(c.env, projectId, 'session', sessionId))
+    .filter((link) => link.sourceKind === 'session' && link.targetKind === 'idea')
+    .filter(
+      (link, index, all) =>
+        all.findIndex((candidate) => candidate.targetId === link.targetId) === index
+    );
 
   // Enrich with task details from D1 in a single query
   let ideas: Array<{
@@ -45,22 +50,26 @@ chatIdeaRoutes.get('/:sessionId/ideas', async (c) => {
       .select({ id: schema.tasks.id, title: schema.tasks.title, status: schema.tasks.status })
       .from(schema.tasks)
       .where(
-        inArray(
-          schema.tasks.id,
-          links.map((l) => l.taskId)
+        and(
+          eq(schema.tasks.projectId, projectId),
+          inArray(
+            schema.tasks.id,
+            links.map((l) => l.targetId)
+          )
         )
       );
 
     const taskMap = new Map(taskRows.map((t) => [t.id, t]));
 
     ideas = links.map((link) => {
-      const task = taskMap.get(link.taskId);
+      const task = taskMap.get(link.targetId);
       return {
-        taskId: link.taskId,
+        taskId: link.targetId,
         title: task?.title ?? null,
         status: task?.status ?? null,
         context: link.context,
-        linkedAt: link.createdAt,
+        linkedAt: link.firstAt,
+        relation: link.relation,
       };
     });
   }
@@ -97,8 +106,16 @@ chatIdeaRoutes.post('/:sessionId/ideas', async (c) => {
     throw errors.notFound('Task not found in this project');
   }
 
-  const context = body.context?.trim().slice(0, 500) ?? null;
-  await projectDataService.linkSessionIdea(c.env, projectId, sessionId, taskId, context);
+  const context = body.context?.trim() ?? null;
+  await recordLink(c.env, projectId, {
+    sourceKind: 'session',
+    sourceId: sessionId,
+    targetKind: 'idea',
+    targetId: taskId,
+    relation: 'linked',
+    origin: 'explicit',
+    context,
+  });
 
   return c.json({ linked: true }, 201);
 });
@@ -116,7 +133,13 @@ chatIdeaRoutes.delete('/:sessionId/ideas/:taskId', async (c) => {
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
 
-  await projectDataService.unlinkSessionIdea(c.env, projectId, sessionId, taskId);
+  await removeLink(c.env, projectId, {
+    sourceKind: 'session',
+    sourceId: sessionId,
+    targetKind: 'idea',
+    targetId: taskId,
+    relation: 'linked',
+  });
 
   return c.json({ unlinked: true });
 });

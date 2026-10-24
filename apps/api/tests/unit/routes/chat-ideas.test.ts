@@ -14,9 +14,10 @@ import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 const mocks = vi.hoisted(() => ({
   requireProjectAccess: vi.fn(),
   requireProjectCapability: vi.fn(),
-  getIdeasForSession: vi.fn(),
-  linkSessionIdea: vi.fn(),
-  unlinkSessionIdea: vi.fn(),
+  getSession: vi.fn(),
+  listResourceLinks: vi.fn(),
+  recordResourceLink: vi.fn(),
+  removeResourceLink: vi.fn(),
 }));
 
 vi.mock('../../../src/middleware/auth', async (importOriginal) => ({
@@ -33,9 +34,22 @@ vi.mock('../../../src/middleware/project-auth', () => ({
 
 vi.mock('../../../src/services/project-data', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/services/project-data')>()),
-  getIdeasForSession: mocks.getIdeasForSession,
-  linkSessionIdea: mocks.linkSessionIdea,
-  unlinkSessionIdea: mocks.unlinkSessionIdea,
+  getSession: mocks.getSession,
+  listResourceLinks: mocks.listResourceLinks,
+  recordResourceLink: mocks.recordResourceLink,
+  removeResourceLink: mocks.removeResourceLink,
+}));
+vi.mock('../../../src/services/admin-settings', () => ({
+  resolveAdminSettingDetailsMany: vi
+    .fn()
+    .mockResolvedValue([
+      { value: 300000 },
+      { value: 100 },
+      { value: 100 },
+      { value: 100000 },
+      { value: 50 },
+      { value: 500 },
+    ]),
 }));
 
 const { chatRoutes } = await import('../../../src/routes/chat');
@@ -73,15 +87,41 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireProjectAccess.mockResolvedValue({ id: 'project-1' });
   mocks.requireProjectCapability.mockResolvedValue({ id: 'project-1' });
-  mocks.linkSessionIdea.mockResolvedValue(undefined);
-  mocks.unlinkSessionIdea.mockResolvedValue(undefined);
+  mocks.getSession.mockResolvedValue({ id: 'session-1' });
+  mocks.recordResourceLink.mockResolvedValue('written');
+  mocks.removeResourceLink.mockResolvedValue(undefined);
 });
 
 describe('session–idea routes mounted under chatRoutes', () => {
   it('lists linked ideas with their task title and status', async () => {
-    mocks.getIdeasForSession.mockResolvedValue([
-      { taskId: 'idea-1', context: 'from review', createdAt: 10 },
-      { taskId: 'idea-gone', context: null, createdAt: 20 },
+    mocks.listResourceLinks.mockResolvedValue([
+      {
+        sourceKind: 'session',
+        sourceId: 'session-1',
+        targetKind: 'idea',
+        targetId: 'idea-1',
+        relation: 'linked',
+        context: 'from review',
+        firstAt: 10,
+      },
+      {
+        sourceKind: 'session',
+        sourceId: 'session-1',
+        targetKind: 'idea',
+        targetId: 'idea-1',
+        relation: 'read',
+        context: null,
+        firstAt: 11,
+      },
+      {
+        sourceKind: 'session',
+        sourceId: 'session-1',
+        targetKind: 'idea',
+        targetId: 'idea-gone',
+        relation: 'linked',
+        context: null,
+        firstAt: 20,
+      },
     ]);
 
     const res = await makeApp().request(`${SESSIONS}/session-1/ideas`, {}, makeEnv());
@@ -95,8 +135,16 @@ describe('session–idea routes mounted under chatRoutes', () => {
           status: 'draft',
           context: 'from review',
           linkedAt: 10,
+          relation: 'linked',
         },
-        { taskId: 'idea-gone', title: null, status: null, context: null, linkedAt: 20 },
+        {
+          taskId: 'idea-gone',
+          title: null,
+          status: null,
+          context: null,
+          linkedAt: 20,
+          relation: 'linked',
+        },
       ],
       count: 2,
     });
@@ -105,10 +153,12 @@ describe('session–idea routes mounted under chatRoutes', () => {
       'project-1',
       'user-1'
     );
-    expect(mocks.getIdeasForSession).toHaveBeenCalledWith(
+    expect(mocks.listResourceLinks).toHaveBeenCalledWith(
       expect.anything(),
       'project-1',
-      'session-1'
+      'session',
+      'session-1',
+      50
     );
   });
 
@@ -125,12 +175,16 @@ describe('session–idea routes mounted under chatRoutes', () => {
       'user-1',
       'task:write'
     );
-    expect(mocks.linkSessionIdea).toHaveBeenCalledWith(
+    expect(mocks.recordResourceLink).toHaveBeenCalledWith(
       env,
       'project-1',
-      'session-1',
-      'idea-2',
-      'why it matters'
+      expect.objectContaining({
+        sourceId: 'session-1',
+        targetId: 'idea-2',
+        relation: 'linked',
+        context: 'why it matters',
+      }),
+      expect.anything()
     );
   });
 
@@ -138,14 +192,14 @@ describe('session–idea routes mounted under chatRoutes', () => {
     const res = await link(makeEnv(), { taskId: 'foreign-idea' });
 
     expect(res.status).toBe(404);
-    expect(mocks.linkSessionIdea).not.toHaveBeenCalled();
+    expect(mocks.recordResourceLink).not.toHaveBeenCalled();
   });
 
   it('rejects a link request without a taskId', async () => {
     const res = await link(makeEnv(), { context: 'no task' });
 
     expect(res.status).toBe(400);
-    expect(mocks.linkSessionIdea).not.toHaveBeenCalled();
+    expect(mocks.recordResourceLink).not.toHaveBeenCalled();
   });
 
   it('unlinks an idea', async () => {
@@ -159,6 +213,12 @@ describe('session–idea routes mounted under chatRoutes', () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ unlinked: true });
-    expect(mocks.unlinkSessionIdea).toHaveBeenCalledWith(env, 'project-1', 'session-1', 'idea-1');
+    expect(mocks.removeResourceLink).toHaveBeenCalledWith(env, 'project-1', {
+      sourceKind: 'session',
+      sourceId: 'session-1',
+      targetKind: 'idea',
+      targetId: 'idea-1',
+      relation: 'linked',
+    });
   });
 });

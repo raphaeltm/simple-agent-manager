@@ -23,6 +23,45 @@ export const SESSION_IDEA_TOOLS = [
   },
   // ─── Session–Idea linking tools ──────────────────────────────────────
   {
+    name: 'link_to_idea',
+    description:
+      'Link a project file, GitHub pull request, or related idea to an idea. Use when work was created outside the automatic chat/file paths.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        ideaId: { type: 'string', description: 'Idea ID receiving the relationship' },
+        kind: {
+          type: 'string',
+          enum: ['file', 'pr', 'idea'],
+          description: 'Kind of related resource',
+        },
+        id: { type: 'string', description: 'File/idea ID or canonical GitHub PR URL' },
+        note: { type: 'string', description: 'Optional short reason for the relationship' },
+      },
+      required: ['ideaId', 'kind', 'id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'unlink_from_idea',
+    description:
+      'Remove an explicit relationship between an idea and a project file, PR, or related idea.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        ideaId: { type: 'string', description: 'Idea ID' },
+        kind: {
+          type: 'string',
+          enum: ['file', 'pr', 'idea'],
+          description: 'Kind of related resource',
+        },
+        id: { type: 'string', description: 'File/idea ID or canonical GitHub PR URL' },
+      },
+      required: ['ideaId', 'kind', 'id'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'link_idea',
     description:
       'Associate the current chat session with an idea (task). Use this when the conversation touches on an existing idea. Linking is idempotent — linking the same idea twice is a no-op.',

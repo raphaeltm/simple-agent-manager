@@ -58,13 +58,17 @@ type Rule = {
 
 // Frozen module SQL fragments that may be interpolated into sql.exec() text, mapped to the
 // number of `?` placeholders each one adds. All live in
-// apps/api/src/durable-objects/project-data/project-events-wake-config.ts and are static
-// strings built at module load, so no caller value ever reaches the SQL text. When a
+// apps/api/src/durable-objects/project-data/project-events-wake-config.ts or links.ts and
+// are static strings built at module load, so no caller value reaches the SQL text. When a
 // fragment's placeholder count changes, update it here or parameterized-sql flags its callers.
 const SAFE_SQL_FRAGMENT_PLACEHOLDERS: ReadonlyMap<string, number> = new Map([
   ['PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL', 0],
   ['PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_UNALIASED_SQL', 0],
   ['WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL', 1],
+  ['LINK_SELECT_SQL', 0],
+  ['LINK_INSERT_PREFIX_SQL', 0],
+  ['LINK_UPSERT_SQL', 1],
+  ['STRONG_SQL', 0],
 ]);
 
 // --- Rules ---

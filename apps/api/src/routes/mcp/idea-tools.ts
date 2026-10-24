@@ -4,8 +4,8 @@
  * list_ideas, search_ideas).
  */
 import type { Env } from '../../env';
+import { listLinks, recordLink, removeLink } from '../../operations/link-core';
 import { runWorkspaceOperation } from '../../operations/workspace-adapter';
-import * as projectDataService from '../../services/project-data';
 import {
   getMcpLimits,
   INVALID_PARAMS,
@@ -55,7 +55,15 @@ export async function handleLinkIdea(
     return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${taskId}`);
   }
 
-  await projectDataService.linkSessionIdea(env, tokenData.projectId, sessionId, taskId, context);
+  await recordLink(env, tokenData.projectId, {
+    sourceKind: 'session',
+    sourceId: sessionId,
+    targetKind: 'idea',
+    targetId: taskId,
+    relation: 'linked',
+    origin: 'explicit',
+    context,
+  });
 
   return jsonRpcSuccess(requestId, {
     content: [
@@ -97,7 +105,13 @@ export async function handleUnlinkIdea(
     );
   }
 
-  await projectDataService.unlinkSessionIdea(env, tokenData.projectId, sessionId, taskId);
+  await removeLink(env, tokenData.projectId, {
+    sourceKind: 'session',
+    sourceId: sessionId,
+    targetKind: 'idea',
+    targetId: taskId,
+    relation: 'linked',
+  });
 
   return jsonRpcSuccess(requestId, {
     content: [
@@ -124,7 +138,12 @@ export async function handleListLinkedIdeas(
     );
   }
 
-  const links = await projectDataService.getIdeasForSession(env, tokenData.projectId, sessionId);
+  const links = (await listLinks(env, tokenData.projectId, 'session', sessionId))
+    .filter((l) => l.sourceKind === 'session' && l.targetKind === 'idea')
+    .filter(
+      (link, index, all) =>
+        all.findIndex((candidate) => candidate.targetId === link.targetId) === index
+    );
 
   // Enrich with task details from D1
   const enriched: Array<{
@@ -133,6 +152,7 @@ export async function handleListLinkedIdeas(
     status: string | null;
     context: string | null;
     linkedAt: number;
+    relation: string;
   }> = [];
 
   if (links.length > 0) {
@@ -141,19 +161,20 @@ export async function handleListLinkedIdeas(
     const rows = await env.DATABASE.prepare(
       `SELECT id, title, status FROM tasks WHERE project_id = ? AND id IN (${placeholders})`
     )
-      .bind(tokenData.projectId, ...links.map((l) => l.taskId))
+      .bind(tokenData.projectId, ...links.map((l) => l.targetId))
       .all<{ id: string; title: string; status: string }>();
 
     const taskMap = new Map((rows.results ?? []).map((t) => [t.id, t]));
 
     for (const link of links) {
-      const task = taskMap.get(link.taskId);
+      const task = taskMap.get(link.targetId);
       enriched.push({
-        taskId: link.taskId,
+        taskId: link.targetId,
         title: task?.title ?? null,
         status: task?.status ?? null,
         context: link.context,
-        linkedAt: link.createdAt,
+        linkedAt: link.firstAt,
+        relation: link.relation,
       });
     }
   }

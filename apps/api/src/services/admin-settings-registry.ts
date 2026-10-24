@@ -47,6 +47,14 @@ export type AdminSettingName =
   | 'integration.gitlab.clientId'
   | 'integration.gitlab.clientSecret'
   | 'operations.workloadIdentityTokenTtlSeconds'
+  | 'operations.resourceLinkTouchIntervalMs'
+  | 'operations.resourceLinkWeakPerTarget'
+  | 'operations.resourceLinkWeakCleanupBatchSize'
+  | 'operations.resourceLinkProjectCap'
+  | 'operations.resourceLinkListCap'
+  | 'operations.resourceLinkBatchTargetLimit'
+  | 'operations.resourceLinkBatchPerTargetCap'
+  | 'operations.resourceLinkContextMaxLength'
   | 'operations.cronSweepsEnabled'
   | 'operations.doAlarmsEnabled'
   | 'operations.stalledTaskClassifierEnabled'
@@ -243,6 +251,62 @@ function validGitLabHost(value: unknown): boolean {
 }
 
 const definitions: AdminSettingDefinition[] = [
+  integerDefinition(
+    'operations.resourceLinkTouchIntervalMs',
+    300000,
+    'Operations',
+    'Minimum interval before a repeated automatic relationship is touched.',
+    { min: 0, max: 86400000 }
+  ),
+  integerDefinition(
+    'operations.resourceLinkWeakPerTarget',
+    100,
+    'Operations',
+    'Maximum automatic read/view relationships per target.',
+    { min: 1, max: 10000 }
+  ),
+  integerDefinition(
+    'operations.resourceLinkWeakCleanupBatchSize',
+    100,
+    'Operations',
+    'Maximum excess weak relationships removed during one link write.',
+    { min: 1, max: 1000 }
+  ),
+  integerDefinition(
+    'operations.resourceLinkProjectCap',
+    100000,
+    'Operations',
+    'Project link count above which new weak relationships are skipped.',
+    { min: 100, max: 10000000 }
+  ),
+  integerDefinition(
+    'operations.resourceLinkListCap',
+    50,
+    'Operations',
+    'Maximum items in each linked work read list.',
+    { min: 1, max: 500 }
+  ),
+  integerDefinition(
+    'operations.resourceLinkBatchTargetLimit',
+    100,
+    'Operations',
+    'Maximum target ids per batched linked work lookup.',
+    { min: 1, max: 500 }
+  ),
+  integerDefinition(
+    'operations.resourceLinkBatchPerTargetCap',
+    50,
+    'Operations',
+    'Maximum session links returned for each target in a batched lookup.',
+    { min: 1, max: 100 }
+  ),
+  integerDefinition(
+    'operations.resourceLinkContextMaxLength',
+    500,
+    'Operations',
+    'Maximum length of an explicit relationship note.',
+    { min: 1, max: 5000 }
+  ),
   integerDefinition(
     'operations.workloadIdentityTokenTtlSeconds',
     DEFAULT_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,

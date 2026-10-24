@@ -8,6 +8,7 @@ import { handleReplyToEmail } from './agent-email-tools';
 import { handleListAiModels, handleRunAiModel } from './agent-model-tools';
 import { handleBuildAndPublish, handleGetPublishStatus } from './compose-publish-tools';
 import { handleListDeploymentRoutes, handleReadDeploymentLogs } from './deployment-tools';
+import { handleLinkToIdea, handleUnlinkFromIdea } from './idea-resource-link-tools';
 import {
   handleCreateIdea,
   handleFindRelatedIdeas,
@@ -162,6 +163,8 @@ export const MCP_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
   ['update_session_topic', handleUpdateSessionTopic],
   ['reply_to_email', handleReplyToEmail],
   ['link_idea', handleLinkIdea],
+  ['link_to_idea', handleLinkToIdea],
+  ['unlink_from_idea', handleUnlinkFromIdea],
   ['unlink_idea', handleUnlinkIdea],
   ['list_linked_ideas', handleListLinkedIdeas],
   ['find_related_ideas', handleFindRelatedIdeas],

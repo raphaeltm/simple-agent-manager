@@ -275,6 +275,18 @@ List active agent sessions for a workspace.
 
 Stop a running agent session.
 
+## Linked work
+
+Project members can read context for an idea, chat, or library file:
+
+| Method | Path | Response |
+| ------ | ---- | -------- |
+| GET | `/api/projects/:projectId/ideas/:ideaId/links` | `IdeaContext` |
+| GET | `/api/projects/:projectId/sessions/:sessionId/links` | `SessionContext` |
+| GET | `/api/projects/:projectId/library/:fileId/links` | `FileContext` |
+
+Each context groups linked resources into capped lists with `items`, `total`, `truncated`, and `totalIsLowerBound`. The last field is true when a bounded PR read can only report a minimum count. Foreign and missing resources both return 404.
+
 ## Resource history
 
 Retained CPU, memory, I/O, and out-of-memory observations for VM-backed workspaces. Requires project access. See [Session Resource History](/docs/guides/session-resources/) for how to read the values.
