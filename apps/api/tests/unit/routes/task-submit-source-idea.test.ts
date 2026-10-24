@@ -127,9 +127,9 @@ function createEnv() {
 
 function seedIdeas(sqlite: Database.Database): void {
   const insert = sqlite.prepare(
-    `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority,
+    `INSERT INTO tasks (id, project_id, user_id, title, description, status, is_idea, priority,
        task_mode, dispatch_depth, triggered_by, created_by, created_at, updated_at)
-     VALUES (?, ?, 'user-1', ?, ?, ?, 0, 'task', 0, 'user', 'user-1',
+     VALUES (?, ?, 'user-1', ?, ?, ?, ?, 0, 'task', 0, 'user', 'user-1',
        '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`
   );
   insert.run(
@@ -137,12 +137,16 @@ function seedIdeas(sqlite: Database.Database): void {
     'project-1',
     'Retry failed webhook deliveries',
     'Use the 3-day window.',
-    'draft'
+    'draft',
+    1
   );
-  insert.run('idea-done', 'project-1', 'Already shipped', null, 'completed');
-  insert.run('idea-parked', 'project-1', 'Parked for now', null, 'cancelled');
-  insert.run('task-ordinary', 'project-1', 'An ordinary task', null, 'queued');
-  insert.run('idea-foreign', 'project-2', 'Another project idea', null, 'draft');
+  insert.run('idea-done', 'project-1', 'Already shipped', null, 'completed', 1);
+  insert.run('idea-parked', 'project-1', 'Parked for now', null, 'cancelled', 1);
+  insert.run('task-ordinary', 'project-1', 'An ordinary task', null, 'queued', 0);
+  // Draft, same project, not an idea — only `is_idea` separates it from `idea-open`, so the
+  // refusal below cannot pass merely because the status differs (program decision 16).
+  insert.run('task-ordinary-draft', 'project-1', 'An ordinary draft task', null, 'draft', 0);
+  insert.run('idea-foreign', 'project-2', 'Another project idea', null, 'draft', 1);
 }
 
 const executionCtx = {

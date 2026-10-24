@@ -22,13 +22,19 @@ import {
 
 function fixture() {
   const db = new Database(':memory:');
-  db.exec(`CREATE TABLE tasks(id TEXT PRIMARY KEY, project_id TEXT, title TEXT, status TEXT);
+  // `is_idea` is the discriminator now, not `status = 'draft'` (program decision 16). The
+  // column is NOT NULL DEFAULT 0 in migration 0207, so the fixture carries it explicitly.
+  db.exec(`CREATE TABLE tasks(id TEXT PRIMARY KEY, project_id TEXT, title TEXT, status TEXT,
+      is_idea INTEGER NOT NULL DEFAULT 0);
     INSERT INTO tasks VALUES
-      ('idea-open','own','Retry failed webhook deliveries','draft'),
-      ('idea-done','own','Shipped already','completed'),
-      ('idea-parked','own','Parked for now','cancelled'),
-      ('task-ordinary','own','An ordinary queued task','queued'),
-      ('idea-foreign','other','Another project''s idea','draft');`);
+      ('idea-open','own','Retry failed webhook deliveries','draft',1),
+      ('idea-done','own','Shipped already','completed',1),
+      ('idea-parked','own','Parked for now','cancelled',1),
+      ('task-ordinary','own','An ordinary queued task','queued',0),
+      -- The row only the NEW definition excludes. Under the old \`status = 'draft'\` rule this
+      -- was indistinguishable from an idea, so Start work would have accepted it.
+      ('task-ordinary-draft','own','An ordinary task nobody has dispatched','draft',0),
+      ('idea-foreign','other','Another project''s idea','draft',1);`);
   const d1 = {
     prepare: (sql: string) => ({
       bind: (...args: unknown[]) => ({
@@ -79,6 +85,25 @@ describe('requireOpenIdeaForWorkStart', () => {
     const { db, env } = fixture();
     try {
       expect(await statusOf(requireOpenIdeaForWorkStart(env, 'own', 'task-ordinary'))).toBe(404);
+    } finally {
+      db.close();
+    }
+  });
+
+  /*
+   * The case only the `is_idea` definition excludes. This row is `draft`, so under the old
+   * "an idea is a task in draft" rule Start work would have accepted an ordinary undispatched
+   * task as an idea — same status, same project, same everything except the flag. It is the
+   * discriminating half of the test above, which passes either way because its row is `queued`.
+   */
+  it('404s an ordinary DRAFT task, which the old status rule would have accepted', async () => {
+    const { db, env } = fixture();
+    try {
+      expect(await statusOf(requireOpenIdeaForWorkStart(env, 'own', 'task-ordinary-draft'))).toBe(
+        404
+      );
+      // The owner control, so this cannot pass by the gate being broken for everything.
+      expect(await statusOf(requireOpenIdeaForWorkStart(env, 'own', 'idea-open'))).toBe(200);
     } finally {
       db.close();
     }
@@ -157,8 +182,10 @@ describe('classifyWorkStartIdea', () => {
 // it had no test of its own when T7 rebased onto it.
 describe('ideaTaskPredicateSql', () => {
   it('qualifies the predicate with the caller supplied alias', () => {
-    expect(ideaTaskPredicateSql()).toBe("tasks.status = 'draft'");
-    expect(ideaTaskPredicateSql('t')).toBe("t.status = 'draft'");
+    // Program decision 16: an idea is `is_idea = 1`, not `status = 'draft'`. This assertion
+    // pinned the old text; reconciled here because T8 merges after T7 (coordinator, seq 228).
+    expect(ideaTaskPredicateSql()).toBe('tasks.is_idea = 1');
+    expect(ideaTaskPredicateSql('t')).toBe('t.is_idea = 1');
   });
 
   it('rejects an alias that is not a plain identifier, so it cannot carry injected SQL', () => {

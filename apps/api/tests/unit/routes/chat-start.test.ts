@@ -79,11 +79,18 @@ function makeEnv(): Env {
 /** Real SQL, so the project predicate in the idea gate is actually evaluated. */
 function seedIdeas(): void {
   const sqlite = new Database(':memory:');
-  sqlite.exec('CREATE TABLE tasks(id TEXT PRIMARY KEY, project_id TEXT, title TEXT, status TEXT)');
-  const insert = sqlite.prepare('INSERT INTO tasks VALUES (?, ?, ?, ?)');
-  insert.run('idea-open', 'project-1', 'Retry failed webhook deliveries', 'draft');
-  insert.run('idea-done', 'project-1', 'Already shipped', 'completed');
-  insert.run('idea-foreign', 'project-2', 'Another project idea', 'draft');
+  // `is_idea` is the idea discriminator (program decision 16, migration 0207). NOT NULL
+  // DEFAULT 0 in the real schema, so the fixture carries it rather than relying on a default.
+  sqlite.exec(
+    `CREATE TABLE tasks(id TEXT PRIMARY KEY, project_id TEXT, title TEXT, status TEXT,
+       is_idea INTEGER NOT NULL DEFAULT 0)`
+  );
+  const insert = sqlite.prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)');
+  insert.run('idea-open', 'project-1', 'Retry failed webhook deliveries', 'draft', 1);
+  insert.run('idea-done', 'project-1', 'Already shipped', 'completed', 1);
+  insert.run('idea-foreign', 'project-2', 'Another project idea', 'draft', 1);
+  // Draft, same project, not an idea — the row only `is_idea` can tell apart from `idea-open`.
+  insert.run('task-ordinary-draft', 'project-1', 'An ordinary task', 'draft', 0);
   ideaDb.current = sqlite;
 }
 
