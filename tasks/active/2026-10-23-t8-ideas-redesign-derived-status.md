@@ -194,22 +194,64 @@ and is invisible to every idea read afterwards. The backfill has already passed 
 
 Run inside `exec_with_secrets` with `secretNames: ["CF_TOKEN"]` (program decision 13), against
 `/accounts/c4e4aebd980b626f6af43ac6b1edcede/d1/database/1cfaf5d4-8226-47d8-bf26-6ba727ce5718/query`
-for staging:
+for staging.
+
+Two things about this query were wrong in its first draft and are worth keeping written down,
+because both would have produced a confident, meaningless number:
+
+1. **The two columns are not the same format.** `d1_migrations.applied_at` is a SQLite
+   `TIMESTAMP` and holds `2026-10-24 04:22:28`; `tasks.created_at` is ISO 8601 and holds
+   `2026-10-24T04:22:28.000Z`. Compared as strings, position 11 is `T` (0x54) against ` `
+   (0x20), so EVERY task created that day sorts after the bookmark — including ones created
+   hours before it. The comparison has to normalize the separator first. Verified against the
+   real staging table rather than assumed (`PRAGMA table_info(d1_migrations)`).
+2. **Nothing distinguishes the two kinds of row by column.** A person filing an idea on the web
+   and `POST /tasks` creating an ordinary task both write `triggered_by = 'user'`,
+   `task_mode = 'task'`, `status = 'draft'`. So the only thing that separates "an idea the old
+   Worker wrote in the window" from "an ordinary task, correctly not an idea" is WHEN it was
+   written: before the Worker swap, or after it. That is why the upper bound is not optional —
+   without it the count grows with ordinary task creation forever and means nothing.
+
+Take the upper bound from the deploy run's own completion time
+(`gh run view <id> --json updatedAt`), as an ISO 8601 string.
 
 ```sql
--- Rows the old Worker could have written as ideas during the window. `triggered_by` excludes
--- POST /tasks' ordinary tasks, which are 'user' and deliberately not ideas; the idea writers
--- are 'connector' (a person through a connected client) and the automation/incident kinds.
-SELECT id, title, triggered_by, created_at
+-- Every draft the new definition does not cover, created between the migration and the
+-- Worker swap. Rows after the swap are ordinary tasks by construction: every idea writer
+-- sets the flag from that moment on.
+SELECT id, title, triggered_by, task_mode, agent_profile_hint,
+       description IS NOT NULL AS has_content, created_at
   FROM tasks
  WHERE status = 'draft'
    AND is_idea = 0
-   AND created_at >= (SELECT applied_at FROM d1_migrations WHERE name LIKE '%0207_tasks_idea_flag%')
+   AND created_at >= (
+         -- ' ' -> 'T' so this compares against an ISO `created_at`. MAX, because a
+         -- re-applied migration would leave two rows with the same name.
+         SELECT replace(MAX(applied_at), ' ', 'T')
+           FROM d1_migrations
+          WHERE name = '0207_tasks_idea_flag.sql'
+       )
+   AND created_at <= '<worker swap, ISO 8601>'
  ORDER BY created_at;
 ```
 
-Count zero is the expected answer: the five idea writers all set the flag, and the only rows
-this can catch are ones written by the pre-swap Worker in that window.
+Both halves proven on the real staging D1 engine before the deploy, rather than reasoned about
+(`SELECT` of the comparison itself, 2026-10-24T07:47Z):
+
+| Expression                                                          | Result                                               |
+| ------------------------------------------------------------------- | ---------------------------------------------------- |
+| `'2026-10-24T01:00:00.000Z' >= '2026-10-24 04:22:28'` (naive)       | `1` — admits a row written 3h22m BEFORE the bookmark |
+| `'2026-10-24T01:00:00.000Z' >= replace(…,' ','T')` (fixed)          | `0` — rejects it                                     |
+| `'2026-10-24T07:50:00.000Z' >= replace(…,' ','T')` (fixed, control) | `1` — still admits a genuine window row              |
+
+The staging table could not have shown this on its own: it holds no `status='draft'` rows
+created on 2026-10-24, so both predicates return the same count of zero there. A query whose
+only evidence is "it returned zero" is indistinguishable from a query that cannot match
+anything, which is the whole reason for the comparison above.
+
+Count zero is the expected answer, and the window is one to three minutes wide. Anything in it
+needs a human look at `has_content` and `agent_profile_hint` before a backfill by id, because
+an ordinary task created in the same minute looks identical to the query.
 
 **Accepted, and noted here because it is a real behaviour change**: the backfill marks every
 row the old definition covered, which includes ordinary undispatched tasks that existed before
