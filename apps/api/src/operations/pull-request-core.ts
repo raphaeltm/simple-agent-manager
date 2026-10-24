@@ -70,6 +70,11 @@ export async function upsertPullRequestSnapshot(
   pr: PullRequestSnapshot
 ): Promise<void> {
   const now = new Date().toISOString();
+  const previous = await env.DATABASE.prepare(
+    'SELECT head_sha FROM pull_requests WHERE project_id = ? AND repository = ? AND number = ?'
+  )
+    .bind(projectId, pr.repository, pr.number)
+    .first<{ head_sha: string | null }>();
   await env.DATABASE.prepare(
     `INSERT INTO pull_requests
       (id, project_id, repository, number, url, title, state, is_draft, head_ref, head_sha,
@@ -106,16 +111,25 @@ export async function upsertPullRequestSnapshot(
       now
     )
     .run();
-  // A synchronized PR leaves its old head SHA behind; discard observations
-  // once no tracked PR in this project still points at that commit.
-  await env.DATABASE.prepare(
-    `DELETE FROM pull_request_checks
-     WHERE project_id = ? AND repository = ? AND head_sha NOT IN (
-       SELECT head_sha FROM pull_requests
-       WHERE project_id = ? AND repository = ? AND head_sha IS NOT NULL)`
-  )
-    .bind(projectId, pr.repository, projectId, pr.repository)
-    .run();
+  // A synchronized PR may orphan observations for its previous head commit.
+  if (previous?.head_sha && previous.head_sha !== pr.headSha) {
+    await env.DATABASE.prepare(
+      `DELETE FROM pull_request_checks
+       WHERE project_id = ? AND repository = ? AND head_sha = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM pull_requests
+           WHERE project_id = ? AND repository = ? AND head_sha = ?)`
+    )
+      .bind(
+        projectId,
+        pr.repository,
+        previous.head_sha,
+        projectId,
+        pr.repository,
+        previous.head_sha
+      )
+      .run();
+  }
 }
 
 export type PullRequestStates = Record<string, PullRequestState | null>;
@@ -261,24 +275,34 @@ export async function getPullRequestStates(
     await resolveAdminSetting(env, 'operations.pullRequestRefreshTtlSeconds')
   );
   const settings = options.refresh === 'single' && ctx.execCtx ? await refreshSettings(env) : null;
+  const parsedRefs = [
+    ...new Map(
+      refs
+        .map((ref) => parseProjectPullRequestUrl(ref.url, project.repository))
+        .filter((ref): ref is ParsedPullRequestUrl => ref !== null)
+        .map((ref) => [ref.url, ref])
+    ).values(),
+  ];
+  if (parsedRefs.length === 0) return result;
+  const rows = await env.DATABASE.prepare(
+    `SELECT url, state, is_draft, title, checks_state, merged_at, updated_at, last_synced_at
+     FROM pull_requests WHERE project_id = ? AND url IN (SELECT value FROM json_each(?))`
+  )
+    .bind(projectId, JSON.stringify(parsedRefs.map((ref) => ref.url)))
+    .all<{
+      url: string;
+      state: PullRequestState['state'];
+      is_draft: number;
+      title: string | null;
+      checks_state: PullRequestState['checksState'];
+      merged_at: string | null;
+      updated_at: string;
+      last_synced_at: string | null;
+    }>();
+  const byUrl = new Map(rows.results.map((row) => [row.url, row]));
   let scheduled = 0;
-  for (const ref of refs) {
-    const parsed = parseProjectPullRequestUrl(ref.url, project.repository);
-    if (!parsed) continue;
-    const row = await env.DATABASE.prepare(
-      `SELECT state, is_draft, title, checks_state, merged_at, updated_at, last_synced_at
-       FROM pull_requests WHERE project_id = ? AND repository = ? AND number = ?`
-    )
-      .bind(projectId, parsed.repository, parsed.number)
-      .first<{
-        state: PullRequestState['state'];
-        is_draft: number;
-        title: string | null;
-        checks_state: PullRequestState['checksState'];
-        merged_at: string | null;
-        updated_at: string;
-        last_synced_at: string | null;
-      }>();
+  for (const parsed of parsedRefs) {
+    const row = byUrl.get(parsed.url);
     const stale =
       !row?.last_synced_at || Date.now() - Date.parse(row.last_synced_at) > ttlSeconds * 1000;
     result[parsed.url] =

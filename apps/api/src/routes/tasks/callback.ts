@@ -148,6 +148,7 @@ taskCallbackRoute.post(
       }
 
       const candidatePrUrl = stepUpdate.outputPrUrl;
+      let projectRepository: string | null = null;
       if (candidatePrUrl) {
         const [project] = await db
           .select({ repository: schema.projects.repository })
@@ -155,6 +156,7 @@ taskCallbackRoute.post(
           .where(eq(schema.projects.id, projectId))
           .limit(1);
         if (project) {
+          projectRepository = project.repository;
           const parsed = parseProjectPullRequestUrl(candidatePrUrl, project.repository);
           if (parsed) {
             stepUpdate.outputPrNumber = parsed.number;
@@ -186,22 +188,15 @@ taskCallbackRoute.post(
         expected: workspaceSnapshot,
       });
 
-      if (stepUpdate.outputPrUrl) {
-        const [project] = await db
-          .select({ repository: schema.projects.repository })
-          .from(schema.projects)
-          .where(eq(schema.projects.id, projectId))
-          .limit(1);
-        if (project) {
-          await revalidateWorkspace();
-          const stored = await ensurePullRequest(
-            c.env,
-            projectId,
-            project.repository,
-            stepUpdate.outputPrUrl
-          );
-          if (!stored) log.warn('task.callback.pr_repository_mismatch', { taskId, projectId });
-        }
+      if (stepUpdate.outputPrUrl && projectRepository) {
+        await revalidateWorkspace();
+        const stored = await ensurePullRequest(
+          c.env,
+          projectId,
+          projectRepository,
+          stepUpdate.outputPrUrl
+        );
+        if (!stored) log.warn('task.callback.pr_repository_mismatch', { taskId, projectId });
       }
 
       // Record activity event for execution step update
