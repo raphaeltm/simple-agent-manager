@@ -104,21 +104,21 @@ chat rows open it. Notifications open it too. The reader:
 
 ### Web
 
-- [ ] `message-aliases.ts` helper (row id → merged item id) + tests
-- [ ] Chat jump registers merged-row aliases (fixes cause 4) + test
-- [ ] Reader data hook (TanStack infinite query, both directions) + API client
-- [ ] Quote highlight module + global `::highlight` styles
-- [ ] Reader page: conversation, landing, edge loading, back-to-comment pill, comment chips
-- [ ] Thread panel (desktop) / sheet (phone) with the real `CommentThread`
-- [ ] Header: topic, n of N, prev/next, Open in chat (correct time + thread)
-- [ ] Route + lazy import in `App.tsx`; Comments page rows open the reader
-- [ ] Unit/behaviour tests (landing target, nav, open-in-chat href, not-found state)
-- [ ] Playwright visual audit 375 / 1280 (normal, long, not found, many, error, sheet)
+- [x] `message-aliases.ts` helper (row id → merged item id) + tests
+- [x] Chat jump registers merged-row aliases (fixes cause 4) + test
+- [x] Reader data hook (TanStack infinite query, both directions) + API client
+- [x] Quote highlight module + global `::highlight` styles
+- [x] Reader page: conversation, landing, edge loading, back-to-comment pill, comment chips
+- [x] Thread panel (desktop) / sheet (phone) with the real `CommentThread`
+- [x] Header: topic, n of N, prev/next, Open in chat (correct time + thread)
+- [x] Route + lazy import in `App.tsx`; Comments page rows open the reader
+- [x] Unit/behaviour tests (landing target, nav, open-in-chat href, not-found state)
+- [x] Playwright visual audit 375 / 1280 (normal, long, not found, many, error, sheet)
 
 ### Docs
 
-- [ ] `apps/www/src/content/docs/docs/guides/collaboration.md` — reading a comment in context
-- [ ] `apps/www/src/content/docs/docs/guides/admin-settings.md` — two new settings
+- [x] `apps/www/src/content/docs/docs/guides/collaboration.md` — reading a comment in context
+- [x] `apps/www/src/content/docs/docs/guides/admin-settings.md` — two new settings
 
 ## Acceptance criteria
 
@@ -146,7 +146,17 @@ chat rows open it. Notifications open it too. The reader:
   row removed without foreign keys; the endpoint still answers it with `anchor.found = false`.
 - Compact-mode default consolidated into `getDefaultCompactMode` (three call sites).
 - Discrimination checks: emptying `MERGED_ROLES` reddens 4 window tests; dropping the session
-  predicate from the anchor lookup reddens exactly the cross-session test.
+  predicate from the anchor lookup reddens exactly the cross-session test; removing the chat's
+  `messageAliases` reddens the chunk-anchor jump test (a notification link with no time); keying
+  the reader's conversation on the breakpoint reddens the identity test.
+- With a correct `commentAt` the chat's time fallback already lands on the merged reply (last item
+  at or before the time), so aliases matter for links without a time (old notifications).
+- Playwright audit (375/1280): 23 pass, 1 skipped by design (sheet test on desktop). Fixed from the
+  screenshots: notice hidden under the header (native scroll anchoring → `overflow-anchor: none`,
+  land on the whole row), words half under the sheet counted as visible (≥24px rule), chip wall
+  with 35 comments (fold into "+N more").
+- Notifications now link to the reader (`buildCommentActionUrl`); API reference, notifications
+  guide, collaboration guide and admin settings guide updated.
 
 ## References
 
