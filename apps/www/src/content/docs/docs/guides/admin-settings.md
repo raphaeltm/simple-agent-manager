@@ -23,8 +23,10 @@ These limit [shared chats and comments](/docs/guides/collaboration/#work-togethe
 | `collaboration.commentContextMessages`           | 6       | 1–50      | Messages shown before and after a commented message when a comment is opened in its conversation   |
 | `collaboration.commentContextMaxRows`            | 1,000   | 50–5,000  | Stored rows read before and after a commented message for that view                                |
 
-An agent's reply counts as one message however many streamed parts it was stored in, and the
-whole commented message is always loaded. The row limit bounds the read when replies are very long.
+An agent's reply counts as one message however many streamed parts it was stored in. So does a
+run of tool calls and their status updates, which the chat shows as one group, so a call is never
+shown without its result. The whole commented message is always loaded. The row limit bounds the
+read when replies are very long.
 
 Lowering the share limit does not remove anyone's access. It only blocks new shares while a chat is at or above the limit.
 
