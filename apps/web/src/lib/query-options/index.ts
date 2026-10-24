@@ -110,6 +110,7 @@ export {
 export { credentialQueryKeys, credentialsQueryOptions } from './credentials';
 export { deploymentQueryKeys } from './deployments';
 export { githubInstallationsQueryOptions, githubQueryKeys } from './github';
+export { ideaDetailQueryOptions, ideaQueryKeys, ideasListQueryOptions } from './ideas';
 export {
   nodeListQueryOptions,
   nodeQueryKeys,
@@ -144,7 +145,6 @@ export {
 export { reportIssueConfigQueryOptions, reportIssueQueryKeys } from './report-issue';
 export {
   activeTasksQueryOptions,
-  draftIdeasQueryOptions,
   taskDetailQueryOptions,
   taskEventsQueryOptions,
   taskQueryKeys,

@@ -1,3 +1,5 @@
+import { DEFAULT_IDEA_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
+
 import type { Env } from '../env';
 import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from '../lib/idea-content-limit';
 import { parsePositiveInt } from '../lib/route-helpers';
@@ -39,7 +41,10 @@ export function getPlatformOperationLimits(env: Env) {
     ideaListMax: parsePositiveInt(env.MCP_IDEA_LIST_MAX, 100),
     ideaSearchMax: parsePositiveInt(env.MCP_IDEA_SEARCH_MAX, 20),
     relatedIdeaSearchLimit: parsePositiveInt(env.MCP_RELATED_IDEA_SEARCH_LIMIT, 10),
-    ideaTitleMaxLength: parsePositiveInt(env.MCP_IDEA_TITLE_MAX_LENGTH, 200),
+    ideaTitleMaxLength: parsePositiveInt(
+      env.MCP_IDEA_TITLE_MAX_LENGTH,
+      DEFAULT_IDEA_TITLE_MAX_LENGTH
+    ),
     dispatchMaxPriority: parsePositiveInt(env.MCP_DISPATCH_MAX_PRIORITY, 100),
     knowledgeSearchLimit: parsePositiveInt(env.KNOWLEDGE_SEARCH_LIMIT, 20),
   };

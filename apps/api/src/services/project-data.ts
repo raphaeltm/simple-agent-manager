@@ -92,6 +92,7 @@ import type {
   GroupedFtsWallRecoveryRequest,
   GroupedFtsWallRecoveryResult,
 } from '../durable-objects/project-data/grouped-fts-wall-recovery';
+import type { IdeaWorkSnapshot } from '../durable-objects/project-data/idea-work';
 import type {
   MessageContextRequest,
   MessageContextResult,
@@ -2342,6 +2343,20 @@ export async function getResourceLinkSnapshot(
   cap: number
 ) {
   return (await getStub(env, projectId)).getResourceLinkSnapshot(kind, id, cap);
+}
+
+/**
+ * Batched: the chats and unanswered questions linked to many ideas, in one round trip.
+ * The Ideas list derives every row's state from this, so it must not be per idea (rule 60).
+ */
+export async function getIdeaWorkSnapshots(
+  env: Env,
+  projectId: string,
+  ideaIds: readonly string[]
+): Promise<Record<string, IdeaWorkSnapshot>> {
+  if (ideaIds.length === 0) return {};
+  const stub = await getStub(env, projectId);
+  return stub.getIdeaWorkSnapshots([...ideaIds]);
 }
 
 // =========================================================================

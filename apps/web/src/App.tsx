@@ -60,7 +60,7 @@ const Chats = lazyNamed(() => import('./pages/Chats'), 'Chats');
 const CreateWorkspace = lazyNamed(() => import('./pages/CreateWorkspace'), 'CreateWorkspace');
 const DeviceAuth = lazyNamed(() => import('./pages/DeviceAuth'), 'DeviceAuth');
 const IdeaDetailPage = lazyNamed(() => import('./pages/IdeaDetailPage'), 'IdeaDetailPage');
-const IdeasPage = lazyNamed(() => import('./pages/IdeasPage'), 'IdeasPage');
+const IdeasListPage = lazyNamed(() => import('./pages/ideas/IdeasListPage'), 'IdeasListPage');
 const Node = lazyNamed(() => import('./pages/Node'), 'Node');
 const Nodes = lazyNamed(() => import('./pages/Nodes'), 'Nodes');
 /**
@@ -339,7 +339,7 @@ export default function App() {
                           element={page(<ProjectCommentReader />)}
                         />
                         <Route path="files" element={page(<ProjectFiles />)} />
-                        <Route path="ideas" element={page(<IdeasPage />)} />
+                        <Route path="ideas" element={page(<IdeasListPage />)} />
                         <Route path="deployments" element={page(<ProjectDeployments />)} />
                         <Route
                           path="deployments/:envId"

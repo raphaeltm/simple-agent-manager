@@ -83,7 +83,7 @@ Each project has:
 
 - A **chat** — the main surface where you describe work and watch agents run it
 - **Agent profiles** and **skills** — reusable configurations you pick from per chat (see below)
-- An **Ideas board** — for capturing and organizing work you haven't started yet
+- An **Ideas list** — what you want done, with whatever needs you first
 - A **default provider**, **default location**, and **default resource requirements** for new workspaces
 - **Runtime configuration** — environment variables and files made available to workspaces
 
@@ -109,7 +109,7 @@ SAM also has a private operator-only incident trigger source used by the configu
 
 ## Ideas
 
-An **idea** captures a piece of work you want an AI agent to do. Most work starts directly from the project chat — submitting a message both creates and executes the work in one step. The **Ideas board** is where you keep ideas you've drafted but haven't started yet; once an idea is executing or done, you'll follow it in the chat session list.
+An **idea** captures a piece of work you want done. Most work starts directly from the project chat — submitting a message both creates and executes the work in one step. The **Ideas** list is where an idea waits until someone starts work on it, collecting context as people and agents talk about it, and then follows that work: its state comes from the chats and pull requests linked to it rather than from a label anyone typed. See [Idea Execution](/docs/guides/idea-execution/#ideas).
 
 You can also start a saved idea from its detail page with the **Start work** button — see [Starting work on an idea](/docs/guides/idea-execution/#starting-work-on-an-idea).
 

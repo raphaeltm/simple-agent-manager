@@ -48,7 +48,7 @@ export const createIdeaDef: AnthropicToolDef = {
 
 export async function createIdea(
   input: { projectId: string; title: string; description?: string; priority?: number },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   const env = ctx.env as unknown as Env;
   const db = drizzle(env.DATABASE, { schema });
@@ -66,20 +66,14 @@ export async function createIdea(
 
   const title = input.title.trim().slice(0, titleMaxLen);
   const description = input.description?.trim().slice(0, descMaxLen) ?? null;
-  const priority = typeof input.priority === 'number'
-    ? Math.min(Math.max(0, Math.round(input.priority)), 10)
-    : 0;
+  const priority =
+    typeof input.priority === 'number' ? Math.min(Math.max(0, Math.round(input.priority)), 10) : 0;
 
   // Verify ownership
   const [project] = await db
     .select({ id: schema.projects.id })
     .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.id, input.projectId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
     .limit(1);
 
   if (!project) {
@@ -88,8 +82,10 @@ export async function createIdea(
 
   // Enforce per-project limit
   const countRow = await env.DATABASE.prepare(
-    "SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND status = 'draft'",
-  ).bind(project.id).first<{ cnt: number }>();
+    "SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND status = 'draft'"
+  )
+    .bind(project.id)
+    .first<{ cnt: number }>();
   if (countRow && countRow.cnt >= maxIdeas) {
     return { error: `Maximum ideas per project (${maxIdeas}) reached.` };
   }
@@ -98,9 +94,11 @@ export async function createIdea(
   const id = ulid();
   const now = new Date().toISOString();
   await env.DATABASE.prepare(
-    `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority, task_mode, dispatch_depth, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'draft', ?, 'task', 0, ?, ?, ?)`,
-  ).bind(id, project.id, ctx.userId, title, description, priority, ctx.userId, now, now).run();
+    `INSERT INTO tasks (id, project_id, user_id, title, description, status, is_idea, priority, task_mode, dispatch_depth, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'draft', 1, ?, 'task', 0, ?, ?, ?)`
+  )
+    .bind(id, project.id, ctx.userId, title, description, priority, ctx.userId, now, now)
+    .run();
 
   log.info('sam.create_idea.created', {
     ideaId: id,

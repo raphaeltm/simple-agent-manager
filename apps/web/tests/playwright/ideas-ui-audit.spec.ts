@@ -124,72 +124,6 @@ const NORMAL_TASKS = [
   makeTask({ id: 't5', title: 'Update dependencies', status: 'draft' }),
 ];
 
-const LONG_TEXT_TASKS = [
-  makeTask({
-    id: 'lt1',
-    title:
-      'This is an extremely long task title that should definitely be truncated on mobile screens because it contains way too many words and characters to fit in a single line without breaking the layout or causing horizontal scroll issues on smaller viewports',
-    status: 'draft',
-    description:
-      'This task has a very long description that goes into great detail about what needs to be done. It includes multiple sentences explaining the requirements, the technical approach, the expected outcomes, and various edge cases that need to be handled. The description should wrap properly on mobile without any overflow issues. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.',
-  }),
-  makeTask({
-    id: 'lt2',
-    title: 'A',
-    status: 'draft',
-    description: null,
-  }),
-  makeTask({
-    id: 'lt3',
-    title:
-      'Fix: handling of special characters like <script>alert("xss")</script> & "quotes" and 日本語テスト',
-    status: 'draft',
-    description:
-      'Test with unicode: 🚀🎉💻 and HTML entities: &amp; &lt; &gt; and very long URLs: https://example.com/very/long/path/that/should/not/break/layout/even/when/it/contains/many/segments',
-  }),
-];
-
-// Tasks with unbroken strings that aggressively test overflow
-const UNBROKEN_STRING_TASKS = [
-  makeTask({
-    id: 'ub1',
-    title: 'x'.repeat(500),
-    status: 'draft',
-    description: 'y'.repeat(600),
-  }),
-  makeTask({
-    id: 'ub2',
-    title:
-      'https://example.com/this-is-an-extremely-long-url-that-should-not-cause-horizontal-overflow-even-on-mobile-devices-with-narrow-viewports?param1=value1&param2=value2&param3=value3',
-    status: 'draft',
-    description:
-      'Description with a long URL: https://example.com/another/very/long/path/that/keeps/going/and/going/without/any/natural/break/points/at/all/whatsoever/even/though/it/really/should/wrap/properly',
-  }),
-  makeTask({
-    id: 'ub3',
-    title: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.repeat(20),
-    status: 'draft',
-    description: '0123456789'.repeat(60),
-  }),
-  makeTask({
-    id: 'ub4',
-    title: 'Title with mixed content and ' + 'verylongword'.repeat(30) + ' in the middle',
-    status: 'draft',
-    description: 'Description with ' + 'anotherverylongword'.repeat(25) + ' embedded',
-  }),
-];
-
-const MANY_TASKS = Array.from({ length: 30 }, (_, i) => {
-  return makeTask({
-    id: `many-${i}`,
-    title: `Idea ${i + 1}: ${['Implement feature', 'Fix bug', 'Refactor module', 'Add tests', 'Update docs'][i % 5]} #${i + 1}`,
-    status: 'draft',
-    description: i % 3 === 0 ? `Description for task ${i + 1}` : null,
-    priority: i % 4 === 0 ? 10 : i % 3 === 0 ? 5 : 0,
-    blocked: i % 7 === 0,
-  });
-});
-
 const MOCK_SESSIONS = [
   {
     id: 's1',
@@ -470,92 +404,10 @@ async function takeScreenshot(page: Page, name: string) {
 // IDEAS PAGE TESTS
 // ===========================================================================
 
-test.describe('IdeasPage - Mobile Audit', () => {
-  test('empty state', async ({ page }) => {
-    await setupApiMocks(page, { tasks: [], sessions: [] });
-    await page.goto('/projects/proj-test-1/ideas');
-    await page.waitForSelector('text=Ideas');
-    await takeScreenshot(page, 'ideas-empty-state');
-
-    // Verify empty state message is visible
-    await expect(page.getByText('Ideas emerge from your conversations')).toBeVisible();
-    await assertNoOverflow(page);
-  });
-
-  test('normal draft ideas', async ({ page }) => {
-    await setupApiMocks(page, { tasks: NORMAL_TASKS, sessions: MOCK_SESSIONS });
-    await page.goto('/projects/proj-test-1/ideas');
-    await page.waitForSelector('text=Ideas');
-    await page.waitForSelector('text=Implement user authentication');
-    await takeScreenshot(page, 'ideas-normal-data');
-
-    await expect(page.getByRole('list', { name: 'Ideas being refined' })).toBeVisible();
-    await expect(page.getByText('5 ideas being refined')).toBeVisible();
-    await assertNoOverflow(page);
-    await expect(page.getByLabel('Filter by status')).toHaveCount(0);
-  });
-
-  test('long text content', async ({ page }) => {
-    await setupApiMocks(page, { tasks: LONG_TEXT_TASKS, sessions: [] });
-    await page.goto('/projects/proj-test-1/ideas');
-    await page.waitForSelector('text=Ideas');
-    await page.waitForTimeout(500);
-    await takeScreenshot(page, 'ideas-long-text');
-
-    // Verify layout is not broken - check that search bar is still visible
-    await expect(page.getByPlaceholder('Search ideas...')).toBeVisible();
-    await assertNoOverflow(page);
-  });
-
-  test('unbroken strings do not cause horizontal overflow', async ({ page }) => {
-    await setupApiMocks(page, { tasks: UNBROKEN_STRING_TASKS, sessions: [] });
-    await page.goto('/projects/proj-test-1/ideas');
-    await page.waitForSelector('text=Ideas');
-    await page.waitForTimeout(500);
-    await takeScreenshot(page, 'ideas-unbroken-strings');
-
-    await expect(page.getByPlaceholder('Search ideas...')).toBeVisible();
-    await assertNoOverflow(page);
-  });
-
-  test('many items (30 ideas)', async ({ page }) => {
-    await setupApiMocks(page, { tasks: MANY_TASKS, sessions: [] });
-    await page.goto('/projects/proj-test-1/ideas');
-    await page.waitForSelector('text=Ideas');
-    await page.waitForTimeout(500);
-    await takeScreenshot(page, 'ideas-many-items');
-    await assertNoOverflow(page);
-  });
-
-  test('search filter active', async ({ page }) => {
-    await setupApiMocks(page, { tasks: NORMAL_TASKS, sessions: MOCK_SESSIONS });
-    await page.goto('/projects/proj-test-1/ideas');
-    await page.waitForSelector('text=Implement user authentication');
-
-    await page.getByPlaceholder('Search ideas...').fill('database');
-    await page.waitForTimeout(300);
-    await takeScreenshot(page, 'ideas-search-filter');
-  });
-
-  test('search no results', async ({ page }) => {
-    await setupApiMocks(page, { tasks: NORMAL_TASKS, sessions: MOCK_SESSIONS });
-    await page.goto('/projects/proj-test-1/ideas');
-    await page.waitForSelector('text=Implement user authentication');
-
-    await page.getByPlaceholder('Search ideas...').fill('nonexistent query xyz');
-    await page.waitForTimeout(300);
-    await takeScreenshot(page, 'ideas-search-no-results');
-
-    await expect(page.getByText('No ideas match your search.')).toBeVisible();
-  });
-
-  test('API error state', async ({ page }) => {
-    await setupApiMocks(page, { tasksError: true });
-    await page.goto('/projects/proj-test-1/ideas');
-    await page.waitForTimeout(1000);
-    await takeScreenshot(page, 'ideas-api-error');
-  });
-});
+// ===========================================================================
+// The Ideas list has its own audit: `ideas-list-audit.spec.ts`. This file keeps the
+// dashboard's active task cards and the task submit form, which share these mocks.
+// ===========================================================================
 
 // ===========================================================================
 // DASHBOARD / ACTIVE TASK CARDS TESTS
@@ -686,56 +538,14 @@ test.describe('TaskSubmitForm - Mobile Audit', () => {
 // TOUCH TARGET BOUNDING BOX ASSERTIONS
 // ===========================================================================
 
-test.describe('Touch Target Size - Bounding Box', () => {
-  test('idea cards meet 44px minimum touch target height', async ({ page }) => {
-    await setupApiMocks(page, { tasks: NORMAL_TASKS, sessions: MOCK_SESSIONS });
-    await page.goto('/projects/proj-test-1/ideas');
-    await page.waitForSelector('text=Implement user authentication');
-
-    // Find the first idea card button element and measure its bounding box
-    const firstCard = page.getByRole('button', { name: /Implement user authentication/i });
-    await expect(firstCard).toBeVisible();
-    const box = await firstCard.boundingBox();
-    expect(box).not.toBeNull();
-    // Cards use min-h-[56px] — verify the rendered height meets the 44px WCAG minimum
-    expect(box!.height).toBeGreaterThanOrEqual(44);
-  });
-
-  test('idea search input meets 44px minimum touch target height', async ({ page }) => {
-    await setupApiMocks(page, { tasks: NORMAL_TASKS, sessions: MOCK_SESSIONS });
-    await page.goto('/projects/proj-test-1/ideas');
-    await page.waitForSelector('text=Implement user authentication');
-
-    const searchInput = page.getByPlaceholder('Search ideas...');
-    await expect(searchInput).toBeVisible();
-    const box = await searchInput.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThanOrEqual(44);
-  });
-});
-
-test('Connector provenance in ideas and active task cards', async ({ page }) => {
+test('Connector provenance on the active task cards', async ({ page }) => {
   const connectorClientName = 'Claude Research 🧪 & planning '.repeat(9);
-  const tasks = NORMAL_TASKS.map((task) => ({
-    ...task,
-    triggeredBy: 'connector',
-    connectorClientName,
-  }));
   const dashboardTasks = MOCK_DASHBOARD_TASKS.map((task) => ({
     ...task,
     triggeredBy: 'connector',
     connectorClientName,
   }));
-  await setupApiMocks(page, { tasks, dashboardTasks });
-  await page.goto('/projects/proj-test-1/ideas');
-  await expect(page.getByTitle(`Created via ${connectorClientName}`).first()).toBeVisible();
-  await assertNoOverflow(page);
-  expect(
-    await page
-      .getByRole('heading', { name: 'Implement user authentication' })
-      .evaluate((el) => el.getBoundingClientRect().width)
-  ).toBeGreaterThan(50);
-  await takeScreenshot(page, 'connector-ideas-provenance');
+  await setupApiMocks(page, { dashboardTasks });
   await page.goto('/dashboard');
   await expect(page.getByTitle(`Created via ${connectorClientName}`).first()).toBeVisible();
   await assertNoOverflow(page);

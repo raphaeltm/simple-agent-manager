@@ -1,3 +1,4 @@
+import { AppError } from '../middleware/error';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -46,4 +47,28 @@ export function operationErrorHttpStatus(error: OperationError): 400 | 403 | 404
     case 'unavailable':
       return 503;
   }
+}
+
+/** HTTP error codes for each operation failure, matching `middleware/error.ts`'s names. */
+const OPERATION_ERROR_HTTP_CODES: Record<OperationErrorCode, string> = {
+  invalid_input: 'BAD_REQUEST',
+  not_found: 'NOT_FOUND',
+  forbidden: 'FORBIDDEN',
+  conflict: 'CONFLICT',
+  rate_limited: 'TOO_MANY_REQUESTS',
+  unavailable: 'SERVICE_UNAVAILABLE',
+};
+
+/**
+ * Turns an operation failure into the HTTP error the app's error handler renders. Anything
+ * that is not an `OperationError` is returned untouched, so a genuine fault still surfaces as
+ * a 500 rather than being flattened into a client error.
+ */
+export function toOperationHttpError(error: unknown): unknown {
+  if (!(error instanceof OperationError)) return error;
+  return new AppError(
+    operationErrorHttpStatus(error),
+    OPERATION_ERROR_HTTP_CODES[error.code],
+    error.message
+  );
 }

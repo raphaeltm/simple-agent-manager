@@ -217,7 +217,7 @@ export async function handleCreateIdea(
   return runWorkspaceOperation('create_idea', requestId, params, tokenData, env);
 }
 
-export { validateIdeaStatusTransition } from '../../operations/idea-core';
+export { validateIdeaStatusTransition } from '../../operations/idea-transitions';
 
 export async function handleUpdateIdea(
   requestId: string | number | null,

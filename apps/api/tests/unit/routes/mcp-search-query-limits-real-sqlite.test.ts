@@ -42,8 +42,9 @@ describe('MCP task-backed search query limits with real SQLite', () => {
 
     const insert = sqlite.prepare(
       `INSERT INTO tasks
-         (id, project_id, user_id, title, description, status, priority, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         (id, project_id, user_id, title, description, status, is_idea, priority, created_at,
+          updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
     );
     insert.run(
       'idea-new',

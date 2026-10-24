@@ -752,6 +752,10 @@ export async function saveDebugDiagnosisAsIdea(
     title: (title?.trim() || 'Investigate deployment diagnosis').slice(0, 200),
     description: diagnosis.diagnosis.slice(0, 5_000),
     status: 'draft',
+    // This row is an idea, so it carries the flag the Ideas pages read. Without it the row
+    // would show up in Ideas only while it stayed `draft` and would vanish the moment someone
+    // marked it done (`db/migrations/0207_tasks_idea_flag.sql`).
+    isIdea: true,
     priority: 0,
     taskMode: 'task',
     dispatchDepth: 0,

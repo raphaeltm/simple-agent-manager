@@ -75,3 +75,36 @@ export function defineOperation<I, O>(operation: Operation<I, O>): Operation<I, 
     },
   };
 }
+
+/**
+ * The operation context for a request a person made in the browser.
+ *
+ * One definition, because two call sites writing the same actor literal is how the second one
+ * quietly loses something — the first copy of this in `routes/tasks/crud.ts` dropped
+ * `execCtx`, which is what lets an operation schedule bounded background work.
+ *
+ * `c.executionCtx` is a getter that throws when there is no execution context, which a
+ * unit-test Hono app has; `lib/wait-until.ts` guards it for the same reason. The cast
+ * reconciles Hono's `ExecutionContext` type, which omits the runtime's newer tracing field.
+ */
+export function webOperationContext(
+  c: {
+    env: Env;
+    req: { header(name: string): string | undefined };
+    executionCtx: { waitUntil(promise: Promise<unknown>): void };
+  },
+  userId: string
+): OperationContext {
+  let execCtx: ExecutionContext | undefined;
+  try {
+    execCtx = c.executionCtx as unknown as ExecutionContext;
+  } catch {
+    execCtx = undefined;
+  }
+  return {
+    env: c.env,
+    requestId: c.req.header('cf-ray') ?? '',
+    actor: { userId, via: 'web', scopes: new Set(['sam.read', 'sam.write']) },
+    execCtx,
+  };
+}

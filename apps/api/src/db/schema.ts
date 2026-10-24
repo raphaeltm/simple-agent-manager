@@ -980,6 +980,19 @@ export const tasks = sqliteTable(
     title: text('title').notNull(),
     description: text('description'),
     status: text('status').notNull().default('draft'),
+    /**
+     * 1 for an idea: a row filed as something to do that has not been handed to an agent.
+     * Ideas keep their own status transitions (`operations/idea-transitions.ts`) and are the
+     * only rows the Ideas list reads. Set at creation; dispatch paths leave it 0. Needed
+     * because a done idea is `completed`, which is otherwise an ordinary finished task.
+     */
+    isIdea: integer('is_idea', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * When a person last chose "Keep open" in answer to this idea's merged-pull-request
+     * question. Only the idea's own Needs-you question reads it; a merge older than this is
+     * settled, so the question does not come back.
+     */
+    ideaMergeAckAt: text('idea_merge_ack_at'),
     executionStep: text('execution_step'),
     priority: integer('priority').notNull().default(0),
     agentProfileHint: text('agent_profile_hint'),

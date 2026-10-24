@@ -10,9 +10,7 @@ describe('MessageBubble memoization', () => {
   });
 
   it('skips re-render when props are identical', () => {
-    const { rerender, container } = render(
-      <MessageBubble text="Hello" role="agent" />
-    );
+    const { rerender, container } = render(<MessageBubble text="Hello" role="agent" />);
     const firstHtml = container.innerHTML;
 
     rerender(<MessageBubble text="Hello" role="agent" />);
@@ -26,9 +24,7 @@ describe('MessageBubble', () => {
   describe('code blocks', () => {
     it('renders fenced code blocks with syntax highlighting (colored tokens)', () => {
       const markdown = '```typescript\nconst x = 42;\n```';
-      const { container } = render(
-        <MessageBubble text={markdown} role="agent" />
-      );
+      const { container } = render(<MessageBubble text={markdown} role="agent" />);
 
       const pre = container.querySelector('pre');
       expect(pre).not.toBeNull();
@@ -41,9 +37,7 @@ describe('MessageBubble', () => {
 
     it('renders line numbers in fenced code blocks', () => {
       const markdown = '```js\nconst a = 1;\nconst b = 2;\nconst c = 3;\n```';
-      const { container } = render(
-        <MessageBubble text={markdown} role="agent" />
-      );
+      const { container } = render(<MessageBubble text={markdown} role="agent" />);
 
       const pre = container.querySelector('pre');
       expect(pre).not.toBeNull();
@@ -56,9 +50,7 @@ describe('MessageBubble', () => {
 
     it('does not double-wrap code blocks in nested <pre> elements', () => {
       const markdown = '```js\nconsole.log("hello");\n```';
-      const { container } = render(
-        <MessageBubble text={markdown} role="agent" />
-      );
+      const { container } = render(<MessageBubble text={markdown} role="agent" />);
 
       const preElements = container.querySelectorAll('pre');
       // Should only have one <pre> (our custom one), not two (react-markdown + custom)
@@ -67,9 +59,7 @@ describe('MessageBubble', () => {
 
     it('renders inline code without <pre> wrapper', () => {
       const markdown = 'Use the `console.log` function';
-      const { container } = render(
-        <MessageBubble text={markdown} role="agent" />
-      );
+      const { container } = render(<MessageBubble text={markdown} role="agent" />);
 
       const pre = container.querySelector('pre');
       expect(pre).toBeNull();
@@ -81,9 +71,7 @@ describe('MessageBubble', () => {
 
     it('does not have overflow-hidden on the prose wrapper', () => {
       const markdown = '```\nsome code\n```';
-      const { container } = render(
-        <MessageBubble text={markdown} role="agent" />
-      );
+      const { container } = render(<MessageBubble text={markdown} role="agent" />);
 
       const proseDiv = container.querySelector('.prose');
       expect(proseDiv).not.toBeNull();
@@ -92,9 +80,7 @@ describe('MessageBubble', () => {
 
     it('applies Night Owl theme background and foreground to syntax-highlighted code blocks', () => {
       const markdown = '```python\nprint("hello")\n```';
-      const { container } = render(
-        <MessageBubble text={markdown} role="agent" />
-      );
+      const { container } = render(<MessageBubble text={markdown} role="agent" />);
 
       const pre = container.querySelector('pre');
       expect(pre).not.toBeNull();
@@ -106,9 +92,7 @@ describe('MessageBubble', () => {
 
     it('uses explicit light text on language-less fenced code blocks', () => {
       const markdown = '```\nOn branch main\nnothing to commit\n```';
-      const { container } = render(
-        <MessageBubble text={markdown} role="agent" />
-      );
+      const { container } = render(<MessageBubble text={markdown} role="agent" />);
 
       const pre = container.querySelector('pre');
       expect(pre).not.toBeNull();
@@ -120,9 +104,7 @@ describe('MessageBubble', () => {
       // No language → no `language-*` class. The old `!match && !className`
       // test misclassified this as inline <code> and collapsed the newlines.
       const markdown = '```\nOn branch main\nnothing to commit\n```';
-      const { container } = render(
-        <MessageBubble text={markdown} role="agent" />
-      );
+      const { container } = render(<MessageBubble text={markdown} role="agent" />);
 
       const pre = container.querySelector('pre');
       expect(pre).not.toBeNull();
@@ -135,9 +117,7 @@ describe('MessageBubble', () => {
 
     it('does not render a multi-line language-less block as inline code', () => {
       const markdown = '```\nfirst line\nsecond line\n```';
-      const { container } = render(
-        <MessageBubble text={markdown} role="agent" />
-      );
+      const { container } = render(<MessageBubble text={markdown} role="agent" />);
 
       // It must be a block (<pre>), never a standalone inline <code> pill.
       expect(container.querySelector('pre')).not.toBeNull();
@@ -152,9 +132,7 @@ describe('MessageBubble', () => {
       // makeCodeComponent is shared between user and agent roles, so the
       // block/inline classification must behave identically for user messages.
       const markdown = '```\nuser line one\nuser line two\n```';
-      const { container } = render(
-        <MessageBubble text={markdown} role="user" />
-      );
+      const { container } = render(<MessageBubble text={markdown} role="user" />);
 
       const pre = container.querySelector('pre');
       expect(pre).not.toBeNull();
@@ -169,9 +147,7 @@ describe('MessageBubble', () => {
       // there is no language match → it renders inline. This is intentional
       // (single-line snippets read fine inline) and not a regression.
       const markdown = '```\ngit status\n```';
-      const { container } = render(
-        <MessageBubble text={markdown} role="agent" />
-      );
+      const { container } = render(<MessageBubble text={markdown} role="agent" />);
 
       expect(container.querySelector('pre')).toBeNull();
       const code = container.querySelector('code');
@@ -182,9 +158,7 @@ describe('MessageBubble', () => {
 
   describe('inline code styling per role', () => {
     it('uses blue styling for inline code in user messages', () => {
-      const { container } = render(
-        <MessageBubble text="Use the `test` function" role="user" />
-      );
+      const { container } = render(<MessageBubble text="Use the `test` function" role="user" />);
 
       const code = container.querySelector('code');
       expect(code).not.toBeNull();
@@ -193,9 +167,7 @@ describe('MessageBubble', () => {
     });
 
     it('uses gray styling for inline code in agent messages', () => {
-      const { container } = render(
-        <MessageBubble text="Use the `test` function" role="agent" />
-      );
+      const { container } = render(<MessageBubble text="Use the `test` function" role="agent" />);
 
       const code = container.querySelector('code');
       expect(code).not.toBeNull();
@@ -206,18 +178,14 @@ describe('MessageBubble', () => {
 
   describe('message alignment', () => {
     it('left-aligns agent messages', () => {
-      const { container } = render(
-        <MessageBubble text="Hello" role="agent" />
-      );
+      const { container } = render(<MessageBubble text="Hello" role="agent" />);
 
       const outerDiv = container.firstElementChild;
       expect(outerDiv!.className).toContain('justify-start');
     });
 
     it('right-aligns user messages', () => {
-      const { container } = render(
-        <MessageBubble text="Hello" role="user" />
-      );
+      const { container } = render(<MessageBubble text="Hello" role="user" />);
 
       const outerDiv = container.firstElementChild;
       expect(outerDiv!.className).toContain('justify-end');
@@ -235,9 +203,7 @@ describe('MessageBubble', () => {
     });
 
     it('hides streaming indicator when streaming is false', () => {
-      const { container } = render(
-        <MessageBubble text="done" role="agent" streaming={false} />
-      );
+      const { container } = render(<MessageBubble text="done" role="agent" streaming={false} />);
 
       const indicator = container.querySelector('.animate-pulse');
       expect(indicator).toBeNull();
@@ -259,9 +225,7 @@ describe('MessageBubble', () => {
 
     it('renders GFM tables', () => {
       const markdown = '| Col1 | Col2 |\n| --- | --- |\n| A | B |';
-      const { container } = render(
-        <MessageBubble text={markdown} role="agent" />
-      );
+      const { container } = render(<MessageBubble text={markdown} role="agent" />);
 
       const table = container.querySelector('table');
       expect(table).not.toBeNull();
@@ -281,12 +245,17 @@ describe('MessageBubble', () => {
         writable: true,
         configurable: true,
       });
-      vi.stubGlobal('SpeechSynthesisUtterance', class {
-        text: string;
-        onend: (() => void) | null = null;
-        onerror: (() => void) | null = null;
-        constructor(text: string) { this.text = text; }
-      });
+      vi.stubGlobal(
+        'SpeechSynthesisUtterance',
+        class {
+          text: string;
+          onend: (() => void) | null = null;
+          onerror: (() => void) | null = null;
+          constructor(text: string) {
+            this.text = text;
+          }
+        }
+      );
       // Provide minimal clipboard mock so the copy button renders
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -310,7 +279,9 @@ describe('MessageBubble', () => {
     });
 
     it('does not show action buttons for streaming agent messages', () => {
-      render(<MessageBubble text="thinking..." role="agent" streaming={true} timestamp={1710288000000} />);
+      render(
+        <MessageBubble text="thinking..." role="agent" streaming={true} timestamp={1710288000000} />
+      );
       expect(screen.queryByLabelText('Message info')).toBeNull();
     });
 
@@ -478,9 +449,7 @@ describe('MessageBubble', () => {
     it('sets aria-label on file-path buttons for accessibility', () => {
       const onFileClick = vi.fn();
       const markdown = 'Check [src/main.ts](src/main.ts) for details';
-      render(
-        <MessageBubble text={markdown} role="agent" onFileClick={onFileClick} />
-      );
+      render(<MessageBubble text={markdown} role="agent" onFileClick={onFileClick} />);
 
       const button = screen.getByLabelText('Open src/main.ts in file browser');
       expect(button).toBeTruthy();
@@ -520,9 +489,7 @@ describe('MessageBubble', () => {
 
     it('renders file paths as plain links when onFileClick is not provided', () => {
       const markdown = 'Check [src/main.ts](src/main.ts) for details';
-      const { container } = render(
-        <MessageBubble text={markdown} role="agent" />
-      );
+      const { container } = render(<MessageBubble text={markdown} role="agent" />);
 
       // Without onFileClick, file paths render as normal <a> tags
       const link = container.querySelector('a');
@@ -546,9 +513,7 @@ describe('MessageBubble', () => {
 
   describe('overflow protection', () => {
     it('bubble container has min-w-0 but NOT overflow-hidden (popover must not be clipped)', () => {
-      const { container } = render(
-        <MessageBubble text="Hello" role="agent" />
-      );
+      const { container } = render(<MessageBubble text="Hello" role="agent" />);
 
       const bubble = container.querySelector('.max-w-\\[80\\%\\]');
       expect(bubble).not.toBeNull();
@@ -557,9 +522,7 @@ describe('MessageBubble', () => {
     });
 
     it('prose wrapper has overflow-x-auto for horizontal scroll', () => {
-      const { container } = render(
-        <MessageBubble text="Hello" role="agent" />
-      );
+      const { container } = render(<MessageBubble text="Hello" role="agent" />);
 
       const proseDiv = container.querySelector('.prose');
       expect(proseDiv).not.toBeNull();
@@ -568,9 +531,7 @@ describe('MessageBubble', () => {
 
     it('inline code has break-all for long file paths (agent)', () => {
       const longPath = '`/very/long/deeply/nested/path/to/some/file.tsx`';
-      const { container } = render(
-        <MessageBubble text={longPath} role="agent" />
-      );
+      const { container } = render(<MessageBubble text={longPath} role="agent" />);
 
       const code = container.querySelector('code');
       expect(code).not.toBeNull();
@@ -579,9 +540,7 @@ describe('MessageBubble', () => {
 
     it('inline code has break-all for long file paths (user)', () => {
       const longPath = '`/very/long/deeply/nested/path/to/some/file.tsx`';
-      const { container } = render(
-        <MessageBubble text={longPath} role="user" />
-      );
+      const { container } = render(<MessageBubble text={longPath} role="user" />);
 
       const code = container.querySelector('code');
       expect(code).not.toBeNull();
@@ -589,13 +548,44 @@ describe('MessageBubble', () => {
     });
 
     it('prose wrapper has break-words for general text overflow', () => {
-      const { container } = render(
-        <MessageBubble text="Hello" role="agent" />
-      );
+      const { container } = render(<MessageBubble text="Hello" role="agent" />);
 
       const proseDiv = container.querySelector('.prose');
       expect(proseDiv).not.toBeNull();
       expect(proseDiv!.className).toContain('break-words');
     });
+  });
+});
+
+/**
+ * Tailwind's preflight zeroes the padding and removes the marker on every ul and ol, and
+ * MessageBubble overrode neither — so a bulleted answer rendered as unindented run-on lines
+ * in chat, the same bug the app's shared renderer had (idea 01M0JQBW9E0T5PJZXY0K72V9BX).
+ */
+describe('MessageBubble lists', () => {
+  it('gives an agent’s bulleted list its bullets and its indent', () => {
+    render(<MessageBubble text={'- first\n- second'} role="agent" />);
+    const list = screen.getByRole('list');
+    expect(list.tagName).toBe('UL');
+    expect(list.className).toContain('list-disc');
+    expect(list.className).toContain('pl-[22px]');
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+  });
+
+  it('numbers an agent’s ordered list', () => {
+    render(<MessageBubble text={'1. first\n2. second'} role="agent" />);
+    const list = screen.getByRole('list');
+    expect(list.tagName).toBe('OL');
+    expect(list.className).toContain('list-decimal');
+  });
+
+  it('does the same for what a person wrote', () => {
+    render(<MessageBubble text={'- mine'} role="user" />);
+    expect(screen.getByRole('list').className).toContain('list-disc');
+  });
+
+  it('does the same when file-path links are being intercepted', () => {
+    render(<MessageBubble text={'- mine'} role="agent" onFileClick={() => {}} />);
+    expect(screen.getByRole('list').className).toContain('list-disc');
   });
 });

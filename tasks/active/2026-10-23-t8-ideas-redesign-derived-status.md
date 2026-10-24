@@ -1,0 +1,157 @@
+# T8 · Ideas redesign: derived status, the Ideas list and the idea page
+
+- Idea: `01M5NG712YTCNSBDWWQVR4F0A1` (program overview `01M5NG3W2ZMDFD797SQF8DWNHR`)
+- Branch: `sam/t8-ideas-redesign-derived-zg8jea`
+- Channel: `feature.linked-work`
+- Design: library `/engineering/ux-audits/ideas-redesign-2026-10-23/` (story `01M5NA13SVX7YDBBPMNXM3D7YJ`,
+  text `01M5NA160HAKFP0T4H4GPHQDZM`, screenshots in `screens/`); prototype code on
+  `origin/sam/started-talking-how-reimagine-861qke` at `apps/web/src/pages/ideas-prototype/`
+  (visual reference only, never merged).
+- Ships as two PRs: **PR1** derived status + the Ideas list; **PR2** the idea page.
+
+## Problem
+
+Ideas never move. An idea is a `tasks` row with `status='draft'`; Execute creates a _separate_ task and
+leaves the idea behind, so the status stays "Exploring" forever and people type status into titles. The
+list is a flat search list with agent-filed error reports mixed in, and the idea page is the raw text plus
+a conversations drawer. Nothing shows what needs a human.
+
+## Research findings
+
+### What exists on main (`f6b24ffbb`)
+
+| Thing                     | Where                                                                                 | Notes                                                                                                                                                                                                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ideas list                | `apps/web/src/pages/IdeasPage.tsx` (269 lines)                                        | `draftIdeasQueryOptions` pages `GET tasks?status=draft`; counts sessions client-side from a 200-session fetch                                                                                                                                                           |
+| Idea page                 | `apps/web/src/pages/IdeaDetailPage.tsx` (515 lines)                                   | Status pill mapped from `TaskStatus`, `Execute` → `/chat?executeIdea=`, conversations side panel + mobile FAB/modal                                                                                                                                                     |
+| Idea reads/writes         | `apps/api/src/operations/idea-core.ts`                                                | `searchIdeas` (defaults `status='draft'`), `getIdea`, `prepareIdeaCreate`, `prepareIdeaUpdate`                                                                                                                                                                          |
+| Idea transitions          | `idea-core.ts:268-270` `IDEA_STATUS_TRANSITIONS`                                      | `draft→ready                                                                                                                                                                                                                                                            | cancelled`, `ready→draft                                                  | completed | cancelled` |
+| Task transitions          | `services/task-status.ts:67-77` `TRANSITIONS`                                         | `draft→ready                                                                                                                                                                                                                                                            | cancelled`— **forbids`ready→completed`**, and `completed` has no way back |
+| Generic task PATCH/status | `routes/tasks/crud.ts:437-468`                                                        | uses `canTransitionTaskStatus`, so an idea row routed through it disagrees with `update_idea`                                                                                                                                                                           |
+| Session↔idea links        | DO `project-data/ideas.ts` (`chat_session_ideas`)                                     | `getSessionsForIdea(taskId)` is **per idea**; no batched read exists                                                                                                                                                                                                    |
+| Needs-input markers       | DO `project-data/attention.ts`, table `session_attention_markers` (migration `020-…`) | `kind`, `resolved_at IS NULL`, `created_at`                                                                                                                                                                                                                             |
+| Automation primitives     | `apps/web/src/pages/automation/ui.tsx`, `page.tsx`, `overview-sections.tsx`           | `Panel`, `SectionTitle`, `RowLink`, `Disclosure`, `TextLink`, `ButtonLink`, `Chips`, `PageHeader`, `Page`, `LoadError`, `Notice`, and the `NeedsAttention`/`AttentionPanel` pattern the design copies                                                                   |
+| Markdown renderer         | `apps/web/src/components/MarkdownRenderer.tsx:255-265`                                | `ul`/`ol` set `paddingLeft: 22` but **no `list-style-type`**, and Tailwind preflight sets `list-style: none` → no bullets/numbers anywhere (idea `01M0JQBW9E0T5PJZXY0K72V9BX`). `packages/acp-client/src/components/MessageBubble.tsx` overrides no list element at all |
+| Operation limits          | `apps/api/src/operations/limits.ts`                                                   | `getPlatformOperationLimits(env)`; `ideaListLimit/Max` already exist                                                                                                                                                                                                    |
+
+### Finding 1 — an idea has no durable discriminator (blocking)
+
+"Mark done" must move the row to `completed` and "Park" to `cancelled` (the design: "Done and Parked stay
+human choices (the existing completed and cancelled statuses)"). But _every_ reader identifies an idea as
+`status='draft'`. The moment an idea is marked done it is indistinguishable from an ordinary completed
+task and vanishes from Ideas, so "Done recently" and the Done idea page cannot exist.
+
+→ D1 migration `0207_tasks_idea_flag.sql`: `ALTER TABLE tasks ADD COLUMN is_idea INTEGER NOT NULL DEFAULT 0`,
+backfill `UPDATE tasks SET is_idea = 1 WHERE status = 'draft'` (exactly today's definition, so lossless),
+plus an index. Additive only — no `DROP`, no unscoped `UPDATE` (rule 31). **Announced on the channel for
+coordinator ack before landing** (program rule: no unannounced migrations).
+
+### Finding 2 — the list cannot use T1's per-idea `getIdeaContext`
+
+T1 exposes `GET …/ideas/:ideaId/links → IdeaContext`, one idea at a time. A list of 100 ideas through that
+is 100+ round trips against a ≤20 budget (rule 60). → one batched DO read of my own,
+`getIdeaWorkSnapshots(taskIds[])` in a new sibling module, whose link source is repointed at T1's
+`resource_links` table at integration while keeping T1's strength rules.
+
+### Finding 3 — PR state must not be refreshed from the list
+
+Cloudflare review of the program: list endpoints read **stored** PR state only. T2's
+`getPullRequestStates(ctx, projectId, refs, { refresh })` defaults to stored D1 reads; only the detail route
+passes `refresh: 'single'` (channel seq 10, 11). `canonicalProjectPullRequestUrl` comes from
+`@simple-agent-manager/shared` (T2, channel seq 9).
+
+### Finding 4 — "filed by agents" already has a signal
+
+`tasks.triggered_by` is `'user' | 'connector' | <automation>`; `IdeasPage` already renders an `AUTO` chip
+for `triggeredBy` not in `{user, connector}`. The design's "Filed by agents" group is exactly that set, so
+no new column is needed for it.
+
+### Finding 5 — scrolling wrapper
+
+Policy `63006482`: the app deliberately does not scroll at `html`/`body`. Playwright overflow checks must
+measure the page's own scroll container, and the list/idea pages must live inside the existing project
+layout scroll container rather than introducing their own.
+
+### Rules / post-mortems read
+
+`00-rule-routing`, `02-quality-gates`, `06-technical-patterns` (interaction-effect analysis, UI→backend
+data path), `11-fail-fast-patterns` (project-scoped read/write guards), `18-file-size-limits`,
+`24-no-duplicate-ui-controls`, `25-review-merge-gate`, `30-never-ship-broken-features`,
+`31-migration-safety` (apps/api scoped), `35-vertical-slice-testing`, `48-stale-while-revalidate-ui`,
+`56-clipped-overflow`, `60-request-io-and-bundle-budgets`, `62-tests-must-observe-the-real-trigger`,
+`64-unstable-prop-identity`, `74-proxy-signals-must-match-the-condition` (derived status is a _derivation_,
+not a proxy: every rule reads the condition itself and carries its source), `76-cost-decisions`,
+`17-ui-visual-testing` (apps/web scoped), `04-ui-standards` (apps/web scoped).
+
+## Implementation checklist
+
+### PR1 — derived status, the transition operation, the API and the Ideas list
+
+- [ ] `packages/shared/src/types/ideas.ts`: `IdeaDerivedState`, `IdeaAttentionKind`, `IdeaAttention`,
+      `IdeaStatusSource`, `IdeaDerivedStatus`, `IdeaListItem`, `IdeaListResponse`, `IdeaCounts`;
+      `IDEA_NEEDS_YOU_STATES`; exported from `types/index.ts`.
+- [ ] `apps/api/src/db/migrations/0207_tasks_idea_flag.sql` (+ `schema.ts` `isIdea` column) — **after
+      channel ack**.
+- [ ] `prepareIdeaCreate` writes `is_idea = 1`; every idea reader filters on it (with the
+      `status='draft'` legacy fallback removed only where the backfill covers it).
+- [ ] `apps/api/src/operations/idea-status.ts` — **pure** `deriveIdeaStatus(input)` implementing the
+      precedence: done → parked → question → stuck → working → review → merged → not-started, each with
+      its `source`.
+- [ ] `apps/api/src/operations/idea-transitions.ts` — one allowed-transition table for idea rows
+      (`markIdeaDone`, `parkIdea`, `reopenIdea`), used by `update_idea`, the new status route and the
+      generic task PATCH/status route when the row is an idea. Delete `IDEA_STATUS_TRANSITIONS` from
+      `idea-core.ts`.
+- [ ] DO: `durable-objects/project-data/idea-work.ts` + a one-line delegating method
+      `getIdeaWorkSnapshots(taskIds)` on the class.
+- [ ] `apps/api/src/operations/idea-list-core.ts` — batched aggregation (ideas → snapshots → tasks → PR
+      state), ≤20 round trips, no per-idea queries.
+- [ ] `apps/api/src/routes/ideas.ts` mounted at `/api/projects/:projectId/ideas`: `GET /`,
+      `GET /:ideaId`, `POST /:ideaId/status`. Project scoping on every read and write.
+- [ ] Fix markdown list markers: `MARKDOWN_COMPONENTS` `ul`/`ol` get `list-style-type`, and
+      `MessageBubble`'s agent/user components get the same lists. Mark idea
+      `01M0JQBW9E0T5PJZXY0K72V9BX` done.
+- [ ] `apps/web/src/pages/ideas/`: `IdeasListPage.tsx` + `parts.tsx` (`StateIcon`, `IdeaRow`,
+      `AttentionCard`), `view-model.ts` (grouping, Needs-you cap, labels), `api`/`query-options`.
+      Needs you (≤3 + "N more need you") → In progress → Not started; Done recently and Filed by agents
+      folded; desktop side column.
+- [ ] Route `IdeasPage` → the new page; delete the old one (no dead code).
+- [ ] Tests: table-driven `deriveIdeaStatus` (every rule, weak links must not move status),
+      transition operation against real SQL (allowed + rejected + PATCH/`update_idea` agreement),
+      list route vertical slice with multi-session fixtures, foreign-project attack + owner control,
+      list view-model + behavioural tests for each Needs-you action, markdown `ul`/`ol` rendered test.
+- [ ] Playwright 375×667 + 1280×800 with stress/empty data, `assertNoOverflow`, screenshots reviewed.
+- [ ] `pnpm quality:cloudflare-cost` before/after, noted in the PR.
+- [ ] Docs: `apps/www/src/content/docs/docs/` page for how idea status is derived.
+
+### PR2 — the idea page
+
+- [ ] `GET /api/projects/:projectId/ideas/:ideaId` returns idea + derived status + Work + Related
+      (T1 `IdeaContext`, T2 PR state with `refresh: 'single'`).
+- [ ] `apps/web/src/pages/ideas/IdeaPage.tsx` (+ parts): status card with the one status-dependent
+      primary action, "The idea" (markdown, the current plan), Work, Updates (T3 notes + composer +
+      quote + derived lifecycle entries), Related. Desktop two columns; the conversations drawer and
+      mobile FAB go away.
+- [ ] Keep Start work (T7) wired; whichever of T7/T8 merges second does the wiring.
+- [ ] Tests: status-dependent primary action per state, Updates composer through the real POST,
+      Mark done / Park through the real route, Playwright both viewports, ui-ux-specialist review.
+
+## Acceptance criteria
+
+1. An idea's state is derived from its linked work, never typed: a linked chat starting moves it to
+   In progress, an open PR to In review, a merged PR into Needs you, a needs-input marker to
+   Waiting for you, a failure to Stopped. Each state names where it came from.
+2. Weak links (`read`, `viewed`, `discusses`) never change an idea's state.
+3. "Mark done" and "Park" go through one server operation; `update_idea`, the ideas UI and the generic
+   task status route agree, and a test proves the route and `update_idea` agree.
+4. The Ideas list shows Needs you first (≤3 cards then "N more need you"), each with its fix as a
+   button; In progress; Not started; Done recently and Filed by agents folded; desktop side column.
+5. The idea page shows the status card with one primary action, the plan, Work, Updates and Related.
+6. `GET /ideas` stays within 20 round trips for a 100-idea project and never refreshes PR state live.
+7. Markdown lists render bullets and numbers on the idea page and in chat.
+8. No horizontal overflow at 375×667 or 1280×800 with stress data; screenshots posted to each PR.
+9. Verified on staging as a user, on phone and desktop widths.
+
+## Notes
+
+- Nothing merges until T1, T2 and T3 are on `main` and this code uses their real operations.
+- `.do-state.md` is the live tracker.

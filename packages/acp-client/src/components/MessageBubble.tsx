@@ -212,10 +212,22 @@ function makeCodeComponent(
 // react-markdown sees the same component references across renders.
 // This prevents unmount/remount of custom renderers which was destroying
 // DOM nodes (resetting horizontal scroll position on code blocks).
+/**
+ * Lists need an explicit marker and indent: Tailwind's preflight sets `list-style: none` and
+ * zeroes the padding on every ul/ol, so without these a bulleted answer renders as unindented
+ * run-on lines (idea 01M0JQBW9E0T5PJZXY0K72V9BX).
+ */
+const SharedList: Components = {
+  ul: ({ children }) => <ul className="my-2 list-disc pl-[22px]">{children}</ul>,
+  ol: ({ children }) => <ol className="my-2 list-decimal pl-[22px]">{children}</ol>,
+  li: ({ children }) => <li className="mb-1">{children}</li>,
+};
+
 const USER_MARKDOWN_COMPONENTS: Components = {
   pre: SharedPre,
   code: makeCodeComponent('bg-blue-500 text-blue-50'),
   a: SharedLink,
+  ...SharedList,
 };
 
 /** Default agent markdown components (no file click handler — links open in new tab). */
@@ -223,6 +235,7 @@ const AGENT_MARKDOWN_COMPONENTS: Components = {
   pre: SharedPre,
   code: makeCodeComponent('bg-gray-100 text-gray-800'),
   a: SharedLink,
+  ...SharedList,
 };
 
 /**
@@ -237,6 +250,7 @@ function buildAgentMarkdownComponents(
   return {
     pre: SharedPre,
     code: makeCodeComponent('bg-gray-100 text-gray-800', options),
+    ...SharedList,
     a: ({ href, children }) => {
       if (isFilePathHref(href)) {
         const { path, line } = parseFilePathRef(href);

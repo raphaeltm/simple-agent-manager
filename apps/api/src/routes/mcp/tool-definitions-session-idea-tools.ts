@@ -116,8 +116,7 @@ export const SESSION_IDEA_TOOLS = [
       properties: {
         query: {
           type: 'string',
-          description:
-            'Search keyword to find in idea titles and descriptions. Over-limit input is truncated.',
+          description: 'Search keyword to find in idea titles and descriptions. Over-limit input is truncated.',
         },
         status: {
           type: 'string',
