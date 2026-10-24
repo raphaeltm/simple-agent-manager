@@ -11,20 +11,16 @@
  */
 import type { PullRequestRef, PullRequestState } from './pull-requests';
 
-/** Where an idea stands. Derived, except `done` and `parked`. */
+/**
+ * Where an idea stands. Derived, except `done` and `parked`.
+ *
+ * Adding a state is a compile error until it is named in `IDEA_STATE_LABELS`
+ * (`apps/web/src/pages/ideas/view-model.ts`), which is a `Record` over this union in a source
+ * file. It has to be a source file: every tsconfig in this repo excludes `tests`, so the same
+ * proof written in a test would never run (`tasks/backlog/2026-10-24-typecheck-test-files.md`).
+ */
 export type IdeaDerivedState =
   'not-started' | 'working' | 'review' | 'merged' | 'stuck' | 'question' | 'done' | 'parked';
-
-export const IDEA_DERIVED_STATES = [
-  'not-started',
-  'working',
-  'review',
-  'merged',
-  'stuck',
-  'question',
-  'done',
-  'parked',
-] as const satisfies readonly IdeaDerivedState[];
 
 /**
  * The states that need a person: an agent asked something, work stopped, or a pull request

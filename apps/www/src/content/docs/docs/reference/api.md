@@ -279,11 +279,11 @@ Stop a running agent session.
 
 Project members can read context for an idea, chat, or library file:
 
-| Method | Path | Response |
-| ------ | ---- | -------- |
-| GET | `/api/projects/:projectId/ideas/:ideaId/links` | `IdeaContext` |
-| GET | `/api/projects/:projectId/sessions/:sessionId/links` | `SessionContext` |
-| GET | `/api/projects/:projectId/library/:fileId/links` | `FileContext` |
+| Method | Path                                                 | Response         |
+| ------ | ---------------------------------------------------- | ---------------- |
+| GET    | `/api/projects/:projectId/ideas/:ideaId/links`       | `IdeaContext`    |
+| GET    | `/api/projects/:projectId/sessions/:sessionId/links` | `SessionContext` |
+| GET    | `/api/projects/:projectId/library/:fileId/links`     | `FileContext`    |
 
 Each context groups linked resources into capped lists with `items`, `total`, `truncated`, and `totalIsLowerBound`. The last field is true when a bounded PR read can only report a minimum count. Foreign and missing resources both return 404.
 
@@ -575,16 +575,31 @@ Create a task record.
 
 ## Ideas
 
-An idea is a `tasks` row nobody has handed to an agent yet. These endpoints return each idea's
-state **derived** from the work linked to it, never a stored label — see
+An idea is something you want done that nobody has handed to an agent yet. These endpoints
+return each idea's state **derived** from the work linked to it, never a stored label — see
 [Idea Execution](/docs/guides/idea-execution/#ideas).
 
-| Method | Endpoint                                           | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ------ | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/projects/:projectId/ideas`                   | Returns `{ items, truncated, totals }`. Each item carries `derived` (the state, its `source`, and the chat or pull request that decided it), `counts`, and a one-line `summary`. Open ideas and finished ones are capped separately, so a project that shipped a lot cannot push its open ideas off the page. Pull request state is not populated yet: the reader is a stub pending the shared pull-request-state operation, so pull requests are listed without their state. |
-| POST   | `/api/projects/:projectId/ideas`                   | Body `{ title, content? }`; files a new idea and returns it. Goes through the same operation the MCP `create_idea` tool uses.                                                                                                                                                                                                                                                                                                                                                 |
-| POST   | `/api/projects/:projectId/ideas/:ideaId/status`    | Body `{ status: 'completed' \| 'cancelled' \| 'draft' }` — "Mark done", "Park", "Reopen". One transition table is shared with `update_idea` and the generic task status route, so every surface allows the same moves.                                                                                                                                                                                                                                                        |
-| POST   | `/api/projects/:projectId/ideas/:ideaId/keep-open` | Records that a person answered the idea's "a pull request merged, is this done?" question with **Keep open**. Changes no status; the question simply stops being asked for that merge.                                                                                                                                                                                                                                                                                        |
+An idea is its own kind of row, marked as one when it is created. `POST /api/projects/:projectId/tasks`
+creates an ordinary task, not an idea, even though that task starts out as a draft: a task you
+have not dispatched yet does not appear in Ideas and cannot be marked done through these
+endpoints. Ideas created before this distinction existed were all marked as ideas, so nothing
+that was in your list has left it.
+
+| Method | Endpoint                                           | Contract                                                                                                                                                                                                                                                                                                      |
+| ------ | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/projects/:projectId/ideas`                   | Returns `{ items, truncated, totals }`. Each item carries `derived` (the state, its `source`, and the chat or pull request that decided it), `counts`, and a one-line `summary`. Open ideas and finished ones are capped separately, so a project that shipped a lot cannot push its open ideas off the page. |
+| GET    | `/api/projects/:projectId/ideas/:ideaId`           | One idea: the current plan in full, its derived state, every chat linked to it and every pull request its work produced.                                                                                                                                                                                      |
+| POST   | `/api/projects/:projectId/ideas`                   | Body `{ title, content? }`; files a new idea and returns it. Goes through the same operation the MCP `create_idea` tool uses.                                                                                                                                                                                 |
+| POST   | `/api/projects/:projectId/ideas/:ideaId/status`    | Body `{ status: 'completed' \| 'cancelled' \| 'draft' }` — "Mark done", "Park", "Reopen". One transition table is shared with `update_idea` and the generic task status route, so every surface allows the same moves.                                                                                        |
+| POST   | `/api/projects/:projectId/ideas/:ideaId/keep-open` | Records that a person answered the idea's "a pull request merged, is this done?" question with **Keep open**. Changes no status; the question simply stops being asked for that merge.                                                                                                                        |
+
+Pull request state comes from what SAM has already stored for the project's pull requests. The
+list never asks GitHub, because one page view would be one call per pull request in the project;
+the single-idea read may ask for one bounded background refresh.
+
+Counts can be minimums. Reading an idea's links is bounded per idea, so a very busy idea reports
+`counts.atLeast` naming the counts it could only establish a floor for, and the UI writes those
+as "50+" rather than a number it did not finish counting.
 
 Reads require project membership; writes require the `task:write` capability. Every lookup is
 scoped to the project in the query itself, so an idea from another project is reported as not

@@ -5,7 +5,7 @@
  * "Work stopped" with a "Try again…" button. These assertions are the contract for every
  * Needs-you action and for the idea page's one primary action.
  */
-import type { IdeaDerivedStatus, IdeaListItem } from '@simple-agent-manager/shared';
+import type { IdeaCounts, IdeaDerivedStatus, IdeaListItem } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -173,15 +173,47 @@ describe('ideaRowLine', () => {
 });
 
 describe('ideaCountsLine', () => {
+  const counts = (overrides: Partial<IdeaCounts> = {}): IdeaCounts => ({
+    updates: 0,
+    chats: 0,
+    files: 0,
+    pullRequests: 0,
+    atLeast: [],
+    ...overrides,
+  });
+
   it('omits whatever is zero and gets the plurals right', () => {
-    expect(ideaCountsLine({ updates: 4, chats: 2, files: 1, pullRequests: 0 })).toBe(
+    expect(ideaCountsLine(counts({ updates: 4, chats: 2, files: 1 }))).toBe(
       '4 updates · 2 chats · 1 file'
     );
-    expect(ideaCountsLine({ updates: 1, chats: 0, files: 0, pullRequests: 0 })).toBe('1 update');
+    expect(ideaCountsLine(counts({ updates: 1 }))).toBe('1 update');
+    expect(ideaCountsLine(counts({ pullRequests: 1 }))).toBe('1 PR');
+    expect(ideaCountsLine(counts({ pullRequests: 2 }))).toBe('2 PRs');
   });
 
   it('says nothing at all when an idea has collected nothing', () => {
-    expect(ideaCountsLine({ updates: 0, chats: 0, files: 0, pullRequests: 0 })).toBeNull();
+    expect(ideaCountsLine(counts())).toBeNull();
+  });
+
+  // The server can only establish a minimum when a bounded link read hits its per-idea cap.
+  // Writing that as "50 files" would be a number nobody counted (rule 65).
+  it('writes a capped count as a minimum, and leaves the exact ones alone', () => {
+    expect(
+      ideaCountsLine(
+        counts({
+          updates: 137,
+          chats: 50,
+          files: 50,
+          pullRequests: 50,
+          atLeast: ['chats', 'files', 'pullRequests'],
+        })
+      )
+    ).toBe('137 updates · 50+ chats · 50+ files · 50+ PRs');
+  });
+
+  // A minimum of one is still "1+", never "1": the plural rule must not hide the disclosure.
+  it('keeps the plural when the count is a minimum of one', () => {
+    expect(ideaCountsLine(counts({ files: 1, atLeast: ['files'] }))).toBe('1+ files');
   });
 });
 
