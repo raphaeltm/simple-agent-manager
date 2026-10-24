@@ -11,7 +11,7 @@
 import type {
   IdeaDerivedStatus,
   IdeaListItem,
-  IdeaPullRequestSummary,
+  IdeaPullRequest,
   IdeaStatusSession,
 } from '@simple-agent-manager/shared';
 import { ideaNeedsYou } from '@simple-agent-manager/shared';
@@ -92,7 +92,7 @@ function chatName(session: IdeaStatusSession | null): string {
   return topic && topic.length > 0 ? topic : 'the chat';
 }
 
-function prName(pullRequest: IdeaPullRequestSummary): string {
+function prName(pullRequest: IdeaPullRequest): string {
   return `PR #${pullRequest.number}`;
 }
 
@@ -163,7 +163,7 @@ export function ideaRowLine(item: IdeaListItem): string {
   }
 }
 
-function checksPhrase(pullRequest: IdeaPullRequestSummary): string {
+function checksPhrase(pullRequest: IdeaPullRequest): string {
   switch (pullRequest.checksState) {
     case 'success':
       return ', checks passed';
@@ -176,18 +176,26 @@ function checksPhrase(pullRequest: IdeaPullRequestSummary): string {
   }
 }
 
-/** "4 updates · 2 chats · 1 file", omitting whatever is zero. */
+/**
+ * "4 updates · 2 chats · 1 file", omitting whatever is zero.
+ *
+ * A count the server could only establish a minimum for reads as "50+ files" rather than
+ * "50 files" — the list reads links in one bounded batch, and a busy idea can reach its cap.
+ */
 export function ideaCountsLine(counts: IdeaListItem['counts']): string | null {
+  const atLeast = new Set(counts.atLeast);
   const parts: string[] = [];
-  if (counts.updates > 0) parts.push(plural(counts.updates, 'update'));
-  if (counts.chats > 0) parts.push(plural(counts.chats, 'chat'));
-  if (counts.files > 0) parts.push(plural(counts.files, 'file'));
-  if (counts.pullRequests > 0) parts.push(plural(counts.pullRequests, 'pull request'));
+  if (counts.updates > 0) parts.push(plural(counts.updates, 'update', atLeast.has('updates')));
+  if (counts.chats > 0) parts.push(plural(counts.chats, 'chat', atLeast.has('chats')));
+  if (counts.files > 0) parts.push(plural(counts.files, 'file', atLeast.has('files')));
+  if (counts.pullRequests > 0) {
+    parts.push(plural(counts.pullRequests, 'pull request', atLeast.has('pullRequests')));
+  }
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+function plural(count: number, noun: string, atLeast = false): string {
+  return `${count}${atLeast ? '+' : ''} ${noun}${count === 1 && !atLeast ? '' : 's'}`;
 }
 
 /**

@@ -114,6 +114,29 @@ export function listIdeaUpdates(
   };
 }
 
+/**
+ * How many notes each of `ideaIds` has, excluding soft-deleted ones.
+ *
+ * One grouped count for the whole Ideas list, so the page's query count does not grow with
+ * the number of ideas on it (rule 60). Ideas with no notes are absent from the result; the
+ * caller reads a missing entry as zero.
+ */
+export function countIdeaUpdates(sql: SqlStorage, ideaIds: string[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  if (!ideaIds.length) return counts;
+  for (const row of sql
+    .exec(
+      `SELECT idea_id AS ideaId, COUNT(*) AS total FROM idea_updates
+       WHERE idea_id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL
+       GROUP BY idea_id`,
+      JSON.stringify(ideaIds)
+    )
+    .toArray()) {
+    counts[String(row.ideaId)] = Number(row.total);
+  }
+  return counts;
+}
+
 export function deleteIdeaUpdate(
   sql: SqlStorage,
   ideaId: string,

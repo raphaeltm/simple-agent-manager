@@ -9,7 +9,7 @@
 -- That includes ordinary undispatched tasks, which are also created in `draft`. Marking them is
 -- deliberate: they are what the Ideas page lists today, so leaving them out would make items
 -- disappear from a page someone is already looking at. Going forward only the flag counts, so
--- no NEW ordinary task joins them — see `ideaTaskPredicateSql` in `operations/idea-core.ts`.
+-- no NEW ordinary task joins them — see `ideaTaskPredicateSql` in `operations/idea-identity.ts`.
 ALTER TABLE tasks ADD COLUMN is_idea INTEGER NOT NULL DEFAULT 0;
 
 UPDATE tasks SET is_idea = 1 WHERE status = 'draft';

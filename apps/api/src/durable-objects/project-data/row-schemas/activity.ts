@@ -137,55 +137,49 @@ export function parseActivityEventRow(row: unknown): Record<string, unknown> {
 // Idea work snapshots (batched Ideas-list read)
 // =============================================================================
 
-/** One chat linked to an idea, joined with the chat's own row. */
+/**
+ * A chat row behind a link to an idea. The link itself comes from the link store, so this
+ * only carries what the chat says about itself.
+ */
 const IdeaWorkSessionSchema = v.object({
-  idea_id: v.string(),
   session_id: v.string(),
   topic: v.nullable(v.string()),
   status: v.string(),
   session_task_id: v.nullable(v.string()),
   updated_at: v.nullable(v.number()),
-  linked_at: v.number(),
 });
 
 export function parseIdeaWorkSessionRow(row: unknown): {
-  ideaId: string;
   sessionId: string;
   topic: string | null;
   sessionStatus: string;
   sessionTaskId: string | null;
   lastActivityAt: number | null;
-  linkedAt: number;
 } {
   const r = parseRow(IdeaWorkSessionSchema, row, 'idea_work_session');
   return {
-    ideaId: r.idea_id,
     sessionId: r.session_id,
     topic: r.topic,
     sessionStatus: r.status,
     sessionTaskId: r.session_task_id,
     lastActivityAt: r.updated_at,
-    linkedAt: r.linked_at,
   };
 }
 
 /** An unanswered question on a chat linked to an idea. */
 const IdeaNeedsInputSchema = v.object({
-  idea_id: v.string(),
   session_id: v.string(),
   reason: v.nullable(v.string()),
   created_at: v.number(),
 });
 
 export function parseIdeaNeedsInputRow(row: unknown): {
-  ideaId: string;
   sessionId: string;
   question: string | null;
   askedAt: number;
 } {
   const r = parseRow(IdeaNeedsInputSchema, row, 'idea_needs_input');
   return {
-    ideaId: r.idea_id,
     sessionId: r.session_id,
     question: r.reason,
     askedAt: r.created_at,
