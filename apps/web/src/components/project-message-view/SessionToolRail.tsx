@@ -88,10 +88,13 @@ function ToolBadge({
   count,
   compact,
   needsAttention,
+  isLowerBound,
 }: Readonly<{
   count: number;
   compact: boolean;
   needsAttention: boolean;
+  /** Renders "N+" — the server could only establish a minimum count. */
+  isLowerBound: boolean;
 }>) {
   const accent = needsAttention ? 'var(--sam-color-warning)' : 'var(--sam-color-fg-muted)';
 
@@ -119,6 +122,7 @@ function ToolBadge({
       }}
     >
       {count}
+      {isLowerBound ? '+' : ''}
     </span>
   );
 }
@@ -177,6 +181,7 @@ function RailAction({
           count={action.badge}
           compact={compact}
           needsAttention={action.badgeNeedsAttention ?? false}
+          isLowerBound={action.badgeIsLowerBound ?? false}
         />
       )}
     </button>

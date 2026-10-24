@@ -18,7 +18,7 @@ import {
   Timer,
   User2,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ChatSessionResponse } from '../../lib/api';
 import { getPortAccessUrl, getProjectTask, listChatMessages } from '../../lib/api';
@@ -39,12 +39,17 @@ import {
   getCreatorLabel,
 } from './SessionHeaderFormatters';
 import { SessionHeaderInfrastructure } from './SessionHeaderInfrastructure';
+import { SessionHeaderPullRequestRow } from './SessionHeaderPullRequestRow';
 import { SessionSourceContextRow } from './SessionSourceContextRow';
 import { SessionTriggerOrigin } from './SessionTriggerOrigin';
+import { SessionWorkingOnChip } from './SessionWorkingOnChip';
 import type { SessionState } from './types';
-import { formatCountdown } from './types';
 import { usePublicPortsToggle } from './usePublicPortsToggle';
+import { resolvePrimaryPullRequest, type SessionLinkedWork } from './useSessionLinkedWork';
 import { WorkloadIdentityDetails } from './WorkloadIdentityDetails';
+
+/** Hoisted so the fallback resolve below keeps a stable argument identity. */
+const EMPTY_PULL_REQUESTS: never[] = [];
 
 const SESSION_STATE_LABELS: Partial<Record<SessionState, string>> = {
   active: 'Active',
@@ -86,6 +91,7 @@ export function SessionHeader({
   flushRight = false,
   completeError = null,
   onDismissCompleteError,
+  linkedWork,
 }: {
   projectId: string;
   session: ChatSessionResponse;
@@ -129,6 +135,12 @@ export function SessionHeader({
   /** Surfaced by the owner's mark-complete flow, which lives with the rail. */
   completeError?: string | null;
   onDismissCompleteError?: () => void;
+  /**
+   * What this chat is related to, owned by `useSessionLinkedWork` in the view above. Supplies
+   * the "Working on" chip and the pull request's state. Absent while the first load is in
+   * flight, and on any surface that does not fetch it.
+   */
+  linkedWork?: SessionLinkedWork | null;
 }) {
   const [initialPrompt, setInitialPrompt] = useState<string | null>(initialPromptFallback);
   const [initialPromptLoading, setInitialPromptLoading] = useState(false);
@@ -182,6 +194,21 @@ export function SessionHeader({
         setInitialPromptLoading(false);
       });
   }, [expanded, initialPrompt, projectId, session.id]);
+
+  /**
+   * The PR the header links to.
+   *
+   * Falls back to resolving from the task's own output URL so the link is present on first
+   * paint and on any surface that does not fetch linked work — it just has no state badge
+   * until the linked-work read lands. One resolver, so the two paths cannot disagree about
+   * which PR is primary (rule 24).
+   */
+  const primaryPullRequest = useMemo(
+    () =>
+      linkedWork?.primaryPullRequest ??
+      resolvePrimaryPullRequest(taskEmbed?.outputPrUrl, EMPTY_PULL_REQUESTS),
+    [linkedWork?.primaryPullRequest, taskEmbed?.outputPrUrl]
+  );
 
   const getWorkspacePortHref = useCallback(
     (port: DetectedPort) => {
@@ -320,6 +347,10 @@ export function SessionHeader({
               needsAttentionCommentCount={needsAttentionCommentCount}
               onOpenComments={onOpenComments}
             />
+          )}
+
+          {linkedWork?.workingOn && (
+            <SessionWorkingOnChip projectId={projectId} workingOn={linkedWork.workingOn} />
           )}
 
           {lineageText && (
@@ -510,38 +541,12 @@ export function SessionHeader({
             </div>
           )}
 
-          {/* PR link & idle countdown — separate row above buttons */}
-          {(taskEmbed?.outputPrUrl || (sessionState === 'idle' && idleCountdownMs !== null)) && (
-            <div className="flex items-center gap-3">
-              {/* Idle countdown (TDF-8) */}
-              {sessionState === 'idle' && idleCountdownMs !== null && (
-                <span
-                  className="sam-type-caption font-mono"
-                  style={{
-                    color:
-                      idleCountdownMs < 5 * 60 * 1000
-                        ? 'var(--sam-color-danger)'
-                        : 'var(--sam-color-warning, #f59e0b)',
-                  }}
-                >
-                  Cleanup in {formatCountdown(idleCountdownMs)}
-                </span>
-              )}
-
-              {/* PR link (T021) */}
-              {taskEmbed?.outputPrUrl && (
-                <a
-                  href={taskEmbed.outputPrUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="sam-type-caption font-medium no-underline"
-                  style={{ color: 'var(--sam-color-accent-primary)' }}
-                >
-                  View PR
-                </a>
-              )}
-            </div>
-          )}
+          {/* PR link (with its state) & idle countdown — separate row above buttons */}
+          <SessionHeaderPullRequestRow
+            sessionState={sessionState}
+            idleCountdownMs={idleCountdownMs}
+            pullRequest={primaryPullRequest}
+          />
 
           {/* Trigger info — shown when task was spawned by an automation trigger */}
           {triggerDetail?.trigger && (

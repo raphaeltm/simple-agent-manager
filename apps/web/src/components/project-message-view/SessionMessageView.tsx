@@ -33,6 +33,7 @@ import { useAnimatedUserMessages } from './useAnimatedUserMessages';
 import { useConversationJump } from './useConversationJump';
 import { useFilePanelAccessGate } from './useFilePanelAccessGate';
 import { useSessionLifecycle } from './useSessionLifecycle';
+import { useSessionLinkedWork } from './useSessionLinkedWork';
 import { useSessionTimeline } from './useSessionTimeline';
 import { useSessionTools } from './useSessionTools';
 import { useToolCallGroupRowState } from './useToolCallGroupRowState';
@@ -69,6 +70,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   const [showTimeline, setShowTimeline] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [showAutomation, setShowAutomation] = useState(false);
+  const [showRelated, setShowRelated] = useState(false);
   const [showResources, setShowResources] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const openComments = useCallback(() => setShowComments(true), []);
@@ -80,6 +82,8 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   const openResources = useCallback(() => setShowResources(true), []);
   const openAutomation = useCallback(() => setShowAutomation(true), []);
   const closeAutomation = useCallback(() => setShowAutomation(false), []);
+  const openRelated = useCallback(() => setShowRelated(true), []);
+  const closeRelated = useCallback(() => setShowRelated(false), []);
   const openShare = useCallback(() => setShowShare(true), []);
   const closeShare = useCallback(() => setShowShare(false), []);
 
@@ -226,6 +230,18 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   const showDockedCommentRail = showComments && commentUi.usesDesktopRail;
   const showMobileCommentsDrawer = showComments && !commentUi.usesDesktopRail;
 
+  /*
+   * One read of the chat's linked work, shared by the header chip, the rail's Related badge
+   * and the Related drawer. Called here rather than in each of them so there is a single
+   * derivation and a single memoised identity (rule 64), and so opening the drawer costs no
+   * request.
+   */
+  const linkedWork = useSessionLinkedWork({
+    projectId,
+    sessionId,
+    outputPrUrl: lc.taskEmbed?.outputPrUrl ?? null,
+  });
+
   const isMobile = useIsMobile();
   const sessionTools = useSessionTools({
     projectId,
@@ -234,12 +250,15 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     taskEmbed: lc.taskEmbed,
     unresolvedCommentCount,
     needsAttentionCommentCount: commentCounts.needs_you,
+    relatedCount: linkedWork.totalCount,
+    relatedCountIsLowerBound: linkedWork.totalIsLowerBound,
     onSessionMutated,
     onOpenFiles: lc.handleOpenFileBrowser,
     onOpenGit: lc.handleOpenGitChanges,
     onOpenTimeline: openTimeline,
     onOpenResources: openResources,
     onOpenAutomation: openAutomation,
+    onOpenRelated: openRelated,
     onOpenComments: openComments,
     onRetry,
     onFork,
@@ -378,6 +397,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
       flushRight={sessionTools.mode !== 'hidden'}
       completeError={sessionTools.completeError}
       onDismissCompleteError={sessionTools.dismissCompleteError}
+      linkedWork={linkedWork}
     />
   );
 
@@ -468,6 +488,9 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
         sessionTools={sessionTools}
         showAutomation={showAutomation}
         onCloseAutomation={closeAutomation}
+        showRelated={showRelated}
+        onCloseRelated={closeRelated}
+        linkedWork={linkedWork}
         showShare={showShare}
         onCloseShare={closeShare}
         onAccessChanged={lc.applySessionAccess}

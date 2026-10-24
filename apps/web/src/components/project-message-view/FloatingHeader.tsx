@@ -5,6 +5,7 @@ import { TruncatedSummary } from '../chat/TruncatedSummary';
 import { FailureCard } from '../debug/FailureCard';
 import { SessionHeader } from './SessionHeader';
 import type { useSessionLifecycle } from './useSessionLifecycle';
+import type { SessionLinkedWork } from './useSessionLinkedWork';
 
 interface FloatingHeaderProps {
   projectId: string;
@@ -23,6 +24,8 @@ interface FloatingHeaderProps {
   flushRight?: boolean;
   completeError?: string | null;
   onDismissCompleteError?: () => void;
+  /** What this chat is related to — the header's "Working on" chip and the PR's state. */
+  linkedWork?: SessionLinkedWork | null;
 }
 
 /** Floating session header with optional error banner and summary. */
@@ -41,6 +44,7 @@ export function FloatingHeader({
   flushRight,
   completeError,
   onDismissCompleteError,
+  linkedWork,
 }: FloatingHeaderProps) {
   if (!lc.session) return null;
 
@@ -94,6 +98,7 @@ export function FloatingHeader({
         flushRight={flushRight}
         completeError={completeError}
         onDismissCompleteError={onDismissCompleteError}
+        linkedWork={linkedWork}
       />
       {lc.taskEmbed?.errorMessage && (
         <div

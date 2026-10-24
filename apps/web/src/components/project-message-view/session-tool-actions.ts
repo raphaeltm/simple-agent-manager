@@ -17,6 +17,7 @@ import {
   GitCompare,
   GitFork,
   Info,
+  Link2,
   MessageSquareQuote,
   RotateCcw,
   Users,
@@ -64,6 +65,7 @@ export type SessionToolId =
   | 'timeline'
   | 'resources'
   | 'automation'
+  | 'related'
   | 'comments'
   | 'share'
   | 'retry'
@@ -85,6 +87,11 @@ export interface SessionToolAction {
   tone?: 'default' | 'success';
   /** Unresolved comment count — a dot in icon mode, a number in label mode. */
   badge?: number;
+  /**
+   * Renders the badge as "N+". Set when the server could only establish a minimum count
+   * (`CappedList.totalIsLowerBound`), so a bare number would assert what it declined to claim.
+   */
+  badgeIsLowerBound?: boolean;
   /**
    * Amber-tints the badge, matching the header chip's "N needs you" treatment. Without
    * it the two surfaces disagreed about urgency for the same session.
@@ -108,12 +115,17 @@ export interface BuildSessionToolActionsInput {
   unresolvedCommentCount: number;
   /** Subset of the above whose last activity came from someone else. */
   needsAttentionCommentCount?: number;
+  /** Ideas, files and pull requests this chat is related to — the Related badge. */
+  relatedCount?: number;
+  /** True when `relatedCount` is a minimum, so the badge reads "N+". */
+  relatedCountIsLowerBound?: boolean;
   /** Handler availability mirrors the old per-button `{onOpenX && ...}` guards. */
   hasFilesHandler: boolean;
   hasGitHandler: boolean;
   hasTimelineHandler: boolean;
   hasResourcesHandler: boolean;
   hasAutomationHandler: boolean;
+  hasRelatedHandler: boolean;
   hasCommentsHandler: boolean;
   hasRetryHandler: boolean;
   hasForkHandler: boolean;
@@ -152,6 +164,19 @@ function withGroup(group: SessionToolGroup, specs: SessionToolSpec[]): SessionTo
   return specs.map((spec) => ({ ...spec, group }));
 }
 
+/**
+ * Related tool hint.
+ *
+ * Names the three things it lists, because in icon-only mode a chain-link glyph is the whole
+ * affordance and "Related" alone does not say related to what.
+ */
+function buildRelatedHint(count: number, isLowerBound: boolean): string {
+  const base = 'See the ideas, files and pull requests related to this chat';
+  if (count <= 0) return base;
+  const noun = count === 1 && !isLowerBound ? 'item' : 'items';
+  return `${base} — ${count}${isLowerBound ? ' or more' : ''} ${noun}`;
+}
+
 /** Comment tool hint — attention outranks a plain unresolved count. */
 function buildCommentsHint(needsAttentionCount: number, unresolvedCount: number): string {
   if (needsAttentionCount > 0) {
@@ -175,8 +200,11 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSp
     hasTimelineHandler,
     hasResourcesHandler,
     hasAutomationHandler,
+    hasRelatedHandler,
     hasCommentsHandler,
     canBrowseWorkspace = true,
+    relatedCount = 0,
+    relatedCountIsLowerBound = false,
   } = input;
 
   const actions: SessionToolSpec[] = [];
@@ -207,6 +235,26 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSp
       label: 'Timeline',
       hint: 'Jump through session history',
       icon: Clock,
+    });
+  }
+
+  /*
+   * Related sits beside Timeline on purpose: Timeline answers "what happened in this chat"
+   * and Related answers "what this chat is connected to". Both are always present and both
+   * are reading surfaces, so they belong together and above the operational tools.
+   *
+   * It is offered even with nothing linked — the panel's empty state is how someone learns the
+   * feature exists, and hiding the tool until a link happens would make it undiscoverable on
+   * exactly the chats where a user might want to create one.
+   */
+  if (hasRelatedHandler) {
+    actions.push({
+      id: 'related',
+      label: 'Related',
+      hint: buildRelatedHint(relatedCount, relatedCountIsLowerBound),
+      icon: Link2,
+      badge: relatedCount > 0 ? relatedCount : undefined,
+      badgeIsLowerBound: relatedCountIsLowerBound,
     });
   }
 

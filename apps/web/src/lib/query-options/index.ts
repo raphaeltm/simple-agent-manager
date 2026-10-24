@@ -118,6 +118,11 @@ export {
   workspaceQueryKeys,
 } from './infrastructure';
 export { type LibraryIndexQueryData, libraryIndexQueryOptions, libraryQueryKeys } from './library';
+export {
+  libraryFileLinksQueryOptions,
+  linkedWorkQueryKeys,
+  sessionLinksQueryOptions,
+} from './links';
 export { mcpConnectionQueryKeys, mcpConnectionsQueryOptions } from './mcp-connections';
 export {
   notificationPreferencesQueryOptions,

@@ -52,12 +52,17 @@ export interface UseSessionToolsInput {
   taskEmbed: ChatSessionResponse['task'] | null;
   unresolvedCommentCount: number;
   needsAttentionCommentCount: number;
+  /** Ideas, files and pull requests linked to this chat — drives the Related badge. */
+  relatedCount?: number;
+  /** True when `relatedCount` is a minimum, so the badge reads "N+". */
+  relatedCountIsLowerBound?: boolean;
   onSessionMutated?: () => void;
   onOpenFiles?: () => void;
   onOpenGit?: () => void;
   onOpenTimeline?: () => void;
   onOpenResources?: () => void;
   onOpenAutomation?: () => void;
+  onOpenRelated?: () => void;
   onOpenComments?: () => void;
   onRetry?: () => void;
   onFork?: () => void;
@@ -95,12 +100,15 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     taskEmbed,
     unresolvedCommentCount,
     needsAttentionCommentCount,
+    relatedCount = 0,
+    relatedCountIsLowerBound = false,
     onSessionMutated,
     onOpenFiles,
     onOpenGit,
     onOpenTimeline,
     onOpenResources,
     onOpenAutomation,
+    onOpenRelated,
     onOpenComments,
     onRetry,
     onFork,
@@ -172,11 +180,14 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       reportEnabled,
       unresolvedCommentCount,
       needsAttentionCommentCount,
+      relatedCount,
+      relatedCountIsLowerBound,
       hasFilesHandler: !!onOpenFiles,
       hasGitHandler: !!onOpenGit,
       hasTimelineHandler: !!onOpenTimeline,
       hasResourcesHandler: !!onOpenResources,
       hasAutomationHandler: !!onOpenAutomation,
+      hasRelatedHandler: !!onOpenRelated,
       hasCommentsHandler: !!onOpenComments,
       hasRetryHandler: !!onRetry,
       hasForkHandler: !!onFork,
@@ -194,11 +205,14 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     reportEnabled,
     unresolvedCommentCount,
     needsAttentionCommentCount,
+    relatedCount,
+    relatedCountIsLowerBound,
     onOpenFiles,
     onOpenGit,
     onOpenTimeline,
     onOpenResources,
     onOpenAutomation,
+    onOpenRelated,
     onOpenComments,
     onRetry,
     onFork,
@@ -227,6 +241,9 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
           break;
         case 'automation':
           onOpenAutomation?.();
+          break;
+        case 'related':
+          onOpenRelated?.();
           break;
         case 'comments':
           onOpenComments?.();
@@ -262,6 +279,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       onOpenTimeline,
       onOpenResources,
       onOpenAutomation,
+      onOpenRelated,
       onOpenComments,
       onOpenShare,
       onRetry,
