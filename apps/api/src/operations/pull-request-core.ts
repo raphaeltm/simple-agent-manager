@@ -308,15 +308,23 @@ export async function getPullRequestStates(
   ctx: Pick<OperationContext, 'env' | 'execCtx'>,
   projectId: string,
   refs: readonly Pick<PullRequestRef, 'url'>[],
-  options: { refresh?: 'single' } = {}
+  options: { refresh?: 'single'; repository?: string } = {}
 ): Promise<PullRequestStates> {
   const env = ctx.env;
   const result: PullRequestStates = {};
   if (refs.length === 0) return result;
-  const project = await env.DATABASE.prepare('SELECT repository FROM projects WHERE id = ?')
-    .bind(projectId)
-    .first<{ repository: string }>();
-  if (!project) return result;
+  // A caller that already holds the project's repository passes it, rather than paying for
+  // the same one-row read twice in one request (rule 60). The Ideas list is that caller: it
+  // reads the repository to canonicalize each idea's refs before it gets here.
+  const repository =
+    options.repository ??
+    (
+      await env.DATABASE.prepare('SELECT repository FROM projects WHERE id = ?')
+        .bind(projectId)
+        .first<{ repository: string }>()
+    )?.repository;
+  if (repository === undefined) return result;
+  const project = { repository };
   const ttlSeconds = Number(
     await resolveAdminSetting(env, 'operations.pullRequestRefreshTtlSeconds')
   );

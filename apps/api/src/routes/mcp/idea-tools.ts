@@ -4,6 +4,7 @@
  * list_ideas, search_ideas).
  */
 import type { Env } from '../../env';
+import { ideaTaskPredicateSql } from '../../operations/idea-identity';
 import { listLinks, recordLink, removeLink } from '../../operations/link-core';
 import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import {
@@ -46,7 +47,7 @@ export async function handleLinkIdea(
 
   // Verify the task exists in this project
   const task = await env.DATABASE.prepare(
-    'SELECT id, title FROM tasks WHERE id = ? AND project_id = ?'
+    `SELECT id, title FROM tasks WHERE id = ? AND project_id = ? AND ${ideaTaskPredicateSql()}`
   )
     .bind(taskId, tokenData.projectId)
     .first<{ id: string; title: string }>();
@@ -159,7 +160,11 @@ export async function handleListLinkedIdeas(
     // Batch-fetch task details in a single D1 query
     const placeholders = links.map(() => '?').join(', ');
     const rows = await env.DATABASE.prepare(
-      `SELECT id, title, status FROM tasks WHERE project_id = ? AND id IN (${placeholders})`
+      // Through the shared predicate: a link to a row that is not an idea can only be a
+      // legacy one, and showing it to an agent as a linked IDEA would be a claim this
+      // module is not entitled to make (`operations/idea-identity.ts`).
+      `SELECT id, title, status FROM tasks
+        WHERE project_id = ? AND ${ideaTaskPredicateSql()} AND id IN (${placeholders})`
     )
       .bind(tokenData.projectId, ...links.map((l) => l.targetId))
       .all<{ id: string; title: string; status: string }>();

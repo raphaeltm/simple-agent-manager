@@ -72,7 +72,7 @@ function item(overrides: Partial<IdeaListItem> = {}): IdeaListItem {
     createdAt: '2026-10-14T00:00:00.000Z',
     updatedAt: '2026-10-20T00:00:00.000Z',
     derived: derived(),
-    counts: { updates: 0, chats: 0, files: 0, pullRequests: 0 },
+    counts: { updates: 0, chats: 0, files: 0, pullRequests: 0, atLeast: [] },
     filedByAgent: false,
     filedBy: null,
     viaConnector: null,
@@ -489,6 +489,54 @@ describe('ideaSecondaryAction', () => {
     expect(
       ideaSecondaryAction({ ideaId: 'idea-1', derived: derived({ state: 'working' }) })
     ).toBeNull();
+  });
+});
+
+describe('Needs you is ranked by urgency, not recency', () => {
+  // The cap is three cards and then a fold, so the slice order decides what a person sees.
+  // The server orders by `updated_at`, which says nothing about urgency: without a ranking
+  // the newest card wins, and a chat blocked on an answer disappears behind the fold
+  // because someone merged a pull request five minutes ago (rule 65).
+  const needsYouItem = (id: string, state: 'question' | 'stuck' | 'merged') =>
+    item({ ideaId: id, derived: derived({ state, needsYou: state }) });
+
+  it('puts an unanswered question first, then stopped work, then a merged pull request', () => {
+    // Deliberately given in the reverse of the wanted order, so a function that returns the
+    // input untouched cannot pass.
+    const groups = groupIdeas([
+      needsYouItem('merged-1', 'merged'),
+      needsYouItem('stuck-1', 'stuck'),
+      needsYouItem('question-1', 'question'),
+    ]);
+    expect(groups.needsYou.map((entry) => entry.ideaId)).toEqual([
+      'question-1',
+      'stuck-1',
+      'merged-1',
+    ]);
+  });
+
+  it('folds the merged card, not the question, when more than three need you', () => {
+    // The case the page actually hits: four cards, three slots. The one that folds must be
+    // the decision that can wait, never the agent that is blocked.
+    const groups = groupIdeas([
+      needsYouItem('merged-1', 'merged'),
+      needsYouItem('merged-2', 'merged'),
+      needsYouItem('stuck-1', 'stuck'),
+      needsYouItem('question-1', 'question'),
+    ]);
+    expect(groups.needsYou.slice(0, 3).map((entry) => entry.ideaId)).toEqual([
+      'question-1',
+      'stuck-1',
+      'merged-1',
+    ]);
+  });
+
+  it('keeps the server’s recency order within one urgency', () => {
+    const groups = groupIdeas([
+      needsYouItem('stuck-newest', 'stuck'),
+      needsYouItem('stuck-older', 'stuck'),
+    ]);
+    expect(groups.needsYou.map((entry) => entry.ideaId)).toEqual(['stuck-newest', 'stuck-older']);
   });
 });
 

@@ -25,12 +25,17 @@ const request = (path: string, init?: RequestInit) =>
 
 describe('resource links through the composed Worker router', () => {
   it('links and unlinks an idea and session, and routes all three contexts', async () => {
-    const ideaResponse = await request('/tasks', {
+    // Through the idea route, not `POST /tasks`. That route creates an ORDINARY task — it is
+    // also a `draft`, which is exactly why an idea is now the flag rather than the status —
+    // and linking to one is refused. The attack case below is the same request, kept.
+    const ideaResponse = await request('/ideas', {
       method: 'POST',
       body: JSON.stringify({ title: 'Linked work integration idea' }),
     });
-    expect(ideaResponse.status).toBe(201);
-    const idea = await ideaResponse.json<{ id: string }>();
+    expect(ideaResponse.status, await ideaResponse.clone().text()).toBe(201);
+    const idea = await ideaResponse.json<{ ideaId: string }>().then((body) => ({
+      id: body.ideaId,
+    }));
     const sessionResponse = await request('/sessions', {
       method: 'POST',
       body: JSON.stringify({ topic: 'Linked work integration chat' }),
@@ -74,6 +79,22 @@ describe('resource links through the composed Worker router', () => {
       method: 'DELETE',
     });
     expect(unlinked.status).toBe(200);
+    // The ordinary task the old definition would have accepted: created through `POST /tasks`,
+    // also a `draft`, and refused everywhere an idea is expected. Through the composed router,
+    // which is where a middleware or mounting mistake would show up.
+    const ordinary = await request('/tasks', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'An undispatched ordinary task' }),
+    });
+    expect(ordinary.status).toBe(201);
+    const ordinaryTask = await ordinary.json<{ id: string }>();
+    const refusedLink = await request(`/sessions/${session.sessionId}/ideas`, {
+      method: 'POST',
+      body: JSON.stringify({ taskId: ordinaryTask.id }),
+    });
+    expect(refusedLink.status).toBe(404);
+    expect((await request(`/ideas/${ordinaryTask.id}/links`)).status).toBe(404);
+
     const after = await request(`/ideas/${idea.id}/links`);
     expect((await after.json<{ sessions: { items: unknown[] } }>()).sessions.items).toEqual([]);
   });

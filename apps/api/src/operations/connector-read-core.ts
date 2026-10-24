@@ -9,6 +9,7 @@ import { getTrustedApiOrigin } from '../lib/trusted-origins';
 import { connectorPendingInteractions } from '../services/connector-agent-answer';
 import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
+import { ideaTaskPredicateSql } from './idea-identity';
 import { getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 
@@ -159,7 +160,9 @@ export async function projectGet(
       repository: schema.projects.repository,
       defaultBranch: schema.projects.defaultBranch,
       status: schema.projects.status,
-      ideaCount: sql<number>`(select count(*) from tasks t where t.project_id = ${schema.projects.id} and t.status = 'draft')`,
+      // Through the one shared predicate: before the flag existed this counted every `draft`
+      // row, which includes every undispatched ordinary task (`operations/idea-identity.ts`).
+      ideaCount: sql<number>`(select count(*) from tasks t where t.project_id = ${schema.projects.id} and ${sql.raw(ideaTaskPredicateSql('t'))})`,
       triggerCount: sql<number>`(select count(*) from triggers t where t.project_id = ${schema.projects.id})`,
     })
     .from(schema.projects)

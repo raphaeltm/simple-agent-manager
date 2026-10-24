@@ -4,10 +4,7 @@
  * Split out of `idea-list-core.ts` so the aggregation reads as one story: every function here
  * is one batched query plus the plain-data mapping of its rows. Nothing here derives state.
  */
-import type { IdeaWorkLinkCaps } from '../durable-objects/project-data/idea-work';
 import { chunk, D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
-import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
-import { OperationError } from './errors';
 import { ideaTaskPredicateSql } from './idea-core';
 import { IDEA_OPEN_STATUSES } from './idea-transitions';
 import type { OperationContext } from './types';
@@ -100,15 +97,6 @@ export function ideaSummary(
     return line.length > max ? `${line.slice(0, max - 1)}…` : line;
   }
   return null;
-}
-
-/** The number at the end of a GitHub pull request URL, or null when there is not one. */
-export function pullRequestNumber(url: string): number | null {
-  const match = /\/pull\/(\d+)\/?$/.exec(url.trim());
-  const digits = match?.[1];
-  if (!digits) return null;
-  const parsed = Number.parseInt(digits, 10);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export async function readIdeaRows(
@@ -233,18 +221,4 @@ export async function readProjectRepository(
     .bind(projectId)
     .first<{ repository: string }>();
   return row?.repository ?? '';
-}
-
-/** The caps a batched link read runs under, from the admin settings registry. */
-export async function readIdeaWorkLinkCaps(ctx: OperationContext): Promise<IdeaWorkLinkCaps> {
-  const [targetLimit, perTargetCap] = await resolveAdminSettingDetailsMany(ctx.env, [
-    'operations.resourceLinkBatchTargetLimit',
-    'operations.resourceLinkBatchPerTargetCap',
-  ]);
-  const maxTargets = Number(targetLimit?.value);
-  const cap = Number(perTargetCap?.value);
-  if (!Number.isInteger(maxTargets) || !Number.isInteger(cap) || maxTargets < 1 || cap < 1) {
-    throw new OperationError('unavailable', 'Resource link batch settings unavailable');
-  }
-  return { maxTargets, perTargetCap: cap };
 }

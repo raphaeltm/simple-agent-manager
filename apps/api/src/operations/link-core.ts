@@ -8,6 +8,7 @@ import type {
   LinkedSession,
   LinkKind,
   LinkRelation,
+  PullRequestRef,
   SessionContext,
 } from '@simple-agent-manager/shared';
 import { canonicalProjectPullRequestUrl, isStrongLinkRelation } from '@simple-agent-manager/shared';
@@ -30,13 +31,18 @@ export async function listLinks(env: Env, projectId: string, kind: LinkKind, id:
   return projectData.listResourceLinks(env, projectId, kind, id, config.listCap);
 }
 
-/** Internal list-page seam: the caller supplies IDs already selected from this project. */
-export async function listLinksForTargets(
-  env: Env,
-  projectId: string,
-  kind: LinkKind,
-  ids: string[]
-) {
+/**
+ * The caps a batched link read runs under. One resolver, because two would be two places to
+ * keep in step with the registry and two chances to disagree about what counts as valid.
+ */
+export interface ResourceLinkBatchCaps {
+  /** Most target ids one link query may ask about. */
+  maxTargets: number;
+  /** Most links returned for each target. */
+  perTargetCap: number;
+}
+
+export async function resolveResourceLinkBatchCaps(env: Env): Promise<ResourceLinkBatchCaps> {
   const [targetLimit, perTargetCap] = await resolveAdminSettingDetailsMany(env, [
     'operations.resourceLinkBatchTargetLimit',
     'operations.resourceLinkBatchPerTargetCap',
@@ -45,7 +51,18 @@ export async function listLinksForTargets(
   const cap = Number(perTargetCap?.value);
   if (!Number.isInteger(maxTargets) || !Number.isInteger(cap) || maxTargets < 1 || cap < 1)
     throw errors.internal('Resource link batch settings unavailable');
-  return projectData.listLinksForTargets(env, projectId, kind, ids, cap, maxTargets);
+  return { maxTargets, perTargetCap: cap };
+}
+
+/** Internal list-page seam: the caller supplies IDs already selected from this project. */
+export async function listLinksForTargets(
+  env: Env,
+  projectId: string,
+  kind: LinkKind,
+  ids: string[]
+) {
+  const { maxTargets, perTargetCap } = await resolveResourceLinkBatchCaps(env);
+  return projectData.listLinksForTargets(env, projectId, kind, ids, perTargetCap, maxTargets);
 }
 
 type IdeaRow = { id: string; title: string; status: string };
@@ -280,16 +297,38 @@ function toSessions(
     (s) => s.sessionId
   );
 }
-function toPrRef(
-  rawUrl: string,
-  repository: string,
-  source: LinkedPullRequest['source'],
-  bySessionId: string | null
-): LinkedPullRequest[] {
-  const url = canonicalProjectPullRequestUrl(rawUrl, repository);
-  const number = Number(/\/pull\/(\d+)$/.exec(url ?? '')?.[1]);
-  if (!url || !number) return [];
-  return [{ url, number, source, state: null, bySessionId }];
+/**
+ * Turns candidate pull request URLs into canonical references, dropping the ones that do not
+ * belong to this project's repository and collapsing duplicates to one.
+ *
+ * A pull request reaches an idea or a chat through three sources — the task's own
+ * `output_pr_url`, a pull-request-shepherd association row, and an explicit link — and the
+ * same pull request routinely arrives through more than one of them, in more than one spelling
+ * (mixed case, a trailing slash). `PullRequestRef['source']` is the enumeration of those three;
+ * `canonicalProjectPullRequestUrl` is the one canonicalizer (program decision 3). Collapsing
+ * them is the same rule wherever it happens, so it happens once, here: the single-resource
+ * context reads below and the batched Ideas list both call this rather than each writing it.
+ *
+ * The first candidate for a URL wins, so callers order their sources by which attribution they
+ * would rather show. Extra fields on a candidate (`bySessionId`) are carried through.
+ */
+export function canonicalPullRequestRefs<
+  T extends { url: string; source: PullRequestRef['source'] },
+>(candidates: readonly T[], repository: string): Array<T & PullRequestRef> {
+  const byUrl = new Map<string, T & PullRequestRef>();
+  for (const candidate of candidates) {
+    const url = canonicalProjectPullRequestUrl(candidate.url, repository);
+    if (!url) continue;
+    const number = Number(/\/pull\/(\d+)$/.exec(url)?.[1]);
+    if (!number) continue;
+    if (!byUrl.has(url)) byUrl.set(url, { ...candidate, url, number });
+  }
+  return [...byUrl.values()];
+}
+
+/** One candidate reference, before canonicalization collapses the three sources. */
+function prCandidate(url: string, source: LinkedPullRequest['source'], bySessionId: string | null) {
+  return { url, source, bySessionId };
 }
 
 function toPrs(
@@ -301,18 +340,19 @@ function toPrs(
   const explicit = links.flatMap((link) => {
     if (link.targetKind !== 'pr') return [];
     const bySessionId = link.sourceKind === 'session' ? link.sourceId : null;
-    return toPrRef(link.targetId, data.repository, 'explicit_link', bySessionId);
+    return [prCandidate(link.targetId, 'explicit_link', bySessionId)];
   });
   const outputs = data.outputs.flatMap((row) => {
     if (!row.chatSessionId || !sessionSet.has(row.chatSessionId) || !row.outputPrUrl) return [];
-    return toPrRef(row.outputPrUrl, data.repository, 'task_output', row.chatSessionId);
+    return [prCandidate(row.outputPrUrl, 'task_output', row.chatSessionId)];
   });
   const associations = data.associations.flatMap((row) => {
     if (!row.chatSessionId || !sessionSet.has(row.chatSessionId)) return [];
-    return toPrRef(row.prUrl, data.repository, 'pr_association', row.chatSessionId);
+    return [prCandidate(row.prUrl, 'pr_association', row.chatSessionId)];
   });
-  const refs = [...explicit, ...outputs, ...associations];
-  return unique(refs, (r) => r.url);
+  return canonicalPullRequestRefs([...explicit, ...outputs, ...associations], data.repository).map(
+    (ref) => ({ ...ref, state: null })
+  );
 }
 
 async function withPullRequestStates(

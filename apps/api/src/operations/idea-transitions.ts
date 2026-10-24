@@ -9,8 +9,14 @@
  * done, park it, and change their mind — so it gets its own table, and every surface asks
  * this module.
  *
- * `ready` is kept as an accepted open status so existing `update_idea` callers keep working.
- * It carries no derived meaning: `idea-status.ts` treats `draft` and `ready` identically.
+ * `ready` is a status an idea may still BE in, and never one it may move TO. The program's
+ * decision 1 is that ideas are never run in place: `draft → ready → POST /tasks/:id/run` is
+ * the legacy path that turns an idea row into a task row, and Start work creates a new linked
+ * task instead. Rows that reached `ready` before that decision keep every way out of it, so
+ * the tightening refuses a new entry without stranding an existing idea (rule 71).
+ *
+ * It carries no derived meaning either way: `idea-status.ts` treats `draft` and `ready`
+ * identically, and `IDEA_OPEN_STATUSES` lists both so a legacy `ready` idea still appears.
  */
 import { ulid } from '../lib/ulid';
 import { OperationError } from './errors';
@@ -19,7 +25,9 @@ import type { OperationContext } from './types';
 
 /** Statuses an idea row can hold, and where each can go. */
 export const IDEA_STATUS_TRANSITIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  draft: Object.freeze(['ready', 'completed', 'cancelled']),
+  // No `ready`: an idea is not run in place (program decision 1).
+  draft: Object.freeze(['completed', 'cancelled']),
+  // Every exit a legacy `ready` idea had, kept.
   ready: Object.freeze(['draft', 'completed', 'cancelled']),
   // Done and parked are reversible: a merged pull request often leaves something behind,
   // and the design asks people to decide, which means letting them decide again.

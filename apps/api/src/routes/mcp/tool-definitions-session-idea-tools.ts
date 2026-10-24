@@ -204,7 +204,7 @@ export const SESSION_IDEA_TOOLS = [
         status: {
           type: 'string',
           description:
-            'Transition the idea to a new status. Allowed transitions: draft→ready, draft→cancelled, ready→draft, ready→completed, ready→cancelled. Terminal statuses (completed, cancelled) cannot be changed.',
+            'Transition the idea to a new status. An idea is open (draft), done (completed) or parked (cancelled). Allowed: draft→completed, draft→cancelled, and completed→draft or cancelled→draft to reopen. Ideas are not run in place, so draft→ready is refused — start work on an idea instead, which creates a new task linked to it.',
           enum: ['draft', 'ready', 'completed', 'cancelled'],
         },
       },
