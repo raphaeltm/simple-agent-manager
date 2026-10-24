@@ -265,6 +265,41 @@ describe('deriveIdeaStatus precedence', () => {
     expect(result.pullRequest?.number).toBe(9);
   });
 
+  /**
+   * The same two merges in the other order. `newestMerged` seeds its `reduce` with `null`
+   * rather than guarding an unseeded one with a length check, so both the seed and the
+   * comparison decide the answer — and a test that only ever puts the winner last cannot tell
+   * the two apart.
+   */
+  it('picks the newest merge whichever order they arrive in', () => {
+    const newest = pullRequest({
+      number: 9,
+      state: 'merged',
+      mergedAt: '2026-10-23T08:00:00.000Z',
+      url: 'https://x/pull/9',
+    });
+    const older = pullRequest({ number: 1, state: 'merged', mergedAt: '2026-10-20T08:00:00.000Z' });
+    for (const pullRequests of [
+      [newest, older],
+      [older, newest],
+    ]) {
+      expect(deriveIdeaStatus(input({ pullRequests })).pullRequest?.number).toBe(9);
+    }
+  });
+
+  it('keeps the first of two merges that happened at the same moment', () => {
+    const at = '2026-10-23T08:00:00.000Z';
+    const result = deriveIdeaStatus(
+      input({
+        pullRequests: [
+          pullRequest({ number: 1, state: 'merged', mergedAt: at }),
+          pullRequest({ number: 9, state: 'merged', mergedAt: at, url: 'https://x/pull/9' }),
+        ],
+      })
+    );
+    expect(result.pullRequest?.number).toBe(1);
+  });
+
   it('an idea with nothing linked has not started, and says so has no source', () => {
     const result = deriveIdeaStatus(input());
     expect(result.state).toBe('not-started');

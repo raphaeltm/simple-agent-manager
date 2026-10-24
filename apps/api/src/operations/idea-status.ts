@@ -163,9 +163,16 @@ function status(
 
 /** The newest merged pull request, by merge time. */
 function newestMerged(pullRequests: readonly IdeaPullRequest[]): IdeaPullRequest | null {
-  const merged = pullRequests.filter((pr) => pr.state === 'merged');
-  if (merged.length === 0) return null;
-  return merged.reduce((best, pr) => ((pr.mergedAt ?? '') > (best.mergedAt ?? '') ? pr : best));
+  // The `null` seed is what makes the empty case safe, rather than a length check standing
+  // one line above an unseeded `reduce()`. That arrangement was correct but positional: the
+  // guard and the thing it guarded were two statements, so an edit to either broke the other
+  // silently. Ties keep the earlier element, as the strict `>` did before.
+  return pullRequests
+    .filter((pr) => pr.state === 'merged')
+    .reduce<IdeaPullRequest | null>(
+      (best, pr) => (best === null || (pr.mergedAt ?? '') > (best.mergedAt ?? '') ? pr : best),
+      null
+    );
 }
 
 /**
