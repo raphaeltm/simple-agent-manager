@@ -22,10 +22,19 @@ import { ideaNeedsYou } from '@simple-agent-manager/shared';
  * must not push the whole list off a phone screen.
  */
 export const DEFAULT_IDEA_NEEDS_YOU_VISIBLE = 3;
-export const IDEA_NEEDS_YOU_VISIBLE = Number.parseInt(
-  import.meta.env.VITE_IDEA_NEEDS_YOU_VISIBLE || String(DEFAULT_IDEA_NEEDS_YOU_VISIBLE),
-  10
-);
+/**
+ * A misconfigured override must not be able to hide the cards.
+ *
+ * `IdeasListPage` slices with this value, and `slice(0, NaN)` returns an EMPTY array — so a
+ * non-numeric `VITE_IDEA_NEEDS_YOU_VISIBLE` folded every "needs you" card behind "N more need
+ * you" rather than showing the most urgent ones, which is the one thing this list exists to do.
+ * A negative value silently dropped cards off the end. Anything that is not a positive integer
+ * falls back to the default.
+ */
+export const IDEA_NEEDS_YOU_VISIBLE = ((): number => {
+  const parsed = Number.parseInt(import.meta.env.VITE_IDEA_NEEDS_YOU_VISIBLE ?? '', 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_IDEA_NEEDS_YOU_VISIBLE;
+})();
 
 export type IdeaTone = 'danger' | 'warning' | 'info';
 

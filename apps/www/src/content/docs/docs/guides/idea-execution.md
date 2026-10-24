@@ -63,9 +63,9 @@ for migration and rollback behavior.
 
 ## Ideas
 
-An idea is something you want done that nobody has handed to an agent yet. It collects
-context — chats, files, notes, pull requests — until someone starts work on it, and then it
-follows that work.
+An idea is something you want done, whether or not work has started. It collects context —
+chats, files, notes, pull requests — and once someone starts work on it, it keeps following
+that work rather than being replaced by it.
 
 ### Where an idea stands is worked out, not typed
 
@@ -73,20 +73,23 @@ Nobody sets an idea's state by hand. SAM derives it from the chats linked to the
 chats' tasks and their pull requests, and shows where each state came from ("From GitHub, a
 minute ago") so you can tell whether to trust it:
 
+The table is in precedence order — the first row that applies is the state you see
+(`operations/idea-status.ts`):
+
 | State               | What it means                                                            |
 | ------------------- | ------------------------------------------------------------------------ |
-| **Not started**     | Nothing is linked yet, or nothing is in flight                           |
+| **Done**            | You marked it done                                                       |
+| **Parked**          | You parked it                                                            |
+| **Waiting for you** | An agent asked you something and nobody has answered                     |
+| **Stopped**         | The latest work failed and nothing else is running                       |
 | **In progress**     | A linked chat is working on it (a sleeping chat still counts — it wakes) |
 | **In review**       | A pull request for the work is open                                      |
 | **Merged**          | A pull request merged, and nobody has said whether that finished it      |
-| **Stopped**         | The latest work failed and nothing else is running                       |
-| **Waiting for you** | An agent asked you something and nobody has answered                     |
-| **Done**            | You marked it done                                                       |
-| **Parked**          | You parked it                                                            |
+| **Not started**     | Nothing is linked yet, or nothing is in flight                           |
 
-Higher rows win: an unanswered question outranks running work, running work outranks an open
-pull request. Only chats that actually work on the idea move it; a chat that merely read or
-mentioned it never does.
+So your own decisions outrank everything, an unanswered question outranks failed or running
+work, and running work outranks an open pull request. Only chats that actually work on the
+idea move it; a chat that merely read or mentioned it never does.
 
 **An idea is never run in place.** Starting work creates a new task linked to the idea, so the
 idea keeps following that work rather than turning into it. That is why an idea moves only

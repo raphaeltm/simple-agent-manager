@@ -9,6 +9,7 @@ import type { IdeaCounts, IdeaDerivedStatus, IdeaListItem } from '@simple-agent-
 import { describe, expect, it } from 'vitest';
 
 import {
+  IDEA_NEEDS_YOU_VISIBLE,
   groupIdeas,
   ideaAttention,
   ideaCountsLine,
@@ -78,6 +79,24 @@ function item(overrides: Partial<IdeaListItem> = {}): IdeaListItem {
     ...overrides,
   };
 }
+
+/*
+ * `IdeasListPage` slices the Needs-you cards with this value, and `slice(0, NaN)` returns an
+ * EMPTY array — so a misconfigured override folded every urgent card behind "N more need you",
+ * which is the one thing that list exists to prevent. A negative value dropped cards instead.
+ */
+describe('IDEA_NEEDS_YOU_VISIBLE', () => {
+  it('is a positive integer whatever the environment says', () => {
+    expect(Number.isInteger(IDEA_NEEDS_YOU_VISIBLE)).toBe(true);
+    expect(IDEA_NEEDS_YOU_VISIBLE).toBeGreaterThan(0);
+  });
+
+  it('slices rather than empties the list', () => {
+    const cards = Array.from({ length: 10 }, (_, index) => index);
+    // The real consumer's expression. With NaN this returned [] and hid everything.
+    expect(cards.slice(0, IDEA_NEEDS_YOU_VISIBLE).length).toBeGreaterThan(0);
+  });
+});
 
 describe('ideaRowLine', () => {
   it('says who is working on it', () => {

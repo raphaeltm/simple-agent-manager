@@ -22,7 +22,7 @@ import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedWorkspace, requireProjectCapability } from '../../middleware/project-auth';
 import { toOperationHttpError } from '../../operations/errors';
-import { applyIdeaStatusTransition } from '../../operations/idea-transitions';
+import { applyIdeaStatusTransition, isIdeaStatus } from '../../operations/idea-transitions';
 import { getIdeaSessionLinks } from '../../operations/link-core';
 import { webOperationContext } from '../../operations/types';
 import {
@@ -469,7 +469,15 @@ crudRoutes.post(
     // The flag IS the definition of an idea, so this reads the same thing
     // `ideaTaskPredicateSql` does — the two surfaces cannot disagree about which state machine
     // governs a row (`operations/idea-core.ts`).
-    if (task.isIdea) {
+    /*
+     * ...but only while the row is actually IN that state machine. A legacy `ready` idea can
+     * still be delegated (`/delegate`), which sets `delegated` and keeps `is_idea = 1`. Routing
+     * on the flag alone then sent a later cancel into the idea table, which has never heard of
+     * `delegated`, so the transition was rejected and `cancelTask` and the terminal cleanup
+     * never ran — the row stranded mid-flight with no way out. An idea that has been handed to
+     * a runner is, for status purposes, a task, and uses the task table like one.
+     */
+    if (task.isIdea && isIdeaStatus(task.status)) {
       try {
         await applyIdeaStatusTransition(webOperationContext(c, userId), {
           projectId,

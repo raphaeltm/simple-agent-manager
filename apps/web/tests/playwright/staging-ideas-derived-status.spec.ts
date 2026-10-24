@@ -366,51 +366,79 @@ test.describe('Ideas list on staging — laptop', () => {
       message: 'Say hello and stop. This is a staging verification run.',
       sourceIdeaId: created.startWorkIdeaId,
     });
-    // 409 means the project default resolves to a VM profile, which this route refuses by
-    // design — that is a profile fact, not a failure of the idea gate, and the gate has
-    // already run by then. Anything else must be a clean start.
-    expect([201, 202, 409]).toContain(started.status());
-    if (started.status() !== 409) {
-      const startedBody = (await started.json()) as { sessionId?: string; taskId?: string };
+    const startedText = await started.text();
+
+    /*
+     * The control has to be discriminating in BOTH branches, which the first version of it was
+     * not: it tolerated 409 outright, so on a project whose profiles resolve to a VM runtime it
+     * passed without ever accepting anything. CodeRabbit caught that, and the staging run
+     * confirmed it — every profile on this project has `runtime: null`, so the request really
+     * did take the 409 path and proved nothing.
+     *
+     * What makes 409 informative is WHICH 409. `requireOpenIdeaForWorkStart` runs before any
+     * effects; `resolveWorkspaceRuntime` and its VM refusal run after it
+     * (`routes/chat-start.ts`). So a 409 carrying the VM-runtime message is positive evidence
+     * that the idea gate ACCEPTED — the request got past it and died further down — while a
+     * 404 is the gate rejecting. Asserting the message is therefore the acceptance proof on a
+     * project where no profile resolves to a container.
+     */
+    expect(started.status(), startedText).not.toBe(404);
+    expect(started.status(), startedText).not.toBe(403);
+    if (started.status() === 409) {
+      // Downstream of the gate: the runtime refusal, not an idea refusal.
+      expect(startedText).toMatch(/VM runtime/i);
+    } else {
+      expect([201, 202], startedText).toContain(started.status());
+      const startedBody = JSON.parse(startedText) as { sessionId?: string; taskId?: string };
       created.startWorkSessionId = startedBody.sessionId ?? '';
       created.startWorkTaskId = startedBody.taskId ?? '';
-      expect(created.startWorkTaskId).not.toBe('');
+      // A started idea must have produced real work, not just a 2xx.
+      expect(created.startWorkTaskId, startedText).not.toBe('');
     }
   });
 
-  test('cleans up everything it created, and proves it', async ({ page }) => {
-    if (created.sessionId) {
-      await api(
-        page,
-        'DELETE',
-        `/api/projects/${PROJECT_ID}/sessions/${created.sessionId}/ideas/${created.ideaId}`
-      );
-    }
-    if (created.sessionTaskId) {
-      // There is no `DELETE /sessions/:id`; the chat's own conversation task is what owns it,
-      // and deleting that is what removes the chat from the project.
-      const deletedChat = await api(
-        page,
-        'DELETE',
-        `/api/projects/${PROJECT_ID}/tasks/${created.sessionTaskId}`
-      );
-      expect([200, 204]).toContain(deletedChat.status());
-    }
-    for (const id of [created.startWorkTaskId, created.startWorkIdeaId, created.ordinaryTaskId]) {
-      if (!id) continue;
-      const gone = await api(page, 'DELETE', `/api/projects/${PROJECT_ID}/tasks/${id}`);
-      expect([200, 204, 404]).toContain(gone.status());
-    }
-    if (created.ideaId) {
-      const deleted = await api(
-        page,
-        'DELETE',
-        `/api/projects/${PROJECT_ID}/tasks/${created.ideaId}`
-      );
-      expect([200, 204]).toContain(deleted.status());
-      // Re-read rather than trust the delete's own answer.
-      const gone = await api(page, 'GET', `/api/projects/${PROJECT_ID}/ideas/${created.ideaId}`);
-      expect(gone.status()).toBe(404);
+  /*
+   * Cleanup runs in `afterAll`, NOT as the final test.
+   *
+   * These tests are serial, so a failure in any earlier one skips every test after it —
+   * including a cleanup test. That is not hypothetical: two runs earlier today died mid-file
+   * and left an idea on staging that I had to find in D1 and delete by hand. `afterAll` runs
+   * even when a test fails, so the footprint is cleaned on the failure path, which is exactly
+   * the path that creates orphans. (CodeRabbit raised this; it had already cost me twice.)
+   *
+   * It still PROVES the deletion rather than assuming it: every id is re-read afterwards and
+   * must be gone. A cleanup failure is reported through `expect`, which `afterAll` surfaces as
+   * a suite failure, so a silent leak cannot pass.
+   */
+  test.afterAll(async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await stagingLogin(page);
+      if (created.sessionId && created.ideaId) {
+        await api(
+          page,
+          'DELETE',
+          `/api/projects/${PROJECT_ID}/sessions/${created.sessionId}/ideas/${created.ideaId}`
+        );
+      }
+      const ids = [
+        created.sessionTaskId,
+        created.startWorkTaskId,
+        created.startWorkIdeaId,
+        created.ordinaryTaskId,
+        created.ideaId,
+      ].filter((id) => id !== '');
+      for (const id of ids) {
+        const deleted = await api(page, 'DELETE', `/api/projects/${PROJECT_ID}/tasks/${id}`);
+        expect([200, 204, 404], `delete ${id}`).toContain(deleted.status());
+      }
+      // Re-read rather than trust the deletes' own answers.
+      for (const id of ids) {
+        const gone = await api(page, 'GET', `/api/projects/${PROJECT_ID}/ideas/${id}`);
+        expect(gone.status(), `re-read ${id} after delete`).toBe(404);
+      }
+    } finally {
+      await page.close();
     }
   });
 });

@@ -31,6 +31,8 @@ const ONBOARDING_DISMISS_ATTEMPTS = 4;
  * freshly resolved one. Playwright's default would retry inside one call until the TEST timeout.
  */
 const ONBOARDING_CLICK_TIMEOUT_MS = 5_000;
+/** How long the wizard must stay gone before a dismissal counts as real. */
+const ONBOARDING_SETTLE_MS = 750;
 
 type StoredCookies = Awaited<ReturnType<BrowserContext['storageState']>>['cookies'];
 let cachedCookies: StoredCookies | null = null;
@@ -128,7 +130,21 @@ export async function dismissStagingOnboarding(page: Page): Promise<void> {
       () => true,
       () => false
     );
-    if (gone) return;
+    if (gone) {
+      /*
+       * Hidden once is not dismissed. The modal REMOUNTS, so `hidden` is also true in the gap
+       * between the old node detaching and its replacement mounting — returning there hands
+       * the next action a page the wizard is about to cover again. Confirm it stays gone.
+       */
+      const stayedGone = await wizard
+        .waitFor({ state: 'visible', timeout: ONBOARDING_SETTLE_MS })
+        .then(
+          () => false,
+          () => true
+        );
+      if (stayedGone) return;
+      continue;
+    }
     await exitSetup.click({ timeout: ONBOARDING_CLICK_TIMEOUT_MS }).catch(() => undefined);
   }
   await expect(wizard).toBeHidden({ timeout: 10_000 });

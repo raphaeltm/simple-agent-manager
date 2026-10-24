@@ -199,6 +199,41 @@ describe('every surface that moves an idea agrees', () => {
    * must keep using the task table for it — `ready → delegated` is a move the idea table has
    * never heard of, and it has to keep working.
    */
+  /*
+   * A row can be an idea AND be mid-flight, and then it is the TASK table that governs it.
+   *
+   * A legacy `ready` idea can still be delegated — `/delegate` sets `delegated` and keeps
+   * `is_idea = 1`. Routing on the flag alone sent a later cancel into the idea table, which has
+   * never heard of `delegated`, so the transition was refused and `cancelTask` and the terminal
+   * cleanup never ran: the row stranded mid-flight with no way out. Found by CodeRabbit.
+   */
+  it('cancels a DELEGATED idea through the task table rather than stranding it', async () => {
+    sqlite
+      .prepare(
+        `INSERT INTO tasks (id, project_id, user_id, title, status, is_idea, priority, task_mode,
+           dispatch_depth, created_by, created_at, updated_at, triggered_by)
+         VALUES ('delegated-idea', ?, 'u1', 'A delegated idea', 'delegated', 1, 0, 'task', 0,
+                 'u1', '2026-10-20T00:00:00.000Z', '2026-10-20T00:00:00.000Z', 'user')`
+      )
+      .run(PROJECT);
+
+    const res = await postJson('tasks/delegated-idea/status', { toStatus: 'cancelled' });
+    expect(res.status, await res.text()).toBe(200);
+    expect(statusOf('delegated-idea')).toBe('cancelled');
+  });
+
+  /*
+   * The control for the test above: a row that IS in an idea status still uses the idea table,
+   * so the fix narrowed the routing rather than disabling it. `draft -> ready` is refused for
+   * an idea and allowed for a task, so this one assertion separates the two tables.
+   */
+  it('still governs an idea that is in an idea status with the idea table', async () => {
+    seedIdea('open-idea', 'draft');
+    const res = await postJson('tasks/open-idea/status', { toStatus: 'ready' });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(statusOf('open-idea')).toBe('draft');
+  });
+
   it('still runs an ordinary task through the task table, not the idea table', async () => {
     sqlite
       .prepare(

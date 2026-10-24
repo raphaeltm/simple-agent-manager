@@ -440,6 +440,37 @@ describe('getIdeaWorkSnapshots', () => {
       expect(whole['idea-a']?.fileIds).toHaveLength(4);
       expect(whole['idea-a']?.truncated.files).toBe(false);
     });
+
+    /*
+     * The cap counts link ROWS, not distinct chats, and `truncated.sessions` has to agree with
+     * it. One chat can hold several relations to one idea — `read` and `works_on` are separate
+     * rows — which the snapshot folds into a single session entry. Counting the folded entries
+     * undercounts against the cap: here 3 rows from 2 chats reach a cap of 3, but only 2
+     * sessions come back, so the old `byId.size >= cap` reported NOT truncated and the list
+     * published "2 chats" as exact. `IdeaCounts.atLeast` exists precisely to say "2+" there.
+     */
+    it('says the chat count is a minimum when relations, not chats, exhausted the cap', async () => {
+      const stub = getStub('idea-work-session-row-cap');
+      const first = await stub.createSession(null, 'First', 'task-first');
+      const second = await stub.createSession(null, 'Second', 'task-second');
+      // Three ROWS across two chats: the first chat contributes two relations.
+      await link(stub, first, 'idea-a', 'works_on');
+      await link(stub, first, 'idea-a', 'read');
+      await link(stub, second, 'idea-a', 'works_on');
+
+      const capped = await stub.getIdeaWorkSnapshots(['idea-a'], {
+        perTargetCap: 3,
+        maxTargets: 100,
+      });
+      // Fewer sessions than the cap, because two rows folded into one.
+      expect(capped['idea-a']?.sessions.length).toBeLessThan(3);
+      expect(capped['idea-a']?.truncated.sessions).toBe(true);
+
+      // The control: the same links under a cap that cannot bite are NOT truncated, so the
+      // assertion above is about the cap rather than about relations existing at all.
+      const whole = await stub.getIdeaWorkSnapshots(['idea-a'], CAPS);
+      expect(whole['idea-a']?.truncated.sessions).toBe(false);
+    });
   });
 
   it('counts the notes on each idea, and omits deleted ones', async () => {

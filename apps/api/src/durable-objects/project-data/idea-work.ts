@@ -211,10 +211,21 @@ export function getIdeaWorkSnapshots(
   // 1. Which chats are linked to these ideas, and how. `relations` is what makes strength
   //    real: before T1 every link meant "works on", so the derivation could assume it.
   const sessionsByIdea = new Map<string, Map<string, IdeaWorkSessionRow>>();
+  /*
+   * Raw link ROWS per idea, which is what the cap actually limits.
+   *
+   * `listLinksForTargets` caps per `target_id` by row, and one chat can hold several relations
+   * to one idea (`read` and `works_on`, say), each its own row folded into a single `byId`
+   * entry below. So `byId.size` undercounts against the cap: 50 rows from 30 chats reached the
+   * limit, but the map holds 30 and the list would publish "30 chats" as exact. That breaks the
+   * `IdeaCounts.atLeast` contract, whose whole job is to say "50+" when a cap intervened.
+   */
+  const linkRowsByIdea = new Map<string, number>();
   const assets: IdeaAssetLink[] = [];
   for (const ids of chunkTargets(unique, caps.maxTargets)) {
     for (const link of listLinksForTargets(sql, 'idea', ids, caps.perTargetCap, caps.maxTargets)) {
       const ideaId = link.targetId;
+      linkRowsByIdea.set(ideaId, (linkRowsByIdea.get(ideaId) ?? 0) + 1);
       const existing = sessionsByIdea.get(ideaId) ?? new Map<string, IdeaWorkSessionRow>();
       sessionsByIdea.set(ideaId, existing);
       const current = existing.get(link.sourceId);
@@ -256,7 +267,7 @@ export function getIdeaWorkSnapshots(
     }
     snapshot.sessions.sort((a, b) => (b.lastActivityAt ?? -1) - (a.lastActivityAt ?? -1));
     snapshot.needsInput.sort((a, b) => b.askedAt - a.askedAt);
-    snapshot.truncated.sessions = byId.size >= caps.perTargetCap;
+    snapshot.truncated.sessions = (linkRowsByIdea.get(ideaId) ?? 0) >= caps.perTargetCap;
   }
 
   // 3. The files and pull requests those ideas own, and how many notes each one has.
