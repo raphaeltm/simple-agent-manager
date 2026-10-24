@@ -59,7 +59,7 @@ const AgentContextPage = lazyNamed(() => import('./pages/AgentContextPage'), 'Ag
 const Chats = lazyNamed(() => import('./pages/Chats'), 'Chats');
 const CreateWorkspace = lazyNamed(() => import('./pages/CreateWorkspace'), 'CreateWorkspace');
 const DeviceAuth = lazyNamed(() => import('./pages/DeviceAuth'), 'DeviceAuth');
-const IdeaDetailPage = lazyNamed(() => import('./pages/IdeaDetailPage'), 'IdeaDetailPage');
+const IdeaPage = lazyNamed(() => import('./pages/ideas/IdeaPage'), 'IdeaPage');
 const IdeasListPage = lazyNamed(() => import('./pages/ideas/IdeasListPage'), 'IdeasListPage');
 const Node = lazyNamed(() => import('./pages/Node'), 'Node');
 const Nodes = lazyNamed(() => import('./pages/Nodes'), 'Nodes');
@@ -350,7 +350,7 @@ export default function App() {
                           path="knowledge"
                           element={<Navigate to="../agent-context" replace />}
                         />
-                        <Route path="ideas/:taskId" element={page(<IdeaDetailPage />)} />
+                        <Route path="ideas/:taskId" element={page(<IdeaPage />)} />
                         <Route path="tasks" element={<Navigate to="../ideas" replace />} />
                         <Route path="tasks/:taskId" element={page(<TaskRedirect />)} />
                         <Route path="settings" element={page(<ProjectSettings />)}>

@@ -107,6 +107,18 @@ pull request waiting on your call, each with its fix as a button (**Answer**, **
 whole list off a phone screen. Below that come **In progress** and **Not started**; ideas you
 have finished and ideas an automation filed fold away at the bottom.
 
+### An idea's page
+
+The idea's own text is the **current plan**, and only that. What happened to it lives beside
+it:
+
+- **Work** — every chat and pull request for the idea, and what each one produced.
+- **Updates** — short notes from people and agents, newest first, with the line each one is
+  answering. Agents post here with `update_idea`'s `note` (and an optional `quote`) instead of
+  appending to the plan, which is what used to make an idea's text contradict itself.
+- **Related** _(intended, not yet available)_ — the files and other ideas that linked
+  themselves while agents worked. The link store this reads is not on `main` yet.
+
 ## While the work runs
 
 ### Linked work

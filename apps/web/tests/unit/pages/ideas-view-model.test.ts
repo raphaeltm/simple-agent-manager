@@ -17,6 +17,7 @@ import {
   ideaPrimaryAction,
   ideaRowLine,
   ideaSecondaryAction,
+  ideaSourceLabel,
   relativeTime,
 } from '../../../src/pages/ideas/view-model';
 
@@ -232,6 +233,30 @@ describe('ideaCountsLine', () => {
   // A minimum of one is still "1+", never "1": the plural rule must not hide the disclosure.
   it('keeps the plural when the count is a minimum of one', () => {
     expect(ideaCountsLine(counts({ files: 1, atLeast: ['files'] }))).toBe('1+ files');
+  });
+});
+
+describe('ideaSourceLabel', () => {
+  it('names where the state came from and when', () => {
+    expect(
+      ideaSourceLabel(
+        { origin: 'github', observedAt: '2026-10-23T11:59:00.000Z', stale: false },
+        NOW
+      )
+    ).toBe('From GitHub, a minute ago');
+  });
+
+  it('warns when the state is stored and may be out of date', () => {
+    expect(
+      ideaSourceLabel(
+        { origin: 'github', observedAt: '2026-10-23T11:59:00.000Z', stale: true },
+        NOW
+      )
+    ).toBe('From GitHub, a minute ago, may be out of date');
+  });
+
+  it('says nothing when nothing decided the state', () => {
+    expect(ideaSourceLabel({ origin: 'none', observedAt: null, stale: false }, NOW)).toBeNull();
   });
 });
 

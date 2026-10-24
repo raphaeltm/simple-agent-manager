@@ -126,8 +126,15 @@ export const IDEAS_POLL_MS = resolveIntervalMs(
   DEFAULT_IDEAS_POLL_MS
 );
 
-/** One idea's page. Faster than the list, because this is the idea you are watching. */
-export const DEFAULT_IDEA_DETAIL_POLL_MS = 15_000;
+/**
+ * One idea's page (its derived state and its updates timeline).
+ *
+ * The same cadence as the list rather than a faster one: each read costs a ProjectData
+ * Durable Object request, and DO requests are already the account's second-largest billed
+ * line (`pnpm quality:cloudflare-cost`, rule 76). Half a minute is well inside the "two
+ * minutes later it says In progress" the design promises.
+ */
+export const DEFAULT_IDEA_DETAIL_POLL_MS = 30_000;
 export const IDEA_DETAIL_POLL_MS = resolveIntervalMs(
   import.meta.env.VITE_IDEA_DETAIL_POLL_MS,
   DEFAULT_IDEA_DETAIL_POLL_MS

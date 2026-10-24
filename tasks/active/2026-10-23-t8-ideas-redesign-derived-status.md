@@ -324,6 +324,34 @@ CI failure, and all of it is fixed in `1f44320f5` except where noted.
 8. No horizontal overflow at 375×667 or 1280×800 with stress data; screenshots posted to each PR.
 9. Verified on staging as a user, on phone and desktop widths.
 
+## Round-trip cost of the Ideas list (rule 60)
+
+Recorded here because the list is the page that scales with a project's history, so the next
+person to add a read to it needs the current number rather than a guess.
+
+A full page costs a fixed handful of round trips, never one per idea:
+
+| Read                                                                | Round trips        |
+| ------------------------------------------------------------------- | ------------------ |
+| `readIdeaRows` open, `readIdeaRows` closed, `readIdeaTotals`        | 3 D1               |
+| `getIdeaWorkSnapshots` (all ideas in one call)                      | 1 DO RPC           |
+| `readSessionTasks`, `readAssociatedPullRequests` (96 ids per chunk) | 2 x ceil(chats/96) |
+| `readAgentProfileNames`                                             | 1 D1               |
+
+At 100 ideas and 300 linked chats that is about 13, inside the ≤20 aggregation budget, and
+`ideas-routes.test.ts` pins it at a full 100-idea page. Two things would move it: T2's
+pull-request-state operation replacing the stub (re-measure at integration), and an idea
+accumulating linked chats without bound — tracked in
+`tasks/backlog/2026-10-24-cap-linked-chats-per-idea.md`.
+
+## One deliberate divergence from the approved design
+
+The approved idea page has a single button on a not-started idea. This ships a quiet second
+one, **Park**, because Parked is a state the page renders, the docs describe, and nothing else
+in the app can enter — without it the state is unreachable. "Start work" is still the filled
+primary and Park is the ghost beside it, so the one obvious next step is unchanged. Flagged in
+PR2 for Raphaël to veto; removing it is one case in `ideaSecondaryAction`.
+
 ## Notes
 
 - Nothing merges until T1, T2 and T3 are on `main` and this code uses their real operations.
