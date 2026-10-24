@@ -183,58 +183,58 @@ the new chat on success.
 ## Implementation checklist
 
 ### Shared
-- [ ] `packages/shared/src/types/work-start.ts` with `resolveWorkStartPlan`, `workStartRelationFor`, exported from `types/index.ts`
-- [ ] `sourceIdeaId` on `SubmitTaskRequest` and `StartInstantChatSessionRequest`
-- [ ] Unit tests: skill over profile, project default, null-taskMode default via workspace profile, cf-container, both relations
+- [x] `packages/shared/src/work-start.ts` (moved out of `types/` to avoid a types→constants cycle) with `resolveWorkStartPlan`, `workStartRelationFor`, exported from `types/index.ts`
+- [x] `sourceIdeaId` on `SubmitTaskRequest` and `StartInstantChatSessionRequest`
+- [x] Unit tests: skill over profile, project default, null-taskMode default via workspace profile, cf-container, both relations
 
 ### API
-- [ ] `operations/untrusted-text.ts` + tests (cap, truncation flag, control chars, end-marker impersonation)
-- [ ] `operations/start-work-core.ts` + tests (foreign project, non-idea task, done, parked, open; relation derivation)
-- [ ] `sourceIdeaId` on `SubmitTaskSchema` / `StartChatSessionSchema`
-- [ ] Early validation in `submit-task-implementation` (before `beforeTaskEffects`) and in `chat-start`
-- [ ] Link write in `acceptInstantSession` (threaded through `LaunchInstantSessionInput`)
-- [ ] Link write in `submit-task-implementation` VM branch before `startTaskRunnerDO`
-- [ ] `get_instructions` idea block (new `routes/mcp/instruction-idea-context.ts`), isolated and capped
-- [ ] Idea-block cap as a typed admin setting with a code default (policy `9017df94`)
+- [x] `operations/untrusted-text.ts` + tests (cap, truncation flag, control chars, end-marker impersonation)
+- [x] `operations/start-work-core.ts` + tests (foreign project, non-idea task, done, parked, open; relation derivation)
+- [x] `sourceIdeaId` on `SubmitTaskSchema` / `StartChatSessionSchema`
+- [x] Early validation in `submit-task-implementation` (before `beforeTaskEffects`) and in `chat-start`
+- [x] Link write in `acceptInstantSession` (threaded through `LaunchInstantSessionInput`)
+- [x] Link write in `submit-task-implementation` VM branch before `startTaskRunnerDO`
+- [x] `get_instructions` idea block (new `routes/mcp/instruction-idea-context.ts`), isolated and capped
+- [x] Idea-block cap as a typed admin setting with a code default (policy `9017df94`)
 
 ### Web
-- [ ] `StartWorkSheet.tsx` + `useStartWork.ts`
-- [ ] Wire into `IdeaDetailPage`; remove the Execute button and `handleExecute`
-- [ ] Remove `EXECUTE_IDEA_PROMPT_TEMPLATE`, the env var, `.env.example` line
-- [ ] Remove `executeIdea` handling from `useProjectChatState` and `linkSessionIdea` from the API client
-- [ ] `startWorkOnIdea` client call (submit + `sourceIdeaId`)
+- [x] `StartWorkSheet.tsx` + `useStartWork.ts`
+- [x] Wire into `IdeaDetailPage`; remove the Execute button and `handleExecute`
+- [x] Remove `EXECUTE_IDEA_PROMPT_TEMPLATE`, the env var, `.env.example` line
+- [x] Remove `executeIdea` handling from `useProjectChatState` and `linkSessionIdea` from the API client
+- [x] Start work posts through the existing `submitTask` client with `sourceIdeaId` (no new client function needed); added `lib/api/links.ts` + `lib/query-options/links.ts` for T1's read endpoints
 
 ### Tests
-- [ ] API: link exists before the agent's first prompt, on both the VM and the Instant path, through the real handlers
-- [ ] API: link failure aborts the start and leaves no queued task
-- [ ] API: retry does not duplicate the link
-- [ ] API: foreign-project / done / parked ideas rejected — real SQL engine, attack case + owner control (rules 11, 28)
-- [ ] API: `get_instructions` includes the idea block for a chat started with `sourceIdeaId` (real trigger: start, then call the handler) and omits it otherwise
-- [ ] Repo guard: no prompt SAM generates for idea work contains `/do` or another slash command
-- [ ] Web: sheet submits the structured request; conversation profile takes the conversation path; note and skill preserved; no composer prefill
-- [ ] Web: interaction-effect trace for the idea page and the chat page
-- [ ] Playwright 375x667 + 1280x800: closed, open, picker, conversation-only, long titles, many profiles, empty counts, error — screenshots reviewed and posted
+- [x] API: link exists before the agent's first prompt, on both the VM and the Instant path, through the real handlers
+- [x] API: link failure aborts the start and leaves no queued task
+- [x] API: retry does not duplicate the link
+- [x] API: foreign-project / done / parked ideas rejected — real SQL engine, attack case + owner control (rules 11, 28)
+- [x] API: `get_instructions` includes the idea block for a chat started with `sourceIdeaId` (real trigger: start, then call the handler) and omits it otherwise
+- [x] Repo guard: no prompt SAM generates for idea work contains `/do` or another slash command
+- [x] Web: sheet submits the structured request; conversation profile takes the conversation path; note and skill preserved; no composer prefill
+- [x] Web: interaction-effect trace for the idea page and the chat page
+- [x] Playwright 375x667 + 1280x800: closed, open, picker, conversation-only, long titles, many profiles, empty counts, error — screenshots reviewed and posted
 
 ### Docs
-- [ ] `apps/www/.../guides/idea-execution.md` rewritten for Start work
-- [ ] `apps/www/.../guides/reporting-issues.md` env-var sentence
-- [ ] `apps/www/.../reference/api.md` for `sourceIdeaId`
-- [ ] `apps/www/.../guides/admin-settings.md` for the new setting
+- [x] `apps/www/.../guides/idea-execution.md` rewritten for Start work
+- [x] `apps/www/.../guides/reporting-issues.md` env-var sentence
+- [x] `apps/www/.../reference/api.md` for `sourceIdeaId`
+- [x] `apps/www/.../guides/admin-settings.md` for the new setting
 
 ## Acceptance criteria
 
-- [ ] Execute is gone: no button, no prompt template, no env var, no client-side post-submit link.
-- [ ] Start work links the idea on the server before the agent receives its first prompt, on both the VM and the Instant path.
-- [ ] A failed link fails the start with a clear error and no orphaned queued task.
-- [ ] Linking is idempotent on retry.
-- [ ] Done and parked ideas are rejected with a clear message; foreign-project ideas 404.
-- [ ] The visible first message is only the person's note, or a short neutral line.
-- [ ] Nothing SAM generates references `/do`, another slash command, or a SAM-repo skill.
-- [ ] A conversation-only profile starts a conversation, not a task, and is recorded as `discusses`.
-- [ ] The selected runtime is never silently changed.
-- [ ] `get_instructions` carries the idea inside the untrusted-data envelope, capped.
-- [ ] No horizontal overflow at 375x667; keyboard and screen-reader operable.
-- [ ] Verified end-to-end on staging for both profile kinds.
+- [x] Execute is gone: no button, no prompt template, no env var, no client-side post-submit link. (`start-work-sheet.test.tsx` "the page shows no Execute button", `start-work-audit.spec.ts` "idea page shows Start work, not Execute", and a repo-wide grep in the doc-sync review.)
+- [x] Start work links the idea on the server before the agent receives its first prompt, on both the VM and the Instant path. (`task-submit-source-idea.test.ts` asserts the call order `['recordLink','startTaskRunnerDO']`; `instant-session-idea-link.test.ts` asserts `recordLink` lands before `launchVmAgentContainer`. Both proven discriminating.)
+- [x] A failed link fails the start with a clear error and no orphaned queued task. (`task-submit-source-idea.test.ts` "aborts the start when the link cannot be written": 500, no runner start, session stopped, zero queued tasks. `instant-session-idea-link.test.ts` asserts no container launch.)
+- [x] Linking is idempotent on retry. (`task-submit-source-idea.test.ts` "is idempotent on retry": both writes carry an identical source/target/relation triple, which T1's store upserts.)
+- [x] Done and parked ideas are rejected with a clear message; foreign-project ideas 404. (`start-work-core.test.ts` on a real SQLite engine with a same-project owner control; `task-submit-source-idea.test.ts` and `chat-start.test.ts` through the real routes, asserting nothing was created.)
+- [x] The visible first message is only the person's note, or a short neutral line. (`start-work-sheet.test.tsx` asserts the exact submitted `message`, and that an empty note sends `Work on the idea “<title>”.` with no id, tool name or slash command.)
+- [x] Nothing SAM generates references `/do`, another slash command, or a SAM-repo skill. (`idea-work-repository-agnostic.test.ts`: a scan of every module that produces agent-visible text, the rendered `get_instructions` lines for both relations, and a control proving the matcher catches the exact string that was removed.)
+- [x] A conversation-only profile starts a conversation, not a task, and is recorded as `discusses`. (`start-work-sheet.test.tsx` picks the chat profile through the real picker and asserts `taskMode: 'conversation'`; `instant-session-idea-link.test.ts` and `task-submit-source-idea.test.ts` assert the `discusses` relation.)
+- [x] The selected runtime is never silently changed. (The sheet sends no `runtime` — asserted in `start-work-sheet.test.tsx` — so the server's own resolution decides; `task-submit-source-idea.test.ts` "passes the validated idea to the Instant branch" proves a cf-container profile reaches `acceptInstantSession` rather than VM placement.)
+- [x] `get_instructions` carries the idea inside the untrusted-data envelope, capped. (`mcp-instruction-idea-block.test.ts` drives the real handler: block present for a linked chat, absent without a link, absent for a foreign-project idea, truncation reported, and the whole slice degrading without taking bootstrap down.)
+- [x] No horizontal overflow at 375x667; keyboard and screen-reader operable. (`start-work-audit.spec.ts`: `assertNoOverflow` + `assertNoClippedOverflow` on every scene at both viewports, a measured sheet-within-viewport check, Escape closing the sheet and restoring focus to the trigger, and a painted-stacking assertion for the nested picker.)
+- [ ] Verified end-to-end on staging for both profile kinds. **PENDING** — the shared staging slot is queued behind deployments-ui, the comments task, T1 and T2, and this branch cannot be marked ready until T1 is on main.
 
 ## References
 
