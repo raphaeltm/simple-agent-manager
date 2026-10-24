@@ -18,6 +18,29 @@ export type LinkRelation =
   | 'related';
 export type LinkOrigin = 'auto' | 'explicit';
 
+/**
+ * Every relation, in one place.
+ *
+ * `LinkRelation` is the type; this is its runtime enumeration, for the boundaries that have to
+ * reject an unrecognised string (the web client's payload normaliser) and for tests that assert
+ * a per-relation map is complete. `satisfies` keeps it tied to the union: a member added to the
+ * union without being added here is not a compile error, so the exhaustiveness proof is a
+ * `Record<LinkRelation, …>` elsewhere plus a test that compares the two.
+ */
+export const LINK_RELATIONS = [
+  'created',
+  'edited',
+  'read',
+  'works_on',
+  'discusses',
+  'linked',
+  'uploaded',
+  'replaced',
+  'viewed',
+  'opened',
+  'related',
+] as const satisfies readonly LinkRelation[];
+
 export const STRONG_LINK_RELATIONS = [
   'works_on',
   'created',
@@ -32,6 +55,8 @@ export const WEAK_LINK_RELATIONS = [
   'viewed',
   'discusses',
 ] as const satisfies readonly LinkRelation[];
+export const isLinkRelation = (value: unknown): value is LinkRelation =>
+  typeof value === 'string' && (LINK_RELATIONS as readonly string[]).includes(value);
 export const isStrongLinkRelation = (relation: LinkRelation): boolean =>
   (STRONG_LINK_RELATIONS as readonly LinkRelation[]).includes(relation);
 export const isWeakLinkRelation = (relation: LinkRelation): boolean =>

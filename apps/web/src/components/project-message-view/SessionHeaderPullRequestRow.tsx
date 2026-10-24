@@ -13,7 +13,7 @@
  */
 import { GitPullRequest } from 'lucide-react';
 
-import { PullRequestStateBadge } from '../chat/linked-work/PullRequestStateBadge';
+import { PullRequestStateBadge } from '../linked-work';
 import type { SessionState } from './types';
 import { formatCountdown } from './types';
 import type { HeaderPullRequest } from './useSessionLinkedWork';

@@ -5,41 +5,30 @@
  * behaviourally in `tests/unit/components/chat/session-linked-work.test.tsx`,
  * `tests/unit/components/library/file-linked-work.test.tsx` and the Playwright audit.
  */
-import type { LinkedSession, LinkRelation } from '@simple-agent-manager/shared';
+import type { LinkedSession } from '@simple-agent-manager/shared';
+import { isLinkRelation, LINK_RELATIONS } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
-import { normalizeFileContext, normalizeSessionContext } from '../../../src/lib/api/links';
 import {
   describeRelations,
   fileProvenance,
   formatCappedTotal,
-  isKnownLinkRelation,
   LINK_RELATION_LABELS,
   linkedSessionLabel,
   orderFileSessions,
   sortLinkRelations,
-} from '../../../src/lib/linked-work';
+} from '../../../../src/components/linked-work';
+import { normalizeFileContext, normalizeSessionContext } from '../../../../src/lib/api/links';
 
 /**
- * The shared union, restated here on purpose.
+ * The shared runtime enumeration.
  *
  * `LINK_RELATION_LABELS` is typed `Record<LinkRelation, string>`, so a MISSING phrase is a
- * typecheck failure. This list catches the other direction a type cannot: a relation removed
- * from the union leaving a dead phrase, and a phrase that is empty or still a raw enum value.
+ * typecheck failure. Comparing it with `LINK_RELATIONS` catches what the type cannot: a member
+ * added to the union and to the map but not to the enumeration the payload normaliser
+ * validates against, and the reverse.
  */
-const EVERY_RELATION: LinkRelation[] = [
-  'created',
-  'edited',
-  'read',
-  'works_on',
-  'discusses',
-  'linked',
-  'uploaded',
-  'replaced',
-  'viewed',
-  'opened',
-  'related',
-];
+const EVERY_RELATION = [...LINK_RELATIONS];
 
 function session(overrides: Partial<LinkedSession> = {}): LinkedSession {
   return {
@@ -66,9 +55,9 @@ describe('link relation labels', () => {
   });
 
   it('accepts only relations it has a phrase for', () => {
-    for (const relation of EVERY_RELATION) expect(isKnownLinkRelation(relation)).toBe(true);
+    for (const relation of EVERY_RELATION) expect(isLinkRelation(relation)).toBe(true);
     for (const other of ['', 'mentions', 'WORKS_ON', 42, null, undefined, {}]) {
-      expect(isKnownLinkRelation(other)).toBe(false);
+      expect(isLinkRelation(other)).toBe(false);
     }
   });
 

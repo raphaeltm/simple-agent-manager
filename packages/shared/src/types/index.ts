@@ -17,8 +17,10 @@ export type {
   SessionContext,
 } from './links';
 export {
+  isLinkRelation,
   isStrongLinkRelation,
   isWeakLinkRelation,
+  LINK_RELATIONS,
   STRONG_LINK_RELATIONS,
   WEAK_LINK_RELATIONS,
 } from './links';

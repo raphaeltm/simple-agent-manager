@@ -12,10 +12,13 @@ import { FileText, GitPullRequest, Lightbulb, Link2, X } from 'lucide-react';
 import { useRef } from 'react';
 import { createPortal } from 'react-dom';
 
-import { describeRelations, formatCappedTotal } from '../../lib/linked-work';
+import {
+  describeRelations,
+  formatCappedTotal,
+  LinkedWorkRow,
+  PullRequestStateBadge,
+} from '../linked-work';
 import type { SessionLinkedWork } from '../project-message-view/useSessionLinkedWork';
-import { LinkedWorkRow } from './linked-work/LinkedWorkRow';
-import { PullRequestStateBadge } from './linked-work/PullRequestStateBadge';
 import { useDialogFocusTrap } from './useDialogFocusTrap';
 
 const IDEA_ACCENT = 'var(--sam-color-accent-primary)';

@@ -20,15 +20,15 @@ import { ChevronDown, ChevronRight, Lightbulb, Link2, MessageSquare } from 'luci
 import { useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
+import { libraryFileLinksQueryOptions } from '../../lib/query-options';
 import {
   describeRelations,
   fileProvenance,
   formatCappedTotal,
   linkedSessionLabel,
+  LinkedWorkRow,
   orderFileSessions,
-} from '../../lib/linked-work';
-import { libraryFileLinksQueryOptions } from '../../lib/query-options';
-import { LinkedWorkRow } from '../chat/linked-work/LinkedWorkRow';
+} from '../linked-work';
 import { FOCUS_RING } from './types';
 
 const CHAT_ACCENT = 'var(--sam-color-info-fg)';

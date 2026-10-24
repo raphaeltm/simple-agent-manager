@@ -2,9 +2,9 @@
  * Plain words for linked work.
  *
  * SAM stores relations as verbs (`works_on`, `uploaded`, `read`, ...). Users see sentences, so
- * every relation gets one short phrase here and nowhere else — the Related panel, the header
- * chip and the library file strip all read the same map, so they cannot describe the same
- * relation differently (`.claude/rules/24-no-duplicate-ui-controls.md`).
+ * every relation gets one short phrase here and nowhere else — the chat's Related panel, the
+ * header chip, the library file strip and the idea page all read the same map, so they cannot
+ * describe the same relation differently (`.claude/rules/24-no-duplicate-ui-controls.md`).
  *
  * `LINK_RELATION_LABELS` is a `Record<LinkRelation, string>`, so adding a relation to the shared
  * union without giving it a phrase is a typecheck failure rather than a row that renders a raw
@@ -34,13 +34,6 @@ export const LINK_RELATION_LABELS: Record<LinkRelation, string> = {
  * is written strong-first for exactly this reason.
  */
 const RELATION_ORDER = Object.keys(LINK_RELATION_LABELS) as LinkRelation[];
-
-const KNOWN_RELATIONS = new Set<string>(RELATION_ORDER);
-
-/** Relations the UI has a phrase for. An unknown one from a newer API is dropped, not printed. */
-export function isKnownLinkRelation(value: unknown): value is LinkRelation {
-  return typeof value === 'string' && KNOWN_RELATIONS.has(value);
-}
 
 export function sortLinkRelations(relations: readonly LinkRelation[]): LinkRelation[] {
   return [...relations].sort((a, b) => RELATION_ORDER.indexOf(a) - RELATION_ORDER.indexOf(b));

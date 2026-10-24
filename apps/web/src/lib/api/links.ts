@@ -23,8 +23,8 @@ import type {
   PullRequestState,
   SessionContext,
 } from '@simple-agent-manager/shared';
+import { isLinkRelation } from '@simple-agent-manager/shared';
 
-import { isKnownLinkRelation } from '../linked-work';
 import { isJsonRecord, type JsonRecord } from '../runtime-validation';
 import { request } from './client';
 
@@ -51,9 +51,9 @@ function bool(root: JsonRecord, key: string): boolean {
 function relations(root: JsonRecord): LinkRelation[] {
   const raw = root['relations'];
   if (!Array.isArray(raw)) return [];
-  // Deduplicated because the UI renders one phrase per relation; a relation the UI has no
-  // phrase for is dropped rather than printed raw at the user (see `lib/linked-work.ts`).
-  return [...new Set(raw.filter(isKnownLinkRelation))];
+  // Deduplicated because the UI renders one phrase per relation; a string that is not a
+  // relation at all is dropped rather than printed raw at the user.
+  return [...new Set(raw.filter(isLinkRelation))];
 }
 
 /**

@@ -3,8 +3,10 @@
  *
  * This is the Work/Related row from the approved Ideas-redesign design language
  * (library `/engineering/ux-audits/ideas-redesign-2026-10-23/`), so a linked idea reads the
- * same wherever it appears. Both the chat's Related panel and the library file's Linked strip
- * render through it rather than each inventing a row.
+ * same wherever it appears. The chat's Related panel, the library file's Linked strip and the
+ * idea page's Work and Related rows all render through it rather than each inventing a row
+ * (`.claude/rules/24-no-duplicate-ui-controls.md`); it lives outside any one of those
+ * directories so none of them owns it.
  *
  * Every text node clamps and breaks: a 200-character idea title and a 90-character branch-like
  * filename both have to survive a 375px viewport without widening the row
@@ -25,8 +27,18 @@ export interface LinkedWorkRowProps {
   title: string;
   /** The relation in plain words, plus any extra context. Hidden when empty. */
   meta?: string;
+  /**
+   * A second subtitle line, for a row that has an outcome as well as a relation — the idea
+   * page's Work rows use it for "+412 −88, 7 files". Hidden when empty.
+   */
+  secondaryMeta?: ReactNode;
   /** Rendered after the meta line — a PR state pill, for example. */
   trailing?: ReactNode;
+  /**
+   * Right-aligned trailing slot, for a relative time ("2h ago"). Sits above the chevron's
+   * baseline so a wrapping title does not drag it down the row.
+   */
+  timestamp?: ReactNode;
   /** In-app destination. Exactly one of `to` / `href` must be given. */
   to?: string;
   /** External destination (a pull request), opened in a new tab. */
@@ -34,7 +46,15 @@ export interface LinkedWorkRowProps {
   testId?: string;
 }
 
-function RowBody({ icon: Icon, accent, title, meta, trailing }: LinkedWorkRowProps) {
+function RowBody({
+  icon: Icon,
+  accent,
+  title,
+  meta,
+  secondaryMeta,
+  trailing,
+  timestamp,
+}: LinkedWorkRowProps) {
   return (
     <>
       <span
@@ -54,7 +74,17 @@ function RowBody({ icon: Icon, accent, title, meta, trailing }: LinkedWorkRowPro
             {trailing}
           </span>
         )}
+        {secondaryMeta && (
+          <span className="min-w-0 break-words text-[11px] text-fg-muted opacity-80 [overflow-wrap:anywhere]">
+            {secondaryMeta}
+          </span>
+        )}
       </span>
+      {timestamp && (
+        <span className="shrink-0 self-start pt-0.5 text-[11px] tabular-nums text-fg-muted">
+          {timestamp}
+        </span>
+      )}
       <ChevronRight
         size={15}
         aria-hidden="true"
