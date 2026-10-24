@@ -1,0 +1,68 @@
+/**
+ * `LINK_RELATIONS` is the runtime enumeration of the `LinkRelation` union, and `satisfies`
+ * only proves that every listed member IS a relation — not that every relation is listed.
+ * A member added to the union and forgotten here would silently make `isLinkRelation` reject
+ * a relation the server can legitimately send, which the web normaliser then drops from a
+ * link row. This is the exhaustiveness proof the enumeration's comment defers to.
+ */
+import { describe, expect, it } from 'vitest';
+
+import type { LinkRelation } from '../src/types/links';
+import {
+  isLinkRelation,
+  LINK_RELATIONS,
+  STRONG_LINK_RELATIONS,
+  WEAK_LINK_RELATIONS,
+} from '../src/types/links';
+
+/**
+ * The compiler checks this map: a relation added to the union makes this object incomplete
+ * and `pnpm typecheck` fails here, which is what forces the list below to be updated.
+ */
+const EVERY_RELATION: Record<LinkRelation, true> = {
+  created: true,
+  discusses: true,
+  edited: true,
+  linked: true,
+  opened: true,
+  read: true,
+  related: true,
+  replaced: true,
+  uploaded: true,
+  viewed: true,
+  works_on: true,
+};
+
+describe('LINK_RELATIONS', () => {
+  it('lists every member of the LinkRelation union', () => {
+    expect([...LINK_RELATIONS].sort()).toEqual(Object.keys(EVERY_RELATION).sort());
+  });
+
+  it('has no duplicates', () => {
+    expect(new Set(LINK_RELATIONS).size).toBe(LINK_RELATIONS.length);
+  });
+
+  it('covers both strength classes, and every relation is in at most one of them', () => {
+    for (const relation of [...STRONG_LINK_RELATIONS, ...WEAK_LINK_RELATIONS]) {
+      expect(LINK_RELATIONS).toContain(relation);
+    }
+    const overlap = (STRONG_LINK_RELATIONS as readonly string[]).filter((relation) =>
+      (WEAK_LINK_RELATIONS as readonly string[]).includes(relation)
+    );
+    expect(overlap).toEqual([]);
+  });
+});
+
+describe('isLinkRelation', () => {
+  it('accepts every relation', () => {
+    for (const relation of LINK_RELATIONS) {
+      expect(isLinkRelation(relation)).toBe(true);
+    }
+  });
+
+  it('rejects anything else a JSON payload could carry', () => {
+    for (const value of ['', 'WORKS_ON', 'works-on', 'nonsense', 0, null, undefined, {}, []]) {
+      expect(isLinkRelation(value)).toBe(false);
+    }
+  });
+});

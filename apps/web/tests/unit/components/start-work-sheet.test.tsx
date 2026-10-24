@@ -30,8 +30,14 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getProfilePickerState: mocks.getProfilePickerState,
   updateProfilePicker: mocks.updateProfilePicker,
   listSkills: mocks.listSkills,
-  getIdeaLinks: mocks.getIdeaLinks,
   submitTask: mocks.submitTask,
+}));
+
+// `query-options/links.ts` imports the client module directly, as T4's chat and library
+// surfaces do, so the barrel mock above would not intercept this one.
+vi.mock('../../../src/lib/api/links', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/links')>()),
+  getIdeaLinks: mocks.getIdeaLinks,
 }));
 
 vi.mock('react-router', async () => {

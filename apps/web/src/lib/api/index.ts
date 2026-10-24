@@ -385,7 +385,7 @@ export {
   updateFileTags,
   uploadLibraryFile,
 } from './library';
-export { getIdeaLinks } from './links';
+export { emptyCappedList, getIdeaLinks, normalizeIdeaContext } from './links';
 export {
   emptyCappedList,
   getLibraryFileLinks,
