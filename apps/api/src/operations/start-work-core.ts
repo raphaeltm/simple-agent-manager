@@ -13,20 +13,8 @@ import { workStartRelationFor } from '@simple-agent-manager/shared';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
+import { ideaTaskPredicateSql } from './idea-identity';
 import { recordLink } from './link-core';
-
-/**
- * An idea is a `tasks` row with `status = 'draft'` (Linked work program decision 1).
- *
- * TODO(T3 rebase): T3 exports `ideaTaskPredicateSql(alias)` from `operations/idea-core.ts`
- * and T8 later widens it to `(status = 'draft' OR is_idea = 1)`. Neither is on this
- * branch's base yet, so this is the single definition T7 uses; delete it and import
- * theirs once T3 is on main. Keep exactly one definition either way (program decision 8).
- */
-export function ideaTaskPredicateSql(alias = 'tasks'): string {
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) throw new Error(`Invalid SQL alias: ${alias}`);
-  return `${alias}.status = 'draft'`;
-}
 
 /** The status an open idea holds. Start work is only offered for an open idea. */
 const OPEN_IDEA_STATUS = 'draft';

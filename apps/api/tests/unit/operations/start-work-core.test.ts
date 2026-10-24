@@ -13,9 +13,9 @@ vi.mock('../../../src/operations/link-core', () => ({ recordLink: recordLinkMock
 
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
+import { ideaTaskPredicateSql } from '../../../src/operations/idea-identity';
 import {
   classifyWorkStartIdea,
-  ideaTaskPredicateSql,
   recordWorkStartIdeaLink,
   requireOpenIdeaForWorkStart,
 } from '../../../src/operations/start-work-core';
@@ -152,14 +152,20 @@ describe('classifyWorkStartIdea', () => {
   });
 });
 
+// `ideaTaskPredicateSql` is T3's (`operations/idea-identity.ts`) and T8 widens it, but it is
+// interpolated straight into this module's admission SQL, so its alias guard is covered here —
+// it had no test of its own when T7 rebased onto it.
 describe('ideaTaskPredicateSql', () => {
   it('qualifies the predicate with the caller supplied alias', () => {
     expect(ideaTaskPredicateSql()).toBe("tasks.status = 'draft'");
     expect(ideaTaskPredicateSql('t')).toBe("t.status = 'draft'");
   });
 
-  it('rejects an alias that is not a plain identifier', () => {
-    expect(() => ideaTaskPredicateSql("t' OR 1=1 --")).toThrow(/Invalid SQL alias/);
+  it('rejects an alias that is not a plain identifier, so it cannot carry injected SQL', () => {
+    expect(() => ideaTaskPredicateSql("t' OR 1=1 --")).toThrow(/Invalid SQL table alias/);
+    expect(() => ideaTaskPredicateSql('tasks; DROP TABLE tasks')).toThrow(
+      /Invalid SQL table alias/
+    );
   });
 });
 
