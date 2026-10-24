@@ -99,6 +99,23 @@ export const SAM_STREAM_MAX_RECONNECTS = resolvePositiveInteger(
   DEFAULT_SAM_STREAM_MAX_RECONNECTS
 );
 
+/**
+ * Ideas list refresh. An idea's state is derived from its linked work, so it changes without
+ * anyone touching the page: a chat starts, a pull request opens, an agent asks something.
+ */
+export const DEFAULT_IDEAS_POLL_MS = 30_000;
+export const IDEAS_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_IDEAS_POLL_MS,
+  DEFAULT_IDEAS_POLL_MS
+);
+
+/** One idea's page. Faster than the list, because this is the idea you are watching. */
+export const DEFAULT_IDEA_DETAIL_POLL_MS = 15_000;
+export const IDEA_DETAIL_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_IDEA_DETAIL_POLL_MS,
+  DEFAULT_IDEA_DETAIL_POLL_MS
+);
+
 /** Node detail refresh (node record + its workspace list). */
 const DEFAULT_NODE_DETAIL_POLL_MS = 10_000;
 export const NODE_DETAIL_POLL_MS = resolveIntervalMs(

@@ -304,9 +304,11 @@ export async function runPlatformFeedbackTriage(
       const isoNow = new Date(now).toISOString();
       const committed = await env.DATABASE.batch([
         env.DATABASE.prepare(
-          `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority,
-          task_mode, dispatch_depth, created_by, created_at, updated_at)
-          SELECT ?, ?, ?, ?, ?, 'draft', 0, 'task', 0, ?, ?, ?
+          // `is_idea = 1` so the Ideas list can find it; `triggered_by = 'incident'` so it
+          // folds into "Filed by agents" rather than crowding the ideas people wrote.
+          `INSERT INTO tasks (id, project_id, user_id, title, description, status, is_idea, priority,
+          task_mode, dispatch_depth, created_by, created_at, updated_at, triggered_by)
+          SELECT ?, ?, ?, ?, ?, 'draft', 1, 0, 'task', 0, ?, ?, ?, 'incident'
           WHERE EXISTS (SELECT 1 FROM platform_feedback_triages
           WHERE signature = ? AND claim_token = ? AND idea_id IS NULL)`
         ).bind(

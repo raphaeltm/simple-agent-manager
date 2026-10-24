@@ -89,7 +89,7 @@ describe('shared platform operation authorization on real SQLite', () => {
     member.run(otherProjectId, ownerId, 'owner', 'active');
     sqlite
       .prepare(
-        'INSERT INTO tasks (id, project_id, user_id, title, description, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO tasks (id, project_id, user_id, title, description, status, is_idea, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)'
       )
       .run(
         'idea-owner',
@@ -104,7 +104,7 @@ describe('shared platform operation authorization on real SQLite', () => {
       );
     sqlite
       .prepare(
-        'INSERT INTO tasks (id, project_id, user_id, title, description, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO tasks (id, project_id, user_id, title, description, status, is_idea, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)'
       )
       .run(
         'idea-other',

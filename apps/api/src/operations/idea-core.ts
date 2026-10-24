@@ -7,8 +7,10 @@ import { ulid } from '../lib/ulid';
 import { operationLink } from './connector-read-core';
 import { formatOperationCursor, readOperationCursor } from './cursors';
 import { OperationError } from './errors';
+export { ideaTaskPredicateSql, isIdeaRow } from './idea-identity';
+import { ideaTaskPredicateSql, isIdeaRow } from './idea-identity';
+import { isIdeaStatus, validateIdeaStatusTransition } from './idea-transitions';
 import { addIdeaUpdate, validateIdeaUpdateNote } from './idea-update-core';
-export { ideaTaskPredicateSql } from './idea-identity';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 
@@ -84,6 +86,9 @@ export async function searchIdeas(ctx: OperationContext, input: IdeasSearchInput
     conditions.push('project_id = ?');
     params.push(ctx.actor.workspace.projectId);
   }
+  // Ideas only, by the one shared definition. The status filter stays because it is what
+  // callers pass; it narrows ideas rather than defining them.
+  conditions.push(ideaTaskPredicateSql());
   conditions.push('status = ?');
   params.push(input.status?.trim() || 'draft');
   if (normalizedQuery)
@@ -167,7 +172,8 @@ export async function getIdea(ctx: OperationContext, projectId: string, ideaId: 
   const id = typeof ideaId === 'string' ? ideaId.trim() : '';
   if (!id) throw new OperationError('invalid_input', 'ideaId is required');
   const idea = await ctx.env.DATABASE.prepare(
-    'SELECT id, triggered_by, connector_client_name, title, description, status, priority, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ?'
+    `SELECT id, triggered_by, connector_client_name, title, description, status, priority, created_at, updated_at
+       FROM tasks WHERE id = ? AND project_id = ? AND ${ideaTaskPredicateSql()}`
   )
     .bind(id, projectId)
     .first<{
@@ -222,8 +228,8 @@ export function prepareIdeaCreate(ctx: OperationContext, input: IdeaCreateInput)
     const ideaId = ulid();
     const now = new Date().toISOString();
     await ctx.env.DATABASE.prepare(
-      `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority, task_mode, dispatch_depth, created_by, created_at, updated_at, triggered_by, connector_client_name)
-     VALUES (?, ?, ?, ?, ?, 'draft', ?, 'task', 0, ?, ?, ?, ?, ?)`
+      `INSERT INTO tasks (id, project_id, user_id, title, description, status, is_idea, priority, task_mode, dispatch_depth, created_by, created_at, updated_at, triggered_by, connector_client_name)
+     VALUES (?, ?, ?, ?, ?, 'draft', 1, ?, 'task', 0, ?, ?, ?, ?, ?)`
     )
       .bind(
         ideaId,
@@ -276,21 +282,6 @@ export function prepareIdeaCreate(ctx: OperationContext, input: IdeaCreateInput)
 
 export async function createIdea(ctx: OperationContext, input: IdeaCreateInput) {
   return prepareIdeaCreate(ctx, input)();
-}
-
-const IDEA_STATUS_TRANSITIONS: Record<string, string[]> = {
-  draft: ['ready', 'cancelled'],
-  ready: ['draft', 'completed', 'cancelled'],
-};
-export function validateIdeaStatusTransition(
-  currentStatus: string,
-  newStatus: string
-): string | null {
-  const allowed = IDEA_STATUS_TRANSITIONS[currentStatus];
-  if (!allowed) return `Cannot update idea in terminal status '${currentStatus}'`;
-  if (!allowed.includes(newStatus))
-    return `Invalid status transition: ${currentStatus} → ${newStatus}. Allowed: ${allowed.join(', ')}`;
-  return null;
 }
 
 async function prepareIdeaNoteUpdate(
@@ -351,7 +342,7 @@ export async function prepareIdeaUpdate(
   const ideaId = typeof input.ideaId === 'string' ? input.ideaId.trim() : '';
   if (!ideaId) throw new OperationError('invalid_input', 'ideaId is required');
   const existing = await ctx.env.DATABASE.prepare(
-    'SELECT id, title, description, status, priority FROM tasks WHERE id = ? AND project_id = ?'
+    'SELECT id, title, description, status, priority, is_idea FROM tasks WHERE id = ? AND project_id = ?'
   )
     .bind(ideaId, input.projectId)
     .first<{
@@ -360,15 +351,16 @@ export async function prepareIdeaUpdate(
       description: string | null;
       status: string;
       priority: number;
+      is_idea: number | null;
     }>();
-  if (!existing) throw new OperationError('not_found', `Idea not found in this project: ${ideaId}`);
+  // Not an idea reads as not found, like every other idea lookup: an ordinary task is not
+  // something `update_idea` may retitle, reprioritise or reopen.
+  if (!existing || !isIdeaRow(existing))
+    throw new OperationError('not_found', `Idea not found in this project: ${ideaId}`);
   const noteUpdate = await prepareIdeaNoteUpdate(ctx, input, ideaId);
   if (noteUpdate) return noteUpdate;
-  if (!(existing.status in IDEA_STATUS_TRANSITIONS))
-    throw new OperationError(
-      'conflict',
-      `Cannot update idea in terminal status '${existing.status}'`
-    );
+  if (!isIdeaStatus(existing.status))
+    throw new OperationError('conflict', `Not an idea status: '${existing.status}'`);
   const updates: string[] = [];
   const bindValues: unknown[] = [];
   let statusTransition: { from: string; to: string } | null = null;
@@ -404,7 +396,7 @@ export async function prepareIdeaUpdate(
     const now = new Date().toISOString();
     bindValues.push(now, ideaId, input.projectId);
     const statement = ctx.env.DATABASE.prepare(
-      `UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND project_id = ?`
+      `UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND project_id = ? AND ${ideaTaskPredicateSql()}`
     ).bind(...bindValues);
     if (statusTransition) {
       const event = ctx.env.DATABASE.prepare(

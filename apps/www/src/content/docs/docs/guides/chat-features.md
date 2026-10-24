@@ -163,7 +163,7 @@ permission, but not ask questions or send links. Which you get depends on what y
 
 - An [agent profile](/docs/guides/agents/#agent-profiles) whose runtime is
   [Instant](/docs/guides/instant-sessions/) gives a **Chat** (unless you attach a file or start from
-  an idea's **Execute** button, and also pick a skill set to **Task**).
+  an idea's **Start work** button, and also pick a skill set to **Task**).
 - On a VM, a profile whose **Task Mode** is **Conversation** gives a **Chat**; profiles you create
   with **Chat and explore** in the chat input are set that way. With **Task Mode** left at
   **Default**, a profile whose **Workspace Profile** is **Lightweight** does too. If you also pick a

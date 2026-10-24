@@ -19,6 +19,8 @@ function setup() {
     CREATE TABLE projects (id TEXT PRIMARY KEY, user_id TEXT NOT NULL);
     CREATE TABLE tasks (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, user_id TEXT NOT NULL,
       title TEXT NOT NULL, description TEXT, status TEXT NOT NULL, priority INTEGER NOT NULL,
+      is_idea INTEGER NOT NULL DEFAULT 0,
+      triggered_by TEXT,
       task_mode TEXT NOT NULL, dispatch_depth INTEGER NOT NULL, created_by TEXT NOT NULL,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL, output_pr_url TEXT);
     CREATE TABLE nodes (id TEXT PRIMARY KEY, agent_version TEXT);

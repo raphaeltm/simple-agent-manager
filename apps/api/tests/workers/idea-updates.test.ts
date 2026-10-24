@@ -34,6 +34,9 @@ const idea = `idea-${suffix}`;
 const foreignIdea = `foreign-idea-${suffix}`;
 const ordinaryTask = `ordinary-task-${suffix}`;
 const readyTask = `ready-task-${suffix}`;
+const draftTask = `draft-task-${suffix}`;
+const doneIdea = `done-idea-${suffix}`;
+const parkedIdea = `parked-idea-${suffix}`;
 const workspace = `idea-workspace-${suffix}`;
 const session = `idea-session-${suffix}`;
 const agentSession = `idea-agent-${suffix}`;
@@ -67,10 +70,16 @@ beforeAll(async () => {
   )
     .bind(project, viewer)
     .run();
-  await seedTask(idea, project, owner, { status: 'draft' });
-  await seedTask(foreignIdea, foreignProject, owner, { status: 'draft' });
+  await seedTask(idea, project, owner, { status: 'draft', isIdea: true });
+  await seedTask(foreignIdea, foreignProject, owner, { status: 'draft', isIdea: true });
   await seedTask(ordinaryTask, project, owner, { status: 'delegated' });
   await seedTask(readyTask, project, owner, { status: 'ready' });
+  // The case `is_idea` exists for on this path: every ordinary task is created in `draft`
+  // (`routes/tasks/crud.ts`), so status alone cannot say whether notes may attach to it.
+  await seedTask(draftTask, project, owner, { status: 'draft' });
+  // And the widening: a finished idea is still an idea, so it still takes notes.
+  await seedTask(doneIdea, project, owner, { status: 'completed', isIdea: true });
+  await seedTask(parkedIdea, project, owner, { status: 'cancelled', isIdea: true });
   await env.DATABASE.prepare('UPDATE tasks SET description = ? WHERE id = ?')
     .bind('Current plan', idea)
     .run();
@@ -91,18 +100,35 @@ describe('idea updates through real D1 and ProjectData SQLite', () => {
     expect(created.update.body).toBe('owner control');
   });
 
-  it('does not attach notes to ordinary tasks', async () => {
+  it.each([
+    ['delegated', () => ordinaryTask],
+    ['ready', () => readyTask],
+    // The one status alone cannot distinguish: an idea and a brand-new ordinary task are
+    // both `draft`, which is why the predicate is the flag and not the status.
+    ['draft', () => draftTask],
+  ])('does not attach notes to an ordinary %s task', async (_status, taskId) => {
     await expect(
-      addIdeaUpdate(ownerContext, { projectId: project, ideaId: ordinaryTask, body: 'not an idea' })
+      addIdeaUpdate(ownerContext, { projectId: project, ideaId: taskId(), body: 'not an idea' })
     ).rejects.toMatchObject({ code: 'not_found' } satisfies Partial<OperationError>);
-    await expect(
-      addIdeaUpdate(ownerContext, { projectId: project, ideaId: readyTask, body: 'not an idea' })
-    ).rejects.toMatchObject({ code: 'not_found' } satisfies Partial<OperationError>);
+  });
+
+  // The owner control for the three above, and the widening T3 asked for on the channel: a
+  // finished idea is still an idea, so an agent can still add to its timeline.
+  it.each([
+    ['done', () => doneIdea],
+    ['parked', () => parkedIdea],
+  ])('still attaches notes to a %s idea', async (_state, ideaId) => {
+    const created = await addIdeaUpdate(ownerContext, {
+      projectId: project,
+      ideaId: ideaId(),
+      body: 'still worth saying',
+    });
+    expect(created.update.body).toBe('still worth saying');
   });
 
   it('pages newest first, soft deletes, and limits delete to author or project admin', async () => {
     const deleteIdea = `delete-idea-${suffix}`;
-    await seedTask(deleteIdea, project, owner, { status: 'draft' });
+    await seedTask(deleteIdea, project, owner, { status: 'draft', isIdea: true });
     const first = await addIdeaUpdate(ownerContext, {
       projectId: project,
       ideaId: deleteIdea,
@@ -139,7 +165,7 @@ describe('idea updates through real D1 and ProjectData SQLite', () => {
 
   it('returns a stable cursor across multiple pages', async () => {
     const pageIdea = `page-idea-${suffix}`;
-    await seedTask(pageIdea, project, owner, { status: 'draft' });
+    await seedTask(pageIdea, project, owner, { status: 'draft', isIdea: true });
     const inserted = [];
     for (let i = 0; i < 32; i++) {
       inserted.push(
@@ -246,7 +272,7 @@ describe('idea updates through real D1 and ProjectData SQLite', () => {
 
   it('exposes note writes and lists through connector operations', async () => {
     const connectorIdea = `connector-idea-${suffix}`;
-    await seedTask(connectorIdea, project, owner, { status: 'draft' });
+    await seedTask(connectorIdea, project, owner, { status: 'draft', isIdea: true });
     const connectorContext: OperationContext = {
       env: testEnv,
       requestId: 'connector-test',
