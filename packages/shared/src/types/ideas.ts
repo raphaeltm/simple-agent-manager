@@ -9,6 +9,7 @@
  * Nothing here is user-facing copy. The API returns the state and the evidence; the words and
  * the buttons belong to the UI, so the contract does not have to change to reword a sentence.
  */
+import type { PullRequestRef, PullRequestState } from './pull-requests';
 
 /** Where an idea stands. Derived, except `done` and `parked`. */
 export type IdeaDerivedState =
@@ -67,19 +68,17 @@ export interface IdeaStatusSession {
   lastActivityAt: string | null;
 }
 
-/** A pull request for an idea, with the stored state T2 keeps for it. */
-export interface IdeaPullRequestSummary {
-  url: string;
-  number: number;
-  state: 'open' | 'closed' | 'merged';
-  isDraft: boolean;
-  title: string | null;
-  checksState: 'pending' | 'success' | 'failure' | 'neutral' | null;
-  mergedAt: string | null;
-  updatedAt: string | null;
-  /** True when the stored state has not been refreshed from GitHub recently. */
-  stale: boolean;
-}
+/**
+ * A pull request for an idea: the reference and the state the platform stores for it.
+ *
+ * Both halves are defined once, in `pull-requests.ts`, and this composes them rather than
+ * restating their fields — a second copy of `state` or `checksState` would be a second thing
+ * to keep in step with GitHub's vocabulary (program decision 2).
+ *
+ * The state is always known here, because a pull request whose state has not been stored yet
+ * cannot move an idea to `review` or `merged` and is left out of the derivation.
+ */
+export interface IdeaPullRequest extends PullRequestRef, PullRequestState {}
 
 export interface IdeaDerivedStatus {
   state: IdeaDerivedState;
@@ -89,7 +88,7 @@ export interface IdeaDerivedStatus {
   /** The chat behind `working`, `question` and `stuck`. */
   session: IdeaStatusSession | null;
   /** The pull request behind `review` and `merged`. */
-  pullRequest: IdeaPullRequestSummary | null;
+  pullRequest: IdeaPullRequest | null;
   /**
    * The agent's question (`question`) or the failure it reported (`stuck`), truncated by the
    * server. Null for every other state.
@@ -97,12 +96,24 @@ export interface IdeaDerivedStatus {
   note: string | null;
 }
 
-/** What an idea has collected. Counts, not lists: the list page shows "4 updates, 2 chats". */
+/** The things an idea has collected that it can only establish a minimum for. */
+export const IDEA_COUNT_KINDS = ['updates', 'chats', 'files', 'pullRequests'] as const;
+export type IdeaCountKind = (typeof IDEA_COUNT_KINDS)[number];
+
+/**
+ * What an idea has collected. Counts, not lists: the list page shows "4 updates, 2 chats".
+ *
+ * The list reads links in one bounded batch, so a very busy idea can hit the per-idea cap.
+ * `atLeast` names every count that was capped, and the UI writes those as "50+" rather than
+ * claiming a number it did not finish counting (program decision 9, rule 65). It is normally
+ * empty: `updates` is an exact `COUNT(*)`, and the cap is well above what an idea collects.
+ */
 export interface IdeaCounts {
   updates: number;
   chats: number;
   files: number;
   pullRequests: number;
+  atLeast: IdeaCountKind[];
 }
 
 export interface IdeaListItem {

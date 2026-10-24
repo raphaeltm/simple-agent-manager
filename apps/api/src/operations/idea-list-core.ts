@@ -9,11 +9,13 @@
  *   1. the open ideas (D1)
  *   2. the recently finished and parked ideas (D1)
  *   3. how many ideas exist in each status, so a capped page can say what it dropped (D1)
- *   4. the chats and unanswered questions linked to all of them (one ProjectData RPC)
- *   5. those chats' tasks (D1)
- *   6. the pull requests recorded against those tasks (D1)
- *   7. the agent profile names for those tasks (D1)
- *   8. the stored state of those pull requests (T2's operation, injected by the caller)
+ *   4. the link caps, and the project's repository (admin settings, D1)
+ *   5. the chats, questions, files, pull requests and note counts linked to all of them
+ *      (one ProjectData RPC, which reads the link store through T1's links module)
+ *   6. those chats' tasks (D1)
+ *   7. the pull requests recorded against those tasks (D1)
+ *   8. the agent profile names for those tasks (D1)
+ *   9. the stored state of every pull request found (T2's `getPullRequestStates`)
  *
  * Open ideas are read separately from finished ones on purpose. A single
  * `ORDER BY updated_at DESC LIMIT n` ranks by recency, which has nothing to do with what the
@@ -22,12 +24,17 @@
  * returned, so the page can say what it is not showing.
  */
 import type {
+  IdeaCountKind,
   IdeaCounts,
   IdeaDerivedStatus,
   IdeaListItem,
-  IdeaPullRequestSummary,
+  IdeaPullRequest,
+  PullRequestRef,
 } from '@simple-agent-manager/shared';
+import type { LinkRelation } from '@simple-agent-manager/shared';
+import { canonicalProjectPullRequestUrl } from '@simple-agent-manager/shared';
 
+import type { IdeaWorkSnapshot } from '../durable-objects/project-data/idea-work';
 import { log } from '../lib/logger';
 import * as projectDataService from '../services/project-data';
 import { OperationError } from './errors';
@@ -39,30 +46,32 @@ import {
   type IdeaListTotals,
   type IdeaRow,
   ideaSummary,
+  pullRequestNumber,
   readAgentProfileNames,
   readAssociatedPullRequests,
   readIdeaRow,
   readIdeaRows,
   readIdeaTotals,
+  readIdeaWorkLinkCaps,
+  readProjectRepository,
   readSessionTasks,
   type SessionTaskRow,
   viaConnector,
 } from './idea-list-reads';
 import { deriveIdeaStatus, type IdeaStatusLinkedSession } from './idea-status';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
+import { getPullRequestStates } from './pull-request-core';
 import type { OperationContext } from './types';
 
 /**
- * Reads the stored state of pull requests, keyed by URL. Supplied by the caller so pull
- * request state has one implementation with one owner: T2's `getPullRequestStates`
- * (`operations/pull-request-core.ts`). A URL with no stored state maps to `null`, and an idea
- * whose pull requests are all unknown simply cannot reach `review` or `merged`.
+ * Whether this read may ask GitHub for pull request state it has not stored.
+ *
+ * `'none'` reads what T2 has stored and nothing else. `'single'` lets T2 schedule one bounded
+ * background refresh through `ctx.execCtx.waitUntil` (program decision 4) — only the
+ * single-idea read uses it, because a whole list page would be one GitHub call per pull
+ * request in the project.
  */
-export type IdeaPullRequestStateReader = (
-  urls: readonly string[]
-) => Promise<Record<string, IdeaPullRequestSummary | null>>;
-
-const noPullRequestState: IdeaPullRequestStateReader = async () => ({});
+export type IdeaPullRequestRefresh = 'none' | 'single';
 
 export interface ListIdeasResult {
   items: IdeaListItem[];
@@ -74,7 +83,6 @@ export interface ListIdeasInput {
   projectId: string;
   openLimit?: number;
   closedLimit?: number;
-  readPullRequestStates?: IdeaPullRequestStateReader;
 }
 
 export interface IdeaDetailResult {
@@ -94,17 +102,17 @@ export interface IdeaDetailResult {
   /** Every chat linked to the idea, newest activity first. */
   sessions: IdeaStatusLinkedSession[];
   /** Every pull request recorded for the idea whose state is known. */
-  pullRequests: IdeaPullRequestSummary[];
+  pullRequests: IdeaPullRequest[];
 }
 
 interface IdeaEvidence {
   sessions: IdeaStatusLinkedSession[];
-  pullRequests: IdeaPullRequestSummary[];
-  pullRequestUrls: string[];
+  pullRequests: IdeaPullRequest[];
+  pullRequestRefs: PullRequestRef[];
 }
 
 function emptyEvidence(): IdeaEvidence {
-  return { sessions: [], pullRequests: [], pullRequestUrls: [] };
+  return { sessions: [], pullRequests: [], pullRequestRefs: [] };
 }
 
 function toLinkedSession(
@@ -114,6 +122,8 @@ function toLinkedSession(
     sessionStatus: string;
     sessionTaskId: string | null;
     lastActivityAt: number | null;
+    relations: LinkRelation[];
+    strong: boolean;
   },
   task: SessionTaskRow | undefined,
   agentLabel: string | null,
@@ -122,12 +132,11 @@ function toLinkedSession(
   return {
     sessionId: session.sessionId,
     topic: session.topic,
-    // Every link that exists today is a strong one: `chat_session_ideas` rows are written only
-    // by `link_idea` and by the browser after starting work, both of which mean "this chat
-    // works on this idea". T1's generic link store adds weak relations (`read`, `viewed`,
-    // `discusses`); at that point this is read from the link row instead of assumed. The
-    // derivation already ignores weak links, and a test pins that.
-    strong: true,
+    // Strength comes from the link rows themselves. Before T1's link store every link meant
+    // "works on", so this could be assumed; now a chat that only read or discussed an idea
+    // is linked to it too, and must not be able to move it (the program's strength rules).
+    relations: session.relations,
+    strong: session.strong,
     sessionStatus: session.sessionStatus,
     taskId: session.sessionTaskId,
     taskStatus: task?.status ?? null,
@@ -138,27 +147,59 @@ function toLinkedSession(
   };
 }
 
+/**
+ * A pull request reference, canonicalized against the project's repository.
+ *
+ * `canonicalProjectPullRequestUrl` is T2's canonicalizer (program decision 3): it rejects
+ * other hosts and other repositories, and collapses the same pull request reached through
+ * three different sources to one URL. A reference that does not canonicalize is dropped —
+ * it is not a pull request in this project.
+ */
+function toRef(
+  rawUrl: string,
+  repository: string,
+  source: PullRequestRef['source']
+): PullRequestRef | null {
+  const url = canonicalProjectPullRequestUrl(rawUrl, repository);
+  if (!url) return null;
+  const number = pullRequestNumber(url);
+  if (number === null) return null;
+  return { url, number, source };
+}
+
+interface CollectedEvidence {
+  evidence: Map<string, IdeaEvidence>;
+  /** The raw link snapshots, which carry the counts and what a cap truncated. */
+  snapshots: Record<string, IdeaWorkSnapshot>;
+}
+
 /** Collects the evidence for every idea in `rows`, in a fixed number of round trips. */
 async function collectEvidence(
   ctx: OperationContext,
   projectId: string,
   rows: readonly IdeaRow[],
-  readPullRequestStates: IdeaPullRequestStateReader
-): Promise<Map<string, IdeaEvidence>> {
+  refresh: IdeaPullRequestRefresh
+): Promise<CollectedEvidence> {
   const evidence = new Map<string, IdeaEvidence>();
   for (const row of rows) evidence.set(row.id, emptyEvidence());
-  if (rows.length === 0) return evidence;
+  if (rows.length === 0) return { evidence, snapshots: {} };
+
+  const [caps, repository] = await Promise.all([
+    readIdeaWorkLinkCaps(ctx),
+    readProjectRepository(ctx, projectId),
+  ]);
 
   const snapshots = await projectDataService.getIdeaWorkSnapshots(
     ctx.env,
     projectId,
-    rows.map((row) => row.id)
+    rows.map((row) => row.id),
+    caps
   );
 
   const sessionTaskIds: string[] = [];
   for (const snapshot of Object.values(snapshots)) {
     for (const session of snapshot.sessions) {
-      if (session.sessionTaskId) sessionTaskIds.push(session.sessionTaskId);
+      if (session.strong && session.sessionTaskId) sessionTaskIds.push(session.sessionTaskId);
     }
   }
 
@@ -180,7 +221,7 @@ async function collectEvidence(
       : new Map<string, string>();
 
   // Every pull request URL any of these ideas touches, asked for once.
-  const allUrls = new Set<string>();
+  const allRefs = new Map<string, PullRequestRef>();
   for (const row of rows) {
     const snapshot = snapshots[row.id];
     const entry = evidence.get(row.id);
@@ -202,48 +243,71 @@ async function collectEvidence(
           marker ? { question: marker.question, askedAt: marker.askedAt } : null
         )
       );
-      const urls = [
-        ...(task?.output_pr_url ? [task.output_pr_url] : []),
-        ...(session.sessionTaskId ? (associations.get(session.sessionTaskId) ?? []) : []),
-      ];
-      for (const url of urls) {
-        if (!entry.pullRequestUrls.includes(url)) entry.pullRequestUrls.push(url);
-        allUrls.add(url);
+    }
+    // What the idea owns: pull requests its strong chats' tasks produced, and the ones the
+    // link store records against the idea or those chats. A weak link contributes nothing.
+    const strongTaskIds = new Set(
+      snapshot.sessions
+        .filter((session) => session.strong && session.sessionTaskId)
+        .map((session) => session.sessionTaskId as string)
+    );
+    const candidates: Array<[string, PullRequestRef['source']]> = [];
+    for (const taskId of strongTaskIds) {
+      const task = tasks.get(taskId);
+      if (task?.output_pr_url) candidates.push([task.output_pr_url, 'task_output']);
+      for (const url of associations.get(taskId) ?? []) candidates.push([url, 'pr_association']);
+    }
+    for (const url of snapshot.pullRequestUrls) candidates.push([url, 'explicit_link']);
+    for (const [rawUrl, source] of candidates) {
+      const ref = toRef(rawUrl, repository, source);
+      if (!ref) continue;
+      if (!entry.pullRequestRefs.some((existing) => existing.url === ref.url)) {
+        entry.pullRequestRefs.push(ref);
       }
+      if (!allRefs.has(ref.url)) allRefs.set(ref.url, ref);
     }
   }
 
-  if (allUrls.size === 0) return evidence;
+  if (allRefs.size === 0) return { evidence, snapshots };
 
-  let states: Record<string, IdeaPullRequestSummary | null> = {};
+  let states: Awaited<ReturnType<typeof getPullRequestStates>> = {};
   try {
-    states = await readPullRequestStates([...allUrls]);
+    states = await getPullRequestStates(
+      ctx,
+      projectId,
+      [...allRefs.values()],
+      refresh === 'single' ? { refresh: 'single' } : {}
+    );
   } catch (error) {
     // Unknown pull request state degrades the derived status to what the chats alone say.
     // It must never fail the whole list.
     log.warn('ideas.pull_request_state_unavailable', {
       projectId,
-      urlCount: allUrls.size,
+      urlCount: allRefs.size,
       error: error instanceof Error ? error.message : String(error),
     });
   }
   for (const entry of evidence.values()) {
-    for (const url of entry.pullRequestUrls) {
-      const state = states[url];
-      if (state) entry.pullRequests.push(state);
+    for (const ref of entry.pullRequestRefs) {
+      const state = states[ref.url];
+      if (state) entry.pullRequests.push({ ...ref, ...state });
     }
   }
 
-  return evidence;
+  return { evidence, snapshots };
 }
 
-function countsFor(entry: IdeaEvidence, updates: number): IdeaCounts {
+function countsFor(entry: IdeaEvidence, snapshot: IdeaWorkSnapshot | undefined): IdeaCounts {
+  const atLeast: IdeaCountKind[] = [];
+  if (snapshot?.truncated.sessions) atLeast.push('chats');
+  if (snapshot?.truncated.files) atLeast.push('files');
+  if (snapshot?.truncated.pullRequests) atLeast.push('pullRequests');
   return {
-    updates,
+    updates: snapshot?.updates ?? 0,
     chats: entry.sessions.length,
-    // Files arrive with T1's link store; until then an idea has no file links to count.
-    files: 0,
-    pullRequests: entry.pullRequestUrls.length,
+    files: snapshot?.fileIds.length ?? 0,
+    pullRequests: entry.pullRequestRefs.length,
+    atLeast,
   };
 }
 
@@ -283,12 +347,7 @@ export async function listIdeasWithDerivedStatus(
   const truncated = openRows.length > openLimit || closedRows.length > closedLimit;
   const rows = [...openRows.slice(0, openLimit), ...closedRows.slice(0, closedLimit)];
 
-  const evidence = await collectEvidence(
-    ctx,
-    input.projectId,
-    rows,
-    input.readPullRequestStates ?? noPullRequestState
-  );
+  const { evidence, snapshots } = await collectEvidence(ctx, input.projectId, rows, 'none');
 
   const items = rows.map((row) => {
     const entry = evidence.get(row.id) ?? emptyEvidence();
@@ -299,7 +358,7 @@ export async function listIdeasWithDerivedStatus(
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       derived: derivedFor(row, entry),
-      counts: countsFor(entry, 0),
+      counts: countsFor(entry, snapshots[row.id]),
       filedByAgent: filedByAgent(row),
       filedBy: filedByLabel(row),
       viaConnector: viaConnector(row),
@@ -311,7 +370,8 @@ export async function listIdeasWithDerivedStatus(
 export interface GetIdeaInput {
   projectId: string;
   ideaId: string;
-  readPullRequestStates?: IdeaPullRequestStateReader;
+  /** Defaults to `'none'`; the single-idea route passes `'single'`. */
+  refresh?: IdeaPullRequestRefresh;
 }
 
 export async function getIdeaWithDerivedStatus(
@@ -323,11 +383,11 @@ export async function getIdeaWithDerivedStatus(
   const row = await readIdeaRow(ctx, input.projectId, ideaId);
   if (!row) throw new OperationError('not_found', `Idea not found in this project: ${ideaId}`);
 
-  const evidence = await collectEvidence(
+  const { evidence, snapshots } = await collectEvidence(
     ctx,
     input.projectId,
     [row],
-    input.readPullRequestStates ?? noPullRequestState
+    input.refresh ?? 'none'
   );
   const entry = evidence.get(row.id) ?? emptyEvidence();
 
@@ -340,7 +400,7 @@ export async function getIdeaWithDerivedStatus(
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     derived: derivedFor(row, entry),
-    counts: countsFor(entry, 0),
+    counts: countsFor(entry, snapshots[row.id]),
     filedByAgent: filedByAgent(row),
     filedBy: filedByLabel(row),
     viaConnector: viaConnector(row),

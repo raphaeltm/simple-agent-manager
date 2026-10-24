@@ -2300,8 +2300,8 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /** Batched: the work linked to many ideas at once, for the Ideas list. */
-  getIdeaWorkSnapshots(ideaIds: string[]) {
-    return ideaWork.getIdeaWorkSnapshots(this.sql, ideaIds);
+  getIdeaWorkSnapshots(ideaIds: string[], caps: ideaWork.IdeaWorkLinkCaps) {
+    return ideaWork.getIdeaWorkSnapshots(this.sql, ideaIds, caps);
   }
 
   async cacheCommands(

@@ -6,22 +6,24 @@
  * one Durable Object round trip per idea and blow the list's I/O budget (rule 60), so this
  * answers for N ideas in a fixed handful of queries instead.
  *
+ * Every `resource_links` read here goes through `links.ts`, which is the single home for that
+ * table (program decision 7). This module owns only the composition: joining the linked
+ * sessions to their chat rows, their unanswered questions and their note counts. It reads no
+ * link table itself, and it no longer reads `chat_session_ideas` — that table stopped being
+ * written when T1 landed (`routes/chat-ideas.ts` records a `resource_links` row now), so a
+ * reader of it would have silently shown only links made before that deploy.
+ *
  * Reads are fault-isolated per row (rule 50): one malformed row is skipped and logged, never
  * turned into a failed list for the whole project.
  */
-import { chunk, D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
+import { isStrongLinkRelation, type LinkRelation } from '@simple-agent-manager/shared';
+
 import { createModuleLogger } from '../../lib/logger';
+import { countIdeaUpdates } from './idea-updates';
+import { type IdeaAssetLink, listIdeaAssetLinksForTargets, listLinksForTargets } from './links';
 import { parseIdeaNeedsInputRow, parseIdeaWorkSessionRow } from './row-schemas';
 
 const log = createModuleLogger('idea-work');
-
-/**
- * The platform's bound-parameter ceiling covers the whole statement, not just the `IN (…)`
- * list: the needs-input query also binds the attention kind and the current time. The margin
- * is wider than those two so another predicate can be added without crossing the ceiling.
- */
-const RESERVED_BIND_PARAMETERS = 4;
-const MAX_IDS_PER_QUERY = D1_MAX_BOUND_PARAMETERS - RESERVED_BIND_PARAMETERS;
 
 /**
  * The attention-marker kind that means "an agent asked a person something and nobody has
@@ -29,6 +31,14 @@ const MAX_IDS_PER_QUERY = D1_MAX_BOUND_PARAMETERS - RESERVED_BIND_PARAMETERS;
  * ACP interaction, and by the reconciliation episode.
  */
 export const IDEA_NEEDS_INPUT_MARKER_KIND = 'needs_input';
+
+/** The caps the link store is read under, resolved from admin settings by the caller. */
+export interface IdeaWorkLinkCaps {
+  /** Most links returned for one idea, per kind of thing linked. */
+  perTargetCap: number;
+  /** Most ideas one link query may ask about; longer lists are read in several queries. */
+  maxTargets: number;
+}
 
 export interface IdeaWorkSessionRow {
   sessionId: string;
@@ -39,6 +49,11 @@ export interface IdeaWorkSessionRow {
   sessionTaskId: string | null;
   /** Epoch ms of the chat's last update. */
   lastActivityAt: number | null;
+  /** Every relation recorded between this chat and the idea. */
+  relations: LinkRelation[];
+  /** True when at least one of those relations is a strong one. */
+  strong: boolean;
+  /** Epoch ms the earliest of those relations was first recorded. */
   linkedAt: number;
 }
 
@@ -52,6 +67,133 @@ export interface IdeaWorkSnapshot {
   ideaId: string;
   sessions: IdeaWorkSessionRow[];
   needsInput: IdeaNeedsInputRow[];
+  /** Project files this idea owns, through its own links or its strong chats'. */
+  fileIds: string[];
+  /** Pull request URLs recorded in the link store for this idea. Not canonicalized here. */
+  pullRequestUrls: string[];
+  /** Notes on the idea, excluding soft-deleted ones. Exact. */
+  updates: number;
+  /** The lists a per-idea cap truncated, so the caller can say "50+" instead of "50". */
+  truncated: { sessions: boolean; files: boolean; pullRequests: boolean };
+}
+
+interface SessionDisplayRow {
+  topic: string | null;
+  sessionStatus: string;
+  sessionTaskId: string | null;
+  lastActivityAt: number | null;
+}
+
+function emptySnapshot(ideaId: string): IdeaWorkSnapshot {
+  return {
+    ideaId,
+    sessions: [],
+    needsInput: [],
+    fileIds: [],
+    pullRequestUrls: [],
+    updates: 0,
+    truncated: { sessions: false, files: false, pullRequests: false },
+  };
+}
+
+/** Chunks `ids` so no link query is asked about more targets than it allows. */
+function chunkTargets(ids: string[], maxTargets: number): string[][] {
+  const size = Math.max(1, Math.floor(maxTargets));
+  const chunks: string[][] = [];
+  for (let index = 0; index < ids.length; index += size) {
+    chunks.push(ids.slice(index, index + size));
+  }
+  return chunks;
+}
+
+/** The chat rows behind a set of session ids, by id. One query, one bound parameter. */
+function readSessionDisplay(
+  sql: SqlStorage,
+  sessionIds: string[]
+): Map<string, SessionDisplayRow> {
+  const byId = new Map<string, SessionDisplayRow>();
+  if (!sessionIds.length) return byId;
+  const rows = sql
+    .exec(
+      `SELECT id AS session_id, topic, status, task_id AS session_task_id, updated_at
+         FROM chat_sessions WHERE id IN (SELECT value FROM json_each(?))`,
+      JSON.stringify(sessionIds)
+    )
+    .toArray();
+  for (const row of rows) {
+    try {
+      const parsed = parseIdeaWorkSessionRow(row);
+      byId.set(parsed.sessionId, {
+        topic: parsed.topic,
+        sessionStatus: parsed.sessionStatus,
+        sessionTaskId: parsed.sessionTaskId,
+        lastActivityAt: parsed.lastActivityAt,
+      });
+    } catch (error) {
+      log.warn('idea_work.session_row_skipped', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return byId;
+}
+
+/**
+ * Unanswered questions on a set of chats, by session id.
+ *
+ * Scoped to the sessions the links already selected, so one project's unrelated attention
+ * markers never reach this read, and a chat that only *read* an idea cannot contribute a
+ * question to it — the caller drops weak links before asking.
+ */
+function readNeedsInput(
+  sql: SqlStorage,
+  sessionIds: string[],
+  now: number
+): Map<string, IdeaNeedsInputRow> {
+  const bySession = new Map<string, IdeaNeedsInputRow>();
+  if (!sessionIds.length) return bySession;
+  const rows = sql
+    .exec(
+      `SELECT session_id, reason, created_at FROM session_attention_markers
+        WHERE session_id IN (SELECT value FROM json_each(?))
+          AND kind = ?
+          AND resolved_at IS NULL
+          AND (expires_at IS NULL OR expires_at > ?)
+        ORDER BY created_at DESC`,
+      JSON.stringify(sessionIds),
+      IDEA_NEEDS_INPUT_MARKER_KIND,
+      now
+    )
+    .toArray();
+  for (const row of rows) {
+    try {
+      const parsed = parseIdeaNeedsInputRow(row);
+      // Newest first, so the first marker for a session is the one on screen.
+      if (!bySession.has(parsed.sessionId)) bySession.set(parsed.sessionId, parsed);
+    } catch (error) {
+      log.warn('idea_work.needs_input_row_skipped', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return bySession;
+}
+
+function applyAssets(
+  snapshots: Record<string, IdeaWorkSnapshot>,
+  assets: IdeaAssetLink[],
+  perTargetCap: number
+): void {
+  for (const asset of assets) {
+    const snapshot = snapshots[asset.ideaId];
+    if (!snapshot) continue;
+    if (asset.targetKind === 'file') snapshot.fileIds.push(asset.targetId);
+    else snapshot.pullRequestUrls.push(asset.targetId);
+  }
+  for (const snapshot of Object.values(snapshots)) {
+    snapshot.truncated.files = snapshot.fileIds.length >= perTargetCap;
+    snapshot.truncated.pullRequests = snapshot.pullRequestUrls.length >= perTargetCap;
+  }
 }
 
 /**
@@ -61,79 +203,73 @@ export interface IdeaWorkSnapshot {
 export function getIdeaWorkSnapshots(
   sql: SqlStorage,
   ideaIds: readonly string[],
+  caps: IdeaWorkLinkCaps,
   now: number = Date.now()
 ): Record<string, IdeaWorkSnapshot> {
   const snapshots: Record<string, IdeaWorkSnapshot> = {};
   const unique = [...new Set(ideaIds.filter((id) => typeof id === 'string' && id.length > 0))];
-  for (const ideaId of unique) {
-    snapshots[ideaId] = { ideaId, sessions: [], needsInput: [] };
-  }
+  for (const ideaId of unique) snapshots[ideaId] = emptySnapshot(ideaId);
   if (unique.length === 0) return snapshots;
 
-  for (const ids of chunk(unique, MAX_IDS_PER_QUERY)) {
-    const placeholders = ids.map(() => '?').join(', ');
-
-    // The chats linked to these ideas, with the task driving each one.
-    const sessionRows = sql
-      .exec(
-        `SELECT csi.task_id AS idea_id, cs.id AS session_id, cs.topic, cs.status,
-                cs.task_id AS session_task_id, cs.updated_at, csi.created_at AS linked_at
-           FROM chat_session_ideas csi
-           JOIN chat_sessions cs ON cs.id = csi.session_id
-          WHERE csi.task_id IN (${placeholders})
-          ORDER BY cs.updated_at DESC`,
-        ...ids
-      )
-      .toArray();
-    for (const row of sessionRows) {
-      try {
-        const parsed = parseIdeaWorkSessionRow(row);
-        snapshots[parsed.ideaId]?.sessions.push({
-          sessionId: parsed.sessionId,
-          topic: parsed.topic,
-          sessionStatus: parsed.sessionStatus,
-          sessionTaskId: parsed.sessionTaskId,
-          lastActivityAt: parsed.lastActivityAt,
-          linkedAt: parsed.linkedAt,
-        });
-      } catch (error) {
-        log.warn('idea_work.session_row_skipped', {
-          error: error instanceof Error ? error.message : String(error),
-        });
+  // 1. Which chats are linked to these ideas, and how. `relations` is what makes strength
+  //    real: before T1 every link meant "works on", so the derivation could assume it.
+  const sessionsByIdea = new Map<string, Map<string, IdeaWorkSessionRow>>();
+  const assets: IdeaAssetLink[] = [];
+  for (const ids of chunkTargets(unique, caps.maxTargets)) {
+    for (const link of listLinksForTargets(sql, 'idea', ids, caps.perTargetCap, caps.maxTargets)) {
+      const ideaId = link.targetId;
+      const existing = sessionsByIdea.get(ideaId) ?? new Map<string, IdeaWorkSessionRow>();
+      sessionsByIdea.set(ideaId, existing);
+      const current = existing.get(link.sourceId);
+      if (current) {
+        if (!current.relations.includes(link.relation)) current.relations.push(link.relation);
+        current.strong ||= isStrongLinkRelation(link.relation);
+        current.linkedAt = Math.min(current.linkedAt, link.firstAt);
+        continue;
       }
+      existing.set(link.sourceId, {
+        sessionId: link.sourceId,
+        topic: null,
+        sessionStatus: 'unknown',
+        sessionTaskId: null,
+        lastActivityAt: null,
+        relations: [link.relation],
+        strong: isStrongLinkRelation(link.relation),
+        linkedAt: link.firstAt,
+      });
     }
+    assets.push(...listIdeaAssetLinksForTargets(sql, ids, caps.perTargetCap, caps.maxTargets));
+  }
 
-    // Unanswered questions on those chats. Scoped to the ideas asked for, so one project's
-    // unrelated attention markers never reach this read.
-    const markerRows = sql
-      .exec(
-        `SELECT csi.task_id AS idea_id, sam.session_id, sam.reason, sam.created_at
-           FROM session_attention_markers sam
-           JOIN chat_session_ideas csi ON csi.session_id = sam.session_id
-          WHERE csi.task_id IN (${placeholders})
-            AND sam.kind = ?
-            AND sam.resolved_at IS NULL
-            AND (sam.expires_at IS NULL OR sam.expires_at > ?)
-          ORDER BY sam.created_at DESC`,
-        ...ids,
-        IDEA_NEEDS_INPUT_MARKER_KIND,
-        now
-      )
-      .toArray();
-    for (const row of markerRows) {
-      try {
-        const parsed = parseIdeaNeedsInputRow(row);
-        snapshots[parsed.ideaId]?.needsInput.push({
-          sessionId: parsed.sessionId,
-          question: parsed.question,
-          askedAt: parsed.askedAt,
-        });
-      } catch (error) {
-        log.warn('idea_work.needs_input_row_skipped', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+  // 2. Those chats' own rows, and the questions on them, in one query each.
+  const sessionIds = [
+    ...new Set([...sessionsByIdea.values()].flatMap((byId) => [...byId.keys()])),
+  ];
+  const display = readSessionDisplay(sql, sessionIds);
+  const needsInput = readNeedsInput(sql, sessionIds, now);
+
+  for (const [ideaId, byId] of sessionsByIdea) {
+    const snapshot = snapshots[ideaId];
+    if (!snapshot) continue;
+    for (const session of byId.values()) {
+      const row = display.get(session.sessionId);
+      // A link whose chat has been deleted is dropped rather than shown as "unknown".
+      if (!row) continue;
+      snapshot.sessions.push({ ...session, ...row });
+      const marker = session.strong ? needsInput.get(session.sessionId) : undefined;
+      if (marker) snapshot.needsInput.push(marker);
     }
+    snapshot.sessions.sort((a, b) => (b.lastActivityAt ?? -1) - (a.lastActivityAt ?? -1));
+    snapshot.needsInput.sort((a, b) => b.askedAt - a.askedAt);
+    snapshot.truncated.sessions = byId.size >= caps.perTargetCap;
+  }
+
+  // 3. The files and pull requests those ideas own, and how many notes each one has.
+  applyAssets(snapshots, assets, caps.perTargetCap);
+  const updates = countIdeaUpdates(sql, unique);
+  for (const [ideaId, count] of Object.entries(updates)) {
+    const snapshot = snapshots[ideaId];
+    if (snapshot) snapshot.updates = count;
   }
 
   return snapshots;
