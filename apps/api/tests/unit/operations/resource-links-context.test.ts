@@ -127,6 +127,7 @@ describe('idea linked context', () => {
           ('s2','Research','active',90,'t2');
         INSERT INTO tasks VALUES
           ('idea1','p','Feature','draft',NULL,NULL),('idea2','p','Related','draft',NULL,NULL),
+          ('ordinary','p','Ordinary task','ready',NULL,NULL),
           ('t1','p','Task 1','in_progress','s1','https://github.com/o/r/pull/1'),
           ('t2','p','Task 2','in_progress','s2','https://github.com/o/r/pull/2');
         INSERT INTO project_files VALUES
@@ -172,6 +173,8 @@ describe('idea linked context', () => {
       add('session', 's2', 'file', 'f2', 'uploaded', 7);
       add('idea', 'idea1', 'file', 'f3', 'linked', 6);
       add('idea', 'idea1', 'idea', 'idea2', 'related', 5);
+      // Simulate a pre-existing legacy row that labeled an ordinary task as an idea.
+      add('idea', 'idea1', 'idea', 'ordinary', 'related', 5);
       recordLink(
         sql,
         {
@@ -201,6 +204,24 @@ describe('idea linked context', () => {
       expect(context.pullRequests.total).toBe(1);
       expect(context.pullRequests.totalIsLowerBound).toBe(false);
       expect(context.relatedIdeas.items.map((i) => i.ideaId)).toEqual(['idea2']);
+      expect(context.relatedIdeas.total).toBe(1);
+      expect(context.relatedIdeas.totalIsLowerBound).toBe(true);
+      vi.mocked(resolveAdminSettingDetailsMany).mockResolvedValueOnce([
+        { value: 300000 },
+        { value: 100 },
+        { value: 100 },
+        { value: 100000 },
+        { value: 3 },
+        { value: 500 },
+      ] as never);
+      const allRelatedRows = await getIdeaContext(
+        { DATABASE: d1Database(db) } as Env,
+        'p',
+        'idea1'
+      );
+      expect(allRelatedRows.relatedIdeas.items.map((idea) => idea.ideaId)).toEqual(['idea2']);
+      expect(allRelatedRows.relatedIdeas.total).toBe(1);
+      expect(allRelatedRows.relatedIdeas.totalIsLowerBound).toBe(false);
       sql.exec(`INSERT INTO chat_sessions VALUES ('s3','Older work','active',80,'t3')`);
       db.exec(`INSERT INTO tasks VALUES
         ('t3','p','Task 3','in_progress','s3','https://github.com/o/r/pull/3')`);

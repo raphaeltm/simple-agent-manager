@@ -223,6 +223,15 @@ function toIdeas(
     (i) => i.ideaId
   );
 }
+function cappedIdeas(
+  data: Awaited<ReturnType<typeof contextData>>,
+  links: ResourceLink[],
+  rawTotal?: number
+): CappedList<LinkedIdea> {
+  const items = toIdeas(data, links);
+  const seenIds = new Set(links.map((link) => resourceEndpointId(link, 'idea')).filter(Boolean));
+  return capped(items, data.cap, items.length, rawTotal !== undefined && rawTotal > seenIds.size);
+}
 function toFiles(
   data: Awaited<ReturnType<typeof contextData>>,
   links: ResourceLink[]
@@ -356,11 +365,7 @@ export async function getIdeaContext(
     sessions: capped(toSessions(data, direct), data.cap, data.totals?.sessions),
     files: capped(toFiles(data, assetLinks), data.cap, data.totals?.files),
     pullRequests: capped(prs, data.cap, prs.length, prIncomplete),
-    relatedIdeas: capped(
-      toIdeas(data, relatedIdeaLinks(direct, ideaId)),
-      data.cap,
-      data.totals?.ideas
-    ),
+    relatedIdeas: cappedIdeas(data, relatedIdeaLinks(direct, ideaId), data.totals?.ideas),
   };
 }
 export async function getSessionContext(
@@ -374,7 +379,7 @@ export async function getSessionContext(
     data.links.filter((l) => l.targetKind === 'pr').map((l) => l.targetId)
   ).size;
   return {
-    ideas: capped(toIdeas(data, data.links), data.cap, data.totals?.ideas),
+    ideas: cappedIdeas(data, data.links, data.totals?.ideas),
     files: capped(toFiles(data, data.links), data.cap, data.totals?.files),
     pullRequests: capped(prs, data.cap, prs.length, (data.totals?.prs ?? 0) > storedPrCount),
   };
@@ -406,7 +411,7 @@ export async function getFileContext(
   );
   return {
     sessions: capped(toSessions(data, data.links), data.cap, data.totals?.sessions),
-    ideas: capped(toIdeas(data, ideaLinks), data.cap, data.totals?.ideas),
+    ideas: cappedIdeas(data, ideaLinks, data.totals?.ideas),
   };
 }
 
