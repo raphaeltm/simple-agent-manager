@@ -22,8 +22,9 @@ SAM stores only manually created session to idea links. Work across ideas, chats
 - [x] Update public docs and pass quality and specialist review.
 - [x] Address coordinator review: JSON-array SQL binding, cheap weak-link count and cleanup,
       per-route auth, consistent file path, and composed Worker route verification.
-- [ ] Claim staging, verify end to end, release and clean up.
-- [ ] Open PR, pass CI and CodeRabbit wait, merge, watch production deploy.
+- [x] Claim staging, verify end to end, release and clean up.
+- [x] Open PR, pass CI and CodeRabbit wait, and merge.
+- [x] Watch production deploy to completion (run 40062885912 succeeded for d9910c6ed).
 
 ## Acceptance
 
