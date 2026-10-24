@@ -181,6 +181,43 @@ as a linked idea.
 Migration `0207` backfills `is_idea = 1` for every row the old `status = 'draft'` definition
 covered, so nothing that was in anyone's Ideas list has left it.
 
+## Decision 16: the migration-to-rollout window (coordinator condition 1, seq 210)
+
+`0207` runs before the new Worker is live. An idea the OLD Worker creates in that window —
+one to three minutes — is written with `is_idea = 0` by a writer that did not yet set the flag,
+and is invisible to every idea read afterwards. The backfill has already passed it.
+
+- [ ] After the STAGING deploy, run the read-only D1 SELECT below and post the count on
+      `feature.linked-work`.
+- [ ] After the PRODUCTION deploy, run it again against production and post the count.
+- [ ] If either is above zero: post the ids, and backfill by id ONLY after the coordinator's OK.
+
+Run inside `exec_with_secrets` with `secretNames: ["CF_TOKEN"]` (program decision 13), against
+`/accounts/c4e4aebd980b626f6af43ac6b1edcede/d1/database/1cfaf5d4-8226-47d8-bf26-6ba727ce5718/query`
+for staging:
+
+```sql
+-- Rows the old Worker could have written as ideas during the window. `triggered_by` excludes
+-- POST /tasks' ordinary tasks, which are 'user' and deliberately not ideas; the idea writers
+-- are 'connector' (a person through a connected client) and the automation/incident kinds.
+SELECT id, title, triggered_by, created_at
+  FROM tasks
+ WHERE status = 'draft'
+   AND is_idea = 0
+   AND created_at >= (SELECT applied_at FROM d1_migrations WHERE name LIKE '%0207_tasks_idea_flag%')
+ ORDER BY created_at;
+```
+
+Count zero is the expected answer: the five idea writers all set the flag, and the only rows
+this can catch are ones written by the pre-swap Worker in that window.
+
+**Accepted, and noted here because it is a real behaviour change**: the backfill marks every
+row the old definition covered, which includes ordinary undispatched tasks that existed before
+this migration. They become ideas. That is deliberate — leaving them out would make items
+vanish from a page someone is already looking at — and it is bounded: no NEW ordinary task
+joins them, and the only thing a person can now do to one through the idea surfaces is mark it
+done, park it, or start work on it, never run it in place.
+
 ## What the five local reviews changed (2026-10-24)
 
 Security found 0 CRITICAL and 0 HIGH. Everything below is from the other four, or is the one

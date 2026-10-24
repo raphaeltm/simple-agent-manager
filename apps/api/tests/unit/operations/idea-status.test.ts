@@ -379,11 +379,52 @@ describe('the merged question is asked once', () => {
     expect(result.pullRequest?.number).toBe(500);
   });
 
-  it('asks when the merge has no timestamp: an unknown answer is not an answer', () => {
+  /**
+   * A merge with no `mergedAt` — a row stored before merge times were recorded, or one whose
+   * merge arrived without one. "Keep open" has to still work on it. It used to not: the
+   * comparison bailed out when `mergedAt` was absent, so no acknowledgement could ever be
+   * newer than the merge and the card came back on every page load for ever.
+   */
+  it('stops asking about a merge with no merge time, using the last sync instead', () => {
+    const result = deriveIdeaStatus(
+      input({
+        mergeAcknowledgedAt: '2026-10-23T12:00:00.000Z',
+        pullRequests: [
+          pullRequest({
+            state: 'merged',
+            mergedAt: null,
+            updatedAt: '2026-10-23T11:00:00.000Z',
+          }),
+        ],
+      })
+    );
+    expect(result.state).toBe('not-started');
+    expect(result.needsYou).toBeNull();
+  });
+
+  // The control: the same card, answered BEFORE the last sync, is still asked. Without it the
+  // test above is also satisfied by "Keep open" dismissing every merged card unconditionally.
+  it('still asks when the answer predates that sync', () => {
     const result = deriveIdeaStatus(
       input({
         mergeAcknowledgedAt: '2026-10-23T09:00:00.000Z',
-        pullRequests: [pullRequest({ state: 'merged', mergedAt: null })],
+        pullRequests: [
+          pullRequest({
+            state: 'merged',
+            mergedAt: null,
+            updatedAt: '2026-10-23T11:00:00.000Z',
+          }),
+        ],
+      })
+    );
+    expect(result.state).toBe('merged');
+  });
+
+  it('asks when the merge cannot be placed in time at all', () => {
+    const result = deriveIdeaStatus(
+      input({
+        mergeAcknowledgedAt: '2026-10-23T09:00:00.000Z',
+        pullRequests: [pullRequest({ state: 'merged', mergedAt: null, updatedAt: null })],
       })
     );
     expect(result.state).toBe('merged');

@@ -169,18 +169,36 @@ function newestMerged(pullRequests: readonly IdeaPullRequest[]): IdeaPullRequest
 }
 
 /**
+ * When the merge this card is about happened, as well as it can be known.
+ *
+ * `mergedAt` is GitHub's own merge time and is what the question should be compared against.
+ * It can be absent: a pull request stored before T2 recorded merge times, or one whose merge
+ * arrived through a path that did not carry it. The fallback is the row's last sync, which is
+ * never earlier than the merge — so "Keep open" still dismisses the card.
+ *
+ * It used to return nothing in that case, which read as fail-open but was not: an answer
+ * could never be newer than a merge that had no time, so the card came back on every page
+ * load and "Keep open" did nothing at all.
+ */
+function mergeObservedAt(merged: IdeaPullRequest): string | null {
+  return merged.mergedAt ?? merged.updatedAt;
+}
+
+/**
  * True when a person has already answered the merged question for this pull request.
  *
- * A merge with no timestamp is treated as unanswered: that is the fail-open direction, and it
- * asks a question rather than silently swallowing one.
+ * A merge that can be placed in time at all is answered by an acknowledgement at or after it.
+ * One that cannot — neither a merge time nor a sync time — stays unanswered, which is the
+ * fail-open direction: it asks a question rather than silently swallowing one.
  */
 function isMergeAnswered(
   merged: IdeaPullRequest,
   acknowledgedAt: string | null | undefined
 ): boolean {
   if (!acknowledgedAt) return false;
-  if (!merged.mergedAt) return false;
-  return new Date(merged.mergedAt).getTime() <= new Date(acknowledgedAt).getTime();
+  const observedAt = mergeObservedAt(merged);
+  if (!observedAt) return false;
+  return new Date(observedAt).getTime() <= new Date(acknowledgedAt).getTime();
 }
 
 /** A ready-for-review pull request wins over a draft, which wins over nothing. */
@@ -249,7 +267,7 @@ export function deriveIdeaStatus(input: IdeaStatusInput): IdeaDerivedStatus {
   //    must not be able to answer a question that was put to a person (rule 74).
   const merged = newestMerged(input.pullRequests);
   if (merged && !isMergeAnswered(merged, input.mergeAcknowledgedAt)) {
-    return status('merged', source('github', merged.mergedAt ?? merged.updatedAt, merged.stale), {
+    return status('merged', source('github', mergeObservedAt(merged), merged.stale), {
       pullRequest: merged,
     });
   }
