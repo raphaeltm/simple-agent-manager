@@ -27,8 +27,9 @@ That decision costs more than the fix. Raising the timeout again just moves the 
 
 Found by T4 (linked-work) while watching the post-merge production deploy for PR #2431. T4's diff
 contains zero `apps/api` files and the identical API tree passed the same job on the PR head
-(run 40070088890), so the failure was unrelated to that change; it was re-run once and passed,
-per `.claude/rules/25`'s treatment of an unrelated CI failure.
+(run 40070088890), so the failure was unrelated to that change; it was re-run once and passed. No rule covers
+re-running an unrelated CI failure; the precedent is T2 doing the same thing for its own
+unrelated flake earlier the same day, recorded on the `feature.linked-work` channel.
 
 A near-identical timeout was seen the same day in
 `apps/api/tests/unit/.../session-snapshot-recovery-attempt-id-migration.test.ts` during a local
