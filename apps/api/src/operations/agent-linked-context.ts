@@ -41,11 +41,16 @@ function fitResponse<T extends object>(response: T, maxBytes: number): T {
     const candidates = lists
       .map((name) => record[name] as MutableList | undefined)
       .filter((list): list is MutableList => Array.isArray(list?.items) && list.items.length > 0);
-    if (candidates.length === 0)
+    const first = candidates[0];
+    if (!first)
       throw new OperationError('unavailable', 'Agent context exceeds the configured byte limit');
-    const largest = candidates.reduce((a, b) =>
-      JSON.stringify(a.items.at(-1)).length >= JSON.stringify(b.items.at(-1)).length ? a : b
-    );
+    let largest = first;
+    for (const candidate of candidates.slice(1)) {
+      if (
+        JSON.stringify(candidate.items.at(-1)).length >= JSON.stringify(largest.items.at(-1)).length
+      )
+        largest = candidate;
+    }
     largest.items.pop();
     largest.truncated = true;
   }
@@ -140,11 +145,18 @@ export async function getAgentLinkedContext(
   const limits = await settings(ctx);
   const resourceId = input.ideaId ?? sessionId ?? input.fileId;
   if (!resourceId) throw new OperationError('invalid_input', 'Resource ID is required');
-  const source = input.ideaId
-    ? await getIdeaContext(ctx.env, input.projectId, input.ideaId)
-    : sessionId
-      ? await getSessionContext(ctx.env, input.projectId, sessionId)
-      : await getFileContext(ctx.env, input.projectId, resourceId);
+  let source: SourceContext;
+  let kind: 'idea' | 'session' | 'file';
+  if (input.ideaId) {
+    kind = 'idea';
+    source = await getIdeaContext(ctx.env, input.projectId, input.ideaId);
+  } else if (sessionId) {
+    kind = 'session';
+    source = await getSessionContext(ctx.env, input.projectId, sessionId);
+  } else {
+    kind = 'file';
+    source = await getFileContext(ctx.env, input.projectId, resourceId);
+  }
   const context = frameContext(source, limits.list, limits.text);
   const updates = input.ideaId
     ? await listIdeaUpdates(ctx, {
@@ -155,8 +167,8 @@ export async function getAgentLinkedContext(
     : null;
   return fitResponse(
     {
-      kind: input.ideaId ? 'idea' : sessionId ? 'session' : 'file',
-      id: input.ideaId ?? sessionId ?? input.fileId,
+      kind,
+      id: resourceId,
       ...context,
       ...(updates
         ? {
