@@ -21,7 +21,29 @@ export const UNTRUSTED_TEXT_GUIDANCE =
 const MARKER_RULE = '-----';
 /** A body line that looks like any BEGIN/END marker is replaced with this. */
 const IMPERSONATION_NOTICE = '[a line that imitated an envelope marker was removed]';
-const TRUNCATION_NOTICE = '[truncated by SAM: the full text is available with get_idea]';
+const TRUNCATION_NOTICE = '[truncated by SAM]';
+/**
+ * Tool names allowed inside the truncation notice. The notice sits INSIDE the fence, so a
+ * caller that passed a newline or a marker-shaped string would be writing into the envelope
+ * from the trusted side — the one direction `neutralizeUntrustedText` does not police. Only a
+ * plain tool identifier is interpolated; anything else degrades to the bare notice rather than
+ * being sanitised into something that looks deliberate.
+ */
+const TOOL_NAME = /^[a-z0-9][a-z0-9_.-]{0,48}$/i;
+
+/**
+ * Says the text was cut, and how to get the rest when the caller knows a tool that returns it
+ * (`.claude/rules/65`: a capped read must disclose what it dropped AND name the retrieval
+ * path). Kind-neutral by default, because this envelope is shared — T6 reuses it for idea
+ * update notes, pull request titles, chat topics and file names, none of which come back from
+ * `get_idea`.
+ */
+function truncationNotice(moreWith: string | null | undefined): string {
+  const tool = typeof moreWith === 'string' ? moreWith.trim() : '';
+  return TOOL_NAME.test(tool)
+    ? `[truncated by SAM: the full text is available with ${tool}]`
+    : TRUNCATION_NOTICE;
+}
 /**
  * Matches our own markers and any near-miss a body might use to fake one.
  *
@@ -69,6 +91,12 @@ export interface UntrustedTextInput {
   text: string | null | undefined;
   /** Maximum characters of body text kept inside the envelope. */
   maxLength: number;
+  /**
+   * Name of the tool that returns the whole text, when one exists. Named in the truncation
+   * notice so a capped read tells the agent how to get the rest. Omit it (or pass something
+   * that is not a plain tool name) and the notice just says the text was cut.
+   */
+  moreWith?: string | null;
 }
 
 /**
@@ -118,7 +146,8 @@ export function untrustedTextBlock(input: UntrustedTextInput): UntrustedTextBloc
 
   const truncated = raw.length > cap;
   const body =
-    neutralizeUntrustedText(raw.slice(0, cap)) + (truncated ? `\n${TRUNCATION_NOTICE}` : '');
+    neutralizeUntrustedText(raw.slice(0, cap)) +
+    (truncated ? `\n${truncationNotice(input.moreWith)}` : '');
   const label = kind.toUpperCase();
   return {
     ...base,

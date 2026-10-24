@@ -80,7 +80,7 @@ export async function resolveInstructionIdeaContext(
 
   const maxLength = await resolveMaxLength(env);
   const content = idea.description?.trim()
-    ? untrustedTextBlock({ kind: 'idea', text: idea.description, maxLength })
+    ? untrustedTextBlock({ kind: 'idea', text: idea.description, maxLength, moreWith: 'get_idea' })
     : null;
   return {
     ideaId: idea.id,

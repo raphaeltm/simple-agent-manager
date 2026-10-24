@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
     persistMessage: vi.fn(),
     transitionAcpSession: vi.fn(),
     failSession: vi.fn(),
+    stopSession: vi.fn(),
   },
   container: {
     destroyVmAgentContainer: vi.fn(),
@@ -134,6 +135,7 @@ describe('acceptInstantSession records the idea link before the agent starts', (
     mocks.projectData.getAcpSession.mockResolvedValue(null);
     mocks.projectData.transitionAcpSession.mockResolvedValue({});
     mocks.projectData.failSession.mockResolvedValue(undefined);
+    mocks.projectData.stopSession.mockResolvedValue(undefined);
     mocks.container.getVmAgentContainerConfig.mockReturnValue({
       vmAgentPort: 8080,
       enabled: true,
@@ -210,5 +212,37 @@ describe('acceptInstantSession records the idea link before the agent starts', (
       acceptInstantSession(makeDb(), env, launchInput({ sourceIdeaId: 'idea-1', taskMode: 'task' }))
     ).rejects.toThrow(/Could not link this chat to the idea/);
     expect(mocks.container.launchVmAgentContainer).not.toHaveBeenCalled();
+  });
+
+  // Both callers mark the task failed when acceptance throws, and the launch never runs after
+  // it — so without this the chat session created moments earlier stays active with no agent
+  // that could attach to it. The VM branch of submitTaskImplementation stops its session on
+  // the same failure; this proves the Instant path behaves the same way.
+  it('stops the session it created when the link write fails, like the VM branch does', async () => {
+    mocks.recordLink.mockImplementation(() => Promise.reject(new Error('DO unavailable')));
+    await expect(
+      acceptInstantSession(makeDb(), env, launchInput({ sourceIdeaId: 'idea-1', taskMode: 'task' }))
+    ).rejects.toThrow(/Could not link this chat to the idea/);
+    expect(mocks.projectData.stopSession).toHaveBeenCalledTimes(1);
+    // The session stopped must be the one this acceptance created, not some other id.
+    expect(mocks.projectData.stopSession).toHaveBeenCalledWith(env, 'project-1', 'chat-session-1');
+  });
+
+  // Control: a successful acceptance must NOT stop its own session, or the test above would
+  // also pass with stopSession called unconditionally.
+  it('leaves the session running when the link write succeeds', async () => {
+    await acceptInstantSession(
+      makeDb(),
+      env,
+      launchInput({ sourceIdeaId: 'idea-1', taskMode: 'task' })
+    );
+    expect(mocks.recordLink).toHaveBeenCalledTimes(1);
+    expect(mocks.projectData.stopSession).not.toHaveBeenCalled();
+  });
+
+  // A failure that is NOT the idea link must not gain a session stop from this change.
+  it('does not stop the session when no idea was involved', async () => {
+    await acceptInstantSession(makeDb(), env, launchInput());
+    expect(mocks.projectData.stopSession).not.toHaveBeenCalled();
   });
 });

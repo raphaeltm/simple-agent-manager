@@ -365,12 +365,31 @@ export async function acceptInstantSession(
     .set({ chatSessionId, updatedAt: now })
     .where(eq(schema.workspaces.id, workspaceId));
 
-  if (input.sourceIdeaId)
-    await recordWorkStartIdeaLink(env, input.project.id, {
-      ideaId: input.sourceIdeaId,
-      sessionId: chatSessionId,
-      taskMode: input.taskMode ?? 'conversation',
-    });
+  if (input.sourceIdeaId) {
+    try {
+      await recordWorkStartIdeaLink(env, input.project.id, {
+        ideaId: input.sourceIdeaId,
+        sessionId: chatSessionId,
+        taskMode: input.taskMode ?? 'conversation',
+      });
+    } catch (error) {
+      // Both callers mark the task failed when acceptance throws, and
+      // `continueInstantSessionLaunch` never runs afterwards — so the chat session created a
+      // few lines above would stay active with no agent that could ever attach to it. The VM
+      // branch of `submitTaskImplementation` stops its session on the same failure; stopping
+      // this one keeps the two runtimes alike rather than leaving a live, empty conversation.
+      // Best-effort on purpose: the original failure is what the caller must see.
+      await projectDataService.stopSession(env, input.project.id, chatSessionId).catch((e) => {
+        log.error('instant_session.orphaned_session_stop_failed', {
+          projectId: input.project.id,
+          taskId: input.taskId,
+          sessionId: chatSessionId,
+          error: String(e),
+        });
+      });
+      throw error;
+    }
+  }
 
   const containerId = node.id.toLowerCase();
   const nodeCallbackToken = await signNodeCallbackToken(node.id, env);
