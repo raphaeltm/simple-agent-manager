@@ -60,11 +60,13 @@ function makeEnv(): Env {
   const sqlite = new Database(':memory:');
   createSchemaTables(sqlite, [schema.tasks]);
   const insert = sqlite.prepare(
-    'INSERT INTO tasks (id, project_id, title, status) VALUES (?, ?, ?, ?)'
+    'INSERT INTO tasks (id, project_id, title, status, is_idea) VALUES (?, ?, ?, ?, ?)'
   );
-  insert.run('idea-1', 'project-1', 'Tighten proxy', 'draft');
-  insert.run('idea-2', 'project-1', 'Split observability', 'draft');
-  insert.run('foreign-idea', 'project-2', 'Another project', 'draft');
+  insert.run('idea-1', 'project-1', 'Tighten proxy', 'draft', 1);
+  insert.run('idea-2', 'project-1', 'Split observability', 'draft', 1);
+  insert.run('foreign-idea', 'project-2', 'Another project', 'draft', 1);
+  // Also a draft, and not an idea: the row only the is_idea flag can tell apart.
+  insert.run('ordinary-draft', 'project-1', 'Undispatched task', 'draft', 0);
   return { DATABASE: createSqliteD1(sqlite) } as Env;
 }
 
@@ -193,6 +195,22 @@ describe('session–idea routes mounted under chatRoutes', () => {
 
     expect(res.status).toBe(404);
     expect(mocks.recordResourceLink).not.toHaveBeenCalled();
+  });
+
+  // The case only `is_idea = 1` can refuse. `POST /api/projects/:projectId/tasks` creates
+  // every ordinary task in `draft`, so under the old definition a chat could be linked to
+  // another member's undispatched work as though it were an idea.
+  it('refuses to link an undispatched ordinary task as an idea', async () => {
+    const env = makeEnv();
+    const attack = await link(env, { taskId: 'ordinary-draft' });
+    expect(attack.status).toBe(404);
+    expect(mocks.recordResourceLink).not.toHaveBeenCalled();
+
+    // Owner control: a real idea in the same project still links, so the refusal above
+    // cannot pass by the route being broken outright.
+    const owner = await link(env, { taskId: 'idea-2' });
+    expect(owner.status).toBe(201);
+    expect(mocks.recordResourceLink).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a link request without a taskId', async () => {
