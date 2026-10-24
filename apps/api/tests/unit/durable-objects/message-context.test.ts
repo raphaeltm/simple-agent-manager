@@ -183,6 +183,51 @@ describe('message context window', () => {
     expect(window).toMatchObject({ hasMoreBefore: true, hasMoreAfter: false });
   });
 
+  /**
+   * The shape seen on staging: two calls start in parallel, then their updates arrive. The chat
+   * shows the run as one tool-call group; a window cut after t1 showed call-1 still running,
+   * because its completion is t3.
+   */
+  it('never cuts a run of tool rows, so every call in the window has its updates', async () => {
+    seed([
+      { id: 'u1', role: 'user' },
+      ...chunks('a', 3),
+      { id: 't1', role: 'tool', toolMetadata: { toolCallId: 'call-1', status: 'pending' } },
+      { id: 't2', role: 'tool', toolMetadata: { toolCallId: 'call-2', status: 'pending' } },
+      { id: 't3', role: 'tool', toolMetadata: { toolCallId: 'call-1', status: 'completed' } },
+      { id: 't4', role: 'tool', toolMetadata: { toolCallId: 'call-2', status: 'in_progress' } },
+      { id: 't5', role: 'tool', toolMetadata: { toolCallId: 'call-2', status: 'completed' } },
+      ...chunks('b', 2),
+      { id: 'u2', role: 'user' },
+    ]);
+
+    // After the anchored reply, the whole run is the one message.
+    const after = await read({ messageId: 'a2' });
+    expect(ids(after.messages)).toEqual(['u1', 'a1', 'a2', 'a3', 't1', 't2', 't3', 't4', 't5']);
+    expect(after).toMatchObject({ hasMoreBefore: false, hasMoreAfter: true });
+
+    // Before the anchored reply too: the run whole, not its last update alone.
+    const before = await read({ messageId: 'b1' });
+    expect(ids(before.messages)).toEqual(['t1', 't2', 't3', 't4', 't5', 'b1', 'b2', 'u2']);
+    expect(before).toMatchObject({ hasMoreBefore: true, hasMoreAfter: false });
+
+    // A comment on one row of the run opens with the whole group, then a message each side.
+    const onTool = await read({ messageId: 't3' });
+    expect(ids(onTool.messages)).toEqual([
+      'a1',
+      'a2',
+      'a3',
+      't1',
+      't2',
+      't3',
+      't4',
+      't5',
+      'b1',
+      'b2',
+    ]);
+    expect(onTool).toMatchObject({ hasMoreBefore: true, hasMoreAfter: true });
+  });
+
   it('stops each side at the row cap and says more exists', async () => {
     seed([{ id: 'u1', role: 'user' }, ...chunks('a', 40), { id: 'u2', role: 'user' }]);
 

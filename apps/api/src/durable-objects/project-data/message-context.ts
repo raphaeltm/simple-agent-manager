@@ -4,15 +4,18 @@
  * A comment is anchored to a stored row, but the chat displays messages, not rows: the VM
  * agent stores one row per streamed ACP chunk (`message_extract.go`), and
  * `chatMessagesToConversationItems` (apps/web) merges consecutive `assistant` rows, and
- * consecutive `thinking` rows, into one displayed message. So the window is counted in
- * displayed messages. It always holds the whole message the anchor belongs to — the rows
- * before the anchor that continue it (an anchor can be a later chunk) and the rows after it,
- * where the quoted words are — then `messagesEachSide` messages either way.
+ * consecutive `thinking` rows, into one displayed message, and folds a run of tool rows (the
+ * calls and their status updates) into one tool-call group. So the window is counted in
+ * displayed messages and only ever cut between runs. It always holds the whole message the
+ * anchor belongs to — the rows before the anchor that continue it (an anchor can be a later
+ * chunk) and the rows after it, where the quoted words are — then `messagesEachSide` messages
+ * either way. A cut inside a run of tool rows would show a finished call as still running:
+ * its completion is a later row of the same run.
  *
  * The run rule is deliberately the plain role rule. The client also merges across a
- * tool-call update or plan replacement between two agent rows; the server does not know
- * which tool rows are updates, so it may count such a row as a message. That only makes the
- * window count one message early on that side; the client still merges and renders exactly.
+ * tool-call update or plan replacement between two agent rows, and folds thoughts into
+ * tool-call groups; the server counts those as separate messages. That only makes the window
+ * count a message early on that side; the client still merges and renders exactly.
  *
  * Reads run in this object against its own SQLite (or compact archive chunks), so the extra
  * pages a long agent reply needs cost no network round trip. Each side is bounded by
@@ -33,6 +36,13 @@ import type { Env } from './types';
 
 /** Rows per page read inside one side's scan; the side's own `maxRows` caps the total. */
 const SCAN_PAGE_ROWS = 250;
+
+/**
+ * Roles whose consecutive rows display as one item: an agent reply or thought merged from its
+ * streamed chunks (`MERGED_MESSAGE_ROLES`, which must stay the chat's text-merge rule), and a
+ * run of tool rows, which the chat shows as one tool-call group.
+ */
+const RUN_ROLES: ReadonlySet<string> = new Set([...MERGED_MESSAGE_ROLES, 'tool']);
 
 export interface MessageContextRequest {
   messageId: string;
@@ -109,7 +119,7 @@ async function scanSide(
   let bytes = 0;
   // The displayed message being read: the anchored one first. `openRole` is the role its
   // further rows would carry, or null when a message is a single row.
-  let openRole = anchor.role !== null && MERGED_MESSAGE_ROLES.has(anchor.role) ? anchor.role : null;
+  let openRole = anchor.role !== null && RUN_ROLES.has(anchor.role) ? anchor.role : null;
   let messagesRead = 0;
   let cursor = anchor.position;
 
@@ -128,7 +138,7 @@ async function scanSide(
       if (!continuesMessage) {
         if (messagesRead >= request.messagesEachSide) return { rows, hasMore: true };
         messagesRead += 1;
-        openRole = role !== null && MERGED_MESSAGE_ROLES.has(role) ? role : null;
+        openRole = role !== null && RUN_ROLES.has(role) ? role : null;
       }
       bytes += formattedRowBytes(row);
       if (bytes > byteBudget) return { rows, hasMore: true };
