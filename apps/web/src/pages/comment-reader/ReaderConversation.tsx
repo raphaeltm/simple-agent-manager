@@ -111,6 +111,9 @@ function Edge({
   );
 }
 
+/** Chips shown under one message before the rest fold into "+N more" (presentation only). */
+const MARKERS_SHOWN = 3;
+
 function CommentMarkers({
   markers,
   onSelect,
@@ -118,9 +121,14 @@ function CommentMarkers({
   markers: ReaderMarker[];
   onSelect: (threadId: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  // The open comment's chip first, so folding never hides it.
+  const ordered = [...markers].sort((a, b) => Number(b.active) - Number(a.active));
+  const shown = expanded ? ordered : ordered.slice(0, MARKERS_SHOWN);
+  const folded = ordered.length - shown.length;
   return (
     <div className="mt-1 flex flex-wrap gap-1.5">
-      {markers.map((marker) => (
+      {shown.map((marker) => (
         <button
           key={marker.threadId}
           type="button"
@@ -136,6 +144,15 @@ function CommentMarkers({
           <span className="truncate">{marker.label}</span>
         </button>
       ))}
+      {folded > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="inline-flex min-h-7 items-center rounded-full border border-border-default px-2 text-xs text-fg-muted transition-colors hover:text-fg-primary"
+        >
+          +{folded} more
+        </button>
+      )}
     </div>
   );
 }
@@ -217,7 +234,11 @@ export function ReaderConversation({
       return;
     }
     const range = quoteRange(scroller, { itemId: anchorItemId, quote });
-    target.current = range ?? itemElement(scroller, anchorItemId);
+    // Without the words, the whole commented row, so the notice above the message shows too.
+    target.current =
+      range ??
+      scroller.querySelector<HTMLElement>('[data-reader-anchor="true"]') ??
+      itemElement(scroller, anchorItemId);
     targetIsWords.current = range !== null;
     if (!pendingLanding.current || !target.current) return;
     pendingLanding.current = false;
@@ -312,7 +333,9 @@ export function ReaderConversation({
         data-reader-scroller=""
         role="region"
         aria-label="Conversation around the comment"
-        className="relative h-full overflow-y-auto overscroll-contain"
+        // Native scroll anchoring is off so prepending behaves the same in every browser
+        // (Safari has none): the effect above keeps the view still itself.
+        className="relative h-full overflow-y-auto overscroll-contain [overflow-anchor:none]"
         style={{ paddingBottom: bottomInset }}
       >
         <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col pt-2 pb-6">

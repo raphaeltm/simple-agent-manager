@@ -163,6 +163,9 @@ export function scrollBoxIntoView(
   scroller.scrollTop += box.top - view.top - visible * ratio;
 }
 
+/** How much of the words must show, about one line, for them to count as on screen. */
+const MIN_VISIBLE_PX = 24;
+
 /** Where `box` is relative to the scroller's visible area, less `bottomInset` px it hides. */
 export function boxPlacement(
   scroller: HTMLElement,
@@ -170,7 +173,7 @@ export function boxPlacement(
   bottomInset = 0
 ): 'above' | 'visible' | 'below' {
   const view = scroller.getBoundingClientRect();
-  if (box.bottom < view.top + 8) return 'above';
-  if (box.top > view.bottom - bottomInset - 8) return 'below';
+  if (box.bottom < view.top + MIN_VISIBLE_PX) return 'above';
+  if (box.top > view.bottom - bottomInset - MIN_VISIBLE_PX) return 'below';
   return 'visible';
 }
