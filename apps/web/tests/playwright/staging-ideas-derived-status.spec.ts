@@ -26,9 +26,9 @@ import {
   STAGING_API,
   STAGING_APP,
   stagingLogin,
+  stagingShot,
 } from './staging-helpers';
 
-const SHOTS = '../../.codex/tmp/staging-screenshots';
 const PROJECT_ID = process.env.T8_PROJECT_ID ?? '';
 
 /** Unique per run, so a failed run never collides with the next one. */
@@ -55,16 +55,15 @@ async function api(page: Page, method: 'GET' | 'POST' | 'DELETE', path: string, 
 }
 
 /**
- * Captures a state and checks it for overflow in the same step, so a real-data layout
- * problem cannot be screenshotted without being asserted on (rules 17 and 56).
+ * Captures a state and checks it for overflow in the same step, so a real-data layout problem
+ * cannot be screenshotted without being asserted on (rules 17 and 56). The capture itself is
+ * the shared `stagingShot`; only the assertion is added here, deliberately rather than inside
+ * the shared helper, because three other items in this program are mid-flight against it and a
+ * new blocking assertion in a shared helper would land in their specs too.
  */
 async function shot(page: Page, name: string): Promise<void> {
-  await page.waitForTimeout(900);
   await assertNoOverflow(page);
-  await page.screenshot({
-    path: `${SHOTS}/${name}-${page.viewportSize()?.width ?? 0}.png`,
-    fullPage: false,
-  });
+  await stagingShot(page, name);
 }
 
 async function openIdeas(page: Page): Promise<void> {
