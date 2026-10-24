@@ -122,6 +122,13 @@ function makeIdea(state: DerivedState, overrides: Record<string, unknown> = {}) 
     content: PLAN,
     summary: 'Retry failed deliveries with exponential backoff for up to 3 days.',
     status: state === 'done' ? 'completed' : state === 'parked' ? 'cancelled' : 'draft',
+    /*
+     * Set only for `done`, and deliberately EARLIER than `updatedAt`: the "Marked done" entry
+     * is dated from this, so a fixture where the two agree would hide the distinction. Also
+     * AFTER the pull request merged (08:00 the same day): a done idea that finished before its
+     * own work did is an incoherent story to put in front of a screenshot reviewer.
+     */
+    completedAt: state === 'done' ? '2026-10-23T09:30:00Z' : null,
     createdAt: '2026-10-14T00:00:00Z',
     updatedAt: '2026-10-22T00:00:00Z',
     derived: {
@@ -550,7 +557,14 @@ test.describe('Idea page — phone', () => {
       await setupIdeaMocks(page, { idea: makeIdea(idea.state) });
       await openIdea(page);
 
-      if (idea.status) await expect(page.getByText(idea.status)).toBeVisible();
+      /*
+       * `exact`, because the status card's word is now a substring of a timeline entry: a done
+       * idea shows "Done" in the card and "Marked done" in Updates, and a loose match resolves
+       * to both. Asserting the card's own word keeps this about the status card.
+       */
+      if (idea.status) {
+        await expect(page.getByText(idea.status, { exact: true }).first()).toBeVisible();
+      }
       for (const action of idea.actions) {
         await expect(page.getByRole(action.role, { name: action.name })).toBeVisible();
       }

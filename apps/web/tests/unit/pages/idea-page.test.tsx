@@ -483,6 +483,50 @@ describe('IdeaPage', () => {
     });
 
     /*
+     * "Marked done" has a real clock after all: `completed_at` is written by
+     * `applyIdeaStatusTransition` at the moment of the transition. I had struck this entry on
+     * the belief that only `updatedAt` was available; the coordinator pointed at the column
+     * and they were right.
+     */
+    it('dates Marked done from the transition, not from the last edit', async () => {
+      mocks.getProjectIdea.mockResolvedValue(
+        makeIdeaDetail({
+          status: 'completed',
+          derived: makeDerived({ state: 'done' }),
+          completedAt: '2026-10-22T08:00:00.000Z',
+          // Later than the completion, and deliberately so: if the entry were dated from
+          // `updatedAt` it would claim the idea finished when someone last edited the plan.
+          updatedAt: '2026-10-24T17:00:00.000Z',
+        })
+      );
+      renderPage();
+
+      const updates = await screen.findByRole('region', { name: 'Updates' });
+      expect(within(updates).getByText('Marked done')).toBeInTheDocument();
+    });
+
+    /*
+     * The control, and the reason `completed_at` is cleared on reopen: a reopened idea must
+     * stop claiming it finished. Guarding on the status too means a stale value left by an
+     * older Worker cannot resurrect the entry.
+     */
+    it('drops Marked done once the idea is reopened', async () => {
+      mocks.getProjectIdea.mockResolvedValue(
+        makeIdeaDetail({
+          status: 'draft',
+          derived: makeDerived({ state: 'not-started' }),
+          completedAt: '2026-10-22T08:00:00.000Z',
+        })
+      );
+      renderPage();
+
+      const updates = await screen.findByRole('region', { name: 'Updates' });
+      expect(within(updates).queryByText('Marked done')).not.toBeInTheDocument();
+      // Liveness: the section rendered, rather than the page having failed.
+      expect(within(updates).getByText(/Nothing yet/)).toBeInTheDocument();
+    });
+
+    /*
      * The count is the timeline's, not the notes table's.
      *
      * It read "3" beside six rows when lifecycle entries joined the list and the pill still

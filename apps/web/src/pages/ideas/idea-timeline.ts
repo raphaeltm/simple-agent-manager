@@ -13,15 +13,20 @@
  *   idea. NOT `lastActivityAt`, which moves on every message and would redate the entry to the
  *   chat's latest reply (`.claude/rules/74`).
  * - "a pull request merged" uses `pullRequest.mergedAt`, which GitHub reports exactly.
+ * - "marked done" uses `completedAt`, written by `applyIdeaStatusTransition` at the moment of
+ *   the transition and cleared again on reopen — so it is a transition clock, and a reopened
+ *   idea stops claiming it finished. NOT the idea's `updatedAt`, which any later plan edit
+ *   moves.
  *
  * Deliberately NOT derived, because the payload has no clock for them — see
  * `tasks/backlog/2026-10-24-idea-lifecycle-entry-timestamps.md`:
  *
  * - "a pull request opened": `PullRequestState` carries `mergedAt` and `updatedAt`, but no
  *   opened-at. `updatedAt` is the last change of any kind.
- * - "marked done", "parked", "reopened": the only candidate is the idea's `updatedAt`, a
- *   last-change clock that any later edit to the plan moves. It would date the transition to
- *   whenever someone last touched the text.
+ * - "parked" and "reopened": unlike completion, these leave no column behind — `completed_at`
+ *   is specific to being done. The transitions ARE recorded, in `task_status_events`, but
+ *   nothing reads that table for ideas yet, so surfacing them is a read and a payload change
+ *   rather than a derivation.
  */
 import type { IdeaUpdateNote } from '@simple-agent-manager/shared';
 
@@ -35,7 +40,7 @@ export type IdeaTimelineEntry =
       id: string;
       /** What happened, already in plain words. */
       text: string;
-      event: 'chat-started' | 'pull-request-merged';
+      event: 'chat-started' | 'pull-request-merged' | 'marked-done';
       /** Where the entry points, when it points somewhere. */
       sessionId?: string;
       url?: string;
@@ -49,7 +54,7 @@ function timeOf(value: string | null | undefined): number | null {
 
 /** Everything that happened to this idea, newest first. */
 export function ideaTimeline(
-  idea: Pick<IdeaDetail, 'sessions' | 'pullRequests'>,
+  idea: Pick<IdeaDetail, 'sessions' | 'pullRequests' | 'status' | 'completedAt'>,
   notes: readonly IdeaUpdateNote[]
 ): IdeaTimelineEntry[] {
   const entries: IdeaTimelineEntry[] = [];
@@ -91,6 +96,22 @@ export function ideaTimeline(
       event: 'pull-request-merged',
       text: `Pull request #${pullRequest.number} merged`,
       url: pullRequest.url,
+    });
+  }
+
+  /*
+   * Only while the idea IS done. `completedAt` is cleared on reopen, so this cannot outlive
+   * the state it describes — but guarding on the status too means a stale value from an older
+   * Worker cannot resurrect the entry on a reopened idea.
+   */
+  const completedAt = timeOf(idea.completedAt);
+  if (idea.status === 'completed' && completedAt !== null) {
+    entries.push({
+      kind: 'lifecycle',
+      at: completedAt,
+      id: 'marked-done',
+      event: 'marked-done',
+      text: 'Marked done',
     });
   }
 

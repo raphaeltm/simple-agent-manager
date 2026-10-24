@@ -8,6 +8,7 @@
  */
 import { Button } from '@simple-agent-manager/ui';
 import {
+  CheckCircle2,
   GitMerge,
   GitPullRequest,
   Lightbulb,
@@ -207,9 +208,16 @@ function LifecycleRow({
   entry: Extract<IdeaTimelineEntry, { kind: 'lifecycle' }>;
   projectId: string;
 }) {
-  const Icon = entry.event === 'pull-request-merged' ? GitMerge : MessageSquare;
+  const Icon =
+    entry.event === 'pull-request-merged'
+      ? GitMerge
+      : entry.event === 'marked-done'
+        ? CheckCircle2
+        : MessageSquare;
   const accent =
-    entry.event === 'pull-request-merged' ? 'text-success-fg' : 'text-fg-muted';
+    entry.event === 'pull-request-merged' || entry.event === 'marked-done'
+      ? 'text-success-fg'
+      : 'text-fg-muted';
   const body = (
     <>
       <span

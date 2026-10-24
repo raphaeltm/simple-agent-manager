@@ -34,6 +34,12 @@ export interface IdeaRow {
   idea_merge_ack_at: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * When the idea was marked done, written by `applyIdeaStatusTransition` at the moment of the
+   * transition and cleared again on reopen. A real transition clock, unlike `updated_at`,
+   * which any later edit to the plan moves.
+   */
+  completed_at: string | null;
 }
 
 export interface SessionTaskRow {
@@ -51,7 +57,7 @@ export interface IdeaListTotals {
 }
 
 const IDEA_COLUMNS =
-  'id, title, description, status, triggered_by, connector_client_name, idea_merge_ack_at, created_at, updated_at';
+  'id, title, description, status, triggered_by, connector_client_name, idea_merge_ack_at, created_at, updated_at, completed_at';
 
 export { IDEA_COLUMNS };
 

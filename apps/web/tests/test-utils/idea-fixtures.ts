@@ -42,6 +42,7 @@ export function makeIdeaDetail(overrides: Partial<IdeaDetail> = {}): IdeaDetail 
     counts: { updates: 0, chats: 0, files: 0, pullRequests: 0 },
     filedByAgent: false,
     filedBy: null,
+    completedAt: null,
     sessions: [],
     pullRequests: [],
     // The detail response carries the newest Updates slice now, so the page makes one request

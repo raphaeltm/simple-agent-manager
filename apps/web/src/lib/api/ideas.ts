@@ -55,6 +55,8 @@ export interface IdeaDetail {
   counts: IdeaCounts;
   filedByAgent: boolean;
   filedBy: string | null;
+  /** When it was marked done, or null. Cleared on reopen. */
+  completedAt: string | null;
   sessions: IdeaLinkedSession[];
   pullRequests: IdeaPullRequest[];
   /**

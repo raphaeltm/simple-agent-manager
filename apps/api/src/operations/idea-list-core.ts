@@ -99,6 +99,8 @@ export interface IdeaDetailResult {
   filedByAgent: boolean;
   filedBy: string | null;
   viaConnector: string | null;
+  /** When it was marked done, or null. Cleared on reopen, so it is never stale. */
+  completedAt: string | null;
   /** Every chat linked to the idea, newest activity first. */
   sessions: IdeaStatusLinkedSession[];
   /** Every pull request recorded for the idea whose state is known. */
@@ -431,6 +433,7 @@ export async function getIdeaWithDerivedStatus(
     filedByAgent: filedByAgent(row),
     filedBy: filedByLabel(row),
     viaConnector: viaConnector(row),
+    completedAt: row.completed_at,
     sessions: entry.sessions,
     pullRequests: entry.pullRequests,
     updates: {
