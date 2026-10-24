@@ -21,7 +21,9 @@ import { Link } from 'react-router';
 import { LinkedWorkRow, PullRequestStateBadge } from '../../components/linked-work';
 import type { IdeaDetail, IdeaLinkedSession, IdeaUpdateNote } from '../../lib/api';
 import { projectChatPath } from '../../lib/project-routes';
+import { sanitizeUrl } from '../../lib/url-utils';
 import { Panel, SectionTitle } from '../automation/ui';
+import type { IdeaTimelineEntry } from './idea-timeline';
 import { LiveDot } from './parts';
 import { relativeTime } from './view-model';
 
@@ -191,8 +193,75 @@ function UpdateRow({ update, projectId }: { update: IdeaUpdateNote; projectId: s
  * This is where the appended sections used to go. An update is a note beside the plan rather
  * than an edit to it, so the plan can stay true while its history stays readable.
  */
+/**
+ * One thing the work itself did, as opposed to something a person or agent wrote.
+ *
+ * Visually quieter than a note and carrying an icon rather than an author, so a reader can
+ * tell at a glance which entries are commentary and which are events — they are different
+ * kinds of claim and the timeline should not blur them.
+ */
+function LifecycleRow({
+  entry,
+  projectId,
+}: {
+  entry: Extract<IdeaTimelineEntry, { kind: 'lifecycle' }>;
+  projectId: string;
+}) {
+  const Icon = entry.event === 'pull-request-merged' ? GitMerge : MessageSquare;
+  const accent =
+    entry.event === 'pull-request-merged' ? 'text-success-fg' : 'text-fg-muted';
+  const body = (
+    <>
+      <span
+        aria-hidden
+        className={`mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border-default ${accent}`}
+      >
+        <Icon size={15} />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="min-w-0 break-words text-[13px] font-medium text-fg-primary [overflow-wrap:anywhere]">
+          {entry.text}
+        </span>
+        <span className="shrink-0 text-xs text-fg-muted">
+          {relativeTime(new Date(entry.at).toISOString())}
+        </span>
+      </span>
+    </>
+  );
+  const className =
+    'flex min-w-0 items-start gap-3 border-0 border-b border-solid border-border-default px-4 py-3 no-underline last:border-b-0';
+  if (entry.url) {
+    return (
+      <li className="min-w-0">
+        <a
+          href={sanitizeUrl(entry.url)}
+          target="_blank"
+          rel="noreferrer noopener"
+          className={`${className} hover:bg-surface-hover`}
+        >
+          {body}
+        </a>
+      </li>
+    );
+  }
+  if (entry.sessionId) {
+    return (
+      <li className="min-w-0">
+        <Link
+          to={projectChatPath(projectId, entry.sessionId)}
+          className={`${className} hover:bg-surface-hover`}
+        >
+          {body}
+        </Link>
+      </li>
+    );
+  }
+  return <li className={className}>{body}</li>;
+}
+
 export function IdeaUpdates({
-  updates,
+  entries,
+  total,
   projectId,
   onPost,
   posting,
@@ -200,7 +269,10 @@ export function IdeaUpdates({
   onRetry,
   canWrite,
 }: {
-  updates: IdeaUpdateNote[] | undefined;
+  /** Notes and lifecycle events, already merged and newest first. */
+  entries: IdeaTimelineEntry[] | undefined;
+  /** The whole timeline's size, which can exceed what `entries` shows. */
+  total: number | undefined;
   projectId: string;
   onPost: (body: string) => void;
   posting: boolean;
@@ -220,8 +292,8 @@ export function IdeaUpdates({
     <div className="flex min-w-0 flex-col gap-2">
       <SectionTitle
         title="Updates"
-        count={updates?.length}
-        hint="Notes from people and agents, newest first"
+        count={total ?? entries?.length}
+        hint="What people, agents and the work itself did — newest first"
       />
       <Panel label="Updates" className="overflow-hidden">
         {canWrite && (
@@ -258,17 +330,21 @@ export function IdeaUpdates({
               Try again
             </Button>
           </div>
-        ) : updates === undefined ? (
+        ) : entries === undefined ? (
           <p className="m-0 px-4 py-6 text-sm text-fg-muted">Loading the updates…</p>
-        ) : updates.length === 0 ? (
+        ) : entries.length === 0 ? (
           <p className="m-0 px-4 py-6 text-sm text-fg-muted">
-            No updates yet. Notes from people and agents appear here.
+            Nothing yet. Notes, and what the work does, appear here.
           </p>
         ) : (
           <ol className="m-0 list-none p-0">
-            {updates.map((update) => (
-              <UpdateRow key={update.id} update={update} projectId={projectId} />
-            ))}
+            {entries.map((entry) =>
+              entry.kind === 'note' ? (
+                <UpdateRow key={entry.note.id} update={entry.note} projectId={projectId} />
+              ) : (
+                <LifecycleRow key={entry.id} entry={entry} projectId={projectId} />
+              )
+            )}
           </ol>
         )}
       </Panel>

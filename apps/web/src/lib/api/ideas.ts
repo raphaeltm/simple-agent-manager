@@ -4,6 +4,7 @@ import type {
   IdeaHumanTransition,
   IdeaListItem,
   IdeaPullRequest,
+  IdeaUpdateNote,
   LinkRelation,
 } from '@simple-agent-manager/shared';
 
@@ -36,6 +37,8 @@ export interface IdeaLinkedSession {
   taskErrorMessage: string | null;
   agentLabel: string | null;
   lastActivityAt: number | null;
+  /** Epoch ms the chat was first linked to this idea. Not its last activity. */
+  linkedAt: number | null;
   needsInput: { question: string | null; askedAt: number } | null;
 }
 
@@ -54,6 +57,18 @@ export interface IdeaDetail {
   filedBy: string | null;
   sessions: IdeaLinkedSession[];
   pullRequests: IdeaPullRequest[];
+  /**
+   * The newest page of the Updates timeline, carried by the detail response.
+   *
+   * The page polls this route; it used to poll `.../updates` alongside it, which was two
+   * requests a tick for one screen. `.../updates` is still the route for paging back through
+   * older notes — `nextCursor` is non-null when there are any — it is just not polled.
+   */
+  updates: {
+    items: IdeaUpdateNote[];
+    total: number;
+    nextCursor: string | null;
+  };
 }
 
 export function listProjectIdeas(

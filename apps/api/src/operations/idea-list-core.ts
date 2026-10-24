@@ -32,10 +32,13 @@ import type {
   PullRequestRef,
 } from '@simple-agent-manager/shared';
 import type { LinkRelation } from '@simple-agent-manager/shared';
+import type { IdeaUpdateNote } from '@simple-agent-manager/shared';
 
 import type { IdeaWorkSnapshot } from '../durable-objects/project-data/idea-work';
 import { log } from '../lib/logger';
+import { resolveAdminSetting } from '../services/admin-settings';
 import * as projectDataService from '../services/project-data';
+import { formatOperationCursor } from './cursors';
 import { OperationError } from './errors';
 import {
   DEFAULT_IDEA_LIST_CLOSED_LIMIT,
@@ -46,12 +49,11 @@ import {
   type IdeaRow,
   ideaSummary,
   readAgentProfileNames,
-  readAssociatedPullRequests,
   readIdeaRow,
   readIdeaRows,
   readIdeaTotals,
   readProjectRepository,
-  readSessionTasks,
+  readSessionTasksWithPullRequests,
   type SessionTaskRow,
   viaConnector,
 } from './idea-list-reads';
@@ -101,6 +103,21 @@ export interface IdeaDetailResult {
   sessions: IdeaStatusLinkedSession[];
   /** Every pull request recorded for the idea whose state is known. */
   pullRequests: IdeaPullRequest[];
+  /**
+   * The newest page of the Updates timeline, folded into this response.
+   *
+   * The idea page polls this route, and used to poll `GET .../updates` alongside it — two HTTP
+   * requests and two project-access reads per tick for one screen. Carrying a bounded slice
+   * here makes it one request (rule 60). `GET .../updates` stays for paging back through older
+   * notes and is simply no longer polled.
+   *
+   * `nextCursor` is non-null when there are older notes than this slice.
+   */
+  updates: {
+    items: IdeaUpdateNote[];
+    total: number;
+    nextCursor: string | null;
+  };
 }
 
 interface IdeaEvidence {
@@ -120,6 +137,7 @@ function toLinkedSession(
     sessionStatus: string;
     sessionTaskId: string | null;
     lastActivityAt: number | null;
+    linkedAt?: number;
     relations: LinkRelation[];
     strong: boolean;
   },
@@ -141,6 +159,7 @@ function toLinkedSession(
     taskErrorMessage: task?.error_message ?? null,
     agentLabel,
     lastActivityAt: session.lastActivityAt,
+    linkedAt: session.linkedAt ?? null,
     needsInput,
   };
 }
@@ -156,7 +175,17 @@ async function collectEvidence(
   ctx: OperationContext,
   projectId: string,
   rows: readonly IdeaRow[],
-  refresh: IdeaPullRequestRefresh
+  refresh: IdeaPullRequestRefresh,
+  /**
+   * The project's repository, when the caller already has it.
+   *
+   * `requireProjectAccess` returns the whole project row, so every route here has already
+   * read `repository` before this runs. Re-reading it cost a D1 round trip per request on a
+   * path the idea page polls (rule 60's shared-path deduplication). `undefined` means "I do
+   * not have it", which is not the same as the empty string a project without a repository
+   * legitimately has — hence the `?? ` rather than `||` below.
+   */
+  knownRepository?: string
 ): Promise<CollectedEvidence> {
   const evidence = new Map<string, IdeaEvidence>();
   for (const row of rows) evidence.set(row.id, emptyEvidence());
@@ -164,7 +193,9 @@ async function collectEvidence(
 
   const [caps, repository] = await Promise.all([
     resolveResourceLinkBatchCaps(ctx.env),
-    readProjectRepository(ctx, projectId),
+    knownRepository === undefined
+      ? readProjectRepository(ctx, projectId)
+      : Promise.resolve(knownRepository),
   ]);
 
   const snapshots = await projectDataService.getIdeaWorkSnapshots(
@@ -181,14 +212,11 @@ async function collectEvidence(
     }
   }
 
-  const [tasks, associations] = await Promise.all([
+  // One joined read, not two: see `readSessionTasksWithPullRequests` for why (rule 60).
+  const { tasks, pullRequests: associations } =
     sessionTaskIds.length > 0
-      ? readSessionTasks(ctx, projectId, sessionTaskIds)
-      : Promise.resolve(new Map<string, SessionTaskRow>()),
-    sessionTaskIds.length > 0
-      ? readAssociatedPullRequests(ctx, projectId, sessionTaskIds)
-      : Promise.resolve(new Map<string, string[]>()),
-  ]);
+      ? await readSessionTasksWithPullRequests(ctx, projectId, sessionTaskIds)
+      : { tasks: new Map<string, SessionTaskRow>(), pullRequests: new Map<string, string[]>() };
 
   const profileIds = [...tasks.values()]
     .map((task) => task.agent_profile_hint)
@@ -349,6 +377,11 @@ export interface GetIdeaInput {
   ideaId: string;
   /** Defaults to `'none'`; the single-idea route passes `'single'`. */
   refresh?: IdeaPullRequestRefresh;
+  /**
+   * The project's repository if the caller already read it — which every route does, because
+   * `requireProjectAccess` returns the project row. Saves one D1 round trip on a polled path.
+   */
+  repository?: string;
 }
 
 export async function getIdeaWithDerivedStatus(
@@ -364,9 +397,26 @@ export async function getIdeaWithDerivedStatus(
     ctx,
     input.projectId,
     [row],
-    input.refresh ?? 'none'
+    input.refresh ?? 'none',
+    input.repository
   );
   const entry = evidence.get(row.id) ?? emptyEvidence();
+
+  /*
+   * The updates slice. Read directly rather than through `listIdeaUpdates`, which would call
+   * `requireIdea` and re-read the row `readIdeaRow` just returned — the idea is already proven
+   * to exist in this project by the time we get here.
+   */
+  const updatesLimit = Number(
+    await resolveAdminSetting(ctx.env, 'collaboration.ideaUpdatePageSize')
+  );
+  const updatesPage = await projectDataService.listIdeaUpdates(
+    ctx.env,
+    input.projectId,
+    row.id,
+    null,
+    updatesLimit
+  );
 
   return {
     ideaId: row.id,
@@ -383,5 +433,15 @@ export async function getIdeaWithDerivedStatus(
     viaConnector: viaConnector(row),
     sessions: entry.sessions,
     pullRequests: entry.pullRequests,
+    updates: {
+      items: updatesPage.updates,
+      total: updatesPage.total,
+      nextCursor: updatesPage.nextCursor
+        ? formatOperationCursor({
+            updatedAt: updatesPage.nextCursor.createdAt,
+            id: updatesPage.nextCursor.id,
+          })
+        : null,
+    },
   };
 }

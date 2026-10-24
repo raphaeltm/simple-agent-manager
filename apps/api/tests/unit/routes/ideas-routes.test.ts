@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   requireProjectAccess: vi.fn(),
   requireProjectCapability: vi.fn(),
   getIdeaWorkSnapshots: vi.fn(),
+  listIdeaUpdates: vi.fn(),
   snapshotCalls: [] as string[][],
 }));
 
@@ -46,6 +47,9 @@ vi.mock('../../../src/middleware/project-auth', () => ({
 }));
 vi.mock('../../../src/services/project-data', () => ({
   getIdeaWorkSnapshots: mocks.getIdeaWorkSnapshots,
+  // The detail route folds the newest Updates slice into its own response (rule 60), so it
+  // reads this too. Default to an empty page; the folding test below overrides it.
+  listIdeaUpdates: mocks.listIdeaUpdates,
 }));
 
 import { IDEA_PULL_REQUEST_REFRESH, ideaRoutes } from '../../../src/routes/ideas';
@@ -238,6 +242,7 @@ describe('ideas routes', () => {
     vi.clearAllMocks();
     mocks.userId = 'u1';
     mocks.snapshotCalls = [];
+    mocks.listIdeaUpdates.mockResolvedValue({ updates: [], total: 0, nextCursor: null });
     mocks.requireProjectAccess.mockImplementation(async (_db: unknown, projectId: string) => {
       if (projectId === 'p1' || projectId === 'p2') return { id: projectId, userId: 'u1' };
       throw Object.assign(new Error('Project not found'), {
@@ -720,6 +725,76 @@ describe('ideas routes', () => {
 
   // The control for the two above: the owner's own idea still reads, so "404" cannot pass by
   // the route being broken outright.
+  /*
+   * The idea page polls this route, so what it costs per tick is the point (rule 60).
+   *
+   * Two savings are asserted by their absence, which is why the harness records every
+   * `prepare`: the project row is already in hand from `requireProjectAccess`, so there is no
+   * second `SELECT repository FROM projects`; and the session tasks and their pull-request
+   * associations come back from one LEFT JOIN rather than a query each.
+   *
+   * `requireProjectAccess` is mocked in this file, so its own reads are not in `queries` —
+   * these counts are the operation's, and the route's full budget is those plus two.
+   */
+  it('does not re-read the project row it was handed, or split the task join', async () => {
+    seedIdea('polled');
+    const res = await app.request(`${BASE}/p1/ideas/polled`, { method: 'GET' }, env);
+    expect(res.status).toBe(200);
+
+    const repositoryReads = queries.filter((sql) => /SELECT\s+repository\s+FROM\s+projects/i.test(sql));
+    expect(repositoryReads, `re-read the project row: ${repositoryReads.join(' | ')}`).toHaveLength(
+      0
+    );
+
+    // The association table is only ever touched through the join now.
+    const standaloneAssociationReads = queries.filter(
+      (sql) => /task_pull_request_associations/i.test(sql) && !/JOIN/i.test(sql)
+    );
+    expect(standaloneAssociationReads).toHaveLength(0);
+  });
+
+  /*
+   * The Updates timeline arrives with the idea, so one tick is one request.
+   *
+   * The page used to poll `GET .../updates` beside this route — two requests and two
+   * project-access reads for one screen. The separate route still exists for paging back
+   * through older notes; it is simply no longer polled.
+   */
+  it('folds the newest Updates slice into the detail response', async () => {
+    seedIdea('with-notes');
+    mocks.listIdeaUpdates.mockResolvedValue({
+      updates: [
+        {
+          id: 'note-1',
+          ideaId: 'with-notes',
+          authorKind: 'user',
+          authorUserId: 'u1',
+          authorName: 'Marcus Chen',
+          sessionId: null,
+          sessionTopic: null,
+          body: 'Match the 3-day window.',
+          quote: null,
+          createdAt: '2026-10-21T10:00:00.000Z',
+          editedAt: null,
+        },
+      ],
+      total: 4,
+      nextCursor: { createdAt: '2026-10-20T10:00:00.000Z', id: 'note-0' },
+    });
+
+    const res = await app.request(`${BASE}/p1/ideas/with-notes`, { method: 'GET' }, env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      updates: { items: { id: string }[]; total: number; nextCursor: string | null };
+    };
+    expect(body.updates.items.map((note) => note.id)).toEqual(['note-1']);
+    // `total` is the whole timeline, not the slice — the page says "4" while showing one.
+    expect(body.updates.total).toBe(4);
+    // A cursor, because there are older notes than this slice carries.
+    expect(body.updates.nextCursor).toBeTruthy();
+    expect(mocks.listIdeaUpdates).toHaveBeenCalledTimes(1);
+  });
+
   it('reads the project’s own idea', async () => {
     seedIdea('real');
     const res = await app.request(`${BASE}/p1/ideas/real`, { method: 'GET' }, env);

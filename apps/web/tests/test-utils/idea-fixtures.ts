@@ -44,6 +44,9 @@ export function makeIdeaDetail(overrides: Partial<IdeaDetail> = {}): IdeaDetail 
     filedBy: null,
     sessions: [],
     pullRequests: [],
+    // The detail response carries the newest Updates slice now, so the page makes one request
+    // per poll instead of two. An idea with no notes still has the envelope.
+    updates: { items: [], total: 0, nextCursor: null },
     ...overrides,
   };
 }

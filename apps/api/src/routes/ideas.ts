@@ -127,7 +127,12 @@ ideaRoutes.get('/:ideaId', ...session, async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const ideaId = requireRouteParam(c, 'ideaId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireProjectAccess(db, projectId, userId);
+  /*
+   * Keep the project row. It carries `repository`, which the evidence read needs, so passing
+   * it down turns a second `SELECT repository FROM projects` into zero round trips. This route
+   * is polled by the idea page, so one saved D1 query per tick is the point (rule 60).
+   */
+  const project = await requireProjectAccess(db, projectId, userId);
 
   const ctx = webOperationContext(c, userId);
   try {
@@ -136,6 +141,7 @@ ideaRoutes.get('/:ideaId', ...session, async (c) => {
       projectId,
       ideaId,
       refresh: IDEA_PULL_REQUEST_REFRESH.detail,
+      repository: project.repository ?? '',
     });
     return c.json(idea);
   } catch (error) {

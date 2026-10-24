@@ -171,6 +171,58 @@ export async function readSessionTasks(
   return byId;
 }
 
+/**
+ * The session tasks AND the pull requests associated with them, in one query.
+ *
+ * These were two reads over the same ids, the same project and the same chunking — one of
+ * `tasks`, one of `task_pull_request_associations` — which cost two D1 round trips on a route
+ * the idea page polls (rule 60). A LEFT JOIN answers both, so a task with no association still
+ * comes back, with a null `pr_url` that is simply not collected.
+ *
+ * The join repeats the task columns once per association, which is why the task row is only
+ * taken the first time an id is seen. Associations per task are a handful, so the row
+ * multiplication is bounded; the bind count is unchanged (one project id plus the chunk), so
+ * the D1 parameter ceiling is no closer than it was.
+ */
+export async function readSessionTasksWithPullRequests(
+  ctx: OperationContext,
+  projectId: string,
+  taskIds: readonly string[]
+): Promise<{ tasks: Map<string, SessionTaskRow>; pullRequests: Map<string, string[]> }> {
+  const tasks = new Map<string, SessionTaskRow>();
+  const pullRequests = new Map<string, string[]>();
+  for (const ids of chunk([...new Set(taskIds)], MAX_IDS_PER_QUERY)) {
+    const placeholders = ids.map(() => '?').join(', ');
+    const result = await ctx.env.DATABASE.prepare(
+      `SELECT t.id, t.status, t.error_message, t.output_pr_url, t.agent_profile_hint,
+              a.pr_url AS associated_pr_url
+         FROM tasks t
+         LEFT JOIN task_pull_request_associations a
+           ON a.task_id = t.id AND a.project_id = t.project_id
+        WHERE t.project_id = ? AND t.id IN (${placeholders})`
+    )
+      .bind(projectId, ...ids)
+      .all<SessionTaskRow & { associated_pr_url: string | null }>();
+    for (const row of result.results ?? []) {
+      if (!tasks.has(row.id)) {
+        tasks.set(row.id, {
+          id: row.id,
+          status: row.status,
+          error_message: row.error_message,
+          output_pr_url: row.output_pr_url,
+          agent_profile_hint: row.agent_profile_hint,
+        });
+      }
+      if (!row.associated_pr_url) continue;
+      const existing = pullRequests.get(row.id);
+      if (existing) {
+        if (!existing.includes(row.associated_pr_url)) existing.push(row.associated_pr_url);
+      } else pullRequests.set(row.id, [row.associated_pr_url]);
+    }
+  }
+  return { tasks, pullRequests };
+}
+
 export async function readAgentProfileNames(
   ctx: OperationContext,
   profileIds: readonly string[]

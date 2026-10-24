@@ -137,9 +137,14 @@ not a proxy: every rule reads the condition itself and carries its source), `76-
       `'user' | 'agent'` with no system kind, `idea-activity.tsx` synthesises nothing, and no
       status mutation posts one — so Updates shows authored notes only, and the timeline never
       says "Marked done on ...". Tracked in
-      `tasks/backlog/2026-10-24-idea-updates-lifecycle-entries.md` rather than left implied
-      (rule 09: a finding must become a checklist item or an explicit deferral; I did neither
-      until the validator caught it).
+      the follow-up PR. **Resolved there:** Updates now carries the two lifecycle entries that
+      have a real clock — "Work started in <chat>" from `session.linkedAt` (the first link, not
+      `lastActivityAt`, which moves on every message) and "Pull request #N merged" from
+      `mergedAt`. The three with no honest timestamp today — PR opened, marked done/parked,
+      reopened — are struck and filed as
+      `tasks/backlog/2026-10-24-idea-lifecycle-entry-timestamps.md`, with the clock each one
+      needs. Rule 09: a finding becomes a checklist item or an explicit deferral; I did neither
+      until the validator caught it.
 - [x] Keep Start work (T7) wired; whichever of T7/T8 merges second does the wiring. **T8 merged
       second, and the wiring was worse than missing — see the three findings below.**
 - [x] Tests: status-dependent primary action per state, Updates composer through the real POST,
@@ -340,10 +345,12 @@ covered, so nothing that was in anyone's Ideas list has left it.
 one to three minutes — is written with `is_idea = 0` by a writer that did not yet set the flag,
 and is invisible to every idea read afterwards. The backfill has already passed it.
 
-- [ ] After the STAGING deploy, run the read-only D1 SELECT below and post the count on
-      `feature.linked-work`.
-- [ ] After the PRODUCTION deploy, run it again against production and post the count.
-- [ ] If either is above zero: post the ids, and backfill by id ONLY after the coordinator's OK.
+- [x] After the STAGING deploy, run the read-only D1 SELECT below and post the count on
+      `feature.linked-work`. Run on 2026-10-24; documented in "Run it, and the answer" below.
+- [x] After the PRODUCTION deploy, run it again against production and post the count. 0 rows;
+      migration 14:54:40 -> Worker swap 15:12:24Z, a 17m44s window. Posted on the channel.
+- [x] If either is above zero: post the ids, and backfill by id ONLY after the coordinator's OK.
+      Not reached — both were zero.
 
 Run inside `exec_with_secrets` with `secretNames: ["CF_TOKEN"]` (program decision 13), against
 `/accounts/c4e4aebd980b626f6af43ac6b1edcede/d1/database/1cfaf5d4-8226-47d8-bf26-6ba727ce5718/query`

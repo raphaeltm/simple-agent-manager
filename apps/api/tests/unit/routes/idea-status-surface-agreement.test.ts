@@ -42,6 +42,9 @@ vi.mock('../../../src/middleware/project-auth', () => ({
 vi.mock('../../../src/services/project-data', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/services/project-data')>()),
   getIdeaWorkSnapshots: vi.fn().mockResolvedValue({}),
+  // The idea read folds the newest Updates slice into its response (rule 60), so every surface
+  // that returns an idea now touches this too.
+  listIdeaUpdates: vi.fn().mockResolvedValue({ updates: [], total: 0, nextCursor: null }),
   recordActivityEvent: vi.fn().mockResolvedValue(undefined),
 }));
 

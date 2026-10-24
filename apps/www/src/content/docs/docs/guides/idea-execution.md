@@ -116,8 +116,11 @@ it:
 - **Updates** — short notes from people and agents, newest first, with the line each one is
   answering. Agents post here with `update_idea`'s `note` (and an optional `quote`) instead of
   appending to the plan, which is what used to make an idea's text contradict itself.
-- **Related** _(intended, not yet available)_ — the files and other ideas that linked
-  themselves while agents worked. The link store this reads is not on `main` yet.
+- **Related** — the files and other ideas that linked themselves while agents worked. Nobody
+  adds these by hand: an agent reading a research file while working on the idea is what puts
+  it there (`IdeaRelated` in `apps/web/src/pages/ideas/idea-sections.tsx`, reading
+  `GET /api/projects/:projectId/ideas/:ideaId/links`). The count reads "N+" rather than "N"
+  when the server could only establish a lower bound.
 
 ## While the work runs
 

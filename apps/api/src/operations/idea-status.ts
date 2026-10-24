@@ -63,6 +63,14 @@ export interface IdeaStatusLinkedSession {
   /** An agent profile name, when one is known for the task. */
   agentLabel: string | null;
   lastActivityAt: number | null;
+  /**
+   * Epoch ms the chat was FIRST linked to this idea (`link.firstAt`), not its last activity.
+   *
+   * These are different clocks and only this one can date "a chat started working on this":
+   * `lastActivityAt` moves every time the chat says anything, so using it would misdate the
+   * entry to the chat's most recent message (`.claude/rules/74`).
+   */
+  linkedAt: number | null;
   /** An unresolved attention marker asking a person something. */
   needsInput: { question: string | null; askedAt: number } | null;
 }

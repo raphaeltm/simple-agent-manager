@@ -22,13 +22,13 @@ import {
   ideaDetailQueryOptions,
   ideaLinksQueryOptions,
   ideaQueryKeys,
-  ideaUpdatesQueryOptions,
 } from '../../lib/query-options';
 import { LoadError, Page, PageHeader } from '../automation/page';
 import { useProjectContext } from '../ProjectContext';
 import { EditIdeaDialog } from './EditIdeaDialog';
 import { IdeaUpdates, IdeaWork } from './idea-activity';
 import { IdeaPlan, IdeaRelated, IdeaStatusCard } from './idea-sections';
+import { ideaTimeline } from './idea-timeline';
 import type { IdeaActionHandlers } from './parts';
 import { useStartWorkLauncher } from './useStartWorkLauncher';
 
@@ -44,10 +44,6 @@ export function IdeaPage() {
   const enabled = Boolean(projectId && ideaId && queryScope);
   const ideaQuery = useQuery({
     ...ideaDetailQueryOptions(queryScope, projectId, ideaId),
-    enabled,
-  });
-  const updatesQuery = useQuery({
-    ...ideaUpdatesQueryOptions(queryScope, projectId, ideaId),
     enabled,
   });
   const linksQuery = useQuery({
@@ -102,8 +98,15 @@ export function IdeaPage() {
   const postUpdate = useMutation({
     mutationFn: (body: string) => postIdeaUpdate(projectId, ideaId, { body }),
     onSuccess: () => {
+      /*
+       * Invalidate the IDEA, because that is where the timeline comes from now. This used to
+       * invalidate `ideaQueryKeys.updates`, which the page no longer reads — so the note a
+       * person had just written would not appear until the next poll. Exactly the shape of the
+       * dead link this work exists to fix: a write path still pointing at something nothing
+       * reads.
+       */
       void queryClient.invalidateQueries({
-        queryKey: ideaQueryKeys.updates(queryScope, projectId, ideaId),
+        queryKey: ideaQueryKeys.detail(queryScope, projectId, ideaId),
       });
     },
     onError: (error: unknown) =>
@@ -150,6 +153,13 @@ export function IdeaPage() {
     );
   }
 
+  /*
+   * Notes and lifecycle events in one list. Both come from `idea`, so the page makes one
+   * request per tick instead of the two it used to (rule 60), and the timeline can show what
+   * the work did rather than only what someone wrote about it.
+   */
+  const timeline = ideaTimeline(idea, idea.updates.items);
+
   const header = (
     <PageHeader title={idea.title} back={{ label: 'Ideas', to: `/projects/${projectId}/ideas` }} />
   );
@@ -160,12 +170,13 @@ export function IdeaPage() {
   const work = <IdeaWork idea={idea} projectId={projectId} />;
   const updates = (
     <IdeaUpdates
-      updates={updatesQuery.data?.updates}
+      entries={timeline}
+      total={idea.updates.total}
       projectId={projectId}
       onPost={(body) => postUpdate.mutate(body)}
       posting={postUpdate.isPending}
-      error={updatesQuery.data === undefined ? updatesQuery.error : null}
-      onRetry={() => void updatesQuery.refetch()}
+      error={null}
+      onRetry={() => void ideaQuery.refetch()}
       canWrite
     />
   );

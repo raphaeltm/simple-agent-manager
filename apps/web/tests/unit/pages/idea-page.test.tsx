@@ -375,8 +375,9 @@ describe('IdeaPage', () => {
 
   describe('Updates', () => {
     it('shows who wrote each note, the chat it came from, and the line it answers', async () => {
-      mocks.listIdeaUpdates.mockResolvedValue({
-        updates: [
+      mocks.getProjectIdea.mockResolvedValue(
+        makeIdeaDetail({
+          updates: { items: [
           {
             id: 'u-1',
             ideaId: 'idea-1',
@@ -403,9 +404,9 @@ describe('IdeaPage', () => {
             createdAt: '2026-10-18T00:00:00.000Z',
             editedAt: null,
           },
-        ],
-        nextCursor: null,
-      });
+        ], total: 2, nextCursor: null },
+        })
+      );
       renderPage();
 
       const updates = await screen.findByRole('region', { name: 'Updates' });
@@ -414,6 +415,99 @@ describe('IdeaPage', () => {
       expect(
         within(updates).getByRole('link', { name: 'Comparing retry schedules' })
       ).toHaveAttribute('href', '/projects/proj-1/chat/sess-research');
+    });
+
+    /*
+     * The timeline carries what the WORK did, not only what people wrote about it.
+     *
+     * The checklist claimed these for the original idea page and they were never built, so the
+     * timeline said nothing when a chat picked the idea up or a pull request merged. Both
+     * entries here are dated from a real clock: `linkedAt` is when the chat was first linked,
+     * and `mergedAt` is what GitHub reported.
+     */
+    it('shows what the work did beside what people wrote, newest first', async () => {
+      mocks.getProjectIdea.mockResolvedValue(
+        makeIdeaDetail({
+          sessions: [
+            {
+              ...SESSION,
+              strong: true,
+              relations: ['works_on'],
+              linkedAt: Date.parse('2026-10-20T09:00:00.000Z'),
+            },
+          ],
+          pullRequests: [
+            { ...PULL_REQUEST, state: 'merged' as const, mergedAt: '2026-10-23T12:00:00.000Z' },
+          ],
+          updates: {
+            items: [
+              {
+                id: 'note-mid',
+                ideaId: 'idea-1',
+                authorKind: 'user' as const,
+                authorUserId: 'user-1',
+                authorName: 'Marcus Chen',
+                sessionId: null,
+                sessionTopic: null,
+                body: 'Match the 3-day window.',
+                quote: null,
+                createdAt: '2026-10-21T10:00:00.000Z',
+                editedAt: null,
+              },
+            ],
+            total: 1,
+            nextCursor: null,
+          },
+        })
+      );
+      renderPage();
+
+      const updates = await screen.findByRole('region', { name: 'Updates' });
+      expect(within(updates).getByText(/Work started in Building retries/)).toBeInTheDocument();
+      expect(within(updates).getByText('Pull request #482 merged')).toBeInTheDocument();
+      // The note is still there — lifecycle entries join the timeline, they do not replace it.
+      expect(within(updates).getByText('Match the 3-day window.')).toBeInTheDocument();
+
+      /*
+       * Order is the claim a timeline makes, so it is asserted rather than assumed: the merge
+       * (Oct 23) is newest, the note (Oct 21) next, the chat starting (Oct 20) oldest.
+       */
+      const rows = within(updates).getAllByRole('listitem');
+      const text = rows.map((row) => row.textContent ?? '');
+      const merged = text.findIndex((line) => line.includes('Pull request #482 merged'));
+      const note = text.findIndex((line) => line.includes('Match the 3-day window.'));
+      const started = text.findIndex((line) => line.includes('Work started in'));
+      expect(merged).toBeGreaterThanOrEqual(0);
+      expect(merged).toBeLessThan(note);
+      expect(note).toBeLessThan(started);
+    });
+
+    /*
+     * The discriminating control: a chat that only READ the idea did not start work on it, and
+     * a pull request that is still open has not merged. Without this, "render every session and
+     * every PR" would pass the test above.
+     */
+    it('does not claim work started from a chat that only read the idea', async () => {
+      mocks.getProjectIdea.mockResolvedValue(
+        makeIdeaDetail({
+          sessions: [
+            {
+              ...SESSION,
+              strong: false,
+              relations: ['read'],
+              linkedAt: Date.parse('2026-10-20T09:00:00.000Z'),
+            },
+          ],
+          pullRequests: [{ ...PULL_REQUEST, state: 'open' as const, mergedAt: null }],
+        })
+      );
+      renderPage();
+
+      const updates = await screen.findByRole('region', { name: 'Updates' });
+      expect(within(updates).queryByText(/Work started in/)).not.toBeInTheDocument();
+      expect(within(updates).queryByText(/merged/)).not.toBeInTheDocument();
+      // Liveness: the section rendered at all, rather than the page having failed.
+      expect(within(updates).getByText(/Nothing yet/)).toBeInTheDocument();
     });
 
     it('posts a note through the real endpoint and clears the composer', async () => {
@@ -430,17 +524,29 @@ describe('IdeaPage', () => {
         })
       );
       expect(composer).toHaveValue('');
-      await waitFor(() => expect(mocks.listIdeaUpdates.mock.calls.length).toBeGreaterThan(1));
+      /*
+       * The note comes back with the IDEA now, not from a second request, so a successful post
+       * has to re-read the idea. Asserting the re-read rather than the notes route is the
+       * point: if posting stopped refreshing, the note a person just wrote would not appear.
+       */
+      await waitFor(() => expect(mocks.getProjectIdea.mock.calls.length).toBeGreaterThan(1));
     });
 
-    it('offers a retry when the updates cannot be read, without hiding the rest', async () => {
-      mocks.listIdeaUpdates.mockRejectedValue(new Error('not found'));
+    /*
+     * Updates has no failure of its own any more: the notes arrive with the idea, so if that
+     * read fails the page's own load error covers it and there is no half-loaded state where
+     * the plan renders beside a broken timeline. This asserts the section simply reports it has
+     * nothing, rather than inventing an error path that can no longer happen.
+     */
+    it('says the timeline is empty rather than showing a failure it cannot have', async () => {
+      mocks.getProjectIdea.mockResolvedValue(
+        makeIdeaDetail({ updates: { items: [], total: 0, nextCursor: null } })
+      );
       renderPage();
 
       const updates = await screen.findByRole('region', { name: 'Updates' });
-      await waitFor(() =>
-        expect(within(updates).getByText('Could not load the updates.')).toBeInTheDocument()
-      );
+      expect(within(updates).getByText(/Nothing yet/)).toBeInTheDocument();
+      expect(within(updates).queryByText('Could not load the updates.')).not.toBeInTheDocument();
       // The rest of the page is still there.
       expect(screen.getByRole('heading', { name: 'The idea' })).toBeInTheDocument();
     });
