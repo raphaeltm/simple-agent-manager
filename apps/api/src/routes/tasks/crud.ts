@@ -134,6 +134,11 @@ crudRoutes.post(
       title,
       description: body.description?.trim() || null,
       status: 'draft',
+      // Deliberately NOT an idea. This route creates an ordinary task, which starts out
+      // undispatched; `is_idea` stays 0, so it does not appear in Ideas and the idea
+      // transition table cannot move it (`operations/idea-identity.ts`). Before the flag
+      // existed an idea was "a task in `draft`", which is also what this row is — so every
+      // task created here was readable and completable as an idea by any project member.
       priority: body.priority ?? 0,
       agentProfileHint: body.agentProfileHint?.trim() || null,
       createdBy: userId,
