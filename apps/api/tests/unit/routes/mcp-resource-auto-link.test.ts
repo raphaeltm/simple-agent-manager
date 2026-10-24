@@ -16,6 +16,7 @@ vi.mock('../../../src/services/project-data', async (original) => ({
   removeResourceLink: removes,
 }));
 vi.mock('../../../src/services/admin-settings', () => ({
+  resolveAdminSetting: vi.fn().mockResolvedValue(12000),
   resolveAdminSettingDetailsMany: vi
     .fn()
     .mockResolvedValue([
@@ -26,6 +27,9 @@ vi.mock('../../../src/services/admin-settings', () => ({
       { value: 50 },
       { value: 500 },
     ]),
+}));
+vi.mock('../../../src/operations/agent-linked-context', () => ({
+  getAgentLinkedContext: vi.fn().mockResolvedValue({ kind: 'idea', id: 'idea1' }),
 }));
 vi.mock('../../../src/middleware/project-auth', async (original) => ({
   ...(await original<typeof import('../../../src/middleware/project-auth')>()),

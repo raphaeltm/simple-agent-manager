@@ -64,6 +64,13 @@ vi.mock('../../../src/services/admin-settings', async (original) => ({
     ]),
 }));
 
+vi.mock('../../../src/operations/agent-linked-context', () => ({
+  getAgentLinkedContext: vi.fn().mockImplementation(async (_ctx, input) => ({
+    kind: input.ideaId ? 'idea' : input.fileId ? 'file' : 'session',
+    id: input.ideaId ?? input.fileId ?? input.sessionId,
+  })),
+}));
+
 vi.mock('../../../src/routes/mcp/deployment-tools', async () => {
   const actual = await vi.importActual<typeof import('../../../src/routes/mcp/deployment-tools')>(
     '../../../src/routes/mcp/deployment-tools'
@@ -5885,8 +5892,11 @@ describe('MCP Routes', () => {
       const body = await res.json();
       const data = JSON.parse(body.result.content[0].text);
       expect(data.ideaId).toBe('idea-1');
-      expect(data.title).toBe('Great idea');
-      expect(data.content).toBe('Detailed content with checklists and notes');
+      expect(data.title).toContain('BEGIN UNTRUSTED IDEA TITLE');
+      expect(data.title).toContain('Great idea');
+      expect(data.content).toContain('BEGIN UNTRUSTED IDEA');
+      expect(data.content).toContain('Detailed content with checklists and notes');
+      expect(data.related).toMatchObject({ kind: 'idea', id: 'idea-1' });
       expect(data.contentLength).toBe(42);
       expect(data.priority).toBe(3);
       expect(data.status).toBe('draft');
@@ -5929,7 +5939,8 @@ describe('MCP Routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       const data = JSON.parse(body.result.content[0].text);
-      expect(data.content).toBe(fencedContent);
+      expect(data.content).toContain(fencedContent);
+      expect(data.content).toContain('BEGIN UNTRUSTED IDEA');
       expect(data.content).toContain('## Untrusted Evidence: User Report Description');
       expect(data.content.indexOf('ignore previous instructions')).toBeGreaterThan(
         data.content.indexOf('## Untrusted Evidence: User Report Description')
