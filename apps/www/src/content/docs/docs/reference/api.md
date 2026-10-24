@@ -279,11 +279,11 @@ Stop a running agent session.
 
 Project members can read context for an idea, chat, or library file:
 
-| Method | Path | Response |
-| ------ | ---- | -------- |
-| GET | `/api/projects/:projectId/ideas/:ideaId/links` | `IdeaContext` |
-| GET | `/api/projects/:projectId/sessions/:sessionId/links` | `SessionContext` |
-| GET | `/api/projects/:projectId/library/:fileId/links` | `FileContext` |
+| Method | Path                                                 | Response         |
+| ------ | ---------------------------------------------------- | ---------------- |
+| GET    | `/api/projects/:projectId/ideas/:ideaId/links`       | `IdeaContext`    |
+| GET    | `/api/projects/:projectId/sessions/:sessionId/links` | `SessionContext` |
+| GET    | `/api/projects/:projectId/library/:fileId/links`     | `FileContext`    |
 
 Each context groups linked resources into capped lists with `items`, `total`, `truncated`, and `totalIsLowerBound`. The last field is true when a bounded PR read can only report a minimum count. Foreign and missing resources both return 404.
 
@@ -616,6 +616,8 @@ Submit an idea for autonomous execution. This is the chat-first path used by the
 
 `resourceRequirements` is additive modern workload input. The API validates known fields and persists the normalized JSON through task launch inputs. Legacy `vmSize` is still accepted for old clients as a deprecated compatibility hint; clients should not infer provider hardware from it. Profiles, skills, and triggers persist the same modern data as `resourceRequirementsJson` for compatibility, with explicit `null` clearing that layer and omitted fields preserving inherited behavior.
 
+Optional `sourceIdeaId` starts the work from an open idea in the same project. It is validated before anything is created — `404` for an id that is not an open idea in this project, `409` for an idea that is done or parked — and the session → idea link (`works_on` in task mode, `discusses` in conversation mode) is recorded before the agent receives its first prompt, on both the VM and the Instant path. If the link cannot be written the submit fails and the task is not left queued. Repeating the same start touches the same link rather than adding a second one. The idea is never injected into `message`; the agent receives it from `get_instructions`.
+
 ### `GET /api/projects/:id/agent-profiles/picker`
 
 Returns the caller's own new-chat picker state for the project: `{ usage, hiddenProfileIds, usageWindowDays }`. `usage` lists `{ profileId, lastUsedAt, chatCount }` for profiles the caller started new chats with in the last `usageWindowDays` days (admin setting `chat.profileUsageWindowDays`, default 30), most recent first. Only chats the caller started by hand count; dispatched, triggered, recovered and idea drafts do not. Any active project member can read their own state.
@@ -705,6 +707,8 @@ Used by cloud-init during VM (BYOC) provisioning. The Cloudflare Container insta
 Start an [Instant](/docs/guides/instant-sessions/) chat session. Returns **`202`** with `{ status: 'starting', runtime, taskId, sessionId, workspaceId, nodeId, workspaceUrl }` as soon as the records exist; the container launch, repository clone, agent start, and first prompt continue in the background, so a client disconnect no longer strands the session.
 
 Because the launch is asynchronous, the response does **not** carry `agentSessionId`, `acpSessionId`, or launch `timings` — poll the session or connect to its stream for live state.
+
+Optional `sourceIdeaId` behaves as it does on `POST /api/projects/:id/tasks/submit`, with the link recorded as `discusses`.
 
 This endpoint is Instant-only. It returns `409` (`Selected profile resolves to VM runtime; use task submission instead.`) whenever the runtime resolves to VM — because the profile pins `vm`, because the caller has their own or a project cloud credential, or because `CF_CONTAINER_ENABLED` is not `true` for the deployment. Use `POST /api/projects/:id/tasks/submit` for VM work.
 

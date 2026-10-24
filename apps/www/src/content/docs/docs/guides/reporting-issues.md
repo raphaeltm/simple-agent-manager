@@ -110,7 +110,7 @@ The draft Idea body is written in a three-part structure that keeps maintainer i
 | `## Trusted Metadata`                            | The identifiers the reporter consented to attach, one per line              |
 | `## Untrusted Evidence: User Report Description` | The reporter's own words, redacted and wrapped in a Markdown code fence     |
 
-That fence matters when you point an agent at the resulting Idea. The reporter's description is external input, and treating it as instructions would be a prompt-injection channel straight into a maintainer's agent. The format tells the agent explicitly which parts are yours and which are the reporter's. SAM's default "execute idea" prompt template carries the same warning; if you override it with `VITE_EXECUTE_IDEA_PROMPT_TEMPLATE`, keep that instruction.
+That fence matters when you point an agent at the resulting Idea. The reporter's description is external input, and treating it as instructions would be a prompt-injection channel straight into a maintainer's agent. The format tells the agent explicitly which parts are yours and which are the reporter's. When you start work on an idea, SAM hands the idea to the agent inside the same kind of explicit untrusted-data envelope, so the agent is told in so many words that the text is data rather than instructions.
 
 ## For operators: automated error triage
 

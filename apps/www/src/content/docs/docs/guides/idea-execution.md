@@ -15,7 +15,22 @@ Type your description in the project chat input and submit. Submitting a message
 4. **Start the agent** — runs the agent from your selected profile (Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, or Amp) with your description
 5. **Stream output** — watch the agent work in real time in the chat
 
-The **Ideas** board holds work you've drafted but not started yet. Once an idea is executing or done, you follow it in the chat session list. You can also start a saved idea from its detail page with the **Execute** button.
+The **Ideas** board holds work you've drafted but not started yet. Once an idea is executing or done, you follow it in the chat session list. You can also start a saved idea from its detail page — see [Starting work on an idea](#starting-work-on-an-idea).
+
+## Starting work on an idea
+
+An open idea's detail page has a **Start work** button. It opens a sheet where you choose:
+
+- **Who works on it** — the same profile picker the chat composer uses. The badge beside the profile says what SAM will do with it: **Does the work** (SAM runs it as a task) or **Talks it through** (SAM runs it as a conversation).
+- **Skill** — optional, from your project's skills.
+- **Note for the agent** — optional. Your note is the only message sent. If you leave it blank SAM sends one short neutral line.
+- **What the agent starts with** — the idea itself, plus the chats, files and pull requests already linked to the idea, which the agent can look up with its SAM tools.
+
+One sentence above the buttons says exactly what will happen. Picking a conversation profile changes the sheet to **Talk it through** and the button to **Start chat**: the chat is recorded on the idea as a discussion rather than as work on it. SAM never swaps the runtime your profile asks for.
+
+Before the agent receives its first prompt, SAM links the new chat to the idea — `works_on` for task work, `discusses` for a conversation. If that link cannot be written the start fails and nothing is left queued. Done and parked ideas are rejected; reopen the idea first.
+
+The agent is given the idea itself through `get_instructions`, inside an explicit untrusted-data envelope, and is pointed at the `get_idea` and `get_related` tools for the rest. SAM does not put ids, tool names, slash commands or any workflow that only exists in one repository into the message you send. How the agent works is decided by the profile and skill you chose and by your repository's own instructions.
 
 ### Keep the plan current with Updates
 
@@ -90,7 +105,7 @@ When an agent finishes its work:
 
 ## Where the work lands
 
-Every **submitted task** gets its own **output branch** — a prefixed name derived from your description, `sam/` by default (self-hosters can change the prefix with `BRANCH_NAME_PREFIX`). This covers work you submit as a task and work an agent creates with `dispatch_task`, on either runtime. A message-box chat on an [Instant](/docs/guides/instant-sessions/) profile, without attachments or explicit resource overrides and not started with an idea's **Execute** button, is the exception: it gets no branch at all — see [What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work). Having a branch does not mean SAM publishes to it: commits, pushes and pull requests are agent-directed on both runtimes. The workspace is now checked out on that branch from the moment it's created: SAM clones your project's default branch as the base, then creates and checks out the output branch before the agent starts. Run `git branch --show-current` inside a task workspace and you'll see the task branch, not `main`.
+Every **submitted task** gets its own **output branch** — a prefixed name derived from your description, `sam/` by default (self-hosters can change the prefix with `BRANCH_NAME_PREFIX`). This covers work you submit as a task and work an agent creates with `dispatch_task`, on either runtime. A message-box chat on an [Instant](/docs/guides/instant-sessions/) profile, without attachments or explicit resource overrides and not started from an idea, is the exception: it gets no branch at all — see [What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work). Having a branch does not mean SAM publishes to it: commits, pushes and pull requests are agent-directed on both runtimes. The workspace is now checked out on that branch from the moment it's created: SAM clones your project's default branch as the base, then creates and checks out the output branch before the agent starts. Run `git branch --show-current` inside a task workspace and you'll see the task branch, not `main`.
 
 The output branch provides a place for the agent to commit and publish when instructed. SAM does not publish whatever the agent leaves behind.
 

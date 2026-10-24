@@ -40,16 +40,17 @@ Lowering the share limit does not remove anyone's access. It only blocks new sha
 
 These **Operations** settings control automatic links between chats, ideas, library files and pull requests. Strong work links remain available when weak read or view links reach a cap.
 
-| Setting | Default | Range | What it controls |
-| ------- | ------- | ----- | ---------------- |
-| `operations.resourceLinkTouchIntervalMs` | 300,000 | 0–86,400,000 | Minimum time between writes for repeated automatic links |
-| `operations.resourceLinkWeakPerTarget` | 100 | 1–10,000 | Weak automatic links kept for one target |
-| `operations.resourceLinkWeakCleanupBatchSize` | 100 | 1–1,000 | Excess weak links removed per write when a cap is lowered |
-| `operations.resourceLinkProjectCap` | 100,000 | 100–10,000,000 | Project link count above which new weak links are skipped |
-| `operations.resourceLinkListCap` | 50 | 1–500 | Items in each linked work context list |
-| `operations.resourceLinkBatchTargetLimit` | 100 | 1–500 | Targets in one batched list lookup |
-| `operations.resourceLinkBatchPerTargetCap` | 50 | 1–100 | Session links returned per batched target |
-| `operations.resourceLinkContextMaxLength` | 500 | 1–5,000 | Characters kept in an explicit link note |
+| Setting                                       | Default | Range          | What it controls                                                     |
+| --------------------------------------------- | ------- | -------------- | -------------------------------------------------------------------- |
+| `operations.resourceLinkTouchIntervalMs`      | 300,000 | 0–86,400,000   | Minimum time between writes for repeated automatic links             |
+| `operations.resourceLinkWeakPerTarget`        | 100     | 1–10,000       | Weak automatic links kept for one target                             |
+| `operations.resourceLinkWeakCleanupBatchSize` | 100     | 1–1,000        | Excess weak links removed per write when a cap is lowered            |
+| `operations.resourceLinkProjectCap`           | 100,000 | 100–10,000,000 | Project link count above which new weak links are skipped            |
+| `operations.resourceLinkListCap`              | 50      | 1–500          | Items in each linked work context list                               |
+| `operations.resourceLinkBatchTargetLimit`     | 100     | 1–500          | Targets in one batched list lookup                                   |
+| `operations.resourceLinkBatchPerTargetCap`    | 50      | 1–100          | Session links returned per batched target                            |
+| `operations.resourceLinkContextMaxLength`     | 500     | 1–5,000        | Characters kept in an explicit link note                             |
+| `operations.agentIdeaContextMaxLength`        | 20,000  | 500–200,000    | Characters of a linked idea included in an agent's session bootstrap |
 
 If an administrator lowers the weak-link cap below an existing target's stored count, each subsequent new automatic weak link for that target removes at most one configured cleanup batch until the target reaches the new cap. Repeated touches of an existing link do not run cleanup.
 
