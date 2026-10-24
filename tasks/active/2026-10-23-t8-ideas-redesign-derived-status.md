@@ -167,6 +167,31 @@ indistinguishable; decision 16's `tasks.is_idea` removed the ambiguity and with 
 Non-ideas now get the same non-disclosing 404 as every other non-idea (rule 11). Discriminating:
 reverting only the `!isIdea` early return reddens exactly 3 tests, all 21 controls stay green.
 
+### What the two PR2 specialist reviews changed (2026-10-24)
+
+| Reviewer           | Verdict                              | What it changed                                                                    |
+| ------------------ | ------------------------------------ | ---------------------------------------------------------------------------------- |
+| `security-auditor` | 1 HIGH, 0 CRITICAL — ADDRESSED       | The raw pull-request `href` in `IdeaActionControl` (Finding 10)                     |
+| `ui-ux-specialist` | No blockers; 5/5 hierarchy, a11y     | Three evidence gaps closed, all of them real (below)                               |
+
+The UI/UX review's three findings, all taken rather than deferred:
+
+1. **The page's own `<h1>` had never met a long title.** The long title existed in the fixtures
+   but only the LIST used it, so the shared `PageHeader`'s wrapping was asserted everywhere
+   except the surface under review.
+2. **`PullRequestStateBadge` showed "Checks passed" beside "Merged" at equal weight.** Checks
+   cannot change a merged or closed outcome, so they are now suppressed for those states — in
+   the component, because it is true of all three surfaces that render it (the chat's Related
+   drawer, the chat header's PR row and this page), not at one call site.
+3. **No idea-page case exercised Work or Related under volume**, including the capped "N+" that
+   `SectionTitle.count`'s new string support exists for. Added at both viewports.
+
+Writing (3) surfaced a bug in my own fixture rather than the page: it claimed `total: 3` with
+four items, and `cappedList` in `lib/api/links.ts` discards a total smaller than the rows sent
+in favour of the row count — the one number that is certainly true. So the assertion would have
+been measuring the normaliser. The fixture's totals are now all >= `items.length`, and the
+comment says why, because the next person to write one will reach for a small number too.
+
 ### Finding 10 — the sanitising fix had a second path I missed (security-auditor, HIGH)
 
 Converging the Work rows onto `LinkedWorkRow` fixed the raw `tasks.output_pr_url` there, and I

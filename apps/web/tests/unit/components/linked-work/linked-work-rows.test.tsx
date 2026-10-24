@@ -106,6 +106,24 @@ describe('PullRequestStateBadge', () => {
     expect(screen.queryByTestId('pr-checks-state')).toBeNull();
   });
 
+  /*
+   * Checks stop being news once the pull request is decided. The UI/UX review found the green
+   * "Checks passed" sitting at equal weight beside the purple "Merged" on the idea page's Work
+   * rows, where it was the louder of the two and could no longer change anything.
+   */
+  it.each([['merged'], ['closed']])('drops the checks word on a %s pull request', (prState) => {
+    render(<PullRequestStateBadge state={state({ state: prState as never })} />);
+    // The positive control: the state pill itself is still rendered and still named.
+    expect(screen.getByTestId('pr-state-badge')).toBeInTheDocument();
+    expect(screen.queryByTestId('pr-checks-state')).toBeNull();
+  });
+
+  it('keeps the checks word while the pull request is still open', () => {
+    // The discriminating control for the pair above: same failing checks, undecided PR.
+    render(<PullRequestStateBadge state={state()} />);
+    expect(screen.getByTestId('pr-checks-state')).toHaveTextContent('Checks failing');
+  });
+
   it('says nothing about inconclusive checks', () => {
     render(<PullRequestStateBadge state={state({ checksState: 'neutral' })} />);
     expect(screen.getByTestId('pr-state-badge')).toBeInTheDocument();

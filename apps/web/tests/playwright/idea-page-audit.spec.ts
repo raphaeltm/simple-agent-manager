@@ -194,7 +194,7 @@ const UPDATES = [
 ];
 
 const LINKS = {
-  sessions: { items: [], total: 0, truncated: false },
+  sessions: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
   files: {
     items: [
       {
@@ -207,8 +207,9 @@ const LINKS = {
     ],
     total: 1,
     truncated: false,
+    totalIsLowerBound: false,
   },
-  pullRequests: { items: [], total: 0, truncated: false },
+  pullRequests: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
   relatedIdeas: {
     items: [
       {
@@ -319,6 +320,56 @@ async function setupIdeaMocks(
     return undefined;
   });
 }
+
+/**
+ * An idea that has accumulated real volume, with a title longer than the header's one line.
+ *
+ * Three things only this case reaches. The page's own `<h1>` never met a long title — the
+ * long one existed in the fixtures but only the LIST used it. The Work and Related rows are
+ * new to this page since they moved onto the shared `LinkedWorkRow`, and every other case
+ * shows three of them. And `SectionTitle.count` gained string support so a bounded read can
+ * say "N+", which nothing on this page exercised: the counts here are capped, so Related must
+ * read "16+" (9 files + 7 ideas, both lower bounds) and not "10", the number of rows on screen.
+ * (Raised by the ui-ux-specialist review, 2026-10-24.)
+ *
+ * Each `total` is deliberately >= its `items.length`. A total BELOW the rows sent is incoherent
+ * and `cappedList` in `lib/api/links.ts` discards it in favour of the row count, which is the
+ * one number that is certainly true — so a fixture claiming "3 total, here are 4" silently
+ * becomes 4 and the assertion measures the normaliser instead of the page. The first draft of
+ * this fixture did exactly that.
+ */
+const MANY_LINKS = {
+  ...LINKS,
+  files: {
+    items: Array.from({ length: 6 }, (_, index) => ({
+      fileId: `file-many-${index}`,
+      filename: `retry-schedules-${index}-with-a-deliberately-long-research-filename.md`,
+      directory: '/engineering/research/webhooks/delivery-retries/',
+      relations: index % 2 === 0 ? ['uploaded'] : ['read'],
+      bySessionId: 'sess-research',
+    })),
+    total: 9,
+    truncated: true,
+    totalIsLowerBound: true,
+  },
+  relatedIdeas: {
+    items: Array.from({ length: 4 }, (_, index) => ({
+      ideaId: `idea-many-${index}`,
+      title: `Rate-limit the delivery log so one noisy merchant cannot drown the rest (${index})`,
+      status: 'draft',
+      relations: ['related'],
+    })),
+    total: 7,
+    truncated: true,
+    totalIsLowerBound: true,
+  },
+};
+
+const MANY_SESSIONS = Array.from({ length: 9 }, (_, index) => ({
+  ...SESSIONS[index % SESSIONS.length]!,
+  sessionId: `sess-many-${index}`,
+  topic: `${SESSIONS[index % SESSIONS.length]!.topic} — attempt ${index + 1}`,
+}));
 
 async function screenshot(page: Page, name: string) {
   await expandScrollContainers(page);
@@ -448,6 +499,35 @@ test.describe('Idea page — phone', () => {
     await screenshot(page, 'idea-page-done-phone');
   });
 
+  test('holds up with a long title, many chats and capped Related counts', async ({ page }) => {
+    await setupIdeaMocks(page, {
+      idea: makeIdea('review', {
+        title:
+          'Retry failed webhook deliveries with exponential backoff over a three-day window, matching Stripe',
+        sessions: MANY_SESSIONS,
+        counts: { updates: 4, chats: 9, files: 9, pullRequests: 1 },
+      }),
+      links: MANY_LINKS,
+    });
+    await openIdea(page);
+
+    // The header's own long title, which only the list used to exercise.
+    await expect(
+      page.getByRole('heading', { name: /matching Stripe/ }).first()
+    ).toBeVisible();
+    /*
+     * A bounded read can only establish a minimum, so Related must say "16+" rather than
+     * asserting a total the server declined to claim: 9 files + 7 ideas, both lower bounds,
+     * against the 10 rows actually on screen.
+     */
+    const related = page.getByRole('region', { name: 'Related' });
+    await expect(related).toBeVisible();
+    await expect(page.getByText('16+', { exact: true })).toBeVisible();
+
+    await assertLayoutIsSound(page);
+    await screenshot(page, 'idea-page-many-phone');
+  });
+
   test('an idea with no plan and nothing linked still reads as a page', async ({ page }) => {
     await setupIdeaMocks(page, {
       idea: {
@@ -575,6 +655,23 @@ test.describe('Idea page — laptop', () => {
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
     await screenshot(page, 'idea-page-start-work-sheet-desktop');
+  });
+
+  test('a long title, many chats and capped counts in two columns', async ({ page }) => {
+    await setupIdeaMocks(page, {
+      idea: makeIdea('review', {
+        title:
+          'Retry failed webhook deliveries with exponential backoff over a three-day window, matching Stripe',
+        sessions: MANY_SESSIONS,
+        counts: { updates: 4, chats: 9, files: 9, pullRequests: 1 },
+      }),
+      links: MANY_LINKS,
+    });
+    await openIdea(page);
+
+    await expect(page.getByText('16+', { exact: true })).toBeVisible();
+    await assertLayoutIsSound(page);
+    await screenshot(page, 'idea-page-many-desktop');
   });
 
   test('the edit dialog stays inside the viewport', async ({ page }) => {
