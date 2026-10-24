@@ -21,6 +21,15 @@ CREATE TABLE pull_requests (
 );
 CREATE UNIQUE INDEX idx_pull_requests_project_repo_number ON pull_requests(project_id, repository, number);
 CREATE INDEX idx_pull_requests_repository_head_sha ON pull_requests(repository, head_sha);
+CREATE TABLE pull_request_checks (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  repository TEXT NOT NULL,
+  head_sha TEXT NOT NULL,
+  check_key TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('pending', 'success', 'failure', 'neutral')),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, repository, head_sha, check_key)
+);
 CREATE TABLE pull_request_refresh_budget (
   installation_id TEXT PRIMARY KEY NOT NULL,
   window_start INTEGER NOT NULL,

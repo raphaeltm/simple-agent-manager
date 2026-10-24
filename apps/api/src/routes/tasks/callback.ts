@@ -10,7 +10,7 @@ import { log } from '../../lib/logger';
 import { toTaskResponse } from '../../lib/mappers';
 import { requireRouteParam } from '../../lib/route-helpers';
 import { errors } from '../../middleware/error';
-import { ensurePullRequest } from '../../operations/pull-request-core';
+import { ensurePullRequest, parseProjectPullRequestUrl } from '../../operations/pull-request-core';
 import { jsonValidator, UpdateTaskStatusSchema } from '../../schemas';
 import { verifyCallbackToken } from '../../services/jwt';
 import * as notificationService from '../../services/notification';
@@ -138,12 +138,6 @@ taskCallbackRoute.post(
         if (body.gitPushResult.prUrl) {
           stepUpdate.outputPrUrl = body.gitPushResult.prUrl;
         }
-        if (body.gitPushResult.prNumber != null) {
-          stepUpdate.outputPrNumber = body.gitPushResult.prNumber;
-        }
-        if (body.gitPushResult.commitSha) {
-          stepUpdate.outputCommitSha = body.gitPushResult.commitSha;
-        }
       }
 
       if (body.outputBranch !== undefined) {
@@ -153,12 +147,46 @@ taskCallbackRoute.post(
         stepUpdate.outputPrUrl = body.outputPrUrl?.trim() || null;
       }
 
+      const candidatePrUrl = stepUpdate.outputPrUrl;
+      if (candidatePrUrl) {
+        const [project] = await db
+          .select({ repository: schema.projects.repository })
+          .from(schema.projects)
+          .where(eq(schema.projects.id, projectId))
+          .limit(1);
+        if (project) {
+          const parsed = parseProjectPullRequestUrl(candidatePrUrl, project.repository);
+          if (parsed) {
+            stepUpdate.outputPrNumber = parsed.number;
+            if (
+              body.gitPushResult?.commitSha &&
+              body.gitPushResult.prUrl &&
+              parseProjectPullRequestUrl(body.gitPushResult.prUrl, project.repository)?.url ===
+                parsed.url
+            )
+              stepUpdate.outputCommitSha = body.gitPushResult.commitSha;
+            else if (
+              body.gitPushResult?.commitSha ||
+              parseProjectPullRequestUrl(task.outputPrUrl ?? '', project.repository)?.url !==
+                parsed.url
+            )
+              stepUpdate.outputCommitSha = null;
+          } else {
+            stepUpdate.outputPrNumber = null;
+            stepUpdate.outputCommitSha = null;
+          }
+        }
+      } else if (stepUpdate.outputPrUrl !== undefined) {
+        stepUpdate.outputPrNumber = null;
+        stepUpdate.outputCommitSha = null;
+      }
+
       const refreshed = await updateTaskExecutionStepFromCallback(db, task, stepUpdate, {
         env: c.env,
         expected: workspaceSnapshot,
       });
 
-      if (body.gitPushResult?.prUrl) {
+      if (stepUpdate.outputPrUrl) {
         const [project] = await db
           .select({ repository: schema.projects.repository })
           .from(schema.projects)
@@ -170,7 +198,7 @@ taskCallbackRoute.post(
             c.env,
             projectId,
             project.repository,
-            body.gitPushResult.prUrl
+            stepUpdate.outputPrUrl
           );
           if (!stored) log.warn('task.callback.pr_repository_mismatch', { taskId, projectId });
         }

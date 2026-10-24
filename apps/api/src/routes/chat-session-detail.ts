@@ -19,6 +19,7 @@ import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { getPullRequestStates, parseProjectPullRequestUrl } from '../operations/pull-request-core';
+import type { OperationContext } from '../operations/types';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as projectDataService from '../services/project-data';
 import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
@@ -139,10 +140,17 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
               : null;
           const prState = parsedPr
             ? (
-                await getPullRequestStates(c.env, projectId, [{ url: parsedPr.url }], {
-                  refresh: 'single',
-                  waitUntil: (promise) => c.executionCtx.waitUntil(promise),
-                })
+                await getPullRequestStates(
+                  {
+                    env: c.env,
+                    actor: { userId, via: 'web', scopes: new Set(['sam.read']) },
+                    requestId: c.req.header('cf-ray') ?? crypto.randomUUID(),
+                    execCtx: c.executionCtx as OperationContext['execCtx'],
+                  } satisfies OperationContext,
+                  projectId,
+                  [{ url: parsedPr.url }],
+                  { refresh: 'single' }
+                )
               )[parsedPr.url]
             : null;
           const agentProfileHint = await resolveTaskAgentProfileHint(db, {
@@ -166,7 +174,7 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
             outputPrUrl: taskRow.outputPrUrl,
             pr: parsedPr
               ? {
-                  number: taskRow.outputPrNumber ?? parsedPr.number,
+                  number: parsedPr.number,
                   state: prState?.state ?? null,
                   checks: prState?.checksState ?? null,
                 }

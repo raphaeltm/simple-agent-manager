@@ -9,6 +9,7 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { resolveAdminSetting } from '../services/admin-settings';
 import { getInstallationToken } from '../services/github-app';
+import type { OperationContext } from './types';
 
 export interface ParsedPullRequestUrl {
   repository: string;
@@ -105,6 +106,16 @@ export async function upsertPullRequestSnapshot(
       now
     )
     .run();
+  // A synchronized PR leaves its old head SHA behind; discard observations
+  // once no tracked PR in this project still points at that commit.
+  await env.DATABASE.prepare(
+    `DELETE FROM pull_request_checks
+     WHERE project_id = ? AND repository = ? AND head_sha NOT IN (
+       SELECT head_sha FROM pull_requests
+       WHERE project_id = ? AND repository = ? AND head_sha IS NOT NULL)`
+  )
+    .bind(projectId, pr.repository, projectId, pr.repository)
+    .run();
 }
 
 export type PullRequestStates = Record<string, PullRequestState | null>;
@@ -181,12 +192,8 @@ async function refreshOne(
       signal: AbortSignal.timeout(settings.timeoutMs),
     }
   );
-  if (
-    response.status === 429 ||
-    (response.status === 403 &&
-      (response.headers.get('x-ratelimit-remaining') === '0' ||
-        response.headers.has('retry-after')))
-  ) {
+  // Secondary limits may return 403 without either rate-limit header.
+  if (response.status === 429 || response.status === 403) {
     const retry = Number(response.headers.get('retry-after'));
     const until =
       Date.now() + (Number.isFinite(retry) && retry > 0 ? retry : settings.backoffSeconds) * 1000;
@@ -212,7 +219,7 @@ async function refreshOne(
   const updatedAt = str(pr.updated_at);
   if (
     pr.number !== ref.number ||
-    str(pr.html_url) !== ref.url ||
+    canonicalProjectPullRequestUrl(str(pr.html_url) ?? '', ref.repository) !== ref.url ||
     str(
       nested('base').repo && (nested('base').repo as Record<string, unknown>).full_name
     )?.toLowerCase() !== ref.repository ||
@@ -238,18 +245,22 @@ async function refreshOne(
 
 /** Read stored state only; single-context callers may schedule refresh separately. */
 export async function getPullRequestStates(
-  env: Env,
+  ctx: OperationContext,
   projectId: string,
   refs: readonly Pick<PullRequestRef, 'url'>[],
-  options: { refresh?: 'single'; waitUntil?: (promise: Promise<void>) => void } = {}
+  options: { refresh?: 'single' } = {}
 ): Promise<PullRequestStates> {
+  const env = ctx.env;
   const result: PullRequestStates = {};
   if (refs.length === 0) return result;
   const project = await env.DATABASE.prepare('SELECT repository FROM projects WHERE id = ?')
     .bind(projectId)
     .first<{ repository: string }>();
   if (!project) return result;
-  const settings = options.refresh === 'single' ? await refreshSettings(env) : null;
+  const ttlSeconds = Number(
+    await resolveAdminSetting(env, 'operations.pullRequestRefreshTtlSeconds')
+  );
+  const settings = options.refresh === 'single' && ctx.execCtx ? await refreshSettings(env) : null;
   let scheduled = 0;
   for (const ref of refs) {
     const parsed = parseProjectPullRequestUrl(ref.url, project.repository);
@@ -269,9 +280,7 @@ export async function getPullRequestStates(
         last_synced_at: string | null;
       }>();
     const stale =
-      !row?.last_synced_at ||
-      (settings !== null &&
-        Date.now() - Date.parse(row.last_synced_at) > settings.ttlSeconds * 1000);
+      !row?.last_synced_at || Date.now() - Date.parse(row.last_synced_at) > ttlSeconds * 1000;
     result[parsed.url] =
       row && row.last_synced_at
         ? {
@@ -284,9 +293,9 @@ export async function getPullRequestStates(
             stale,
           }
         : null;
-    if (settings && stale && options.waitUntil && scheduled < settings.cap) {
+    if (settings && stale && ctx.execCtx && scheduled < settings.cap) {
       scheduled++;
-      options.waitUntil(
+      ctx.execCtx.waitUntil(
         refreshOne(env, projectId, parsed, settings).catch((error) => {
           log.warn('github.pr_refresh_failed', { projectId, error: String(error) });
         })

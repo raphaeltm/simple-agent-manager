@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   listAcpSessions: vi.fn(),
   getSessionState: vi.fn(),
   persistError: vi.fn(async () => undefined),
+  getPullRequestStates: vi.fn(),
   userRole: 'user',
 }));
 
@@ -66,6 +67,11 @@ function createChatRoutesTestApp(): Hono<{ Bindings: Env }> {
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: mocks.drizzle,
 }));
+
+vi.mock('../../../src/operations/pull-request-core', async (importActual) => {
+  const actual = await importActual<typeof import('../../../src/operations/pull-request-core')>();
+  return { ...actual, getPullRequestStates: mocks.getPullRequestStates };
+});
 
 vi.mock('@simple-agent-manager/shared', async (importActual) => {
   const actual = await importActual<typeof import('@simple-agent-manager/shared')>();
@@ -227,9 +233,11 @@ describe('chatRoutes agent session routing', () => {
       createdAt: 1,
     });
 
-    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
-      DATABASE: {} as D1Database,
-    } as Env);
+    const response = await app.fetch(
+      new Request('https://example.test/api/projects/proj-1/sessions/chat-1'),
+      { DATABASE: {} as D1Database } as Env,
+      { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext
+    );
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -278,6 +286,57 @@ describe('chatRoutes agent session routing', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.session.agentSessionId).toBeNull();
+  });
+
+  it('embeds canonical PR number, state and checks in session detail', async () => {
+    const url = 'https://github.com/acme/widget/pull/17';
+    mocks.getPullRequestStates.mockResolvedValue({
+      [url]: { state: 'merged', checksState: 'failure' },
+    });
+    mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
+    mocks.getSession.mockResolvedValue({
+      id: 'chat-1',
+      workspaceId: 'ws-1',
+      taskId: 'task-1',
+      status: 'active',
+      messageCount: 0,
+      startedAt: 1,
+      endedAt: null,
+      createdAt: 1,
+    });
+    mocks.drizzle.mockReturnValue({
+      select: vi
+        .fn()
+        .mockReturnValueOnce(
+          makeTaskQuery([
+            {
+              id: 'task-1',
+              status: 'in_progress',
+              executionStep: 'agent_session',
+              outputPrUrl: 'https://github.com/Acme/Widget/pull/17/',
+              outputPrNumber: 999,
+              taskMode: 'task',
+              agentProfileHint: null,
+            },
+          ])
+        )
+        .mockReturnValueOnce(makeTaskQuery([{ repository: 'acme/widget' }]))
+        .mockReturnValueOnce(makeProfileQuery([])),
+    });
+    const response = await app.fetch(
+      new Request('https://example.test/api/projects/proj-1/sessions/chat-1'),
+      { DATABASE: {} as D1Database } as Env,
+      { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.session.task.pr).toEqual({ number: 17, state: 'merged', checks: 'failure' });
+    expect(mocks.getPullRequestStates).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      [{ url }],
+      { refresh: 'single' }
+    );
   });
 
   it('returns agentType from ACP session in the response', async () => {

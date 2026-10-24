@@ -20,7 +20,8 @@ SAM stores a task's PR URL but not the PR number, lifecycle state, or checks. Li
 - [x] Persist callback number/SHA and PR rows; integrate complete_task and associate_pull_request.
 - [x] Add PR state to chat session detail; T1 link reads depend on merge order.
 - [x] Test real webhook and callback routes, ordering, project isolation, refresh budget, failure behavior, and migration safety.
-- [ ] Update public docs and run quality, specialist, staging, PR, CI, CodeRabbit, and production gates.
+- [x] Update public docs and complete specialist review.
+- [ ] Complete staging, PR, CI, CodeRabbit, and production gates.
 
 ## Acceptance criteria
 

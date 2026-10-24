@@ -223,16 +223,53 @@ describe('VM-agent failure callback preserves the failed task work', () => {
     const foreign = await callback('https://github.com/attacker/other/pull/17');
     expect(foreign.status).toBe(200);
     expect(sqlite.prepare('SELECT count(*) AS n FROM pull_requests').get()).toEqual({ n: 0 });
-    const owner = await callback('https://github.com/acme/widget/pull/17');
+    expect(
+      sqlite
+        .prepare('SELECT output_pr_number, output_commit_sha FROM tasks WHERE id = ?')
+        .get('task-1')
+    ).toEqual({ output_pr_number: null, output_commit_sha: null });
+    const owner = await callback('https://github.com/acme/widget/pull/18');
     expect(owner.status).toBe(200);
     expect(
       sqlite
         .prepare('SELECT output_pr_number, output_commit_sha FROM tasks WHERE id = ?')
         .get('task-1')
-    ).toEqual({ output_pr_number: 17, output_commit_sha: 'a'.repeat(40) });
+    ).toEqual({ output_pr_number: 18, output_commit_sha: 'a'.repeat(40) });
     expect(
       sqlite.prepare('SELECT project_id, repository, number FROM pull_requests').get()
-    ).toEqual({ project_id: 'project-1', repository: 'acme/widget', number: 17 });
+    ).toEqual({ project_id: 'project-1', repository: 'acme/widget', number: 18 });
+    const relink = await postCallback({
+      executionStep: 'awaiting_followup',
+      outputPrUrl: 'https://github.com/acme/widget/pull/20',
+    });
+    expect(relink.status).toBe(200);
+    expect(
+      sqlite
+        .prepare('SELECT output_pr_number, output_commit_sha FROM tasks WHERE id = ?')
+        .get('task-1')
+    ).toEqual({ output_pr_number: 20, output_commit_sha: null });
+    const override = await postCallback({
+      executionStep: 'awaiting_followup',
+      outputPrUrl: 'https://github.com/acme/widget/pull/19',
+      gitPushResult: {
+        pushed: true,
+        branchName: 'sam/topic',
+        commitSha: 'b'.repeat(40),
+        prUrl: 'https://github.com/acme/widget/pull/18',
+        prNumber: 18,
+        hasUncommittedChanges: false,
+        error: null,
+      },
+    });
+    expect(override.status).toBe(200);
+    expect(
+      sqlite
+        .prepare('SELECT output_pr_number, output_commit_sha FROM tasks WHERE id = ?')
+        .get('task-1')
+    ).toEqual({ output_pr_number: 19, output_commit_sha: null });
+    expect(sqlite.prepare('SELECT number FROM pull_requests WHERE number = 19').get()).toEqual({
+      number: 19,
+    });
   });
 
   it('fails the task but queues a snapshot-backed sleep instead of tearing the workspace down', async () => {

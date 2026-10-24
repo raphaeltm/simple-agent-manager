@@ -1182,6 +1182,32 @@ export const pullRequests = sqliteTable(
   })
 );
 
+/** Latest observation per logical GitHub check on a PR head commit. */
+export const pullRequestChecks = sqliteTable(
+  'pull_request_checks',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    headSha: text('head_sha').notNull(),
+    checkKey: text('check_key').notNull(),
+    state: text('state', { enum: ['pending', 'success', 'failure', 'neutral'] }).notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.repository, table.headSha, table.checkKey] }),
+  })
+);
+
+/** Per-installation hourly refresh budget and shared rate-limit backoff. */
+export const pullRequestRefreshBudget = sqliteTable('pull_request_refresh_budget', {
+  installationId: text('installation_id').primaryKey(),
+  windowStart: integer('window_start').notNull(),
+  used: integer('used').notNull().default(0),
+  blockedUntil: integer('blocked_until').notNull().default(0),
+});
+
 /** Append-only PR ownership evidence; never grants merge or cleanup authority. */
 export const taskPullRequestAssociations = sqliteTable(
   'task_pull_request_associations',

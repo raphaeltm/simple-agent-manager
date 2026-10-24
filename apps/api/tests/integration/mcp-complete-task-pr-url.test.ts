@@ -26,7 +26,15 @@ describe('complete_task PR URL persistence', () => {
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [schema.tasks]);
+    createSchemaTables(sqlite, [schema.projects, schema.tasks, schema.pullRequests]);
+    sqlite.exec(
+      'CREATE UNIQUE INDEX idx_pull_requests_project_repo_number ON pull_requests(project_id, repository, number)'
+    );
+    sqlite
+      .prepare(
+        "INSERT INTO projects (id, repository) VALUES ('project-1', 'raphaeltm/simple-agent-manager')"
+      )
+      .run();
     sqlite
       .prepare(
         `INSERT INTO tasks
@@ -72,6 +80,13 @@ describe('complete_task PR URL persistence', () => {
       status: 'completed',
       output_pr_url: prUrl,
       completion_evidence: JSON.stringify({ prUrl }),
+    });
+    expect(
+      sqlite.prepare('SELECT project_id, repository, number FROM pull_requests').get()
+    ).toEqual({
+      project_id: 'project-1',
+      repository: 'raphaeltm/simple-agent-manager',
+      number: 9999,
     });
   });
 });
