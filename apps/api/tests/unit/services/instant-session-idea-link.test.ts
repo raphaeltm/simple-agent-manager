@@ -243,6 +243,9 @@ describe('acceptInstantSession records the idea link before the agent starts', (
   // A failure that is NOT the idea link must not gain a session stop from this change.
   it('does not stop the session when no idea was involved', async () => {
     await acceptInstantSession(makeDb(), env, launchInput());
+    // Liveness beside the absence (rule 62): without this, the assertion below is also
+    // satisfied by acceptInstantSession never reaching the session at all.
+    expect(calls).toContain('createSession');
     expect(mocks.projectData.stopSession).not.toHaveBeenCalled();
   });
 });

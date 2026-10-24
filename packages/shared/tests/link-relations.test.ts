@@ -16,8 +16,20 @@ import {
 } from '../src/types/links';
 
 /**
- * The compiler checks this map: a relation added to the union makes this object incomplete
- * and `pnpm typecheck` fails here, which is what forces the list below to be updated.
+ * What this map does and does NOT buy, because the distinction is easy to get wrong.
+ *
+ * `pnpm typecheck` does NOT read this file: `packages/shared/tsconfig.json` excludes `tests`,
+ * as `apps/api` and `apps/web` do. So the annotation below is only checked by an editor, and
+ * a relation added to the union while BOTH this map and `LINK_RELATIONS` are forgotten slips
+ * through every gate. That hole is tracked in
+ * `tasks/backlog/2026-10-24-typecheck-test-files.md`; the same assumption is load-bearing in
+ * `packages/shared/src/types/links.ts`'s own comment, so it is worth closing properly rather
+ * than papering over here.
+ *
+ * What the assertion below DOES catch is the realistic mistake: someone adds a relation to the
+ * union and to `LINK_RELATIONS` and does not come back here. Then the two lists disagree and
+ * the test fails. Verified discriminating in both directions — dropping a member from
+ * `LINK_RELATIONS` reddens it, and adding one without updating this map reddens it too.
  */
 const EVERY_RELATION: Record<LinkRelation, true> = {
   created: true,
