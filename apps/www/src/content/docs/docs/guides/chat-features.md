@@ -205,6 +205,7 @@ the conversation you are in rather than opening something beside it.)
 | **Timeline**   | A jump list through the session's history                                                                                                                          | Always                                                                                                                                                                            |
 | **Resources**  | CPU, memory, I/O, and OOM history — [Session Resource History](/docs/guides/session-resources/)                                                                    | Always                                                                                                                                                                            |
 | **Automation** | What this chat waits for, and what is set to message it — [Scheduled actions](/docs/guides/scheduled-actions/)                                                     | Always                                                                                                                                                                            |
+| **Related**    | The ideas, library files and pull requests this chat is related to — [Related work](#related-work)                                                                 | Always                                                                                                                                                                            |
 | **Comments**   | Comment threads on this session. Unresolved threads show as a dot in icons mode and a count in labels mode; the marker turns amber when a thread is waiting on you | Always                                                                                                                                                                            |
 | **Share**      | Who else can drive this chat and until when, with controls to add, renew or revoke — [Share a chat](/docs/guides/collaboration/#share-a-chat)                      | Always; only the owner and people it is shared with can change it                                                                                                                 |
 | **Retry**      | Start a new chat with the original task prompt — [Retrying a Session](#retrying-a-session)                                                                         | When the session has a task, unless the chat has expired                                                                                                                          |
@@ -234,6 +235,40 @@ The chevron at the top of the rail cycles it through three modes:
 3. **Hidden** — collapsed to a labelled **Tools** tab on the right edge; click the tab to bring it back.
 
 Your choice is remembered in the browser, per device.
+
+## Related Work
+
+SAM keeps track of what a chat touches, and **Related** in the tool rail shows it: the ideas the
+agent worked on, the library files it added or read, and the pull requests it opened. Each row
+says how the chat is related in plain words, and opens the thing it names — the idea page, the
+file's preview in the library, or the pull request on GitHub.
+
+| Words you'll see                        | What happened                                                   |
+| --------------------------------------- | --------------------------------------------------------------- |
+| **Working on**, **Created**, **Edited** | The agent is working on that idea, wrote it, or changed it      |
+| **Read**, **Discussed**                 | The idea came up, but the chat is not the work on it            |
+| **Uploaded**, **Replaced**              | The chat added that library file, or wrote a new version of it  |
+| **Viewed**                              | The chat read the file                                          |
+| **Opened**                              | The chat opened that pull request                               |
+| **Linked**, **Related**                 | Someone — a person or an agent — connected the two deliberately |
+
+A count next to a group is occasionally shown as `12+`. That means SAM stopped counting rather
+than guess: the lists are read within a bounded budget, so when a chat has more linked work than
+one read covers, the number it can prove is a minimum. The same `+` appears on the **Related**
+badge in the rail.
+
+Two of these also surface without opening the panel:
+
+- **The idea being worked on** appears as a chip in the chat header, next to the comment chip.
+  Tap it to open the idea.
+- **View PR**, in the session's **Details** panel, shows the pull request's number and its state
+  — Open, Draft, Merged or Closed — with its checks when SAM knows them. The state comes from
+  SAM's own record of the pull request, so a brand-new pull request shows as a plain link until
+  SAM has looked at it.
+
+Most links are recorded as the work happens, so there is nothing to maintain by hand. An agent
+can also connect something deliberately when the work happened elsewhere — see
+[Linking Ideas to Conversations](/docs/concepts/#linking-ideas-to-conversations).
 
 ## File Browsing
 
@@ -334,10 +369,15 @@ Each card shows a tiered inline preview based on the file type:
 
 Click a card to open the document full-screen. Markdown renders (with a toggle to see the
 source), images open in the image viewer, PDFs open in your browser's own PDF viewer, and every
-file has a **Download** button. Because library files are stored
-durably, document cards keep working after the workspace is gone — a card whose
-file was later deleted degrades to a "no longer in the library" note rather than
-breaking.
+file has a **Download** button. When SAM knows where the file came from, a line under the
+title says so — "Uploaded by _the chat that made it_" — and expands to list every chat that
+touched the file and every idea it belongs to. The same line appears when you open a file from
+the project's library. It is absent for files with nothing linked, and it never guesses: the
+chat named there is the one SAM recorded, not one the uploader claimed.
+
+Because library files are stored durably, document cards keep working after the workspace is
+gone — a card whose file was later deleted degrades to a "no longer in the library" note rather
+than breaking.
 
 Cards render the same way regardless of which agent produced them. Some agents
 send a follow-up tool update that omits the document details, which used to

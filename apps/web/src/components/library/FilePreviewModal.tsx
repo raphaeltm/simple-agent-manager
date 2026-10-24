@@ -24,6 +24,7 @@ import {
 } from '../project-message-view/comments/useCommentSelection';
 import { ImageViewer } from '../shared-file-viewer/ImageViewer';
 import { FileCommentPanel } from './FileCommentPanel';
+import { FileLinkedWorkSection } from './FileLinkedWorkSection';
 import { InteractiveHtmlPreview } from './InteractiveHtmlPreview';
 import { type FileWithTags, FOCUS_RING } from './types';
 
@@ -304,6 +305,9 @@ export function FilePreviewModal({
               <X size={18} />
             </button>
           </div>
+
+          {/* Where this file came from — absent when nothing is linked. */}
+          <FileLinkedWorkSection projectId={projectId} fileId={file.id} />
 
           {/* Content + optional comment panel */}
           <div className="flex min-h-0 flex-1 overflow-hidden">

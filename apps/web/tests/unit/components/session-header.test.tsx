@@ -80,39 +80,34 @@ vi.mock('@simple-agent-manager/ui', () => ({
   Spinner: () => <span data-testid="spinner" />,
 }));
 
-vi.mock('lucide-react', () => ({
-  AlertTriangle: () => <span />,
-  Bot: () => <span />,
-  Box: () => <span />,
-  CheckCircle2: () => <span data-testid="icon-check-circle" />,
-  ChevronDown: () => <span />,
-  ChevronLeft: () => <span />,
-  ChevronRight: () => <span />,
-  ChevronUp: () => <span />,
-  Clock: () => <span />,
-  Cloud: () => <span />,
-  Copy: () => <span data-testid="icon-copy" />,
-  Cpu: () => <span />,
-  ExternalLink: () => <span />,
-  Flag: () => <span />,
-  FolderOpen: () => <span />,
-  GitBranch: () => <span />,
-  GitCompare: () => <span />,
-  GitFork: () => <span />,
-  Globe: () => <span />,
-  Hash: () => <span />,
-  Info: () => <span />,
-  Loader2: () => <span />,
-  MapPin: () => <span />,
-  MessageSquare: () => <span />,
-  MessageSquareQuote: () => <span />,
-  Monitor: () => <span />,
-  RotateCcw: () => <span />,
-  Server: () => <span />,
-  Tag: () => <span />,
-  Timer: () => <span />,
-  User2: () => <span />,
-}));
+/*
+ * Lucide is stubbed so the header's icons do not dominate the rendered output, and so two of
+ * them carry stable test ids.
+ *
+ * It spreads the real module rather than listing every icon: an allowlist breaks the whole
+ * suite the moment any component in this tree imports an icon nobody added here, which is
+ * exactly what happened when the pull-request state badge arrived.
+ */
+vi.mock('lucide-react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('lucide-react')>();
+  const blank = () => <span />;
+  return new Proxy(
+    {
+      ...actual,
+      CheckCircle2: () => <span data-testid="icon-check-circle" />,
+      Copy: () => <span data-testid="icon-copy" />,
+    },
+    {
+      get(target, property, receiver) {
+        // Any other icon renders as an empty span; non-component exports pass through.
+        const value = Reflect.get(target, property, receiver);
+        if (typeof property !== 'string') return value;
+        if (property === 'CheckCircle2' || property === 'Copy') return value;
+        return /^[A-Z]/.test(property) && typeof value === 'function' ? blank : value;
+      },
+    }
+  );
+});
 
 import { useState } from 'react';
 
@@ -248,7 +243,7 @@ describe('SessionHeader', () => {
     mocks.updateWorkspacePortsPublic.mockResolvedValue(makeWorkspace({ portsPublicEnabled: true }));
   });
 
-  it('mounts the usage chip for the session\'s project and agent session', () => {
+  it("mounts the usage chip for the session's project and agent session", () => {
     renderHeader({ session: makeSession({ agentSessionId: 'agent-123' }) });
     expect(chipMock.SessionCredentialLimitChip).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: 'proj-1', agentSessionId: 'agent-123' }),

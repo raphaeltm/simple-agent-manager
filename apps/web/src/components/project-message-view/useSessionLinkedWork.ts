@@ -16,6 +16,7 @@ import type {
   LinkedFile,
   LinkedIdea,
   LinkedPullRequest,
+  PullRequestState,
 } from '@simple-agent-manager/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
@@ -30,14 +31,28 @@ export interface SessionWorkingOnIdea {
   verb: 'Working on' | 'Discussing';
 }
 
+/**
+ * The pull request the chat header points at.
+ *
+ * `number` and `state` are both optional because the header must keep working for a URL SAM
+ * cannot parse or has not recorded — a GitLab merge request, a pull request on another host,
+ * or one whose state has not been read yet. Dropping the link in those cases would hide work
+ * the header used to show.
+ */
+export interface HeaderPullRequest {
+  url: string;
+  number: number | null;
+  state: PullRequestState | null;
+}
+
 export interface SessionLinkedWork {
   ideas: CappedList<LinkedIdea>;
   files: CappedList<LinkedFile>;
   pullRequests: CappedList<LinkedPullRequest>;
   /** The idea this chat works on, or merely discusses, for the header chip. */
   workingOn: SessionWorkingOnIdea | null;
-  /** The pull request the header links to, carrying its state once that is known. */
-  primaryPullRequest: LinkedPullRequest | null;
+  /** The pull request the header links to, carrying its number and state when known. */
+  primaryPullRequest: HeaderPullRequest | null;
   /** Everything linked, for the rail badge. */
   totalCount: number;
   /** True when any of the three lists could only report a minimum — the badge shows "N+". */
@@ -72,22 +87,21 @@ export function pullRequestNumberFromUrl(url: string | null | undefined): number
 export function resolvePrimaryPullRequest(
   outputPrUrl: string | null | undefined,
   pullRequests: readonly LinkedPullRequest[]
-): LinkedPullRequest | null {
-  const number = pullRequestNumberFromUrl(outputPrUrl);
-  if (number !== null) {
-    const matched = pullRequests.find((pr) => pr.number === number);
-    if (matched) return matched;
-    // The task's PR is not in the link store (an older task, or a URL outside the project
-    // repository the server refuses to canonicalise). Still link to it, just without state.
-    return {
-      url: outputPrUrl as string,
-      number,
-      source: 'task_output',
-      state: null,
-      bySessionId: null,
-    };
+): HeaderPullRequest | null {
+  if (outputPrUrl) {
+    const number = pullRequestNumberFromUrl(outputPrUrl);
+    // Match on the NUMBER, not on `source === 'task_output'`: the same PR can arrive from the
+    // task's output URL, a shepherd association and an explicit link, and the server collapses
+    // duplicates to whichever source it saw first — so the surviving row for the task's own PR
+    // is not reliably labelled `task_output`.
+    const matched = number === null ? undefined : pullRequests.find((pr) => pr.number === number);
+    if (matched) return { url: matched.url, number: matched.number, state: matched.state };
+    // Not in the link store: an older task, a URL outside the project repository the server
+    // refuses to canonicalise, or a host whose URLs SAM does not parse. Still link to it.
+    return { url: outputPrUrl, number, state: null };
   }
-  return pullRequests[0] ?? null;
+  const [first] = pullRequests;
+  return first ? { url: first.url, number: first.number, state: first.state } : null;
 }
 
 function pickWorkingOn(ideas: readonly LinkedIdea[]): SessionWorkingOnIdea | null {

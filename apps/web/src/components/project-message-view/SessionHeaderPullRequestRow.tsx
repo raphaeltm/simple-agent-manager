@@ -11,12 +11,12 @@
  * work, so no GitHub request is made to render it, and the badge is simply absent while the
  * state is unknown rather than guessing.
  */
-import type { LinkedPullRequest } from '@simple-agent-manager/shared';
 import { GitPullRequest } from 'lucide-react';
 
 import { PullRequestStateBadge } from '../chat/linked-work/PullRequestStateBadge';
 import type { SessionState } from './types';
 import { formatCountdown } from './types';
+import type { HeaderPullRequest } from './useSessionLinkedWork';
 
 export function SessionHeaderPullRequestRow({
   sessionState,
@@ -25,8 +25,8 @@ export function SessionHeaderPullRequestRow({
 }: Readonly<{
   sessionState: SessionState;
   idleCountdownMs: number | null;
-  /** The chat's primary pull request, with state when SAM has recorded it. */
-  pullRequest: LinkedPullRequest | null;
+  /** The chat's primary pull request, with its number and state when SAM knows them. */
+  pullRequest: HeaderPullRequest | null;
 }>) {
   const showCountdown = sessionState === 'idle' && idleCountdownMs !== null;
   if (!pullRequest && !showCountdown) return null;
@@ -58,7 +58,8 @@ export function SessionHeaderPullRequestRow({
             data-testid="session-view-pr"
           >
             <GitPullRequest size={12} aria-hidden="true" />
-            View PR #{pullRequest.number}
+            {/* The number is omitted rather than guessed when the URL is not one SAM parses. */}
+            {pullRequest.number === null ? 'View PR' : `View PR #${pullRequest.number}`}
           </a>
           <PullRequestStateBadge state={pullRequest.state} />
         </span>

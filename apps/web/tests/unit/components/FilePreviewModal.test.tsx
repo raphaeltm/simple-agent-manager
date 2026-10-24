@@ -1,8 +1,26 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FilePreviewModal } from '../../../src/components/library/FilePreviewModal';
 import type { FileWithTags } from '../../../src/components/library/types';
+import { renderWithPreviewProviders as render } from '../../helpers/preview-providers';
+
+// The file preview reads the linked-work query, which is scoped by the signed-in identity.
+// `AuthContext` is module-private, so the hook is mocked rather than the provider mounted.
+vi.mock('../../../src/components/AuthProvider', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/components/AuthProvider')>()),
+  useAuth: () => ({ user: { id: 'user-preview' }, isSuperadmin: false, isLoading: false }),
+}));
+
+// Nothing is linked in these tests, so the provenance strip renders nothing and the preview's
+// own behaviour is what is under test. `file-linked-work.test.tsx` covers the strip itself.
+vi.mock('../../../src/lib/api/links', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/links')>()),
+  getLibraryFileLinks: vi.fn().mockResolvedValue({
+    sessions: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+    ideas: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+  }),
+}));
 
 // Mock the heavy content renderers/viewers with test doubles that expose which
 // branch the modal selected. The modal's branch choice (image/pdf/markdown/html)
@@ -44,11 +62,14 @@ describe('FilePreviewModal — octet-stream extension recovery', () => {
   });
 
   it('renders the markdown branch for an octet-stream file with a .md name', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      text: () => Promise.resolve('# Recovered heading\n\nBody.'),
-    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve('# Recovered heading\n\nBody.'),
+      })
+    );
 
     render(
       <FilePreviewModal
@@ -56,7 +77,7 @@ describe('FilePreviewModal — octet-stream extension recovery', () => {
         previewUrl="https://api.test/preview/f-1"
         onClose={noop}
         onDownload={noop}
-      />,
+      />
     );
 
     // Markdown branch: fetches the preview URL and renders the returned source.
@@ -66,7 +87,7 @@ describe('FilePreviewModal — octet-stream extension recovery', () => {
     expect(screen.getByTestId('rendered-markdown').textContent).toContain('# Recovered heading');
     expect(global.fetch).toHaveBeenCalledWith(
       'https://api.test/preview/f-1',
-      expect.objectContaining({ credentials: 'include' }),
+      expect.objectContaining({ credentials: 'include' })
     );
     // Not routed to any other viewer.
     expect(screen.queryByTestId('image-viewer')).toBeNull();
@@ -83,8 +104,8 @@ describe('FilePreviewModal — octet-stream extension recovery', () => {
           expiresAt: '2026-08-04T12:05:00.000Z',
           version: '2026-04-14T00:00:00Z',
         }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
     );
     vi.stubGlobal('fetch', fetchSpy);
 
@@ -94,7 +115,7 @@ describe('FilePreviewModal — octet-stream extension recovery', () => {
         previewUrl="https://api.test/preview/f-html"
         onClose={noop}
         onDownload={noop}
-      />,
+      />
     );
 
     // Runs on open, in the cross-origin sandboxed frame — no click and no inert copy.
@@ -105,7 +126,7 @@ describe('FilePreviewModal — octet-stream extension recovery', () => {
     // The only request is the signed-URL mint — the modal never fetches HTML to render inertly.
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(String(fetchSpy.mock.calls[0]?.[0])).toContain(
-      '/api/projects/proj-1/library/f-1/interactive-preview-url',
+      '/api/projects/proj-1/library/f-1/interactive-preview-url'
     );
   });
 
@@ -119,7 +140,7 @@ describe('FilePreviewModal — octet-stream extension recovery', () => {
         previewUrl="https://api.test/preview/f-svg"
         onClose={noop}
         onDownload={noop}
-      />,
+      />
     );
 
     // .svg recovers to image/svg+xml, which is excluded from the previewable
@@ -141,7 +162,7 @@ describe('FilePreviewModal — octet-stream extension recovery', () => {
         previewUrl="https://api.test/preview/f-bin"
         onClose={noop}
         onDownload={noop}
-      />,
+      />
     );
 
     // No branch renders; nothing is fetched. The header (filename) still shows.
