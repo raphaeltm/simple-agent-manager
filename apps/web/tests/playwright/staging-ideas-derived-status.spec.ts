@@ -14,9 +14,17 @@
  * Everything is driven as a user or through the real REST API; nothing sets UI state directly
  * (`.claude/rules/62`). Every row it creates is deleted at the end and re-read to prove it.
  *
+ * `T8_PROJECT_ID` must name a project that already holds real ideas, so the run is also the
+ * rule-17 stress pass with data nobody wrote for it: the chosen staging project has 80
+ * pre-existing `status='draft'` rows, which the `0207` backfill turns into ideas. That is the
+ * coordinator's accepted note observed rather than asserted, and 80 rows at 375px is a harder
+ * layout than any fixture. The first test fails if the list is small, because a verification
+ * run against an empty page would prove nothing about either.
+ *
  * Run inside `exec_with_secrets` with `secretNames: ["SAM_PLAYWRIGHT_PRIMARY_USER"]`: in an
  * agent workspace that variable holds a placeholder, not the token (program decision 12).
- * Set `T8_PROJECT_ID` to the staging project. Run with `--workers=1` — see `login`.
+ * Run with `--workers=1` — the token-login is rate-limited per IP and `stagingLogin` caches
+ * one login for the whole file.
  */
 import { expect, type Page, test } from '@playwright/test';
 
@@ -66,12 +74,28 @@ async function shot(page: Page, name: string): Promise<void> {
   await stagingShot(page, name);
 }
 
+/** The least number of ideas that makes this a stress pass rather than an empty page. */
+const MIN_REAL_IDEAS = 10;
+
 async function openIdeas(page: Page): Promise<void> {
   await page.goto(`${STAGING_APP}/projects/${PROJECT_ID}/ideas`);
   await expect(page.getByRole('heading', { name: 'Ideas', level: 1 })).toBeVisible({
     timeout: 30_000,
   });
   await dismissStagingOnboarding(page);
+}
+
+/**
+ * Narrows the list to this run's idea the way a person would, by typing in the search box.
+ * With 80 real ideas in the project the row is in the DOM either way, but it is far down the
+ * page — so without this the screenshots would show somebody else's ideas and prove nothing.
+ */
+async function searchForThisRun(page: Page): Promise<void> {
+  const search = page.getByPlaceholder('Search ideas');
+  await expect(search).toBeVisible();
+  await search.fill(RUN);
+  await expect(ideaRow(page)).toBeVisible({ timeout: 20_000 });
+  await ideaRow(page).scrollIntoViewIfNeeded();
 }
 
 /** The row for this run's idea, found by its title rather than by position. */
@@ -103,7 +127,21 @@ test.describe('Ideas list on staging — phone', () => {
 
     await openIdeas(page);
     await expect(ideaRow(page)).toBeVisible({ timeout: 20_000 });
-    // The markdown fix ships in this PR too: the plan's list renders with bullets.
+
+    // The stress pass, on data nobody wrote for this test: every one of these rows is a
+    // pre-existing draft the backfill turned into an idea, with whatever titles and summaries
+    // their authors happened to give them.
+    const rows = await page.getByTestId('idea-row').count();
+    expect(
+      rows,
+      `T8_PROJECT_ID must name a project with real ideas; saw ${rows}`
+    ).toBeGreaterThanOrEqual(MIN_REAL_IDEAS);
+    await shot(page, 't8-ideas-real-list');
+
+    // Then this run's own row, which is what the rest of the file follows.
+    await searchForThisRun(page);
+    // The markdown fix ships in this PR too: the plan's list renders as a sentence, not `- `.
+    await expect(ideaRow(page)).not.toContainText('- derived status');
     await shot(page, 't8-ideas-not-started');
   });
 
@@ -129,16 +167,17 @@ test.describe('Ideas list on staging — phone', () => {
     // THE HOP. The list reads that link back through the real PROJECT_DATA binding, joins the
     // chat's task from D1, and derives the state. Read off the page, not out of the API.
     await openIdeas(page);
+    await searchForThisRun(page);
     const row = ideaRow(page);
-    await expect(row).toBeVisible({ timeout: 20_000 });
-    await expect(row).toContainText(/In progress|is working|chat/i, { timeout: 20_000 });
 
-    const inProgress = page.getByRole('heading', { name: /In progress/ });
-    await expect(inProgress).toBeVisible();
-    await shot(page, 't8-ideas-in-progress');
+    // The idea is now under "In progress" rather than "Not started", and the search has
+    // narrowed the page to it — so this heading is about this idea and nothing else.
+    await expect(page.getByRole('heading', { name: /In progress/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Not started/ })).toBeHidden();
 
     // And the counts are real, not zeros: the chat the link store just recorded is counted.
     await expect(row).toContainText(/\d+ chat/);
+    await shot(page, 't8-ideas-in-progress');
   });
 
   test('Mark done moves it to Done recently, which only the flag makes possible', async ({
@@ -156,6 +195,8 @@ test.describe('Ideas list on staging — phone', () => {
     expect(((await done.json()) as { derived: { state: string } }).derived.state).toBe('done');
 
     await openIdeas(page);
+    const search = page.getByPlaceholder('Search ideas');
+    await search.fill(RUN);
     // On a phone the finished ideas are folded, so open the fold the way a person would.
     const fold = page.getByTestId('ideas-done-recently');
     await expect(fold).toBeVisible({ timeout: 20_000 });
@@ -171,8 +212,13 @@ test.describe('Ideas list on staging — laptop', () => {
 
   test('shows the same idea, and its side column, with the extra width', async ({ page }) => {
     await openIdeas(page);
+    // The side column only exists at this width, and it carries the explanation of the states.
     await expect(page.getByText('Ideas move on their own')).toBeVisible({ timeout: 20_000 });
-    // Done recently is a side-column panel at this width rather than a fold.
+    await shot(page, 't8-ideas-desktop-real-list');
+
+    await page.getByPlaceholder('Search ideas').fill(RUN);
+    // Done recently is a side-column panel at this width rather than a fold, so the done idea
+    // is on screen without opening anything.
     await expect(page.getByRole('heading', { name: /Done recently/ })).toBeVisible();
     await expect(page.getByText(IDEA_TITLE).first()).toBeVisible({ timeout: 20_000 });
     await shot(page, 't8-ideas-desktop');
@@ -188,7 +234,9 @@ test.describe('Ideas list on staging — laptop', () => {
     expect(reopened.status(), await reopened.text()).toBe(200);
 
     await openIdeas(page);
-    await expect(ideaRow(page)).toBeVisible({ timeout: 20_000 });
+    await searchForThisRun(page);
+    // Back out of "Done recently" and into the open list.
+    await expect(page.getByRole('heading', { name: /Not started/ })).toBeVisible();
     await shot(page, 't8-ideas-reopened');
   });
 
