@@ -228,6 +228,29 @@ test.describe('Ideas list on staging — phone', () => {
     expect(done.status(), await done.text()).toBe(200);
     expect(((await done.json()) as { derived: { state: string } }).derived.state).toBe('done');
 
+    /*
+     * The coordinator's combined check (seq 262), in the form that is reachable over HTTP.
+     *
+     * A COMPLETED idea must still be readable through a predicate-gated read and still carry
+     * its content — that is what `is_idea = 1` buys, and before this PR a completed row left
+     * the idea surfaces entirely. `GET /ideas/:id` reaches it through `readIdeaRow`, which
+     * applies `ideaTaskPredicateSql()` exactly as T6's `get_idea` does through `getIdea`.
+     * They are sibling functions over one predicate, so this exercises the predicate on a done
+     * idea live; it does NOT exercise T6's MCP tool itself, which needs a workspace-minted MCP
+     * token. That gap is stated in the PR rather than papered over.
+     */
+    const doneRead = await api(page, 'GET', `/api/projects/${PROJECT_ID}/ideas/${created.ideaId}`);
+    expect(doneRead.status(), await doneRead.text()).toBe(200);
+    const doneBody = (await doneRead.json()) as {
+      derived: { state: string };
+      idea?: { content?: string | null };
+      content?: string | null;
+    };
+    expect(doneBody.derived.state).toBe('done');
+    // Content survives completion — the read is not a stub for a finished idea.
+    const content = doneBody.idea?.content ?? doneBody.content ?? '';
+    expect(content, 'a completed idea still returns its plan').toContain('Staging check');
+
     await openIdeas(page);
     const search = page.getByPlaceholder('Search ideas');
     await search.fill(RUN);
