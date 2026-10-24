@@ -41,7 +41,7 @@ import {
   setTaskStatus,
   updateTaskExecutionStepFromCallback,
 } from './_helpers';
-import { prepareCallbackPullRequest, storeCallbackPullRequest } from './callback-pull-request';
+import * as callbackPr from './callback-pull-request';
 import { handleProviderLimitCallback } from './provider-limit-callback';
 
 /**
@@ -136,7 +136,7 @@ taskCallbackRoute.post(
         stepUpdate.outputPrUrl = body.outputPrUrl?.trim() || null;
       }
 
-      const projectRepository = await prepareCallbackPullRequest(
+      const projectRepository = await callbackPr.prepareCallbackPullRequest(
         db,
         projectId,
         task,
@@ -149,7 +149,7 @@ taskCallbackRoute.post(
         expected: workspaceSnapshot,
       });
 
-      await storeCallbackPullRequest(
+      await callbackPr.storeCallbackPullRequest(
         c.env,
         projectId,
         taskId,
@@ -372,6 +372,7 @@ taskCallbackRoute.post(
       if (handled) return c.json(toTaskResponse(handled));
     }
 
+    const prUpdate = await callbackPr.prepareStatusCallbackPullRequest(db, projectId, task, body);
     const updatedTask = await setTaskStatus(
       db,
       task,
@@ -383,10 +384,12 @@ taskCallbackRoute.post(
         outputSummary: body.outputSummary,
         outputBranch: body.outputBranch,
         outputPrUrl: body.outputPrUrl,
+        ...prUpdate.options,
         errorMessage: body.errorMessage,
         callbackFence: { env: c.env, expected: workspaceSnapshot },
       }
     );
+    await prUpdate.store(c.env, taskId, revalidateWorkspace);
 
     const lifecycleStatus = body.toStatus;
     if (task.status !== lifecycleStatus && isLifecycleTaskStatus(lifecycleStatus)) {

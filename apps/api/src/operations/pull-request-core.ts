@@ -117,6 +117,39 @@ export async function upsertPullRequestSnapshot(
       now
     )
     .run();
+  if (pr.headSha) {
+    await env.DATABASE.prepare(
+      `UPDATE pull_requests SET
+         checks_state = (
+           SELECT CASE
+             WHEN count(*) = 0 THEN NULL
+             WHEN sum(state = 'failure') > 0 THEN 'failure'
+             WHEN sum(state = 'pending') > 0 THEN 'pending'
+             WHEN sum(state = 'success') > 0 THEN 'success'
+             ELSE 'neutral' END
+           FROM pull_request_checks
+           WHERE project_id = ? AND repository = ? AND head_sha = ?),
+         checks_updated_at = (
+           SELECT max(updated_at) FROM pull_request_checks
+           WHERE project_id = ? AND repository = ? AND head_sha = ?)
+       WHERE project_id = ? AND repository = ? AND number = ?
+         AND head_sha = ? AND updated_at >= ?`
+    )
+      .bind(
+        projectId,
+        pr.repository,
+        pr.headSha,
+        projectId,
+        pr.repository,
+        pr.headSha,
+        projectId,
+        pr.repository,
+        pr.number,
+        pr.headSha,
+        pr.updatedAt
+      )
+      .run();
+  }
   // A synchronized PR may orphan observations for its previous head commit.
   if (previous?.head_sha && previous.head_sha !== pr.headSha) {
     await env.DATABASE.prepare(
@@ -261,6 +294,13 @@ async function refreshOne(
     createdAt,
     updatedAt,
   });
+  // An unchanged GitHub snapshot still completes the freshness check.
+  await env.DATABASE.prepare(
+    `UPDATE pull_requests SET last_synced_at = ?
+     WHERE project_id = ? AND repository = ? AND number = ? AND updated_at >= ?`
+  )
+    .bind(new Date().toISOString(), projectId, ref.repository, ref.number, updatedAt)
+    .run();
 }
 
 /** Read stored state only; single-context callers may schedule refresh separately. */

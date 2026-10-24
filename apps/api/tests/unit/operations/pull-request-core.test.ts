@@ -201,6 +201,43 @@ describe('pull request state refresh', () => {
     ).toEqual({ used: 1 });
   });
 
+  it('marks an unchanged GitHub refresh fresh without spending budget again on the next read', async () => {
+    await ensurePullRequest(env, 'p1', repo, url(8));
+    const fetchMock = vi.fn(async () => Response.json(githubPr(8)));
+    globalThis.fetch = fetchMock as typeof fetch;
+    const firstJobs: Promise<void>[] = [];
+    await getPullRequestStates(context(firstJobs), 'p1', [{ url: url(8) }], {
+      refresh: 'single',
+    });
+    await Promise.all(firstJobs);
+    sqlite
+      .prepare(
+        "UPDATE pull_requests SET last_synced_at = '2025-01-01T00:00:00Z' WHERE project_id = 'p1' AND number = 8"
+      )
+      .run();
+    sqlite.prepare('UPDATE pull_request_refresh_budget SET used = 0').run();
+
+    const secondJobs: Promise<void>[] = [];
+    const stale = await getPullRequestStates(context(secondJobs), 'p1', [{ url: url(8) }], {
+      refresh: 'single',
+    });
+    expect(stale[url(8)]?.stale).toBe(true);
+    await Promise.all(secondJobs);
+    const fresh = await getPullRequestStates(context(), 'p1', [{ url: url(8) }]);
+    expect(fresh[url(8)]?.stale).toBe(false);
+    expect(
+      sqlite
+        .prepare('SELECT last_synced_at FROM pull_requests WHERE project_id = ? AND number = ?')
+        .get('p1', 8)
+    ).toMatchObject({ last_synced_at: expect.not.stringContaining('2025-01-01') });
+    const thirdJobs: Promise<void>[] = [];
+    await getPullRequestStates(context(thirdJobs), 'p1', [{ url: url(8) }], {
+      refresh: 'single',
+    });
+    expect(thirdJobs).toHaveLength(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('backs off on GitHub rate limiting and returns last known state marked stale', async () => {
     await ensurePullRequest(env, 'p1', repo, url(4));
     sqlite

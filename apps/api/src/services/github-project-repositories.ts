@@ -8,6 +8,7 @@ export type GitHubProjectCandidate = {
   id: string;
   name: string;
   repository: string;
+  githubRepoId: number | null;
 };
 
 export async function findProjectsForGitHubRepository(
@@ -30,6 +31,7 @@ export async function findProjectsForGitHubRepository(
       id: schema.projects.id,
       name: schema.projects.name,
       repository: schema.projects.repository,
+      githubRepoId: schema.projects.githubRepoId,
     })
     .from(schema.projects)
     .where(where);

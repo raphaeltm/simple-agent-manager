@@ -16,6 +16,7 @@ import type { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { getPullRequestStates, parseProjectPullRequestUrl } from '../operations/pull-request-core';
@@ -138,21 +139,31 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
             taskRow.outputPrUrl && project
               ? parseProjectPullRequestUrl(taskRow.outputPrUrl, project.repository)
               : null;
-          const prState = parsedPr
-            ? (
-                await getPullRequestStates(
-                  {
-                    env: c.env,
-                    actor: { userId, via: 'web', scopes: new Set(['sam.read']) },
-                    requestId: c.req.header('cf-ray') ?? crypto.randomUUID(),
-                    execCtx: c.executionCtx as OperationContext['execCtx'],
-                  } satisfies OperationContext,
-                  projectId,
-                  [{ url: parsedPr.url }],
-                  { refresh: 'single' }
-                )
-              )[parsedPr.url]
-            : null;
+          let prState: Awaited<ReturnType<typeof getPullRequestStates>>[string] = null;
+          if (parsedPr) {
+            try {
+              prState =
+                (
+                  await getPullRequestStates(
+                    {
+                      env: c.env,
+                      actor: { userId, via: 'web', scopes: new Set(['sam.read']) },
+                      requestId: c.req.header('cf-ray') ?? crypto.randomUUID(),
+                      execCtx: c.executionCtx as OperationContext['execCtx'],
+                    } satisfies OperationContext,
+                    projectId,
+                    [{ url: parsedPr.url }],
+                    { refresh: 'single' }
+                  )
+                )[parsedPr.url] ?? null;
+            } catch (error) {
+              log.warn('chat.session_pr_state_failed', {
+                projectId,
+                sessionId,
+                error: String(error),
+              });
+            }
+          }
           const agentProfileHint = await resolveTaskAgentProfileHint(db, {
             hint: taskRow.agentProfileHint,
             projectId,

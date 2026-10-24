@@ -73,6 +73,7 @@ export type AdminSettingName =
   | 'operations.pullRequestRefreshBackoffSeconds'
   | 'operations.pullRequestRefreshTimeoutMs'
   | 'operations.pullRequestCheckUpdateCap'
+  | 'operations.pullRequestPendingCheckCap'
   | 'trials.enabled';
 export interface AdminSettingDefinition {
   readonly name: AdminSettingName;
@@ -511,6 +512,13 @@ const definitions: AdminSettingDefinition[] = [
     'Operations',
     'Maximum pull request rows updated by one GitHub check event per project.',
     { min: 1, max: 500 }
+  ),
+  integerDefinition(
+    'operations.pullRequestPendingCheckCap',
+    1000,
+    'Operations',
+    'Maximum unmatched GitHub check observations retained per project repository.',
+    { min: 1, max: 10000 }
   ),
   switchDefinition(
     'operations.stalledTaskClassifierEnabled',

@@ -1179,6 +1179,11 @@ export const pullRequests = sqliteTable(
       table.number
     ),
     head: index('idx_pull_requests_repository_head_sha').on(table.repository, table.headSha),
+    projectHead: index('idx_pull_requests_project_repo_head_sha').on(
+      table.projectId,
+      table.repository,
+      table.headSha
+    ),
   })
 );
 

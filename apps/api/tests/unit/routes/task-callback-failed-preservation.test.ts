@@ -272,6 +272,35 @@ describe('VM-agent failure callback preserves the failed task work', () => {
     });
   });
 
+  it('persists PR identity through a status-transition callback', async () => {
+    seed('running');
+    const prUrl = 'https://github.com/acme/widget/pull/31';
+    const response = await postCallback({
+      toStatus: 'completed',
+      outputPrUrl: prUrl,
+      gitPushResult: {
+        pushed: true,
+        branchName: 'sam/topic',
+        commitSha: 'c'.repeat(40),
+        prUrl,
+        prNumber: 31,
+        hasUncommittedChanges: false,
+        error: null,
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(
+      sqlite
+        .prepare('SELECT status, output_pr_number, output_commit_sha FROM tasks WHERE id = ?')
+        .get('task-1')
+    ).toEqual({
+      status: 'completed',
+      output_pr_number: 31,
+      output_commit_sha: 'c'.repeat(40),
+    });
+    expect(sqlite.prepare('SELECT number FROM pull_requests').get()).toEqual({ number: 31 });
+  });
+
   it('fails the task but queues a snapshot-backed sleep instead of tearing the workspace down', async () => {
     seed('running');
 

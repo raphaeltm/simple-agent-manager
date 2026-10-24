@@ -193,6 +193,24 @@ export async function handleCompleteTask(
     if (project)
       await ensurePullRequest(env, tokenData.projectId, project.repository, completionPrUrl);
   };
+  const rememberCompletionPrBestEffort = async () => {
+    try {
+      await rememberCompletionPr();
+    } catch (error) {
+      log.warn('mcp.complete_task.pr_storage_failed', {
+        taskId: tokenData.taskId,
+        error: String(error),
+      });
+      _executionCtx?.waitUntil(
+        rememberCompletionPr().catch((retryError) => {
+          log.warn('mcp.complete_task.pr_storage_retry_failed', {
+            taskId: tokenData.taskId,
+            error: String(retryError),
+          });
+        })
+      );
+    }
+  };
 
   const now = new Date().toISOString();
 
@@ -244,7 +262,7 @@ export async function handleCompleteTask(
       );
     }
 
-    await rememberCompletionPr();
+    await rememberCompletionPrBestEffort();
 
     log.info('mcp.complete_task.conversation_remapped', {
       taskId: tokenData.taskId,
@@ -321,7 +339,7 @@ export async function handleCompleteTask(
     );
   }
 
-  await rememberCompletionPr();
+  await rememberCompletionPrBestEffort();
 
   const completedEvent: TaskTerminalTransitionEvent = {
     transitionId: ulid(),

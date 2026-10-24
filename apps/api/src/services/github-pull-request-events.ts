@@ -33,7 +33,11 @@ export async function ingestPullRequestWebhook(
   if (!repositoryFullName && repositoryId === null) return;
   const projects = (
     await findProjectsForGitHubRepository(env, { repositoryFullName, repositoryId })
-  ).filter((project) => project.repository.toLowerCase() === repositoryFullName);
+  ).filter(
+    (project) =>
+      project.repository.toLowerCase() === repositoryFullName &&
+      (project.githubRepoId === null || project.githubRepoId === repositoryId)
+  );
   if (projects.length === 0 || !repositoryFullName) return;
 
   if (event === 'pull_request')
@@ -100,6 +104,26 @@ function lifecycleState(
   return pr?.merged === true ? 'merged' : 'closed';
 }
 
+function checkBelongsToProjectPullRequest(
+  check: Record<string, unknown> | null,
+  repositoryId: number | null,
+  repositoryFullName: string,
+  sha: string
+): boolean {
+  const pullRequests = check?.pull_requests;
+  if (!Array.isArray(pullRequests)) return false;
+  return pullRequests.some((value) => {
+    const pr = record(value);
+    const head = record(pr?.head);
+    const baseRepo = record(record(pr?.base)?.repo);
+    const repoMatches =
+      typeof baseRepo?.id === 'number'
+        ? baseRepo.id === repositoryId
+        : string(baseRepo?.full_name)?.toLowerCase() === repositoryFullName;
+    return typeof pr?.number === 'number' && pr.number > 0 && head?.sha === sha && repoMatches;
+  });
+}
+
 async function ingestChecksWebhook(
   env: Env,
   event: string,
@@ -126,21 +150,36 @@ async function ingestChecksWebhook(
     (event === 'check_run' && !checkName)
   )
     return;
+  const orderingTime =
+    string(check?.updated_at) ?? string(check?.completed_at) ?? string(check?.started_at);
+  if (!orderingTime || !Number.isFinite(Date.parse(orderingTime))) return;
+  const updatedAt = new Date(orderingTime).toISOString();
   const checksState = checkState(string(check?.conclusion), payload.action);
-  const updatedAt =
-    string(check?.completed_at) ?? string(check?.started_at) ?? new Date().toISOString();
   // A new run ID for the same app/name supersedes an earlier failed attempt.
   const checkKey = event === 'check_run' ? `${event}:${appId}:${checkName}` : `${event}:${appId}`;
   const cap = Number(await resolveAdminSetting(env, 'operations.pullRequestCheckUpdateCap'));
+  const pendingCap = Number(
+    await resolveAdminSetting(env, 'operations.pullRequestPendingCheckCap')
+  );
+  const associated = checkBelongsToProjectPullRequest(
+    check,
+    typeof record(payload.repository)?.id === 'number'
+      ? (record(payload.repository)?.id as number)
+      : null,
+    repositoryFullName,
+    sha
+  );
   await Promise.all(
     projects.map(async (project) => {
       await env.DATABASE.prepare(
         `INSERT INTO pull_request_checks (project_id, repository, head_sha, check_key, state, updated_at)
-         SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (
+         SELECT ?, ?, ?, ?, ?, ? WHERE ? = 1 OR EXISTS (
            SELECT 1 FROM pull_requests WHERE project_id = ? AND repository = ? AND head_sha = ?)
          ON CONFLICT(project_id, repository, head_sha, check_key) DO UPDATE SET
            state = excluded.state, updated_at = excluded.updated_at
-         WHERE excluded.updated_at >= pull_request_checks.updated_at`
+         WHERE excluded.updated_at > pull_request_checks.updated_at
+            OR (excluded.updated_at = pull_request_checks.updated_at
+                AND pull_request_checks.state = 'pending' AND excluded.state != 'pending')`
       )
         .bind(
           project.id,
@@ -149,10 +188,23 @@ async function ingestChecksWebhook(
           checkKey,
           checksState,
           updatedAt,
+          Number(associated),
           project.id,
           repositoryFullName,
           sha
         )
+        .run();
+      await env.DATABASE.prepare(
+        `DELETE FROM pull_request_checks WHERE rowid IN (
+           SELECT c.rowid FROM pull_request_checks c
+           WHERE c.project_id = ? AND c.repository = ?
+             AND NOT EXISTS (
+               SELECT 1 FROM pull_requests p
+               WHERE p.project_id = c.project_id AND p.repository = c.repository
+                 AND p.head_sha = c.head_sha)
+           ORDER BY c.updated_at DESC, c.rowid DESC LIMIT -1 OFFSET ?)`
+      )
+        .bind(project.id, repositoryFullName, pendingCap)
         .run();
       const result = await env.DATABASE.prepare(
         `UPDATE pull_requests SET checks_state = (

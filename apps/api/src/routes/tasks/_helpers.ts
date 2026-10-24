@@ -224,6 +224,8 @@ export async function setTaskStatus(
     outputSummary?: string;
     outputBranch?: string;
     outputPrUrl?: string;
+    outputPrNumber?: number | null;
+    outputCommitSha?: string | null;
     errorMessage?: string;
     callbackFence?: TaskWorkspaceCallbackFence;
   } = {}
@@ -263,6 +265,12 @@ export async function setTaskStatus(
 
   if (options.outputPrUrl !== undefined) {
     nextValues.outputPrUrl = options.outputPrUrl?.trim() || null;
+  }
+  if (options.outputPrNumber !== undefined) {
+    nextValues.outputPrNumber = options.outputPrNumber;
+  }
+  if (options.outputCommitSha !== undefined) {
+    nextValues.outputCommitSha = options.outputCommitSha;
   }
 
   if (toStatus === 'failed') {

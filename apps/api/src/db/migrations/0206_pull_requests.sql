@@ -21,6 +21,7 @@ CREATE TABLE pull_requests (
 );
 CREATE UNIQUE INDEX idx_pull_requests_project_repo_number ON pull_requests(project_id, repository, number);
 CREATE INDEX idx_pull_requests_repository_head_sha ON pull_requests(repository, head_sha);
+CREATE INDEX idx_pull_requests_project_repo_head_sha ON pull_requests(project_id, repository, head_sha);
 CREATE TABLE pull_request_checks (
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   repository TEXT NOT NULL,

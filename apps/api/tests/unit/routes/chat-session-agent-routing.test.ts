@@ -339,6 +339,49 @@ describe('chatRoutes agent session routing', () => {
     );
   });
 
+  it('keeps the task embed when PR state lookup fails', async () => {
+    mocks.getPullRequestStates.mockRejectedValue(new Error('D1 unavailable'));
+    mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
+    mocks.getSession.mockResolvedValue({
+      id: 'chat-1',
+      workspaceId: 'ws-1',
+      taskId: 'task-1',
+      status: 'active',
+      messageCount: 0,
+      startedAt: 1,
+      endedAt: null,
+      createdAt: 1,
+    });
+    mocks.drizzle.mockReturnValue({
+      select: vi
+        .fn()
+        .mockReturnValueOnce(
+          makeTaskQuery([
+            {
+              id: 'task-1',
+              status: 'in_progress',
+              outputPrUrl: 'https://github.com/acme/widget/pull/17',
+              taskMode: 'task',
+              agentProfileHint: null,
+            },
+          ])
+        )
+        .mockReturnValueOnce(makeTaskQuery([{ repository: 'acme/widget' }]))
+        .mockReturnValueOnce(makeProfileQuery([])),
+    });
+    const response = await app.fetch(
+      new Request('https://example.test/api/projects/proj-1/sessions/chat-1'),
+      { DATABASE: {} as D1Database } as Env,
+      { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.session.task).toMatchObject({
+      status: 'in_progress',
+      pr: { number: 17, state: null, checks: null },
+    });
+  });
+
   it('returns agentType from ACP session in the response', async () => {
     mocks.listAcpSessions.mockResolvedValue({
       sessions: [
