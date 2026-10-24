@@ -61,7 +61,6 @@ import * as groupedFtsCleanup from './grouped-fts-cleanup';
 import * as groupedFtsWallRecovery from './grouped-fts-wall-recovery';
 import * as ideaUpdates from './idea-updates';
 import * as ideaWork from './idea-work';
-import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
 import * as libraryFileComments from './library-file-comments';

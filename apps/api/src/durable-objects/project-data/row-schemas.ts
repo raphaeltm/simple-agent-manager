@@ -9,7 +9,6 @@ export {
   parseActivityEventRow,
   parseCachedCommandRow,
   parseIdeaNeedsInputRow,
-  parseIdeaSessionDetail,
   parseIdeaWorkSessionRow,
   parseIdleCleanupSchedule,
   parseWorkspaceIdleCheck,
