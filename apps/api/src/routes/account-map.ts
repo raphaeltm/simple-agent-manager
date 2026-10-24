@@ -9,7 +9,8 @@
  * to fetch sessions. For accounts with many projects, this can be slow on
  * cold DOs (~5-20ms each). KV caching (30s TTL) absorbs repeated reads.
  */
-import { and, eq, inArray } from 'drizzle-orm';
+import { isStrongLinkRelation } from '@simple-agent-manager/shared';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -17,6 +18,9 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import { ideaTaskPredicateSql } from '../operations/idea-core';
+import { listLinksForTargets } from '../operations/link-core';
+import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
 import { listAgentActivityTasks } from '../services/agent-activity';
 import * as projectDataService from '../services/project-data';
 
@@ -39,7 +43,7 @@ const DEFAULT_MAX_SESSIONS_PER_PROJECT = 20;
 
 /** KV cache TTL in seconds. Configurable via ACCOUNT_MAP_CACHE_TTL_SECONDS. */
 const DEFAULT_CACHE_TTL_SECONDS = 30;
-const ACCOUNT_MAP_CACHE_VERSION = 'v2';
+const ACCOUNT_MAP_CACHE_VERSION = 'v3';
 
 interface SessionSummary {
   id: string;
@@ -56,6 +60,7 @@ interface Relationship {
   target: string;
   type: string;
   active: boolean;
+  primary?: boolean;
 }
 
 const accountMapRoutes = new Hono<{ Bindings: Env }>();
@@ -92,8 +97,20 @@ accountMapRoutes.get('/', async (c) => {
   // --- D1 queries: projects, nodes, workspaces, tasks ---
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const [projectRows, nodeRows, workspaceRows, taskRows] = await Promise.all([
-    // Projects: always return all (they're parent containers)
+  const [linkProjectCapSetting, ideaCapSetting, batchTargetSetting, perTargetCapSetting] =
+    await resolveAdminSettingDetailsMany(c.env, [
+      'operations.accountMapLinkProjectCap',
+      'operations.accountMapIdeaCap',
+      'operations.resourceLinkBatchTargetLimit',
+      'operations.resourceLinkBatchPerTargetCap',
+    ]);
+  const linkProjectCap = Number(linkProjectCapSetting?.value);
+  const ideaCap = Math.min(Number(ideaCapSetting?.value), Number(batchTargetSetting?.value));
+  const perTargetCap = Number(perTargetCapSetting?.value);
+
+  const [projectCandidates, nodeCandidates, workspaceCandidates, taskRows] = await Promise.all([
+    // The existing session fanout includes all returned projects. New idea-link reads
+    // below are limited to the most recently active projects only.
     db
       .select({
         id: schema.projects.id,
@@ -105,8 +122,8 @@ accountMapRoutes.get('/', async (c) => {
       })
       .from(schema.projects)
       .where(eq(schema.projects.userId, userId))
-      .limit(maxEntities),
-
+      .orderBy(desc(schema.projects.lastActivityAt), desc(schema.projects.id))
+      .limit(maxEntities + 1),
     // Nodes: filter to active statuses when activeOnly
     db
       .select({
@@ -127,7 +144,7 @@ accountMapRoutes.get('/', async (c) => {
           ? and(eq(schema.nodes.userId, userId), inArray(schema.nodes.status, ACTIVE_NODE_STATUSES))
           : eq(schema.nodes.userId, userId)
       )
-      .limit(maxEntities),
+      .limit(maxEntities + 1),
 
     // Workspaces: filter to active statuses when activeOnly
     db
@@ -150,14 +167,36 @@ accountMapRoutes.get('/', async (c) => {
             )
           : eq(schema.workspaces.userId, userId)
       )
-      .limit(maxEntities),
+      .limit(maxEntities + 1),
 
-    listAgentActivityTasks(c.env, {
-      userId,
-      activeOnly,
-      limit: maxEntities,
-    }),
+    listAgentActivityTasks(c.env, { userId, activeOnly, limit: maxEntities }),
   ]);
+  const projectRows = projectCandidates.slice(0, maxEntities);
+  const nodeRows = nodeCandidates.slice(0, maxEntities);
+  const workspaceRows = workspaceCandidates.slice(0, maxEntities);
+  const linkProjects = projectRows.slice(0, linkProjectCap);
+  const linkProjectIdsJson = JSON.stringify(linkProjects.map((project) => project.id));
+
+  // The D1 owner join is a second scope boundary in addition to the project IDs.
+  // json_each keeps the statement at three bound parameters even for large lists.
+  const ideaCandidates = linkProjects.length
+    ? await c.env.DATABASE.prepare(
+        `SELECT tasks.id,tasks.project_id AS projectId,tasks.title,tasks.status,tasks.updated_at AS updatedAt
+         FROM tasks JOIN projects ON projects.id=tasks.project_id
+         WHERE projects.user_id=? AND tasks.project_id IN (SELECT value FROM json_each(?))
+           AND ${ideaTaskPredicateSql('tasks')}
+         ORDER BY tasks.updated_at DESC,tasks.id DESC LIMIT ?`
+      )
+        .bind(userId, linkProjectIdsJson, ideaCap + 1)
+        .all<{
+          id: string;
+          projectId: string;
+          title: string;
+          status: string;
+          updatedAt: string | null;
+        }>()
+    : { results: [] };
+  const candidateIdeas = ideaCandidates.results.slice(0, ideaCap);
 
   // --- Fan out to ProjectData DOs for sessions ---
   // Each callback returns its sessions; collected after settlement to avoid shared-array mutation.
@@ -171,8 +210,9 @@ accountMapRoutes.get('/', async (c) => {
         0
       );
 
-      return sessionsResult.sessions.map(
-        (s): SessionSummary => ({
+      return {
+        truncated: sessionsResult.total > sessionsResult.sessions.length,
+        sessions: sessionsResult.sessions.map((s): SessionSummary => ({
           id: s.id as string,
           projectId: project.id,
           topic: (s.topic as string) ?? null,
@@ -180,16 +220,20 @@ accountMapRoutes.get('/', async (c) => {
           messageCount: (s.messageCount as number) ?? 0,
           workspaceId: (s.workspaceId as string) ?? null,
           taskId: (s.taskId as string) ?? null,
-        })
-      );
+        })),
+      };
     })
   );
 
   const allSessions: SessionSummary[] = [];
+  let sessionsTruncated = false;
+  let incomplete = false;
   for (const result of doResults) {
     if (result.status === 'fulfilled') {
-      allSessions.push(...result.value);
+      allSessions.push(...result.value.sessions);
+      sessionsTruncated ||= result.value.truncated;
     } else {
+      incomplete = true;
       log.warn('account_map.do_fetch_failed', { error: String(result.reason) });
     }
   }
@@ -199,8 +243,70 @@ accountMapRoutes.get('/', async (c) => {
     ? allSessions.filter((s) => ACTIVE_SESSION_STATUSES.includes(s.status))
     : allSessions;
 
+  const visibleSessions = new Map(filteredSessions.map((session) => [session.id, session]));
+  const ideasByProject = new Map<string, typeof candidateIdeas>();
+  for (const idea of candidateIdeas) {
+    const group = ideasByProject.get(idea.projectId) ?? [];
+    group.push(idea);
+    ideasByProject.set(idea.projectId, group);
+  }
+  const linkResults = await Promise.allSettled(
+    [...ideasByProject].map(async ([projectId, ideas]) => ({
+      projectId,
+      links: await listLinksForTargets(
+        c.env,
+        projectId,
+        'idea',
+        ideas.map((idea) => idea.id)
+      ),
+    }))
+  );
+  const ideaProjectById = new Map(candidateIdeas.map((idea) => [idea.id, idea.projectId]));
+  const linkedIdeaIds = new Set<string>();
+  const ideaSessionEdges = new Map<string, Relationship>();
+  let linksPossiblyTruncated = false;
+  for (const result of linkResults) {
+    if (result.status === 'rejected') {
+      incomplete = true;
+      log.warn('account_map.link_fetch_failed', { error: String(result.reason) });
+      continue;
+    }
+    const { projectId, links } = result.value;
+    const linkCounts = new Map<string, number>();
+    for (const link of links) {
+      if (link.sourceKind !== 'session' || link.targetKind !== 'idea') continue;
+      linkCounts.set(link.targetId, (linkCounts.get(link.targetId) ?? 0) + 1);
+      const session = visibleSessions.get(link.sourceId);
+      if (
+        !session ||
+        session.projectId !== projectId ||
+        ideaProjectById.get(link.targetId) !== projectId
+      )
+        continue;
+      linkedIdeaIds.add(link.targetId);
+      const key = `${link.targetId}:${session.id}`;
+      const previous = ideaSessionEdges.get(key);
+      const primary = link.relation === 'works_on';
+      ideaSessionEdges.set(key, {
+        source: link.targetId,
+        target: session.id,
+        type: 'idea_session',
+        active: (previous?.active ?? false) || isStrongLinkRelation(link.relation),
+        primary: (previous?.primary ?? false) || primary,
+      });
+    }
+    if ([...linkCounts.values()].some((count) => count >= perTargetCap))
+      linksPossiblyTruncated = true;
+  }
+  const ideas = candidateIdeas.filter((idea) => linkedIdeaIds.has(idea.id));
+
   // --- Build relationships ---
   const relationships: Relationship[] = [];
+
+  for (const idea of ideas) {
+    relationships.push({ source: idea.projectId, target: idea.id, type: 'has_idea', active: true });
+  }
+  relationships.push(...ideaSessionEdges.values());
 
   // Project → Workspace
   for (const ws of workspaceRows) {
@@ -287,13 +393,27 @@ accountMapRoutes.get('/', async (c) => {
       priority: t.priority,
       agentActivityState: t.agentActivityState,
     })),
+    ideas: ideas.map(({ id, projectId, title, status }) => ({ id, projectId, title, status })),
+    truncation: {
+      projects: projectCandidates.length > maxEntities,
+      linkProjects: projectRows.length > linkProjectCap,
+      ideas: ideaCandidates.results.length > ideaCap,
+      sessions: sessionsTruncated,
+      links: linksPossiblyTruncated,
+      nodes: nodeCandidates.length > maxEntities,
+      workspaces: workspaceCandidates.length > maxEntities,
+      tasks: taskRows.length >= maxEntities,
+      incomplete,
+    },
     relationships,
   };
 
   // --- Cache in KV (fire-and-forget) ---
-  void c.env.KV.put(cacheKey, JSON.stringify(payload), { expirationTtl: cacheTtl }).catch(
-    (err: unknown) => log.warn('account_map.kv_cache_write_failed', { error: String(err) })
-  );
+  if (!incomplete) {
+    void c.env.KV.put(cacheKey, JSON.stringify(payload), { expirationTtl: cacheTtl }).catch(
+      (err: unknown) => log.warn('account_map.kv_cache_write_failed', { error: String(err) })
+    );
+  }
 
   return c.json(payload);
 });

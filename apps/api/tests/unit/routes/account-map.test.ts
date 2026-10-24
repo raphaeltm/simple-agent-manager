@@ -34,6 +34,12 @@ vi.mock('../../../src/services/project-data', () => ({
 vi.mock('../../../src/services/agent-activity', () => ({
   listAgentActivityTasks: vi.fn(),
 }));
+vi.mock('../../../src/operations/link-core', () => ({ listLinksForTargets: vi.fn() }));
+vi.mock('../../../src/services/admin-settings', () => ({
+  resolveAdminSettingDetailsMany: vi
+    .fn()
+    .mockResolvedValue([{ value: 10 }, { value: 100 }, { value: 100 }, { value: 50 }]),
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -70,6 +76,7 @@ function buildMockDB(projects: any[], nodes: any[], workspaces: any[], tasks: an
     from: vi.fn().mockReturnThis(),
     innerJoin: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
+    orderBy: vi.fn().mockReturnThis(),
     limit: vi.fn().mockImplementation(() => {
       const result = results[callIdx % results.length];
       callIdx++;
@@ -81,7 +88,11 @@ function buildMockDB(projects: any[], nodes: any[], workspaces: any[], tasks: an
 }
 
 const mockEnv = {
-  DATABASE: {} as D1Database,
+  DATABASE: {
+    prepare: vi.fn().mockReturnValue({
+      bind: vi.fn().mockReturnValue({ all: vi.fn().mockResolvedValue({ results: [] }) }),
+    }),
+  } as unknown as D1Database,
   PROJECT_DATA: {
     idFromName: vi.fn().mockReturnValue({ toString: () => 'do-id' }),
     get: vi.fn(),
@@ -152,6 +163,9 @@ describe('GET /account-map', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (agentActivityService.listAgentActivityTasks as any).mockResolvedValue([]);
+    (mockEnv.DATABASE.prepare as any).mockReturnValue({
+      bind: vi.fn().mockReturnValue({ all: vi.fn().mockResolvedValue({ results: [] }) }),
+    });
   });
 
   it('returns empty response when user has no entities', async () => {
@@ -231,7 +245,8 @@ describe('GET /account-map', () => {
   });
 
   it('defaults to activeOnly=true and uses scoped cache key', async () => {
-    buildMockDB([], [], [], []);
+    buildMockDB([projectFixture()], [], [], []);
+    (projectDataService.listSessions as any).mockResolvedValue({ sessions: [], total: 0 });
 
     const app = buildApp();
     const res = await app.request('/account-map', {}, mockEnv);
@@ -239,7 +254,7 @@ describe('GET /account-map', () => {
     expect(res.status).toBe(200);
 
     // Cache key should include :active suffix
-    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v2:user-123:active', 'json');
+    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v3:user-123:active', 'json');
     expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
       mockEnv,
       expect.objectContaining({ activeOnly: true, userId: 'user-123' })
@@ -247,7 +262,8 @@ describe('GET /account-map', () => {
   });
 
   it('uses :all cache key when activeOnly=false', async () => {
-    buildMockDB([], [], [], []);
+    buildMockDB([projectFixture()], [], [], []);
+    (projectDataService.listSessions as any).mockResolvedValue({ sessions: [], total: 0 });
 
     const app = buildApp();
     const res = await app.request('/account-map?activeOnly=false', {}, mockEnv);
@@ -255,7 +271,7 @@ describe('GET /account-map', () => {
     expect(res.status).toBe(200);
 
     // Cache key should include :all suffix
-    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v2:user-123:all', 'json');
+    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v3:user-123:all', 'json');
     expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
       mockEnv,
       expect.objectContaining({ activeOnly: false, userId: 'user-123' })
@@ -373,5 +389,7 @@ describe('GET /account-map', () => {
     const body = (await res.json()) as any;
     expect(body.projects).toHaveLength(1);
     expect(body.sessions).toEqual([]);
+    expect(body.truncation.incomplete).toBe(true);
+    expect(mockEnv.KV.put).not.toHaveBeenCalled();
   });
 });

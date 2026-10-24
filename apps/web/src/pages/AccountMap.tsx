@@ -1,5 +1,5 @@
 import { Spinner } from '@simple-agent-manager/ui';
-import { useEffect,useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { AccountMapCanvas } from '../components/account-map/AccountMapCanvas';
 import { AccountMapEmptyState } from '../components/account-map/AccountMapEmptyState';
@@ -12,7 +12,7 @@ export function AccountMap() {
   const isMobile = useIsMobile();
   const [activeOnly, setActiveOnly] = useState(true);
 
-  const { nodes, edges, loading, error, isEmpty, stats, refresh, reorganize } =
+  const { nodes, edges, loading, error, isEmpty, stats, truncation, refresh, reorganize } =
     useAccountMapData({ isMobile, activeOnly });
 
   const {
@@ -79,12 +79,20 @@ export function AccountMap() {
         activeOnly={activeOnly}
         onToggleActiveOnly={() => setActiveOnly((v) => !v)}
       />
+      {truncation && Object.values(truncation).some(Boolean) && (
+        <p
+          className="px-3 py-1.5 text-xs text-fg-muted bg-surface border-b border-border-default"
+          role="status"
+        >
+          {truncation.incomplete
+            ? 'Some map data could not be loaded. Refresh to try again.'
+            : truncation.linkProjects || truncation.ideas
+              ? 'Idea links are checked for recent projects and ideas only. Older linked ideas may be omitted.'
+              : 'Showing a recent subset of the map. Older projects, ideas, chats or links may be omitted.'}
+        </p>
+      )}
       <div className="flex-1 min-h-0">
-        <AccountMapCanvas
-          nodes={filteredNodes}
-          edges={filteredEdges}
-          isMobile={isMobile}
-        />
+        <AccountMapCanvas nodes={filteredNodes} edges={filteredEdges} isMobile={isMobile} />
       </div>
     </div>
   );

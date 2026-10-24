@@ -84,11 +84,29 @@ export interface AccountMapResponse {
     priority: number | null;
     agentActivityState: AgentActivityState;
   }>;
+  ideas: Array<{
+    id: string;
+    projectId: string;
+    title: string;
+    status: string;
+  }>;
+  truncation: {
+    projects: boolean;
+    linkProjects: boolean;
+    ideas: boolean;
+    sessions: boolean;
+    links: boolean;
+    nodes: boolean;
+    workspaces: boolean;
+    tasks: boolean;
+    incomplete: boolean;
+  };
   relationships: Array<{
     source: string;
     target: string;
     type: string;
     active: boolean;
+    primary?: boolean;
   }>;
 }
 

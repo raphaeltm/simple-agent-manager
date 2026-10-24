@@ -1,13 +1,12 @@
-import { type EdgeProps,getBezierPath } from '@xyflow/react';
+import { type EdgeProps, getBezierPath } from '@xyflow/react';
 import { type FC, useMemo, useSyncExternalStore } from 'react';
 
 const PARTICLE_COUNT = 4;
 const CYCLE_DURATION = 3;
 
 /** Subscribes to prefers-reduced-motion media query. */
-const motionQuery = typeof window !== 'undefined'
-  ? window.matchMedia('(prefers-reduced-motion: reduce)')
-  : null;
+const motionQuery =
+  typeof window !== 'undefined' ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
 
 function subscribeMotion(cb: () => void) {
   motionQuery?.addEventListener('change', cb);
@@ -36,6 +35,7 @@ export const AnimatedFlowEdge: FC<EdgeProps> = ({
   const color = (data?.color as string) ?? '#00ff88';
   const prefersReducedMotion = useSyncExternalStore(subscribeMotion, getMotionSnapshot);
   const active = ((data?.active as boolean) ?? false) && !prefersReducedMotion;
+  const primary = (data?.primary as boolean) ?? false;
 
   const [edgePath] = getBezierPath({
     sourceX,
@@ -67,11 +67,7 @@ export const AnimatedFlowEdge: FC<EdgeProps> = ({
     if (!active) return null;
     return (
       <circle r="6" fill={color} opacity="0.3" filter="url(#particle-glow)">
-        <animateMotion
-          dur={`${CYCLE_DURATION}s`}
-          repeatCount="indefinite"
-          path={edgePath}
-        />
+        <animateMotion dur={`${CYCLE_DURATION}s`} repeatCount="indefinite" path={edgePath} />
       </circle>
     );
   }, [active, color, edgePath]);
@@ -92,7 +88,7 @@ export const AnimatedFlowEdge: FC<EdgeProps> = ({
         d={edgePath}
         fill="none"
         stroke={active ? color : 'var(--sam-color-border-default)'}
-        strokeWidth={active ? 1.5 : 1}
+        strokeWidth={primary ? 2.5 : active ? 1.5 : 1}
         strokeOpacity={active ? 0.6 : 0.3}
         strokeDasharray={active ? undefined : '4 4'}
         style={style}

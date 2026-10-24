@@ -27,7 +27,15 @@ interface UseAccountMapDataResult {
   loading: boolean;
   error: string | null;
   isEmpty: boolean;
-  stats: { projects: number; nodes: number; workspaces: number; sessions: number; tasks: number };
+  stats: {
+    projects: number;
+    nodes: number;
+    workspaces: number;
+    sessions: number;
+    tasks: number;
+    ideas: number;
+  };
+  truncation: AccountMapResponse['truncation'] | null;
   refresh: () => void;
   reorganize: () => void;
 }
@@ -63,17 +71,25 @@ export function useAccountMapData({
       return {
         nodes: [] as Node[],
         edges: [] as Edge[],
-        stats: { projects: 0, nodes: 0, workspaces: 0, sessions: 0, tasks: 0 },
+        stats: { projects: 0, nodes: 0, workspaces: 0, sessions: 0, tasks: 0, ideas: 0 },
         isEmpty: true,
       };
     }
 
     const flowNodes: Node[] = [];
+    const ideas = rawData.ideas ?? [];
 
     // Count relationships for enrichment
     const workspacesByProject = new Map<string, number>();
     const sessionsByProject = new Map<string, number>();
     const tasksByProject = new Map<string, number>();
+    const sessionsByIdea = new Map<string, Set<string>>();
+    for (const relation of rawData.relationships) {
+      if (relation.type !== 'idea_session') continue;
+      const sessions = sessionsByIdea.get(relation.source) ?? new Set<string>();
+      sessions.add(relation.target);
+      sessionsByIdea.set(relation.source, sessions);
+    }
 
     for (const ws of rawData.workspaces) {
       if (ws.projectId) {
@@ -176,6 +192,22 @@ export function useAccountMapData({
       });
     }
 
+    // Ideas
+    for (const idea of ideas) {
+      flowNodes.push({
+        id: idea.id,
+        type: 'ideaNode',
+        position: { x: 0, y: 0 },
+        data: {
+          label: idea.title,
+          status: idea.status,
+          linkedSessionCount: sessionsByIdea.get(idea.id)?.size ?? 0,
+          projectId: idea.projectId,
+          isMobile,
+        },
+      });
+    }
+
     // Edges
     const flowEdges: Edge[] = rawData.relationships.map((rel, i) => ({
       id: `e-${rel.source}-${rel.target}-${i}`,
@@ -185,6 +217,7 @@ export function useAccountMapData({
       data: {
         color: EDGE_COLORS[rel.type] ?? '#29423b',
         active: rel.active,
+        primary: rel.primary ?? false,
       },
     }));
 
@@ -200,7 +233,8 @@ export function useAccountMapData({
       rawData.nodes.length +
       rawData.workspaces.length +
       rawData.sessions.length +
-      rawData.tasks.length;
+      rawData.tasks.length +
+      ideas.length;
 
     return {
       nodes: layoutedNodes,
@@ -211,6 +245,7 @@ export function useAccountMapData({
         workspaces: rawData.workspaces.length,
         sessions: rawData.sessions.length,
         tasks: rawData.tasks.length,
+        ideas: ideas.length,
       },
       isEmpty: totalEntities === 0,
     };
@@ -220,5 +255,15 @@ export function useAccountMapData({
     setLayoutKey((k) => k + 1);
   }, []);
 
-  return { nodes, edges, loading, error, isEmpty, stats, refresh: fetchData, reorganize };
+  return {
+    nodes,
+    edges,
+    loading,
+    error,
+    isEmpty,
+    stats,
+    truncation: rawData?.truncation ?? null,
+    refresh: fetchData,
+    reorganize,
+  };
 }

@@ -51,12 +51,15 @@ function TooltipDetails({ data }: { data: Record<string, unknown> }) {
   if (data.repository) fields.push({ label: 'Repo', value: String(data.repository) });
   if (data.branch) fields.push({ label: 'Branch', value: String(data.branch) });
   if (data.ipAddress) fields.push({ label: 'IP', value: String(data.ipAddress) });
-  if (data.messageCount != null) fields.push({ label: 'Messages', value: String(data.messageCount) });
+  if (data.messageCount != null)
+    fields.push({ label: 'Messages', value: String(data.messageCount) });
   if (data.executionStep) fields.push({ label: 'Step', value: String(data.executionStep) });
   return (
     <div className="flex flex-col gap-0.5 sam-type-caption text-fg-muted">
       {fields.map((f) => (
-        <span key={f.label} className="truncate">{f.label}: {f.value}</span>
+        <span key={f.label} className="truncate">
+          {f.label}: {f.value}
+        </span>
       ))}
     </div>
   );
@@ -75,7 +78,11 @@ const EDGE_TYPES: EdgeTypes = {
   animatedFlow: AnimatedFlowEdge,
 };
 
-function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMobile }: AccountMapCanvasProps) {
+function AccountMapCanvasInner({
+  nodes: initialNodes,
+  edges: initialEdges,
+  isMobile,
+}: AccountMapCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; node: Node } | null>(null);
@@ -108,9 +115,7 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
     (_event: React.MouseEvent, node: Node) => {
       if (!isMobile) return;
       // On mobile, show tooltip on tap
-      setTooltip((prev) =>
-        prev?.node.id === node.id ? null : { x: 0, y: 0, node }
-      );
+      setTooltip((prev) => (prev?.node.id === node.id ? null : { x: 0, y: 0, node }));
     },
     [isMobile]
   );
@@ -156,13 +161,18 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
         onNodeClick={handleNodeClick}
         onPaneClick={handlePaneClick}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={{ padding: 0.2, minZoom: isMobile ? 0.8 : undefined }}
         minZoom={0.1}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
         defaultEdgeOptions={{ type: 'animatedFlow' }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--sam-color-border-default)" />
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={20}
+          size={1}
+          color="var(--sam-color-border-default)"
+        />
         {!isMobile && (
           <>
             <MiniMap
@@ -172,37 +182,47 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
             />
             <Controls
               showInteractive={false}
-              style={{ background: 'var(--sam-color-bg-surface)', border: '1px solid var(--sam-color-border-default)' }}
+              style={{
+                background: 'var(--sam-color-bg-surface)',
+                border: '1px solid var(--sam-color-border-default)',
+              }}
             />
           </>
         )}
       </ReactFlow>
 
       {/* Tooltip */}
-      {tooltip && typeof document !== 'undefined' && createPortal(
-        <div
-          ref={tooltipRef}
-          className={`fixed z-dropdown glass-surface rounded-lg px-3 py-2 shadow-lg pointer-events-none max-w-[260px] ${
-            isMobile ? 'left-4 right-4' : ''
-          }`}
-          style={
-            isMobile
-              ? { bottom: 'max(1rem, env(safe-area-inset-bottom, 1rem))' }
-              : tooltipStyle
-          }
-        >
-          <div className="sam-type-secondary text-fg-primary font-medium mb-1 truncate">
-            {(tooltip.node.data?.label as string) ?? 'Entity'}
-          </div>
-          <TooltipDetails data={expectJsonRecord(tooltip.node.data, 'account-map.tooltip.node.data')} />
-        </div>,
-        document.body,
-      )}
+      {tooltip &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={tooltipRef}
+            className={`fixed z-dropdown glass-surface rounded-lg px-3 py-2 shadow-lg pointer-events-none max-w-[260px] ${
+              isMobile ? 'left-4 right-4' : ''
+            }`}
+            style={
+              isMobile ? { bottom: 'max(1rem, env(safe-area-inset-bottom, 1rem))' } : tooltipStyle
+            }
+          >
+            <div className="sam-type-secondary text-fg-primary font-medium mb-1 truncate">
+              {(tooltip.node.data?.label as string) ?? 'Entity'}
+            </div>
+            <TooltipDetails
+              data={expectJsonRecord(tooltip.node.data, 'account-map.tooltip.node.data')}
+            />
+          </div>,
+          document.body
+        )}
 
       {/* Keyboard hint — desktop only */}
       {!isMobile && (
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 sam-type-caption text-fg-muted bg-surface/80 px-2 py-1 rounded border border-border-default backdrop-blur-sm whitespace-nowrap">
           Drag nodes to rearrange &middot; Scroll to zoom
+        </div>
+      )}
+      {isMobile && (
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 sam-type-caption text-fg-muted bg-surface/80 px-2 py-1 rounded border border-border-default backdrop-blur-sm whitespace-nowrap pointer-events-none">
+          Drag to explore &middot; Pinch to zoom
         </div>
       )}
     </div>

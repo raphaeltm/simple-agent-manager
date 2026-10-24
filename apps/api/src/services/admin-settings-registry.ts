@@ -59,6 +59,8 @@ export type AdminSettingName =
   | 'operations.resourceLinkBatchPerTargetCap'
   | 'operations.resourceLinkContextMaxLength'
   | 'operations.agentIdeaContextMaxLength'
+  | 'operations.accountMapLinkProjectCap'
+  | 'operations.accountMapIdeaCap'
   | 'operations.cronSweepsEnabled'
   | 'operations.doAlarmsEnabled'
   | 'operations.stalledTaskClassifierEnabled'
@@ -334,6 +336,20 @@ const definitions: AdminSettingDefinition[] = [
     'Operations',
     'Maximum characters of a linked idea included in an agent session bootstrap.',
     { min: 500, max: 200000 }
+  ),
+  integerDefinition(
+    'operations.accountMapLinkProjectCap',
+    10,
+    'Operations',
+    'Maximum recent projects checked for idea links on the Account Map.',
+    { min: 1, max: 10 }
+  ),
+  integerDefinition(
+    'operations.accountMapIdeaCap',
+    100,
+    'Operations',
+    'Maximum recent idea candidates checked for Account Map chat links.',
+    { min: 1, max: 100 }
   ),
   integerDefinition(
     'operations.workloadIdentityTokenTtlSeconds',

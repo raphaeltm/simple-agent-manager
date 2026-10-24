@@ -1,4 +1,4 @@
-import { Eye, EyeOff,RotateCcw, Search, X } from 'lucide-react';
+import { Eye, EyeOff, RotateCcw, Search, X } from 'lucide-react';
 import type { FC } from 'react';
 
 import type { EntityType } from './hooks/useMapFilters';
@@ -12,6 +12,7 @@ interface FilterChip {
 
 const FILTER_CHIPS: FilterChip[] = [
   { type: 'project', label: 'Projects', shortLabel: 'Proj', color: 'bg-accent' },
+  { type: 'idea', label: 'Ideas', shortLabel: 'Idea', color: 'bg-[#ffdd44]' },
   { type: 'node', label: 'Nodes', shortLabel: 'Node', color: 'bg-success' },
   { type: 'workspace', label: 'Workspaces', shortLabel: 'WS', color: 'bg-[#00ccff]' },
   { type: 'session', label: 'Sessions', shortLabel: 'Chat', color: 'bg-[#aa88ff]' },
@@ -85,13 +86,21 @@ export const AccountMapToolbar: FC<AccountMapToolbarProps> = ({
         <button
           onClick={onToggleActiveOnly}
           aria-pressed={!activeOnly}
-          aria-label={activeOnly ? 'Showing active only — click to show all' : 'Showing all — click to show active only'}
+          aria-label={
+            activeOnly
+              ? 'Showing active only — click to show all'
+              : 'Showing all — click to show active only'
+          }
           className={`flex items-center gap-1 px-2 py-1.5 text-xs rounded-md border cursor-pointer transition-colors whitespace-nowrap min-h-[44px] ${
             activeOnly
               ? 'bg-transparent border-border-default text-fg-muted hover:text-fg-primary hover:bg-surface-hover'
               : 'bg-surface-hover border-border-default text-fg-primary'
           }`}
-          title={activeOnly ? 'Showing active only — click to show all' : 'Showing all — click to show active only'}
+          title={
+            activeOnly
+              ? 'Showing active only — click to show all'
+              : 'Showing all — click to show active only'
+          }
         >
           {activeOnly ? <Eye size={14} /> : <EyeOff size={14} />}
           {!isMobile && <span aria-hidden="true">{activeOnly ? 'Active' : 'All'}</span>}
@@ -126,6 +135,7 @@ export const AccountMapToolbar: FC<AccountMapToolbarProps> = ({
           return (
             <button
               key={chip.type}
+              aria-label={`${chip.label} filter`}
               onClick={() => onToggleFilter(chip.type)}
               aria-pressed={isActive}
               className={`flex items-center gap-1 px-2.5 py-2 text-xs rounded-full border cursor-pointer transition-all whitespace-nowrap shrink-0 min-h-[44px] ${
@@ -134,7 +144,9 @@ export const AccountMapToolbar: FC<AccountMapToolbarProps> = ({
                   : 'border-transparent bg-transparent text-fg-muted opacity-50'
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${chip.color} ${isActive ? '' : 'opacity-30'}`} />
+              <span
+                className={`w-2 h-2 rounded-full ${chip.color} ${isActive ? '' : 'opacity-30'}`}
+              />
               {isMobile ? chip.shortLabel : chip.label}
               <span className="text-fg-muted">({count})</span>
             </button>
