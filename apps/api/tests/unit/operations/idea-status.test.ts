@@ -6,7 +6,7 @@
  * the weak-link case (a chat that only read the idea must not move it) and the
  * merge-already-answered case (the question is asked once, not on every page load).
  */
-import type { IdeaPullRequestSummary } from '@simple-agent-manager/shared';
+import type { IdeaPullRequest } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -23,6 +23,7 @@ function session(overrides: Partial<IdeaStatusLinkedSession> = {}): IdeaStatusLi
   return {
     sessionId: 'sess-1',
     topic: 'Retry failed webhook deliveries',
+    relations: ['works_on'],
     strong: true,
     sessionStatus: 'stopped',
     taskId: 'task-1',
@@ -35,7 +36,7 @@ function session(overrides: Partial<IdeaStatusLinkedSession> = {}): IdeaStatusLi
   };
 }
 
-function pullRequest(overrides: Partial<IdeaPullRequestSummary> = {}): IdeaPullRequestSummary {
+function pullRequest(overrides: Partial<IdeaPullRequest> = {}): IdeaPullRequest {
   return {
     url: 'https://github.com/acme/payments/pull/482',
     number: 482,
@@ -300,7 +301,7 @@ describe('weak links never move an idea', () => {
   // these go red, which is the point.
   it('a weakly linked running chat does not make the idea in progress', () => {
     const result = deriveIdeaStatus(
-      input({ sessions: [session({ strong: false, taskStatus: 'in_progress' })] })
+      input({ sessions: [session({ relations: ['read'], strong: false, taskStatus: 'in_progress' })] })
     );
     expect(result.state).toBe('not-started');
   });
@@ -310,6 +311,7 @@ describe('weak links never move an idea', () => {
       input({
         sessions: [
           session({
+            relations: ['discusses'],
             strong: false,
             needsInput: { question: 'unrelated question', askedAt: minutesAgo(1) },
           }),
@@ -322,7 +324,7 @@ describe('weak links never move an idea', () => {
 
   it('a weakly linked failure does not make the idea stuck', () => {
     const result = deriveIdeaStatus(
-      input({ sessions: [session({ strong: false, taskStatus: 'failed' })] })
+      input({ sessions: [session({ relations: ['read'], strong: false, taskStatus: 'failed' })] })
     );
     expect(result.state).toBe('not-started');
   });

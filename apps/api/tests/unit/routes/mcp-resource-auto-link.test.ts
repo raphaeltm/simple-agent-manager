@@ -78,10 +78,12 @@ describe('automatic links from real workspace MCP triggers', () => {
       ]);
       db.exec(`INSERT INTO projects(id,repository) VALUES
         ('project1','owner/repo'),('project2','other/repo');
-        INSERT INTO tasks(id,project_id,title,status,priority) VALUES
-        ('idea1','project1','Feature','draft',1),
-        ('idea2','project1','Related','draft',1),
-        ('foreign-idea','project2','Foreign','draft',1);
+        INSERT INTO tasks(id,project_id,title,status,priority,is_idea) VALUES
+        ('idea1','project1','Feature','draft',1,1),
+        ('idea2','project1','Related','draft',1,1),
+        ('foreign-idea','project2','Foreign','draft',1,1),
+        -- Also a draft, and not an idea: the row only the is_idea flag can tell apart.
+        ('ordinary-draft','project1','Undispatched task','draft',1,0);
         INSERT INTO workspaces(id,project_id,chat_session_id) VALUES
         ('workspace1','project1','session1');
         INSERT INTO project_files(id,project_id,filename,directory,mime_type,size_bytes,
@@ -291,7 +293,7 @@ describe('automatic links from real workspace MCP triggers', () => {
         id: 'https://github.com/owner/repo/pull/12',
       });
       const explicitBefore = writes.mock.calls.length;
-      const attack = async (kind: string, id: string) => {
+      const attack = async (kind: string, id: string, ideaId = 'idea1') => {
         const response = await app.fetch(
           new Request('https://api.example/mcp', {
             method: 'POST',
@@ -302,7 +304,7 @@ describe('automatic links from real workspace MCP triggers', () => {
               method: 'tools/call',
               params: {
                 name: 'link_to_idea',
-                arguments: { ideaId: 'idea1', kind, id },
+                arguments: { ideaId, kind, id },
               },
             }),
           }),
@@ -314,7 +316,36 @@ describe('automatic links from real workspace MCP triggers', () => {
       await attack('file', 'foreign-file');
       await attack('idea', 'foreign-idea');
       await attack('pr', 'https://github.com/other/repo/pull/12');
+      // The cases only `is_idea = 1` can refuse: an undispatched ordinary task is also a
+      // `draft` row, so the old definition accepted it as an idea on either end of the link.
+      // The three successful `link_to_idea` calls above are the owner control.
+      await attack('file', 'file1', 'ordinary-draft');
+      await attack('idea', 'ordinary-draft');
       expect(writes).toHaveBeenCalledTimes(explicitBefore);
+
+      // The same row, through the automatic link path.
+      await recordAutoLink(env, 'project1', {
+        sourceKind: 'session',
+        sourceId: 'session1',
+        targetKind: 'idea',
+        targetId: 'ordinary-draft',
+        relation: 'read',
+        origin: 'auto',
+        context: null,
+      });
+      expect(writes).toHaveBeenCalledTimes(explicitBefore);
+      // Owner control for the automatic path: a real idea in the same project is still
+      // recorded, so the two assertions above cannot pass by auto-linking being broken.
+      await recordAutoLink(env, 'project1', {
+        sourceKind: 'session',
+        sourceId: 'session1',
+        targetKind: 'idea',
+        targetId: 'idea2',
+        relation: 'read',
+        origin: 'auto',
+        context: null,
+      });
+      expect(writes).toHaveBeenCalledTimes(explicitBefore + 1);
     } finally {
       db.close();
       doDb.close();
