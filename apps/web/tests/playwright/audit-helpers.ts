@@ -510,6 +510,41 @@ export function describeThemeAudit(
 }
 
 /**
+ * The app-shell endpoints every audited page loads before its own data.
+ *
+ * Auth, the project list, agents, active tasks, notifications, GitHub, credentials and nodes
+ * are loaded by the shell around whatever page is under test, so each spec was re-declaring
+ * the same handler chain. Returns `undefined` for anything it does not handle, so a spec can
+ * call it first and then match its own routes:
+ *
+ * ```ts
+ * await setupAuditRoutes(page, (path, respond) => {
+ *   const shell = respondToAppShellRoute(path, respond, { user, projects });
+ *   if (shell) return shell;
+ *   // ...the spec's own routes
+ * });
+ * ```
+ */
+export function respondToAppShellRoute(
+  path: string,
+  respond: AuditResponder,
+  options: { user: unknown; projects?: unknown[] }
+): Promise<void> | undefined {
+  if (path.startsWith('/api/auth/')) return respond(200, options.user);
+  if (path === '/api/projects') return respond(200, { projects: options.projects ?? [] });
+  if (path === '/api/agents') return respond(200, { agents: [] });
+  if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
+  if (path.startsWith('/api/notifications')) {
+    return respond(200, { notifications: [], unreadCount: 0 });
+  }
+  if (path.startsWith('/api/github')) return respond(200, []);
+  if (path === '/api/credentials') return respond(200, []);
+  if (path.startsWith('/api/credentials/')) return respond(200, { consumers: [], credentials: [] });
+  if (path.startsWith('/api/nodes')) return respond(200, { nodes: [] });
+  return undefined;
+}
+
+/**
  * Registers the catch-all `/api` glob route used by the theme audits. The
  * supplied handler returns the `respond(...)` promise for paths it handles and
  * `undefined` for everything else, which falls through to an empty `{}` 200 so

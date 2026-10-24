@@ -16,6 +16,7 @@ import {
   assertNoOverflow,
   makeMockProject,
   makeMockUser,
+  respondToAppShellRoute,
   screenshot as capture,
   setupAuditRoutes,
 } from './audit-helpers';
@@ -282,17 +283,11 @@ async function setupIdeasMocks(page: Page, options: { items?: unknown[]; error?:
   }, MOCK_USER.user.id);
 
   await setupAuditRoutes(page, (path, respond) => {
-    if (path.startsWith('/api/auth/')) return respond(200, MOCK_USER);
-    if (path === '/api/projects') return respond(200, { projects: [makeMockProject()] });
-    if (path === '/api/agents') return respond(200, { agents: [] });
-    if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
-    if (path.startsWith('/api/notifications'))
-      return respond(200, { notifications: [], unreadCount: 0 });
-    if (path.startsWith('/api/github')) return respond(200, []);
-    if (path === '/api/credentials') return respond(200, []);
-    if (path.startsWith('/api/credentials/'))
-      return respond(200, { consumers: [], credentials: [] });
-    if (path.startsWith('/api/nodes')) return respond(200, { nodes: [] });
+    const shell = respondToAppShellRoute(path, respond, {
+      user: MOCK_USER,
+      projects: [makeMockProject()],
+    });
+    if (shell) return shell;
 
     const match = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (!match) return undefined;
