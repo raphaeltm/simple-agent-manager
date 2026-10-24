@@ -58,6 +58,12 @@ Ideas progress through these stages as seen in the UI:
 | **Done**      | The agent finished and created a PR        |
 | **Parked**    | The idea was cancelled or execution failed |
 
+### Linked work
+
+SAM connects an idea to the chats that created, edited, read, or worked on it. When an agent uploads, replaces, downloads, or displays a library file in a chat, SAM records that relationship too. An idea can show files and pull requests linked directly to it and those produced by chats doing substantial work on it. A chat that only read an idea does not bring its files or pull requests into that idea.
+
+Agents can use `link_to_idea` for a file, pull request, or related idea created outside those automatic paths, and `unlink_from_idea` to remove an explicit link. The idea's Conversations list still shows its connected chats. Linked lists are capped; the API reports their totals and whether results were truncated. A pull request total may be shown as a lower bound when the associated chat list is too large to scan in one bounded read.
+
 ### Execution Steps
 
 While an idea is executing, SAM tracks detailed progress:
