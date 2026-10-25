@@ -72,26 +72,45 @@ channel can pull an agent back into a fresh turn roughly every 30 seconds.
 
 ## Implementation checklist
 
-- [ ] Shared types: `minWakeIntervalMs` on `CreateProjectEventSubscriptionInput`,
+- [x] Shared types: `minWakeIntervalMs` on `CreateProjectEventSubscriptionInput`,
       `ProjectEventSubscriptionCreateRequest`, and (optional) `ProjectEventSubscriptionRecord`
-- [ ] DO migration 069 (ALTER TABLE ADD COLUMN), row schema, mapper
-- [ ] DO normalization: validate (positive integer ms, wake modes only, ≤ lifetime), clamp to floor,
+- [x] DO migration 069 (ALTER TABLE ADD COLUMN), row schema, mapper
+- [x] DO normalization: validate (positive integer ms, wake modes only, ≤ lifetime), clamp to floor,
       fingerprint only when set; INSERT the column
-- [ ] Queue-time cooldown uses `max(floor, minWakeIntervalMs)` in `materializeCandidate`
-- [ ] Acceptance-time re-arm (extend-only, opted-in rows only) in `advanceProjectEventPromptAttemptCheckpoint`
-- [ ] Services: pass `minWakeIntervalMs` through `followChannelForCaller` and
+- [x] Queue-time cooldown uses `max(floor, minWakeIntervalMs)` in `materializeCandidate`
+- [x] Acceptance-time re-arm (extend-only, opted-in rows only) in `advanceProjectEventPromptAttemptCheckpoint`
+- [x] Services: pass `minWakeIntervalMs` through `followChannelForCaller` and
       `createProjectEventSubscriptionForCaller`
-- [ ] MCP: schema + parsing (`minWakeIntervalSeconds` → ms) for both tools; tool descriptions
-- [ ] Agent guidance: coordination-channel section + eventing instructions mention the option
-- [ ] Docs: api.md, agents.md, configuration.md, api-reference skill, env-reference skill
-- [ ] Worker tests (real MCP tools + real scheduler/sweep loop + real acceptance checkpoint):
-  - [ ] channel follow with interval: wakes spaced by the interval from acceptance, events bundled
-  - [ ] control: no interval → today's 30 s spacing
-  - [ ] long busy turn: no second wake until interval after acceptance (discriminates the re-arm)
-  - [ ] create_project_event_subscription honours the interval
-  - [ ] validation: record_only rejected, above-lifetime rejected, below-floor raised, replay conflict,
+- [x] MCP: schema + parsing (`minWakeIntervalSeconds` → ms) for both tools; tool descriptions
+- [x] Agent guidance: coordination-channel section + eventing instructions mention the option
+- [x] Docs: api.md, agents.md, configuration.md, api-reference skill, env-reference skill
+- [x] Worker tests (real MCP tools + real scheduler/sweep loop + real acceptance checkpoint):
+  - [x] channel follow with interval: wakes spaced by the interval from acceptance, events bundled
+  - [x] control: no interval → today's 30 s spacing
+  - [x] long busy turn: no second wake until interval after acceptance (discriminates the re-arm)
+  - [x] create_project_event_subscription honours the interval
+  - [x] validation: record_only rejected, above-lifetime rejected, below-floor raised, replay conflict,
         bad MCP values rejected
-- [ ] Prove each new guard discriminating (revert queue-time and acceptance re-arm separately)
+- [x] Prove each new guard discriminating (revert queue-time and acceptance re-arm separately)
+
+## Implementation notes
+
+- Queue-time spacing is computed in SQL inside `recordQueueCheckpoint`
+  (`? + MAX(floor, COALESCE(min_wake_interval_ms, 0))`), so `project-events-materialization.ts`
+  (677 lines) did not need to grow. Two files over the 500-line limit were split first as pure moves
+  (commit 421f6ee43): subscription CRUD -> `project-events-subscriptions.ts`, subscription input
+  normalization -> `project-events-subscription-normalization.ts`.
+- Acceptance re-arm: `rearmMinWakeIntervalOnAcceptance` in `project-events-wake-delivery.ts`, called
+  from `advanceProjectEventPromptAttemptCheckpoint` for `accepted` attempts; the prompt-delivery runner
+  calls that checkpoint and then `recalculateAlarm`, so the alarm moves to the new cooldown end.
+- A wake taken over by pull (`cancelQueuedWakeInboxBeforePull`) is never accepted, so only the
+  queue-time spacing covers it: dedicated test.
+- MCP argument shared by both tools: `apps/api/src/routes/mcp/wake-interval-param.ts`.
+- Wake test helpers moved from the occupancy test to `tests/workers/helpers/event-wake-harness.ts`.
+- Discrimination (each revert alone): no acceptance re-arm -> 3 red (follower interval, long turn,
+  create tool); no queue-time interval -> pull-takeover test red; fingerprint always carrying the
+  field -> fingerprint-format unit test red; re-arm without `min_wake_interval_ms IS NOT NULL` ->
+  no-interval control red.
 
 ## Acceptance criteria
 
