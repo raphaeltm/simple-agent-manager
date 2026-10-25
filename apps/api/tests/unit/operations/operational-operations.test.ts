@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   ended: vi.fn(),
   resolve: vi.fn(),
+  attention: vi.fn(),
 }));
 vi.mock('../../../src/services/project-data', () => ({
   getSessionAccess: mocks.access,
@@ -44,6 +45,15 @@ vi.mock('../../../src/services/project-data', () => ({
   recordActivityEvent: vi.fn(async () => undefined),
   getSessionState: mocks.state,
   recordSessionTurnEnd: mocks.ended,
+  listActiveAttentionMarkers: mocks.attention,
+  getLogicalTranscriptPage: vi.fn(async () => ({
+    entries: [],
+    nextCursor: null,
+    hasMore: false,
+    scannedRows: 0,
+    scanBudgetExhausted: false,
+    latest: null,
+  })),
 }));
 vi.mock('../../../src/routes/chat-agent-state', () => ({ resolveChatAgentState: mocks.resolve }));
 vi.mock('../../../src/services/acp-interaction-store', () => ({
@@ -122,6 +132,7 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
     mocks.cancel.mockResolvedValue({ success: true, status: 200 });
     mocks.ended.mockResolvedValue({});
     mocks.state.mockResolvedValue({ promptStartedAt: 7 });
+    mocks.attention.mockResolvedValue([]);
   });
   afterEach(() => sqlite.close());
 
@@ -299,6 +310,89 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
       link: 'https://app.example.test/projects/p/chat/chat',
     });
     expect(reader).not.toHaveProperty('pendingInteractions');
+    expect(reader).not.toHaveProperty('pendingAttention');
+  });
+
+  /** A request_human_input question as ProjectData stores it: an attention marker. */
+  function question(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'marker-1',
+      sessionId: 'chat',
+      taskId: 'task',
+      workspaceId: 'workspace',
+      kind: 'needs_input',
+      source: 'request_human_input',
+      sourceEventId: null,
+      sourceMessageId: null,
+      sourceNotificationId: 'notification-1',
+      reason: 'Which database should the migration target?',
+      metadata: JSON.stringify({ category: 'decision', options: ['staging', 'production'] }),
+      createdAt: 1_000,
+      expiresAt: 2_000,
+      resolvedAt: null,
+      resolvedByMessageId: null,
+      resolvedByActorType: null,
+      resolvedReason: null,
+      notificationUserId: 'owner',
+      nextEscalationAt: 1_500,
+      escalationCount: 0,
+      maxExpiresAt: 9_000,
+      resolvedAnswer: null,
+      ...overrides,
+    };
+  }
+
+  it('shows agent questions to people who can answer them, in every per-chat read', async () => {
+    mocks.attention.mockResolvedValue([
+      question(),
+      question({ id: 'marker-2', kind: 'wake_failed', source: 'session_wake', metadata: null }),
+      question({ id: 'marker-3', source: 'acp_interaction' }),
+    ]);
+    const read = await samChatRead.run(ctx('grantee'), session);
+    expect(read.pendingAttention).toEqual([
+      expect.objectContaining({
+        markerId: 'marker-1',
+        answerable: true,
+        category: 'decision',
+        options: ['staging', 'production'],
+        expiresAt: new Date(2_000).toISOString(),
+        notification: { notificationId: 'notification-1', deviceDelivery: 'not_recorded' },
+      }),
+      expect.objectContaining({
+        markerId: 'marker-2',
+        answerable: false,
+        urgency: 'informational',
+      }),
+      expect.objectContaining({ markerId: 'marker-3', answerable: false }),
+    ]);
+    expect(read.pendingAttention?.[0]?.question.text).toContain('Which database');
+    expect(read.pendingAttention?.[2]?.answerWith).toContain('interactionId');
+
+    const interactions = await samChatInteractions.run(ctx('grantee'), session);
+    expect(interactions.attention.map((item) => item.markerId)).toEqual([
+      'marker-1',
+      'marker-2',
+      'marker-3',
+    ]);
+    await expect(samChatInteractions.run(ctx('reader'), session)).rejects.toMatchObject({
+      code: 'forbidden',
+    });
+  });
+
+  it('reports a new question as a change and says when questions could not be read', async () => {
+    const initial = await samWorkChanges.run(ctx(), session);
+    mocks.attention.mockResolvedValue([question()]);
+    const asked = await samWorkChanges.run(ctx(), { ...session, cursor: initial.cursor });
+    expect(asked.changed).toBe(true);
+    expect(asked.snapshot?.attention).toEqual([{ markerId: 'marker-1', kind: 'needs_input' }]);
+    // A reminder is not a new question.
+    mocks.attention.mockResolvedValue([question({ escalationCount: 1, nextEscalationAt: 1_800 })]);
+    const reminded = await samWorkChanges.run(ctx(), { ...session, cursor: asked.cursor });
+    expect(reminded.changed).toBe(false);
+
+    mocks.attention.mockRejectedValue(new Error('object overloaded'));
+    const unavailable = await samChatInteractions.run(ctx(), session);
+    expect(unavailable).toMatchObject({ attention: [], attentionUnavailable: true });
   });
   it('changes cursor tracks retained state and rejects actor/session cursor reuse', async () => {
     const initial = await samWorkChanges.run(ctx(), session);

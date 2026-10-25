@@ -24,7 +24,7 @@ import { operationLink } from './connector-read-core';
 import { diagnostic } from './operational-projections';
 import { getPullRequestStates, parseProjectPullRequestUrl } from './pull-request-core';
 import { readTeamTasks, type TeamScope, type TeamTaskRow } from './team-lineage';
-import { type Settled, settle, usageSection } from './team-usage';
+import { settle, type Settled, usageSection } from './team-usage';
 import type { OperationContext } from './types';
 import { untrustedTextBlock } from './untrusted-text';
 
@@ -94,13 +94,13 @@ async function readCompute(ctx: OperationContext, workspaceIds: string, now: str
   const result = await ctx.env.DATABASE.prepare(
     `SELECT workspace_id AS workspaceId, COUNT(*) AS intervals,
             SUM(CASE WHEN ended_at IS NULL THEN 1 ELSE 0 END) AS openIntervals,
-            SUM((julianday(COALESCE(ended_at, ?1)) - julianday(started_at)) * 86400000) AS durationMs,
-            SUM((julianday(COALESCE(ended_at, ?1)) - julianday(started_at)) * 86400000 * vcpu_count)
+            SUM((julianday(COALESCE(ended_at, ?)) - julianday(started_at)) * 86400000) AS durationMs,
+            SUM((julianday(COALESCE(ended_at, ?)) - julianday(started_at)) * 86400000 * vcpu_count)
               AS vcpuMs
-     FROM compute_usage WHERE workspace_id IN (SELECT value FROM json_each(?2))
+     FROM compute_usage WHERE workspace_id IN (SELECT value FROM json_each(?))
      GROUP BY workspace_id`
   )
-    .bind(now, workspaceIds)
+    .bind(now, now, workspaceIds)
     .all<Record<string, unknown>>();
   const rows = parseRows(ComputeRowSchema, result.results ?? [], 'compute_usage');
   return new Map(rows.map((row) => [row.workspaceId, row]));

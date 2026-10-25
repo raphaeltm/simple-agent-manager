@@ -396,13 +396,17 @@ describe('connector operations current membership and creator authority', () => 
     expect((await samTasksList.run(ctx(), {})).tasks).toEqual([]);
     expect((await samIdeasSearch.run(ctx(), {})).ideas).toEqual([]);
   });
-  it('transcripts page with exact cursor and distinguish concise from detailed content', async () => {
+  it('stored-row transcripts page with exact cursor and distinguish concise from detailed content', async () => {
     const text = 'x'.repeat(2500);
     vi.mocked(projectData.getMessages).mockResolvedValue({
       messages: [{ id: 'message', role: 'assistant', content: text, createdAt: 10, sequence: 2 }],
       hasMore: true,
     });
-    const first = await samChatRead.run(ctx(), { projectId: 'project', sessionId: 'chat' });
+    const first = await samChatRead.run(ctx(), {
+      projectId: 'project',
+      sessionId: 'chat',
+      unit: 'rows',
+    });
     expect(first.messages[0]?.content.length).toBe(2000);
     expect(first).toMatchObject({ untrustedContent: true, nextCursor: '[10,2,"message"]' });
     const detailed = await samChatRead.run(ctx(), {
@@ -411,6 +415,7 @@ describe('connector operations current membership and creator authority', () => 
       cursor: '[10,2,"message"]',
       response_format: 'detailed',
       includeToolPayloads: true,
+      unit: 'rows',
     });
     expect(detailed.messages[0]?.content).toBe(text);
     expect(projectData.getMessages).toHaveBeenLastCalledWith(
@@ -571,6 +576,57 @@ describe('connector operations current membership and creator authority', () => 
       code: 'conflict',
     });
     expect(run).toHaveBeenCalledTimes(1);
+  });
+  it('inbox selects chats with an open question before its recency cap', async () => {
+    // Six newer chats without questions fill the five-chat recency page; the question is older.
+    const recent = sqlite.prepare(
+      'INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,attention_json) VALUES (?,?,?,?,NULL)'
+    );
+    for (let index = 0; index < 6; index += 1)
+      recent.run(`recent-${index}`, 'project', 'owner', 100 + index);
+    mocks.snapshot.mockResolvedValue({ pending: [], settled: [], cursor: null });
+
+    const inbox = await samInboxGet.run(ctx(), {});
+
+    expect(inbox.pending.map((row) => row.sessionId)).toEqual(['chat']);
+    expect(inbox.pending[0]?.attention).toEqual({ message: 'Needs approval' });
+    expect(inbox.coverage).toContain('Chats you created');
+    // The question is not repeated when the recency page continues.
+    const next = await samInboxGet.run(ctx(), { cursor: inbox.nextCursor ?? undefined });
+    expect(next.pending.map((row) => row.sessionId)).not.toContain('chat');
+  });
+  it('inbox question notifications carry the marker and options needed to answer', async () => {
+    mocks.notifications.mockResolvedValue({
+      notifications: [
+        {
+          id: 'question',
+          projectId: 'project',
+          sessionId: 'chat',
+          type: 'needs_input',
+          title: 'Decision needed',
+          createdAt: '2026-10-25T09:30:00.000Z',
+          metadata: { attentionMarkerId: 'marker-1', category: 'decision', options: ['A', 'B', 3] },
+        },
+        {
+          id: 'done',
+          projectId: 'project',
+          sessionId: 'chat',
+          type: 'task_complete',
+          title: 'Done',
+          metadata: { attentionMarkerId: 'not-a-question' },
+        },
+      ],
+    });
+
+    const inbox = await samInboxGet.run(ctx(), {});
+
+    expect(inbox.notifications[0]).toMatchObject({
+      id: 'question',
+      projectId: 'project',
+      sessionId: 'chat',
+      question: { markerId: 'marker-1', category: 'decision', options: ['A', 'B'] },
+    });
+    expect(inbox.notifications[1]).not.toHaveProperty('question');
   });
   it('isolates a corrupt attention row and exposes batched pending choices in inbox', async () => {
     sqlite.prepare("UPDATE session_summaries SET attention_json='bad-json' WHERE id='chat'").run();

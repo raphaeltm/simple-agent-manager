@@ -24,10 +24,10 @@ import {
   type LogicalActivity,
   type LogicalEntry,
   type LogicalMessage,
-  RUN_ROLES,
-  type Run,
   rowPosition,
   rowRole,
+  type Run,
+  RUN_ROLES,
   type ToolCallStates,
 } from './logical-transcript-model';
 import {

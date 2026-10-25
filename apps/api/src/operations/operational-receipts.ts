@@ -13,6 +13,10 @@ const keyedWrites = new Set([
   'sam_work_stop',
   'sam_idea_create',
   'sam_idea_update',
+  'sam_schedule_create',
+  'sam_schedule_update',
+  'sam_schedule_cancel',
+  'sam_channel_subscription_cancel',
 ]);
 const safeStatuses = new Set([
   'queued',
@@ -28,6 +32,13 @@ const safeStatuses = new Set([
   'failed',
   'sleeping',
   'in_progress',
+  'processing',
+  'admitted',
+  'expired',
+  'ambiguous',
+  'active',
+  'paused',
+  'disabled',
 ]);
 /** Deliberately not the saved response: it may contain user text or permission material. */
 export async function readOperation(
@@ -64,7 +75,15 @@ export async function readOperation(
           action: 'inspect this operation result',
         });
       }
-      for (const key of ['sessionId', 'taskId', 'messageId', 'deliveryId', 'ideaId']) {
+      for (const key of [
+        'sessionId',
+        'taskId',
+        'messageId',
+        'deliveryId',
+        'ideaId',
+        'scheduleId',
+        'subscriptionId',
+      ]) {
         const field = saved[key];
         if (typeof field === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(field)) result[key] = field;
       }
@@ -72,7 +91,15 @@ export async function readOperation(
         const field = saved[key];
         if (typeof field === 'string' && safeStatuses.has(field)) result[key] = field;
       }
-      if (typeof saved.accepted === 'boolean') result.accepted = saved.accepted;
+      // Schedule writes nest their acceptance under `receipt`.
+      const receipt = saved.receipt;
+      const accepted =
+        typeof saved.accepted === 'boolean'
+          ? saved.accepted
+          : receipt && typeof receipt === 'object' && !Array.isArray(receipt)
+            ? (receipt as Record<string, unknown>).accepted
+            : undefined;
+      if (typeof accepted === 'boolean') result.accepted = accepted;
     }
   } catch (error) {
     // Authorization errors must not be swallowed as corrupt receipt data.

@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import { runMigrations } from '../../../src/durable-objects/migrations';
+import {
+  createAttentionMarker,
+  resolveAttentionMarkerById,
+} from '../../../src/durable-objects/project-data/attention';
 import { syncSessionSummariesToD1 } from '../../../src/durable-objects/project-data/session-summary-sync';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -99,6 +103,53 @@ describe('ProjectData session summary sync', () => {
           .prepare('SELECT last_message_at FROM session_summaries WHERE id = ?')
           .get('session-newer-inline-message')
       ).toEqual({ last_message_at: 4000 });
+    } finally {
+      source.db.close();
+      d1.db.close();
+    }
+  });
+
+  it('copies a new or answered question to the index without a new message', async () => {
+    const source = makeDoSql();
+    const d1 = makeD1Env();
+    try {
+      source.sql.exec(
+        `INSERT INTO chat_sessions
+           (id, workspace_id, created_by_user_id, topic, status, message_count,
+            started_at, created_at, updated_at)
+         VALUES ('session-question', 'workspace-sync', 'user-sync', 'Quiet chat', 'active', 1,
+                 1000, 1000, 1000)`
+      );
+      const attention = () =>
+        d1.db
+          .prepare('SELECT attention_json FROM session_summaries WHERE id = ?')
+          .get('session-question') as { attention_json: string | null };
+
+      await syncSessionSummariesToD1(source.sql, d1.env, 'project-sync');
+      await syncSessionSummariesToD1(source.sql, d1.env, 'project-sync');
+      expect(attention().attention_json).toBeNull();
+      expect(d1.db.prepare('SELECT complete FROM session_index_coverage').get()).toEqual({
+        complete: 1,
+      });
+
+      // request_human_input writes only a marker: chat_sessions.updated_at does not move.
+      const marker = createAttentionMarker(source.sql, {
+        sessionId: 'session-question',
+        taskId: null,
+        workspaceId: null,
+        kind: 'needs_input',
+        source: 'request_human_input',
+        reason: 'Ship to production?',
+      });
+      await syncSessionSummariesToD1(source.sql, d1.env, 'project-sync');
+      expect(JSON.parse(attention().attention_json ?? 'null')).toMatchObject({
+        markerId: marker.id,
+        reason: 'Ship to production?',
+      });
+
+      resolveAttentionMarkerById(source.sql, marker.id, 'human', 'answered');
+      await syncSessionSummariesToD1(source.sql, d1.env, 'project-sync');
+      expect(attention().attention_json).toBeNull();
     } finally {
       source.db.close();
       d1.db.close();

@@ -7,12 +7,12 @@
  */
 import type { CredentialLimitsResponse } from '@simple-agent-manager/shared';
 
+import { log } from '../lib/logger';
 import {
   getTokenUsage,
   getUserBudgetSettings,
   resolveEffectiveLimits,
 } from '../services/ai-token-budget';
-import { log } from '../lib/logger';
 import type { TeamTask } from './team-core';
 import type { OperationContext } from './types';
 

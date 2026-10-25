@@ -10,7 +10,7 @@ import {
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, type sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -47,6 +47,7 @@ import {
   validateTriggerSourceFields,
 } from '../../services/trigger-create';
 import { listTriggerRows, toTriggerResponse } from '../../services/trigger-read';
+import { triggerStatusUpdates } from '../../services/trigger-status';
 import {
   getWebhookTriggerLimits,
   validateWebhookTriggerConfig,
@@ -329,16 +330,7 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
       updates.nextFireAt = cronToNextFire(expression, timezone);
     }
   }
-  if (body.status !== undefined) {
-    updates.status = body.status;
-    if (body.status === 'active' && trigger.status !== 'active') {
-      updates.autoPauseResetSequence = sql`${schema.triggers.nextExecutionSequence}`;
-    }
-    if (body.status !== 'active') updates.nextFireAt = null;
-    if (body.status === 'active' && trigger.sourceType === 'cron' && trigger.cronExpression) {
-      updates.nextFireAt = cronToNextFire(trigger.cronExpression, trigger.cronTimezone ?? 'UTC');
-    }
-  }
+  if (body.status !== undefined) Object.assign(updates, triggerStatusUpdates(trigger, body.status));
   let effectiveWebhookConfig: ReturnType<typeof mergeWebhookConfig> | undefined;
   if (body.webhookConfig) {
     const current = await db

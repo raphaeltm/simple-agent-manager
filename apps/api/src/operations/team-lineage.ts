@@ -129,18 +129,18 @@ export async function readTeamTasks(
     root = await rootTaskId(env, projectId, scope);
     const result = await env.DATABASE.prepare(
       `WITH RECURSIVE lineage(id, depth) AS (
-         SELECT id, 0 FROM tasks WHERE id = ?1 AND project_id = ?2
+         SELECT id, 0 FROM tasks WHERE id = ? AND project_id = ?
          UNION ALL
          SELECT child.id, lineage.depth + 1 FROM tasks child
          JOIN lineage ON child.parent_task_id = lineage.id
-         WHERE child.project_id = ?2 AND lineage.depth < ?3
+         WHERE child.project_id = ? AND lineage.depth < ?
        )
        SELECT ${TASK_COLUMNS}, lineage.depth AS depth FROM lineage
-       JOIN tasks t ON t.id = lineage.id AND t.project_id = ?2
+       JOIN tasks t ON t.id = lineage.id AND t.project_id = ?
        ORDER BY lineage.depth ASC, ${READER_ORDER}
-       LIMIT ?4`
+       LIMIT ?`
     )
-      .bind(root, projectId, caps.maxDepth, caps.maxTasks + 1)
+      .bind(root, projectId, projectId, caps.maxDepth, projectId, caps.maxTasks + 1)
       .all<Record<string, unknown>>();
     rows = parseTeamRows(result.results ?? [], projectId);
     if (rows.length === 0) throw new OperationError('not_found', 'Task not found in this project');

@@ -4,6 +4,7 @@ import { takeRejectedBeforeEffects } from '../lib/operation-effect-boundary';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { AppError } from '../middleware/error';
 import { OperationError } from '../operations/errors';
+import { scheduleCreateStartsWork } from '../operations/schedule-inputs';
 import type { OperationContext } from '../operations/types';
 import { operationReceiptId } from './cli-operation-receipts';
 import { getConnectorSettings } from './connector-settings';
@@ -134,7 +135,12 @@ export async function executeConnectorWrite<T>(
     settings.writeRateLimitPerMinute,
     60_000
   );
-  if (operation === 'sam_chat_start') {
+  // A schedule that will start work later spends the same start budget now, so scheduling is
+  // not a way around the per-person start limits. A recurring schedule is charged once here.
+  if (
+    operation === 'sam_chat_start' ||
+    (operation === 'sam_schedule_create' && scheduleCreateStartsWork(input))
+  ) {
     await consumeConnectorBudget(
       ctx.env,
       ctx.actor.userId,
@@ -236,6 +242,18 @@ const AUDIT_INPUT_FIELDS = new Set([
   'formContent',
   'markerId',
   'answer',
+  'scheduleId',
+  'runAt',
+  'cron',
+  'timezone',
+  'disambiguation',
+  'expiresAt',
+  'name',
+  'reason',
+  'action',
+  'paused',
+  'expectedVersion',
+  'subscriptionId',
 ]);
 function auditResourceId(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -275,7 +293,9 @@ export async function auditConnectorWrite<T>(
       projectId,
       auditResourceId(input.taskId) ??
         auditResourceId(input.sessionId) ??
-        auditResourceId(input.ideaId),
+        auditResourceId(input.ideaId) ??
+        auditResourceId(input.scheduleId) ??
+        auditResourceId(input.subscriptionId),
       JSON.stringify(
         Object.keys(input)
           .filter((name) => AUDIT_INPUT_FIELDS.has(name))

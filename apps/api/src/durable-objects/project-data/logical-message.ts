@@ -16,10 +16,10 @@ import {
   type LogicalActivity,
   type LogicalMessage,
   type Row,
-  RUN_ROLES,
-  type Run,
   rowPosition,
   rowRole,
+  type Run,
+  RUN_ROLES,
   runContent,
 } from './logical-transcript-model';
 import {

@@ -1,10 +1,15 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getMessages } from '../../../src/durable-objects/project-data/messages';
+import { readLogicalMessage } from '../../../src/durable-objects/project-data/logical-message';
+import { readLogicalTranscriptPage } from '../../../src/durable-objects/project-data/logical-transcript';
+import type { MessageContextReader } from '../../../src/durable-objects/project-data/message-context';
+import { formatMessageRows, getMessages } from '../../../src/durable-objects/project-data/messages';
 import type { Env } from '../../../src/env';
 import { readChat, searchChats } from '../../../src/operations/chat-core';
+import { readChatMessage } from '../../../src/operations/chat-transcript';
 import type { OperationContext } from '../../../src/operations/types';
+import { getConnectorReadLimits } from '../../../src/services/connector-read-settings';
 import * as projectData from '../../../src/services/project-data';
 import { getLatestAssistantMessageForTask } from '../../../src/services/task-final-assistant-message';
 
@@ -16,11 +21,25 @@ vi.mock('../../../src/services/project-data', () => ({
   getMessages: vi.fn(),
   getSession: vi.fn(),
   searchMessagesWithArchiveMetadata: vi.fn(),
+  getLogicalTranscriptPage: vi.fn(),
+  getLogicalMessage: vi.fn(),
+  listActiveAttentionMarkers: vi.fn(async () => []),
 }));
+
+vi.mock('../../../src/services/connector-read-settings', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../src/services/connector-read-settings')>();
+  return { ...actual, getConnectorReadLimits: vi.fn(actual.getConnectorReadLimits) };
+});
 
 let db: Database.Database;
 const env = { BASE_DOMAIN: 'example.test' } as Env;
 const ctx = { env, actor: { via: 'connector', userId: 'owner' } } as OperationContext;
+const agentCtx = {
+  env,
+  actor: { via: 'workspace-agent', userId: 'owner' },
+} as OperationContext;
+
 function seed(rows: [string, string][]) {
   rows.forEach(([role, content], index) =>
     db
@@ -28,6 +47,7 @@ function seed(rows: [string, string][]) {
       .run(String(index).padStart(3, '0'), 'chat', role, content, 1000, index)
   );
 }
+
 beforeEach(() => {
   db = new Database(':memory:');
   db.exec(
@@ -38,9 +58,27 @@ beforeEach(() => {
       toArray: () => db.prepare(query).all(...params),
     }),
   } as unknown as SqlStorage;
+  // The Durable Object readers, over this database: the same row order and paging production uses.
+  const reader: MessageContextReader = {
+    locate: async (messageId) => {
+      const row = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(messageId);
+      return row
+        ? (formatMessageRows([row as Record<string, unknown>], 'chat', 1, true, 'asc')
+            .messages[0] ?? null)
+        : null;
+    },
+    page: async (bounds, limit, order) =>
+      getMessages(sql, 'chat', limit, bounds.before, bounds.after, undefined, true, order),
+  };
   vi.mocked(projectData.getMessages).mockImplementation(
     async (_env, _project, session, limit, before, after, roles, compact, order) =>
       getMessages(sql, session, limit, before, after, roles, compact, order)
+  );
+  vi.mocked(projectData.getLogicalTranscriptPage).mockImplementation(async (_e, _p, _s, request) =>
+    readLogicalTranscriptPage(reader, request)
+  );
+  vi.mocked(projectData.getLogicalMessage).mockImplementation(async (_e, _p, _s, request) =>
+    readLogicalMessage(reader, request)
   );
   vi.mocked(projectData.getSession).mockResolvedValue({
     id: 'chat',
@@ -48,7 +86,19 @@ beforeEach(() => {
     createdByUserId: 'owner',
   } as never);
 });
-afterEach(() => db.close());
+afterEach(() => {
+  db.close();
+  vi.mocked(getConnectorReadLimits).mockReset();
+});
+
+async function scanRows(rows: number) {
+  const actual = await vi
+    .importActual<typeof import('../../../src/services/connector-read-settings')>(
+      '../../../src/services/connector-read-settings'
+    )
+    .then((module) => module.getConnectorReadLimits(env));
+  vi.mocked(getConnectorReadLimits).mockResolvedValue({ ...actual, transcriptScanRows: rows });
+}
 
 describe('Connector transcript against actual SQLite message ordering', () => {
   it('generates search source links from the project-scoped result, never excerpt text', async () => {
@@ -84,7 +134,8 @@ describe('Connector transcript against actual SQLite message ordering', () => {
       null
     );
   });
-  it('coalesces the complete latest streamed response and discloses a bounded suffix', async () => {
+
+  it('returns the complete latest streamed reply for task details', async () => {
     seed([
       ['user', 'Start'],
       ...['CONNECT', 'OR', '_IN', 'STANT', '_READY'].map((text): [string, string] => [
@@ -93,15 +144,9 @@ describe('Connector transcript against actual SQLite message ordering', () => {
       ]),
     ]);
     expect(await getLatestAssistantMessageForTask(env, 'project', 'chat')).toMatchObject({
+      id: '001',
       content: 'CONNECTOR_INSTANT_READY',
     });
-    expect(
-      await getLatestAssistantMessageForTask(
-        { MCP_MESSAGE_LIST_MAX: '3' } as Env,
-        'project',
-        'chat'
-      )
-    ).toMatchObject({ content: '_INSTANT_READY', partialBefore: true });
     expect(
       await getLatestAssistantMessageForTask(
         { MCP_TASK_DETAIL_MESSAGE_SNIPPET_LENGTH: '5' } as Env,
@@ -109,46 +154,12 @@ describe('Connector transcript against actual SQLite message ordering', () => {
         'chat'
       )
     ).toMatchObject({ content: 'CONNE...', truncated: true });
+    await scanRows(3);
+    expect(await getLatestAssistantMessageForTask(env, 'project', 'chat')).toMatchObject({
+      content: '_INSTANT_READY',
+      partialBefore: true,
+    });
   });
-
-  it.each([1, 3, 5])(
-    'pages every stored token once with tied timestamps, limit %i',
-    async (limit) => {
-      const rows: [string, string][] = [
-        ['user', 'U'],
-        ['assistant', 'A'],
-        ['assistant', 'B'],
-        ['thinking', 'T'],
-        ['assistant', 'C'],
-        ['tool', 'X'],
-        ['assistant', 'D'],
-        ['assistant', 'E'],
-      ];
-      seed(rows);
-      let cursor: string | undefined;
-      const pages: string[][] = [];
-      do {
-        const result = await readChat(ctx, {
-          projectId: 'project',
-          sessionId: 'chat',
-          limit,
-          cursor,
-          includeToolPayloads: true,
-          response_format: 'detailed',
-        });
-        expect(result).toMatchObject({
-          projectId: 'project',
-          sessionId: 'chat',
-          link: 'https://app.example.test/projects/project/chat/chat',
-        });
-        expect(projectData.getSession).toHaveBeenCalledWith(env, 'project', 'chat');
-        pages.push(result.messages.map((message) => message.content).reverse());
-        cursor = result.nextCursor ?? undefined;
-        expect(pages.length).toBeLessThanOrEqual(rows.length);
-      } while (cursor);
-      expect(pages.reverse().flat().join('')).toBe(rows.map((row) => row[1]).join(''));
-    }
-  );
 
   it('does not claim an older assistant message exists inside a bounded tool-only tail', async () => {
     seed([
@@ -156,42 +167,232 @@ describe('Connector transcript against actual SQLite message ordering', () => {
       ['tool', 'A'],
       ['tool', 'B'],
     ]);
-    expect(
-      await getLatestAssistantMessageForTask(
-        { MCP_MESSAGE_LIST_MAX: '2' } as Env,
-        'project',
-        'chat'
-      )
-    ).toBeNull();
+    await scanRows(2);
+    expect(await getLatestAssistantMessageForTask(env, 'project', 'chat')).toBeNull();
   });
 
-  it('preserves hidden role boundaries and reports split groups', async () => {
-    seed([
-      ['assistant', 'A'],
-      ['tool', 'X'],
-      ['assistant', 'B'],
-      ['assistant', 'C'],
-      ['assistant', 'D'],
-    ]);
-    const first = await readChat(ctx, {
-      projectId: 'project',
-      sessionId: 'chat',
-      limit: 2,
-      response_format: 'detailed',
+  describe('stored-row unit (diagnostics, workspace agents)', () => {
+    it.each([1, 3, 5])(
+      'pages every stored token once with tied timestamps, limit %i',
+      async (limit) => {
+        const rows: [string, string][] = [
+          ['user', 'U'],
+          ['assistant', 'A'],
+          ['assistant', 'B'],
+          ['thinking', 'T'],
+          ['assistant', 'C'],
+          ['tool', 'X'],
+          ['assistant', 'D'],
+          ['assistant', 'E'],
+        ];
+        seed(rows);
+        let cursor: string | undefined;
+        const pages: string[][] = [];
+        do {
+          const result = await readChat(ctx, {
+            projectId: 'project',
+            sessionId: 'chat',
+            limit,
+            cursor,
+            includeToolPayloads: true,
+            response_format: 'detailed',
+            unit: 'rows',
+          });
+          expect(result).toMatchObject({
+            projectId: 'project',
+            sessionId: 'chat',
+            paginationUnit: 'stored_rows',
+            link: 'https://app.example.test/projects/project/chat/chat',
+          });
+          pages.push(result.messages.map((message) => message.content).reverse());
+          cursor = result.nextCursor ?? undefined;
+          expect(pages.length).toBeLessThanOrEqual(rows.length);
+        } while (cursor);
+        expect(pages.reverse().flat().join('')).toBe(rows.map((row) => row[1]).join(''));
+      }
+    );
+
+    it('preserves hidden role boundaries and reports split groups', async () => {
+      seed([
+        ['assistant', 'A'],
+        ['tool', 'X'],
+        ['assistant', 'B'],
+        ['assistant', 'C'],
+        ['assistant', 'D'],
+      ]);
+      const first = await readChat(ctx, {
+        projectId: 'project',
+        sessionId: 'chat',
+        limit: 2,
+        response_format: 'detailed',
+        unit: 'rows',
+      });
+      expect(first.messages).toMatchObject([{ content: 'CD', partialBefore: true }]);
+      const next = await readChat(ctx, {
+        projectId: 'project',
+        sessionId: 'chat',
+        cursor: first.nextCursor!,
+        response_format: 'detailed',
+        unit: 'rows',
+      });
+      expect(next.messages).toMatchObject([
+        { content: 'B', mayContinueInNewerPage: true },
+        { content: 'A' },
+      ]);
+      expect(await getLatestAssistantMessageForTask(env, 'project', 'chat')).toMatchObject({
+        content: 'BCD',
+      });
     });
-    expect(first.messages).toMatchObject([{ content: 'CD', partialBefore: true }]);
-    const next = await readChat(ctx, {
-      projectId: 'project',
-      sessionId: 'chat',
-      cursor: first.nextCursor!,
-      response_format: 'detailed',
+
+    it('keeps the workspace-agent shape: stored rows, no app fields', async () => {
+      seed([
+        ['user', 'Q'],
+        ['assistant', 'A1'],
+        ['assistant', 'A2'],
+      ]);
+      const result = await readChat(agentCtx, { projectId: 'project', sessionId: 'chat' });
+      expect(result).not.toHaveProperty('paginationUnit');
+      expect(result).not.toHaveProperty('link');
+      expect(result).not.toHaveProperty('pendingAttention');
+      expect(result.messages.map((message) => message.content)).toEqual(['Q', 'A1A2']);
     });
-    expect(next.messages).toMatchObject([
-      { content: 'B', mayContinueInNewerPage: true },
-      { content: 'A' },
-    ]);
-    expect(await getLatestAssistantMessageForTask(env, 'project', 'chat')).toMatchObject({
-      content: 'BCD',
+  });
+
+  describe('whole-message unit (default for apps)', () => {
+    it('returns whole replies, activity summaries and the latest request and reply', async () => {
+      seed([
+        ['user', 'Please audit the deploy'],
+        ['assistant', 'Looking'],
+        ['assistant', ' now.'],
+        ['tool', 'grep output'],
+        ['thinking', 'hidden plan'],
+        ['assistant', 'The deploy is '],
+        ['assistant', 'fine.'],
+      ]);
+      const result = await readChat(ctx, { projectId: 'project', sessionId: 'chat' });
+      expect(result).toMatchObject({
+        paginationUnit: 'logical_messages',
+        hasMore: false,
+        nextCursor: null,
+        messageCount: 3,
+        pendingAttention: [],
+        latest: {
+          assistant: { messageId: '005', inPage: true },
+          user: { messageId: '000', inPage: true },
+        },
+      });
+      expect(result.messages).toMatchObject([
+        { kind: 'message', role: 'assistant', content: 'The deploy is fine.' },
+        { kind: 'activity', toolCalls: 1, thinkingMessages: 1 },
+        { kind: 'message', role: 'assistant', content: 'Looking now.' },
+        { kind: 'message', role: 'user', sentBy: 'person', content: 'Please audit the deploy' },
+      ]);
+      expect(JSON.stringify(result)).not.toContain('grep output');
+      expect(JSON.stringify(result)).not.toContain('hidden plan');
+    });
+
+    it('cuts an oversized page at a message boundary and loses nothing across pages', async () => {
+      const replies = Array.from({ length: 6 }, (_, index) => `${index}:${'x'.repeat(300)}`);
+      seed(replies.map((reply): [string, string] => ['user', reply]));
+      // A 2,000-byte response cap leaves an 800-byte result budget: a few messages per page.
+      const small = { ...env, CONNECTOR_RESPONSE_MAX_BYTES: '2000' } as Env;
+      const smallCtx = { ...ctx, env: small } as OperationContext;
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      let trimmedOnce = false;
+      for (let pages = 0; pages < 10; pages += 1) {
+        const result = await readChat(smallCtx, {
+          projectId: 'project',
+          sessionId: 'chat',
+          cursor,
+        });
+        if ('coverage' in result) trimmedOnce ||= result.coverage.trimmedToFitResponse;
+        for (const message of result.messages) seen.unshift(message.content);
+        cursor = result.nextCursor ?? undefined;
+        if (!cursor) break;
+      }
+      expect(trimmedOnce).toBe(true);
+      expect(seen).toEqual(replies);
+    });
+
+    it('rejects an unknown role and accepts thinking on request', async () => {
+      seed([
+        ['thinking', 'reasoning'],
+        ['assistant', 'answer'],
+      ]);
+      await expect(
+        readChat(ctx, { projectId: 'project', sessionId: 'chat', roles: ['nope'] })
+      ).rejects.toMatchObject({ code: 'invalid_input' });
+      const result = await readChat(ctx, {
+        projectId: 'project',
+        sessionId: 'chat',
+        roles: ['assistant', 'thinking'],
+      });
+      expect(result.messages.map((message) => message.content)).toEqual(['answer', 'reasoning']);
+    });
+
+    it('reads the rest of a long message by offset', async () => {
+      seed([
+        ['assistant', 'abc'],
+        ['assistant', 'def'],
+        ['assistant', 'ghi'],
+      ]);
+      const first = await readChatMessage(ctx, {
+        projectId: 'project',
+        sessionId: 'chat',
+        messageId: '001',
+        maxChars: 4,
+      });
+      expect(first).toMatchObject({
+        complete: true,
+        message: { messageId: '000', content: 'abcd', nextOffset: 4, contentLength: 9 },
+      });
+      const rest = await readChatMessage(ctx, {
+        projectId: 'project',
+        sessionId: 'chat',
+        messageId: '000',
+        offset: 4,
+      });
+      expect(rest.message).toMatchObject({ content: 'efghi', nextOffset: null });
+      await expect(
+        readChatMessage(ctx, { projectId: 'project', sessionId: 'chat', messageId: 'gone' })
+      ).rejects.toMatchObject({ code: 'not_found' });
+    });
+
+    it('adds whole-message excerpts to app search results only', async () => {
+      seed([
+        ['assistant', 'The security '],
+        ['assistant', 'audit'],
+        ['assistant', ' found two issues.'],
+      ]);
+      vi.mocked(projectData.searchMessagesWithArchiveMetadata).mockResolvedValue({
+        results: [
+          {
+            id: '001',
+            sessionId: 'chat',
+            sessionTopic: 'Report',
+            sessionTaskId: null,
+            role: 'assistant',
+            snippet: 'audit',
+            createdAt: 1000,
+          },
+        ],
+        query: { query: 'audit' },
+        archiveSearch: { status: 'not_needed' },
+      } as never);
+      const app = await searchChats(ctx, { projectId: 'project', query: 'audit' });
+      expect(app.results[0]).toMatchObject({
+        snippet: 'audit',
+        excerpt: {
+          messageId: '000',
+          text: 'The security audit found two issues.',
+          matched: true,
+          complete: true,
+        },
+      });
+      const agent = await searchChats(agentCtx, { projectId: 'project', query: 'audit' });
+      expect(agent.results[0]).not.toHaveProperty('excerpt');
+      expect(agent).not.toHaveProperty('excerptCoverage');
     });
   });
 });

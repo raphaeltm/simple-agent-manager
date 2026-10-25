@@ -163,6 +163,30 @@ describe('Attention Markers Module', () => {
       const markers = listActiveAttentionMarkers(sql, 'session-2');
       expect(markers).toHaveLength(0);
     });
+
+    it('skips a malformed marker instead of hiding the session’s other questions', () => {
+      const good = createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: null,
+        workspaceId: null,
+        kind: 'needs_input',
+        source: 'request_human_input',
+      });
+      const bad = createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: null,
+        workspaceId: null,
+        kind: 'needs_input',
+        source: 'request_human_input',
+      });
+      db.prepare(
+        `UPDATE session_attention_markers SET escalation_count = 'not-a-number' WHERE id = ?`
+      ).run(bad.id);
+
+      expect(listActiveAttentionMarkers(sql, 'session-1').map((marker) => marker.id)).toEqual([
+        good.id,
+      ]);
+    });
   });
 
   describe('resolveAttentionMarkers', () => {
@@ -385,6 +409,36 @@ describe('Attention Markers Module', () => {
       expect(summary!.reason).toBe('Please review');
       expect(summary!.expiresAt).toBe(expiresAt);
       expect(summary!.options).toEqual(['Approve', 'Reject']);
+    });
+
+    it('prefers an open question over a newer system marker', () => {
+      const question = createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: null,
+        workspaceId: null,
+        kind: 'needs_input',
+        source: 'request_human_input',
+        reason: 'Which region?',
+      });
+      db.prepare('UPDATE session_attention_markers SET created_at = 1 WHERE id = ?').run(
+        question.id
+      );
+      createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: null,
+        workspaceId: null,
+        kind: 'wake_failed',
+        source: 'session_wake',
+      });
+
+      expect(getAttentionSummary(sql, 'session-1')).toMatchObject({
+        markerId: question.id,
+        kind: 'needs_input',
+        reason: 'Which region?',
+      });
+      resolveAttentionMarkerById(sql, question.id, 'human', 'answered');
+      // Without an open question, the newest marker of any kind is reported.
+      expect(getAttentionSummary(sql, 'session-1')).toMatchObject({ kind: 'wake_failed' });
     });
 
     it('returns null after all markers are resolved', () => {

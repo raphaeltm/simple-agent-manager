@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
@@ -230,7 +230,10 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
     operationPageLimit(ctx, input.limit),
     parsePositiveInt(ctx.env.CONNECTOR_INBOX_SESSION_LIMIT, 5)
   );
-  const sessionPage = (page: InboxSessionCursor, attentionOnly: boolean) =>
+  // Two disjoint lists, each with its own cursor, so no chat repeats across pages: chats with an
+  // open question, and the rest by recency (checked for permission/form requests, which live
+  // outside the D1 index).
+  const sessionPage = (page: InboxSessionCursor, withAttention: boolean) =>
     page === null
       ? Promise.resolve([])
       : db
@@ -249,7 +252,9 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
                 ? sql`(${schema.sessionSummaries.updatedAt} < ${page[0]} OR (${schema.sessionSummaries.updatedAt} = ${page[0]} AND ${schema.sessionSummaries.id} < ${page[1]}))`
                 : undefined,
               eq(schema.sessionSummaries.createdByUserId, ctx.actor.userId),
-              attentionOnly ? isNotNull(schema.sessionSummaries.attentionJson) : undefined,
+              withAttention
+                ? isNotNull(schema.sessionSummaries.attentionJson)
+                : isNull(schema.sessionSummaries.attentionJson),
               ctx.actor.workspace
                 ? eq(schema.sessionSummaries.projectId, ctx.actor.workspace.projectId)
                 : undefined
@@ -257,9 +262,7 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
           )
           .orderBy(desc(schema.sessionSummaries.updatedAt), desc(schema.sessionSummaries.id))
           .limit(limit + 1);
-  // Chats with an open question are selected on their own, so a question in a chat that is not
-  // among the most recently updated ones is not pushed out of the page. The recency page still
-  // finds permission/form requests, which live outside the D1 index.
+  // A question in a chat that is not among the most recently updated ones is not pushed out.
   const [attentionRows, rows] = await Promise.all([
     sessionPage(cursor ? cursor.attention : undefined, true),
     sessionPage(cursor?.sessions, false),

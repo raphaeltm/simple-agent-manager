@@ -16,7 +16,10 @@ import {
   agentModelSettingDefinitions,
   type AgentModelSettingKey,
 } from './agent-models/settings-definition';
-import { CONNECTOR_READ_SETTINGS, type ConnectorReadSettingName } from './connector-read-settings';
+import {
+  CONNECTOR_READ_SETTINGS,
+  type ConnectorReadSettingName,
+} from './connector-read-settings-definition';
 import {
   CONNECTOR_DEFAULTS,
   type ConnectorSettingKey,

@@ -1,9 +1,12 @@
 import { toJsonSchema } from '@valibot/to-json-schema';
 import * as v from 'valibot';
 
+import { channelOperations } from './channel-operations';
 import { connectorOperations } from './connector-operations';
 import { operationalOperations } from './operational-operations';
 import { platformOperations } from './platform-operations';
+import { scheduleOperations } from './schedule-operations';
+import { teamOperations } from './team-operations';
 import type { Operation } from './types';
 
 /** One catalog shared by adapters. Names remain stable across surfaces. */
@@ -11,6 +14,9 @@ export const operations = [
   ...platformOperations,
   ...connectorOperations,
   ...operationalOperations,
+  ...teamOperations,
+  ...scheduleOperations,
+  ...channelOperations,
 ] as const;
 
 export function operationInputJsonSchema(
