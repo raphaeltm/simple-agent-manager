@@ -371,8 +371,9 @@ export async function getPullRequestStates(
           mergedAt: row.merged_at,
           updatedAt: row.updated_at,
           stale,
-          headSha: row.head_sha,
-          checksUpdatedAt: row.checks_updated_at,
+          // Only when known: other readers bound their responses by bytes.
+          ...(row.head_sha ? { headSha: row.head_sha } : {}),
+          ...(row.checks_updated_at ? { checksUpdatedAt: row.checks_updated_at } : {}),
         }
       : null;
     if (settings && stale && ctx.execCtx && scheduled < settings.cap) {

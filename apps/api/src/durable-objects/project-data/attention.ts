@@ -95,28 +95,27 @@ export function resolveAttentionMarkers(
   reason: string = 'human_message'
 ): number {
   const now = Date.now();
-  const cursor = sql.exec(
-    `UPDATE session_attention_markers
-     SET resolved_at = ?, resolved_by_message_id = ?,
-         resolved_by_actor_type = ?, resolved_reason = ?
-     WHERE session_id = ? AND resolved_at IS NULL`,
-    now,
-    resolvedByMessageId,
-    actorType,
-    reason,
-    sessionId
-  );
-
-  if (cursor.rowsWritten > 0) {
-    log.info('attention_markers.resolved', {
-      sessionId,
-      count: cursor.rowsWritten,
+  // Counted from RETURNING: Durable Object `rowsWritten` also counts index entries.
+  const count = sql
+    .exec(
+      `UPDATE session_attention_markers
+       SET resolved_at = ?, resolved_by_message_id = ?,
+           resolved_by_actor_type = ?, resolved_reason = ?
+       WHERE session_id = ? AND resolved_at IS NULL
+       RETURNING id`,
+      now,
+      resolvedByMessageId,
       actorType,
       reason,
-    });
+      sessionId
+    )
+    .toArray().length;
+
+  if (count > 0) {
+    log.info('attention_markers.resolved', { sessionId, count, actorType, reason });
   }
 
-  return cursor.rowsWritten;
+  return count;
 }
 
 /**
@@ -133,30 +132,27 @@ export function resolveAttentionMarkersByKind(
   reason: string
 ): number {
   const now = Date.now();
-  const cursor = sql.exec(
-    `UPDATE session_attention_markers
-     SET resolved_at = ?, resolved_by_message_id = ?,
-         resolved_by_actor_type = ?, resolved_reason = ?
-     WHERE session_id = ? AND kind = ? AND resolved_at IS NULL`,
-    now,
-    resolvedByMessageId,
-    actorType,
-    reason,
-    sessionId,
-    kind
-  );
-
-  if (cursor.rowsWritten > 0) {
-    log.info('attention_markers.resolved_by_kind', {
-      sessionId,
-      kind,
-      count: cursor.rowsWritten,
+  const count = sql
+    .exec(
+      `UPDATE session_attention_markers
+       SET resolved_at = ?, resolved_by_message_id = ?,
+           resolved_by_actor_type = ?, resolved_reason = ?
+       WHERE session_id = ? AND kind = ? AND resolved_at IS NULL
+       RETURNING id`,
+      now,
+      resolvedByMessageId,
       actorType,
       reason,
-    });
+      sessionId,
+      kind
+    )
+    .toArray().length;
+
+  if (count > 0) {
+    log.info('attention_markers.resolved_by_kind', { sessionId, kind, count, actorType, reason });
   }
 
-  return cursor.rowsWritten;
+  return count;
 }
 
 /**
@@ -171,25 +167,24 @@ export function resolveAttentionMarkerById(
   reason: string = 'expired'
 ): number {
   const now = Date.now();
-  const cursor = sql.exec(
-    `UPDATE session_attention_markers
-     SET resolved_at = ?, resolved_by_actor_type = ?, resolved_reason = ?
-     WHERE id = ? AND resolved_at IS NULL`,
-    now,
-    actorType,
-    reason,
-    markerId
-  );
-
-  if (cursor.rowsWritten > 0) {
-    log.info('attention_marker.resolved_by_id', {
-      markerId,
+  const count = sql
+    .exec(
+      `UPDATE session_attention_markers
+       SET resolved_at = ?, resolved_by_actor_type = ?, resolved_reason = ?
+       WHERE id = ? AND resolved_at IS NULL
+       RETURNING id`,
+      now,
       actorType,
       reason,
-    });
+      markerId
+    )
+    .toArray().length;
+
+  if (count > 0) {
+    log.info('attention_marker.resolved_by_id', { markerId, actorType, reason });
   }
 
-  return cursor.rowsWritten;
+  return count;
 }
 
 export function linkAttentionNotification(
@@ -301,19 +296,21 @@ export function completeAttentionAnswer(
   answer: string
 ): number {
   const now = Date.now();
-  const cursor = sql.exec(
-    `UPDATE session_attention_markers
-     SET resolved_at = ?, resolved_by_actor_type = 'human',
-         resolved_reason = 'structured_answer', resolved_answer = ?
-     WHERE id = ? AND session_id = ? AND kind = 'needs_input'
-       AND resolved_at IS NULL AND resolved_answer = ?`,
-    now,
-    answer,
-    markerId,
-    sessionId,
-    answer
-  );
-  return cursor.rowsWritten;
+  return sql
+    .exec(
+      `UPDATE session_attention_markers
+       SET resolved_at = ?, resolved_by_actor_type = 'human',
+           resolved_reason = 'structured_answer', resolved_answer = ?
+       WHERE id = ? AND session_id = ? AND kind = 'needs_input'
+         AND resolved_at IS NULL AND resolved_answer = ?
+       RETURNING id`,
+      now,
+      answer,
+      markerId,
+      sessionId,
+      answer
+    )
+    .toArray().length;
 }
 
 export function parseAttentionOptions(metadata: string | null): string[] {

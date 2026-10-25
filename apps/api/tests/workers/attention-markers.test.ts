@@ -294,7 +294,8 @@ describe('Attention Markers', () => {
       'system',
       'task_completed'
     );
-    expect(count).toBe(2);
+    // The number of markers resolved, not storage writes (which also count index entries).
+    expect(count).toBe(1);
 
     const markers = await stub.listActiveAttentionMarkers(sessionId);
     expect(markers).toHaveLength(0);
