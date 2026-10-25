@@ -227,15 +227,21 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
   });
   it('checks current writer grant, membership, project and read scope before evidence lookup', async () => {
     for (const op of [samChatStatus, samWorkChanges, samChatInteractions, samChatJobs]) {
-      await expect(op.run(ctx('reader'), session)).rejects.toThrow();
-      await expect(op.run(ctx('owner', []), session)).rejects.toThrow();
-      await expect(op.run(ctx(), { ...session, projectId: 'foreign' })).rejects.toThrow();
+      // A member who cannot write the chat, and a token without the read scope, are refused;
+      // another project is not found, as for a project that does not exist.
+      await expect(op.run(ctx('reader'), session)).rejects.toMatchObject({ code: 'forbidden' });
+      await expect(op.run(ctx('owner', []), session)).rejects.toMatchObject({ code: 'forbidden' });
+      await expect(op.run(ctx(), { ...session, projectId: 'foreign' })).rejects.toMatchObject({
+        code: 'not_found',
+      });
     }
     await expect(samChatStatus.run(ctx('grantee'), session)).resolves.toMatchObject({
       workspaceId: 'workspace',
     });
     sqlite.exec("UPDATE project_members SET status='removed' WHERE user_id='grantee'");
-    await expect(samChatStatus.run(ctx('grantee'), session)).rejects.toThrow();
+    await expect(samChatStatus.run(ctx('grantee'), session)).rejects.toMatchObject({
+      code: 'not_found',
+    });
   });
   it('checks delivery session ownership and excludes raw content, metadata and errors', async () => {
     mocks.mailbox.mockResolvedValue({

@@ -1043,6 +1043,18 @@ describe('connector schedule operations', () => {
     });
   });
 
+  it('exports the five operations with stable names and kinds', () => {
+    // A read-only Connector connection lists only `read` operations, and apps confirm
+    // `destructive` ones with the user, so each kind is part of the contract.
+    expect(scheduleOperations.map((operation) => [operation.name, operation.kind])).toEqual([
+      ['sam_schedules_list', 'read'],
+      ['sam_schedule_get', 'read'],
+      ['sam_schedule_create', 'write'],
+      ['sam_schedule_update', 'write'],
+      ['sam_schedule_cancel', 'destructive'],
+    ]);
+  });
+
   it('declares inputs every adapter can publish, and which creates start work', () => {
     for (const operation of scheduleOperations) {
       expect(() => operationInputJsonSchema(operation)).not.toThrow();

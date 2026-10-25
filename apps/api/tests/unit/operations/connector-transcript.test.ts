@@ -23,6 +23,12 @@ vi.mock('../../../src/services/project-data', () => ({
   searchMessagesWithArchiveMetadata: vi.fn(),
   getLogicalTranscriptPage: vi.fn(),
   getLogicalMessage: vi.fn(),
+  resolveTranscriptOwner: vi.fn(async (_env: unknown, projectId: string, sessionId: string) => ({
+    kind: 'root',
+    projectId,
+    sessionId,
+    ownerName: projectId,
+  })),
   listActiveAttentionMarkers: vi.fn(async () => []),
 }));
 
@@ -291,6 +297,47 @@ describe('Connector transcript against actual SQLite message ordering', () => {
       expect(JSON.stringify(result)).not.toContain('hidden plan');
     });
 
+    it('returns the latest request itself when it is not on the page, cut to fit', async () => {
+      const request = `Please audit the deploy ${'and the rollout plan '.repeat(150)}`.trim();
+      seed([
+        ['user', request],
+        ['assistant', 'Looking'],
+        ['assistant', ' now.'],
+        ['tool', 'grep output'],
+        ['assistant', 'The deploy is '],
+        ['assistant', 'fine.'],
+      ]);
+      // An 8,000-byte response cap leaves a 3,200-byte result, a quarter of it for each latest.
+      const small = { ...env, CONNECTOR_RESPONSE_MAX_BYTES: '8000' } as Env;
+      const smallCtx = { ...ctx, env: small } as OperationContext;
+
+      const result = await readChat(smallCtx, {
+        projectId: 'project',
+        sessionId: 'chat',
+        limit: 1,
+      });
+
+      expect(result.messages).toMatchObject([
+        { kind: 'message', messageId: '004', content: 'The deploy is fine.' },
+      ]);
+      expect(result.latest?.assistant).toEqual({ messageId: '004', inPage: true });
+      const user = result.latest?.user;
+      expect(user).toMatchObject({
+        inPage: false,
+        messageId: '000',
+        role: 'user',
+        sentBy: 'person',
+        contentLength: request.length,
+        truncated: true,
+      });
+      if (!user || !('content' in user)) throw new Error('expected the latest request itself');
+      expect(user.content.length).toBeGreaterThan(0);
+      expect(request.startsWith(user.content)).toBe(true);
+      expect(user.nextOffset).toBe(user.content.length);
+      expect(new TextEncoder().encode(user.content).length).toBeLessThanOrEqual(3_200 / 4);
+      expect(new TextEncoder().encode(JSON.stringify(result)).length).toBeLessThanOrEqual(3_200);
+    });
+
     it('cuts an oversized page at a message boundary and loses nothing across pages', async () => {
       const replies = Array.from({ length: 6 }, (_, index) => `${index}:${'x'.repeat(300)}`);
       seed(replies.map((reply): [string, string] => ['user', reply]));
@@ -365,22 +412,29 @@ describe('Connector transcript against actual SQLite message ordering', () => {
         ['assistant', 'audit'],
         ['assistant', ' found two issues.'],
       ]);
+      const hit = (id: string) => ({
+        id,
+        sessionId: 'chat',
+        sessionTopic: 'Report',
+        sessionTaskId: null,
+        role: 'assistant',
+        snippet: 'audit',
+        createdAt: 1000,
+      });
       vi.mocked(projectData.searchMessagesWithArchiveMetadata).mockResolvedValue({
-        results: [
-          {
-            id: '001',
-            sessionId: 'chat',
-            sessionTopic: 'Report',
-            sessionTaskId: null,
-            role: 'assistant',
-            snippet: 'audit',
-            createdAt: 1000,
-          },
-        ],
+        results: [hit('001'), hit('002')],
         query: { query: 'audit' },
         archiveSearch: { status: 'not_needed' },
       } as never);
+      vi.mocked(projectData.resolveTranscriptOwner).mockClear();
+      vi.mocked(projectData.getLogicalMessage).mockClear();
       const app = await searchChats(ctx, { projectId: 'project', query: 'audit' });
+      // Two hits in one chat: one lookup of who owns its transcript, passed to both reads.
+      expect(projectData.resolveTranscriptOwner).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(projectData.getLogicalMessage).mock.calls.map((call) => call[4])).toEqual([
+        expect.objectContaining({ sessionId: 'chat' }),
+        expect.objectContaining({ sessionId: 'chat' }),
+      ]);
       expect(app.results[0]).toMatchObject({
         snippet: 'audit',
         excerpt: {

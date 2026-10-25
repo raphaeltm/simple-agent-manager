@@ -180,10 +180,15 @@ Notes for client developers:
   `unit: "rows"` returns the previous stored-row pages, where a group split across pages carries
   `partialBefore` or `mayContinueInNewerPage`. Owners and shared writers also get
   `pendingInteractions` and `pendingAttention` (questions agents asked).
-- A task's final-message summary is the newest whole assistant reply, assembled within a bounded
-  scan (`connector.transcriptScanRows`). If that scan holds no assistant text (a very long tool
-  run), the summary is `null`; read the chat for older progress.
-- `sam_team_status` takes one of `taskId`, `sessionId` or `channel`. `sam_schedules_list`,
+- A task's final-message summary is the newest whole assistant reply, and `recentAssistantMessages`
+  lists the last few whole replies, newest first, assembled within a bounded scan
+  (`connector.transcriptScanRows`). If that scan holds no assistant text (a very long tool run),
+  the summary is `null`; read the chat for older progress.
+- `sam_inbox_get` checks at most `limit` chats per page, those with an open question first, and
+  `nextCursor` continues both lists.
+- `sam_team_status` takes one of `taskId`, `sessionId` or `channel`. A team too large for one
+  response gets shorter agent text first (`agentTextCharsPerField`), then fewer tasks listed
+  (`truncated`, `omitted`); `counts` and `usage` cover every task read. `sam_schedules_list`,
   `sam_schedule_get`, `sam_schedule_create`, `sam_schedule_update` and `sam_schedule_cancel` cover
   one-off schedules and recurring (cron) ones. `sam_channels_list`, `sam_channel_history`,
   `sam_channel_get` and `sam_channel_subscription_cancel` read and manage coordination channels;

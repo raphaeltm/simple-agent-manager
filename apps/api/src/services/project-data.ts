@@ -1079,26 +1079,41 @@ export async function getLogicalTranscriptPage(
   );
 }
 
+/** Which object owns a chat's transcript, for several reads of that chat in one request. */
+export function resolveTranscriptOwner(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<ProjectDataArchiveLocation> {
+  return resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
+}
+
 /**
  * One whole message by any of its stored rows, from whichever object owns the transcript. See
- * `durable-objects/project-data/logical-message.ts`.
+ * `durable-objects/project-data/logical-message.ts`. Pass `owner` from `resolveTranscriptOwner`
+ * when reading several messages of one chat.
  */
 export async function getLogicalMessage(
   env: Env,
   projectId: string,
   sessionId: string,
-  request: LogicalMessageRequest
+  request: LogicalMessageRequest,
+  owner?: ProjectDataArchiveLocation
 ): Promise<LogicalMessageResult> {
-  const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
+  if (owner && (owner.projectId !== projectId || owner.sessionId !== sessionId)) {
+    throw new Error('Transcript owner does not belong to this chat');
+  }
+  const location =
+    owner ?? (await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId));
   return callProjectDataOwnerWithRetry(
     env,
     projectId,
-    owner.ownerName,
+    location.ownerName,
     'getLogicalMessage',
     (stub) =>
-      owner.kind === 'root'
-        ? stub.archiveSourceGetLogicalMessage(owner, request)
-        : stub.archiveTargetGetLogicalMessage(owner, request),
+      location.kind === 'root'
+        ? stub.archiveSourceGetLogicalMessage(location, request)
+        : stub.archiveTargetGetLogicalMessage(location, request),
     'idempotent_read'
   );
 }

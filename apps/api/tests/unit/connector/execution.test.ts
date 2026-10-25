@@ -141,6 +141,43 @@ describe('Connector atomic execution', () => {
     );
     expect(run).toHaveBeenCalledTimes(2);
   });
+  it('scheduled starts spend the start budget; a scheduled message to a chat does not', async () => {
+    sqlite.exec(
+      `INSERT INTO platform_settings(key,value,updated_at) VALUES ('connector.maxStartsPerUserPerDay','2','2026-10-16T00:00:00Z')`
+    );
+    const run = vi.fn(async () => ({ accepted: true }));
+    const write = (key: string, name: string, input: Record<string, unknown>) =>
+      executeConnectorWrite({ ...ctx, idempotencyKey: key }, name, input, run);
+    const startLater = { kind: 'start_session', prompt: 'Review the open pull requests' };
+
+    // A start now and a start scheduled for later share the daily budget of two.
+    await write('now', 'sam_chat_start', { projectId: 'project' });
+    await write('later', 'sam_schedule_create', {
+      projectId: 'project',
+      runAt: '2026-10-26T09:00',
+      action: startLater,
+    });
+    // A scheduled message to an existing chat starts no work and is not charged.
+    await write('message', 'sam_schedule_create', {
+      projectId: 'project',
+      runAt: '2026-10-26T09:00',
+      action: { kind: 'message_session', sessionId: 'chat', message: 'Any blockers?' },
+    });
+    expect(run).toHaveBeenCalledTimes(3);
+
+    // The budget is spent: a recurring schedule and a direct start are both refused.
+    await expect(
+      write('daily', 'sam_schedule_create', {
+        projectId: 'project',
+        cron: '0 9 * * *',
+        action: startLater,
+      })
+    ).rejects.toMatchObject({ code: 'rate_limited' });
+    await expect(write('again', 'sam_chat_start', { projectId: 'project' })).rejects.toMatchObject({
+      code: 'rate_limited',
+    });
+    expect(run).toHaveBeenCalledTimes(3);
+  });
   it('write switch and missing scope fail before the side effect', async () => {
     const run = vi.fn(async () => ({}));
     await expect(

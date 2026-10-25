@@ -94,8 +94,11 @@ agents from ChatGPT/Claude. Observed friction (Oct 24 hackathon session):
 - [x] `sam_chats_search` excerpts from whole messages for the top results
 - [x] `getLatestAssistantMessageForTask` uses the logical reader (complete latest reply)
 - [x] Tests: DO reader against real SQLite (page boundaries, ties, role filter, budgets, legacy
-      cursor), operation tests incl. byte-budget trimming, no duplicate/missing chunks across pages
-      (archive-target reader reuses the existing comment-context reader factory; not separately tested)
+      cursor), operation tests incl. byte-budget trimming, no duplicate/missing chunks across pages;
+      archived chats (SQLite and compact R2) page exactly as they did live
+      (`logical-transcript-archive.test.ts`)
+- [x] `sam_task_get` / `get_task_details` `recentAssistantMessages` are whole replies (one logical
+      read serves both fields; review found raw chunk rows there)
 
 ### 2. Schedules
 - [x] `sam_schedules_list`, `sam_schedule_get`, `sam_schedule_create`, `sam_schedule_update`,
@@ -110,7 +113,7 @@ agents from ChatGPT/Claude. Observed friction (Oct 24 hackathon session):
 - [x] `sam_channels_list`, `sam_channel_history`, `sam_channel_get` (roster + subscribers),
       `sam_channel_subscription_cancel` (caller-writable owner chats only)
 - [x] Human channel post: requires a new human actor for channel events (new trust boundary) —
-      reported for decision per policy 1b930820(c) instead of building silently (Idea 01M5SR2HB56YT0VFY6BB6TCNCK; other follow-ups in Idea 01M5SR2Q7PH4FEK8YDYDQDJ10M)
+      reported for decision per policy 1b930820(c) instead of building silently (Idea 01M5SR2HB56YT0VFY6BB6TCNCK)
 
 ### 4. Team
 - [x] `sam_team_status` (root task / chat / channel scope): bounded lineage, state + freshness,
@@ -129,20 +132,44 @@ agents from ChatGPT/Claude. Observed friction (Oct 24 hackathon session):
 - [x] `apps/www/.../guides/sam-connector.md`, `guides/admin-settings.md`, `reference/api.md`,
       `.claude/skills/api-reference/SKILL.md` (connector section)
 
+### Deliberate gaps (tracked, not built)
+
+- Human posting to channels: new trust boundary, needs a decision (Idea 01M5SR2HB56YT0VFY6BB6TCNCK).
+- Inbox coverage of shared chats you did not create (Idea 01M5SR2Q7PH4FEK8YDYDQDJ10M).
+- New read tools on the /sam operator allowlist (Idea 01M5SR2Q7PH4FEK8YDYDQDJ10M).
+- Newest-first channel history (Idea 01M5SR2Q7PH4FEK8YDYDQDJ10M).
+- Cron time zones given as UTC offsets (Idea 01M5SR2Q7PH4FEK8YDYDQDJ10M).
+- Per-task token counts: SAM does not record them; team status reports `unavailable`
+  (Idea 01M5SR2Q7PH4FEK8YDYDQDJ10M).
+- Deployed commit: not recorded; team status reports `not_recorded`.
+- PM delegation authority: optional in the idea ("could support"); not built.
+- Schedule prompt text and `agent-dm.*` history are visible to every project member, as in REST and
+  the web app (chats are project-visible); per-member privacy is a product decision
+  (Idea 01M5SR2Q7PH4FEK8YDYDQDJ10M).
+
 ## Acceptance criteria
 
-- [ ] Latest full reply and preceding user request available from one `sam_chat_read` call
-- [ ] Paging a long streamed reply returns each chunk exactly once, never mid-message (legacy
-      mid-message cursors are flagged)
-- [ ] Role-filter paging semantics documented and tested (bounded scan, disclosed)
-- [ ] Search results include message-level excerpts and stable message IDs
-- [ ] Schedule create is idempotent, DST-correct and returns distinct acceptance/execution states
-- [ ] Channel list/history/roster readable with cursors and bounded size; no blanket peer authority
-- [ ] Team view joins tasks/descendants/state/blockers/PR/evidence/usage with sources, timestamps
-      and explicit unknowns; no fake cost/quota
-- [ ] A `request_human_input` question appears in `sam_chat_read`, `sam_chat_interactions` and
+- [x] Latest full reply and preceding user request available from one `sam_chat_read` call
+      (`connector-transcript.test.ts`: whole replies + latest; latest request off-page cut to fit;
+      Workers adapter test)
+- [x] Paging a long streamed reply returns each chunk exactly once, never mid-message (legacy
+      mid-message cursors are flagged) (`logical-transcript.test.ts` limits 1–3 with tied
+      timestamps; `connector-transcript.test.ts` oversized page)
+- [x] Role-filter paging semantics documented and tested (bounded scan, disclosed)
+      (`logical-transcript.test.ts` role filter/scan budget; `api.md`, `sam-connector.md`)
+- [x] Search results include message-level excerpts and stable message IDs
+      (`connector-transcript.test.ts` excerpts, one owner lookup per chat)
+- [x] Schedule create is idempotent, DST-correct and returns distinct acceptance/execution states
+      (`schedule-time.test.ts`, `schedule-operations.test.ts`, Workers adapter test)
+- [x] Channel list/history/roster readable with cursors and bounded size; no blanket peer authority
+      (`channel-operations.test.ts`)
+- [x] Team view joins tasks/descendants/state/blockers/PR/evidence/usage with sources, timestamps
+      and explicit unknowns; no fake cost/quota; fits the response (`team-status.test.ts`)
+- [x] A `request_human_input` question appears in `sam_chat_read`, `sam_chat_interactions` and
       `sam_inbox_get`; answering still requires explicit confirmation
-- [ ] Existing tools keep working; read-only connections see no write tools
+      (`operational-operations.test.ts`, `connector-operations.test.ts`)
+- [x] Existing tools keep working; read-only connections see no write tools (`protocol.test.ts`,
+      `connector-oauth.test.ts`, full API unit suite)
 - [ ] CI green, review addressed, merged, production deploy verified with safe reads
 
 ## References

@@ -16,8 +16,9 @@ sees only what you can see in SAM, and its answers link back to the pages in SAM
   the invoice rendering chat?"_ The app can read your projects, chats, tasks, ideas, saved project
   knowledge, and agent profiles. See [Reading chats, teams and channels](#reading-chats-teams-and-channels).
 - **See a whole team at once.** _"How is the launch team doing?"_ One read covers a task and the
-  subtasks it dispatched, or everyone on a coordination channel: who is working, idle, asleep or
-  waiting, open questions, pull requests and their checks, and what each agent reported.
+  subtasks it dispatched, or everyone on a coordination channel: who is working, idle or asleep,
+  what each task is waiting on, open questions, pull requests and their checks, and what each
+  agent reported.
 - **Schedule work.** _"Tomorrow at 9:00 Paris time, ask the launch chat for a status update"_ or
   _"Every weekday at 8:00, start a chat that checks the overnight builds."_ See
   [Scheduling work](#scheduling-work).
@@ -107,16 +108,18 @@ list, and on ideas, so you can tell it apart from work you started in SAM.
   never the tools' output. Tool-call titles, which can include commands, are added only when the
   app asks for them. The first page also names your latest request and the agent's latest
   reply. A very long message says it was cut and where to continue, so the app can read the rest.
-  Older pages always start between messages, so nothing is read twice or skipped.
+  Older pages always start between messages, so nothing is read twice or skipped. A task's details
+  also end with the agent's last replies as whole messages.
 - **Search finds the whole message.** The first results include an excerpt from the full message
   around the match, not just the matching word.
 - **Team status.** For a task and its subtasks (up to four levels by default), the task behind a
   chat, or every task dispatched with one coordination channel, the app sees each task's status;
-  whether its agent is working, idle, asleep or waiting, and on what (you, a provider usage limit
-  that resets at a given time, credentials, machine capacity, or the next message); its pull
-  request with the latest commit and checks; and what the agent reported. Reported summaries and
-  evidence are the agent's own claims, and are labelled that way. Large teams are cut off at a
-  limit, and the result says so.
+  whether its agent is working, idle, asleep, or replaced by a retry; what the task is waiting on
+  (you, a provider usage limit that resets at a given time, credentials, machine capacity, or the
+  next message); its pull request with the latest commit and checks; and what the agent reported.
+  Reported summaries and evidence are the agent's own claims, and are labelled that way. A large
+  team gets shorter summaries first and then fewer tasks listed, deepest and least recently
+  active first, and the result says so; its counts and usage still cover every task read.
 - **Usage, only what SAM measures.** Team status shows how long each workspace ran, your SAM AI
   usage today when agents use SAM's AI service, and the latest usage-limit readings your
   providers reported for your credentials. SAM doesn't record token counts per task or which
@@ -150,7 +153,8 @@ When an agent is [waiting for you](/docs/guides/chat-features/#when-the-agent-ne
 can show you what it asked, with the agent's own options or form fields, and send your answer.
 That includes questions an agent asks you directly, which also appear in the app's view of the
 chat and of its pending requests. The inbox lists chats with a question first, so an older
-question isn't pushed out by newer activity. Apps
+question isn't pushed out by newer activity; each inbox page checks a few chats and continues on
+the next page. Apps
 are told to confirm every answer with you before sending it. SAM checks that the answer is one the
 agent offered, but it can't tell whether the app asked you first, so treat an app that answers
 without asking as a reason to disconnect it.

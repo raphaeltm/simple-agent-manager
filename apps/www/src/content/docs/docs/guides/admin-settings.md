@@ -36,18 +36,19 @@ These bound what one [Connector](/docs/guides/sam-connector/) read returns, unde
 category. Every result must also fit the Connector's response size limit, so long text is cut
 where it says so and the app continues from there.
 
-| Setting                            | Default | Range        | What it limits                                                                     |
-| ---------------------------------- | ------- | ------------ | ---------------------------------------------------------------------------------- |
-| `connector.transcriptPageMessages` | 10      | 1–100        | Whole messages in one chat page when the app does not ask for a number             |
-| `connector.transcriptScanRows`     | 4,000   | 250–20,000   | Stored rows one chat read examines; agent replies are stored as many streamed rows |
-| `connector.transcriptMessageChars` | 6,000   | 500–40,000   | Characters of each message in a chat page                                          |
-| `connector.transcriptPageChars`    | 24,000  | 2,000–40,000 | Characters in one chat page, one message read, or one channel page                 |
-| `connector.searchContextResults`   | 3       | 0–10         | Chat search results that get an excerpt from the whole message (0 turns it off)    |
-| `connector.searchExcerptChars`     | 600     | 100–4,000    | Characters in each search excerpt                                                  |
-| `connector.teamMaxTasks`           | 40      | 1–100        | Tasks in one team status read, and tasks listed on a channel                       |
-| `connector.teamMaxDepth`           | 4       | 1–10         | Levels of subtasks below the starting task in team status                          |
-| `connector.channelHistoryPageSize` | 20      | 1–100        | Channel messages in one page when the app does not ask for a number                |
-| `connector.channelMessageChars`    | 2,000   | 200–4,096    | Characters of each channel message                                                 |
+| Setting                            | Default | Range        | What it limits                                                                       |
+| ---------------------------------- | ------- | ------------ | ------------------------------------------------------------------------------------ |
+| `connector.transcriptPageMessages` | 10      | 1–100        | Whole messages in one chat page when the app does not ask for a number               |
+| `connector.transcriptScanRows`     | 4,000   | 250–20,000   | Stored rows one chat read examines; agent replies are stored as many streamed rows   |
+| `connector.transcriptMessageChars` | 6,000   | 500–40,000   | Characters of each message in a chat page                                            |
+| `connector.transcriptPageChars`    | 24,000  | 2,000–40,000 | Characters in one chat page, one message read, or one channel page                   |
+| `connector.searchContextResults`   | 3       | 0–5          | Chat search results that get an excerpt from the whole message (0 turns it off)      |
+| `connector.searchExcerptChars`     | 600     | 100–4,000    | Characters in each search excerpt                                                    |
+| `connector.teamMaxTasks`           | 40      | 1–100        | Tasks in one team status read, and tasks listed on a channel                         |
+| `connector.teamMaxDepth`           | 4       | 1–10         | Levels of subtasks below the starting task in team status                            |
+| `connector.teamTextChars`          | 600     | 100–4,000    | Characters of each agent summary, evidence note and question per task in team status |
+| `connector.channelHistoryPageSize` | 20      | 1–100        | Channel messages in one page when the app does not ask for a number                  |
+| `connector.channelMessageChars`    | 2,000   | 200–4,096    | Characters of each channel message                                                   |
 
 ## Chat
 

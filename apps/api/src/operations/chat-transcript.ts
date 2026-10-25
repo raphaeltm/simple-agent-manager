@@ -285,6 +285,16 @@ export async function searchExcerpts(
 ) {
   const limits = await getConnectorReadLimits(ctx.env);
   const terms = query.split(/\s+/).filter((term) => term.length > 0);
+  // Hits often share a chat; look up who owns each chat's transcript once.
+  const owners = new Map<string, ReturnType<typeof projectDataService.resolveTranscriptOwner>>();
+  const ownerOf = (sessionId: string) => {
+    let owner = owners.get(sessionId);
+    if (!owner) {
+      owner = projectDataService.resolveTranscriptOwner(ctx.env, projectId, sessionId);
+      owners.set(sessionId, owner);
+    }
+    return owner;
+  };
   const excerpts = await Promise.all(
     hits.slice(0, limits.searchContextResults).map(async (hit) => {
       try {
@@ -300,7 +310,8 @@ export async function searchExcerpts(
             focus: { terms },
             includeThinking: false,
             includeToolTitles: false,
-          }
+          },
+          await ownerOf(hit.sessionId)
         );
         const message = result.message;
         if (!message || result.thinkingWithheld) return null;

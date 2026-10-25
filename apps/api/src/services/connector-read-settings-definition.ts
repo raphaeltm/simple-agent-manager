@@ -40,8 +40,8 @@ export const CONNECTOR_READ_SETTINGS = [
     name: 'connector.searchContextResults',
     defaultValue: 3,
     description:
-      'Chat search results that also get an excerpt from the whole message around the match. 0 turns excerpts off.',
-    range: { min: 0, max: 10 },
+      'Chat search results that also get an excerpt from the whole message around the match. 0 turns excerpts off. Each excerpt is one more read of the chat.',
+    range: { min: 0, max: 5 },
   },
   {
     name: 'connector.searchExcerptChars',
