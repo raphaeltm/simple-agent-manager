@@ -430,9 +430,14 @@ Connector connection/client inventories accept `cursor` and return `nextCursor`.
 
 ### External operational MCP tools
 
-The full external registry includes `sam_chat_interrupt`, `sam_chat_status`,
+The full external registry (38 tools, 27 read-only) includes `sam_chat_interrupt`, `sam_chat_status`,
 `sam_chat_delivery_get`, `sam_chat_interactions`, `sam_work_changes`,
-`sam_chat_jobs_list`, and `sam_operation_get`. Operational session reads require
+`sam_chat_jobs_list`, and `sam_operation_get`; transcript reads `sam_chat_read` (whole messages by
+default, `unit:"rows"` for stored rows) and `sam_chat_message_get`; `sam_team_status`; schedules
+`sam_schedules_list|get|create|update|cancel` (one-off DO schedules + cron triggers); channels
+`sam_channels_list`, `sam_channel_history`, `sam_channel_get`, `sam_channel_subscription_cancel`
+(no app posting). Agent questions (attention markers) appear in `sam_chat_read.pendingAttention`,
+`sam_chat_interactions.attention` and the inbox. Operational session reads require
 current session-writer authority; operation receipts are actor/project scoped.
 Interrupt requires a requestKey and preserves the task/workspace. Reads never
 contact or wake runtimes. Changes are coalesced snapshots, not a durable event

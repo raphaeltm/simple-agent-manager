@@ -330,7 +330,16 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
       updates.nextFireAt = cronToNextFire(expression, timezone);
     }
   }
-  if (body.status !== undefined) Object.assign(updates, triggerStatusUpdates(trigger, body.status));
+  if (body.status !== undefined) {
+    // The schedule the row will have after this update: a request that changes the cron and
+    // resumes at once must take its next fire from the new cron.
+    const schedule = {
+      ...trigger,
+      cronExpression: updates.cronExpression ?? trigger.cronExpression,
+      cronTimezone: updates.cronTimezone ?? trigger.cronTimezone,
+    };
+    Object.assign(updates, triggerStatusUpdates(schedule, body.status));
+  }
   let effectiveWebhookConfig: ReturnType<typeof mergeWebhookConfig> | undefined;
   if (body.webhookConfig) {
     const current = await db

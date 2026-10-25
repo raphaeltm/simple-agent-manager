@@ -179,4 +179,19 @@ describe('PATCH /triggers/:id status through the real route', () => {
       auto_pause_reset_sequence: 7,
     });
   });
+
+  it('takes the next fire from the new cron when one request changes it and resumes', async () => {
+    expect((await patch('cron-1', { status: 'paused' })).status).toBe(200);
+    // Weekdays 09:00 Paris becomes 06:30 UTC every day.
+    const response = await patch('cron-1', {
+      status: 'active',
+      cronExpression: '30 6 * * *',
+      cronTimezone: 'UTC',
+    });
+    expect(response.status).toBe(200);
+    expect(row('cron-1')).toMatchObject({
+      status: 'active',
+      next_fire_at: cronToNextFire('30 6 * * *', 'UTC'),
+    });
+  });
 });

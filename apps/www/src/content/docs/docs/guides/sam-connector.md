@@ -14,7 +14,13 @@ sees only what you can see in SAM, and its answers link back to the pages in SAM
   work with its pull requests, and unread notifications, across your projects.
 - **Check on work.** _"How is the checkout tests task going?"_ or _"What did the agent say last in
   the invoice rendering chat?"_ The app can read your projects, chats, tasks, ideas, saved project
-  knowledge, and agent profiles.
+  knowledge, and agent profiles. See [Reading chats, teams and channels](#reading-chats-teams-and-channels).
+- **See a whole team at once.** _"How is the launch team doing?"_ One read covers a task and the
+  subtasks it dispatched, or everyone on a coordination channel: who is working, idle, asleep or
+  waiting, open questions, pull requests and their checks, and what each agent reported.
+- **Schedule work.** _"Tomorrow at 9:00 Paris time, ask the launch chat for a status update"_ or
+  _"Every weekday at 8:00, start a chat that checks the overnight builds."_ See
+  [Scheduling work](#scheduling-work).
 - **Start work.** _"In acme/checkout-service, start a chat to find out why the tests are failing."_
   This starts work in that project, which you can open in SAM like any other. It's a **Chat** or a
   **Task** (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)) depending on what the app
@@ -28,8 +34,9 @@ sees only what you can see in SAM, and its answers link back to the pages in SAM
   open a link it sent. See [Answering your agents](#answering-your-agents).
 - **Keep ideas.** Create an idea, or update one.
 
-It can't read repository files directly, create projects, change settings, or delete ideas. It can
-only reply to, answer, or stop chats that you started.
+It can't read repository files directly, create projects, change settings, delete ideas, post to
+agents' coordination channels, or delete recurring schedules. It can only reply to, answer, or stop
+chats that you started or that their owner shared with you.
 
 ## Connect Claude or ChatGPT
 
@@ -92,10 +99,58 @@ work an hour and 50 a day through the Connector unless your administrator change
 Work your app starts is labelled **via ChatGPT** (or the app's name) on the dashboard, in the session
 list, and on ideas, so you can tell it apart from work you started in SAM.
 
+## Reading chats, teams and channels
+
+- **Chats come back as whole messages.** An agent's reply arrives as one message even though it
+  was streamed in many pieces. Tool calls, the agent's private thinking and plan updates between
+  messages are summarized as activity: how many tool calls ran, which tools, and how they ended,
+  never the tools' output. Tool-call titles, which can include commands, are added only when the
+  app asks for them. The first page also names your latest request and the agent's latest
+  reply. A very long message says it was cut and where to continue, so the app can read the rest.
+  Older pages always start between messages, so nothing is read twice or skipped.
+- **Search finds the whole message.** The first results include an excerpt from the full message
+  around the match, not just the matching word.
+- **Team status.** For a task and its subtasks (up to four levels by default), the task behind a
+  chat, or every task dispatched with one coordination channel, the app sees each task's status;
+  whether its agent is working, idle, asleep or waiting, and on what (you, a provider usage limit
+  that resets at a given time, credentials, machine capacity, or the next message); its pull
+  request with the latest commit and checks; and what the agent reported. Reported summaries and
+  evidence are the agent's own claims, and are labelled that way. Large teams are cut off at a
+  limit, and the result says so.
+- **Usage, only what SAM measures.** Team status shows how long each workspace ran, your SAM AI
+  usage today when agents use SAM's AI service, and the latest usage-limit readings your
+  providers reported for your credentials. SAM doesn't record token counts per task or which
+  commit a deployment runs, so those show as unavailable rather than as guesses.
+- **Coordination channels.** The app can list a project's channels, read their messages, and see
+  which tasks are on a channel and which chats follow it. Messages are what agents posted, not
+  decisions you made, and SAM doesn't record whether an agent read one. Private agent-to-agent
+  channels are hidden unless the app asks for them. The app can stop one of your own chats from
+  following a channel, but can't post to a channel.
+
+## Scheduling work
+
+Ask the app to schedule work and it can do it once at a set time, or on a repeating schedule:
+
+- **Once:** message a chat you can write to, or start new work, at a time you give. Say the time
+  in your own time zone; the app sends it with the zone's name (such as `Europe/Paris`), and SAM
+  handles daylight saving. A time that the clocks skip is refused with the next valid time, and a
+  time that happens twice uses the earlier one unless the app asks for the later.
+- **Repeating:** start new work on a cron schedule in a time zone. It needs a name, and it can be
+  paused and resumed. Delete it on the project's **Automation** page.
+
+A schedule that starts work counts toward the same per-person start limits as starting work
+directly. "Scheduled" only means SAM accepted it. The schedule's details keep four things apart:
+SAM accepted it; when it came due, SAM handed it on; the agent started; and how the work ended.
+Whether you were notified is not tracked. Cancelling a one-time schedule can't be undone, so the
+app should confirm with you first.
+
 ## Answering your agents
 
 When an agent is [waiting for you](/docs/guides/chat-features/#when-the-agent-needs-you), your app
-can show you what it asked, with the agent's own options or form fields, and send your answer. Apps
+can show you what it asked, with the agent's own options or form fields, and send your answer.
+That includes questions an agent asks you directly, which also appear in the app's view of the
+chat and of its pending requests. The inbox lists chats with a question first, so an older
+question isn't pushed out by newer activity. Apps
 are told to confirm every answer with you before sending it. SAM checks that the answer is one the
 agent offered, but it can't tell whether the app asked you first, so treat an app that answers
 without asking as a reason to disconnect it.
@@ -194,6 +249,9 @@ Superadmins manage the Connector under **Admin → Integrations → Connector**:
 | **Writes per user per minute**       | 30                                       |
 | **Starts per user per hour**         | 10                                       |
 | **Starts per user per day**          | 50                                       |
+
+Limits on how much one read returns (messages per page, team size, channel page size and similar)
+are in **Admin → Settings** under **Connector**; see [Connector reads](/docs/guides/admin-settings/#connector-reads).
 
 **Allowed redirect hosts** applies only when **Client registration** is set to **Allowed redirect
 hosts only**, and only when an app registers: apps that registered earlier keep working, so use

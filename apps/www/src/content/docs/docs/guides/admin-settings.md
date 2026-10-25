@@ -3,7 +3,7 @@ title: Dynamic admin settings
 description: Change Phase 1 platform controls without redeploying the Worker.
 ---
 
-Active, approved superadmins can use **Admin → Settings** to search and edit platform settings from a phone or desktop. This page covers the Phase 1 controls: GitHub, Google login, Google infrastructure and GitLab OAuth configuration; the ten Connector settings; anonymous trials; cron sweeps; Durable Object alarms; stalled-task classification; the Collaboration limits for shared chats and comments; the Chat setting for the new-chat profile picker; the Operations limits for workflows; the AI models controls for agent model calls; and the Email limits for agent email (preview). Other deployment and resource settings remain in their existing interfaces.
+Active, approved superadmins can use **Admin → Settings** to search and edit platform settings from a phone or desktop. This page covers the Phase 1 controls: GitHub, Google login, Google infrastructure and GitLab OAuth configuration; the ten Connector settings and the Connector read limits; anonymous trials; cron sweeps; Durable Object alarms; stalled-task classification; the Collaboration limits for shared chats and comments; the Chat setting for the new-chat profile picker; the Operations limits for workflows; the AI models controls for agent model calls; and the Email limits for agent email (preview). Other deployment and resource settings remain in their existing interfaces.
 
 The editor shows each setting's effective value, code default and source. Secret fields show only whether a value is configured. Enter a replacement to change a secret; leaving a password field empty does not reveal or erase the current secret. Related OAuth client IDs and secrets must satisfy the existing provider validation together. Risky saves and resets require confirmation.
 
@@ -29,6 +29,25 @@ shown without its result. The whole commented message is always loaded. The row 
 read when replies are very long.
 
 Lowering the share limit does not remove anyone's access. It only blocks new shares while a chat is at or above the limit.
+
+## Connector reads
+
+These bound what one [Connector](/docs/guides/sam-connector/) read returns, under the **Connector**
+category. Every result must also fit the Connector's response size limit, so long text is cut
+where it says so and the app continues from there.
+
+| Setting                            | Default | Range        | What it limits                                                                     |
+| ---------------------------------- | ------- | ------------ | ---------------------------------------------------------------------------------- |
+| `connector.transcriptPageMessages` | 10      | 1–100        | Whole messages in one chat page when the app does not ask for a number             |
+| `connector.transcriptScanRows`     | 4,000   | 250–20,000   | Stored rows one chat read examines; agent replies are stored as many streamed rows |
+| `connector.transcriptMessageChars` | 6,000   | 500–40,000   | Characters of each message in a chat page                                          |
+| `connector.transcriptPageChars`    | 24,000  | 2,000–40,000 | Characters in one chat page, one message read, or one channel page                 |
+| `connector.searchContextResults`   | 3       | 0–10         | Chat search results that get an excerpt from the whole message (0 turns it off)    |
+| `connector.searchExcerptChars`     | 600     | 100–4,000    | Characters in each search excerpt                                                  |
+| `connector.teamMaxTasks`           | 40      | 1–100        | Tasks in one team status read, and tasks listed on a channel                       |
+| `connector.teamMaxDepth`           | 4       | 1–10         | Levels of subtasks below the starting task in team status                          |
+| `connector.channelHistoryPageSize` | 20      | 1–100        | Channel messages in one page when the app does not ask for a number                |
+| `connector.channelMessageChars`    | 2,000   | 200–4,096    | Characters of each channel message                                                 |
 
 ## Chat
 

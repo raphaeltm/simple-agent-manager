@@ -5,6 +5,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import { createModuleLogger } from '../../lib/logger';
 import type { ProjectEventScheduleEnv } from './project-event-schedules-config';
 import { scheduleLimits } from './project-event-schedules-config';
 import {
@@ -27,6 +28,8 @@ import {
   stableStringify,
 } from './project-events-values';
 import type { Env } from './types';
+
+const log = createModuleLogger('project_event_schedules');
 
 type ScheduleEnv = Env & ProjectEventScheduleEnv;
 const integer = v.pipe(v.number(), v.safeInteger());
@@ -346,7 +349,7 @@ export function listSchedules(
   }
   const query = (
     column: 'creator_chat_session_id' | 'target_session_id' | null
-  ): ProjectSchedule[] => {
+  ): { rows: ProjectSchedule[]; more: boolean } => {
     const conditions = ['project_id = ?'];
     const bindings: Array<string | number> = [projectId];
     if (column && sessionId) {
@@ -363,18 +366,33 @@ export function listSchedules(
     }
     bindings.push(limit + 1);
     const whereClause = conditions.join(' AND ');
-    return sql
+    const raw = sql
       .exec(
         `SELECT * FROM project_schedules WHERE ${whereClause}
        ORDER BY created_at DESC, id DESC LIMIT ?`,
         ...bindings
       )
-      .toArray()
-      .map(mapSchedule);
+      .toArray();
+    // One malformed row is left out and logged; it must not fail the whole list (rule 50).
+    // `more` comes from the raw rows, so a skipped look-ahead row still reports more.
+    const rows: ProjectSchedule[] = [];
+    for (const row of raw) {
+      try {
+        rows.push(mapSchedule(row));
+      } catch (error) {
+        log.warn('project_schedule.list_row_skipped', {
+          projectId,
+          scheduleId: typeof row.id === 'string' ? row.id : null,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return { rows, more: raw.length > limit };
   };
-  const candidates = sessionId
-    ? [...query('creator_chat_session_id'), ...query('target_session_id')]
-    : query(null);
+  const pages = sessionId
+    ? [query('creator_chat_session_id'), query('target_session_id')]
+    : [query(null)];
+  const candidates = pages.flatMap((page) => page.rows);
   const ordered = [...new Map(candidates.map((s) => [s.id, s])).values()].sort(
     (a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)
   );
@@ -383,7 +401,7 @@ export function listSchedules(
   return {
     schedules,
     nextCursor:
-      ordered.length > limit && last
+      (ordered.length > limit || pages.some((page) => page.more)) && last
         ? JSON.stringify({
             version: 1,
             projectId,
