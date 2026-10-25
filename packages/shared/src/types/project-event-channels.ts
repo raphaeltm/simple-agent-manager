@@ -20,6 +20,13 @@ export const PROJECT_EVENT_CHANNEL_TYPE = 'agent.channel.published';
  */
 export const AGENT_MESSAGE_CHANNEL_PREFIX = 'agent-dm.';
 
+/**
+ * First name after every `agent-dm.<hex>` pair channel. Only SAM creates names with that prefix
+ * (generic publish and follow reject it), and they are lowercase hex, so all of them sort below
+ * this name: a name-ordered catalog read that starts here skips the whole range in one request.
+ */
+export const DIRECT_CHANNEL_RANGE_END = `${AGENT_MESSAGE_CHANNEL_PREFIX}g`;
+
 export type ProjectEventChannelActor = {
   userId: string;
   taskId: string;

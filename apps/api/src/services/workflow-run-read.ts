@@ -23,6 +23,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { contentFreeIssues, parseRowsSkippingInvalid } from '../lib/runtime-validation';
 import { getWorkflowConfig } from './workflow-config';
 import { workflowDependencies, workflowResult } from './workflow-state-validation';
 
@@ -91,18 +92,12 @@ export function toWorkflowRunStatus(stored: string): WorkflowRunStatus {
   return stored === 'active' || stored === 'completed' ? stored : 'needs_attention';
 }
 
-/** Where a value failed and what was expected, without the value itself. */
-const issueReason = (issues: readonly v.BaseIssue<unknown>[]) =>
-  issues
-    .map((issue) => `${v.getDotPath(issue) ?? 'value'}: expected ${issue.expected ?? issue.type}`)
-    .join('; ');
-
 /**
  * Why a value was skipped. valibot and JSON.parse messages quote the input, and these columns
  * hold agent-written text, so only the location and the expected shape are logged.
  */
 function skipReason(error: unknown): string {
-  if (error instanceof v.ValiError) return issueReason(error.issues);
+  if (error instanceof v.ValiError) return contentFreeIssues(error.issues);
   if (error instanceof SyntaxError) return 'invalid JSON';
   return error instanceof Error ? error.name : 'unknown error';
 }
@@ -129,13 +124,9 @@ export function parseRows<TSchema extends v.GenericSchema>(
   runId: string,
   table: string
 ): Array<v.InferOutput<TSchema>> {
-  const parsed: Array<v.InferOutput<TSchema>> = [];
-  for (const row of rows ?? []) {
-    const result = v.safeParse(schema, row);
-    if (result.success) parsed.push(result.output);
-    else fieldSkipped(runId, table, null, issueReason(result.issues));
-  }
-  return parsed;
+  return parseRowsSkippingInvalid(schema, rows, (reason) =>
+    fieldSkipped(runId, table, null, reason)
+  );
 }
 
 const RUN_COLUMNS =

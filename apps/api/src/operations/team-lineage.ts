@@ -12,6 +12,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parseRowsSkippingInvalid } from '../lib/runtime-validation';
 import { OperationError } from './errors';
 
 export type TeamScope =
@@ -56,21 +57,14 @@ export type TeamTaskRow = v.InferOutput<typeof TeamTaskRowSchema>;
 
 /** One malformed task row is left out and logged; it must not hide the rest of the team. */
 function parseTeamRows(rows: unknown[], projectId: string): TeamTaskRow[] {
-  const parsed: TeamTaskRow[] = [];
-  for (const row of rows) {
-    const result = v.safeParse(TeamTaskRowSchema, row);
-    if (result.success) {
-      parsed.push(result.output);
-      continue;
-    }
+  return parseRowsSkippingInvalid(TeamTaskRowSchema, rows, (reason, row) =>
     log.warn('connector.team_task_row_skipped', {
       projectId,
       taskId:
         row && typeof row === 'object' && 'id' in row && typeof row.id === 'string' ? row.id : null,
-      error: result.issues[0]?.message ?? 'invalid row',
-    });
-  }
-  return parsed;
+      reason,
+    })
+  );
 }
 
 const TASK_COLUMNS = `t.id AS id, t.title AS title, t.status AS status,

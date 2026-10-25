@@ -28,6 +28,7 @@ import {
   rowRole,
   type Run,
   RUN_ROLES,
+  SCAN_PAGE_ROWS,
   type ToolCallStates,
 } from './logical-transcript-model';
 import {
@@ -38,9 +39,6 @@ import {
 import type { Env } from './types';
 
 export type { LogicalActivity, LogicalEntry, LogicalMessage } from './logical-transcript-model';
-
-/** Rows per page read inside one scan; `maxScanRows` caps the total. */
-const SCAN_PAGE_ROWS = 250;
 
 export interface LogicalTranscriptRequest {
   /** Exclusive bound: the page holds messages older than this position. */

@@ -595,6 +595,37 @@ describe('connector operations current membership and creator authority', () => 
     const next = await samInboxGet.run(ctx(), { cursor: inbox.nextCursor ?? undefined });
     expect(next.pending.map((row) => row.sessionId)).not.toContain('chat');
   });
+  it('inbox pages check at most limit chats, questions first, and show each chat once', async () => {
+    const insert = sqlite.prepare(
+      'INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,attention_json) VALUES (?,?,?,?,?)'
+    );
+    // Two more questions beside the fixture's `chat` (updated_at 20), and three chats without one.
+    insert.run('question-new', 'project', 'owner', 40, '{"message":"Pick one"}');
+    insert.run('question-mid', 'project', 'owner', 30, '{"message":"Which?"}');
+    for (const [id, at] of [
+      ['recent-1', 90],
+      ['recent-2', 80],
+      ['recent-3', 70],
+    ] as const)
+      insert.run(id, 'project', 'owner', at, null);
+    const seen: string[][] = [];
+    const lookups: number[] = [];
+    let cursor: string | undefined;
+    do {
+      mocks.snapshot.mockClear();
+      const page = await samInboxGet.run(ctx(), { limit: 2, cursor });
+      lookups.push(mocks.snapshot.mock.calls.length);
+      seen.push(page.pending.map((row) => row.sessionId));
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor && seen.length < 10);
+
+    expect(seen).toEqual([
+      ['question-new', 'question-mid'],
+      ['chat', 'recent-1'],
+      ['recent-2', 'recent-3'],
+    ]);
+    expect(Math.max(...lookups)).toBeLessThanOrEqual(2);
+  });
   it('inbox question notifications carry the marker and options needed to answer', async () => {
     mocks.notifications.mockResolvedValue({
       notifications: [

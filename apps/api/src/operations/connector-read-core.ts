@@ -5,8 +5,10 @@ import * as v from 'valibot';
 import * as schema from '../db/schema';
 import type { NotificationService } from '../durable-objects/notification';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { getTrustedApiOrigin } from '../lib/trusted-origins';
 import { connectorPendingInteractions } from '../services/connector-agent-answer';
+import { questionMetadata } from './attention-core';
 import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
 import { ideaTaskPredicateSql } from './idea-identity';
@@ -192,7 +194,8 @@ export async function projectGet(
 }
 const SessionCursorSchema = v.tuple([v.pipe(v.number(), v.safeInteger()), v.string()]);
 const InboxCursorSchema = v.object({
-  sessions: v.nullable(SessionCursorSchema),
+  // Absent while no chat without a question has been read yet: the next page starts at the top.
+  sessions: v.optional(v.nullable(SessionCursorSchema)),
   // Absent in cursors issued before questions were selected separately; such a cursor has
   // already returned its questions with the recency page, so it continues without them.
   attention: v.optional(v.nullable(SessionCursorSchema), null),
@@ -204,16 +207,10 @@ type InboxSessionCursor = v.InferOutput<typeof SessionCursorSchema> | null | und
 
 /** Fields of a `needs_input` notification an app needs to answer the question it announces. */
 function notificationQuestion(metadata: unknown) {
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return undefined;
-  const record = metadata as Record<string, unknown>;
-  if (typeof record.attentionMarkerId !== 'string') return undefined;
-  return {
-    markerId: record.attentionMarkerId,
-    category: typeof record.category === 'string' ? record.category : null,
-    options: Array.isArray(record.options)
-      ? record.options.filter((option): option is string => typeof option === 'string')
-      : [],
-  };
+  const record = maybeJsonRecord(metadata);
+  if (typeof record?.attentionMarkerId !== 'string') return undefined;
+  const { category, options } = questionMetadata(record);
+  return { markerId: record.attentionMarkerId, category, options };
 }
 export async function inboxGet(ctx: OperationContext, input: { limit?: number; cursor?: string }) {
   let cursor: v.InferOutput<typeof InboxCursorSchema> | undefined;
@@ -232,7 +229,8 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
   );
   // Two disjoint lists, each with its own cursor, so no chat repeats across pages: chats with an
   // open question, and the rest by recency (checked for permission/form requests, which live
-  // outside the D1 index).
+  // outside the D1 index). A page checks at most `limit` chats, questions first, and each cursor
+  // moves only past the chats the page used.
   const sessionPage = (page: InboxSessionCursor, withAttention: boolean) =>
     page === null
       ? Promise.resolve([])
@@ -267,12 +265,10 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
     sessionPage(cursor ? cursor.attention : undefined, true),
     sessionPage(cursor?.sessions, false),
   ]);
-  const candidates = new Map<string, (typeof rows)[number]>();
-  for (const row of [...attentionRows.slice(0, limit), ...rows.slice(0, limit)]) {
-    if (!candidates.has(row.id)) candidates.set(row.id, row);
-  }
+  const withQuestion = attentionRows.slice(0, limit);
+  const recent = rows.slice(0, limit - withQuestion.length);
   const pending = await Promise.all(
-    [...candidates.values()].map(async (row) => {
+    [...withQuestion, ...recent].map(async (row) => {
       let attention: unknown = null;
       if (row.attention) {
         try {
@@ -341,13 +337,21 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
       )
     );
   const projectIds = new Set(accessible.map((row) => row.projectId));
-  const lastSession = rows.slice(0, limit).at(-1);
-  const lastAttention = attentionRows.slice(0, limit).at(-1);
+  const lastSession = recent.at(-1);
+  const lastAttention = withQuestion.at(-1);
   const lastTask = tasks.slice(0, limit).at(-1);
   const next = {
-    sessions: rows.length > limit && lastSession ? [lastSession.updatedAt, lastSession.id] : null,
+    // Questions filled the page: the other chats have not been read, so keep their position.
+    sessions:
+      rows.length === 0
+        ? null
+        : !lastSession
+          ? cursor?.sessions
+          : rows.length > recent.length
+            ? [lastSession.updatedAt, lastSession.id]
+            : null,
     attention:
-      attentionRows.length > limit && lastAttention
+      attentionRows.length > withQuestion.length && lastAttention
         ? [lastAttention.updatedAt, lastAttention.id]
         : null,
     tasks: tasks.length > limit && lastTask ? [lastTask.updatedAt, lastTask.id] : null,
@@ -355,12 +359,12 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
   };
   return {
     nextCursor:
-      next.sessions || next.attention || next.tasks || next.notifications
+      next.sessions !== null || next.attention || next.tasks || next.notifications
         ? JSON.stringify(next)
         : null,
     pending: pending.filter((row) => row.attention || row.interactions.length),
     coverage:
-      'Chats you created. A shared chat you can answer shows its questions in sam_chat_read and sam_chat_interactions. attention is the newest open question per chat; sam_chat_interactions lists all of them.',
+      'Chats you created, those with an open question first; a page checks at most limit chats and nextCursor continues. A shared chat you can answer shows its questions in sam_chat_read and sam_chat_interactions. attention is the newest open question per chat; sam_chat_interactions lists all of them.',
     tasks: tasks.slice(0, limit).map((row) => ({
       ...row,
       link: operationLink(ctx, row.projectId, row.chatSessionId ?? undefined),

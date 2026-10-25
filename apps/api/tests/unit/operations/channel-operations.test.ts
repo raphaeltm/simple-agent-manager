@@ -1,4 +1,5 @@
 import {
+  DIRECT_CHANNEL_RANGE_END,
   PROJECT_EVENT_CHANNEL_SOURCE,
   PROJECT_EVENT_CHANNEL_TYPE,
   type ProjectEventChannelActor,
@@ -34,7 +35,7 @@ import {
   ProjectEventValidationError,
 } from '../../../src/durable-objects/project-data/project-events-contracts';
 import type { Env } from '../../../src/env';
-import { DIRECT_CHANNEL_RANGE_END, sharedTextCap } from '../../../src/operations/channel-core';
+import { sharedTextCap } from '../../../src/operations/channel-core';
 import {
   channelOperations,
   samChannelGet,

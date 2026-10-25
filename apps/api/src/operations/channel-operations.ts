@@ -4,7 +4,10 @@
  * the subscribing chat. Apps cannot post: agents post through their own SAM tools, so a post is
  * always an agent's, never a person's decision relayed by an app.
  */
-import type { ProjectEventSubscriptionRecord } from '@simple-agent-manager/shared';
+import {
+  DIRECT_CHANNEL_RANGE_END,
+  type ProjectEventSubscriptionRecord,
+} from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { isAgentMessageChannelName } from '../durable-objects/project-data/agent-message-notice';
@@ -25,7 +28,6 @@ import {
   channelRoster,
   channelsPageLink,
   channelSummary,
-  DIRECT_CHANNEL_RANGE_END,
   effectiveSubscriptionState,
   isoTime,
   requireChannelName,

@@ -10,6 +10,8 @@
  * their options and answers belong to the interaction (`interactionId`).
  */
 import {
+  HUMAN_INPUT_CATEGORIES,
+  type HumanInputCategory,
   MAX_HUMAN_INPUT_CONTEXT_LENGTH,
   MAX_HUMAN_INPUT_OPTION_LENGTH,
   MAX_HUMAN_INPUT_OPTIONS_COUNT,
@@ -27,6 +29,27 @@ function iso(value: number | null): string | null {
   return value === null || !Number.isFinite(value) ? null : new Date(value).toISOString();
 }
 
+/**
+ * A question's options and category from marker or notification metadata, bounded the way
+ * request_human_input bounds them when it stores them.
+ */
+export function questionMetadata(record: Record<string, unknown> | null): {
+  options: string[];
+  category: HumanInputCategory | null;
+} {
+  const options = Array.isArray(record?.options)
+    ? record.options
+        .filter((option): option is string => typeof option === 'string')
+        .slice(0, MAX_HUMAN_INPUT_OPTIONS_COUNT)
+        .map((option) => option.slice(0, MAX_HUMAN_INPUT_OPTION_LENGTH))
+    : [];
+  // request_human_input accepts only these categories; anything else is not reported.
+  const category = (HUMAN_INPUT_CATEGORIES as readonly unknown[]).includes(record?.category)
+    ? (record?.category as HumanInputCategory)
+    : null;
+  return { options, category };
+}
+
 function markerMetadata(marker: Marker) {
   let record: Record<string, unknown> | null = null;
   if (marker.metadata) {
@@ -36,14 +59,7 @@ function markerMetadata(marker: Marker) {
       record = null;
     }
   }
-  const options = Array.isArray(record?.options)
-    ? record.options
-        .filter((option): option is string => typeof option === 'string')
-        .slice(0, MAX_HUMAN_INPUT_OPTIONS_COUNT)
-        .map((option) => option.slice(0, MAX_HUMAN_INPUT_OPTION_LENGTH))
-    : [];
-  const category = typeof record?.category === 'string' ? record.category.slice(0, 40) : null;
-  return { options, category };
+  return questionMetadata(record);
 }
 
 /** How a person acts on this marker, in the tool vocabulary apps use. */

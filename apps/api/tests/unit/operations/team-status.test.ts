@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { jsonBytes, resultByteBudget } from '../../../src/operations/response-budget';
 import { samTeamStatus } from '../../../src/operations/team-operations';
 import type { OperationContext } from '../../../src/operations/types';
 import { getConnectorReadLimits } from '../../../src/services/connector-read-settings';
@@ -324,6 +325,70 @@ describe('sam_team_status', () => {
     });
     expect(byChannel.tasks.map((row) => row.taskId).sort()).toEqual(['child', 'root']);
     expect(byChannel.tasks.every((row) => row.relation !== 'root')).toBe(true);
+  });
+
+  describe('response size', () => {
+    /** Subtasks of root with agent text far longer than one response can carry for all of them. */
+    function insertWordyTeam(count: number): void {
+      for (let index = 0; index < count; index += 1) {
+        insertTask(
+          task(`wordy-${String(index).padStart(2, '0')}`, {
+            parent_task_id: 'root',
+            // Multi-byte text: the budget is in bytes, not characters.
+            output_summary: 'Résumé ✓ '.repeat(250),
+            completion_evidence: 'Évidence ✓ '.repeat(250),
+            updated_at: `2026-10-25T07:${String(index).padStart(2, '0')}:00.000Z`,
+          })
+        );
+      }
+    }
+
+    function respond(maxBytes: number): void {
+      (env as unknown as Record<string, unknown>).CONNECTOR_RESPONSE_MAX_BYTES = String(maxBytes);
+    }
+
+    it('shortens agent text first and still lists every task when that is enough', async () => {
+      insertWordyTeam(6);
+      respond(60_000);
+
+      const team = await samTeamStatus.run(ctx(), { projectId: 'p', taskId: 'root' });
+
+      expect(jsonBytes(team)).toBeLessThanOrEqual(resultByteBudget(env));
+      expect(team.agentTextCharsPerField).toBeLessThan(600);
+      expect(team.counts).toMatchObject({ tasks: 11, listed: 11 });
+      expect(team.truncated).toBe(false);
+      expect(team).not.toHaveProperty('omitted');
+      const wordy = team.tasks.find((row) => row.taskId === 'wordy-00')!;
+      expect(wordy.output.summary.text).toContain('sam_task_get');
+    });
+
+    it('lists fewer tasks when even short text does not fit, and says which and why', async () => {
+      insertWordyTeam(30);
+      respond(30_000);
+
+      const team = await samTeamStatus.run(ctx(), { projectId: 'p', taskId: 'root' });
+
+      expect(jsonBytes(team)).toBeLessThanOrEqual(resultByteBudget(env));
+      expect(team.agentTextCharsPerField).toBe(100);
+      // Counts and usage still cover every task read.
+      expect(team.counts.tasks).toBe(35);
+      expect(team.counts.listed).toBe(team.tasks.length);
+      expect(team.tasks.length).toBeGreaterThan(0);
+      expect(team.tasks.length).toBeLessThan(35);
+      // The lowest-ranked tasks go first: the root and its first level stay.
+      expect(team.tasks[0]?.taskId).toBe('root');
+      expect(team.truncated).toBe(true);
+      expect(team.omitted).toContain(`${35 - team.tasks.length} of the tasks read are not listed`);
+      expect(team.omitted).toContain('sam_task_get');
+    });
+
+    it('keeps full agent text for a team that fits', async () => {
+      const team = await samTeamStatus.run(ctx(), { projectId: 'p', taskId: 'root' });
+
+      expect(team.agentTextCharsPerField).toBe(600);
+      expect(team.counts).toMatchObject({ tasks: 5, listed: 5 });
+      expect(team).not.toHaveProperty('omitted');
+    });
   });
 
   it('requires project membership and exactly one scope', async () => {

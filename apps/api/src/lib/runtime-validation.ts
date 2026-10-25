@@ -20,6 +20,31 @@ export class RuntimeValidationError extends Error {
   }
 }
 
+/** Where values failed and what was expected, without the values (stored rows can hold user text). */
+export function contentFreeIssues(issues: readonly v.BaseIssue<unknown>[]): string {
+  return issues
+    .map((issue) => `${v.getDotPath(issue) ?? 'value'}: expected ${issue.expected ?? issue.type}`)
+    .join('; ');
+}
+
+/**
+ * Parse each stored row on its own (rule 50): a row that does not match is left out and passed
+ * to `onSkip` with a content-free reason, so one malformed row cannot fail a list read.
+ */
+export function parseRowsSkippingInvalid<TSchema extends GenericSchema>(
+  schema: TSchema,
+  rows: readonly unknown[] | undefined,
+  onSkip: (reason: string, row: unknown) => void
+): Array<InferOutput<TSchema>> {
+  const parsed: Array<InferOutput<TSchema>> = [];
+  for (const row of rows ?? []) {
+    const result = v.safeParse(schema, row);
+    if (result.success) parsed.push(result.output);
+    else onSkip(contentFreeIssues(result.issues), row);
+  }
+  return parsed;
+}
+
 export function parseWithSchema<TSchema extends GenericSchema>(
   schema: TSchema,
   value: unknown,

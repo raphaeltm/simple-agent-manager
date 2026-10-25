@@ -14,7 +14,9 @@
 import type { PullRequestState } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import { chunk, D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { log } from '../lib/logger';
+import { parseRowsSkippingInvalid } from '../lib/runtime-validation';
 import { listAgentActivityTasks } from '../services/agent-activity';
 import { getConnectorReadLimits } from '../services/connector-read-settings';
 import { listProjectCredentialLimits } from '../services/credential-limit-events/read';
@@ -23,15 +25,14 @@ import { authorizeProjectOperation } from './authorization';
 import { operationLink } from './connector-read-core';
 import { diagnostic } from './operational-projections';
 import { getPullRequestStates, parseProjectPullRequestUrl } from './pull-request-core';
+import { jsonBytes, RESULT_FRAMING_RESERVE_BYTES, resultByteBudget } from './response-budget';
 import { readTeamTasks, type TeamScope, type TeamTaskRow } from './team-lineage';
 import { settle, type Settled, usageSection } from './team-usage';
 import type { OperationContext } from './types';
 import { untrustedTextBlock } from './untrusted-text';
 
-/** Bound on agent-written text per task; the full text stays in sam_task_get. */
-const AGENT_TEXT_MAX = 600;
-/** ProjectData session lookups bind one parameter per task; stay under D1's 100-bind cap. */
-const SESSION_LOOKUP_CHUNK = 90;
+/** Shortest agent text per field a large team is cut to before fewer tasks are listed. */
+const MIN_TEAM_TEXT_CHARS = 100;
 
 const AgentSessionRowSchema = v.object({
   workspaceId: v.string(),
@@ -53,18 +54,14 @@ const ComputeRowSchema = v.object({
 type ComputeRow = v.InferOutput<typeof ComputeRowSchema>;
 
 /** Rows that fail their schema are left out (and logged) rather than failing the section. */
-function parseRows<T>(
-  schema: v.GenericSchema<unknown, T>,
+function parseRows<TSchema extends v.GenericSchema>(
+  schema: TSchema,
   rows: readonly unknown[],
   context: string
-): T[] {
-  const parsed: T[] = [];
-  for (const row of rows) {
-    const result = v.safeParse(schema, row);
-    if (result.success) parsed.push(result.output);
-    else log.warn('connector.team_row_skipped', { context, error: result.issues[0]?.message });
-  }
-  return parsed;
+): Array<v.InferOutput<TSchema>> {
+  return parseRowsSkippingInvalid(schema, rows, (reason) =>
+    log.warn('connector.team_row_skipped', { context, reason })
+  );
 }
 
 function jsonIds(ids: readonly (string | null)[]): string {
@@ -108,12 +105,13 @@ async function readCompute(ctx: OperationContext, workspaceIds: string, now: str
 
 async function readSessions(ctx: OperationContext, projectId: string, taskIds: string[]) {
   const byTask = new Map<string, Record<string, unknown>>();
-  for (let index = 0; index < taskIds.length; index += SESSION_LOOKUP_CHUNK) {
-    const chunk = taskIds.slice(index, index + SESSION_LOOKUP_CHUNK);
+  // The ProjectData lookup binds one parameter per task id and nothing else; Cloudflare's SQL
+  // surfaces (D1 and Durable Object storage alike) reject the statement past that limit.
+  for (const taskChunk of chunk(taskIds, D1_MAX_BOUND_PARAMETERS)) {
     for (const session of await projectDataService.getSessionsByTaskIds(
       ctx.env,
       projectId,
-      chunk
+      taskChunk
     )) {
       const taskId = typeof session.taskId === 'string' ? session.taskId : null;
       if (taskId && !byTask.has(taskId)) byTask.set(taskId, session);
@@ -156,7 +154,11 @@ function providerLimitReset(task: TeamTaskRow) {
     : null;
 }
 
-function sessionAttention(session: Record<string, unknown> | undefined, callerId: string) {
+function sessionAttention(
+  session: Record<string, unknown> | undefined,
+  callerId: string,
+  textChars: number
+) {
   const attention = session?.attention;
   if (!attention || typeof attention !== 'object') return null;
   const record = attention as Record<string, unknown>;
@@ -173,7 +175,7 @@ function sessionAttention(session: Record<string, unknown> | undefined, callerId
           question: untrustedTextBlock({
             kind: 'agent question',
             text: typeof record.reason === 'string' ? record.reason : null,
-            maxLength: AGENT_TEXT_MAX,
+            maxLength: textChars,
             moreWith: 'sam_chat_interactions',
           }),
           options: Array.isArray(record.options) ? record.options : [],
@@ -238,10 +240,11 @@ function projectTeamTask(
   ctx: OperationContext,
   input: { projectId: string; scope: TeamScope },
   task: TeamTaskRow,
-  sources: TaskSources
+  sources: TaskSources,
+  textChars: number
 ) {
   const { session, agent, usage } = sources;
-  const attention = sessionAttention(session, ctx.actor.userId);
+  const attention = sessionAttention(session, ctx.actor.userId, textChars);
   return {
     taskId: task.id,
     title: task.title,
@@ -292,13 +295,13 @@ function projectTeamTask(
       summary: untrustedTextBlock({
         kind: 'agent summary',
         text: task.outputSummary,
-        maxLength: AGENT_TEXT_MAX,
+        maxLength: textChars,
         moreWith: 'sam_task_get',
       }),
       evidence: untrustedTextBlock({
         kind: 'agent evidence',
         text: task.completionEvidence,
-        maxLength: AGENT_TEXT_MAX,
+        maxLength: textChars,
         moreWith: 'sam_task_get',
       }),
       source: 'agent_reported_not_verified',
@@ -319,6 +322,45 @@ function projectTeamTask(
 }
 
 export type TeamTask = ReturnType<typeof projectTeamTask>;
+
+/**
+ * The tasks that fit `budget` bytes. Agent text is shortened first, since sam_task_get returns it
+ * in full; then the lowest-ranked tasks (deepest, least active, least recently updated, as
+ * `team-lineage.ts` orders them) are left out. The caller discloses both.
+ */
+function fitTasks(project: (textChars: number) => TeamTask[], textChars: number, budget: number) {
+  let chars = textChars;
+  let tasks = project(chars);
+  while (jsonBytes(tasks) > budget && chars > MIN_TEAM_TEXT_CHARS) {
+    chars = Math.max(MIN_TEAM_TEXT_CHARS, Math.floor(chars / 2));
+    tasks = project(chars);
+  }
+  // One byte per task for the separating comma, two for the brackets.
+  const sizes = tasks.map((task) => jsonBytes(task) + 1);
+  let total = sizes.reduce((sum, size) => sum + size, 2);
+  let listed = tasks.length;
+  while (listed > 1 && total > budget) {
+    listed -= 1;
+    total -= sizes[listed] ?? 0;
+  }
+  return { tasks: tasks.slice(0, listed), textChars: chars, notListed: tasks.length - listed };
+}
+
+function omittedNote(readCapped: boolean, maxTasks: number, notListed: number): string | null {
+  const notes: string[] = [];
+  if (readCapped)
+    notes.push(`More than ${maxTasks} tasks match, so the least relevant were not read.`);
+  if (notListed > 0) {
+    notes.push(
+      `${notListed} of the tasks read are not listed, to fit the response: the deepest, least active and least recently updated.`
+    );
+  }
+  if (notes.length === 0) return null;
+  notes.push(
+    "Call sam_team_status with a subtask's taskId to read its branch, sam_task_get for one task, or sam_tasks_list to list them."
+  );
+  return notes.join(' ');
+}
 
 export async function teamStatus(
   ctx: OperationContext,
@@ -349,33 +391,34 @@ export async function teamStatus(
     ),
   ]);
   const states = new Map(activity.ok ? activity.value.map((row) => [row.id, row]) : []);
+  const project = (textChars: number) =>
+    team.rows.map((task) =>
+      projectTeamTask(
+        ctx,
+        input,
+        task,
+        {
+          activity: activity.ok
+            ? (states.get(task.id)?.agentActivityState ?? 'unknown')
+            : 'unavailable',
+          session: sessions.ok ? sessions.value.get(task.id) : undefined,
+          agent: agents.ok && task.workspaceId ? agents.value.get(task.workspaceId) : undefined,
+          usage: compute.ok && task.workspaceId ? compute.value.get(task.workspaceId) : undefined,
+          pullRequests: prStates,
+        },
+        textChars
+      )
+    );
 
-  const tasks = team.rows.map((task) =>
-    projectTeamTask(ctx, input, task, {
-      activity: activity.ok
-        ? (states.get(task.id)?.agentActivityState ?? 'unknown')
-        : 'unavailable',
-      session: sessions.ok ? sessions.value.get(task.id) : undefined,
-      agent: agents.ok && task.workspaceId ? agents.value.get(task.workspaceId) : undefined,
-      usage: compute.ok && task.workspaceId ? compute.value.get(task.workspaceId) : undefined,
-      pullRequests: prStates,
-    })
-  );
-
-  return {
+  // Counts and usage cover every task read, including any the listing leaves out.
+  const everyTask = project(limits.teamTextChars);
+  const summary = {
     projectId: input.projectId,
     scope: input.scope,
     rootTaskId: team.rootTaskId,
     observedAt: now.toISOString(),
-    counts: summarize(tasks),
-    tasks,
-    truncated: team.truncated,
-    ...(team.truncated
-      ? {
-          omitted: `More than ${limits.teamMaxTasks} tasks match. Call sam_team_status with a subtask's taskId to read its branch, or list tasks with sam_tasks_list.`,
-        }
-      : {}),
-    usage: await usageSection(ctx, tasks, compute.ok, quotas),
+    counts: summarize(everyTask),
+    usage: await usageSection(ctx, everyTask, compute.ok, quotas),
     deployments: {
       deployedCommit: 'not_recorded',
       note: 'SAM does not record which commit a deployment runs; check the deploy workflow.',
@@ -387,6 +430,27 @@ export async function teamStatus(
       pullRequests: prStates.ok ? 'github_webhook_last_stored' : 'unavailable',
       agentText: 'agent_reported_not_verified',
     },
+  };
+  const fitted = fitTasks(
+    project,
+    limits.teamTextChars,
+    resultByteBudget(ctx.env) - jsonBytes(summary) - RESULT_FRAMING_RESERVE_BYTES
+  );
+  const omitted = omittedNote(team.truncated, limits.teamMaxTasks, fitted.notListed);
+
+  return {
+    projectId: summary.projectId,
+    scope: summary.scope,
+    rootTaskId: summary.rootTaskId,
+    observedAt: summary.observedAt,
+    counts: { ...summary.counts, listed: fitted.tasks.length },
+    tasks: fitted.tasks,
+    agentTextCharsPerField: fitted.textChars,
+    truncated: team.truncated || fitted.notListed > 0,
+    ...(omitted ? { omitted } : {}),
+    usage: summary.usage,
+    deployments: summary.deployments,
+    sources: summary.sources,
   };
 }
 

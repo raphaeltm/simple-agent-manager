@@ -11,6 +11,7 @@
 import {
   AGENT_MESSAGE_CHANNEL_PREFIX,
   DEFAULT_PROJECT_EVENT_LIST_MAX,
+  DIRECT_CHANNEL_RANGE_END,
   type ProjectEventChannel,
   type ProjectEventSubscriptionState,
   type ProjectSchedule,
@@ -230,13 +231,6 @@ export function subscriptionDeliveriesQueryOptions(
     retry: false,
   });
 }
-
-/**
- * First name after every `agent-dm.<hex>` channel. SAM's pair channels use lowercase hex, so
- * all of them sort below this name; starting the catalog read here skips the whole range in
- * one request instead of paging through up to a thousand private relays.
- */
-export const DIRECT_CHANNEL_RANGE_END = `${AGENT_MESSAGE_CHANNEL_PREFIX}g`;
 
 export const isDirectChannel = (name: string) => name.startsWith(AGENT_MESSAGE_CHANNEL_PREFIX);
 

@@ -16,48 +16,18 @@ import type {
   LogicalEntry,
   LogicalMessage,
 } from '../durable-objects/project-data/logical-transcript';
-import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { parsePositiveInt } from '../lib/route-helpers';
-import {
-  DEFAULT_CONNECTOR_RESPONSE_MAX_BYTES,
-  MIN_CONNECTOR_RESPONSE_MAX_BYTES,
-} from '../services/connector-limits';
 import { getConnectorReadLimits } from '../services/connector-read-settings';
 import * as projectDataService from '../services/project-data';
 import { OperationError } from './errors';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
+import {
+  fitUtf8,
+  jsonBytes,
+  RESULT_FRAMING_RESERVE_BYTES,
+  resultByteBudget,
+} from './response-budget';
 import type { OperationContext } from './types';
-
-/** Share of the Connector response cap one transcript result may use (the envelope doubles it). */
-const RESULT_SHARE_OF_RESPONSE_CAP = 0.4;
-
-const encoder = new TextEncoder();
-
-function utf8Bytes(value: unknown): number {
-  return encoder.encode(JSON.stringify(value)).length;
-}
-
-function resultByteBudget(env: Env): number {
-  const cap = Math.max(
-    MIN_CONNECTOR_RESPONSE_MAX_BYTES,
-    parsePositiveInt(env.CONNECTOR_RESPONSE_MAX_BYTES, DEFAULT_CONNECTOR_RESPONSE_MAX_BYTES)
-  );
-  return Math.floor(cap * RESULT_SHARE_OF_RESPONSE_CAP);
-}
-
-/** The longest prefix of `text` whose UTF-8 encoding fits `maxBytes`. */
-function fitUtf8(text: string, maxBytes: number): string {
-  if (encoder.encode(text).length <= maxBytes) return text;
-  let low = 0;
-  let high = text.length;
-  while (low < high) {
-    const middle = Math.ceil((low + high) / 2);
-    if (encoder.encode(text.slice(0, middle)).length <= maxBytes) low = middle;
-    else high = middle - 1;
-  }
-  return text.slice(0, low);
-}
 
 function plural(count: number, word: string): string {
   return `${count} ${word}${count === 1 ? '' : 's'}`;
@@ -191,11 +161,11 @@ export async function readChatMessages(ctx: OperationContext, input: ChatMessage
         message ? [projectMessage(message)] : []
       )
     : [];
-  const reserve = 2_000 + utf8Bytes(latestMessages);
+  const reserve = RESULT_FRAMING_RESERVE_BYTES + jsonBytes(latestMessages);
   let entries = page.entries;
   let nextCursor = page.nextCursor;
   let trimmed = false;
-  while (entries.length > 1 && utf8Bytes(entries.map(projectEntry)) + reserve > budget) {
+  while (entries.length > 1 && jsonBytes(entries.map(projectEntry)) + reserve > budget) {
     entries = entries.slice(0, -1);
     nextCursor = entries[entries.length - 1]?.start ?? nextCursor;
     trimmed = true;
@@ -283,7 +253,11 @@ export async function readChatMessage(
   const budget = resultByteBudget(ctx.env);
   return {
     ...(result.message
-      ? { message: projectMessage(fitMessage(result.message, budget - 2_000)) }
+      ? {
+          message: projectMessage(
+            fitMessage(result.message, budget - RESULT_FRAMING_RESERVE_BYTES)
+          ),
+        }
       : {}),
     ...(result.activity ? { activity: projectActivity(result.activity) } : {}),
     complete: (result.message ?? result.activity)?.complete ?? false,

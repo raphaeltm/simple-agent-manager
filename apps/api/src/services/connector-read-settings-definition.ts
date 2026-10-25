@@ -62,6 +62,13 @@ export const CONNECTOR_READ_SETTINGS = [
     range: { min: 1, max: 10 },
   },
   {
+    name: 'connector.teamTextChars',
+    defaultValue: 600,
+    description:
+      'Characters of each agent summary, evidence note and question per task in sam_team_status. A team too large for one response gets shorter text first, then lists fewer tasks.',
+    range: { min: 100, max: 4_000 },
+  },
+  {
     name: 'connector.channelHistoryPageSize',
     defaultValue: 20,
     description: 'Channel messages one sam_channel_history page returns by default.',
@@ -76,6 +83,3 @@ export const CONNECTOR_READ_SETTINGS = [
 ] as const;
 
 export type ConnectorReadSettingName = (typeof CONNECTOR_READ_SETTINGS)[number]['name'];
-
-type LimitKey<N extends string> = N extends `connector.${infer K}` ? K : never;
-export type ConnectorReadLimits = Record<LimitKey<ConnectorReadSettingName>, number>;

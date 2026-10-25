@@ -22,27 +22,14 @@
  * `maxRows` rows and half of the RPC size budget the anchored row leaves, and reports
  * whether more exists.
  */
-import {
-  MERGED_MESSAGE_ROLES,
-  type MessageCursor,
-  type MessagePosition,
-} from '@simple-agent-manager/shared';
+import { type MessageCursor, type MessagePosition } from '@simple-agent-manager/shared';
 
 import type { ProjectDataArchiveExactReadInput } from '../../project-data-archive/contract';
 import * as archiveSharding from './archive-sharding';
 import * as compactArchive from './compact-archive';
+import { RUN_ROLES, SCAN_PAGE_ROWS } from './logical-transcript-model';
 import * as messages from './messages';
 import type { Env } from './types';
-
-/** Rows per page read inside one side's scan; the side's own `maxRows` caps the total. */
-const SCAN_PAGE_ROWS = 250;
-
-/**
- * Roles whose consecutive rows display as one item: an agent reply or thought merged from its
- * streamed chunks (`MERGED_MESSAGE_ROLES`, which must stay the chat's text-merge rule), and a
- * run of tool rows, which the chat shows as one tool-call group.
- */
-const RUN_ROLES: ReadonlySet<string> = new Set([...MERGED_MESSAGE_ROLES, 'tool']);
 
 export interface MessageContextRequest {
   messageId: string;

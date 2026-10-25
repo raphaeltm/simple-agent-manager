@@ -10,6 +10,7 @@
  */
 import {
   AGENT_MESSAGE_CHANNEL_PREFIX,
+  DIRECT_CHANNEL_RANGE_END,
   isJsonRecord,
   PROJECT_EVENT_CHANNEL_SOURCE,
   PROJECT_EVENT_CHANNEL_TYPE,
@@ -48,13 +49,6 @@ export const CHANNEL_SEMANTICS =
 export const ACKNOWLEDGMENT_NOTE =
   'SAM records no acknowledgments for channel messages. Following a channel or being woken by ' +
   'it is not agreement; check the agent’s own chat for its response.';
-
-/**
- * First name after every `agent-dm.<hex>` pair channel. Only SAM creates names with that prefix
- * (generic publish and follow reject it), and they are lowercase hex, so all of them sort below
- * this name. The web channel catalog skips the same range (`DIRECT_CHANNEL_RANGE_END`).
- */
-export const DIRECT_CHANNEL_RANGE_END = `${AGENT_MESSAGE_CHANNEL_PREFIX}g`;
 
 /** Inside the hidden range, a catalog page could hold nothing but hidden channels. */
 export function skipsDirectRange(name: string | null | undefined): boolean {

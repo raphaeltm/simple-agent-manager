@@ -4,8 +4,8 @@
  *
  * The VM agent stores an agent reply (and a thought) as one row per streamed chunk, and each tool
  * call as several rows (the call and its status updates). Run boundaries follow the chat's own
- * rule (`MERGED_MESSAGE_ROLES` plus tool runs, as in `message-context.ts`): consecutive rows of one
- * of those roles are one message; any other row is a message on its own.
+ * rule (`RUN_ROLES` below, shared with `message-context.ts`): consecutive rows of one of those roles
+ * are one message; any other row is a message on its own.
  *
  * Tool runs are only ever summarized from tool metadata (call ids, kinds, statuses, tool names, and
  * titles when the caller asked for them). Tool output and command text never leave this module.
@@ -16,6 +16,15 @@ import { MERGED_MESSAGE_ROLES, type MessagePosition } from '@simple-agent-manage
 const ACTIVITY_LIST_CAP = 8;
 const ACTIVITY_TEXT_MAX = 120;
 
+/** Rows per page read inside a bounded transcript scan; each reader's own row budget caps the total. */
+export const SCAN_PAGE_ROWS = 250;
+
+/**
+ * Roles whose consecutive rows display as one item: an agent reply or thought merged from its
+ * streamed chunks (`MERGED_MESSAGE_ROLES`, which must stay the chat's text-merge rule), and a
+ * run of tool rows, which the chat shows as one tool-call group. Every whole-message reader
+ * (`message-context.ts`, `logical-transcript.ts`, `logical-message.ts`) uses this one rule.
+ */
 export const RUN_ROLES: ReadonlySet<string> = new Set([...MERGED_MESSAGE_ROLES, 'tool']);
 
 export interface LogicalActivity {

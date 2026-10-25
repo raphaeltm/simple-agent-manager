@@ -21,6 +21,7 @@ import {
   type Run,
   RUN_ROLES,
   runContent,
+  SCAN_PAGE_ROWS,
 } from './logical-transcript-model';
 import {
   type MessageContextReader,
@@ -28,9 +29,6 @@ import {
   targetTranscriptReader,
 } from './message-context';
 import type { Env } from './types';
-
-/** Rows per page read inside one side's walk; `maxRows` caps each side. */
-const SCAN_PAGE_ROWS = 250;
 
 export interface LogicalMessageRequest {
   /** Any stored row of the message. */
