@@ -152,6 +152,11 @@ function compactChunkQuery(sessionId: string, cursor: number | null, filter: Com
   return { query, params };
 }
 
+/** When an archive read that may span several pages must finish all of its R2 reads. */
+export function compactArchiveReadDeadline(env: Env): number {
+  return Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
+}
+
 export async function* compactRawChunks(
   sql: SqlStorage,
   env: Env,
@@ -163,8 +168,7 @@ export async function* compactRawChunks(
     .toArray()[0];
   if (!target) throw new Error('Compact archive target missing');
   const perChunkMs = filter.perChunkTimeoutMs;
-  const sharedDeadline =
-    filter.deadline ?? Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
+  const sharedDeadline = filter.deadline ?? compactArchiveReadDeadline(env);
   let cursor: number | null = filter.startAfterOrdinal ?? null;
   for (;;) {
     const { query, params } = compactChunkQuery(sessionId, cursor, filter);
