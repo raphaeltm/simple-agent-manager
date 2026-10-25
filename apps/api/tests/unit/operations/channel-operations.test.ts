@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-
 import {
   PROJECT_EVENT_CHANNEL_SOURCE,
   PROJECT_EVENT_CHANNEL_TYPE,
@@ -46,7 +44,7 @@ import {
 } from '../../../src/operations/channel-operations';
 import { OperationError } from '../../../src/operations/errors';
 import type { OperationContext } from '../../../src/operations/types';
-import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { applySqliteMigration, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { createSqlStorage } from '../durable-objects/sql-storage-test-utils';
 
 /**
@@ -256,9 +254,7 @@ describe('Connector channel operations', () => {
     ]);
     for (const name of ['0189_cli_operation_receipts.sql', '0191_connector_execution.sql']) {
       // Production migrations as behavioral fixtures for receipts, budgets and audit.
-      sqlite.exec(
-        readFileSync(new URL(`../../../src/db/migrations/${name}`, import.meta.url), 'utf8')
-      );
+      applySqliteMigration(sqlite, new URL(`../../../src/db/migrations/${name}`, import.meta.url));
     }
     for (const id of [OWNER, COLLEAGUE, VIEWER, OUTSIDER])
       sqlite.prepare('INSERT INTO users(id,name,email) VALUES (?,?,?)').run(id, id, `${id}@x.test`);

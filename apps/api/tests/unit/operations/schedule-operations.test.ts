@@ -4,8 +4,6 @@
  * Membership, recurring schedules (cron triggers), receipts and audit run against a real SQLite
  * engine, so project predicates are evaluated rather than assumed.
  */
-import { readFileSync } from 'node:fs';
-
 import type { ProjectSchedule, ProjectScheduleMutationResult } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,7 +26,7 @@ import {
 } from '../../../src/operations/schedule-operations';
 import type { OperationContext } from '../../../src/operations/types';
 import { CONNECTOR_DEFAULTS } from '../../../src/services/connector-settings-definition';
-import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { applySqliteMigration, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
@@ -155,9 +153,7 @@ describe('connector schedule operations', () => {
     ]);
     for (const name of ['0189_cli_operation_receipts.sql', '0191_connector_execution.sql']) {
       // Production migrations as fixtures, so receipts and budgets run their real SQL.
-      sqlite.exec(
-        readFileSync(new URL(`../../../src/db/migrations/${name}`, import.meta.url), 'utf8')
-      );
+      applySqliteMigration(sqlite, new URL(`../../../src/db/migrations/${name}`, import.meta.url));
     }
     sqlite.exec(`INSERT INTO users (id, name, email) VALUES ('owner','Owner','o@example.com'),
         ('maint','Maintainer','m@example.com'), ('viewer','Viewer','v@example.com'),

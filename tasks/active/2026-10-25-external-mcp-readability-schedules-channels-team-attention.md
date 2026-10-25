@@ -83,48 +83,50 @@ agents from ChatGPT/Claude. Observed friction (Oct 24 hackathon session):
       `(project_id, coordination_channel)`; schema.ts mirrors them
 - [x] Admin settings `connector.transcript*`, `connector.search*`, `connector.team*`,
       `connector.channel*` (`services/connector-read-settings.ts`)
-- [ ] Registry wiring, `CONNECTOR_INSTRUCTIONS`, catalog tests, receipts (`sam_operation_get`)
+- [x] Registry wiring, `CONNECTOR_INSTRUCTIONS`, catalog tests, receipts (`sam_operation_get`), audit fields, start budget for scheduled starts
 
 ### 1. Transcripts
 - [x] DO: `logical-transcript-model.ts`, `logical-transcript.ts`, `logical-message.ts`; reader
       factories exported from `message-context.ts`; RPC + service wrappers
-- [ ] `sam_chat_read` default `unit: 'messages'` (logical), `unit: 'rows'` keeps legacy paging;
+- [x] `sam_chat_read` default `unit: 'messages'` (logical), `unit: 'rows'` keeps legacy paging;
       `latest` user/assistant on first page; coverage disclosure; workspace-agent path unchanged
-- [ ] `sam_chat_message_get` (full text by offset; thinking only on request; tool runs summarized)
-- [ ] `sam_chats_search` excerpts from whole messages for the top results
-- [ ] `getLatestAssistantMessageForTask` uses the logical reader (complete latest reply)
-- [ ] Tests: DO reader against real SQLite (page boundaries, ties, role filter, budgets, legacy
-      cursor, archive target), operation tests, no duplicate/missing chunks across pages
+- [x] `sam_chat_message_get` (full text by offset; thinking only on request; tool runs summarized)
+- [x] `sam_chats_search` excerpts from whole messages for the top results
+- [x] `getLatestAssistantMessageForTask` uses the logical reader (complete latest reply)
+- [x] Tests: DO reader against real SQLite (page boundaries, ties, role filter, budgets, legacy
+      cursor), operation tests incl. byte-budget trimming, no duplicate/missing chunks across pages
+      (archive-target reader reuses the existing comment-context reader factory; not separately tested)
 
 ### 2. Schedules
-- [ ] `sam_schedules_list`, `sam_schedule_get`, `sam_schedule_create`, `sam_schedule_update`,
+- [x] `sam_schedules_list`, `sam_schedule_get`, `sam_schedule_create`, `sam_schedule_update`,
       `sam_schedule_cancel` over the existing services; recurring via cron triggers
-- [ ] Timezone-local input → UTC with DST gap/overlap handling; tests for both transitions
-- [ ] Idempotent create (receipt + DO idempotency key), duplicate tests; start budget applies
-- [ ] Extract trigger status update into a shared service used by REST PATCH and the operation
-- [ ] Distinguish accepted / admitted / execution receipt / task outcome / notification
+- [x] Timezone-local input → UTC with DST gap/overlap handling; tests for both transitions
+- [x] Idempotent create (receipt + DO idempotency key), duplicate tests; start budget applies
+- [x] Extract trigger status update into a shared service used by REST PATCH and the operation
+      (also fixed: PATCH resuming with a new cron used the old cron for the next fire)
+- [x] Distinguish accepted / admitted / execution receipt / task outcome / notification
 
 ### 3. Channels
-- [ ] `sam_channels_list`, `sam_channel_history`, `sam_channel_get` (roster + subscribers),
+- [x] `sam_channels_list`, `sam_channel_history`, `sam_channel_get` (roster + subscribers),
       `sam_channel_subscription_cancel` (caller-writable owner chats only)
-- [ ] Human channel post: requires a new human actor for channel events (new trust boundary) —
-      report for decision per policy 1b930820(c) instead of building silently
+- [x] Human channel post: requires a new human actor for channel events (new trust boundary) —
+      reported for decision per policy 1b930820(c) instead of building silently (Idea 01M5SR2HB56YT0VFY6BB6TCNCK; other follow-ups in Idea 01M5SR2Q7PH4FEK8YDYDQDJ10M)
 
 ### 4. Team
-- [ ] `sam_team_status` (root task / chat / channel scope): bounded lineage, state + freshness,
+- [x] `sam_team_status` (root task / chat / channel scope): bounded lineage, state + freshness,
       blockers/attention, PR/CI, evidence (agent-claimed vs control-plane), measured usage with
       explicit unknowns, cap disclosure
 
 ### 5. Attention
-- [ ] Shared pending-attention projection; `sam_chat_read`, `sam_chat_interactions`,
+- [x] Shared pending-attention projection; `sam_chat_read`, `sam_chat_interactions`,
       `sam_work_changes` include it (writer-gated)
-- [ ] Inbox: sessions with attention selected before the recency cap; notifications carry
-      `attentionMarkerId`/options/category
-- [ ] DO: marker create/resolve refresh the D1 summary; summary prefers answerable questions
-- [ ] Notification dedup keeps metadata of the newest marker
+- [x] Inbox: sessions with attention selected before the recency cap (disjoint lists); notifications
+      carry `attentionMarkerId`/options/category
+- [x] DO: marker create/resolve refresh the D1 summary; summary prefers answerable questions
+- [x] Notification dedup keeps metadata of the newest marker
 
 ### Docs
-- [ ] `apps/www/.../guides/sam-connector.md`, `guides/admin-settings.md`,
+- [x] `apps/www/.../guides/sam-connector.md`, `guides/admin-settings.md`, `reference/api.md`,
       `.claude/skills/api-reference/SKILL.md` (connector section)
 
 ## Acceptance criteria
