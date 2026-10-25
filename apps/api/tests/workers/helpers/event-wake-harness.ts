@@ -104,6 +104,35 @@ export async function acceptWake(f: WakeFixture, batchId: string, now: number): 
 }
 
 /**
+ * Apply the busy-turn outcome a wake gets on its first attempt when the runtime is mid-prompt
+ * (for an interrupt-class wake, the attempt that stops the turn), through the same checkpoint.
+ */
+export async function retryWakeBehindBusyTurn(
+  f: WakeFixture,
+  batchId: string,
+  now: number
+): Promise<void> {
+  await runInDurableObject(f.stub, (_instance, state) => {
+    const message = parseMailboxMessageRow(
+      state.storage.sql.exec('SELECT * FROM session_inbox WHERE id = ?', batchId).toArray()[0]
+    );
+    advanceProjectEventPromptAttemptCheckpoint(
+      state.storage.sql,
+      f.projectId,
+      { message, attemptId: `attempt:${batchId}:busy`, mode: 'submit' },
+      {
+        kind: 'retry',
+        reason: 'busy',
+        error: 'Target VM is currently processing a prompt',
+        runtimeIdentity: 'runtime:occupancy',
+        capabilities: null,
+      },
+      now
+    );
+  });
+}
+
+/**
  * The MCP send path needs event wakes and durable delivery on. Once setup is done, switch both
  * off for the ProjectData object (Miniflare shares this env with the test worker) so background
  * alarms cannot materialize wakes or deliver them to the seeded, unreachable VM mid-test. The

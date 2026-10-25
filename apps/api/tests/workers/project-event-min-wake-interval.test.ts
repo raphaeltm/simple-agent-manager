@@ -26,6 +26,7 @@ import {
   fireWakeAlarmsUntilMaterialized,
   materialize,
   onlyWake,
+  retryWakeBehindBusyTurn,
   wakeBatches,
   wakeDueAt,
   type WakeFixture,
@@ -100,6 +101,15 @@ const storedInterval = async (f: WakeFixture, subscriptionId: string) =>
       subscriptionId
     )
   )[0]?.min_wake_interval_ms;
+
+const storedCooldown = async (f: WakeFixture, subscriptionId: string) =>
+  (
+    await sqlRows<{ delivery_cooldown_until: number | null }>(
+      f.stub,
+      'SELECT delivery_cooldown_until FROM project_event_subscriptions WHERE id = ?',
+      subscriptionId
+    )
+  )[0]?.delivery_cooldown_until;
 
 const subscriptionCount = async (f: WakeFixture) =>
   (
@@ -256,6 +266,131 @@ describe('agent-chosen wake interval', () => {
         expect(await fireWakeAlarmsUntilMaterialized(f, queuedAt + 6_000)).toEqual([
           queuedAt + PLATFORM_COOLDOWN_MS,
         ]);
+      });
+    });
+  });
+
+  it('applies the interval to runtime_interrupt wakes delivered by stopping a busy turn', async () => {
+    await withAgentMessageChannels(async () => {
+      const f = await twoAgentProject();
+      const created = okBody<CreateReply>(
+        await subscribeToHeadCommit(f, {
+          requestedDelivery: 'runtime_interrupt',
+          minWakeIntervalSeconds: 300,
+        })
+      );
+      const subscriptionId = created.subscription.id;
+
+      await withQuietAlarms(f, async () => {
+        await admitCheckRunCompleted(f, 'unit');
+        const t0 = Date.now();
+        expect(await materialize(f, t0)).toMatchObject({ status: 'materialized' });
+        const wake = await onlyWake(f, f.a.sessionId);
+        const inbox = await sqlRows<{ message_class: string }>(
+          f.stub,
+          'SELECT message_class FROM session_inbox WHERE id = ?',
+          wake.id
+        );
+        expect(inbox).toEqual([{ message_class: 'interrupt' }]);
+
+        // Stop-and-deliver: the first attempt stops the busy turn and is retried. A retry is
+        // not a delivery, so only the queue-time interval holds the subscription.
+        await retryWakeBehindBusyTurn(f, wake.id, t0 + 1_000);
+        expect(await storedCooldown(f, subscriptionId)).toBe(t0 + 300_000);
+        expect(await onlyWake(f, f.a.sessionId)).toMatchObject({ state: 'pending' });
+
+        // The resubmitted wake is the agent's next prompt; the interval counts from then.
+        await acceptWake(f, wake.id, t0 + 15_000);
+        await admitCheckRunCompleted(f, 'e2e');
+        expect(await fireWakeAlarmsUntilMaterialized(f, t0 + 16_000)).toEqual([t0 + 315_000]);
+      });
+    });
+  });
+
+  it('keeps each subscription on its own interval when several wake the same chat', async () => {
+    await withAgentMessageChannels(async () => {
+      const f = await channelFixture();
+      const channel = okBody<FollowReply>(await follow(f, { minWakeIntervalSeconds: 600 }));
+      const ci = okBody<CreateReply>(
+        await subscribeToHeadCommit(f, { minWakeIntervalSeconds: 120 })
+      );
+      const channelId = channel.result.subscription.id;
+      const ciId = ci.subscription.id;
+
+      await withQuietAlarms(f, async () => {
+        await publish(f, 'first');
+        const t0 = Date.now();
+        expect(await materialize(f, t0)).toMatchObject({ status: 'materialized' });
+        await acceptWake(f, (await onlyWake(f, f.a.sessionId)).id, t0 + 2_000);
+
+        // CI finishes: the channel follow's ten minutes do not hold the CI subscription back.
+        await admitCheckRunCompleted(f, 'unit');
+        expect(await fireWakeAlarmsUntilMaterialized(f, t0 + 3_000)).toEqual([t0 + 4_000]);
+        const ciWake = (await wakeBatches(f, f.a.sessionId))[1];
+        expect(ciWake).toMatchObject({ subscription_id: ciId, state: 'pending' });
+        await acceptWake(f, ciWake!.id, t0 + 6_000);
+        expect(await storedCooldown(f, channelId)).toBe(t0 + 602_000);
+        expect(await storedCooldown(f, ciId)).toBe(t0 + 126_000);
+
+        // More of both arrive. Each wakes on its own schedule: CI after two minutes, the
+        // channel only when its own ten minutes are up.
+        await publish(f, 'second');
+        await admitCheckRunCompleted(f, 'e2e');
+        expect(await fireWakeAlarmsUntilMaterialized(f, t0 + 7_000)).toEqual([t0 + 126_000]);
+        const secondCiWake = (await wakeBatches(f, f.a.sessionId))[2];
+        expect(secondCiWake).toMatchObject({ subscription_id: ciId, event_count: 1 });
+        await acceptWake(f, secondCiWake!.id, t0 + 127_000);
+        expect(await fireWakeAlarmsUntilMaterialized(f, t0 + 128_000)).toEqual([t0 + 602_000]);
+        expect((await wakeBatches(f, f.a.sessionId))[3]).toMatchObject({
+          subscription_id: channelId,
+          event_count: 1,
+        });
+      });
+    });
+  });
+
+  it('stops waking once an interval subscription is cancelled mid-interval', async () => {
+    await withAgentMessageChannels(async () => {
+      const f = await channelFixture();
+      const followed = okBody<FollowReply>(await follow(f, { minWakeIntervalSeconds: 600 }));
+      const subscriptionId = followed.result.subscription.id;
+
+      await withQuietAlarms(f, async () => {
+        await publish(f, 'first');
+        const t0 = Date.now();
+        expect(await materialize(f, t0)).toMatchObject({ status: 'materialized' });
+        await acceptWake(f, (await onlyWake(f, f.a.sessionId)).id, t0 + 1_000);
+        await publish(f, 'second');
+        // Liveness: the next wake is armed for the end of the interval.
+        expect(await wakeDueAt(f, t0 + 2_000)).toBe(t0 + 601_000);
+
+        okBody(await f.a.tool('cancel_project_event_subscription', { subscriptionId }));
+        expect(await wakeDueAt(f, t0 + 2_000)).toBeNull();
+        expect(await materialize(f, t0 + 601_000)).toMatchObject({ status: 'no_due_work' });
+        expect(await wakeBatches(f, f.a.sessionId)).toHaveLength(1);
+      });
+    });
+  });
+
+  it('spends one alarm tick and no wake when the subscription expires inside its interval', async () => {
+    await withAgentMessageChannels(async () => {
+      const f = await channelFixture();
+      okBody<FollowReply>(
+        await follow(f, { minWakeIntervalSeconds: 600, expiresAt: Date.now() + 300_000 })
+      );
+
+      await withQuietAlarms(f, async () => {
+        await publish(f, 'first');
+        const t0 = Date.now();
+        expect(await materialize(f, t0)).toMatchObject({ status: 'materialized' });
+        await acceptWake(f, (await onlyWake(f, f.a.sessionId)).id, t0 + 1_000);
+        await publish(f, 'second');
+
+        // The interval outlasts the subscription: the single alarm at its end finds the
+        // subscription expired, delivers nothing and does not re-arm.
+        expect(await fireWakeAlarmsUntilMaterialized(f, t0 + 2_000)).toEqual([t0 + 601_000]);
+        expect(await wakeDueAt(f, t0 + 601_000)).toBeNull();
+        expect(await wakeBatches(f, f.a.sessionId)).toHaveLength(1);
       });
     });
   });
