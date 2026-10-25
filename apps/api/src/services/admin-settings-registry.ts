@@ -16,6 +16,7 @@ import {
   agentModelSettingDefinitions,
   type AgentModelSettingKey,
 } from './agent-models/settings-definition';
+import { CONNECTOR_READ_SETTINGS, type ConnectorReadSettingName } from './connector-read-settings';
 import {
   CONNECTOR_DEFAULTS,
   type ConnectorSettingKey,
@@ -30,6 +31,7 @@ export type AdminSettingName =
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
   | `aiModels.${AgentModelSettingKey}`
   | `connector.${ConnectorSettingKey}`
+  | ConnectorReadSettingName
   | AgentEmailSettingName
   | 'chat.profileUsageWindowDays'
   | 'collaboration.ideaUpdateBodyMaxLength'
@@ -538,6 +540,15 @@ const definitions: AdminSettingDefinition[] = [
     'Collaboration',
     'Most stored rows read before and after a commented message for that view. Agent replies are stored as many streamed rows.',
     { min: 50, max: 5_000 }
+  ),
+  ...CONNECTOR_READ_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Connector',
+      setting.description,
+      setting.range
+    )
   ),
   ...AGENT_EMAIL_SETTINGS.map((setting) =>
     integerDefinition(

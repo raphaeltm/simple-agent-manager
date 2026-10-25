@@ -67,6 +67,8 @@ import * as libraryFileComments from './library-file-comments';
 import * as links from './links';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
+import * as logicalMessage from './logical-message';
+import * as logicalTranscript from './logical-transcript';
 import * as messageContext from './message-context';
 import * as messagePersistence from './message-persistence';
 import * as messages from './messages';
@@ -1127,6 +1129,22 @@ export class ProjectData extends DurableObject<Env> {
     return messageContext.readSourceMessageContext(this.sql, this.env, input, request);
   }
 
+  /** A transcript page counted in whole messages (`logical-transcript.ts`). */
+  archiveSourceGetLogicalTranscript(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    request: logicalTranscript.LogicalTranscriptRequest
+  ): Promise<logicalTranscript.LogicalTranscriptResult> {
+    return logicalTranscript.readSourceLogicalTranscript(this.sql, this.env, input, request);
+  }
+
+  /** One whole message by any of its stored rows (`logical-message.ts`). */
+  archiveSourceGetLogicalMessage(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    request: logicalMessage.LogicalMessageRequest
+  ): Promise<logicalMessage.LogicalMessageResult> {
+    return logicalMessage.readSourceLogicalMessage(this.sql, this.env, input, request);
+  }
+
   archiveSourceGetMessageCount(
     input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
     roles?: string[]
@@ -1293,6 +1311,22 @@ export class ProjectData extends DurableObject<Env> {
     request: messageContext.MessageContextRequest
   ): Promise<messageContext.MessageContextResult> {
     return messageContext.readTargetMessageContext(this.sql, this.env, input, request);
+  }
+
+  /** A whole-message transcript page from an archive shard's sealed copy. */
+  archiveTargetGetLogicalTranscript(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    request: logicalTranscript.LogicalTranscriptRequest
+  ): Promise<logicalTranscript.LogicalTranscriptResult> {
+    return logicalTranscript.readTargetLogicalTranscript(this.sql, this.env, input, request);
+  }
+
+  /** One whole message from an archive shard's sealed copy. */
+  archiveTargetGetLogicalMessage(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    request: logicalMessage.LogicalMessageRequest
+  ): Promise<logicalMessage.LogicalMessageResult> {
+    return logicalMessage.readTargetLogicalMessage(this.sql, this.env, input, request);
   }
 
   archiveTargetGetMessageCount(
@@ -2438,6 +2472,9 @@ export class ProjectData extends DurableObject<Env> {
     }
     const result = attention.createAttentionMarker(this.sql, opts);
     await this.recalculateAlarm();
+    // The D1 session index (Connector inbox, chat list badges) copies the attention summary; a
+    // new question must reach it without waiting for the session's next message.
+    this.scheduleSummarySync();
     this.broadcastEvent(
       'attention.created',
       {
@@ -2483,6 +2520,7 @@ export class ProjectData extends DurableObject<Env> {
     const count = attention.completeAttentionAnswer(this.sql, sessionId, markerId, answer);
     if (count > 0) {
       await this.recalculateAlarm();
+      this.scheduleSummarySync();
       this.broadcastEvent(
         'attention.resolved',
         { sessionId, markerId, count, reason: 'structured_answer' },
@@ -2500,6 +2538,7 @@ export class ProjectData extends DurableObject<Env> {
     const count = attention.resolveAttentionMarkerById(this.sql, markerId, actorType, reason);
     if (count > 0) {
       await this.recalculateAlarm();
+      this.scheduleSummarySync();
       this.broadcastEvent('attention.resolved', { markerId, count, reason });
     }
     return count;
@@ -2520,6 +2559,7 @@ export class ProjectData extends DurableObject<Env> {
     );
     if (count > 0) {
       await this.recalculateAlarm();
+      this.scheduleSummarySync();
       this.broadcastEvent('attention.resolved', { sessionId, count, reason }, sessionId);
     }
     return count;

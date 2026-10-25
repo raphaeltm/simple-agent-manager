@@ -1,12 +1,18 @@
-import { formatMessageCursor, parseMessageCursor } from '@simple-agent-manager/shared';
+import {
+  formatMessageCursor,
+  type MessageCursor,
+  parseMessageCursor,
+} from '@simple-agent-manager/shared';
 
-import { VALID_MESSAGE_ROLES, validateRoles } from '../lib/message-roles';
+import { type MessageRole, VALID_MESSAGE_ROLES, validateRoles } from '../lib/message-roles';
 import { AppError } from '../middleware/error';
 import { connectorPendingInteractions } from '../services/connector-agent-answer';
 import { groupTokensIntoMessages } from '../services/message-groups';
 import * as projectDataService from '../services/project-data';
 import { describeRootSearchCoverage } from '../services/project-data-search-coverage';
 import { requireSessionWriter } from '../services/session-access';
+import { pendingAttention } from './attention-core';
+import { readChatMessages, searchExcerpts } from './chat-transcript';
 import { operationLink } from './connector-read-core';
 import { OperationError } from './errors';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
@@ -14,8 +20,8 @@ import type { OperationContext } from './types';
 
 export { groupTokensIntoMessages, type TokenRow } from '../services/message-groups';
 
-function rolesOrThrow(input: unknown) {
-  const result = validateRoles(input);
+function rolesOrThrow(input: unknown, defaults?: MessageRole[]) {
+  const result = validateRoles(input, defaults);
   if (!result.valid) {
     throw new OperationError(
       'invalid_input',
@@ -25,30 +31,69 @@ function rolesOrThrow(input: unknown) {
   return result.roles;
 }
 
-export async function readChat(
+/** Whole-message reads return SAM's own notices too: they explain gaps and recoveries. */
+const MESSAGE_UNIT_DEFAULT_ROLES: MessageRole[] = ['user', 'assistant', 'system'];
+
+interface ReadChatInput {
+  projectId: string;
+  sessionId: string;
+  limit?: number;
+  roles?: string[];
+  cursor?: string;
+  includeToolPayloads?: boolean;
+  response_format?: 'concise' | 'detailed';
+  unit?: 'messages' | 'rows';
+}
+
+/**
+ * What the chat is waiting on a person for: ACP permission/form/URL requests and attention markers
+ * (questions agents ask with `request_human_input`). Only people who can answer see them.
+ */
+async function writerPendingRequests(
   ctx: OperationContext,
-  input: {
-    projectId: string;
-    sessionId: string;
-    limit?: number;
-    roles?: string[];
-    cursor?: string;
-    includeToolPayloads?: boolean;
-    response_format?: 'concise' | 'detailed';
-  }
+  projectId: string,
+  sessionId: string,
+  createdByUserId: unknown
 ) {
-  const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : '';
-  if (!sessionId) throw new OperationError('invalid_input', 'sessionId is required');
+  let writer = createdByUserId === ctx.actor.userId;
+  if (!writer) {
+    try {
+      await requireSessionWriter(ctx.env, projectId, sessionId, ctx.actor.userId, {
+        action: 'read pending agent requests',
+      });
+      writer = true;
+    } catch (error) {
+      if (!(error instanceof AppError) || error.statusCode !== 403) throw error;
+    }
+  }
+  if (!writer) return {};
+  const [pendingInteractions, attention] = await Promise.all([
+    connectorPendingInteractions(ctx.env, projectId, sessionId),
+    pendingAttention(ctx.env, projectId, sessionId),
+  ]);
+  return {
+    pendingInteractions,
+    pendingAttention: attention.items,
+    ...(attention.available ? {} : { pendingAttentionUnavailable: true }),
+  };
+}
+
+/**
+ * Stored transcript rows, the historical paging unit. Workspace agents keep exactly this shape;
+ * apps get it with `unit: 'rows'` for diagnostics.
+ */
+async function readStoredRows(
+  ctx: OperationContext,
+  input: ReadChatInput,
+  sessionId: string,
+  before: MessageCursor | null
+) {
   const limits = getPlatformOperationLimits(ctx.env);
   const requestedLimit = typeof input.limit === 'number' ? input.limit : limits.messageListLimit;
   const limit = clampOperationNumber(requestedLimit, 1, limits.messageListMax, 'limit');
   const roles = rolesOrThrow(
     input.roles ?? (input.includeToolPayloads ? [...VALID_MESSAGE_ROLES] : undefined)
   );
-  const before = input.cursor ? parseMessageCursor(input.cursor) : null;
-  if (input.cursor && !before) throw new OperationError('invalid_input', 'Invalid message cursor');
-  const session = await projectDataService.getSession(ctx.env, input.projectId, sessionId);
-  if (!session) throw new OperationError('not_found', 'Session not found in this project');
   const connector = ctx.actor.via !== 'workspace-agent';
   const page = await projectDataService.getMessages(
     ctx.env,
@@ -95,25 +140,10 @@ export async function readChat(
     });
   if (connector) result.reverse();
   const oldest = messages[0];
-  let writer = session.createdByUserId === ctx.actor.userId;
-  if (connector && !writer) {
-    try {
-      await requireSessionWriter(ctx.env, input.projectId, sessionId, ctx.actor.userId, {
-        action: 'read pending agent requests',
-      });
-      writer = true;
-    } catch (error) {
-      if (!(error instanceof AppError) || error.statusCode !== 403) throw error;
-    }
-  }
   return {
-    ...(ctx.actor.via !== 'workspace-agent'
+    ...(connector
       ? {
-          // The session was found in this authorized project's own Durable Object.
-          projectId: input.projectId,
-          link: operationLink(ctx, input.projectId, sessionId),
-          untrustedContent: true,
-          paginationUnit: 'stored_rows',
+          paginationUnit: 'stored_rows' as const,
           nextCursor:
             hasMore &&
             oldest &&
@@ -128,22 +158,51 @@ export async function readChat(
               : null,
         }
       : {}),
-    sessionId,
-    topic: session.topic,
-    taskId: session.taskId,
-    ...(connector && writer
-      ? {
-          pendingInteractions: await connectorPendingInteractions(
-            ctx.env,
-            input.projectId,
-            sessionId
-          ),
-        }
-      : {}),
     messages: result,
     messageCount: result.length,
     hasMore,
   };
+}
+
+export async function readChat(ctx: OperationContext, input: ReadChatInput) {
+  const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : '';
+  if (!sessionId) throw new OperationError('invalid_input', 'sessionId is required');
+  const before = input.cursor ? parseMessageCursor(input.cursor) : null;
+  if (input.cursor && !before) throw new OperationError('invalid_input', 'Invalid message cursor');
+  const session = await projectDataService.getSession(ctx.env, input.projectId, sessionId);
+  if (!session) throw new OperationError('not_found', 'Session not found in this project');
+  if (ctx.actor.via === 'workspace-agent') {
+    return {
+      sessionId,
+      topic: session.topic,
+      taskId: session.taskId,
+      ...(await readStoredRows(ctx, input, sessionId, before)),
+    };
+  }
+  const common = {
+    // The session was found in this authorized project's own Durable Object.
+    projectId: input.projectId,
+    link: operationLink(ctx, input.projectId, sessionId),
+    untrustedContent: true,
+    sessionId,
+    topic: session.topic,
+    taskId: session.taskId,
+  };
+  const [pending, page] = await Promise.all([
+    writerPendingRequests(ctx, input.projectId, sessionId, session.createdByUserId),
+    input.unit === 'rows'
+      ? readStoredRows(ctx, input, sessionId, before)
+      : readChatMessages(ctx, {
+          projectId: input.projectId,
+          sessionId,
+          limit: input.limit,
+          roles: rolesOrThrow(input.roles, MESSAGE_UNIT_DEFAULT_ROLES),
+          cursor: before,
+          detailed: input.response_format === 'detailed',
+          includeToolTitles: input.includeToolPayloads === true,
+        }),
+  ]);
+  return { ...common, ...pending, ...page };
 }
 
 export async function searchChats(
@@ -182,26 +241,46 @@ export async function searchChats(
     limit,
     continuation
   );
+  const app = ctx.actor.via !== 'workspace-agent';
+  // Apps get the whole message around the first hits: a keyword hit can be a single streamed
+  // chunk, so its snippet alone may be one word. Workspace agents keep the snippet-only shape.
+  const context = app
+    ? await searchExcerpts(ctx, input.projectId, search.query.query, search.results)
+    : null;
   return {
-    results: search.results.map((result) => ({
-      ...(ctx.actor.via !== 'workspace-agent'
-        ? {
-            projectId: input.projectId,
-            link: operationLink(ctx, input.projectId, result.sessionId),
-          }
-        : {}),
-      messageId: result.id,
-      sessionId: result.sessionId,
-      sessionTopic: result.sessionTopic,
-      sessionTaskId: result.sessionTaskId,
-      role: result.role,
-      snippet: result.snippet,
-      createdAt: result.createdAt,
-    })),
+    results: search.results.map((result, index) => {
+      const excerpt = context ? context.excerpts[index] : undefined;
+      return {
+        ...(app
+          ? {
+              projectId: input.projectId,
+              link: operationLink(ctx, input.projectId, result.sessionId),
+            }
+          : {}),
+        messageId: result.id,
+        sessionId: result.sessionId,
+        sessionTopic: result.sessionTopic,
+        sessionTaskId: result.sessionTaskId,
+        role: result.role,
+        snippet: result.snippet,
+        createdAt: result.createdAt,
+        ...(excerpt ? { excerpt } : {}),
+      };
+    }),
     count: search.results.length,
     ...search.query,
     archiveSearch: search.archiveSearch,
     rootSearch: search.rootSearch,
     coverageNotes: describeRootSearchCoverage(search.rootSearch),
+    ...(context
+      ? {
+          excerptCoverage: {
+            resultsWithExcerpts: context.excerpts.filter(Boolean).length,
+            excerptLimit: context.excerptLimit,
+            readMore:
+              'sam_chat_message_get with a result excerpt messageId reads the whole message.',
+          },
+        }
+      : {}),
   };
 }

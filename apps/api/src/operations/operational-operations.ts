@@ -6,6 +6,7 @@ import { connectorPendingInteractions } from '../services/connector-agent-answer
 import { executeConnectorWrite } from '../services/connector-execution';
 import * as projectData from '../services/project-data';
 import { requireSessionWriter } from '../services/session-access';
+import { pendingAttention } from './attention-core';
 import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
@@ -80,20 +81,22 @@ export const samChatInteractions = defineOperation({
   title: 'Read pending and settled agent requests',
   kind: 'read',
   description:
-    'Read current writer-authorized permission options/form schemas and settled interaction summaries. Includes active shared-session writers. Use cursor for older settled history, not forward changes or transcript paging. This read never answers or approves anything; every sam_agent_answer still requires user confirmation. Answer acceptance is not proof of runtime delivery.',
+    'Read everything a chat is waiting on a person for: permission options and form schemas (pending, answered by interactionId), questions the agent asked with request_human_input and other attention markers (attention, answered by markerId), and settled interaction summaries. Includes active shared-session writers. Use cursor for older settled history, not forward changes or transcript paging. This read never answers or approves anything; every sam_agent_answer still requires user confirmation. Answer acceptance is not proof of runtime delivery.',
   input: v.object({ ...session, cursor: v.optional(id) }),
   async run(ctx, input) {
     await operationalSession(ctx, input.projectId, input.sessionId);
-    const [snapshot, pending] = await Promise.all([
+    const [snapshot, pending, attention] = await Promise.all([
       snapshotInteractions(ctx.env, input.projectId, input.sessionId, input.cursor ?? null),
       connectorPendingInteractions(ctx.env, input.projectId, input.sessionId),
+      pendingAttention(ctx.env, input.projectId, input.sessionId),
     ]);
     return {
       pending,
+      attention: attention.items,
+      ...(attention.available ? {} : { attentionUnavailable: true }),
       settled: snapshot.settled.map((row) => interactionProjection({ ...row })),
       cursor: snapshot.cursor,
-      evidence: 'persisted_interaction_snapshot',
-      attentionMarkers: 'use_sam_inbox_get_and_sam_chat_read',
+      evidence: 'persisted_interaction_snapshot_and_attention_markers',
     };
   },
 });
@@ -109,11 +112,14 @@ export const samWorkChanges = defineOperation({
   title: 'Read incremental work changes',
   kind: 'read',
   description:
-    'Bounded pull watch of current chat operational state and pending/settled request summaries. Reuse returned cursor. Coalesces intermediate transitions: NOT a lossless event stream or push subscription. Reconcile current snapshot after reconnect; reads never wake compute. changed=false means unchanged retained evidence, not a liveness guarantee.',
+    'Bounded pull watch of current chat operational state, pending/settled request summaries and open attention markers (questions agents asked). Reuse returned cursor. Coalesces intermediate transitions: NOT a lossless event stream or push subscription. Reconcile current snapshot after reconnect; reads never wake compute. changed=false means unchanged retained evidence, not a liveness guarantee.',
   input: v.object({ ...session, cursor: v.optional(id) }),
   async run(ctx, input) {
     const status = await chatStatus(ctx, input.projectId, input.sessionId);
-    const interactions = await snapshotInteractions(ctx.env, input.projectId, input.sessionId);
+    const [interactions, attention] = await Promise.all([
+      snapshotInteractions(ctx.env, input.projectId, input.sessionId),
+      pendingAttention(ctx.env, input.projectId, input.sessionId),
+    ]);
     const summary = {
       ...status,
       observedAt: undefined,
@@ -121,6 +127,10 @@ export const samWorkChanges = defineOperation({
         pending: interactions.pending.map((row) => interactionProjection({ ...row })),
         settled: interactions.settled.map((row) => interactionProjection({ ...row })),
       },
+      // Identity and state only: a reminder count or deadline change is not a new question.
+      attention: attention.available
+        ? attention.items.map((item) => ({ markerId: item.markerId, kind: item.kind }))
+        : 'unavailable',
     };
     const scope = await fingerprint([ctx.actor.userId, input.projectId, input.sessionId]);
     if (input.cursor && !new RegExp(`^v1:${scope}:[a-f0-9]{64}$`).test(input.cursor)) {

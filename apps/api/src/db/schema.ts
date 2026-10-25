@@ -1135,6 +1135,14 @@ export const tasks = sqliteTable(
     missionIdIdx: index('idx_tasks_mission_id')
       .on(table.missionId)
       .where(sql`mission_id IS NOT NULL`),
+    // Team status walks descendants level by level (migration 0208).
+    parentTaskIdIdx: index('idx_tasks_parent_task_id')
+      .on(table.parentTaskId)
+      .where(sql`parent_task_id IS NOT NULL`),
+    // A coordination channel's roster of tasks (migration 0208).
+    projectCoordinationChannelIdx: index('idx_tasks_project_coordination_channel')
+      .on(table.projectId, table.coordinationChannel)
+      .where(sql`coordination_channel IS NOT NULL`),
     providerLimitCredentialIdx: index('idx_tasks_provider_limit_credential').on(
       sql`json_extract(CASE WHEN json_valid(${table.providerLimitWaitJson}) THEN ${table.providerLimitWaitJson} ELSE '{}' END, '$.credentialKey')`,
       table.admissionState

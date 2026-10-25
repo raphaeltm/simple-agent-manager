@@ -64,7 +64,8 @@ export interface MessageContextResult {
 
 type Page = { messages: Record<string, unknown>[]; hasMore: boolean };
 
-interface MessageContextReader {
+/** Row access shared by every whole-message transcript read (also `logical-transcript.ts`). */
+export interface MessageContextReader {
   /** The formatted row for `messageId` in this session, or null. */
   locate(messageId: string): Promise<Record<string, unknown> | null>;
   /** One page inside exclusive bounds, returned in transcript order (as `getMessages` does). */
@@ -211,6 +212,63 @@ function formatRow(
   );
 }
 
+/**
+ * Rows of a transcript the root ProjectData object still owns. Fails closed while an archive
+ * migration of the session is in progress.
+ */
+export function sourceTranscriptReader(
+  sql: SqlStorage,
+  env: Env,
+  owner: ProjectDataArchiveExactReadInput,
+  compact: boolean,
+  operation: string
+): MessageContextReader {
+  archiveSharding.assertSourceExactReadAvailable(sql, owner, operation);
+  return {
+    locate: async (messageId) =>
+      formatRow(env, selectMessageRow(sql, owner.sessionId, messageId), owner.sessionId, compact),
+    page: async (bounds, limit, order) =>
+      archiveSharding.archiveSourceReadMessages(
+        sql,
+        env,
+        owner,
+        limit,
+        bounds.before,
+        bounds.after,
+        undefined,
+        compact,
+        order
+      ),
+  };
+}
+
+/** Rows of a transcript an archive shard holds as a sealed copy. */
+export function targetTranscriptReader(
+  sql: SqlStorage,
+  env: Env,
+  owner: ProjectDataArchiveExactReadInput,
+  compact: boolean,
+  operation: string
+): MessageContextReader {
+  archiveSharding.assertTargetExactReadAvailable(sql, owner, operation);
+  return {
+    locate: async (messageId) => {
+      const raw = compactArchive.isCompactArchive(sql, owner.sessionId)
+        ? await compactArchive.compactRawMessage(sql, env, owner.sessionId, messageId)
+        : selectMessageRow(sql, owner.sessionId, messageId);
+      return formatRow(env, raw, owner.sessionId, compact);
+    },
+    page: (bounds, limit, order) =>
+      archiveSharding.archiveTargetReadMessages(sql, env, owner, {
+        limit,
+        before: bounds.before,
+        after: bounds.after,
+        compact,
+        order,
+      }),
+  };
+}
+
 /** The window from the root ProjectData object, which still owns the transcript. */
 export function readSourceMessageContext(
   sql: SqlStorage,
@@ -218,29 +276,8 @@ export function readSourceMessageContext(
   owner: ProjectDataArchiveExactReadInput,
   request: MessageContextRequest
 ): Promise<MessageContextResult> {
-  archiveSharding.assertSourceExactReadAvailable(sql, owner, 'context read');
   return readMessageContextWindow(
-    {
-      locate: async (messageId) =>
-        formatRow(
-          env,
-          selectMessageRow(sql, owner.sessionId, messageId),
-          owner.sessionId,
-          request.compact
-        ),
-      page: async (bounds, limit, order) =>
-        archiveSharding.archiveSourceReadMessages(
-          sql,
-          env,
-          owner,
-          limit,
-          bounds.before,
-          bounds.after,
-          undefined,
-          request.compact,
-          order
-        ),
-    },
+    sourceTranscriptReader(sql, env, owner, request.compact, 'context read'),
     request
   );
 }
@@ -252,24 +289,8 @@ export function readTargetMessageContext(
   owner: ProjectDataArchiveExactReadInput,
   request: MessageContextRequest
 ): Promise<MessageContextResult> {
-  archiveSharding.assertTargetExactReadAvailable(sql, owner, 'context read');
   return readMessageContextWindow(
-    {
-      locate: async (messageId) => {
-        const raw = compactArchive.isCompactArchive(sql, owner.sessionId)
-          ? await compactArchive.compactRawMessage(sql, env, owner.sessionId, messageId)
-          : selectMessageRow(sql, owner.sessionId, messageId);
-        return formatRow(env, raw, owner.sessionId, request.compact);
-      },
-      page: (bounds, limit, order) =>
-        archiveSharding.archiveTargetReadMessages(sql, env, owner, {
-          limit,
-          before: bounds.before,
-          after: bounds.after,
-          compact: request.compact,
-          order,
-        }),
-    },
+    targetTranscriptReader(sql, env, owner, request.compact, 'context read'),
     request
   );
 }

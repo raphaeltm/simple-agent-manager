@@ -94,6 +94,14 @@ import type {
 } from '../durable-objects/project-data/grouped-fts-wall-recovery';
 import type { IdeaWorkLinkCaps, IdeaWorkSnapshot } from '../durable-objects/project-data/idea-work';
 import type {
+  LogicalMessageRequest,
+  LogicalMessageResult,
+} from '../durable-objects/project-data/logical-message';
+import type {
+  LogicalTranscriptRequest,
+  LogicalTranscriptResult,
+} from '../durable-objects/project-data/logical-transcript';
+import type {
   MessageContextRequest,
   MessageContextResult,
 } from '../durable-objects/project-data/message-context';
@@ -980,6 +988,21 @@ export async function getSession(
   );
 }
 
+/** Open attention markers for one chat, newest first (`project-data/attention.ts`). */
+export async function listActiveAttentionMarkers(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<ReturnType<ProjectData['listActiveAttentionMarkers']>> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listActiveAttentionMarkers',
+    (stub) => stub.listActiveAttentionMarkers(sessionId),
+    'idempotent_read'
+  );
+}
+
 export async function getMessages(
   env: Env,
   projectId: string,
@@ -1028,6 +1051,54 @@ export async function getMessageContextWindow(
       owner.kind === 'root'
         ? stub.archiveSourceGetMessageContext(owner, request)
         : stub.archiveTargetGetMessageContext(owner, request),
+    'idempotent_read'
+  );
+}
+
+/**
+ * A transcript page counted in whole messages, from whichever object owns the transcript. See
+ * `durable-objects/project-data/logical-transcript.ts`.
+ */
+export async function getLogicalTranscriptPage(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  request: LogicalTranscriptRequest
+): Promise<LogicalTranscriptResult> {
+  const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
+  return callProjectDataOwnerWithRetry(
+    env,
+    projectId,
+    owner.ownerName,
+    'getLogicalTranscriptPage',
+    (stub) =>
+      owner.kind === 'root'
+        ? stub.archiveSourceGetLogicalTranscript(owner, request)
+        : stub.archiveTargetGetLogicalTranscript(owner, request),
+    'idempotent_read'
+  );
+}
+
+/**
+ * One whole message by any of its stored rows, from whichever object owns the transcript. See
+ * `durable-objects/project-data/logical-message.ts`.
+ */
+export async function getLogicalMessage(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  request: LogicalMessageRequest
+): Promise<LogicalMessageResult> {
+  const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
+  return callProjectDataOwnerWithRetry(
+    env,
+    projectId,
+    owner.ownerName,
+    'getLogicalMessage',
+    (stub) =>
+      owner.kind === 'root'
+        ? stub.archiveSourceGetLogicalMessage(owner, request)
+        : stub.archiveTargetGetLogicalMessage(owner, request),
     'idempotent_read'
   );
 }

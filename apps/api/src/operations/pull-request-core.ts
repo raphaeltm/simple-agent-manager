@@ -339,7 +339,8 @@ export async function getPullRequestStates(
   ];
   if (parsedRefs.length === 0) return result;
   const rows = await env.DATABASE.prepare(
-    `SELECT url, state, is_draft, title, checks_state, merged_at, updated_at, last_synced_at
+    `SELECT url, state, is_draft, title, checks_state, merged_at, updated_at, last_synced_at,
+            head_sha, checks_updated_at
      FROM pull_requests WHERE project_id = ? AND url IN (SELECT value FROM json_each(?))`
   )
     .bind(projectId, JSON.stringify(parsedRefs.map((ref) => ref.url)))
@@ -352,6 +353,8 @@ export async function getPullRequestStates(
       merged_at: string | null;
       updated_at: string;
       last_synced_at: string | null;
+      head_sha: string | null;
+      checks_updated_at: string | null;
     }>();
   const byUrl = new Map(rows.results.map((row) => [row.url, row]));
   let scheduled = 0;
@@ -368,6 +371,8 @@ export async function getPullRequestStates(
           mergedAt: row.merged_at,
           updatedAt: row.updated_at,
           stale,
+          headSha: row.head_sha,
+          checksUpdatedAt: row.checks_updated_at,
         }
       : null;
     if (settings && stale && ctx.execCtx && scheduled < settings.cap) {

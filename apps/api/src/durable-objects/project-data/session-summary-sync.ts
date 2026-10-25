@@ -99,8 +99,14 @@ export async function syncSessionSummariesToD1(
                   ), 0) as last_message_at
            FROM chat_sessions
            WHERE updated_at >= ?
+              -- Attention markers change without touching chat_sessions.updated_at (which also
+              -- feeds workspace idle timeouts), so a new or resolved question is selected here.
+              OR id IN (SELECT session_id FROM session_attention_markers
+                        WHERE created_at >= ? OR resolved_at >= ?)
            ORDER BY updated_at DESC
            LIMIT ?`,
+          coverage.synced_at,
+          coverage.synced_at,
           coverage.synced_at,
           maxRows
         )

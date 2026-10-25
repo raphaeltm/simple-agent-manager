@@ -14,4 +14,8 @@ export interface PullRequestState {
   mergedAt: string | null;
   updatedAt: string | null;
   stale: boolean;
+  /** Head commit the stored state and checks describe, when GitHub has reported it. */
+  headSha?: string | null;
+  /** When the check rollup for that head commit last changed. */
+  checksUpdatedAt?: string | null;
 }

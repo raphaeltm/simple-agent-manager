@@ -102,6 +102,8 @@ export interface ListAgentActivityTasksOptions {
   excludeTaskId?: string | null;
   /** Restrict the list to tasks that own this pull request. */
   ownsPullRequest?: PullRequestOwnerFilter;
+  /** Restrict the list to these tasks (a team view classifies a known set of tasks). */
+  taskIds?: readonly string[];
   limit?: number;
   nowMs?: number;
 }
@@ -275,6 +277,11 @@ export async function listAgentActivityTasks(
   if (activeOnly) appendActiveCondition(conditions, binds);
   if (options.ownsPullRequest) {
     appendPullRequestOwnerCondition(conditions, binds, options.ownsPullRequest);
+  }
+  if (options.taskIds) {
+    // One JSON bind, so the set is not bounded by D1's 100-parameter statement limit.
+    conditions.push('t.id IN (SELECT value FROM json_each(?))');
+    binds.push(JSON.stringify(options.taskIds));
   }
 
   const limit = normalizedLimit(options.limit);

@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
@@ -190,11 +190,31 @@ export async function projectGet(
     ...(await chatsList(ctx, input)),
   };
 }
+const SessionCursorSchema = v.tuple([v.pipe(v.number(), v.safeInteger()), v.string()]);
 const InboxCursorSchema = v.object({
-  sessions: v.nullable(v.tuple([v.pipe(v.number(), v.safeInteger()), v.string()])),
+  sessions: v.nullable(SessionCursorSchema),
+  // Absent in cursors issued before questions were selected separately; such a cursor has
+  // already returned its questions with the recency page, so it continues without them.
+  attention: v.optional(v.nullable(SessionCursorSchema), null),
   tasks: v.nullable(v.tuple([v.string(), v.string()])),
   notifications: v.nullable(v.string()),
 });
+
+type InboxSessionCursor = v.InferOutput<typeof SessionCursorSchema> | null | undefined;
+
+/** Fields of a `needs_input` notification an app needs to answer the question it announces. */
+function notificationQuestion(metadata: unknown) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return undefined;
+  const record = metadata as Record<string, unknown>;
+  if (typeof record.attentionMarkerId !== 'string') return undefined;
+  return {
+    markerId: record.attentionMarkerId,
+    category: typeof record.category === 'string' ? record.category : null,
+    options: Array.isArray(record.options)
+      ? record.options.filter((option): option is string => typeof option === 'string')
+      : [],
+  };
+}
 export async function inboxGet(ctx: OperationContext, input: { limit?: number; cursor?: string }) {
   let cursor: v.InferOutput<typeof InboxCursorSchema> | undefined;
   if (input.cursor) {
@@ -210,33 +230,46 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
     operationPageLimit(ctx, input.limit),
     parsePositiveInt(ctx.env.CONNECTOR_INBOX_SESSION_LIMIT, 5)
   );
-  const rows = await db
-    .select({
-      id: schema.sessionSummaries.id,
-      projectId: schema.sessionSummaries.projectId,
-      topic: schema.sessionSummaries.topic,
-      attention: schema.sessionSummaries.attentionJson,
-      updatedAt: schema.sessionSummaries.updatedAt,
-    })
-    .from(schema.sessionSummaries)
-    .where(
-      and(
-        membershipCondition(ctx, schema.sessionSummaries.projectId),
-        cursor?.sessions === null
-          ? sql`0=1`
-          : cursor?.sessions
-            ? sql`(${schema.sessionSummaries.updatedAt} < ${cursor.sessions[0]} OR (${schema.sessionSummaries.updatedAt} = ${cursor.sessions[0]} AND ${schema.sessionSummaries.id} < ${cursor.sessions[1]}))`
-            : undefined,
-        eq(schema.sessionSummaries.createdByUserId, ctx.actor.userId),
-        ctx.actor.workspace
-          ? eq(schema.sessionSummaries.projectId, ctx.actor.workspace.projectId)
-          : undefined
-      )
-    )
-    .orderBy(desc(schema.sessionSummaries.updatedAt), desc(schema.sessionSummaries.id))
-    .limit(limit + 1);
+  const sessionPage = (page: InboxSessionCursor, attentionOnly: boolean) =>
+    page === null
+      ? Promise.resolve([])
+      : db
+          .select({
+            id: schema.sessionSummaries.id,
+            projectId: schema.sessionSummaries.projectId,
+            topic: schema.sessionSummaries.topic,
+            attention: schema.sessionSummaries.attentionJson,
+            updatedAt: schema.sessionSummaries.updatedAt,
+          })
+          .from(schema.sessionSummaries)
+          .where(
+            and(
+              membershipCondition(ctx, schema.sessionSummaries.projectId),
+              page
+                ? sql`(${schema.sessionSummaries.updatedAt} < ${page[0]} OR (${schema.sessionSummaries.updatedAt} = ${page[0]} AND ${schema.sessionSummaries.id} < ${page[1]}))`
+                : undefined,
+              eq(schema.sessionSummaries.createdByUserId, ctx.actor.userId),
+              attentionOnly ? isNotNull(schema.sessionSummaries.attentionJson) : undefined,
+              ctx.actor.workspace
+                ? eq(schema.sessionSummaries.projectId, ctx.actor.workspace.projectId)
+                : undefined
+            )
+          )
+          .orderBy(desc(schema.sessionSummaries.updatedAt), desc(schema.sessionSummaries.id))
+          .limit(limit + 1);
+  // Chats with an open question are selected on their own, so a question in a chat that is not
+  // among the most recently updated ones is not pushed out of the page. The recency page still
+  // finds permission/form requests, which live outside the D1 index.
+  const [attentionRows, rows] = await Promise.all([
+    sessionPage(cursor ? cursor.attention : undefined, true),
+    sessionPage(cursor?.sessions, false),
+  ]);
+  const candidates = new Map<string, (typeof rows)[number]>();
+  for (const row of [...attentionRows.slice(0, limit), ...rows.slice(0, limit)]) {
+    if (!candidates.has(row.id)) candidates.set(row.id, row);
+  }
   const pending = await Promise.all(
-    rows.slice(0, limit).map(async (row) => {
+    [...candidates.values()].map(async (row) => {
       let attention: unknown = null;
       if (row.attention) {
         try {
@@ -306,15 +339,25 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
     );
   const projectIds = new Set(accessible.map((row) => row.projectId));
   const lastSession = rows.slice(0, limit).at(-1);
+  const lastAttention = attentionRows.slice(0, limit).at(-1);
   const lastTask = tasks.slice(0, limit).at(-1);
   const next = {
     sessions: rows.length > limit && lastSession ? [lastSession.updatedAt, lastSession.id] : null,
+    attention:
+      attentionRows.length > limit && lastAttention
+        ? [lastAttention.updatedAt, lastAttention.id]
+        : null,
     tasks: tasks.length > limit && lastTask ? [lastTask.updatedAt, lastTask.id] : null,
     notifications: notifications.nextCursor ?? null,
   };
   return {
-    nextCursor: next.sessions || next.tasks || next.notifications ? JSON.stringify(next) : null,
+    nextCursor:
+      next.sessions || next.attention || next.tasks || next.notifications
+        ? JSON.stringify(next)
+        : null,
     pending: pending.filter((row) => row.attention || row.interactions.length),
+    coverage:
+      'Chats you created. A shared chat you can answer shows its questions in sam_chat_read and sam_chat_interactions. attention is the newest open question per chat; sam_chat_interactions lists all of them.',
     tasks: tasks.slice(0, limit).map((row) => ({
       ...row,
       link: operationLink(ctx, row.projectId, row.chatSessionId ?? undefined),
@@ -325,14 +368,22 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
           (!row.projectId || projectIds.has(row.projectId)) &&
           (!ctx.actor.workspace || row.projectId === ctx.actor.workspace.projectId)
       )
-      .map((row) => ({
-        id: row.id,
-        title: row.title,
-        body: row.body,
-        type: row.type,
-        // Unread notifications can be months old; the date is what says so.
-        createdAt: row.createdAt,
-        link: operationLink(ctx, row.projectId ?? undefined, row.sessionId ?? undefined),
-      })),
+      .map((row) => {
+        const question =
+          row.type === 'needs_input' ? notificationQuestion(row.metadata) : undefined;
+        return {
+          id: row.id,
+          title: row.title,
+          body: row.body,
+          type: row.type,
+          // Unread notifications can be months old; the date is what says so.
+          createdAt: row.createdAt,
+          projectId: row.projectId,
+          sessionId: row.sessionId,
+          // Answer with sam_agent_answer (projectId, sessionId, markerId, answer) after asking.
+          ...(question ? { question } : {}),
+          link: operationLink(ctx, row.projectId ?? undefined, row.sessionId ?? undefined),
+        };
+      }),
   };
 }
