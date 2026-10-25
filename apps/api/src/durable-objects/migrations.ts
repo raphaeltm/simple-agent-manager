@@ -2561,6 +2561,15 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    // Agent-chosen wake spacing for one subscription (minWakeIntervalSeconds on
+    // follow_event_channel / create_project_event_subscription). NULL keeps the platform
+    // cooldown, so every existing subscription is unchanged.
+    name: '069-project-event-subscription-min-wake-interval',
+    run(sql) {
+      sql.exec('ALTER TABLE project_event_subscriptions ADD COLUMN min_wake_interval_ms INTEGER');
+    },
+  },
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
   // that ran it keep an unused `message_upload_parts` table, since DO migrations
   // never drop tables, so neither that migration name nor that table name may be reused.

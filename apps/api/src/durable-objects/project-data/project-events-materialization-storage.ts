@@ -1,4 +1,7 @@
-import type { ProjectEventRecord, ProjectEventSubscriptionRecord } from '@simple-agent-manager/shared';
+import type {
+  ProjectEventRecord,
+  ProjectEventSubscriptionRecord,
+} from '@simple-agent-manager/shared';
 
 import type { resolveProjectEventLimits } from './project-events-limits';
 import { mapProjectEvent, mapProjectEventSubscription } from './project-events-mappers';
@@ -60,6 +63,12 @@ export function insertPromptQueueBatch(
   );
 }
 
+/**
+ * Records a queued wake and holds the subscription for its cooldown: the platform
+ * `subscriptionCooldownMs`, or the subscription's own longer `min_wake_interval_ms`.
+ * `advanceProjectEventPromptAttemptCheckpoint` re-arms that interval once the runtime accepts the
+ * wake, because a wake can wait behind a busy turn for longer than the interval.
+ */
 export function recordQueueCheckpoint(
   sql: SqlStorage,
   projectId: string,
@@ -86,12 +95,13 @@ export function recordQueueCheckpoint(
     `UPDATE project_event_subscriptions
      SET prompt_delivery_count = prompt_delivery_count + 1,
          prompt_delivery_last_at = ?,
-         delivery_cooldown_until = ?,
+         delivery_cooldown_until = ? + MAX(?, COALESCE(min_wake_interval_ms, 0)),
          updated_at = ?
      WHERE project_id = ?
        AND id = (SELECT subscription_id FROM project_event_delivery_batches WHERE project_id = ? AND id = ?)`,
     now,
-    now + subscriptionCooldownMs,
+    now,
+    subscriptionCooldownMs,
     now,
     projectId,
     projectId,

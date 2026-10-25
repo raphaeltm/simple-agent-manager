@@ -108,8 +108,8 @@ export function createProjectEventSubscription(
       target_agent_id, lifecycle_state, reason, created_at, updated_at, expires_at,
       owner_version, owner_project_id, owner_chat_session_id, owner_task_id, owner_runtime_id,
       prompt_delivery_count, prompt_delivery_last_at, delivery_cooldown_until,
-      delivery_lifetime_expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      delivery_lifetime_expires_at, min_wake_interval_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     subscriptionId,
     normalized.projectId,
     normalized.deliveryPreference.resolved === 'queued_for_prompt_delivery' ? 2 : 1,
@@ -143,7 +143,8 @@ export function createProjectEventSubscription(
     0,
     null,
     null,
-    deliveryLifetimeExpiresAt
+    deliveryLifetimeExpiresAt,
+    normalized.minWakeIntervalMs
   );
   for (const key of normalized.compiledFilter.matchKeys) {
     sql.exec(

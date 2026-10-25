@@ -323,6 +323,11 @@ export type ProjectEventSubscriptionRecord = {
   cancelledBy: ProjectEventSubscriptionOwner | null;
   cancelReason: string | null;
   lastMatchedAt: number | null;
+  /**
+   * Shortest time between two wakes of the target chat, in milliseconds, already raised to the
+   * platform wake cooldown. Null means the platform cooldown alone. ProjectData always sets it.
+   */
+  minWakeIntervalMs?: number | null;
 };
 
 export type ProjectEventSubscriptionMutationResult = {
@@ -341,6 +346,12 @@ export type CreateProjectEventSubscriptionInput = {
   ownerTaskId?: string | null;
   reason?: string | null;
   expiresAt?: number | null;
+  /**
+   * Wake the target chat at most once per this many milliseconds; events in between are bundled
+   * into the next wake. Only for subscriptions that wake the chat. Omit or null for the platform
+   * cooldown.
+   */
+  minWakeIntervalMs?: number | null;
 };
 
 export type ListProjectEventSubscriptionsInput = {

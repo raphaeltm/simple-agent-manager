@@ -45,6 +45,7 @@ export function coordinationChannelSection(channel: string): string {
     `This work shares the project event channel \`${channel}\` with its coordinator and sibling agents; dispatch_task passes it to your own subtasks automatically.`,
     `- Publish findings, interface decisions, blockers, dependency readiness and completion evidence with publish_channel_event (channel "${channel}", one stable idempotencyKey per message). Skip routine progress.`,
     '- Read it with get_channel_history, or follow it with follow_event_channel: requestedDelivery "existing_session_prompt" to be woken, "record_only" to keep a history feed.',
+    '- When following to be woken, add minWakeIntervalSeconds (for example 600) unless you must react to each message at once; messages in between arrive together in your next wake.',
     '- If a channel call fails, report it with update_task_status naming the channel, tool and error; do not silently stop using it.',
   ].join('\n');
 }

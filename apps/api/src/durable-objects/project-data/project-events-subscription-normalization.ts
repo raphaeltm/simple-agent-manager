@@ -47,6 +47,8 @@ export type NormalizedSubscriptionInput = {
   ownerTaskId: string | null;
   reason: string | null;
   expiresAt: number | null;
+  /** Requested wake spacing raised to the platform wake cooldown; null keeps the cooldown alone. */
+  minWakeIntervalMs: number | null;
 };
 
 export type NormalizedDeliveryBatchInput = {
@@ -92,6 +94,11 @@ export function normalizeSubscriptionInput(
     input.expiresAt === null || input.expiresAt === undefined
       ? null
       : normalizeTimestamp(input.expiresAt, 'expiresAt');
+  const requestedMinWakeIntervalMs = normalizeMinWakeIntervalMs(
+    input.minWakeIntervalMs,
+    deliveryPreference,
+    limits
+  );
   const idempotencyFingerprint = stableStringify([
     projectId,
     owner.type,
@@ -101,6 +108,11 @@ export function normalizeSubscriptionInput(
     ownerTaskId,
     reason,
     expiresAt,
+    // Appended only when set, so a retry of a subscription created before the field existed
+    // keeps its stored fingerprint.
+    ...(requestedMinWakeIntervalMs === null
+      ? []
+      : [{ minWakeIntervalMs: requestedMinWakeIntervalMs }]),
   ]);
 
   return {
@@ -113,7 +125,41 @@ export function normalizeSubscriptionInput(
     ownerTaskId,
     reason,
     expiresAt,
+    minWakeIntervalMs:
+      requestedMinWakeIntervalMs === null
+        ? null
+        : Math.max(requestedMinWakeIntervalMs, limits.wakeSubscriptionCooldownMs),
   };
+}
+
+/**
+ * Agent-chosen spacing between wakes. Only a subscription that wakes its chat can use it, and it
+ * cannot exceed the wake delivery lifetime: past that no further wake could be delivered.
+ */
+function normalizeMinWakeIntervalMs(
+  value: number | null | undefined,
+  deliveryPreference: ProjectEventDeliveryPreference,
+  limits: ProjectEventLimits
+): number | null {
+  if (value === null || value === undefined) return null;
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new ProjectEventValidationError(
+      'minimum wake interval must be a positive whole number of milliseconds'
+    );
+  }
+  if (deliveryPreference.resolved !== 'queued_for_prompt_delivery') {
+    throw new ProjectEventValidationError(
+      'minimum wake interval applies only to subscriptions that wake the chat ' +
+        '(requestedDelivery existing_session_prompt or runtime_interrupt)'
+    );
+  }
+  if (value > limits.wakeSubscriptionLifetimeMs) {
+    throw new ProjectEventValidationError(
+      'minimum wake interval cannot exceed the wake subscription lifetime of ' +
+        `${Math.floor(limits.wakeSubscriptionLifetimeMs / 1000)} seconds`
+    );
+  }
+  return value;
 }
 
 export function normalizeDeliveryBatchInput(

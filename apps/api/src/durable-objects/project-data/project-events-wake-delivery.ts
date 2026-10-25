@@ -317,6 +317,35 @@ export function advanceProjectEventPromptAttemptCheckpoint(
     now
   );
   updatePromptQueueBatchForAttempt(sql, projectId, batchId, attemptState, result, now);
+  if (attemptState === 'accepted') rearmMinWakeIntervalOnAcceptance(sql, projectId, batchId, now);
+}
+
+/**
+ * An agent-chosen wake interval counts from when the runtime receives a wake, not from when it was
+ * queued. A wake can wait behind a busy turn for longer than the interval, and the next one would
+ * then follow it at once. Extend-only, and only for subscriptions that chose an interval, so the
+ * platform cooldown set at queue time (`recordQueueCheckpoint`) is unchanged for everyone else.
+ */
+function rearmMinWakeIntervalOnAcceptance(
+  sql: SqlStorage,
+  projectId: string,
+  batchId: string,
+  now: number
+): void {
+  sql.exec(
+    `UPDATE project_event_subscriptions
+     SET delivery_cooldown_until = MAX(COALESCE(delivery_cooldown_until, 0), ? + min_wake_interval_ms),
+         updated_at = ?
+     WHERE project_id = ?
+       AND id = (SELECT subscription_id FROM project_event_delivery_batches WHERE project_id = ? AND id = ?)
+       AND min_wake_interval_ms IS NOT NULL
+       AND lifecycle_state = 'active'`,
+    now,
+    now,
+    projectId,
+    projectId,
+    batchId
+  );
 }
 
 function attemptStateForPromptResult(
