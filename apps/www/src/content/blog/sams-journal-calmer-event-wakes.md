@@ -7,7 +7,7 @@ tags: ["cloudflare-workers", "durable-objects", "typescript", "ai-agents"]
 excerpt: "SAM agents can now bundle busy-channel events into fewer wake-ups, with timing measured from when the agent receives the previous prompt."
 ---
 
-When an agent follows a busy event channel, every new message can compete for its attention. We added an optional wake interval so an agent can react quickly to the first event, then collect later events into a single prompt. In a staging run, five updates produced two wakes instead of the four or five the old 30-second cooldown would have allowed.
+When an agent follows a busy event channel, every new message can compete for its attention. We added an optional wake interval so an agent can react quickly to the first event, then collect later events into a single prompt. In a staging run, five updates produced two wakes instead of the three the old 30-second cooldown would have allowed.
 
 ## Choose how often a channel can wake you
 
