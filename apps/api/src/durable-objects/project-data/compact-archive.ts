@@ -224,6 +224,8 @@ export type CompactRawPageOptions = {
   after: MessageCursor | null;
   roles?: string[];
   order: 'asc' | 'desc';
+  /** Absolute time by which every R2 read must finish; one read of many pages shares it. */
+  deadline?: number;
 };
 
 function matchesRawPage(row: ProjectDataArchiveRow, options: CompactRawPageOptions): boolean {
@@ -237,13 +239,14 @@ export async function compactRawPage(
   sessionId: string,
   options: CompactRawPageOptions
 ): Promise<ProjectDataArchiveRow[]> {
-  const { limit, before, after, roles, order } = options;
+  const { limit, before, after, roles, order, deadline } = options;
   const result: ProjectDataArchiveRow[] = [];
   let bytes = 0;
   for await (const chunk of compactRawChunks(sql, env, sessionId, {
     bounds: { before, after },
     roles,
     order,
+    deadline,
   })) {
     const rows = order === 'desc' ? [...chunk.rows].reverse() : chunk.rows;
     for (const row of rows) {
@@ -282,9 +285,10 @@ export async function compactRawMessage(
   sql: SqlStorage,
   env: Env,
   sessionId: string,
-  messageId: string
+  messageId: string,
+  deadline?: number
 ) {
-  for await (const chunk of compactRawChunks(sql, env, sessionId, { messageId })) {
+  for await (const chunk of compactRawChunks(sql, env, sessionId, { messageId, deadline })) {
     const row = chunk.rows.find((candidate) => candidate.id === messageId);
     if (row) return row;
   }

@@ -569,7 +569,8 @@ describe('DO Migrations', () => {
       // Shared session access expiry (065): 1 (unhandled grants by expiry).
       // Resource links (067): three indexes (source, target, weak-target cleanup).
       // Idea updates (068): two seek indexes (timeline and per-session throttle).
-      expect(indexes).toHaveLength(138);
+      // Attention marker changes for the summary sync delta (070): two.
+      expect(indexes).toHaveLength(140);
       expect(indexes.some((query) => query.includes('idx_session_access_grants_expiry_due'))).toBe(
         true
       );

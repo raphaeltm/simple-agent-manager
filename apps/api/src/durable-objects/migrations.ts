@@ -2570,6 +2570,20 @@ export const MIGRATIONS: Migration[] = [
       sql.exec('ALTER TABLE project_event_subscriptions ADD COLUMN min_wake_interval_ms INTEGER');
     },
   },
+  {
+    // The session summary sync re-sends chats whose attention markers were created or resolved
+    // since its last run (`project-data/session-summary-sync.ts`). Markers are kept after they
+    // resolve, so without these each sync would scan every marker the project ever had.
+    name: '070-attention-marker-change-indexes',
+    run(sql) {
+      sql.exec(
+        'CREATE INDEX IF NOT EXISTS idx_attention_created_at ON session_attention_markers(created_at)'
+      );
+      sql.exec(
+        'CREATE INDEX IF NOT EXISTS idx_attention_resolved_at ON session_attention_markers(resolved_at) WHERE resolved_at IS NOT NULL'
+      );
+    },
+  },
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
   // that ran it keep an unused `message_upload_parts` table, since DO migrations
   // never drop tables, so neither that migration name nor that table name may be reused.

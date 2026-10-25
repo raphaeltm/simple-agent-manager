@@ -224,7 +224,32 @@ export function runContent(run: Run): string {
   return content;
 }
 
-/** One message from a run, returning `maxChars` of its text from `offset`. */
+/**
+ * `maxChars` characters of the run's text from `offset`, and the text's whole length, copying only
+ * the chunks that overlap the slice (a long reply is never joined in full to return a page of it).
+ */
+function runTextSlice(run: Run, offset: number, maxChars: number) {
+  let length = 0;
+  for (const row of run.rows) length += typeof row.content === 'string' ? row.content.length : 0;
+  const start = Math.min(Math.max(0, Math.floor(offset)), length);
+  const end = Math.min(length, start + Math.max(0, Math.floor(maxChars)));
+  const parts: string[] = [];
+  let position = 0;
+  for (let index = run.rows.length - 1; index >= 0 && position < end; index -= 1) {
+    const chunk = run.rows[index]?.content;
+    if (typeof chunk !== 'string') continue;
+    if (position + chunk.length > start) {
+      parts.push(chunk.slice(Math.max(0, start - position), end - position));
+    }
+    position += chunk.length;
+  }
+  return { text: parts.join(''), length, start, end };
+}
+
+/**
+ * One message from a run, returning `maxChars` of its text from `offset`. `content` is the run's
+ * whole text when the caller already built it (to search it); otherwise only the slice is built.
+ */
 export function assembleMessage(
   run: Run,
   slice: { offset: number; maxChars: number; content?: string },
@@ -232,9 +257,15 @@ export function assembleMessage(
 ): LogicalMessage {
   const first = run.rows[run.rows.length - 1] ?? {};
   const last = run.rows[0] ?? {};
-  const content = slice.content ?? runContent(run);
-  const offset = Math.min(Math.max(0, Math.floor(slice.offset)), content.length);
-  const end = Math.min(content.length, offset + Math.max(0, Math.floor(slice.maxChars)));
+  const { text, length, start, end } =
+    slice.content === undefined
+      ? runTextSlice(run, slice.offset, slice.maxChars)
+      : (() => {
+          const whole = slice.content;
+          const from = Math.min(Math.max(0, Math.floor(slice.offset)), whole.length);
+          const to = Math.min(whole.length, from + Math.max(0, Math.floor(slice.maxChars)));
+          return { text: whole.slice(from, to), length: whole.length, start: from, end: to };
+        })();
   return {
     kind: 'message',
     messageId: rowId(first),
@@ -242,11 +273,11 @@ export function assembleMessage(
     lastRowId: rowId(last),
     role: run.role,
     origin: typeof first.origin === 'string' ? first.origin : null,
-    content: content.slice(offset, end),
-    offset,
-    contentLength: content.length,
-    truncated: end < content.length,
-    nextOffset: end < content.length ? end : null,
+    content: text,
+    offset: start,
+    contentLength: length,
+    truncated: end < length,
+    nextOffset: end < length ? end : null,
     rowCount: run.rows.length,
     createdAt: rowTime(first),
     updatedAt: rowTime(last),

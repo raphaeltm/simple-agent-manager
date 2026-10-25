@@ -7,7 +7,10 @@ import {
   createAttentionMarker,
   resolveAttentionMarkerById,
 } from '../../../src/durable-objects/project-data/attention';
-import { syncSessionSummariesToD1 } from '../../../src/durable-objects/project-data/session-summary-sync';
+import {
+  SESSION_SUMMARY_DELTA_SQL,
+  syncSessionSummariesToD1,
+} from '../../../src/durable-objects/project-data/session-summary-sync';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { createSqlStorage } from './sql-storage-test-utils';
@@ -153,6 +156,44 @@ describe('ProjectData session summary sync', () => {
     } finally {
       source.db.close();
       d1.db.close();
+    }
+  });
+
+  it('reads only changed sessions and markers through their indexes', () => {
+    // Every mutation schedules this delta, and markers are kept after they resolve, so neither
+    // table may be scanned whole. Plans are taken over a populated object without ANALYZE
+    // statistics, as Durable Object storage has none unless something runs it.
+    const source = makeDoSql();
+    try {
+      const session = source.db.prepare(
+        `INSERT INTO chat_sessions (id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES (?, 'topic', 'active', 0, 1, 1, ?)`
+      );
+      const marker = source.db.prepare(
+        `INSERT INTO session_attention_markers (id, session_id, kind, source, created_at, resolved_at)
+         VALUES (?, ?, 'needs_input', 'request_human_input', ?, ?)`
+      );
+      for (let index = 0; index < 500; index += 1) {
+        session.run(`session-${index}`, index);
+        marker.run(`marker-${index}`, `session-${index}`, index, index % 2 ? index + 1 : null);
+      }
+
+      const plan = source.db
+        .prepare(`EXPLAIN QUERY PLAN ${SESSION_SUMMARY_DELTA_SQL}`)
+        .all(490, 490, 490, 100)
+        .map((row) => (row as { detail: string }).detail);
+
+      expect(plan.some((step) => step.startsWith('SCAN chat_sessions'))).toBe(false);
+      expect(plan.some((step) => step.startsWith('SCAN session_attention_markers'))).toBe(false);
+      expect(plan).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('USING INDEX idx_chat_sessions_updated_at'),
+          expect.stringContaining('USING INDEX idx_attention_created_at'),
+          expect.stringContaining('USING INDEX idx_attention_resolved_at'),
+        ])
+      );
+    } finally {
+      source.db.close();
     }
   });
 });

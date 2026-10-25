@@ -19,6 +19,10 @@ import {
   type LogicalTranscriptRequest,
   readSourceLogicalTranscript,
 } from '../../../src/durable-objects/project-data/logical-transcript';
+import {
+  assembleMessage,
+  type Run,
+} from '../../../src/durable-objects/project-data/logical-transcript-model';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import { createSqlStorage } from './sql-storage-test-utils';
 
@@ -428,5 +432,23 @@ describe('logical transcript', () => {
 
       expect(await read('missing')).toMatchObject({ found: false, message: null });
     });
+  });
+
+  it('returns the same characters of a message whatever chunks they span', () => {
+    const chunks: unknown[] = ['ab', '', 'cde', null, 'f', 'ghij', 'k'];
+    // Newest first, as a run holds its rows.
+    const run: Run = {
+      role: 'assistant',
+      rows: chunks.map((content, index) => ({ id: `r${index}`, content })).reverse(),
+    };
+    const whole = chunks.filter((chunk) => typeof chunk === 'string').join('');
+    for (let offset = -1; offset <= whole.length + 1; offset += 1) {
+      for (let maxChars = 0; maxChars <= whole.length + 1; maxChars += 1) {
+        const sliced = assembleMessage(run, { offset, maxChars }, true);
+        expect(sliced).toEqual(assembleMessage(run, { offset, maxChars, content: whole }, true));
+        const from = Math.min(Math.max(0, offset), whole.length);
+        expect(sliced.content).toBe(whole.slice(from, from + maxChars));
+      }
+    }
   });
 });

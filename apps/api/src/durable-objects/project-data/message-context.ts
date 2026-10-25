@@ -24,6 +24,7 @@
  */
 import { type MessageCursor, type MessagePosition } from '@simple-agent-manager/shared';
 
+import { compactArchiveTimeout } from '../../project-data-archive/compact-r2';
 import type { ProjectDataArchiveExactReadInput } from '../../project-data-archive/contract';
 import * as archiveSharding from './archive-sharding';
 import * as compactArchive from './compact-archive';
@@ -238,10 +239,12 @@ export function targetTranscriptReader(
   operation: string
 ): MessageContextReader {
   archiveSharding.assertTargetExactReadAvailable(sql, owner, operation);
+  // A read can take many pages; they share one R2 budget rather than each starting a fresh one.
+  const deadline = Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
   return {
     locate: async (messageId) => {
       const raw = compactArchive.isCompactArchive(sql, owner.sessionId)
-        ? await compactArchive.compactRawMessage(sql, env, owner.sessionId, messageId)
+        ? await compactArchive.compactRawMessage(sql, env, owner.sessionId, messageId, deadline)
         : selectMessageRow(sql, owner.sessionId, messageId);
       return formatRow(env, raw, owner.sessionId, compact);
     },
@@ -252,6 +255,7 @@ export function targetTranscriptReader(
         after: bounds.after,
         compact,
         order,
+        deadline,
       }),
   };
 }

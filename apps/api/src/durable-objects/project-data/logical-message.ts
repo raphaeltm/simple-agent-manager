@@ -136,8 +136,12 @@ export async function readLogicalMessage(
     const message = { ...withheld, truncated: false, nextOffset: null };
     return { ...NOT_FOUND, found: true, message, thinkingWithheld: true };
   }
-  const content = runContent(run);
-  const focused = request.focus ? focusStart(content, request.focus.terms, request.maxChars) : null;
+  // The whole text is built only to search it; a plain read builds just the requested slice.
+  const content = request.focus ? runContent(run) : undefined;
+  const focused =
+    content !== undefined && request.focus
+      ? focusStart(content, request.focus.terms, request.maxChars)
+      : null;
   const message = assembleMessage(
     run,
     { offset: focused ?? request.offset, maxChars: request.maxChars, content },
