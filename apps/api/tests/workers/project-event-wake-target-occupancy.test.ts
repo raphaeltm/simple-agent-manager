@@ -8,11 +8,6 @@ import { runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import { runMigrations } from '../../src/durable-objects/migrations';
-import { runProjectEventWakeMaterializationBatch } from '../../src/durable-objects/project-data/project-events-materialization';
-import { computeProjectEventMaterializationAlarmTime } from '../../src/durable-objects/project-data/project-events-scheduler';
-import { advanceProjectEventPromptAttemptCheckpoint } from '../../src/durable-objects/project-data/project-events-wake-delivery';
-import type { PromptDeliveryResult } from '../../src/durable-objects/project-data/prompt-delivery';
-import { parseMailboxMessageRow } from '../../src/durable-objects/project-data/row-schemas';
 import * as svc from '../../src/services/project-data';
 import {
   type ChannelReceipt,
@@ -21,50 +16,20 @@ import {
   testEnv,
   twoAgentProject,
   withAgentMessageChannels,
-  withProjectDataEnv,
 } from './helpers/agent-message-channels';
+import {
+  acceptWake,
+  materialize,
+  onlyWake,
+  wakeBatches,
+  wakeDueAt,
+  type WakeFixture as Fixture,
+  withQuietAlarms,
+} from './helpers/event-wake-harness';
 
-type Fixture = Awaited<ReturnType<typeof twoAgentProject>>;
-type WakeBatch = {
-  id: string;
-  subscription_id: string;
-  state: string;
-  acked_at: number | null;
-  event_count: number;
-};
 type SubscriptionRow = { delivery_cooldown_until: number | null; wake_due_at: number | null };
 
 const HEAD_SHA = '107390d66f57c845f80b1b44507ccf2115635823';
-const wakeEnv = () => ({ ...testEnv, PROJECT_EVENT_WAKE_ENABLED: 'true' });
-
-const materialize = (f: Fixture, now: number) =>
-  runInDurableObject(f.stub, (_instance, state) =>
-    state.storage.transactionSync(() =>
-      runProjectEventWakeMaterializationBatch(state.storage.sql, wakeEnv(), f.projectId, now)
-    )
-  );
-
-const wakeDueAt = (f: Fixture, now: number) =>
-  runInDurableObject(f.stub, (_instance, state) =>
-    computeProjectEventMaterializationAlarmTime(state.storage.sql, wakeEnv(), f.projectId, now)
-  );
-
-const wakeBatches = (f: Fixture, sessionId: string) =>
-  sqlRows<WakeBatch>(
-    f.stub,
-    `SELECT id, subscription_id, state, acked_at, event_count
-     FROM project_event_delivery_batches
-     WHERE delivery_channel = 'prompt_queue' AND target_session_id = ?
-     ORDER BY created_at, id`,
-    sessionId
-  );
-
-/** The chat's only prompt-queue wake so far. */
-async function onlyWake(f: Fixture, sessionId: string): Promise<WakeBatch> {
-  const batches = await wakeBatches(f, sessionId);
-  expect(batches).toHaveLength(1);
-  return batches[0] as WakeBatch;
-}
 
 const subscriptionRow = async (f: Fixture, subscriptionId: string) =>
   (
@@ -104,62 +69,6 @@ function admitCheckRunCompleted(f: Fixture, check: string) {
     occurredAt: now,
     receivedAt: now,
   });
-}
-
-/** Apply a runtime acceptance through the same checkpoint the prompt-delivery runner calls. */
-async function acceptWake(f: Fixture, batchId: string, now: number): Promise<void> {
-  await runInDurableObject(f.stub, (_instance, state) => {
-    const message = parseMailboxMessageRow(
-      state.storage.sql.exec('SELECT * FROM session_inbox WHERE id = ?', batchId).toArray()[0]
-    );
-    const accepted: PromptDeliveryResult = {
-      kind: 'accepted',
-      acpSessionId: message.targetSessionId,
-      promptEpoch: now,
-      runtimeIdentity: 'runtime:occupancy',
-      capabilities: {
-        protocolVersion: 1,
-        runtimeIdentity: 'runtime:occupancy',
-        promptReceipts: { supported: true, lookup: true, states: ['accepted'] },
-        checkpointRollover: {
-          supported: false,
-          automatic: false,
-          states: [],
-          defaultGraceMs: 0,
-          maxGraceMs: 0,
-          operationTimeoutMs: 0,
-        },
-      },
-      receipt: {
-        deliveryId: `receipt:${batchId}`,
-        state: 'accepted',
-        runtimeIdentity: 'runtime:occupancy',
-        acceptedAt: now,
-        completedAt: null,
-      },
-    };
-    advanceProjectEventPromptAttemptCheckpoint(
-      state.storage.sql,
-      f.projectId,
-      { message, attemptId: `attempt:${batchId}`, mode: 'submit' },
-      accepted,
-      now
-    );
-  });
-}
-
-/**
- * The MCP send path needs event wakes and durable delivery on. Once setup is done, switch both
- * off for the ProjectData object (Miniflare shares this env with the test worker) so background
- * alarms cannot materialize wakes or deliver them to the seeded, unreachable VM mid-test. The
- * tests drive materialization through `wakeEnv()` and delivery outcomes through `acceptWake`.
- */
-function withQuietAlarms<T>(f: Fixture, fn: () => Promise<T>): Promise<T> {
-  return withProjectDataEnv(
-    f.stub,
-    { PROJECT_EVENT_WAKE_ENABLED: 'false', DURABLE_PROMPT_DELIVERY_ENABLED: 'false' },
-    fn
-  );
 }
 
 describe('event wake target occupancy', () => {
