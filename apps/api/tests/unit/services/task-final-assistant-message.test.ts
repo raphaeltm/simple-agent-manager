@@ -1,105 +1,220 @@
-import { describe, expect, it, vi } from 'vitest';
+/**
+ * The task view's assistant messages (`sam_task_get`, workspace-agent and /sam `get_task_details`)
+ * read through the real whole-message reader over a real SQLite transcript, stored the way the VM
+ * agent stores replies: one row per streamed chunk. Only the Durable Object transport is replaced.
+ */
+import Database from 'better-sqlite3';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getLatestAssistantMessageForTask } from '../../../src/services/task-final-assistant-message';
+import { runMigrations } from '../../../src/durable-objects/migrations';
+import { readSourceLogicalTranscript } from '../../../src/durable-objects/project-data/logical-transcript';
+import type { Env as ProjectDataEnv } from '../../../src/durable-objects/project-data/types';
+import { log } from '../../../src/lib/logger';
+import {
+  getLatestAssistantMessageForTask,
+  getRecentAssistantMessagesForTask,
+} from '../../../src/services/task-final-assistant-message';
+import { createSqlStorage } from '../durable-objects/sql-storage-test-utils';
 
 vi.mock('../../../src/services/project-data', () => ({
-  getMessages: vi.fn(),
+  getLogicalTranscriptPage: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/logger', () => ({
-  log: { warn: vi.fn() },
+vi.mock('../../../src/services/connector-read-settings', () => ({
+  getConnectorReadLimits: vi.fn(),
 }));
 
+import * as connectorReadSettings from '../../../src/services/connector-read-settings';
 import * as projectDataService from '../../../src/services/project-data';
 
-const mockGetMessages = vi.mocked(projectDataService.getMessages);
+const PROJECT = 'proj-1';
+const SESSION = 'session-1';
+const mockGetLogicalTranscriptPage = vi.mocked(projectDataService.getLogicalTranscriptPage);
+const mockGetConnectorReadLimits = vi.mocked(connectorReadSettings.getConnectorReadLimits);
 const mockEnv = {} as Parameters<typeof getLatestAssistantMessageForTask>[0];
 
-describe('getLatestAssistantMessageForTask', () => {
-  it('returns null when sessionId is null', async () => {
-    const result = await getLatestAssistantMessageForTask(mockEnv, 'proj-1', null);
-    expect(result).toBeNull();
-    expect(mockGetMessages).not.toHaveBeenCalled();
-  });
+interface SeedRow {
+  id: string;
+  role: string;
+  content: string;
+}
 
-  it('returns null when no assistant messages exist', async () => {
-    mockGetMessages.mockResolvedValue({ messages: [], hasMore: false });
+describe('task assistant messages', () => {
+  let sql: SqlStorage;
+  let nextRow = 0;
 
-    const result = await getLatestAssistantMessageForTask(mockEnv, 'proj-1', 'session-1');
-    expect(result).toBeNull();
-  });
+  function seed(rows: SeedRow[]): void {
+    for (const row of rows) {
+      nextRow += 1;
+      sql.exec(
+        `INSERT INTO chat_messages (id, session_id, role, content, created_at, sequence)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        row.id,
+        SESSION,
+        row.role,
+        row.content,
+        1_000 + nextRow,
+        nextRow
+      );
+    }
+  }
 
-  it('returns null when the assistant message has empty content', async () => {
-    mockGetMessages.mockResolvedValue({
-      messages: [{ id: 'msg-1', role: 'assistant', content: '   ', createdAt: 1000 }],
-      hasMore: false,
-    });
+  /** A reply streamed as `count` chunk rows: `prefix001`, `prefix002`, ... */
+  function streamed(prefix: string, count: number, text = (i: number) => `${prefix}${i}.`) {
+    return Array.from({ length: count }, (_, index) => ({
+      id: `${prefix}${String(index + 1).padStart(3, '0')}`,
+      role: 'assistant',
+      content: text(index + 1),
+    }));
+  }
 
-    const result = await getLatestAssistantMessageForTask(mockEnv, 'proj-1', 'session-1');
-    expect(result).toBeNull();
-  });
-
-  it('returns null when the assistant message has non-string content', async () => {
-    mockGetMessages.mockResolvedValue({
-      messages: [{ id: 'msg-1', role: 'assistant', content: 42 as unknown as string, createdAt: 1000 }],
-      hasMore: false,
-    });
-
-    const result = await getLatestAssistantMessageForTask(mockEnv, 'proj-1', 'session-1');
-    expect(result).toBeNull();
-  });
-
-  it('returns the latest assistant message with bounded content', async () => {
-    mockGetMessages.mockResolvedValue({
-      messages: [{ id: 'msg-latest', role: 'assistant', content: 'Final findings here', createdAt: 1710000002000 }],
-      hasMore: false,
-    });
-
-    const result = await getLatestAssistantMessageForTask(mockEnv, 'proj-1', 'session-1');
-    expect(result).toEqual({
-      id: 'msg-latest',
-      content: 'Final findings here',
-      createdAt: 1710000002000,
-    });
-  });
-
-  it('requests a bounded all-role tail to preserve message boundaries', async () => {
-    mockGetMessages.mockResolvedValue({
-      messages: [{ id: 'msg-newest', role: 'assistant', content: 'Latest output', createdAt: 1710000005000 }],
-      hasMore: false,
-    });
-
-    await getLatestAssistantMessageForTask(mockEnv, 'proj-1', 'session-1');
-    expect(mockGetMessages).toHaveBeenCalledWith(
-      mockEnv,
-      'proj-1',
-      'session-1',
-      200,
-      null,
-      null,
-      undefined,
-      false,
-      'desc',
+  beforeEach(() => {
+    vi.clearAllMocks();
+    nextRow = 0;
+    const db = new Database(':memory:');
+    sql = createSqlStorage(db);
+    runMigrations(sql);
+    sql.exec(`INSERT INTO chat_sessions (id, topic, started_at) VALUES (?, ?, ?)`, SESSION, 't', 1);
+    mockGetConnectorReadLimits.mockResolvedValue({
+      transcriptScanRows: 4_000,
+    } as Awaited<ReturnType<typeof connectorReadSettings.getConnectorReadLimits>>);
+    mockGetLogicalTranscriptPage.mockImplementation((_env, projectId, sessionId, request) =>
+      readSourceLogicalTranscript(
+        sql,
+        {} as ProjectDataEnv,
+        { projectId, sessionId, ownerName: projectId, generation: 1, migrationId: null },
+        request
+      )
     );
   });
 
-  it('truncates content exceeding 2000 characters', async () => {
-    const longContent = 'x'.repeat(2500);
-    mockGetMessages.mockResolvedValue({
-      messages: [{ id: 'msg-long', role: 'assistant', content: longContent, createdAt: 1000 }],
-      hasMore: false,
-    });
-
-    const result = await getLatestAssistantMessageForTask(mockEnv, 'proj-1', 'session-1');
-    expect(result).not.toBeNull();
-    expect(result!.content).toHaveLength(2003);
-    expect(result!.content.endsWith('...')).toBe(true);
+  it('returns nothing without a session, and does not read', async () => {
+    expect(await getLatestAssistantMessageForTask(mockEnv, PROJECT, null)).toBeNull();
+    expect(await getRecentAssistantMessagesForTask(mockEnv, PROJECT, null, 5)).toEqual([]);
+    expect(mockGetLogicalTranscriptPage).not.toHaveBeenCalled();
   });
 
-  it('returns null and logs a warning when getMessages throws', async () => {
-    mockGetMessages.mockRejectedValue(new Error('ProjectData unavailable'));
+  it('returns null when the chat has no assistant reply', async () => {
+    seed([{ id: 'u1', role: 'user', content: 'Hello?' }]);
 
-    const result = await getLatestAssistantMessageForTask(mockEnv, 'proj-1', 'session-1');
-    expect(result).toBeNull();
+    expect(await getLatestAssistantMessageForTask(mockEnv, PROJECT, SESSION)).toBeNull();
+    expect(mockGetLogicalTranscriptPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns null when the newest reply is only whitespace', async () => {
+    seed([
+      { id: 'a1', role: 'assistant', content: 'Earlier reply' },
+      { id: 'u1', role: 'user', content: 'And now?' },
+      { id: 'a2', role: 'assistant', content: '   ' },
+    ]);
+
+    expect(await getLatestAssistantMessageForTask(mockEnv, PROJECT, SESSION)).toBeNull();
+  });
+
+  it('assembles the whole newest reply from every streamed chunk', async () => {
+    // 300 chunk rows: more than the 200-row tail the raw-row reader used to scan.
+    seed([{ id: 'u1', role: 'user', content: 'Review this' }, ...streamed('r', 300)]);
+    const expected = Array.from({ length: 300 }, (_, i) => `r${i + 1}.`).join('');
+
+    const latest = await getLatestAssistantMessageForTask(mockEnv, PROJECT, SESSION);
+
+    expect(expected.length).toBeLessThan(2_000);
+    expect(latest).toEqual({ id: 'r001', content: expected, createdAt: 1_002 });
+  });
+
+  it('marks a reply whose start lies beyond the scan budget as partialBefore', async () => {
+    mockGetConnectorReadLimits.mockResolvedValue({
+      transcriptScanRows: 250,
+    } as Awaited<ReturnType<typeof connectorReadSettings.getConnectorReadLimits>>);
+    seed([{ id: 'u1', role: 'user', content: 'Review this' }, ...streamed('r', 300)]);
+
+    const latest = await getLatestAssistantMessageForTask(mockEnv, PROJECT, SESSION);
+
+    expect(latest).toMatchObject({ partialBefore: true });
+    expect(latest!.content.endsWith('r300.')).toBe(true);
+    expect(latest!.content.startsWith('r1.')).toBe(false);
+  });
+
+  it('caps a long reply at the snippet length and says it was truncated', async () => {
+    seed(streamed('x', 25, () => 'x'.repeat(100)));
+
+    const latest = await getLatestAssistantMessageForTask(mockEnv, PROJECT, SESSION);
+
+    expect(latest!.content).toHaveLength(2_003);
+    expect(latest!.content.endsWith('...')).toBe(true);
+    expect(latest).toMatchObject({ truncated: true });
+  });
+
+  it('does not mark a reply of exactly the snippet length as truncated', async () => {
+    seed(streamed('x', 20, () => 'x'.repeat(100)));
+
+    const latest = await getLatestAssistantMessageForTask(mockEnv, PROJECT, SESSION);
+
+    expect(latest!.content).toHaveLength(2_000);
+    expect(latest).not.toHaveProperty('truncated');
+  });
+
+  it('lists recent replies newest first, each whole, skipping user and tool rows', async () => {
+    seed([
+      { id: 'u1', role: 'user', content: 'Start' },
+      ...streamed('a', 3),
+      { id: 't1', role: 'tool', content: '' },
+      ...streamed('b', 2),
+      { id: 'u2', role: 'user', content: 'More' },
+      ...streamed('c', 4),
+    ]);
+
+    const recent = await getRecentAssistantMessagesForTask(mockEnv, PROJECT, SESSION, 5);
+
+    expect(recent.map((message) => [message.id, message.content])).toEqual([
+      ['c001', 'c1.c2.c3.c4.'],
+      ['b001', 'b1.b2.'],
+      ['a001', 'a1.a2.a3.'],
+    ]);
+  });
+
+  it('keeps each of several long recent replies whole up to the snippet length', async () => {
+    const long = (prefix: string) => streamed(prefix, 15, () => prefix.repeat(100));
+    seed([
+      ...long('a'),
+      { id: 'u1', role: 'user', content: 'Next' },
+      ...long('b'),
+      { id: 'u2', role: 'user', content: 'Next' },
+      ...long('c'),
+    ]);
+
+    const recent = await getRecentAssistantMessagesForTask(mockEnv, PROJECT, SESSION, 5);
+
+    expect(recent.map((message) => [message.id, message.content.length])).toEqual([
+      ['c001', 1_500],
+      ['b001', 1_500],
+      ['a001', 1_500],
+    ]);
+    expect(recent.some((message) => message.truncated)).toBe(false);
+  });
+
+  it('returns at most the requested number of recent replies', async () => {
+    seed([
+      ...streamed('a', 2),
+      { id: 'u1', role: 'user', content: 'Next' },
+      ...streamed('b', 2),
+      { id: 'u2', role: 'user', content: 'Next' },
+      ...streamed('c', 2),
+    ]);
+
+    const recent = await getRecentAssistantMessagesForTask(mockEnv, PROJECT, SESSION, 2);
+
+    expect(recent.map((message) => message.id)).toEqual(['c001', 'b001']);
+  });
+
+  it('returns nothing and logs when the transcript cannot be read', async () => {
+    const warn = vi.spyOn(log, 'warn');
+    mockGetLogicalTranscriptPage.mockRejectedValue(new Error('ProjectData unavailable'));
+
+    expect(await getLatestAssistantMessageForTask(mockEnv, PROJECT, SESSION)).toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      'get_recent_assistant_messages_for_task_failed',
+      expect.objectContaining({ projectId: PROJECT, sessionId: SESSION })
+    );
   });
 });

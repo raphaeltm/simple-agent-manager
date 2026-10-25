@@ -3,10 +3,8 @@ import { and, desc, eq, type SQL, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import { log } from '../lib/logger';
 import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../lib/search-query-limits';
-import * as projectDataService from '../services/project-data';
-import { getLatestAssistantMessageForTask } from '../services/task-final-assistant-message';
+import { getRecentAssistantMessagesForTask } from '../services/task-final-assistant-message';
 import { membershipCondition, operationLink } from './connector-read-core';
 import { formatOperationCursor, readOperationCursor } from './cursors';
 import { OperationError } from './errors';
@@ -54,49 +52,6 @@ function toTaskSearchResult(task: TaskSearchRow, snippetLength: number, external
   };
 }
 
-async function loadRecentAssistantMessages(
-  ctx: OperationContext,
-  projectId: string,
-  sessionId: string | null
-) {
-  if (!sessionId) return [];
-  try {
-    const { messages } = await projectDataService.getMessages(
-      ctx.env,
-      projectId,
-      sessionId,
-      getPlatformOperationLimits(ctx.env).taskDetailRecentMessageLimit,
-      null,
-      null,
-      ['assistant'],
-      false,
-      'desc'
-    );
-    return messages
-      .filter((message) => message.role === 'assistant' && typeof message.content === 'string')
-      .map((message) => ({
-        id: String(message.id),
-        role: 'assistant' as const,
-        content:
-          truncateSnippet(
-            message.content as string,
-            getPlatformOperationLimits(ctx.env).taskDetailMessageSnippetLength
-          ) ?? '',
-        createdAt:
-          typeof message.createdAt === 'number' || typeof message.createdAt === 'string'
-            ? message.createdAt
-            : null,
-      }));
-  } catch (error) {
-    log.warn('mcp.get_task_details.recent_assistant_messages_failed', {
-      projectId,
-      sessionId,
-      error: String(error),
-    });
-    return [];
-  }
-}
-
 export async function getTask(ctx: OperationContext, projectId: string, taskId: string) {
   const id = typeof taskId === 'string' ? taskId.trim() : '';
   if (!id) throw new OperationError('invalid_input', 'taskId is required');
@@ -127,16 +82,18 @@ export async function getTask(ctx: OperationContext, projectId: string, taskId: 
     .limit(1);
   const task = rows[0];
   if (!task) throw new OperationError('not_found', 'Task not found in this project');
-  const recentAssistantMessages = await loadRecentAssistantMessages(
-    ctx,
-    projectId,
-    task.chatSessionId
-  );
-  const finalAssistantMessage = await getLatestAssistantMessageForTask(
+  // One whole-message read serves both fields: the newest reply is the final message.
+  const recent = await getRecentAssistantMessagesForTask(
     ctx.env,
     projectId,
-    task.chatSessionId
+    task.chatSessionId,
+    getPlatformOperationLimits(ctx.env).taskDetailRecentMessageLimit
   );
+  const finalAssistantMessage = recent[0] ?? null;
+  const recentAssistantMessages = recent.map((message) => ({
+    ...message,
+    role: 'assistant' as const,
+  }));
   return {
     id: task.id,
     ...(ctx.actor.via !== 'workspace-agent'

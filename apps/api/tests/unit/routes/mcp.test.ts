@@ -1,12 +1,21 @@
+import Database from 'better-sqlite3';
 import { getTableColumns } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import { runMigrations } from '../../../src/durable-objects/migrations';
+import {
+  type LogicalTranscriptRequest,
+  readSourceLogicalTranscript,
+} from '../../../src/durable-objects/project-data/logical-transcript';
+import type { Env as ProjectDataEnv } from '../../../src/durable-objects/project-data/types';
+import type { ProjectDataArchiveExactReadInput } from '../../../src/project-data-archive/contract';
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';
 import * as projectHelpers from '../../../src/routes/projects/_helpers';
 import * as agentProfileService from '../../../src/services/agent-profiles';
 import { createUnpublishedStorageSession } from '../../helpers/reliability-storage';
+import { createSqlStorage } from '../durable-objects/sql-storage-test-utils';
 
 const providerCredentialMocks = vi.hoisted(() => ({
   resolveCredentialSource: vi.fn(),
@@ -355,6 +364,48 @@ let mockRootSearchCoverage = {
   keywordScanTruncated: false,
 };
 
+// Whole-message reads (get_task_details' assistant messages) run the real ProjectData reader
+// over a real SQLite transcript; only the Durable Object transport is mocked.
+let transcriptSql: SqlStorage;
+let transcriptRow = 0;
+
+function resetTranscript(): void {
+  transcriptSql = createSqlStorage(new Database(':memory:'));
+  runMigrations(transcriptSql);
+  transcriptRow = 0;
+}
+
+/** Store rows the way the VM agent does: one row per streamed chunk, in transcript order. */
+function seedTranscript(
+  sessionId: string,
+  rows: Array<{ id: string; role: string; content: string; createdAt?: number }>
+): void {
+  transcriptSql.exec(
+    'INSERT OR IGNORE INTO chat_sessions (id, topic, started_at) VALUES (?, ?, ?)',
+    sessionId,
+    'topic',
+    1
+  );
+  for (const row of rows) {
+    transcriptRow += 1;
+    transcriptSql.exec(
+      `INSERT INTO chat_messages (id, session_id, role, content, created_at, sequence)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      row.id,
+      sessionId,
+      row.role,
+      row.content,
+      row.createdAt ?? transcriptRow,
+      transcriptRow
+    );
+  }
+}
+
+const readTranscript = (
+  owner: ProjectDataArchiveExactReadInput,
+  request: LogicalTranscriptRequest
+) => readSourceLogicalTranscript(transcriptSql, {} as ProjectDataEnv, owner, request);
+
 const mockDoStub = {
   fetch: vi.fn().mockResolvedValue(new Response('ok')),
   ensureProjectId: vi.fn(),
@@ -373,6 +424,7 @@ const mockDoStub = {
       order?: 'asc' | 'desc'
     ) => mockDoStub.getMessages(owner.sessionId, limit, before, after, roles, compact, order)
   ),
+  archiveSourceGetLogicalTranscript: vi.fn(readTranscript),
   archiveTargetGetMessages: vi.fn(
     (
       owner: { sessionId: string },
@@ -523,6 +575,8 @@ describe('MCP Routes', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    resetTranscript();
+    mockDoStub.archiveSourceGetLogicalTranscript.mockImplementation(readTranscript);
     mockD1 = createMockD1();
     mockEnv.DATABASE = mockD1;
     mockDispatchProjectAccess({ consumeConfigured: false });
@@ -1460,23 +1514,21 @@ describe('MCP Routes', () => {
           completed_at: '2026-03-14T01:00:00Z',
         },
       ]);
-      mockDoStub.getMessages.mockResolvedValue({
-        messages: [
-          {
-            id: 'msg-new',
-            role: 'assistant',
-            content: 'Final detailed findings',
-            createdAt: 1710000002000,
-          },
-          {
-            id: 'msg-old',
-            role: 'assistant',
-            content: 'Earlier analysis',
-            createdAt: 1710000001000,
-          },
-        ],
-        hasMore: false,
-      });
+      seedTranscript('chat-session-99', [
+        {
+          id: 'msg-user-1',
+          role: 'user',
+          content: 'Review the codebase',
+          createdAt: 1710000000000,
+        },
+        { id: 'msg-old', role: 'assistant', content: 'Earlier ', createdAt: 1710000001000 },
+        { id: 'msg-old-2', role: 'assistant', content: 'analysis', createdAt: 1710000001001 },
+        { id: 'msg-tool', role: 'tool', content: '', createdAt: 1710000001500 },
+        { id: 'msg-user-2', role: 'user', content: 'Anything else?', createdAt: 1710000001600 },
+        { id: 'msg-new', role: 'assistant', content: 'Final ', createdAt: 1710000002000 },
+        { id: 'msg-new-2', role: 'assistant', content: 'detailed ', createdAt: 1710000002001 },
+        { id: 'msg-new-3', role: 'assistant', content: 'findings', createdAt: 1710000002002 },
+      ]);
 
       const res = await mcpRequest(
         app,
@@ -1489,15 +1541,18 @@ describe('MCP Routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       const data = JSON.parse(body.result.content[0].text);
-      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
-        'chat-session-99',
-        5,
-        null,
-        null,
-        ['assistant'],
-        false,
-        'desc'
+      // One whole-message read serves both the final message and the recent list.
+      expect(mockDoStub.archiveSourceGetLogicalTranscript).toHaveBeenCalledTimes(1);
+      expect(mockDoStub.archiveSourceGetLogicalTranscript).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: 'proj-456', sessionId: 'chat-session-99' }),
+        expect.objectContaining({ before: null, limit: 5, roles: ['assistant'] })
       );
+      expect(mockDoStub.getMessages).not.toHaveBeenCalled();
+      expect(data.finalAssistantMessage).toEqual({
+        id: 'msg-new',
+        content: 'Final detailed findings',
+        createdAt: 1710000002000,
+      });
       expect(data.recentAssistantMessages).toEqual([
         {
           id: 'msg-new',
@@ -1536,7 +1591,13 @@ describe('MCP Routes', () => {
           completed_at: '2026-03-14T01:00:00Z',
         },
       ]);
-      mockDoStub.getMessages.mockRejectedValue(new Error('ProjectData unavailable'));
+      // Readable rows exist, so an empty list can only come from the failed read.
+      seedTranscript('chat-session-fails', [
+        { id: 'msg-1', role: 'assistant', content: 'Work done' },
+      ]);
+      mockDoStub.archiveSourceGetLogicalTranscript.mockRejectedValue(
+        new Error('ProjectData unavailable')
+      );
 
       const res = await mcpRequest(
         app,
@@ -1551,7 +1612,9 @@ describe('MCP Routes', () => {
       const data = JSON.parse(body.result.content[0].text);
       expect(data.id).toBe('task-session-read-fails');
       expect(data.outputSummary).toBe('Completed');
+      expect(mockDoStub.archiveSourceGetLogicalTranscript).toHaveBeenCalled();
       expect(data.recentAssistantMessages).toEqual([]);
+      expect(data.finalAssistantMessage).toBeNull();
     });
 
     it('should return empty recentAssistantMessages when task has no session', async () => {
@@ -1591,6 +1654,7 @@ describe('MCP Routes', () => {
       const data = JSON.parse(body.result.content[0].text);
       expect(data.id).toBe('task-no-session');
       expect(data.recentAssistantMessages).toEqual([]);
+      expect(mockDoStub.archiveSourceGetLogicalTranscript).not.toHaveBeenCalled();
       expect(mockDoStub.getMessages).not.toHaveBeenCalled();
     });
 
@@ -4408,18 +4472,23 @@ describe('MCP Routes', () => {
       });
       const statefulD1 = createStatefulTaskD1(task);
       mockEnv.DATABASE = statefulD1 as unknown;
-      mockDoStub.getMessages.mockResolvedValue({
-        messages: [
-          {
-            id: 'msg-final',
-            role: 'assistant',
-            content:
-              'Ranked findings:\n1. HIGH: Preserve completion evidence for review-only subtasks.\n2. MEDIUM: Add regression coverage for generic summaries.',
-            createdAt: 1783123200000,
-          },
-        ],
-        hasMore: false,
-      });
+      // The final reply as the VM agent stores it: one row per streamed chunk.
+      seedTranscript(task.chat_session_id, [
+        { id: 'msg-user', role: 'user', content: 'Review the PR', createdAt: 1783123100000 },
+        {
+          id: 'msg-final',
+          role: 'assistant',
+          content:
+            'Ranked findings:\n1. HIGH: Preserve completion evidence for review-only subtasks.\n',
+          createdAt: 1783123200000,
+        },
+        {
+          id: 'msg-final-2',
+          role: 'assistant',
+          content: '2. MEDIUM: Add regression coverage for generic summaries.',
+          createdAt: 1783123200001,
+        },
+      ]);
 
       const detailsRes = await mcpRequest(
         app,
@@ -4440,23 +4509,9 @@ describe('MCP Routes', () => {
           'Ranked findings:\n1. HIGH: Preserve completion evidence for review-only subtasks.\n2. MEDIUM: Add regression coverage for generic summaries.',
         createdAt: 1783123200000,
       });
-      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
-        task.chat_session_id,
-        200,
-        null,
-        null,
-        undefined,
-        false,
-        'desc'
-      );
-      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
-        task.chat_session_id,
-        5,
-        null,
-        null,
-        ['assistant'],
-        false,
-        'desc'
+      expect(mockDoStub.archiveSourceGetLogicalTranscript).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: task.chat_session_id }),
+        expect.objectContaining({ limit: 5, roles: ['assistant'] })
       );
     });
 
