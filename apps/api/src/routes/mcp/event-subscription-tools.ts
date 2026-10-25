@@ -27,6 +27,7 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+import { parseMinWakeIntervalSeconds } from './wake-interval-param';
 
 function textResult(requestId: string | number | null, payload: Record<string, unknown>) {
   return jsonRpcSuccess(requestId, {
@@ -168,6 +169,7 @@ export async function handleCreateProjectEventSubscription(
         target: normalizeTarget(params.target),
         reason: normalizeOptionalString(params.reason, 'reason') ?? null,
         expiresAt: normalizeExpiresAt(params.expiresAt),
+        minWakeIntervalMs: parseMinWakeIntervalSeconds(params.minWakeIntervalSeconds),
       }
     );
     return textResult(requestId, {

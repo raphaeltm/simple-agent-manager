@@ -136,6 +136,7 @@ export function mapProjectEventSubscription(row: unknown): ProjectEventSubscript
     ),
     cancelReason: parsed.cancel_reason,
     lastMatchedAt: parsed.last_matched_at,
+    minWakeIntervalMs: parsed.min_wake_interval_ms,
   };
 }
 

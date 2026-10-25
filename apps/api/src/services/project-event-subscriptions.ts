@@ -89,6 +89,7 @@ export async function createProjectEventSubscriptionForCaller(
     ownerTaskId: context.callerKind === 'agent' ? context.sourceTaskId : null,
     reason: request.reason ?? null,
     expiresAt,
+    minWakeIntervalMs: request.minWakeIntervalMs ?? null,
   });
   return {
     ...result,

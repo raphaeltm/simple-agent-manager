@@ -24,7 +24,6 @@ import {
 } from './project-events-mappers';
 import {
   assertProjectBinding,
-  normalizeDeliveryBatchInput,
   normalizeListLimit,
   normalizeProjectId,
 } from './project-events-normalization';
@@ -47,6 +46,7 @@ import {
   updateBatchForAttempt,
   updateMatchesForBatch,
 } from './project-events-storage-helpers';
+import { normalizeDeliveryBatchInput } from './project-events-subscription-normalization';
 import {
   normalizeNullableText,
   normalizeText,

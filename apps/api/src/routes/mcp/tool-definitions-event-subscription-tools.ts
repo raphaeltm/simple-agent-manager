@@ -4,6 +4,8 @@ import {
   PROJECT_EVENT_SUBSCRIPTION_STATES,
 } from '@simple-agent-manager/shared';
 
+import { MIN_WAKE_INTERVAL_SECONDS_PROPERTY } from './wake-interval-param';
+
 const STRING_OR_STRING_ARRAY = {
   anyOf: [
     { type: 'string' },
@@ -115,6 +117,7 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
           description:
             'Optional future millisecond timestamp. Agent subscriptions are capped by the caller MCP token lifetime. Expiry does not itself wake the agent; arrange an independent bounded fallback before yielding.',
         },
+        minWakeIntervalSeconds: MIN_WAKE_INTERVAL_SECONDS_PROPERTY,
       },
       required: ['idempotencyKey', 'filter', 'requestedDelivery'],
       additionalProperties: false,

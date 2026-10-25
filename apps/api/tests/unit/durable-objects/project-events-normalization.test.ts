@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   compileProjectEventFilter,
-  normalizeDeliveryBatchInput,
   normalizeProjectEventInput,
 } from '../../../src/durable-objects/project-data/project-events-normalization';
+import { normalizeDeliveryBatchInput } from '../../../src/durable-objects/project-data/project-events-subscription-normalization';
 
 const baseLimits = DEFAULT_PROJECT_EVENT_LIMITS;
 

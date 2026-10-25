@@ -285,7 +285,25 @@ describe('internal ProjectData event subscription surface', () => {
       ownerTaskId: 'task-1',
       reason: 'watch CI',
       expiresAt: now + 120_000,
+      minWakeIntervalMs: null,
     });
+  });
+
+  it('passes an agent-chosen wake interval through to ProjectData', async () => {
+    const env = makeEnv();
+
+    await createProjectEventSubscriptionForCaller(env, makeAgentCaller(), {
+      idempotencyKey: 'idem-interval',
+      filter,
+      requestedDelivery: 'existing_session_prompt',
+      minWakeIntervalMs: 600_000,
+    });
+
+    expect(projectDataMocks.createProjectEventSubscription).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      expect.objectContaining({ idempotencyKey: 'idem-interval', minWakeIntervalMs: 600_000 })
+    );
   });
 
   it('stores the recovery-lineage root as the source task guard while preserving current target validation', async () => {

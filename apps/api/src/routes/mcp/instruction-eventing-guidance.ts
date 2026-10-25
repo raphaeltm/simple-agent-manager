@@ -27,7 +27,8 @@ export function buildEventingInstructions(input: {
       ? `Your feature coordination channel is \`${input.coordinationChannel}\`, shared with your coordinator and sibling agents; ` +
         '`dispatch_task` passes it to your subtasks automatically. Publish findings, interface decisions, blockers, dependency ' +
         'readiness and completion evidence there with `publish_channel_event`; read it with `get_channel_history` or follow it ' +
-        'with `follow_event_channel`.'
+        'with `follow_event_channel`. When following to be woken, pass `minWakeIntervalSeconds` (for example 600) unless you ' +
+        'must react to each message at once, so channel traffic wakes you at most that often.'
       : 'When you coordinate several agents on one feature, publish a short kickoff to a project event channel (for example ' +
         '`feature.<short-name>`) and pass it as `coordinationChannel` to `dispatch_task`; every descendant inherits it.',
     'If an eventing or messaging tool fails, report it visibly (`update_task_status` or your coordinator) with safe identifiers: ' +

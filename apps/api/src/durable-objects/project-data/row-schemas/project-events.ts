@@ -79,6 +79,7 @@ export const ProjectEventSubscriptionRowSchema = v.object({
   prompt_delivery_last_at: v.optional(v.nullable(v.number()), null),
   delivery_cooldown_until: v.optional(v.nullable(v.number()), null),
   delivery_lifetime_expires_at: v.optional(v.nullable(v.number()), null),
+  min_wake_interval_ms: v.optional(v.nullable(v.number()), null),
 });
 
 export const ProjectEventMatchRowSchema = v.object({
