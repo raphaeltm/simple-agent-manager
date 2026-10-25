@@ -445,7 +445,7 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_EVENT_WAKE_PROMPT_TTL_MS` — Hard lifetime for queued same-chat event wake prompts before physical delivery is rejected; also bounds how long an undelivered wake holds its chat (default: `86400000`)
 - `PROJECT_EVENT_WAKE_READ_GRACE_MS` — Read/ack grace retained on accepted event-wake batches after natural subscription expiry (default: `86400000`)
 - `PROJECT_EVENT_WAKE_TARGET_COOLDOWN_MS` — Delay before retrying an event wake for a chat whose transcript or project mailbox is at capacity. A chat with an undelivered wake is skipped until that wake is accepted, without this cooldown (default: `30000`)
-- `PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS` — Per-subscription cooldown after a wake batch is queued (default: `30000`)
+- `PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS` — Per-subscription cooldown after a wake batch is queued, and the smallest `minWakeIntervalSeconds` an agent can choose; a longer agent-chosen interval replaces it for that subscription (default: `30000`)
 - `PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS` — Maximum delivery lifetime for an event subscription from creation (default: `86400000`)
 - `PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION` — Maximum wake deliveries per subscription over its lifetime (default: `50`)
 - `PROJECT_EVENT_CHANNEL_MAX_CHANNELS` — Maximum catalog generations per project (default: `128`)
